@@ -205,17 +205,49 @@ static void merge_sort(sorter *s, size_t *pos, size_t *tmp, size_t n) {
   memcpy(pos, tmp, n * sizeof *pos);
 }
 
+/* The first position (from 1) of the range the array functions take as
+ * `[nStart], [nCount]`, from argument `k`: 1 when it is absent, not a number
+ * or 0; 0, no range, when it is negative or past the end. */
+static uint64_t range_start(uint32_t argc, const xb_item *argv, uint32_t k, size_t len) {
+  uint64_t start = 1;
+  if (argc > k && xb_is_number(&argv[k])) {
+    int64_t v = xb_num_to_i64(&argv[k]);
+    if (v < 0) return 0; /* a negative start is past any end */
+    if (v > 0) start = (uint64_t)v;
+  }
+  return start > len ? 0 : start;
+}
+
+/* AFill( aTarget, xValue, [nStart], [nCount] ): the range from nStart, up to
+ * nCount elements (the rest of the array without it; none when it is 0 or
+ * less) takes the value; without a value nothing changes. */
+void xbf_AFILL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1 || argv[0].type != XB_T_ARRAY) {
+    xb_rt_error(ctx, "BASE", 6004, "Argument error", "AFILL");
+    return;
+  }
+  *ret = argv[0];
+  xb_array *a = argv[0].v.p;
+  uint64_t start = argc > 1 ? range_start(argc, argv, 2, a->len) : 0;
+  if (!start) return;
+  uint64_t count = a->len - start + 1;
+  if (argc > 3 && xb_is_number(&argv[3])) {
+    int64_t v = xb_num_to_i64(&argv[3]);
+    if (v <= 0) return;
+    if ((uint64_t)v < count) count = (uint64_t)v;
+  }
+  for (size_t k = (size_t)(start - 1), end = k + (size_t)count; k < end; ++k) {
+    a->items[k] = argv[1];
+    xb_gc_write_item(a, k);
+  }
+}
+
 void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
   const size_t len = ((const xb_array *)argv[0].v.p)->len;
   *ret = argv[0];
-  uint64_t start = 1;
-  if (argc > 1 && xb_is_number(&argv[1])) {
-    int64_t v = xb_num_to_i64(&argv[1]);
-    if (v < 0) return; /* a negative start is past any end */
-    if (v > 0) start = (uint64_t)v;
-  }
-  if (start > len) return;
+  uint64_t start = range_start(argc, argv, 1, len);
+  if (!start) return;
   uint64_t rest = len - start + 1, count = rest;
   if (argc > 2 && xb_is_number(&argv[2])) {
     int64_t v = xb_num_to_i64(&argv[2]);

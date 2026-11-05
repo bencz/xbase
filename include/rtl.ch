@@ -22,6 +22,7 @@
 // Arrays
 EXTERN FUNCTION AAdd( aTarget, xValue ) NATIVE RESERVED CHECKED
 EXTERN FUNCTION AClone( aSource ) NATIVE
+EXTERN FUNCTION AFill( aTarget, [xValue], [nStart], [nCount] ) NATIVE
 EXTERN FUNCTION Array( nElements, ... ) NATIVE
 EXTERN FUNCTION ASize( aTarget, nLength ) NATIVE
 EXTERN FUNCTION ASort( aTarget, [nStart], [nCount], [bOrder] ) NATIVE

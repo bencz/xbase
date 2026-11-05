@@ -258,8 +258,13 @@ Conventions:
   off otherwise. `__SetCentury( [lOn] )` rewrites that run as `YYYY` or `YY` (or puts it in front when the picture
   has no `Y`) and the picture in upper case. Other values change nothing.
 - `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector).
+- `AFill( a, xValue, [nStart], [nCount] )` stores `xValue` in `nCount` elements from `nStart` and returns the array;
+  `nStart` follows `ASort`'s rule, `nCount` missing or reaching past the end means the rest, and 0 or negative fills
+  nothing, as does a missing `xValue`. Anything but an array is an argument error (`BASE/6004`). Each store goes
+  through the write barrier.
 - `ASort( a, [nStart], [nCount], [bOrder] )` sorts in place and returns the array (`NIL` for anything else). `nStart`
-  0 or missing is 1, one past the end or negative sorts nothing; `nCount` missing, 0, negative or reaching past the
+  0, missing or not a number is 1, one past the end or negative sorts nothing (`range_start` in `rtl/arrays.c`, which
+  `AFill` shares); `nCount` missing, 0, negative or reaching past the
   end means the rest. The sort is stable (a merge sort of positions: equal elements keep their order).
   `bOrder( x, y )` says whether `x` goes first (a number: whether it is not 0; any other value: yes); without it,
   values of one kind compare like the operators (strings follow SET EXACT, integers exactly, dates by day, `.F.`

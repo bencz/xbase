@@ -15,10 +15,7 @@ PROCEDURE Main( cDigits )
 
 // The digits as the original prints them: "3." and the decimals, then a line break.
 STATIC FUNCTION PiDigits( nDigits )
-   LOCAL x := Array( 128000 ), xc, cOut := ""
-   FOR xc := 1 TO Len( x )
-      x[ xc ] := 0
-   NEXT
+   LOCAL x := AFill( Array( 128000 ), 0 ), xc, cOut := ""
    xc := 1
    xc++
    x[ xc ] += nDigits

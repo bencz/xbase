@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 58 of 551 done. Commands (`std.ch` families): 16 of 155 done.
+Functions: 59 of 551 done. Commands (`std.ch` families): 16 of 155 done.
 
 ## Statements (grammar)
 
@@ -81,9 +81,9 @@ Other standard headers, each to be provided with the matching runtime support: `
 **CDoW**, **CMonth**, **CToD**, **Date**, **Day**, **DoW**, **DToC**, **DToS**, **Month**, **Seconds**, **SToD**,
 **Time**, **Year**
 
-### Arrays (6 of 12 done)
+### Arrays (7 of 12 done)
 
-**AAdd**, **AClone**, *ACopy*, *ADel*, *AEval*, *AFill*, *AIns*, **Array**, *AScan*, **ASize**, **ASort**, **ATail**
+**AAdd**, **AClone**, *ACopy*, *ADel*, *AEval*, **AFill**, *AIns*, **Array**, *AScan*, **ASize**, **ASort**, **ATail**
 
 ### Files, directories and environment (0 of 23 done)
 
