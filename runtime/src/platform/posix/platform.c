@@ -68,3 +68,10 @@ void xb_platform_local_date(int *year, int *month, int *day) {
   *month = tm.tm_mon + 1;
   *day = tm.tm_mday;
 }
+
+/* The arguments are passed through as bytes: the program receives what the
+ * shell gave it (UTF-8 under a UTF-8 locale). */
+char **xb_platform_args(int argc, char **argv, int *count) {
+  *count = argc;
+  return argv;
+}

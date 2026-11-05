@@ -274,10 +274,12 @@ void CodeGen::genModuleRegistration(const xir::Module &m) {
   appendToGlobalCtors(mod_, reg, 65535);
 }
 
-// void xb_app_main(xb_ctx *ctx) - called by the runtime's main().
+// void xb_app_main(xb_ctx *ctx, uint32_t argc, xb_item *argv) - called by the
+// runtime's main() with the command-line arguments, the start function's.
 void CodeGen::genEntry(const xir::Function &start) {
-  auto *fn = Function::Create(initFnTy_, GlobalValue::ExternalLinkage, "xb_app_main", mod_);
-  fn->addFnAttr(Attribute::NoUnwind);
+  auto *ty = FunctionType::get(Type::getVoidTy(ctx_), {ptrTy_, i32_, ptrTy_}, false);
+  auto *fn = Function::Create(ty, GlobalValue::ExternalLinkage, "xb_app_main", mod_);
+  addAbiAttributes(fn);
   b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", fn));
   Value *ctx = fn->getArg(0);
   uint64_t strHdr = dl_.getStructLayout(strType(ArrayType::get(i8_, 0)))->getElementOffset(3);
@@ -293,8 +295,7 @@ void CodeGen::genEntry(const xir::Function &start) {
   b_.CreateCall(rtModulesInit_, {ctx});
   checkPending(fnExit_); // an error in a module initialization ends the program
   pushFrame(1, 0, nullptr, nullptr); // the start function's result slot, a root
-  b_.CreateCall(xbFuncTy_, functions_.at(&start),
-                {ctx, slot(0), ConstantInt::get(i32_, 0), ConstantPointerNull::get(ptrTy_)});
+  b_.CreateCall(xbFuncTy_, functions_.at(&start), {ctx, slot(0), fn->getArg(1), fn->getArg(2)});
   popFrame();
   b_.CreateBr(fnExit_);
   fnExit_->moveAfter(b_.GetInsertBlock());

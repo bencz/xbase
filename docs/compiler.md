@@ -276,9 +276,9 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
 - A module with `STATIC`s gets an internal global `xb.statics` (an array of NIL items), its initialization function,
   and a global constructor `xb.module.register` that calls `xb_module_register` before `main`. `CodeGen::run` adds
   one module to the LLVM module; several modules share it.
-- `CodeGen::finish` adds `xb_app_main` (unless `--no-entry`), which checks the ABI, runs the module initializations
-  (`xb_modules_init`, followed by the pending check) and calls the start function (see
-  [Sources and modules](#sources-and-modules)).
+- `CodeGen::finish` adds `xb_app_main( ctx, argc, argv )` (unless `--no-entry`), which checks the ABI, runs the
+  module initializations (`xb_modules_init`, followed by the pending check) and calls the start function (see
+  [Sources and modules](#sources-and-modules)) with the command-line arguments the runtime passes it.
 - 32-bit parameters and results of every declared or defined function carry the extension attribute the target ABI
   requires (`zeroext` on s390x, `signext` on RISC-V 64, none on x86-64), taken from LLVM's target library information.
 

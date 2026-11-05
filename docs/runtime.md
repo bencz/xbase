@@ -305,7 +305,11 @@ Before `main`, the global constructor of every module with `STATIC`s calls `xb_m
 (`core/module.c`), which records the module's initialization function and registers its statics as a GC root.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
-in binary mode so programs write the same bytes everywhere; everywhere, the start of the `ElapsedMs` clock), then on the
-program's thread creates the context, calls `xb_app_main` (emitted by the compiler), flushes output and returns the exit
-code. `xb_app_main` checks the ABI, runs the registered module initializations in registration order (`xb_modules_init`,
-which stops at the first error) and calls the start function.
+in binary mode so programs write the same bytes everywhere; everywhere, the start of the `ElapsedMs` clock) and takes
+the command-line arguments in UTF-8 (`xb_platform_args`: as `main` received them on POSIX systems, converted from the
+wide command line on Windows). Then, on the program's thread, it creates the context, makes the arguments after the
+program's name strings in a frame of its own linked into the context's chain (so the collector sees them), calls
+`xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes output and returns the exit code.
+`xb_app_main` checks the ABI, runs the registered module initializations in registration order (`xb_modules_init`,
+which stops at the first error) and calls the start function with the arguments, as Clipper passes them: strings,
+`NIL` for a parameter without one, and arguments past the parameters passed too.

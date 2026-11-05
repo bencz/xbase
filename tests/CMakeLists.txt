@@ -1,6 +1,7 @@
 # Run tests: tests/run/<name>.prg is compiled with xbc, linked against xbrt,
 # executed, and its stdout compared with <name>.out. An optional <name>.rc
-# holds the expected exit code (default 0). The modules in an optional
+# holds the expected exit code (default 0), an optional <name>.args the
+# command-line arguments, one per line. The modules in an optional
 # directory <name>.with/ are compiled in the same xbc run (one object); those
 # in an optional directory <name>.d/ are compiled on their own with --no-entry
 # and linked into the program.
@@ -24,9 +25,13 @@ function(xb_add_run_test name)
     file(READ ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.rc rc)
     string(STRIP "${rc}" rc)
   endif()
+  set(args "")
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.args)
+    file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.args args)
+  endif()
   add_test(NAME run.${name}
     COMMAND ${CMAKE_COMMAND}
-      -DEXE=$<TARGET_FILE:t_${name}>
+      "-DEXE=$<TARGET_FILE:t_${name}>;${args}"
       -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.out
       -DEXPECTED_RC=${rc}
       -DEXPECTED_ERR=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.err

@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 7u
+#define XB_ABI_VERSION 8u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -369,8 +369,10 @@ static inline void xb_str_minus(char *out, const char *a, size_t la, const char 
 /* Formats a value the way ? / QOut() shows it. Returns a new string. */
 xb_str  *xb_item_display(const xb_ctx *ctx, const xb_item *it);
 
-/* Program entry, emitted by xbc in the start module. */
-void     xb_app_main(xb_ctx *ctx);
+/* [ABI] Program entry, emitted by xbc in the start module: `argv` holds the
+ * command-line arguments after the program's name, as strings, which it
+ * passes to the start function as its arguments. */
+void     xb_app_main(xb_ctx *ctx, uint32_t argc, xb_item *argv);
 
 #ifdef __cplusplus
 }

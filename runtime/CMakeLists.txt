@@ -23,6 +23,7 @@ add_library(xbrt STATIC
 
 if(WIN32)
   target_sources(xbrt PRIVATE src/platform/win32/platform.c)
+  target_link_libraries(xbrt PUBLIC shell32) # CommandLineToArgvW
 else()
   target_sources(xbrt PRIVATE src/platform/posix/platform.c)
   find_package(Threads REQUIRED)

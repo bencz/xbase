@@ -7,6 +7,8 @@
 #include <time.h>
 #include <windows.h>
 
+#include <shellapi.h>
+
 static LARGE_INTEGER started, frequency;
 
 /* Program output is byte-exact on every platform: no CRLF translation. */
@@ -76,4 +78,24 @@ void xb_platform_local_date(int *year, int *month, int *day) {
   *year = tm.tm_year + 1900;
   *month = tm.tm_mon + 1;
   *day = tm.tm_mday;
+}
+
+/* main() receives the arguments in the ANSI code page; the wide command line
+ * converted to UTF-8 keeps every character. On failure, main()'s array. */
+char **xb_platform_args(int argc, char **argv, int *count) {
+  int n = 0;
+  LPWSTR *wide = CommandLineToArgvW(GetCommandLineW(), &n);
+  char **out = wide ? calloc((size_t)n + 1, sizeof *out) : NULL;
+  for (int i = 0; out && i < n; ++i) {
+    int len = WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, NULL, 0, NULL, NULL);
+    out[i] = len > 0 ? malloc((size_t)len) : NULL;
+    if (!out[i] || WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, out[i], len, NULL, NULL) != len) out = NULL;
+  }
+  if (wide) LocalFree(wide);
+  if (!out) {
+    *count = argc;
+    return argv;
+  }
+  *count = n;
+  return out;
 }

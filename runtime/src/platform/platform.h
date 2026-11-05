@@ -31,6 +31,11 @@ int64_t xb_platform_elapsed_ms(void);
  * thread could not be created. */
 int xb_platform_run_on_stack(size_t stack_size, void (*fn)(void *), void *arg);
 
+/* The program's command-line arguments in UTF-8 (argv[0], the program, first):
+ * the array main() received where it already is UTF-8, else a converted copy
+ * that lives as long as the process. */
+char **xb_platform_args(int argc, char **argv, int *count);
+
 /* Today's date in local time. */
 void xb_platform_local_date(int *year, int *month, int *day);
 
