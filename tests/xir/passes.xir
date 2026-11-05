@@ -1,0 +1,39 @@
+module PASSES
+
+function MAIN params 0 {
+  $f0 = frame 0 "N"
+  $f1 = frame 1 "LG"
+entry:
+  store $f0, 0:w10
+  br while.body
+while.body:
+  %2 = load $f0
+  %3 = binary add %2, 1:w0
+  store $f0, %3
+  %5 = load $f0
+  %6 = binary gt %5, 3:w10
+  %7 = truth %6
+  cond_br %7, while.cond.2, while.body
+while.cond.2:
+  %9 = load $f0
+  %10 = binary lt %9, 10:w10
+  %11 = truth %10
+  cond_br %11, while.body.2, while.end.2
+while.body.2:
+  %13 = load $f0
+  %14 = binary add %13, 1:w0
+  store $f0, %14
+  br while.cond.2
+while.end.2:
+  %17 = load $f0
+  %18 = call QOUT native %17
+  %19 = load $f0
+  %20 = binary gt %19, 5:w10
+  store $f1, %20
+  %22 = load $f1
+  %23 = truth %22
+  %24 = load $f1
+  %25 = truth %24
+  %26 = call QOUT native "always"
+  ret
+}

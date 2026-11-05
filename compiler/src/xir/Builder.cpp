@@ -184,6 +184,13 @@ Instruction *Builder::br(BasicBlock *to, const std::vector<Value *> &args) {
   return i;
 }
 
+Instruction *Builder::jump(BasicBlock *from, BasicBlock *to, const std::vector<Value *> &args) {
+  std::unique_ptr<Instruction> old = from->takeTerminator();
+  setBlock(from);
+  setLoc(old->loc);
+  return br(to, args);
+}
+
 Instruction *Builder::condBr(Value *cond, BasicBlock *t, BasicBlock *f, const std::vector<Value *> &targs,
                              const std::vector<Value *> &fargs) {
   Instruction *i = make(Op::CondBr, Type::Void, {cond});

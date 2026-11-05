@@ -24,17 +24,15 @@ each.body:
   %14 = binary add %12, %13
   store $f2 maybe_ref, %14
   barrier $f2 maybe_ref
-  br each.next
-each.next:
-  %18 = i.add %5, i64 1
-  br each.test(%18)
+  %17 = i.add %5, i64 1
+  br each.test(%17)
 each.end:
   each.leave $f1, false, %3
-  %21 = block MAIN.block1 $f2
-  store $f3, %21
-  %23 = load $f3
-  %24 = call EVAL native %23, 2:w10
-  ret %24
+  %20 = block MAIN.block1 $f2
+  store $f3, %20
+  %22 = load $f3
+  %23 = call EVAL native %22, 2:w10
+  ret %23
 }
 
 block MAIN.block1 internal params 1 {

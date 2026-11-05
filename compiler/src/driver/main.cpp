@@ -8,6 +8,7 @@
 #include "sema/Calls.h"
 #include "sema/Sema.h"
 #include "xir/Gen.h"
+#include "xir/PassManager.h"
 #include "xir/Printer.h"
 #include "xir/Verifier.h"
 
@@ -204,6 +205,12 @@ int main(int argc, char **argv) {
   if (std::string bad = xb::xir::verify(*xir); !bad.empty()) {
     std::fprintf(stderr, "xbc: internal error: invalid xIR: %s\n", bad.c_str());
     return 1;
+  }
+  if (tcfg.optLevel > 0) {
+    if (std::string bad = xb::xir::optimize(*xir); !bad.empty()) {
+      std::fprintf(stderr, "xbc: internal error: invalid xIR %s\n", bad.c_str());
+      return 1;
+    }
   }
   if (!xirDump.empty()) {
     std::ofstream out(xirDump, std::ios::binary);

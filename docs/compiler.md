@@ -4,7 +4,8 @@ Code: `compiler/src/`. The preprocessor is described in [preprocessor.md](prepro
 generated code relies on is in [runtime.md](runtime.md).
 
 Pipeline (`main.cpp`): preprocess `std.ch` and the source, parse, resolve calls, fold constants, run semantic checks,
-generate xIR and verify it, lower it to an in-memory LLVM module, optimize it, emit the object file. Each stage stops
+generate xIR and verify it, optimize it (from `-O1` on, [xir.md](xir.md#passes)), lower it to an in-memory LLVM
+module, optimize that, emit the object file. Each stage stops
 the compilation when it reports errors. After 100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the
 preprocessor and the parser stop early.
 
@@ -148,7 +149,8 @@ Code generation has two steps: the syntax tree becomes xIR ([xir.md](xir.md)), w
 ### Syntax tree to xIR
 
 `xir/Gen*.cpp` (`xir::Generator`) emits each function's xIR in Clipper's evaluation order; `xir/Verifier.*` checks
-the result before it goes further (an invalid xIR is an internal error), and `--dump-xir=<file>` writes its text.
+the result before it goes further (an invalid xIR is an internal error). From `-O1` on the xIR passes run
+([xir.md](xir.md#passes)); `--dump-xir=<file>` writes the xIR that is lowered to LLVM.
 
 - Evaluation order: binary operators evaluate the left operand, then the right; calls evaluate their arguments in
   order; `x := v` evaluates `v`, then stores; `x op= v` loads `x`, then evaluates `v`; `a[i] := v` evaluates `v`,
@@ -218,8 +220,7 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to
   `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to a function of the module to `xbp_NAME` (prefixes in `xbrt.h`).
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
-  calls `xb_pending` and leaves through the operation's unwind block (the function's exit when it has none) if that
-  asks to unwind.
+  calls `xb_pending` and leaves through the function's exit if that asks to unwind.
   `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
 - Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
   target `DataLayout`); a `FOR EACH` variable goes through `xb_ref_target`; a `STATIC`, a shared or captured

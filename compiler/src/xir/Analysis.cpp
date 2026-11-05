@@ -92,8 +92,23 @@ bool CFG::dominates(const BasicBlock *a, const BasicBlock *b) const {
   return enter_[ia] <= enter_[ib] && leave_[ib] <= leave_[ia];
 }
 
-void removeUnreachableBlocks(Function &f) {
+Predecessors predecessorTerminators(const Function &f) {
+  Predecessors preds;
+  for (auto &b : f.blocks) {
+    Instruction *t = b->terminator();
+    if (!t) continue;
+    for (size_t k = 0; k < t->targets.size(); ++k) {
+      bool seen = false;
+      for (size_t j = 0; j < k; ++j) seen |= t->targets[j].block == t->targets[k].block;
+      if (!seen) preds[t->targets[k].block].push_back(t);
+    }
+  }
+  return preds;
+}
+
+bool removeUnreachableBlocks(Function &f) {
   CFG cfg(f);
+  if (cfg.order().size() == f.blocks.size()) return false;
   // Uses of values from dead blocks only occur in dead blocks (dominance), so
   // dropping the dead instructions' operands first leaves no dangling user.
   for (auto &b : f.blocks)
@@ -102,6 +117,7 @@ void removeUnreachableBlocks(Function &f) {
   f.blocks.erase(std::remove_if(f.blocks.begin(), f.blocks.end(),
                                 [&](const std::unique_ptr<BasicBlock> &b) { return !cfg.reachable(b.get()); }),
                  f.blocks.end());
+  return true;
 }
 
 } // namespace xb::xir

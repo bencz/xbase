@@ -7,7 +7,7 @@ Tests run through CTest (`ctest --test-dir build --output-on-failure`); `tests/C
 | Execution | `tests/run/<name>.prg`, `<name>.out`, optional `<name>.rc`, `<name>.err`, `<name>.d/*.prg` | The program is compiled with `xbc`, linked with `xbrt` (and with the modules in `<name>.d/`, compiled with `--no-entry`) and run; standard output must equal `<name>.out`, the exit code must equal `<name>.rc` (default 0), and standard error must contain `<name>.err`. |
 | Preprocessor | `tests/pp/<name>.prg`, `<name>.ppo` | `xbc -E` output must equal `<name>.ppo`. |
 | Compile failure | `tests/fail/<name>.prg`, `<name>.err` | Compiling must fail, report the text in `<name>.err`, and report exactly one error. |
-| xIR | `tests/xir/<name>.prg`, `<name>.xir` | The xIR `xbc --dump-xir` writes must equal `<name>.xir`. |
+| xIR | `tests/xir/<name>.prg`, `<name>.xir` | The xIR `xbc --dump-xir` writes (after the xIR passes, at the default `-O2`) must equal `<name>.xir`. |
 | Code generation | `xb_add_codegen_test` in `tests/CMakeLists.txt` | The IR `xbc --dump-ir` emits for a cross target must match a regular expression. |
 | Declarations | `runtime.declarations` (`tests/declarations_test.cmake`) | `include/rtl.ch` declares exactly the `xbf_` functions defined in `runtime/src`. |
 

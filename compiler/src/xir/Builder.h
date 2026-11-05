@@ -55,6 +55,9 @@ public:
 
   // Terminators
   Instruction *br(BasicBlock *to, const std::vector<Value *> &args = {});
+  // Replaces the terminator of `from` with `br to(args)`, keeping its source
+  // location; the builder then points at the end of `from`.
+  Instruction *jump(BasicBlock *from, BasicBlock *to, const std::vector<Value *> &args);
   Instruction *condBr(Value *cond, BasicBlock *t, BasicBlock *f, const std::vector<Value *> &targs = {},
                       const std::vector<Value *> &fargs = {});
   Instruction *ret(Value *v);

@@ -47,7 +47,7 @@ enum class Op : uint8_t {
 // the passes that move, merge or remove operations (one row per operation in
 // IR.cpp). "Its variable" is `var`, and for `block` the captured variables.
 enum Effect : uint16_t {
-  Fails       = 1u << 0,  // may raise an error (and leave through `unwind`)
+  Fails       = 1u << 0,  // may raise an error (the function returns with it pending)
   FailsByRef  = 1u << 1,  // fails only when its access goes through a reference (an element may be gone)
   ReadsVar    = 1u << 2,  // reads its variable
   WritesVar   = 1u << 3,  // changes its variable, or its own item (moving it into a cell)

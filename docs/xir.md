@@ -23,8 +23,9 @@ coroutines, classes) run before lowering, where LLVM can no longer see them.
   - low-level operations: type tests, unboxed arithmetic, `alloc`, field access, `write_barrier`, `safepoint`.
 - Where a type is not proven, lowering emits a type test with a specialized fast path and the general path (a
   runtime call). Compilation is ahead of time, so there is no deoptimization.
-- A verifier checks every function after each pass; a text form exists only for debugging and tests
-  (`--dump-xir`). The pipeline never reads text.
+- A verifier checks every function after it is generated and after each pass that changed it: block shape, operand
+  types, branch arguments, dominance, and that use lists match the uses. A text form exists only for debugging and
+  tests (`--dump-xir`). The pipeline never reads text.
 
 ## Memory and the GC
 
@@ -38,9 +39,11 @@ coroutines, classes) run before lowering, where LLVM can no longer see them.
 
 ## Control flow for errors and exceptions
 
-Every operation that can fail has an optional unwind successor (like LLVM's `invoke`). `BEGIN SEQUENCE` / `RECOVER`,
-`BREAK`, `TRY` / `CATCH` / `FINALLY`, and the restoring of `FOR EACH` variables on unwinding are edges in the graph.
-The runtime's pending flag ([runtime.md](runtime.md#errors-and-pending-requests)) is one way to lower those edges.
+Planned (phase 5): every operation that can fail gets an optional unwind successor (like LLVM's `invoke`), an edge
+of the control flow graph that the analyses and passes follow. `BEGIN SEQUENCE` / `RECOVER`, `BREAK`, `TRY` /
+`CATCH` / `FINALLY`, and the restoring of `FOR EACH` variables on unwinding become such edges. The runtime's pending
+flag ([runtime.md](runtime.md#errors-and-pending-requests)) is one way to lower them. Until then a failing operation
+makes its function return, with the error pending.
 
 ## Resumable functions
 
@@ -57,14 +60,29 @@ adjustment, as C++ compilers do.
 
 ## Passes
 
-Planned. Today the syntax tree is folded (`opt/Fold`, [compiler.md](compiler.md#constant-folding)) and the lowering
-elides copies (`FramePlan`); xIR has the analyses the passes build on (reverse postorder, dominators, the verifier).
-A pass manager runs the passes in order, with the verifier after each one and a dump option per pass.
+The syntax tree is folded first (`opt/Fold`, [compiler.md](compiler.md#constant-folding)). From `-O1` on, the pass
+manager (`PassManager.*`, `optimize`) runs a table of passes on every function, in order, repeating the pipeline
+while something changes (at most four rounds), and verifies the function after every pass that changed it; invalid
+xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
 
-The passes need infrastructure xIR does not have yet:
+- `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `from_bool` and `truth` of
+  constants (`truth` of a logical just made is its boolean), `cond_br` on a constant becomes `br`. A folded
+  instruction is removed at once, also one that can fail in general (`truth`) but not with these operands.
+- `simplify-cfg`: a block holding only `br` whose parameters nothing else uses is skipped by its predecessors; two
+  branches to one block differing only in a `true`/`false` argument become a jump passing the condition; a block
+  whose single predecessor jumps to it joins it; unreachable blocks go. The steps repeat until nothing changes.
+- `remove-dead-code`: instructions whose result is unused and that cannot fail and write nothing (the effects in
+  `Ops.*`), and unused block parameters with their arguments, by a worklist.
 
-- Mutation: replacing all uses of a value, erasing and moving instructions, splitting blocks, cloning blocks and
-  functions (inlining, unrolling, unswitching).
+They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
+with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor
+terminators of every block (`Analysis.h`), computed once per round. Constants compare by value (`sameValue`):
+each use of a literal may be its own constant. The lowering then elides copies (`FramePlan`).
+
+Still to build for the passes that follow:
+
+- Mutation: moving instructions, splitting blocks, cloning blocks and functions (inlining, unrolling,
+  unswitching).
 - Attributes of external functions in their declarations (pure, no allocation, reads its arguments only), next to
   `FOLD`, so calls such as `Len` can be moved, merged and removed.
 - Cached analyses with invalidation: natural loops and their nesting, post-dominators and dominance frontiers
@@ -72,10 +90,9 @@ The passes need infrastructure xIR does not have yet:
 - Types on values (the lattice type inference computes) and branch weights (error paths are cold before LLVM sees
   them).
 
-They come in layers, each pass with its own tests:
+Planned, in layers, each pass with its own tests:
 
-- Cleanup: CFG simplification (merging blocks, threading jumps, removing empty and unreachable blocks), dead code
-  elimination, copy propagation, sparse conditional constant propagation, value numbering (CSE/GVN).
+- Cleanup: copy propagation, sparse conditional constant propagation, value numbering (CSE/GVN).
 - Memory: mem2reg (variables that are not shared become SSA values), load elimination and store-to-load forwarding,
   dead store elimination, write barrier elision (a store into an object allocated with no safepoint since).
 - Types: type inference over SSA (the xBase counterpart of known bits: integer, double, string, array, logical,
@@ -95,9 +112,10 @@ LLVM then does instruction selection, register allocation and its own vectorizat
 (`Ops.*`: one row per operation with its name and effects: whether it may fail, reads or writes its variable or the
 heap, depends on SET values, runs xBase code, allocates, ends a block, is commutative; `mayFail` and the copy elision
 of the frame plan consult it), `Builder`, `Verifier`, `Printer`, control flow analyses (`Analysis`: reverse
-postorder, dominators, removal of unreachable blocks), and the lowering from the syntax tree (`Gen*.cpp`).
-`compiler/src/codegen/` lowers xIR to LLVM (`FramePlan` assigns the frame). Optimization passes on xIR come with
-phase 3.
+postorder, dominators, the predecessor terminators of every block, removal of unreachable blocks), and the lowering
+from the syntax tree (`Gen*.cpp`). Block names are unique in a function (`while.body.2`).
+`PassManager.*` and `passes/` optimize it (see [Passes](#passes)). `compiler/src/codegen/` lowers xIR to LLVM
+(`FramePlan` assigns the frame).
 
 ## Phase 1 in detail
 
@@ -117,8 +135,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   declared externals), array literals, element read and write, codeblock creation with the cells of its captured
   variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`, `each.move`, `each.leave`), the
   `SWITCH` check and match.
-- Every operation that can fail has an optional unwind successor, where control goes when the operation leaves a
-  pending error or request; without one, the function returns. Phase 1 never sets it.
+- An operation that fails, or leaves another pending request that asks to unwind, makes the function return (unwind
+  successors are planned, see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `ret`.
 - Lowering to LLVM gives every live `item` value a frame slot (a GC root): liveness is computed per value by walking
   from its uses back to its definition, and slots are assigned by linear scan, so slots are reused once their values
@@ -132,8 +150,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 1. The core, lowering from the syntax tree and to LLVM, reproducing the previous behavior (done).
 2. Native frames: item frames on the machine stack, linked per context (done; each frame is the anchor the stack
    maps of phase 4 are relative to). Direct calls with fixed arity (planned).
-3. The pass manager and the passes (see [Passes](#passes)), starting with mem2reg, type inference and inline fast
-   paths.
+3. The pass manager and the passes (see [Passes](#passes)): the manager and the cleanup passes are done; next
+   mem2reg, type inference and inline fast paths.
 4. Statepoints: once mem2reg makes items SSA values, LLVM keeps them in registers and records where the live
    object pointers are at each call (stack maps, relative to the frame's anchor), instead of frame slots holding
    every item; relocation, evacuation in the collector, barrier elision.

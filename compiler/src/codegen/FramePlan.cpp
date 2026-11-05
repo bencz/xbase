@@ -127,8 +127,7 @@ void FramePlan::chooseHomes() {
         if (v->type() != Type::Item || v->kind() == Value::Kind::Constant || !v->hasOneUse() || homes_.count(v) ||
             unit_.count(v))
           continue;
-        const BasicBlock *defBlock = v->kind() == Value::Kind::Param ? static_cast<const BlockParam *>(v)->block
-                                                                     : static_cast<const Instruction *>(v)->parent;
+        const BasicBlock *defBlock = definingBlock(v);
         if (defBlock != b || pos_.at(v) >= pos_.at(&i)) continue;
         groupMember_[v] = (uint32_t)k; // a block parameter here takes its arguments into the group slot too
         unit_[v] = u;
@@ -175,8 +174,7 @@ void FramePlan::computeLiveness() {
   std::vector<const BasicBlock *> work;
   for (auto &[v, u] : unit_) {
     ++stamp;
-    const BasicBlock *def = v->kind() == Value::Kind::Param ? static_cast<const BlockParam *>(v)->block
-                                                            : static_cast<const Instruction *>(v)->parent;
+    const BasicBlock *def = definingBlock(v);
     uint32_t start = pos_.at(v), end = start;
     auto useIn = [&](const BasicBlock *b, uint32_t p) {
       end = std::max(end, p);

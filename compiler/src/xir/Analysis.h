@@ -28,6 +28,11 @@ private:
 };
 
 // Removes the blocks the entry cannot reach (code after RETURN, EXIT, LOOP).
-void removeUnreachableBlocks(Function &f);
+bool removeUnreachableBlocks(Function &f); // true when it removed some
+
+// The terminators that branch to each block, once per terminator however many
+// of its edges go there; a pass that redirects edges keeps it up to date.
+using Predecessors = std::unordered_map<const BasicBlock *, std::vector<Instruction *>>;
+Predecessors predecessorTerminators(const Function &f);
 
 } // namespace xb::xir

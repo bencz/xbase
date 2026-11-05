@@ -24,7 +24,7 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 | `compiler/src/parser/` | syntax tree and recursive descent parser |
 | `compiler/src/sema/` | scopes, slots, captures, structural checks |
 | `compiler/src/opt/` | optimizations on the syntax tree (constant folding) |
-| `compiler/src/xir/` | xIR: data structures, builder, verifier, printer, control flow analyses; syntax tree to xIR |
+| `compiler/src/xir/` | xIR: data structures, operation catalog, builder, verifier, printer, control flow analyses; syntax tree to xIR; pass manager and passes (`passes/`) |
 | `compiler/src/codegen/` | xIR to in-memory LLVM module (frame plan, instructions); object emission |
 | `compiler/src/driver/` | `xbc` command line |
 | `include/` | `std.ch`, `set.ch` and the other standard headers |

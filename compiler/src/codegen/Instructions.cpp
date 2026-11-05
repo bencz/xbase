@@ -11,8 +11,6 @@ using namespace llvm;
 
 namespace xb {
 
-BasicBlock *CodeGen::unwindOf(const xir::Instruction &i) { return i.unwind ? blocks_.at(i.unwind) : fnExit_; }
-
 // The address of an item value.
 Value *CodeGen::addr(const xir::Value *v) {
   const Home &h = plan_->home(v);
@@ -32,7 +30,7 @@ Value *CodeGen::dest(const xir::Instruction &i) {
   const Home &h = plan_->home(&i);
   if (h.kind == Home::Kind::Place) {
     const xir::Instruction &store = *h.place;
-    Value *p = varAddress(*store.var, store.access, unwindOf(store));
+    Value *p = varAddress(*store.var, store.access, fnExit_);
     values_[&i] = p;
     return p;
   }
@@ -130,7 +128,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtNumDefaultDec_, {fnCtx_, dest(i), ConstantFP::get(Type::getDoubleTy(ctx_), i.imm)});
     break;
   case Op::Load: {
-    Value *p = varAddress(*i.var, i.access, unwindOf(i));
+    Value *p = varAddress(*i.var, i.access, fnExit_);
     const Home &h = plan_->home(&i);
     if (h.kind == Home::Kind::Place && h.place == &i) values_[&i] = p; // the variable's own item serves the use
     else copyItem(addr(&i), p);
@@ -139,24 +137,24 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::Store:
     if (!plan_->forwarded(&i)) {
       Value *src = addr(ops[0]);
-      copyItem(varAddress(*i.var, i.access, unwindOf(i)), src);
+      copyItem(varAddress(*i.var, i.access, fnExit_), src);
     }
     break;
   case Op::Barrier: writeBarrier(*i.var, i.access); break;
   case Op::Unary: {
     Value *a = addr(ops[0]);
     b_.CreateCall(i.unop == UnOp::Neg ? rtNeg_ : rtNot_, {fnCtx_, dest(i), a});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   }
   case Op::Binary: {
     Value *a = addr(ops[0]);
     Value *bv = addr(ops[1]);
     b_.CreateCall(rtBin_.at(i.binop), {fnCtx_, dest(i), a, bv});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   }
-  case Op::Truth: values_[&i] = testTruth(addr(ops[0]), unwindOf(i)); break;
+  case Op::Truth: values_[&i] = testTruth(addr(ops[0]), fnExit_); break;
   case Op::FromBool: storeLogical(dest(i), value(ops[0])); break;
   case Op::Call: {
     Value *argv = operandGroup(i);
@@ -164,7 +162,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     setNil(d); // the caller clears the result, so callees that return nothing need not
     b_.CreateCall(xbFuncTy_, callee, {fnCtx_, d, ConstantInt::get(i32_, ops.size()), argv});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   }
   case Op::ArrayLit: {
@@ -176,12 +174,12 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *base = addr(ops[0]);
     Value *idx = addr(ops[1]);
     b_.CreateCall(rtIndex_, {fnCtx_, dest(i), base, idx});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   }
   case Op::IndexSet:
     b_.CreateCall(rtIndexSet_, {fnCtx_, addr(ops[0]), addr(ops[1]), addr(ops[2])});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   case Op::MakeBlock: {
     // The cells first (a variable moving into its cell changes its slot, which
@@ -199,13 +197,13 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::ForTest: {
     Value *go = b_.CreateCall(rtForTest_, {fnCtx_, addr(ops[0]), addr(ops[1]), addr(ops[2])});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     values_[&i] = b_.CreateICmpNE(go, ConstantInt::get(i32_, 0));
     break;
   }
   case Op::EnumLen:
     values_[&i] = b_.CreateCall(rtEnumLen_, {fnCtx_, addr(ops[0])});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   case Op::EachInCell: {
     Value *shared = b_.CreateCall(rtEachShared_, {fnCtx_, rawAddress(*i.var)}, "shared");
@@ -220,7 +218,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::EachMove: {
     Value *inCell = b_.CreateZExt(value(ops[0]), i32_);
     b_.CreateCall(rtEachMove_, {fnCtx_, rawAddress(*i.var), inCell, value(ops[1])});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   }
   case Op::EachLeave: {
@@ -231,11 +229,11 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::RefVar: refOf(*i.var, dest(i)); break;
   case Op::RefIndex:
     b_.CreateCall(rtRefElem_, {fnCtx_, dest(i), addr(ops[0]), addr(ops[1])});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   case Op::SwitchCheck:
     b_.CreateCall(rtSwitchCheck_, {fnCtx_, addr(ops[0])});
-    checkPending(unwindOf(i));
+    checkPending(fnExit_);
     break;
   case Op::SwitchMatch: {
     Value *m = b_.CreateCall(rtSwitchMatch_, {addr(ops[0]), addr(ops[1])});

@@ -172,7 +172,6 @@ private:
     for (size_t k = 0; k < ops.size(); ++k) out_ += (k || i.var ? ", " : " ") + value(ops[k]);
     if (i.op == Op::Br) out_ += " " + target(i.targets[0]);
     if (i.op == Op::CondBr) out_ += ", " + target(i.targets[0]) + ", " + target(i.targets[1]);
-    if (i.unwind) out_ += " unwind " + i.unwind->name;
     out_ += "\n";
   }
 

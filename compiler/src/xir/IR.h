@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // xIR: the mid-level IR between the syntax tree and LLVM (docs/xir.md).
@@ -39,6 +40,7 @@ public:
   Type type() const { return type_; }
   const std::vector<Instruction *> &users() const { return users_; }
   bool hasOneUse() const { return users_.size() == 1; }
+  void replaceAllUsesWith(Value *with); // every operand and branch argument using this value now uses `with`
 
   // Numbering for the printer and for analyses (set by Function::renumber).
   mutable uint32_t id = 0;
@@ -72,6 +74,26 @@ public:
   BasicBlock *block;
   uint32_t index;
 };
+
+// The value as a constant, a machine boolean constant, or a block parameter;
+// null when it is something else.
+inline const Constant *asConstant(const Value *v) {
+  return v->kind() == Value::Kind::Constant ? static_cast<const Constant *>(v) : nullptr;
+}
+inline const Constant *asBool(const Value *v) {
+  const Constant *c = asConstant(v);
+  return c && c->lit == Constant::Lit::Bool ? c : nullptr;
+}
+inline const BlockParam *asParam(const Value *v) {
+  return v->kind() == Value::Kind::Param ? static_cast<const BlockParam *>(v) : nullptr;
+}
+
+// The block that defines the value (null for a constant).
+const BasicBlock *definingBlock(const Value *v);
+
+// Whether two values are always the same: the same value, or equal constants
+// (each use of a literal may be its own Constant).
+bool sameValue(const Value *a, const Value *b);
 
 // A memory place of a function: a frame variable (parameter or LOCAL), a
 // variable a codeblock captured (reached through the block's cells), or a
@@ -135,7 +157,8 @@ public:
   BasicBlock *parent;
   SourceLoc loc;
 
-  // The operation can raise an error (and then leaves through `unwind`).
+  // The operation can raise an error (the function then returns: the error
+  // is pending in the context).
   bool mayFail() const;
 
   const std::vector<Value *> &operands() const { return operands_; }
@@ -143,6 +166,9 @@ public:
   void addOperand(Value *v);
   void addTargetArg(size_t target, Value *v); // branch arguments are uses too
   void dropOperands();                         // operands and branch arguments
+  void replaceUses(Value *from, Value *to);    // in operands and branch arguments
+  void setTarget(size_t target, BasicBlock *to, std::vector<Value *> args);
+  void removeTargetArg(size_t target, size_t k);
 
   // Operation-specific data.
   UnOp unop = UnOp::Neg;
@@ -154,10 +180,10 @@ public:
   Callee callee;                      // Call
   Function *blockFn = nullptr;        // MakeBlock
   std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
-  BasicBlock *unwind = nullptr;       // operations that may fail: where to go (null: the function's exit)
   std::vector<Target> targets;        // Br: one; CondBr: then, else (operand 0 is the condition)
 
 private:
+  static void removeUse(Value *v, Instruction *user); // one occurrence of `user` in v's users
   std::vector<Value *> operands_;
 };
 
@@ -171,7 +197,11 @@ public:
   std::vector<std::unique_ptr<Instruction>> insts;
 
   BlockParam *addParam(Type t);
+  // Removes unused parameter k and argument k of `branches`, the terminators
+  // that branch here (see predecessorTerminators in Analysis.h).
+  void removeParam(size_t k, const std::vector<Instruction *> &branches);
   Instruction *terminator() const;
+  std::unique_ptr<Instruction> takeTerminator(); // removed with its uses undone
   size_t numSuccessors() const; // the targets of the terminator, without allocating
   BasicBlock *successor(size_t k) const;
 };
@@ -200,6 +230,9 @@ public:
   Var *addVar(Var::Kind k, uint32_t index, std::string name);
   uint32_t numFrameVars() const;
   void renumber() const;          // ids for values, in block order
+
+private:
+  std::unordered_map<std::string, unsigned> blockNames_; // uses of each block name, for unique names
 };
 
 class Module {

@@ -89,7 +89,6 @@ private:
   llvm::Value *value(const xir::Value *v);
   llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind);
   llvm::Value *operandGroup(const xir::Instruction &i);
-  llvm::BasicBlock *unwindOf(const xir::Instruction &i);
 
   llvm::LLVMContext &ctx_;
   llvm::Module &mod_;

@@ -19,34 +19,30 @@ for.body:
   %9 = load $f2
   %10 = binary add %8, %9
   store $f1, %10
-  br for.incr
-for.incr:
-  %13 = load $f2
-  %14 = binary add %13, -2:w10
-  store $f2, %14
+  %12 = load $f2
+  %13 = binary add %12, -2:w10
+  store $f2, %13
   br for.test
 for.end:
-  %17 = load $f0
-  %18 = index %17, 1:w10
-  %19 = binary add %18, 1:w0
-  index.set %17, 1:w10, %19
-  %21 = load $f1
-  %22 = binary gt %21, 2:w10
-  %23 = truth %22
-  cond_br %23, and.rhs, and.end(false)
+  %16 = load $f0
+  %17 = index %16, 1:w10
+  %18 = binary add %17, 1:w0
+  index.set %16, 1:w10, %18
+  %20 = load $f1
+  %21 = binary gt %20, 2:w10
+  %22 = truth %21
+  cond_br %22, and.rhs, and.end(false)
 and.rhs:
-  %25 = load $f1
-  %26 = binary lt %25, 100:w10
-  %27 = truth %26
-  br and.end(%27)
-and.end(%29: bool):
-  cond_br %29, iif.then, iif.else
+  %24 = load $f1
+  %25 = binary lt %24, 100:w10
+  %26 = truth %25
+  br and.end(%26)
+and.end(%28: bool):
+  cond_br %28, iif.then, iif.end("out")
 iif.then:
-  %31 = load $f0
-  %32 = index %31, 1:w10
-  br iif.end(%32)
-iif.else:
-  br iif.end("out")
-iif.end(%35: item):
-  ret %35
+  %30 = load $f0
+  %31 = index %30, 1:w10
+  br iif.end(%31)
+iif.end(%33: item):
+  ret %33
 }

@@ -25,6 +25,7 @@ public:
       for (size_t k = 0; k < b->insts.size(); ++k) defined_[b->insts[k].get()] = {b.get(), k};
     }
     for (auto &b : f_.blocks) block(*b);
+    useLists();
     return error_;
   }
 
@@ -40,8 +41,32 @@ private:
     if (cur_ && cur_->loc.line) error_ += " (line " + std::to_string(cur_->loc.line) + ")";
   }
 
+  // Every value's user list holds each instruction once per operand or branch
+  // argument using the value (the passes edit both sides together).
+  void useLists() {
+    std::unordered_map<const Value *, size_t> uses;
+    for (auto &b : f_.blocks)
+      for (auto &i : b->insts) {
+        for (const Value *v : i->operands()) ++uses[v];
+        for (const Target &t : i->targets)
+          for (const Value *v : t.args) ++uses[v];
+      }
+    auto check = [&](const Value &v) {
+      if (v.users().size() != uses[&v]) fail("the use list of a value does not match its uses");
+      for (const Instruction *u : v.users())
+        if (!owned_.count(u->parent)) fail("a value is used by an instruction outside the function");
+    };
+    for (auto &c : f_.constants) check(*c);
+    for (auto &b : f_.blocks) {
+      for (auto &p : b->params) check(*p);
+      for (auto &i : b->insts) check(*i);
+    }
+  }
+
   void block(const BasicBlock &b) {
     if (b.parent != &f_) fail(b.name + " belongs to another function");
+    for (size_t k = 0; k < b.params.size(); ++k)
+      if (b.params[k]->block != &b || b.params[k]->index != k) fail(b.name + " has a parameter with a wrong place");
     if (b.insts.empty() || !isTerminator(b.insts.back()->op)) {
       fail(b.name + " does not end with a terminator");
       return;
@@ -175,8 +200,6 @@ private:
         fail("ret takes at most one item");
       break;
     }
-    if (i.unwind && !owned_.count(i.unwind)) fail("unwind to a block of another function");
-    if (i.unwind && !i.mayFail()) fail(std::string(opName(i.op)) + " cannot fail but has an unwind block");
   }
 
   const Module &m_;
@@ -190,11 +213,14 @@ private:
 
 } // namespace
 
+std::string verify(const Module &m, const Function &f) {
+  std::string e = Verifier(m, f).run();
+  return e.empty() ? e : e + "\n" + print(f);
+}
+
 std::string verify(const Module &m) {
-  for (auto &f : m.functions) {
-    std::string e = Verifier(m, *f).run();
-    if (!e.empty()) return e + "\n" + print(*f);
-  }
+  for (auto &f : m.functions)
+    if (std::string e = verify(m, *f); !e.empty()) return e;
   return {};
 }
 
