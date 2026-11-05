@@ -91,6 +91,7 @@ struct CallExpr : Expr {
   std::vector<ExprPtr> args;
   const ExternDecl *callee = nullptr; // the declaration, when the call goes to an EXTERN FUNCTION
   bool declaredOnly = false;     // always the declared function, even if the module defines one (LOCAL a[n])
+  bool external = false;         // neither defined nor declared: another module's function, found when linking
   CallExpr(SourceLoc l, std::string n) : Expr(ExprKind::Call, l), name(std::move(n)) {}
 };
 
@@ -138,6 +139,10 @@ struct IndexExpr : Expr { // a[i, j] is Index( Index( a, i ), j )
   ExprPtr base, index;
   IndexExpr(SourceLoc l, ExprPtr b, ExprPtr i) : Expr(ExprKind::Index, l), base(std::move(b)), index(std::move(i)) {}
 };
+
+// What can be assigned, incremented or passed by reference: a variable or an
+// element.
+inline bool isLvalue(const Expr &e) { return e.kind == ExprKind::Var || e.kind == ExprKind::Index; }
 
 // A call argument passed by reference: the callee's parameter designates the
 // variable or element, so assigning the parameter assigns it.

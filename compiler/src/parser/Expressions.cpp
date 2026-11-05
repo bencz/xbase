@@ -5,8 +5,6 @@ namespace xb {
 
 ExprPtr Parser::parseExpr() { return parseAssign(); }
 
-static bool isLvalue(const Expr &e) { return e.kind == ExprKind::Var || e.kind == ExprKind::Index; }
-
 ExprPtr Parser::parseAssign() {
   ExprPtr lhs = parseOr();
   BinOp op = BinOp::Add;
@@ -52,12 +50,13 @@ ExprPtr Parser::parseAnd() {
 }
 
 ExprPtr Parser::parseNot() {
-  if (at(Tok::Not)) {
-    SourceLoc loc = cur().loc;
-    advance();
-    return std::make_unique<UnaryExpr>(loc, UnOp::Not, parseNot());
-  }
-  return parseEquality();
+  if (!at(Tok::Not)) return parseEquality();
+  SourceLoc loc = cur().loc;
+  if (!enterExpr()) return std::make_unique<NilExpr>(loc);
+  advance();
+  ExprPtr e = std::make_unique<UnaryExpr>(loc, UnOp::Not, parseNot());
+  --exprDepth_;
+  return e;
 }
 
 ExprPtr Parser::parseEquality() {
@@ -126,18 +125,38 @@ ExprPtr Parser::parsePower() {
   return lhs;
 }
 
+// One more level of expression nesting (each nested expression and each
+// prefix operator passes through parseUnary or parseNot once per level); at
+// the limit the rest of the statement is skipped.
+bool Parser::enterExpr() {
+  if (exprDepth_ == kMaxExprNesting) {
+    tooDeep("expression", kMaxExprNesting);
+    skipToEndOfStmt();
+    return false;
+  }
+  ++exprDepth_;
+  return true;
+}
+
 ExprPtr Parser::parseUnary() {
   SourceLoc loc = cur().loc;
-  if (accept(Tok::Minus)) return std::make_unique<UnaryExpr>(loc, UnOp::Neg, parseUnary());
-  if (accept(Tok::Plus)) return std::make_unique<UnaryExpr>(loc, UnOp::Plus, parseUnary());
-  if (at(Tok::Inc) || at(Tok::Dec)) {
+  if (!enterExpr()) return std::make_unique<NilExpr>(loc);
+  ExprPtr e;
+  if (accept(Tok::Minus)) {
+    e = std::make_unique<UnaryExpr>(loc, UnOp::Neg, parseUnary());
+  } else if (accept(Tok::Plus)) {
+    e = std::make_unique<UnaryExpr>(loc, UnOp::Plus, parseUnary());
+  } else if (at(Tok::Inc) || at(Tok::Dec)) {
     bool inc = at(Tok::Inc);
     advance();
     ExprPtr t = parseUnary();
     if (!isLvalue(*t)) diag_.error(t->loc, "invalid operand for ++/--");
-    return std::make_unique<IncDecExpr>(loc, inc, true, std::move(t));
+    e = std::make_unique<IncDecExpr>(loc, inc, true, std::move(t));
+  } else {
+    e = parsePostfix();
   }
-  return parsePostfix();
+  --exprDepth_;
+  return e;
 }
 
 ExprPtr Parser::parsePostfix() {

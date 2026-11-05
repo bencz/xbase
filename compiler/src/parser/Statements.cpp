@@ -71,15 +71,33 @@ StmtPtr Parser::parseStmt() {
     return nullptr;
   }
 
-  // Statement-level `x = expr` is an assignment, not a comparison.
-  if (at(Tok::Ident) && ahead().kind == Tok::Eq) {
-    auto target = std::make_unique<VarExpr>(cur().loc, cur().upper);
-    advance();
-    SourceLoc aloc = cur().loc;
-    advance();
-    ExprPtr value = parseExpr();
-    endOfStmt();
-    return std::make_unique<ExprStmt>(loc, std::make_unique<AssignExpr>(aloc, std::move(target), std::move(value)));
+  // A statement `operand = expr` is an assignment (`x = y = 3` is
+  // `x := ( y = 3 )`), whose target must be a variable or an element, also in
+  // parentheses: the statement is read as a postfix expression first, and from
+  // its start again when no `=` follows. The first reading's errors are the
+  // statement's.
+  if (at(Tok::Ident) || at(Tok::LParen) || at(Tok::String) || at(Tok::Number) || at(Tok::True) ||
+      at(Tok::False) || at(Tok::LBrace)) {
+    size_t start = pos_;
+    unsigned errors = diag_.errorCount();
+    ExprPtr target = parsePostfix();
+    if (diag_.errorCount() != errors) {
+      skipToEndOfStmt();
+      return nullptr;
+    }
+    if (at(Tok::Eq)) {
+      if (!isLvalue(*target)) {
+        diag_.error(target->loc, "invalid assignment target");
+        skipToEndOfStmt();
+        return nullptr;
+      }
+      SourceLoc aloc = cur().loc;
+      advance();
+      ExprPtr value = parseExpr();
+      endOfStmt();
+      return std::make_unique<ExprStmt>(loc, std::make_unique<AssignExpr>(aloc, std::move(target), std::move(value)));
+    }
+    pos_ = start;
   }
 
   // A statement whose expression has an error says nothing more: the rest of

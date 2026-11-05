@@ -54,6 +54,7 @@ private:
   Value *genAssign(const AssignExpr &a);
   Value *genIncDec(const IncDecExpr &e);
   Value *genIndexAssign(const IndexExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);
+  Value *genLogic(const LogicExpr &l);
   Value *genIIf(const IIfExpr &e);
   Value *genCodeblock(const BlockExpr &b);
 

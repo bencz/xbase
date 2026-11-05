@@ -26,8 +26,14 @@ std::string Parser::found() const {
 
 bool Parser::expect(Tok k, const char *what) {
   if (accept(k)) return true;
-  diag_.error(cur().loc, std::string("expected ") + what + ", " + found());
+  if (!quiet()) diag_.error(cur().loc, std::string("expected ") + what + ", " + found());
   return false;
+}
+
+void Parser::tooDeep(const char *what, unsigned limit) {
+  if (!quiet()) diag_.error(cur().loc, std::string(what) + " nested too deeply (more than " + std::to_string(limit) +
+                                           " levels)");
+  quietStmt_ = true;
 }
 
 // `FOR each := ...` is a FOR loop over a variable named EACH.
@@ -42,8 +48,9 @@ void Parser::skipToEndOfStmt() {
 
 void Parser::endOfStmt() {
   if (!atEndOfStmt()) {
-    diag_.error(cur().loc, std::string("unexpected ") +
-                               (at(Tok::Ident) ? "'" + cur().text + "'" : std::string(tokName(cur().kind))));
+    if (!quiet())
+      diag_.error(cur().loc, std::string("unexpected ") +
+                                 (at(Tok::Ident) ? "'" + cur().text + "'" : std::string(tokName(cur().kind))));
     skipToEndOfStmt();
   }
   accept(Tok::EndOfStmt);
@@ -304,6 +311,13 @@ std::optional<ExternDecl> Parser::parseExtern() {
 
 Block Parser::parseBlock(std::initializer_list<const char *> enders) {
   Block b;
+  if (blockDepth_ == kMaxBlockNesting) {
+    tooDeep("statements", kMaxBlockNesting);
+    stopped_ = true;
+    pos_ = toks_.size() - 1; // the end of the source
+    return b;
+  }
+  ++blockDepth_;
   while (true) {
     skipBlankStmts();
     // EXTERN FUNCTION ends a function body, like FUNCTION; inside a nested block
@@ -315,6 +329,7 @@ Block Parser::parseBlock(std::initializer_list<const char *> enders) {
     if (StmtPtr s = parseStmt()) b.push_back(std::move(s));
     if (pos_ == before) advance(); // guarantee progress after errors
   }
+  --blockDepth_;
   return b;
 }
 
@@ -324,7 +339,7 @@ void Parser::closeBlock(std::initializer_list<const char *> closers, const char 
     endOfStmt();
     return;
   }
-  diag_.error(openLoc, std::string(opener) + " without matching " + *closers.begin());
+  if (!quiet()) diag_.error(openLoc, std::string(opener) + " without matching " + *closers.begin());
 }
 
 } // namespace xb

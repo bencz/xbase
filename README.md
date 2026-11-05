@@ -41,12 +41,15 @@ cc hello.o build/runtime/libxbrt.a -lm -o hello  # link with the runtime
 ./hello
 ```
 
+A program of several sources compiles in one run into one object (`xbc *.prg -o app.o`); calls between its modules
+need no declaration, and it starts at `Main()`.
+
 Useful options (`xbc --help` lists all of them):
 
 | Option | Meaning |
 |---|---|
 | `-E` | print the preprocessed source and stop |
-| `-p` | also write the preprocessed source to `<file>.ppo` |
+| `-p` | also write each preprocessed source to `<file>.ppo` |
 | `-I<dir>`, `-D<name>[=<value>]` | include directory, `#define` |
 | `-u`, `-u<file>` | compile without `std.ch`, or with another standard header |
 | `--target=<triple>` | cross-compile, e.g. `--target=s390x-linux-gnu` |

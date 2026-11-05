@@ -7,7 +7,7 @@
 xb_ctx *xb_ctx_new(void) {
   xb_gc_init();
   xb_ctx *ctx = calloc(1, sizeof *ctx);
-  if (!ctx) abort();
+  if (!ctx) xb_gc_fatal("out of memory");
   ctx->set_decimals = 2;
   ctx->set_exact = 0;
   xb_ctx_set_date_format(ctx, "mm/dd/yy", 8);
@@ -50,14 +50,15 @@ void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, u
   if (version != XB_ABI_VERSION || item_size != sizeof(xb_item) || str_hdr_size != offsetof(xb_str, data) ||
       block_cells_offset != offsetof(xb_block, cells) || frame_slots_offset != offsetof(xb_frame, slots) ||
       ctx_frames_offset != offsetof(xb_ctx, frames)) {
-    fprintf(stderr,
-            "xbrt: ABI mismatch (module v%u item=%u str=%u block=%u frame=%u ctx=%u, "
-            "runtime v%u item=%u str=%u block=%u frame=%u ctx=%u)\n",
-            version, item_size, str_hdr_size, block_cells_offset, frame_slots_offset, ctx_frames_offset,
-            XB_ABI_VERSION, (unsigned)sizeof(xb_item), (unsigned)offsetof(xb_str, data),
-            (unsigned)offsetof(xb_block, cells), (unsigned)offsetof(xb_frame, slots),
-            (unsigned)offsetof(xb_ctx, frames));
-    abort();
+    char why[256];
+    snprintf(why, sizeof why,
+             "ABI mismatch (module v%u item=%u str=%u block=%u frame=%u ctx=%u, "
+             "runtime v%u item=%u str=%u block=%u frame=%u ctx=%u)",
+             version, item_size, str_hdr_size, block_cells_offset, frame_slots_offset, ctx_frames_offset,
+             XB_ABI_VERSION, (unsigned)sizeof(xb_item), (unsigned)offsetof(xb_str, data),
+             (unsigned)offsetof(xb_block, cells), (unsigned)offsetof(xb_frame, slots),
+             (unsigned)offsetof(xb_ctx, frames));
+    xb_gc_fatal(why);
   }
 }
 

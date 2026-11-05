@@ -97,33 +97,5 @@ ASYNC FUNCTION FetchOrders( cUrl )
 
 ## Roadmap
 
-[coverage.md](coverage.md) tracks every command and function; the list below orders the work.
-
-1. Several `.prg` files in one `xbc` run (one module each, a single program entry, calls resolved across them), then
-   separate compilation with a symbol table per module.
-2. xIR ([xir.md](xir.md)), a mid-level IR between the syntax tree and LLVM: functions in SSA form over xBase values,
-   with explicit evaluation order, frames, pending checks and write barriers, so that language-level optimizations run
-   on it before lowering: type inference (integers, doubles and logicals unboxed in registers when a variable never
-   holds anything else), constant and copy propagation, dead code, inline fast paths of the operators with the runtime
-   call only for the general case, loop-invariant code motion and unswitching of type tests, escape analysis (objects
-   that do not leave a function or task allocated in a region freed as a whole, or on the stack).
-3. GC integration with LLVM, together with the IR: object pointers kept in SSA values across calls become precise,
-   relocatable roots through statepoints and stack maps (`gc.statepoint`, `gc.relocate`, `RewriteStatepointsForGC`),
-   so that the collector can move objects: an Immix heap (blocks and lines, bump allocation) with evacuation of young
-   objects and defragmentation, objects handed to C pinned. Frames keep only what must outlive registers.
-4. Runtime entry points with LLVM attributes (`nounwind`, `willreturn`, memory effects limited to arguments,
-   `nocapture`), so that LLVM's own passes see through them.
-5. Compiler gaps: references (`@var`, `DO ... WITH` by reference), building on the `XB_T_REF` item `FOR EACH` uses;
-   Clipper's 10-significant-character identifiers (programs calling a function by its first 10 characters); declaration
-   files generated per module for separate compilation. Preprocessor gaps: macro tokens (`&var.suffix`),
-   `__FILE__`/`__LINE__`, `#pragma`, `e"..."` strings, date literals, precompiled `std.ch` rules.
-6. Core language: date literals, `MEMVAR`/`PRIVATE`/`PUBLIC`, `FIELD`/aliases, `BEGIN SEQUENCE`, `ErrorBlock`, hashes,
-   `FOR EACH` over hashes and user enumerators (yield), the rest of the array functions (`AIns`, `ADel`, `AFill`,
-   `AScan`, `AEval`, `ACopy`, `ASort`). Dynamic symbol table, runtime macro evaluation.
-7. GC: pages returned to the operating system. FFI (`EXTERN "C" FUNCTION` with types), runtime parts written in xBase.
-8. Native classes.
-9. async/await, thread pool, asynchronous I/O.
-10. RDD (DBF, FPT, NTX, CDX, SDF, DELIM) and the terminal layer: one screen/keyboard interface with drivers for plain
-    standard output, ncurses (Linux, macOS, BSD) and the Windows console, chosen by a command-line option or at link
-    time.
-11. Embedded linker (LLD as a library), debug information (DWARF/CodeView).
+[roadmap.md](roadmap.md) lists what is missing compared with Clipper, the planned extensions, and the order of the
+work; [coverage.md](coverage.md) tracks every command and function.

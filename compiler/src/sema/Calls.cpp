@@ -57,8 +57,8 @@ void CallResolver::call(CallExpr &c) {
     if (d && d->name == c.name) checkArgs(c, *d);   // a CHECKED name keeps its argument count when redefined
     return;
   }
-  if (!d) {
-    diag_.error(c.loc, "function '" + c.name + "' is not declared (define it, or declare it with EXTERN FUNCTION)");
+  if (!d) { // as in Clipper, the linker finds it in another module
+    c.external = true;
     return;
   }
   c.name = d->name;

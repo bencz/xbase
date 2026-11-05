@@ -4,9 +4,9 @@ Tests run through CTest (`ctest --test-dir build --output-on-failure`); `tests/C
 
 | Kind | Files | Check |
 |---|---|---|
-| Execution | `tests/run/<name>.prg`, `<name>.out`, optional `<name>.rc`, `<name>.err`, `<name>.d/*.prg` | The program is compiled with `xbc`, linked with `xbrt` (and with the modules in `<name>.d/`, compiled with `--no-entry`) and run; standard output must equal `<name>.out`, the exit code must equal `<name>.rc` (default 0), and standard error must contain `<name>.err`. |
-| Preprocessor | `tests/pp/<name>.prg`, `<name>.ppo` | `xbc -E` output must equal `<name>.ppo`. |
-| Compile failure | `tests/fail/<name>.prg`, `<name>.err` | Compiling must fail, report the text in `<name>.err`, and report exactly one error. |
+| Execution | `tests/run/<name>.prg`, `<name>.out`, optional `<name>.rc`, `<name>.err`, `<name>.with/*.prg`, `<name>.d/*.prg` | The program is compiled with `xbc` (together with the modules in `<name>.with/`, in the same run), linked with `xbrt` (and with the modules in `<name>.d/`, each compiled on its own with `--no-entry`) and run; standard output must equal `<name>.out`, the exit code must equal `<name>.rc` (default 0), and standard error must contain `<name>.err`. |
+| Preprocessor | `tests/pp/<name>.prg`, `<name>.ppo` | `xbc -E` output must equal `<name>.ppo`. Two more, in `tests/CMakeLists.txt`: `pp.custom_std` (`-u<file>`) and `pp.sources_pattern` (several sources and a file pattern, `tests/pp/glob`). |
+| Compile failure | `tests/fail/<name>.prg`, `<name>.err`, optional `<name>.with/*.prg` | Compiling (with the modules in `<name>.with/`) must fail, report the text in `<name>.err`, and report exactly one error. |
 | xIR | `tests/xir/<name>.prg`, `<name>.xir` | The xIR `xbc --dump-xir` writes (after the xIR passes, at the default `-O2`) must equal `<name>.xir`. |
 | Code generation | `xb_add_codegen_test` in `tests/CMakeLists.txt` | The IR `xbc --dump-ir` emits for a cross target must match a regular expression. |
 | Declarations | `runtime.declarations` (`tests/declarations_test.cmake`) | `include/rtl.ch` declares exactly the `xbf_` functions defined in `runtime/src`. |
@@ -49,9 +49,10 @@ Running big-endian programs needs a target sysroot and an emulator (for example 
 
 `bench/<name>.prg` are benchmark programs: recursive calls (`fib`), an integer loop (`loops`), arrays (`sieve`,
 `matmul`), sorting in xBase (`qsort`) and with `ASort` (`asort`), strings (`strings`), the bit functions and string
-building (`crc32`). Each one times its own work with `ElapsedMs()`, checks its result against a value computed
-independently, and prints one line: `<name> <milliseconds> ok|WRONG`. The `bench` target (not part of the default
-build or of `ctest`) compiles them with `-O2` (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the
-tests) and runs `bench/run_bench.cmake`: every program `XB_BENCH_REPEAT` times (a cache variable, default 3), the best
-time of each in a table, and a failure when one does not run or reports `WRONG`. It warns when the build is not
-Release. Performance changes are measured with it, before and after.
+building (`crc32`), double arithmetic (`float`, the Mandelbrot set) and integers mixed with doubles (`mixed`:
+`i + 3.14`, `i / 4`, `Int()`, comparisons across both). Each one times its own work with `ElapsedMs()`, checks its
+result against a value computed independently, and prints one line: `<name> <milliseconds> ok|WRONG`. The `bench` target
+(not part of the default build or of `ctest`) compiles them with `-O2` (`bench/CMakeLists.txt`, through the same
+`xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every program `XB_BENCH_REPEAT` times (a cache
+variable, default 3), the best time of each in a table, and a failure when one does not run or reports `WRONG`. It warns
+when the build is not Release. Performance changes are measured with it, before and after.

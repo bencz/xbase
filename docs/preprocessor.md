@@ -14,8 +14,9 @@ no knowledge of commands.
 
 The lexer delivers one logical line at a time. A UTF-8 byte order mark at the start of a file is skipped.
 
-- A `;` followed only by blanks or a line comment up to the newline continues the line. Any other `;` separates
-  statements.
+- A `;` followed only by blanks and comments up to the newline continues the line; so does one followed by a block
+  comment that crosses a newline (the line goes on after the comment). Any other `;` separates statements.
+- Blanks are spaces, tabs, carriage returns, form feeds and Ctrl-Z (the end-of-file mark of DOS editors).
 - Comments: `//` and `&&` to the end of the line; `/* ... */` (may span lines); `*` when it is the first token of a
   line; `NOTE` when it is the first token of a statement.
 - Strings: `"..."`, `'...'` and `[...]`. A `[` starts a string unless it follows something that can be indexed (an

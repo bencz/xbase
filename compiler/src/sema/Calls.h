@@ -12,7 +12,8 @@ namespace xb {
 
 // Resolves every call of a module before the other passes: a call goes to a
 // function the module defines, or to an EXTERN FUNCTION (include/rtl.ch for the
-// runtime), whose name it may abbreviate when the declaration allows it. It
+// runtime), whose name it may abbreviate when the declaration allows it, or
+// else to a function of another module of the program, by name. It
 // also applies the declarations' rules: RESERVED names cannot be defined, and
 // CHECKED functions take the declared number of arguments. Calls are renamed
 // to the full name and linked to their declaration (CallExpr::callee).

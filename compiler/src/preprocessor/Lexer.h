@@ -27,7 +27,7 @@ private:
   SourceLoc here() const { return {file_, line_, col_}; }
   Token &add(Tok k, SourceLoc loc, std::string text);
   void skipToEol();
-  bool continuationAhead() const;
+  size_t continuation() const;
   bool bracketStringAllowed() const;
   void lexNumber();
   void lexString(char close);

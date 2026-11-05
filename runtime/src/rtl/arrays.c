@@ -92,7 +92,7 @@ static void map_add(clone_map *m, const xb_array *src, xb_array *copy) {
   if ((m->count + 1) * 2 > m->mask + 1) {
     clone_map grown = {calloc((m->mask + 1) * 2, sizeof(clone_entry)), (m->mask + 1) * 2 - 1, 0, m->order,
                        m->orderLen, m->orderCap};
-    if (!grown.slots) abort();
+    if (!grown.slots) xb_gc_fatal("out of memory");
     for (size_t i = 0; i <= m->mask; ++i)
       if (m->slots[i].src) grown.slots[slot_of(&grown, m->slots[i].src)] = m->slots[i];
     grown.count = m->count;
@@ -103,7 +103,7 @@ static void map_add(clone_map *m, const xb_array *src, xb_array *copy) {
   if (m->orderLen == m->orderCap) {
     m->orderCap = m->orderCap ? m->orderCap * 2 : 16;
     m->order = realloc(m->order, m->orderCap * sizeof *m->order);
-    if (!m->order) abort();
+    if (!m->order) xb_gc_fatal("out of memory");
   }
   m->order[m->orderLen++] = src;
   ++m->count;
@@ -113,7 +113,7 @@ void xbf_ACLONE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
   clone_map m = {calloc(16, sizeof(clone_entry)), 15, 0, NULL, 0, 0};
-  if (!m.slots) abort();
+  if (!m.slots) xb_gc_fatal("out of memory");
   const xb_array *root = argv[0].v.p;
   xb_array *top = xb_array_alloc(root->len);
   xb_set_array(ret, top); /* every copy below hangs from `ret` once allocated */

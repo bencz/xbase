@@ -45,7 +45,7 @@ enum class Op : uint8_t {
 
 // What an operation does besides computing its result from its operands, for
 // the passes that move, merge or remove operations (one row per operation in
-// IR.cpp). "Its variable" is `var`, and for `block` the captured variables.
+// Ops.cpp). "Its variable" is `var`, and for `block` the captured variables.
 enum Effect : uint16_t {
   Fails       = 1u << 0,  // may raise an error (the function returns with it pending)
   FailsByRef  = 1u << 1,  // fails only when its access goes through a reference (an element may be gone)

@@ -150,7 +150,7 @@ static void *xmalloc(size_t n) {
 
 void xb_gc_init(void) {
   if (heap.ready) return;
-  xb_mutex_init(&heap.lock);
+  if (!xb_mutex_init(&heap.lock)) xb_gc_fatal("cannot create the heap lock");
   size_t c = 0;
   for (size_t units = 0; units <= XB_GC_SMALL_MAX / XB_GC_ALIGN; ++units) {
     while (class_sizes[c] < units * XB_GC_ALIGN) ++c;
@@ -345,8 +345,7 @@ void xb_gc_add_root(xb_item *items, size_t count) {
 
 void xb_gc_root_push(xb_ctx *ctx, xb_item *it) {
   if (ctx->rootLen == XB_GC_MAX_ROOTS) {
-    fputs("xbrt: too many temporary GC roots\n", stderr);
-    abort();
+    xb_gc_fatal("too many temporary GC roots");
   }
   ctx->roots[ctx->rootLen++] = it;
 }

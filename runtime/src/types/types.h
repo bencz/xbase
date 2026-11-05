@@ -35,6 +35,8 @@ static inline uint8_t *xb_array_cards(const xb_array *a) {
 
 /* Longest array: its items must fit in addressable memory with room to grow. */
 #define XB_ARRAY_MAX_LEN (SIZE_MAX / sizeof(xb_item) / 4)
+/* Longest string: its size with the header must not wrap. */
+#define XB_STR_MAX_LEN (SIZE_MAX / 2)
 
 /* Lengths are 64-bit so that a length past XB_ARRAY_MAX_LEN is caught before
  * it is narrowed to size_t (on 32-bit hosts). */

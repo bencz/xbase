@@ -5,9 +5,26 @@ generated code relies on is in [runtime.md](runtime.md).
 
 Pipeline (`main.cpp`): preprocess `std.ch` and the source, parse, resolve calls, fold constants, run semantic checks,
 generate xIR and verify it, optimize it (from `-O1` on, [xir.md](xir.md#passes)), lower it to an in-memory LLVM
-module, optimize that, emit the object file. Each stage stops
-the compilation when it reports errors. After 100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the
-preprocessor and the parser stop early.
+module, optimize that, emit the object file. A stage that reports errors stops the compilation of that source; after
+100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the preprocessor and the parser stop early.
+
+## Sources and modules
+
+`xbc` takes one or more sources (`xbc main.prg repository.prg`, `xbc *.prg`); each is a module, and a file given
+twice is compiled once. A source whose file name contains `*` (any characters) or `?` (one character) and names no
+file stands for the files of its directory that match it, sorted by name, except names starting with `.` unless the
+pattern does; names compare without case on Windows. This serves shells that do not expand patterns. Each
+source is preprocessed on its own, with `std.ch` and the command-line defines (its `#define`s and rules do not reach
+the next source), and goes through the front end; a source with errors does not stop the others from being checked.
+Two modules defining the same public function is an error. Then every module is lowered into one LLVM module and one
+object (`-o`, by default the first source's name with `.o`), where calls between the modules are direct and LLVM can
+inline across them; `-p` writes a `.ppo` per source, `-E` prints them all, `--depfile` lists every file read.
+
+The program starts at the public function `MAIN` of any module, or else at the first function of the first source
+that has one (a `STATIC` function named `MAIN` does not count). Clipper starts at the first function; xbase prefers
+`MAIN`, so that `xbc *.prg` works whatever order the files come in, and a source may define helpers before `Main`.
+`--no-entry` leaves the entry out, for modules compiled on their own and linked into a program whose entry is in
+another object.
 
 ## Grammar
 
@@ -65,7 +82,9 @@ Statements:
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
   other arguments (an element, a variable in parentheses, an expression) by value
-- expression statements; at statement level `x = expr` is an assignment
+- expression statements; a statement `operand = expr` is an assignment, and `=` inside `expr` compares:
+  `x = y = 3` is `x := ( y = 3 )`, `a[1] = 5` assigns. The parser reports an invalid assignment target (anything but
+  a variable or an element, also in parentheses) here, for `:=`, `op=`, `++`/`--` and `@`.
 
 `PRIVATE`, `PUBLIC`, `MEMVAR`, `FIELD` and `PARAMETERS` are recognized and reported as not supported yet.
 
@@ -81,12 +100,21 @@ references `@name()`.
 Variables and elements (`a[i] := v`, `a[i] += v`, `a[i]++`) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
 declares `a := Array( n1, n2 )`.
 
+Nesting is limited, so that a deep source is reported instead of exhausting the compiler's stack: 1024 levels of
+nested expressions (parentheses, calls, arrays, codeblocks, prefix operators; `Parser::kMaxExprNesting`) and 1024 of
+nested statements (`Parser::kMaxBlockNesting`). One error is reported, and the rest of the statement, or of the
+source, is skipped. Chains of binary operators are not nested in the source but make deep trees; the preprocessor's
+limit on a statement's tokens bounds them, and `xbc` runs its stages on a thread with a 256 MB stack
+(`kCompilerStackSize` in `main.cpp`; where LLVM is built without threads, on the main thread's own stack).
+
 ## Calls
 
-A call goes to a function the module defines or to a declared external function. `EXTERN FUNCTION` (`EXTERNAL`, which
-may be abbreviated down to `EXTE`) declares a function the module calls but does not define (a runtime function, a
-function of a C library written to the runtime's convention, or a function of another module of the program); the
-runtime's are declared in `include/rtl.ch`, which `std.ch` includes:
+A call goes to a function the module defines, to a declared external function, or else, as in Clipper, to a public
+function of another module, found by name when the program is linked (`xbp_NAME`): no declaration is needed for the
+functions of the program's other modules, whether they are compiled in the same run or on their own. `EXTERN FUNCTION`
+(`EXTERNAL`, which may be abbreviated down to `EXTE`) declares a function the module calls but does not define (a
+runtime function, a function of a C library written to the runtime's convention, or a function of another module whose
+argument count is to be checked); the runtime's are declared in `include/rtl.ch`, which `std.ch` includes:
 
 ```
 EXTERN FUNCTION SubStr( cString, nStart, [nCount] ) NATIVE RESERVED CHECKED ABBREV 4
@@ -108,15 +136,15 @@ function always receives the reference, so `@` in a declaration without `NATIVE`
 | `ABBREV n` | calls may abbreviate the name to its first `n` or more letters (the keyword rule, `keywordMatches`) |
 | `FOLD` | calls with constant arguments are evaluated at compile time (see [Constant folding](#constant-folding)) |
 
-`sema/Calls.*` resolves every call before the other passes. A function the module defines comes first (a name that
-is not `RESERVED` may be redefined); otherwise the call goes to the declaration with that name, or that it
-abbreviates. The call is renamed to the full name and linked to its declaration (`CallExpr::callee`), and an argument
-`@x` the declaration does not take by reference becomes `x` (`ExternDecl::takesRef`). The argument
-count of a `CHECKED` name is checked even where the module redefines it. `LOCAL a[n]` calls the declared `Array()`
-even if the module defines one (Clipper creates the array itself). It reports a call to a function that is neither
-defined nor declared, a wrong argument count, a definition of a `RESERVED` name (also through an abbreviation), an
-abbreviation that fits several declarations, conflicting declarations of one name (identical ones are accepted), a
-`FOLD` function the compiler has no evaluator for, and a declaration inside a function.
+`sema/Calls.*` resolves every call before the other passes. A function the module defines comes first (a name that is
+not `RESERVED` may be redefined); otherwise the call goes to the declaration with that name, or that it abbreviates; a
+name neither defined nor declared is another module's function (`CallExpr::external`). The call is renamed to the full
+name and linked to its declaration (`CallExpr::callee`), and an argument `@x` the declaration does not take by reference
+becomes `x` (`ExternDecl::takesRef`). The argument count of a `CHECKED` name is checked even where the module redefines
+it. `LOCAL a[n]` calls the declared `Array()` even if the module defines one (Clipper creates the array itself). It
+reports a wrong argument count, a definition of a `RESERVED` name (also through an abbreviation), an abbreviation that
+fits several declarations, conflicting declarations of one name (identical ones are accepted), a `FOLD` function the
+compiler has no evaluator for, and a declaration inside a function.
 
 ## Semantic checks
 
@@ -137,10 +165,10 @@ called inside it). Anything else, a plain variable included, is "illegal initial
 visible in its own initializer, so a codeblock stored in it can call itself; a `LOCAL`'s initializer is resolved
 before the `LOCAL` exists.
 
-Sema reports: undeclared variables, duplicate functions, parameters or locals, `EXIT` outside a loop or `SWITCH`,
-`LOOP` outside a loop, invalid assignment targets, a `LOCAL` or `STATIC` that follows an executable statement or
-appears inside a nested block, a non-constant `STATIC` initializer, a `SWITCH` `CASE` that is not an integer or
-string constant ("CASE requires either numeric or string constant"), and a `CASE` value repeated in a `SWITCH`.
+Sema reports: undeclared variables, duplicate functions, parameters or locals, `EXIT` outside a loop or `SWITCH`, `LOOP`
+outside a loop, a `LOCAL` or `STATIC` that follows an executable statement or appears inside a nested block, a
+non-constant `STATIC` initializer, a `SWITCH` `CASE` that is not an integer or string constant ("CASE requires either
+numeric or string constant"), and a `CASE` value repeated in a `SWITCH`.
 
 ## Code generation
 
@@ -166,7 +194,9 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   variable or a parameter is tested at run time for a cell or a reference (an argument passed by reference); other
   `LOCAL`s never hold one. An argument `@x` is `ref` (the variable's cell), `@a[i]` is `ref.index`. A store into a
   variable that may live in the heap (a cell, an element through a reference) is followed by `barrier`.
-- `.AND.`, `.OR.` and `IIF` branch; their results are block parameters. Conditions are `truth` tests of items.
+- `.AND.`, `.OR.` and `IIF` branch; their results are block parameters. Conditions are `truth` tests of items. The
+  left side of `.AND.`/`.OR.` must be logical; when it does not settle the result, the right side's value is the
+  result as it is, whatever its type (`.T. .AND. 5` is 5, as in Clipper), and only a condition tests it.
 - `DO CASE` becomes an `IF`/`ELSEIF` chain. `SWITCH` evaluates its value once, checks it (`switch.check`; a `SWITCH`
   without arms accepts anything) and compares it with each `CASE` constant in order (`switch.match`); the arm bodies
   follow each other so that control falls through.
@@ -224,7 +254,9 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   directly, without the logical item. A call to a bit function (`BitAnd`, ..., the table `xb_bit_function` in `xbrt.h`)
   with integer arguments is the machine operation; other arguments call the runtime function. Calls set the result slot
   to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME`
-  or `xbp_NAME` (`NATIVE` or not), one to a function of the module to `xbp_NAME` (prefixes in `xbrt.h`).
+  or `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module
+  straight to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
+  initialization are internal, under names nothing looks up, so modules sharing the object never clash.
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
   calls `xb_pending` and leaves through the function's exit if that asks to unwind.
   `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
@@ -242,9 +274,11 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
 - Block parameters: item parameters live in slots, and branches copy their arguments in (through a staging buffer
   when a destination is also a source); machine parameters (`bool`, `i64`) become PHIs.
 - A module with `STATIC`s gets an internal global `xb.statics` (an array of NIL items), its initialization function,
-  and a global constructor `xb.module.register` that calls `xb_module_register` before `main`.
-- The start module also gets `xb_app_main`, which checks the ABI, runs the module initializations
-  (`xb_modules_init`, followed by the pending check) and calls the first function of the source.
+  and a global constructor `xb.module.register` that calls `xb_module_register` before `main`. `CodeGen::run` adds
+  one module to the LLVM module; several modules share it.
+- `CodeGen::finish` adds `xb_app_main` (unless `--no-entry`), which checks the ABI, runs the module initializations
+  (`xb_modules_init`, followed by the pending check) and calls the start function (see
+  [Sources and modules](#sources-and-modules)).
 - 32-bit parameters and results of every declared or defined function carry the extension attribute the target ABI
   requires (`zeroext` on s390x, `signext` on RISC-V 64, none on x86-64), taken from LLVM's target library information.
 

@@ -52,7 +52,7 @@ void FramePlan::number() {
 // between that can write the variable, is served by the variable's own item.
 // A plain frame variable changes only by its own stores; one in a cell, a
 // STATIC, or one reached through a reference can also change through anything
-// that writes a variable or the heap or runs code (see Effect in IR.h).
+// that writes a variable or the heap or runs code (see Effect in Ops.h).
 // One pass per block: the position of the last write of each variable and of
 // the last instruction that may write any variable indirectly.
 void FramePlan::elideLoads(const BasicBlock &b) {

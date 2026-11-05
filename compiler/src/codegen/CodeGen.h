@@ -30,7 +30,13 @@ namespace xb {
 class CodeGen {
 public:
   CodeGen(llvm::LLVMContext &ctx, llvm::Module &mod, Diagnostics &diag);
-  bool run(const xir::Module &m, bool emitEntry);
+  // Adds one module of the program to the LLVM module; several modules may
+  // share it (one object for several sources), each adding its own functions,
+  // STATICs and registration.
+  void run(const xir::Module &m);
+  // Then: the program entry calling `start` (none without one), and the check
+  // of the LLVM module.
+  bool finish(const xir::Function *start);
 
 private:
   // Fields of xb_item, xb_frame and the head of xb_ctx, in the LLVM structs
@@ -132,9 +138,9 @@ private:
   llvm::FunctionCallee rtModuleRegister_, rtModulesInit_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
-  // module state
+  // state of the object (every module added)
   std::unordered_map<const xir::Function *, llvm::Function *> functions_;
-  llvm::GlobalVariable *statics_ = nullptr;   // the module's STATICs
+  llvm::GlobalVariable *statics_ = nullptr;   // the STATICs of the module being added
   std::unordered_map<std::string, llvm::Constant *> strLits_;
   std::unordered_map<std::string, llvm::Constant *> numLits_;
   llvm::Constant *nilLit_ = nullptr;

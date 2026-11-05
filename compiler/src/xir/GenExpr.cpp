@@ -30,7 +30,7 @@ Value *Generator::genExpr(const Expr &e) {
     return b.binary(bin.op, l, r);
   }
   case ExprKind::And:
-  case ExprKind::Or: return b.fromBool(genCond(e));
+  case ExprKind::Or: return genLogic(static_cast<const LogicExpr &>(e));
   case ExprKind::Assign: return genAssign(static_cast<const AssignExpr &>(e));
   case ExprKind::IncDec: return genIncDec(static_cast<const IncDecExpr &>(e));
   case ExprKind::IIf: return genIIf(static_cast<const IIfExpr &>(e));
@@ -104,9 +104,9 @@ Value *Generator::genCall(const CallExpr &c) {
   std::vector<Value *> args;
   for (auto &a : c.args) args.push_back(genExpr(*a));
   Callee callee;
-  if (c.callee) { // resolved to an EXTERN FUNCTION (sema/Calls)
+  if (c.callee || c.external) { // an EXTERN FUNCTION, or another module's function (sema/Calls)
     callee.name = c.name;
-    callee.native = c.callee->native;
+    callee.native = c.callee && c.callee->native;
   } else {
     callee.function = funcs_.at(c.name);
   }
@@ -160,6 +160,24 @@ Value *Generator::genIndexAssign(const IndexExpr &target, const AssignExpr *assi
   Value *now = b.binary(op, elem, rhs);
   b.indexSet(base, idx, now);
   return incdec && !incdec->prefix ? elem : now;
+}
+
+// .AND. and .OR. as a value: the left side decides (it must be logical) and,
+// when it does not settle the result, the right side's value is the result as
+// it is, whatever its type, as in Clipper (`.T. .AND. 5` is 5).
+Value *Generator::genLogic(const LogicExpr &l) {
+  Builder &b = *cur_.b;
+  bool isAnd = l.kind == ExprKind::And;
+  Value *lv = genCond(*l.lhs);
+  BasicBlock *rhs = cur_.fn->addBlock(isAnd ? "and.rhs" : "or.rhs");
+  BasicBlock *join = cur_.fn->addBlock(isAnd ? "and.end" : "or.end");
+  Value *result = join->addParam(Type::Item);
+  if (isAnd) b.condBr(lv, rhs, join, {}, {b.logical(false)});
+  else b.condBr(lv, join, rhs, {b.logical(true)}, {});
+  b.setBlock(rhs);
+  b.br(join, {genExpr(*l.rhs)});
+  b.setBlock(join);
+  return result;
 }
 
 Value *Generator::genIIf(const IIfExpr &e) {

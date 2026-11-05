@@ -41,9 +41,9 @@ struct xb_mutex_impl {
   pthread_mutex_t m;
 };
 
-void xb_mutex_init(xb_mutex *m) {
+int xb_mutex_init(xb_mutex *m) {
   *m = malloc(sizeof **m);
-  if (!*m || pthread_mutex_init(&(*m)->m, NULL) != 0) abort();
+  return *m && pthread_mutex_init(&(*m)->m, NULL) == 0;
 }
 
 void xb_mutex_lock(xb_mutex *m) { pthread_mutex_lock(&(*m)->m); }

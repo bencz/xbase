@@ -111,16 +111,24 @@ FunctionCallee CodeGen::rt(const char *name, Type *ret, std::initializer_list<Ty
   return c;
 }
 
-// The LLVM function of an xIR function: program functions are xbp_NAME (see
-// the symbol prefixes in xbrt.h); codeblocks and the module initialization are
-// internal.
+// The LLVM function of an xIR function: public program functions are
+// xbp_NAME (see the symbol prefixes in xbrt.h), declared already when another
+// module of the object called it first; STATIC functions, codeblocks and the
+// module initialization are internal, with names no other module looks up.
 Function *CodeGen::declare(const xir::Function &f) {
-  FunctionType *ty = f.kind == xir::Function::Kind::Program ? xbFuncTy_
-                     : f.kind == xir::Function::Kind::Block ? blockFnTy_
-                                                            : initFnTy_;
-  std::string sym = f.kind == xir::Function::Kind::Program ? XB_PROGRAM_FUNC_PREFIX + f.name : "xb." + f.name;
-  Function *fn =
-      Function::Create(ty, f.internal ? GlobalValue::InternalLinkage : GlobalValue::ExternalLinkage, sym, mod_);
+  bool program = f.kind == xir::Function::Kind::Program;
+  if (program && !f.internal) {
+    std::string sym = XB_PROGRAM_FUNC_PREFIX + f.name;
+    if (Function *fn = mod_.getFunction(sym)) {
+      if (!fn->isDeclaration()) diag_.error({}, "internal compiler error: function " + f.name + " defined twice");
+      return fn;
+    }
+    Function *fn = Function::Create(xbFuncTy_, GlobalValue::ExternalLinkage, sym, mod_);
+    addAbiAttributes(fn);
+    return fn;
+  }
+  FunctionType *ty = program ? xbFuncTy_ : f.kind == xir::Function::Kind::Block ? blockFnTy_ : initFnTy_;
+  Function *fn = Function::Create(ty, GlobalValue::InternalLinkage, "xb." + f.name, mod_);
   addAbiAttributes(fn);
   return fn;
 }
@@ -136,7 +144,8 @@ Function *CodeGen::externFunction(const xir::Callee &c) {
   return f;
 }
 
-bool CodeGen::run(const xir::Module &m, bool emitEntry) {
+void CodeGen::run(const xir::Module &m) {
+  statics_ = nullptr;
   if (!m.statics.empty()) {
     auto *ty = ArrayType::get(itemTy_, m.statics.size());
     auto *gv = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, ConstantAggregateZero::get(ty),
@@ -147,13 +156,10 @@ bool CodeGen::run(const xir::Module &m, bool emitEntry) {
   for (auto &f : m.functions) functions_[f.get()] = declare(*f);
   for (auto &f : m.functions) genFunction(*f);
   if (!m.statics.empty()) genModuleRegistration(m);
-  if (emitEntry)
-    for (auto &f : m.functions)
-      if (f->kind == xir::Function::Kind::Program) {
-        genEntry(*f); // the first function of the source starts the program
-        break;
-      }
+}
 
+bool CodeGen::finish(const xir::Function *start) {
+  if (start) genEntry(*start);
   std::string err;
   raw_string_ostream os(err);
   if (verifyModule(mod_, &os)) {

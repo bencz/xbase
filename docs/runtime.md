@@ -85,7 +85,9 @@ each one, so object pointers are what the rest of the runtime and compiled code 
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
 - Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, an object above half the address space,
-  memory exhausted) end the program through `xb_gc_fatal` with a message on standard error and exit code 1.
+  memory exhausted), more temporary roots than `XB_GC_MAX_ROOTS`, a lock that cannot be created and an ABI mismatch
+  end the program through `xb_gc_fatal`, the runtime's single fatal exit, with a message on standard error and exit
+  code 1.
 - Rules for C code: a collection can run inside any allocation, so every object still needed must be reachable from
   a frame or a C root before the next allocation, and a store into a heap object that may have aged since it was
   allocated (any allocation in between) is followed by `xb_gc_write` or `xb_gc_write_item`. Objects never move.
@@ -303,7 +305,7 @@ Before `main`, the global constructor of every module with `STATIC`s calls `xb_m
 (`core/module.c`), which records the module's initialization function and registers its statics as a GC root.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
-in binary mode so programs write the same bytes everywhere; everywhere, the start of the `ElapsedMs` clock), then on
-the program's thread creates the context, calls `xb_app_main` (emitted by the compiler), flushes output and returns
-the exit code. `xb_app_main` checks the ABI, runs the registered module
-initializations in registration order (`xb_modules_init`, which stops at the first error) and calls the start function.
+in binary mode so programs write the same bytes everywhere; everywhere, the start of the `ElapsedMs` clock), then on the
+program's thread creates the context, calls `xb_app_main` (emitted by the compiler), flushes output and returns the exit
+code. `xb_app_main` checks the ABI, runs the registered module initializations in registration order (`xb_modules_init`,
+which stops at the first error) and calls the start function.

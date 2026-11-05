@@ -15,7 +15,7 @@
 
 /* Locks. */
 typedef struct xb_mutex_impl *xb_mutex;
-void xb_mutex_init(xb_mutex *m);
+int xb_mutex_init(xb_mutex *m); /* 0: no memory or no lock available */
 void xb_mutex_lock(xb_mutex *m);
 void xb_mutex_unlock(xb_mutex *m);
 

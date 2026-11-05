@@ -5,7 +5,7 @@
 #include <string.h>
 
 xb_str *xb_str_alloc(uint64_t newLen) {
-  if (newLen > SIZE_MAX / 2) xb_gc_fatal("out of memory"); /* the header must not wrap the size */
+  if (newLen > XB_STR_MAX_LEN) xb_gc_fatal("out of memory");
   size_t len = (size_t)newLen;
   xb_str *s = xb_gc_alloc(XB_GC_STRING, offsetof(xb_str, data) + len + 1);
   s->flags = 0;

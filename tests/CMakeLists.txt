@@ -1,10 +1,13 @@
 # Run tests: tests/run/<name>.prg is compiled with xbc, linked against xbrt,
 # executed, and its stdout compared with <name>.out. An optional <name>.rc
 # holds the expected exit code (default 0). The modules in an optional
-# directory <name>.d/ are compiled with --no-entry and linked into the program.
+# directory <name>.with/ are compiled in the same xbc run (one object); those
+# in an optional directory <name>.d/ are compiled on their own with --no-entry
+# and linked into the program.
 function(xb_add_run_test name)
   set(obj ${CMAKE_CURRENT_BINARY_DIR}/${name}.o)
-  xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.prg ${obj})
+  file(GLOB with ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.with/*.prg)
+  xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.prg ${obj} ${with})
   set(objs ${obj})
   file(GLOB modules ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.d/*.prg)
   foreach(module ${modules})
@@ -48,13 +51,17 @@ foreach(t ${XB_PP_TESTS})
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endforeach()
 
-# Compile-failure tests: compiling tests/fail/<name>.prg must fail with the message in <name>.err.
+# Compile-failure tests: compiling tests/fail/<name>.prg (with the modules of
+# an optional directory <name>.with/) must fail with the message in <name>.err.
 file(GLOB XB_FAIL_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/fail ${CMAKE_CURRENT_SOURCE_DIR}/fail/*.prg)
 foreach(t ${XB_FAIL_TESTS})
   string(REGEX REPLACE "\\.prg$" "" t ${t})
+  file(GLOB with ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.with/*.prg)
+  set(cmd $<TARGET_FILE:xbc> ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.prg ${with}
+      -o ${CMAKE_CURRENT_BINARY_DIR}/fail_${t}.o)
   add_test(NAME fail.${t}
     COMMAND ${CMAKE_COMMAND}
-      "-DEXE=$<TARGET_FILE:xbc>;${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.prg;-o;${CMAKE_CURRENT_BINARY_DIR}/fail_${t}.o"
+      "-DEXE=${cmd}"
       -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.err
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail_test.cmake)
 endforeach()
@@ -67,6 +74,16 @@ add_test(NAME pp.custom_std
     -DEXPECTED_RC=0
     -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pp/custom_std)
+
+# Several sources and a file pattern xbc expands itself (CTest passes `*` as
+# it is): sorted, a file starting with a dot left out, b.prg compiled once.
+add_test(NAME pp.sources_pattern
+  COMMAND ${CMAKE_COMMAND}
+    "-DEXE=$<TARGET_FILE:xbc>;-E;glob/b.prg;glob/*.prg"
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/pp/glob/expected.ppo
+    -DEXPECTED_RC=0
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pp)
 
 # Code generation checks on cross targets: the IR xbc emits for <triple> must
 # match a regular expression (tests/codegen_test.cmake).

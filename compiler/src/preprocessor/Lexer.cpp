@@ -103,12 +103,28 @@ void Lexer::skipToEol() {
   while (pos_ < src_.size() && peek() != '\n') get();
 }
 
-// ';' followed only by blanks and/or a line comment up to the newline.
-bool Lexer::continuationAhead() const {
+// Blanks between tokens; Ctrl-Z, the end-of-file mark of DOS editors, is one.
+static bool isBlank(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\x1a'; }
+
+// At a ';': where the logical line goes on when the ';' continues it, or npos
+// when it separates statements. It continues the line when only blanks and
+// comments follow up to the newline, which it skips; a block comment that
+// crosses a newline continues the line too, right after the comment.
+size_t Lexer::continuation() const {
   size_t p = pos_ + 1;
-  while (p < src_.size() && (src_[p] == ' ' || src_[p] == '\t' || src_[p] == '\r')) ++p;
-  if (p >= src_.size() || src_[p] == '\n') return true;
-  return src_.compare(p, 2, "//") == 0 || src_.compare(p, 2, "&&") == 0;
+  bool crossed = false;
+  for (;;) {
+    while (p < src_.size() && isBlank(src_[p])) ++p;
+    if (src_.compare(p, 2, "/*") != 0) break;
+    size_t end = src_.find("*/", p + 2);
+    if (end == std::string::npos) return std::string::npos; // unterminated: reported where it is lexed
+    crossed |= src_.find('\n', p) < end;
+    p = end + 2;
+  }
+  if (p < src_.size() && src_[p] != '\n' && src_.compare(p, 2, "//") != 0 && src_.compare(p, 2, "&&") != 0)
+    return crossed ? p : std::string::npos;
+  size_t eol = src_.find('\n', p);
+  return eol == std::string::npos ? src_.size() : eol + 1;
 }
 
 // '[' opens a string unless it follows something that can be indexed
@@ -282,7 +298,7 @@ bool Lexer::nextLine(std::vector<Token> &line) {
       get();
       return true;
     }
-    if (c == ' ' || c == '\t' || c == '\r' || c == '\f') {
+    if (isBlank(c)) {
       get();
       space_ = true;
       continue;
@@ -305,10 +321,8 @@ bool Lexer::nextLine(std::vector<Token> &line) {
       continue;
     }
     if (c == ';') {
-      if (continuationAhead()) {
-        get();
-        skipToEol();
-        if (pos_ < src_.size()) get(); // the newline: the logical line goes on
+      if (size_t to = continuation(); to != std::string::npos) {
+        while (pos_ < to) get(); // through get(), which counts the lines
         space_ = true;
         continue;
       }

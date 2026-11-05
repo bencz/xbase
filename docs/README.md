@@ -4,7 +4,8 @@ Find the task, read the doc it points to, then the code.
 
 | Task | Read |
 |---|---|
-| Overall design, decisions, roadmap, planned features (classes, async/await, FFI, GC) | [architecture.md](architecture.md) |
+| Overall design, decisions, planned design (classes, async/await, FFI, GC) | [architecture.md](architecture.md) |
+| What is missing compared with Clipper, planned extensions (classes, hashes, exceptions, generators, async, sockets), order of the work | [roadmap.md](roadmap.md) |
 | The planned mid-level IR (xIR): form, GC, exceptions, coroutines, classes, passes | [xir.md](xir.md) |
 | Directives, `#command`/`#translate` rules, `std.ch`, tokenization, comments, string literals | [preprocessor.md](preprocessor.md) |
 | Grammar, keywords, name resolution, code generation, object emission, cross-compilation, driver options | [compiler.md](compiler.md) |

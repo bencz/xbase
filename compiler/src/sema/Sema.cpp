@@ -177,7 +177,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::ForEach: {
     auto &f = static_cast<ForEachStmt &>(st);
-    for (auto &v : f.vars) lvalue(*v, s);
+    for (auto &v : f.vars) expr(*v, s);
     for (auto &c : f.collections) expr(*c, s);
     ++s.loopDepth;
     nestedBlock(f.body, s);
@@ -236,7 +236,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::For: {
     auto &f = static_cast<ForStmt &>(st);
-    lvalue(*f.var, s);
+    expr(*f.var, s);
     expr(*f.start, s);
     expr(*f.limit, s);
     if (f.step) expr(*f.step, s);
@@ -252,14 +252,6 @@ void Sema::stmt(Stmt &st, Scope &s) {
     if (!s.loopDepth) diag_.error(st.loc, "LOOP outside of a loop");
     break;
   }
-}
-
-void Sema::lvalue(Expr &e, Scope &s) {
-  if (e.kind != ExprKind::Var && e.kind != ExprKind::Index) {
-    diag_.error(e.loc, "invalid assignment target");
-    return;
-  }
-  expr(e, s);
 }
 
 void Sema::expr(Expr &e, Scope &s) {
@@ -304,18 +296,18 @@ void Sema::expr(Expr &e, Scope &s) {
   case ExprKind::Assign: {
     auto &a = static_cast<AssignExpr &>(e);
     expr(*a.value, s);
-    lvalue(*a.target, s);
+    expr(*a.target, s);
     break;
   }
   case ExprKind::IncDec:
-    lvalue(*static_cast<IncDecExpr &>(e).target, s);
+    expr(*static_cast<IncDecExpr &>(e).target, s);
     break;
   case ExprKind::Ref: {
     // A variable passed by reference is shared with the callee: a function's
     // LOCAL or parameter is marked; a codeblock's parameters, STATICs and
     // captured variables are reached with a run-time test anyway.
     Expr &target = *static_cast<RefExpr &>(e).target;
-    lvalue(target, s);
+    expr(target, s);
     if (target.kind == ExprKind::Var) {
       auto &v = static_cast<VarExpr &>(target);
       if (v.where == VarWhere::Frame && !frames_.back().block) markBoxed(frames_.back(), v.slot);

@@ -15,11 +15,17 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/GlobPattern.h>
 #include <llvm/Support/Path.h>
+#include <llvm/Support/thread.h>
 
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
+#include <memory>
+#include <optional>
+#include <unordered_map>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -31,15 +37,18 @@
 namespace {
 
 const char *kUsage =
-    "usage: xbc [options] <file.prg>\n"
+    "usage: xbc [options] <file.prg>...\n"
     "\n"
-    "  -o <file>          output object file (default: <file>.o)\n"
+    "  Every source is a module; all of them go into one object, where calls between them are direct.\n"
+    "  A name with * or ? stands for the files it matches.\n"
+    "\n"
+    "  -o <file>          output object file (default: the first source's name with .o)\n"
     "  -I<dir>            add an include directory\n"
     "  -D<name>[=<val>]   #define <name> [<val>]\n"
     "  -u                 do not load std.ch\n"
     "  -u<file>           use <file> instead of std.ch\n"
     "  -E                 preprocess only, write the result to stdout\n"
-    "  -p                 also write the preprocessed source to <file>.ppo\n"
+    "  -p                 also write each preprocessed source to <file>.ppo\n"
     "  -O0 | -O1 | -O2 | -O3\n"
     "                     optimization level (default -O2)\n"
     "  --target=<triple>  cross-compile for <triple> (default: host)\n"
@@ -47,7 +56,8 @@ const char *kUsage =
     "                     machine's CPU and features (the program may not run on other machines)\n"
     "  --features=<list>  target features, e.g. +sse4.2,-avx\n"
     "  --static           non-PIC code\n"
-    "  --no-entry         do not emit the program entry (xb_app_main)\n"
+    "  --no-entry         do not emit the program entry (xb_app_main): the modules are linked into\n"
+    "                     a program whose entry another object has\n"
     "  --depfile=<file>   write a Make-style dependency file for the object\n"
     "  --dump-ir=<file>   debug: also write the LLVM module as text\n"
     "  --dump-xir=<file>  debug: also write the module's xIR as text\n"
@@ -103,12 +113,111 @@ std::vector<std::string> defaultIncludeDirs(const char *argv0) {
   return dirs;
 }
 
+// A command-line source with `*` or `?` in its file name that names no file
+// stands for the files of its directory it matches, sorted by name, leaving
+// out names that start with a dot unless the pattern does (the shell of some
+// platforms does not expand it). Only `*` and `?` are special. File names
+// compare without case on Windows.
+bool expandInput(const std::string &arg, std::vector<std::string> &inputs) {
+  std::string name = llvm::sys::path::filename(arg).str();
+  if (name.find_first_of("*?") == std::string::npos || llvm::sys::fs::exists(arg)) {
+    inputs.push_back(arg);
+    return true;
+  }
+  constexpr bool foldCase = llvm::sys::path::is_style_windows(llvm::sys::path::Style::native);
+  auto fold = [&](std::string t) {
+    if (foldCase)
+      for (char &c : t) c = (char)std::tolower((unsigned char)c);
+    return t;
+  };
+  std::string glob;
+  for (char c : fold(name)) {
+    if (std::strchr("[]{}\\", c)) glob += '\\'; // literal for the matcher
+    glob += c;
+  }
+  auto pattern = llvm::GlobPattern::create(glob);
+  if (!pattern) {
+    llvm::consumeError(pattern.takeError());
+    std::fprintf(stderr, "xbc: invalid file pattern '%s'\n", arg.c_str());
+    return false;
+  }
+  std::string dir = llvm::sys::path::parent_path(arg).str();
+  std::vector<std::string> found;
+  std::error_code ec;
+  for (llvm::sys::fs::directory_iterator it(dir.empty() ? "." : dir, ec), end; it != end && !ec; it.increment(ec)) {
+    std::string file = llvm::sys::path::filename(it->path()).str();
+    if (file[0] == '.' && name[0] != '.') continue;
+    if (it->type() != llvm::sys::fs::file_type::directory_file && pattern->match(fold(file)))
+      found.push_back(dir.empty() ? file : it->path());
+  }
+  if (found.empty()) {
+    std::fprintf(stderr, "xbc: no file matches '%s'\n", arg.c_str());
+    return false;
+  }
+  std::sort(found.begin(), found.end());
+  inputs.insert(inputs.end(), found.begin(), found.end());
+  return true;
+}
+
+// The stages walk the syntax tree recursively; a statement may hold a chain of
+// tens of thousands of operators (the preprocessor's limit on a statement's
+// tokens bounds it), so the compiler runs on a thread with this much stack.
+constexpr unsigned kCompilerStackSize = 256u << 20;
+
+// One source of the program, through the front end.
+struct Source {
+  std::string path;
+  std::unique_ptr<xb::Module> ast;
+  std::unique_ptr<xb::xir::Module> xir;
+};
+
+// The function that starts the program: a public MAIN in any module, or else
+// the first function of the first source that has one.
+const xb::xir::Function *startFunction(const std::vector<Source> &sources) {
+  for (const Source &s : sources)
+    for (auto &f : s.xir->functions)
+      if (f->kind == xb::xir::Function::Kind::Program && !f->internal && f->name == "MAIN") return f.get();
+  for (const Source &s : sources)
+    for (auto &f : s.xir->functions)
+      if (f->kind == xb::xir::Function::Kind::Program) return f.get();
+  return nullptr;
+}
+
+// The sources without repetitions (the same file named twice, for example
+// `main.prg *.prg`), in their first order.
+std::vector<std::string> distinctFiles(const std::vector<std::string> &inputs) {
+  std::vector<std::string> out;
+  std::vector<llvm::sys::fs::UniqueID> seen;
+  for (const std::string &in : inputs) {
+    llvm::sys::fs::UniqueID id;
+    if (!llvm::sys::fs::getUniqueID(in, id)) {
+      if (std::find(seen.begin(), seen.end(), id) != seen.end()) continue;
+      seen.push_back(id);
+    }
+    out.push_back(in); // a file that cannot be read is reported when it is processed
+  }
+  return out;
+}
+
+// Two modules cannot both define a public function of one name.
+void checkDuplicates(const std::vector<Source> &sources, xb::Diagnostics &diag) {
+  std::unordered_map<std::string, const xb::FuncDecl *> seen;
+  for (const Source &s : sources)
+    for (auto &f : s.ast->funcs) {
+      if (f->isStatic) continue;
+      auto [it, fresh] = seen.emplace(f->name, f.get());
+      if (fresh) continue;
+      diag.error(f->loc, "function '" + f->name + "' is already defined in another module");
+      diag.note(it->second->loc, "previous definition is here");
+    }
+}
+
 } // namespace
 
-int main(int argc, char **argv) {
+static int compile(int argc, char **argv) {
   xb::TargetConfig tcfg;
-  std::string input, output, irDump, xirDump, depFile, stdFile = "std.ch";
-  std::vector<std::string> includeDirs, defines;
+  std::string output, irDump, xirDump, depFile, stdFile = "std.ch";
+  std::vector<std::string> inputs, includeDirs, defines;
   bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false;
 
   for (int i = 1; i < argc; ++i) {
@@ -146,75 +255,90 @@ int main(int argc, char **argv) {
     } else if (a[0] == '-') {
       std::fprintf(stderr, "xbc: unknown option '%s'\n%s", a, kUsage);
       return 2;
-    } else if (input.empty()) {
-      input = a;
-    } else {
-      std::fprintf(stderr, "xbc: only one input file is supported for now\n");
+    } else if (!expandInput(a, inputs)) {
       return 2;
     }
   }
-  if (input.empty()) {
+  inputs = distinctFiles(inputs);
+  if (inputs.empty()) {
     std::fputs(kUsage, stderr);
     return 2;
   }
-  if (output.empty()) output = withExtension(input, ".o");
+  if (output.empty()) output = withExtension(inputs.front(), ".o");
 
   xb::Diagnostics diag;
+  std::string stdPath;
+  std::vector<std::string> filesRead;
+  std::vector<Source> sources;
+  for (const std::string &input : inputs) {
+    // Each source is preprocessed on its own: its #defines and rules do not
+    // reach the next one.
+    xb::Preprocessor pp(diag);
+    for (const std::string &d : includeDirs) pp.addIncludeDir(d);
+    for (const std::string &d : defaultIncludeDirs(argv[0])) pp.addIncludeDir(d);
+    for (const std::string &d : defines) pp.defineFromCommandLine(d);
+    if (useStd) {
+      // An explicit -u<file> is a path like any other file argument.
+      if (stdPath.empty())
+        stdPath = customStd && llvm::sys::fs::exists(stdFile) ? stdFile : pp.findInclude(stdFile, "");
+      if (stdPath.empty()) {
+        std::fprintf(stderr, "xbc: cannot find '%s' (use -I<dir>, or -u to compile without it)\n", stdFile.c_str());
+        return 1;
+      }
+      pp.processFile(stdPath);
+    }
+    // What std.ch (and the files it includes, such as rtl.ch) produces is the
+    // program's prelude: parsed, but not part of the preprocessed listing.
+    size_t prelude = pp.outputSize();
+    unsigned errors = diag.errorCount();
+    pp.processFile(input);
+    std::vector<xb::Token> tokens = pp.takeOutput();
+    for (const std::string &f : pp.filesRead())
+      if (std::find(filesRead.begin(), filesRead.end(), f) == filesRead.end()) filesRead.push_back(f);
+    if (diag.errorCount() != errors) continue;
 
-  xb::Preprocessor pp(diag);
-  for (const std::string &d : includeDirs) pp.addIncludeDir(d);
-  for (const std::string &d : defaultIncludeDirs(argv[0])) pp.addIncludeDir(d);
-  for (const std::string &d : defines) pp.defineFromCommandLine(d);
-  if (useStd) {
-    // An explicit -u<file> is a path like any other file argument.
-    std::string path = customStd && llvm::sys::fs::exists(stdFile) ? stdFile : pp.findInclude(stdFile, "");
-    if (path.empty()) {
-      std::fprintf(stderr, "xbc: cannot find '%s' (use -I<dir>, or -u to compile without it)\n", stdFile.c_str());
+    if (ppOnly || ppFile) {
+      std::string text = xb::Preprocessor::render(tokens, prelude);
+      if (ppOnly) {
+        std::fputs(text.c_str(), stdout);
+        continue;
+      }
+      std::ofstream ppo(withExtension(input, ".ppo"), std::ios::binary);
+      ppo << text;
+    }
+
+    xb::Parser parser(std::move(tokens), diag);
+    auto ast = parser.parseModule(moduleNameFor(input));
+    if (diag.errorCount() != errors) continue;
+    xb::CallResolver(diag, xb::Folder::canEvaluate).run(*ast);
+    if (diag.errorCount() != errors) continue;
+    xb::Folder().run(*ast); // before Sema: STATIC initializers are checked once folded
+    xb::Sema(diag).run(*ast);
+    if (diag.errorCount() != errors) continue;
+    sources.push_back({input, std::move(ast), nullptr});
+  }
+  if (ppOnly) return diag.errorCount() ? 1 : 0;
+  checkDuplicates(sources, diag);
+  if (diag.errorCount()) return 1;
+
+  std::string xirText;
+  for (Source &s : sources) {
+    s.xir = xb::xir::Generator().run(*s.ast);
+    if (std::string bad = xb::xir::verify(*s.xir); !bad.empty()) {
+      std::fprintf(stderr, "xbc: internal error: invalid xIR: %s\n", bad.c_str());
       return 1;
     }
-    pp.processFile(path);
-  }
-  // What std.ch (and the files it includes, such as rtl.ch) produces is the
-  // program's prelude: parsed, but not part of the preprocessed listing.
-  size_t prelude = pp.outputSize();
-  pp.processFile(input);
-  std::vector<xb::Token> tokens = pp.takeOutput();
-  if (diag.errorCount()) return 1;
-
-  if (ppOnly || ppFile) {
-    std::string text = xb::Preprocessor::render(tokens, prelude);
-    if (ppOnly) {
-      std::fputs(text.c_str(), stdout);
-      return 0;
+    if (tcfg.optLevel > 0) {
+      if (std::string bad = xb::xir::optimize(*s.xir); !bad.empty()) {
+        std::fprintf(stderr, "xbc: internal error: invalid xIR %s\n", bad.c_str());
+        return 1;
+      }
     }
-    std::ofstream ppo(withExtension(input, ".ppo"), std::ios::binary);
-    ppo << text;
-  }
-
-  xb::Parser parser(std::move(tokens), diag);
-  auto ast = parser.parseModule(moduleNameFor(input));
-  if (diag.errorCount()) return 1;
-  xb::CallResolver(diag, xb::Folder::canEvaluate).run(*ast);
-  if (diag.errorCount()) return 1;
-  xb::Folder().run(*ast); // before Sema: STATIC initializers are checked once folded
-  xb::Sema sema(diag);
-  sema.run(*ast);
-  if (diag.errorCount()) return 1;
-
-  auto xir = xb::xir::Generator().run(*ast);
-  if (std::string bad = xb::xir::verify(*xir); !bad.empty()) {
-    std::fprintf(stderr, "xbc: internal error: invalid xIR: %s\n", bad.c_str());
-    return 1;
-  }
-  if (tcfg.optLevel > 0) {
-    if (std::string bad = xb::xir::optimize(*xir); !bad.empty()) {
-      std::fprintf(stderr, "xbc: internal error: invalid xIR %s\n", bad.c_str());
-      return 1;
-    }
+    if (!xirDump.empty()) xirText += xb::xir::print(*s.xir);
   }
   if (!xirDump.empty()) {
     std::ofstream out(xirDump, std::ios::binary);
-    out << xb::xir::print(*xir);
+    out << xirText;
     if (!out) {
       std::fprintf(stderr, "xbc: cannot write '%s'\n", xirDump.c_str());
       return 1;
@@ -229,13 +353,14 @@ int main(int argc, char **argv) {
     return 1;
   }
   llvm::LLVMContext llctx;
-  llvm::Module mod(ast->name, llctx);
+  llvm::Module mod(sources.front().ast->name, llctx);
   mod.setTargetTriple(tm->getTargetTriple());
   mod.setDataLayout(tm->createDataLayout());
-  mod.setSourceFileName(input);
+  mod.setSourceFileName(sources.front().path);
 
   xb::CodeGen cg(llctx, mod, diag);
-  if (!cg.run(*xir, emitEntry)) return 1;
+  for (const Source &s : sources) cg.run(*s.xir);
+  if (!cg.finish(emitEntry ? startFunction(sources) : nullptr)) return 1;
 
   xb::optimizeModule(mod, *tm, tcfg.optLevel);
 
@@ -247,9 +372,16 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "xbc: %s\n", err.c_str());
     return 1;
   }
-  if (!depFile.empty() && !writeDepFile(depFile, output, pp.filesRead())) {
+  if (!depFile.empty() && !writeDepFile(depFile, output, filesRead)) {
     std::fprintf(stderr, "xbc: cannot write '%s'\n", depFile.c_str());
     return 1;
   }
   return 0;
+}
+
+int main(int argc, char **argv) {
+  int rc = 1;
+  llvm::thread worker(std::optional<unsigned>(kCompilerStackSize), [&] { rc = compile(argc, argv); });
+  worker.join();
+  return rc;
 }

@@ -27,7 +27,8 @@ static xb_str *overflow(xb_str *s) {
 }
 
 /* Writes [sign][int digits] right-aligned in the first `width` columns, then
- * `.frac` when dec > 0. Returns 0 when the integer part does not fit. */
+ * `.frac` (zeros when `frac` is null) when dec > 0. Returns 0 when the integer
+ * part does not fit. */
 static int place(xb_str *s, int width, int dec, int neg, const char *intDigits, size_t intLen, const char *frac) {
   if (intLen + (neg ? 1u : 0u) > (size_t)width) return 0;
   char *p = s->data + (size_t)width - intLen;
@@ -35,7 +36,10 @@ static int place(xb_str *s, int width, int dec, int neg, const char *intDigits, 
   if (neg) p[-1] = '-';
   if (dec > 0) {
     s->data[width] = '.';
-    memcpy(s->data + width + 1, frac, (size_t)dec);
+    if (frac)
+      memcpy(s->data + width + 1, frac, (size_t)dec);
+    else
+      memset(s->data + width + 1, '0', (size_t)dec);
   }
   return 1;
 }
@@ -51,11 +55,7 @@ static xb_str *format_int(int64_t v, int width, int dec) {
     mag /= 10u;
   } while (mag);
   for (size_t i = 0; i < n; ++i) digits[i] = rev[n - 1 - i];
-  char *frac = dec > 0 ? malloc((size_t)dec) : NULL;
-  if (frac) memset(frac, '0', (size_t)dec);
-  int ok = place(s, width, dec, v < 0, digits, n, frac);
-  free(frac);
-  return ok ? s : overflow(s);
+  return place(s, width, dec, v < 0, digits, n, NULL) ? s : overflow(s);
 }
 
 static xb_str *format_double(double v, int width, int dec) {
@@ -70,16 +70,18 @@ static xb_str *format_double(double v, int width, int dec) {
   memcpy(m + 1, sci + 2, XB_NUM_PRECISION - 1);
   int e = atoi(strchr(sci, 'e') + 1);
 
-  /* digits[i] holds the digit of exponent hi - i, from hi down to -dec. */
+  /* digits[i] holds the digit of exponent hi - i, from hi down to -dec
+   * (positions in 64 bits: dec may be near INT_MAX). */
   int hi = (e > 0 ? e : 0) + 1; /* one spare column for a rounding carry */
-  size_t n = (size_t)(hi + dec + 1);
+  size_t n = (size_t)hi + (size_t)dec + 1;
   char *digits = malloc(n);
+  if (!digits) xb_gc_fatal("out of memory");
   memset(digits, '0', n);
   int roundUp = 0;
   for (int k = 0; k < XB_NUM_PRECISION; ++k) {
     int exp = e - k;
     if (exp >= -dec) {
-      digits[hi - exp] = m[k];
+      digits[(int64_t)hi - exp] = m[k];
     } else {
       roundUp = m[k] >= '5';
       break;

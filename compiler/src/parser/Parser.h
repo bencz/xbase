@@ -19,6 +19,11 @@ namespace xb {
 // #command rules in include/std.ch.
 class Parser {
 public:
+  // Nesting limits: deeper sources are reported instead of exhausting the
+  // compiler's stack (every later stage recurses over the tree too).
+  static constexpr unsigned kMaxExprNesting = 1024;  // parentheses, calls, arrays, blocks, prefix operators
+  static constexpr unsigned kMaxBlockNesting = 1024; // IF, DO CASE, loops, ... inside each other
+
   Parser(std::vector<Token> toks, Diagnostics &diag) : toks_(std::move(toks)), diag_(diag) {}
   std::unique_ptr<Module> parseModule(const std::string &moduleName);
 
@@ -31,11 +36,15 @@ private:
   bool expect(Tok k, const char *what);
   std::string found() const;
   bool isAssignAfterEach() const;
-  void advance() { if (pos_ + 1 < toks_.size()) ++pos_; }
+  void advance() {
+    if (at(Tok::EndOfStmt)) quietStmt_ = false; // the statement a nesting error silenced ends
+    if (pos_ + 1 < toks_.size()) ++pos_;
+  }
   bool atEndOfStmt() const { return at(Tok::EndOfStmt) || at(Tok::Eof); }
   void endOfStmt();
   void skipToEndOfStmt();
   void skipBlankStmts();
+  void tooDeep(const char *what, unsigned limit);
 
   // Parser.cpp: keywords
   bool isKw(const Token &t, const char *kw) const;
@@ -74,6 +83,7 @@ private:
   ExprPtr parseAdditive();
   ExprPtr parseMultiplicative();
   ExprPtr parsePower();
+  bool enterExpr();
   ExprPtr parseUnary();
   ExprPtr parsePostfix();
   ExprPtr parsePrimary();
@@ -84,6 +94,15 @@ private:
   std::vector<Token> toks_;
   Diagnostics &diag_;
   size_t pos_ = 0;
+  unsigned exprDepth_ = 0;
+  unsigned blockDepth_ = 0;
+  // After a nesting error the parser reports nothing more until the statement
+  // ends (expressions: until advance() passes an end of statement) or at all
+  // (blocks: the rest of the source is skipped), so the closers it then misses
+  // are not reported one by one.
+  bool quietStmt_ = false;
+  bool stopped_ = false;
+  bool quiet() const { return quietStmt_ || stopped_; }
 };
 
 } // namespace xb

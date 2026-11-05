@@ -57,4 +57,8 @@ static inline int xb_mul_overflow(int64_t a, int64_t b, int64_t *r) {
 #endif
 }
 
+/* a * b for sizes, saturated: a product past UINT64_MAX is UINT64_MAX, which
+ * every size limit rejects. */
+static inline uint64_t xb_mul_sat_u64(uint64_t a, uint64_t b) { return a && b > UINT64_MAX / a ? UINT64_MAX : a * b; }
+
 #endif

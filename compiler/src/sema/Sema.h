@@ -24,7 +24,6 @@ private:
   void nestedBlock(Block &b, Scope &s);
   void stmt(Stmt &st, Scope &s);
   void expr(Expr &e, Scope &s);
-  void lvalue(Expr &e, Scope &s);
   void codeblock(BlockExpr &b, Scope &s);
   bool resolve(VarExpr &v);
   struct Frame;

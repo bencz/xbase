@@ -116,6 +116,14 @@ void xbf_SPACE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_str(ret, r);
 }
 
+/* Whether a string result of `len` bytes can be made; the length is computed
+ * in 64 bits and tested before it is narrowed to size_t (32-bit hosts). */
+static int result_fits(xb_ctx *ctx, uint64_t len, const char *function) {
+  if (len <= XB_STR_MAX_LEN) return 1;
+  xb_rt_error(ctx, "BASE", 1234, "String overflow", function);
+  return 0;
+}
+
 void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s || argc < 2 || !xb_is_number(&argv[1])) {
@@ -124,10 +132,7 @@ void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   int64_t n = xb_num_to_i64(&argv[1]);
   uint64_t count = n > 0 && s->len ? (uint64_t)n : 0;
-  if (count && count > SIZE_MAX / 2 / s->len) { /* tested before narrowing to size_t (32-bit hosts) */
-    xb_rt_error(ctx, "BASE", 1234, "String overflow", "REPLICATE");
-    return;
-  }
+  if (!result_fits(ctx, xb_mul_sat_u64(count, s->len), "REPLICATE")) return;
   size_t times = (size_t)count;
   xb_str *r = xb_str_alloc(s->len * times);
   for (size_t i = 0; i < times; ++i) memcpy(r->data + i * s->len, s->data, s->len);
@@ -218,7 +223,10 @@ void xbf_STRTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     *ret = argv[0];
     return;
   }
-  xb_str *r = xb_str_alloc(s->len - hits * search->len + hits * rlen);
+  uint64_t added = xb_mul_sat_u64(hits, rlen); /* the removed search texts fit in s->len */
+  uint64_t len = added > UINT64_MAX - s->len ? UINT64_MAX : s->len - (uint64_t)hits * search->len + added;
+  if (!result_fits(ctx, len, "STRTRAN")) return;
+  xb_str *r = xb_str_alloc(len);
   size_t o = 0, done = 0;
   found = 0;
   for (size_t i = 0; i < s->len;) {

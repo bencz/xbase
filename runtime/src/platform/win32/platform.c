@@ -50,10 +50,11 @@ struct xb_mutex_impl {
   SRWLOCK lock;
 };
 
-void xb_mutex_init(xb_mutex *m) {
+int xb_mutex_init(xb_mutex *m) {
   *m = malloc(sizeof **m);
-  if (!*m) abort();
+  if (!*m) return 0;
   InitializeSRWLock(&(*m)->lock);
+  return 1;
 }
 
 void xb_mutex_lock(xb_mutex *m) { AcquireSRWLockExclusive(&(*m)->lock); }
