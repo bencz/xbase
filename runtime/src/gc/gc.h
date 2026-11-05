@@ -29,6 +29,11 @@ typedef struct xb_gc_hdr {
 #define XB_GC_REMEMBERED XB_GC_STATE_RECORDED
 /* An old array in the remembered set for its dirty cards only. */
 #define XB_GC_CARDED     0x4u
+/* Young and reached by the young collection in progress. */
+#define XB_GC_SEEN       0x8u
+/* Young and survived one young collection: the next one that reaches it
+ * promotes it. */
+#define XB_GC_AGED       0x10u
 
 _Static_assert(sizeof(xb_gc_hdr) - offsetof(xb_gc_hdr, state) == XB_GC_STATE_BACK, "state byte position (xbrt.h)");
 

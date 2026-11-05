@@ -119,8 +119,7 @@ ASYNC FUNCTION FetchOrders( cUrl )
 6. Core language: date literals, `MEMVAR`/`PRIVATE`/`PUBLIC`, `FIELD`/aliases, `BEGIN SEQUENCE`, `ErrorBlock`, hashes,
    `FOR EACH` over hashes and user enumerators (yield), the rest of the array functions (`AIns`, `ADel`, `AFill`,
    `AScan`, `AEval`, `ACopy`, `ASort`). Dynamic symbol table, runtime macro evaluation.
-7. GC: promotion after two young collections (aging), so that objects of medium lifetime die young; pages returned
-   to the operating system. FFI (`EXTERN "C" FUNCTION` with types), runtime parts written in xBase.
+7. GC: pages returned to the operating system. FFI (`EXTERN "C" FUNCTION` with types), runtime parts written in xBase.
 8. Native classes.
 9. async/await, thread pool, asynchronous I/O.
 10. RDD (DBF, FPT, NTX, CDX, SDF, DELIM) and the terminal layer: one screen/keyboard interface with drivers for plain

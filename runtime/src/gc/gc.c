@@ -12,7 +12,14 @@
  * Generations. Marks are sticky: an object marked by a collection stays
  * marked, and a marked object is old. A young collection marks from the roots
  * and from the remembered set, never traverses old objects, and frees only
- * unmarked (young) objects; its survivors become old. The write barrier
+ * young objects it did not reach. While aging is on, a young object it
+ * reaches ages and one that had already aged is promoted, so objects that die
+ * soon after a young collection (a table whose entries are replaced) die
+ * young; an object that is old after a young collection and still points to
+ * a young one stays in the remembered set (an array keeps the card dirty)
+ * until that one is promoted or dies. Aging adapts: it turns off when most
+ * aged objects survive to promotion (it only doubles their tracing) and back
+ * on when a full collection finds that most promoted bytes had died. The write barrier
  * (xb_gc_write, xbrt.h) puts an old object that receives a store into the
  * remembered set, so the young objects it points to are found. A full
  * collection clears every mark first and traces the whole heap; it runs when
@@ -46,6 +53,9 @@
 #define XB_GC_YOUNG_MIN ((size_t)8 << 20)
 #define XB_GC_SURVIVAL_HIGH 2u                    /* survivors above 1/2 of the allocation */
 #define XB_GC_SURVIVAL_LOW 8u                     /* survivors below 1/8 */
+/* Aging turns off when the bytes promoted at a young collection exceed this
+ * many times the aged bytes that died. */
+#define XB_GC_AGING_WASTE 4u
 #define XB_GC_MIN_FULL ((size_t)32 << 20)        /* old bytes that trigger the first full collection */
 #define XB_GC_ALIGN 8u
 
@@ -65,7 +75,7 @@ typedef struct xb_page {
   uint32_t live;            /* slots in use after the last sweep */
   uint8_t needsSweep;       /* a collection ran since its last sweep */
   uint8_t cached;           /* some thread heap allocates from it */
-  uint8_t young;            /* received objects since its last sweep */
+  uint8_t young;            /* may hold young objects: received objects, or kept aged ones, since its last sweep */
   char *data;               /* first slot, XB_GC_ALIGN aligned */
 } xb_page;
 
@@ -111,6 +121,15 @@ static struct {
   size_t stackLen, stackCap;
   xb_gc_hdr **remembered;          /* old objects that received stores */
   size_t rememberedLen, rememberedCap;
+  int full;                        /* the collection in progress is a full one */
+  int aging;                       /* young collections age objects instead of promoting them at once */
+  xb_gc_hdr **survivors;           /* young objects the young collection in progress reached */
+  size_t survivorsLen, survivorsCap;
+  xb_gc_hdr **aged;                /* objects that aged at the last young collection */
+  size_t agedLen, agedCap;
+  xb_gc_hdr **retained;            /* old objects that keep pointing to young ones, with how to record them */
+  uint8_t *retainedHow;
+  size_t retainedLen, retainedCap;
 } heap;
 
 static XB_THREAD_LOCAL xb_tlh *tlh;
@@ -139,6 +158,7 @@ void xb_gc_init(void) {
   }
   heap.fullThreshold = XB_GC_MIN_FULL;
   heap.youngBudget = XB_GC_YOUNG_MIN;
+  heap.aging = 1;
   heap.ready = 1;
 }
 
@@ -204,15 +224,17 @@ static xb_page *page_new(uint32_t cls) {
   return p;
 }
 
-/* Rebuilds the free list from the marks of the last collection; the marked
- * objects stay marked (old). */
+/* Rebuilds the free list from the marks of the last collection: old and aged
+ * objects stay. */
 static void page_sweep(xb_page *p) {
   void *freeList = NULL;
   uint32_t live = 0;
+  uint8_t young = 0;
   for (uint32_t i = p->nslots; i-- > 0;) {
     xb_gc_hdr *h = (xb_gc_hdr *)(p->data + (size_t)i * p->slotSize);
     if (h->kind != XB_GC_FREE) {
-      if (h->state & XB_GC_MARKED) {
+      if (h->state & (XB_GC_MARKED | XB_GC_AGED)) {
+        young |= (h->state & XB_GC_AGED) != 0;
         ++live;
         continue;
       }
@@ -224,7 +246,7 @@ static void page_sweep(xb_page *p) {
   p->freeList = freeList;
   p->live = live;
   p->needsSweep = 0;
-  p->young = 0;
+  p->young = young; /* aged objects may die at the next young collection */
 }
 
 /* A page of class `cls` with a free slot, for the thread heap. Under the lock.
@@ -332,25 +354,43 @@ void xb_gc_root_push(xb_ctx *ctx, xb_item *it) {
 void xb_gc_root_pop(xb_ctx *ctx, unsigned n) { ctx->rootLen -= n; }
 
 
-/* Marks a young object and queues it for tracing; old objects are already
- * marked, so a young collection stops at them. */
+/* Marks an object and queues it for tracing. A full collection marks it
+ * old; a young one marks it seen, and stops at old objects. */
 static void push(xb_gc_hdr *h) {
-  if (h->state & XB_GC_MARKED) return;
-  h->state |= XB_GC_MARKED;
+  if (heap.full || !heap.aging) {
+    if (h->state & XB_GC_MARKED) return;
+    h->state |= XB_GC_MARKED; /* old now (an aged object is settled at the end) */
+  } else {
+    if (h->state & (XB_GC_MARKED | XB_GC_SEEN)) return;
+    h->state |= XB_GC_SEEN;
+    stack_push(&heap.survivors, &heap.survivorsLen, &heap.survivorsCap, h);
+  }
   heap.markedBytes += h->size;
   ++heap.markedObjects;
   stack_push(&heap.stack, &heap.stackLen, &heap.stackCap, h);
 }
 
+/* Marks the object `h` refers to; true when it stays young after the young
+ * collection in progress (reached now, and not aged before: it ages instead
+ * of being promoted). */
+static int mark_ref(xb_gc_hdr *h) {
+  push(h);
+  return !(h->state & (XB_GC_MARKED | XB_GC_AGED));
+}
+
 /* Puts an old object in the remembered set (once), to be traced whole
- * (XB_GC_REMEMBERED) or for its dirty cards (XB_GC_CARDED). */
-static void record(xb_gc_hdr *h, uint8_t how) {
-  xb_mutex_lock(&heap.lock);
+ * (XB_GC_REMEMBERED) or for its dirty cards (XB_GC_CARDED). Under the lock. */
+static void record_locked(xb_gc_hdr *h, uint8_t how) {
   if ((h->state & XB_GC_MARKED) && !(h->state & how)) {
     if (!(h->state & (XB_GC_REMEMBERED | XB_GC_CARDED)))
       stack_push(&heap.remembered, &heap.rememberedLen, &heap.rememberedCap, h);
     h->state = (uint8_t)(h->state | how);
   }
+}
+
+static void record(xb_gc_hdr *h, uint8_t how) {
+  xb_mutex_lock(&heap.lock);
+  record_locked(h, how);
   xb_mutex_unlock(&heap.lock);
 }
 
@@ -368,26 +408,28 @@ void xb_gc_write_item(xb_array *a, size_t index) {
   if (!(h->state & XB_GC_CARDED)) record(h, XB_GC_CARDED);
 }
 
-static void mark_item(const xb_item *it) {
+/* Marks what an item refers to; true when that stays young (see mark_ref). */
+static int mark_item(const xb_item *it) {
   switch ((xb_type)it->type) {
     case XB_T_STRING:
-      if (!(it->v.s->flags & XB_STR_STATIC)) push(xb_gc_header(it->v.s));
-      break;
+      return !(it->v.s->flags & XB_STR_STATIC) && mark_ref(xb_gc_header(it->v.s));
     case XB_T_ARRAY:
     case XB_T_BLOCK:
     case XB_T_CELL:
     case XB_T_REF:
-      push(xb_gc_header(it->v.p));
-      break;
+      return mark_ref(xb_gc_header(it->v.p));
     default:
-      break;
+      return 0;
   }
 }
 
-/* The items under the dirty cards of an old array, eight cards per step. */
-static void trace_cards(const xb_array *a) {
+/* The items under the dirty cards of an old array, eight cards per step. A
+ * card whose items still refer to young objects stays dirty; returns whether
+ * any did. */
+static int trace_cards(const xb_array *a) {
   uint8_t *cards = xb_array_cards(a);
   size_t n = xb_array_card_count(a->cap);
+  int young = 0;
   for (size_t c = 0; c < n;) {
     uint64_t word = 0;
     if (c + sizeof word <= n) {
@@ -398,22 +440,27 @@ static void trace_cards(const xb_array *a) {
       }
     }
     if (cards[c]) {
-      cards[c] = 0;
       size_t from = c << XB_ARRAY_CARD_SHIFT, to = from + ((size_t)1 << XB_ARRAY_CARD_SHIFT);
       if (to > a->len) to = a->len;
-      for (size_t i = from; i < to; ++i) mark_item(&a->items[i]);
+      int keep = 0;
+      for (size_t i = from; i < to; ++i) keep |= mark_item(&a->items[i]);
+      cards[c] = (uint8_t)keep;
+      young |= keep;
     }
     ++c;
   }
+  return young;
 }
 
-static void trace(const xb_gc_hdr *h) {
+/* Marks what an object refers to; returns whether some of it stays young. */
+static int trace(const xb_gc_hdr *h) {
   const void *obj = h + 1;
+  int young = 0;
   switch ((xb_gc_kind)h->kind) {
     case XB_GC_ARRAY: {
       const xb_array *a = obj;
-      if (a->items != a->inline_items) push(xb_gc_header(a->items));
-      for (size_t i = 0; i < a->len; ++i) mark_item(&a->items[i]);
+      if (a->items != a->inline_items) young |= mark_ref(xb_gc_header(a->items));
+      for (size_t i = 0; i < a->len; ++i) young |= mark_item(&a->items[i]);
       uint8_t *cards = xb_array_cards(a); /* everything was scanned */
       if (cards) memset(cards, 0, xb_array_card_count(a->cap));
       break;
@@ -421,19 +468,82 @@ static void trace(const xb_gc_hdr *h) {
     case XB_GC_BLOCK: {
       const xb_block *b = obj;
       for (uint32_t i = 0; i < b->ncells; ++i)
-        if (b->cells[i]) push(xb_gc_header(b->cells[i])); /* NULL until the creator fills it */
+        if (b->cells[i]) young |= mark_ref(xb_gc_header(b->cells[i])); /* NULL until the creator fills it */
       break;
     }
     case XB_GC_CELL:
-      mark_item(&((const xb_cell *)obj)->value);
+      young = mark_item(&((const xb_cell *)obj)->value);
       break;
     case XB_GC_REF:
-      mark_item(&((const xb_ref *)obj)->coll);
-      mark_item(&((const xb_ref *)obj)->value);
+      young = mark_item(&((const xb_ref *)obj)->coll);
+      young |= mark_item(&((const xb_ref *)obj)->value);
       break;
     default:
       break;
   }
+  return young;
+}
+
+/* An object that is old after this collection and still refers to young
+ * objects: recorded again once the collection's state changes are done. */
+static void retain(xb_gc_hdr *h, uint8_t how) {
+  if (heap.retainedLen == heap.retainedCap) {
+    size_t n = heap.retainedCap ? heap.retainedCap * 2 : 1024;
+    xb_gc_hdr **r = realloc(heap.retained, n * sizeof *r);
+    uint8_t *w = realloc(heap.retainedHow, n);
+    if (!r || !w) out_of_memory();
+    heap.retained = r;
+    heap.retainedHow = w;
+    heap.retainedCap = n;
+  }
+  heap.retained[heap.retainedLen] = h;
+  heap.retainedHow[heap.retainedLen++] = how;
+}
+
+/* Traces a queued object; an aged one is promoted by this collection, so it is
+ * retained if it still refers to young objects. */
+static void trace_queued(xb_gc_hdr *h) {
+  int young = trace(h);
+  if (young && (h->state & XB_GC_AGED)) retain(h, XB_GC_REMEMBERED);
+}
+
+/* End of a young collection: objects that aged before and were not reached
+ * die; reached ones age, or are promoted if they had aged (with aging off,
+ * push already made every reached object old); then the old objects that
+ * still refer to young ones are recorded again. Aging turns off when aged
+ * objects mostly survived to promotion. */
+static void settle_young(void) {
+  size_t died = 0;
+  for (size_t i = 0; i < heap.agedLen; ++i) {
+    xb_gc_hdr *h = heap.aged[i];
+    if (h->state & (XB_GC_SEEN | XB_GC_MARKED)) continue;
+    h->state &= (uint8_t)~XB_GC_AGED;
+    died += h->size;
+  }
+  if (!heap.aging) { /* reached aged objects were made old by push */
+    for (size_t i = 0; i < heap.agedLen; ++i)
+      if (heap.aged[i]->state & XB_GC_MARKED) heap.aged[i]->state = XB_GC_MARKED;
+    heap.agedLen = 0;
+    heap.oldBytes += heap.markedBytes;
+    return;
+  }
+  heap.agedLen = 0;
+  size_t promoted = 0;
+  for (size_t i = 0; i < heap.survivorsLen; ++i) {
+    xb_gc_hdr *h = heap.survivors[i];
+    if (h->state & XB_GC_AGED) {
+      h->state = XB_GC_MARKED;
+      promoted += h->size;
+    } else {
+      h->state = XB_GC_AGED;
+      stack_push(&heap.aged, &heap.agedLen, &heap.agedCap, h);
+    }
+  }
+  heap.survivorsLen = 0;
+  heap.oldBytes += promoted;
+  if (promoted > died * XB_GC_AGING_WASTE) heap.aging = 0;
+  for (size_t i = 0; i < heap.retainedLen; ++i) record_locked(heap.retained[i], heap.retainedHow[i]);
+  heap.retainedLen = 0;
 }
 
 static void mark_roots(void) {
@@ -453,6 +563,7 @@ static void unmark_all(void) {
       for (uint32_t k = 0; k < p->nslots; ++k) ((xb_gc_hdr *)(p->data + (size_t)k * p->slotSize))->state = 0;
   for (xb_large *l = heap.large; l; l = l->link.next) l->hdr.state = 0;
   heap.rememberedLen = 0;
+  heap.agedLen = 0;
 }
 
 static void collect(int full) {
@@ -466,23 +577,25 @@ static void collect(int full) {
   }
   /* Unswept pages keep the marks of the previous collection: their unmarked
    * objects are dead, and stay unmarked since nothing reaches them. */
+  heap.full = full;
   if (full) unmark_all();
   heap.markedBytes = 0;
   heap.markedObjects = 0;
   mark_roots();
-  for (size_t i = 0; i < heap.rememberedLen; ++i) { /* their young objects get marked: they stop being young */
+  for (size_t i = 0; i < heap.rememberedLen; ++i) {
     xb_gc_hdr *h = heap.remembered[i];
-    uint8_t how = h->state;
+    uint8_t how = h->state & (XB_GC_REMEMBERED | XB_GC_CARDED);
     h->state = XB_GC_MARKED;
-    if (how & XB_GC_REMEMBERED) trace(h);
-    else trace_cards((const xb_array *)(h + 1));
+    int young = (how & XB_GC_REMEMBERED) ? trace(h) : trace_cards((const xb_array *)(h + 1));
+    if (young) retain(h, (how & XB_GC_REMEMBERED) ? XB_GC_REMEMBERED : XB_GC_CARDED);
   }
   heap.rememberedLen = 0;
-  while (heap.stackLen) trace(heap.stack[--heap.stackLen]);
+  while (heap.stackLen) trace_queued(heap.stack[--heap.stackLen]);
+  if (!full) settle_young();
 
   for (xb_large **pl = &heap.large; *pl;) {
     xb_large *l = *pl;
-    if (l->hdr.state & XB_GC_MARKED) {
+    if (l->hdr.state & (XB_GC_MARKED | XB_GC_AGED)) {
       pl = &l->link.next;
     } else {
       *pl = l->link.next;
@@ -513,11 +626,11 @@ static void collect(int full) {
   }
   for (size_t c = 0; c < XB_GC_CLASSES; ++c) heap.cursor[c] = heap.pages[c];
   if (full) {
+    if (heap.markedBytes < heap.oldBytes / 2) heap.aging = 1; /* most promoted bytes had died */
     heap.oldBytes = heap.markedBytes;
     heap.liveObjects = heap.markedObjects;
     heap.fullThreshold = heap.oldBytes * 2 > XB_GC_MIN_FULL ? heap.oldBytes * 2 : XB_GC_MIN_FULL;
   } else {
-    heap.oldBytes += heap.markedBytes; /* the survivors were promoted */
     if (heap.markedBytes > heap.allocated / XB_GC_SURVIVAL_HIGH) heap.youngBudget *= 2;
     else if (heap.markedBytes < heap.allocated / XB_GC_SURVIVAL_LOW) heap.youngBudget /= 2;
   }

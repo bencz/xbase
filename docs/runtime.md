@@ -47,8 +47,14 @@ each one, so object pointers are what the rest of the runtime and compiled code 
   tasks, and global item arrays registered with `xb_gc_add_root` (the modules' `STATIC`s).
 - Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young.
   A young collection marks from the roots and the remembered set, stops at old objects instead of traversing them,
-  and frees only unmarked objects; the survivors become old. A full collection clears every mark and traces the
-  whole heap; it runs when the old generation reaches twice its size after the previous full one (at least 32 MB).
+  and frees only the young objects it did not reach. A full collection clears every mark and traces the whole heap;
+  it runs when the old generation reaches twice its size after the previous full one (at least 32 MB).
+- Aging: a young object reached by a young collection ages, and is promoted by the next one that reaches it, so
+  objects that die soon after a collection (a table whose entries are replaced) die young. An object that is old
+  after a young collection and still refers to a young one stays in the remembered set (an array keeps the card
+  dirty) until that one is promoted or dies. Aging adapts: it turns off when the bytes promoted at a young collection
+  exceed four times the aged bytes that died (aging then only doubles their tracing; reached objects are promoted at
+  once), and back on when a full collection finds that more than half of the old bytes had died.
 - Young budget: a young collection runs when the allocation since the last collection reaches the budget, at least
   8 MB. The budget doubles after a collection where more than half of the allocation survived (collecting such
   objects early only promotes them) and halves when less than an eighth did; it never exceeds the size of the old
@@ -71,9 +77,6 @@ each one, so object pointers are what the rest of the runtime and compiled code 
   received objects since their last sweep need it, since old objects do not die there. A full collection sweeps
   every page at once and gives pages whose objects all died back to a pool shared by all size classes. Pages are not
   returned to the operating system.
-- Known cost: objects that live through one young collection and die soon after (a table whose entries are
-  replaced) are promoted and wait for a full collection, so such programs use more memory than with a single
-  generation. Promotion after two young collections (aging) is planned.
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
 - Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, an object above half the address space,
