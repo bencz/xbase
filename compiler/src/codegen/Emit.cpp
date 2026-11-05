@@ -33,16 +33,41 @@ static CodeGenOptLevel cgLevel(unsigned l) {
   }
 }
 
+// The CPU and features: as given, or with `native` the machine xbc runs on
+// (its CPU and every feature it has, then the explicit features). `native`
+// only makes sense for the host target: code built for it may not run
+// elsewhere, which is why the default is `generic`.
+static bool resolveCpu(const TargetConfig &cfg, const Triple &triple, std::string &cpu, std::string &features,
+                       std::string &err) {
+  cpu = cfg.cpu;
+  features = cfg.features;
+  if (cfg.cpu != "native") return true;
+  if (triple != Triple(sys::getDefaultTargetTriple())) {
+    err = "--cpu=native needs the host target (" + sys::getDefaultTargetTriple() + ")";
+    return false;
+  }
+  cpu = sys::getHostCPUName().str();
+  std::string host;
+  for (const auto &f : sys::getHostCPUFeatures()) {
+    if (!host.empty()) host += ",";
+    host += (f.second ? "+" : "-") + f.first().str();
+  }
+  features = cfg.features.empty() ? host : host + "," + cfg.features;
+  return true;
+}
+
 std::unique_ptr<TargetMachine> createTargetMachine(const TargetConfig &cfg, std::string &err) {
   Triple triple(cfg.triple.empty() ? sys::getDefaultTargetTriple() : Triple::normalize(cfg.triple));
   const Target *target = TargetRegistry::lookupTarget(triple, err);
   if (!target) return nullptr;
+  std::string cpu, features;
+  if (!resolveCpu(cfg, triple, cpu, features, err)) return nullptr;
   TargetOptions opts;
   std::optional<Reloc::Model> rm;
   if (cfg.pic) rm = Reloc::PIC_;
   else rm = Reloc::Static;
   std::unique_ptr<TargetMachine> tm(
-      target->createTargetMachine(triple, cfg.cpu, cfg.features, opts, rm, std::nullopt, cgLevel(cfg.optLevel)));
+      target->createTargetMachine(triple, cpu, features, opts, rm, std::nullopt, cgLevel(cfg.optLevel)));
   if (!tm) err = "cannot create target machine for '" + triple.str() + "'";
   return tm;
 }
@@ -67,6 +92,10 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   mpm.run(m, mam);
 }
 
+// Code generation runs on the legacy pass manager: in LLVM 22 it is the one
+// every target implements (TargetMachine::buildCodeGenPipeline, the new pass
+// manager's code generation, is only provided by a few targets, experimentally).
+// The optimization pipeline above uses the new pass manager.
 bool emitObject(Module &m, TargetMachine &tm, const std::string &path, std::string &err) {
   std::error_code ec;
   raw_fd_ostream out(path, ec, sys::fs::OF_None);

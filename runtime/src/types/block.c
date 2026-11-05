@@ -1,18 +1,31 @@
 /* Codeblocks and cells.
  *
- * A LOCAL (or parameter) used by a codeblock lives in a cell, so the block
- * and the function share it and it survives the function's return. The
- * function's frame slot then holds an XB_T_CELL item pointing at the cell;
- * compiled code reaches the value through it. */
+ * A variable a codeblock captures or that is passed by reference moves into a
+ * cell when that first happens, so the block or the callee and the function
+ * share it and it survives the function's return. Its frame slot (or STATIC
+ * storage) then holds an XB_T_CELL item pointing at the cell; compiled code
+ * reaches the value through it. */
 #include "xbrt_int.h"
 
-void xb_cell_box(xb_ctx *ctx, xb_item *slot) {
-  XB_UNUSED(ctx);
-  xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell)); /* slot is still a frame root */
-  c->value = *slot;
-  xb_set_nil(slot);
-  slot->type = XB_T_CELL;
-  slot->v.p = c;
+xb_cell *xb_cell_move(xb_item *var) {
+  if (var->type == XB_T_CELL) return var->v.p; /* shared already (a parameter: its caller's variable) */
+  xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell)); /* `var` is a root: a frame slot or STATIC storage */
+  c->value = *var;
+  xb_set_nil(var);
+  var->type = XB_T_CELL;
+  var->v.p = c;
+  return c;
+}
+
+xb_cell *xb_cell_of(xb_ctx *ctx, xb_item *var) {
+  if (!xb_is_loop_ref(var)) return xb_cell_move(var);
+  xb_item element; /* the current element, in a cell of its own: the variable stays the loop's */
+  xb_ref_copy(&element, var);
+  xb_gc_root_push(ctx, &element);
+  xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell));
+  xb_gc_root_pop(ctx, 1);
+  c->value = element;
+  return c;
 }
 
 xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, uint32_t ncells) {

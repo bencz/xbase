@@ -19,6 +19,7 @@ enum class ExprKind : uint8_t {
   Assign,     // := and compound assignment
   IncDec,     // ++x x++ --x x--
   IIf,        // IIF( c, a, b ) / IF( c, a, b )
+  Ref,        // @var, @a[i]: a call argument passed by reference
   ArrayLit,   // { a, b, ... }
   Index,      // base[ index ]
   Block,      // {| params | exprs }
@@ -34,6 +35,7 @@ struct Param {
 
 struct Expr {
   ExprKind kind;
+  bool parenthesized = false; // written as ( expr )
   SourceLoc loc;
   explicit Expr(ExprKind k, SourceLoc l) : kind(k), loc(l) {}
   virtual ~Expr() = default;
@@ -64,8 +66,10 @@ struct StringExpr : Expr {
   StringExpr(SourceLoc l, std::string v) : Expr(ExprKind::String, l), value(std::move(v)) {}
 };
 
-// Where a variable lives, set by Sema. A frame variable used by a codeblock
-// is "boxed" (its slot holds a cell); the frame's `boxed` table says which.
+// Where a variable lives, set by Sema. A LOCAL or parameter of a function
+// that a codeblock uses or that is passed by reference is "boxed": shared, it
+// moves into a cell when that happens; the function's `boxed` table says
+// which.
 enum class VarWhere : uint8_t {
   Frame,     // slot of the current function's or codeblock's frame
   Capture,   // captured cell `slot` of the current codeblock
@@ -132,6 +136,13 @@ struct ArrayLitExpr : Expr {
 struct IndexExpr : Expr { // a[i, j] is Index( Index( a, i ), j )
   ExprPtr base, index;
   IndexExpr(SourceLoc l, ExprPtr b, ExprPtr i) : Expr(ExprKind::Index, l), base(std::move(b)), index(std::move(i)) {}
+};
+
+// A call argument passed by reference: the callee's parameter designates the
+// variable or element, so assigning the parameter assigns it.
+struct RefExpr : Expr {
+  ExprPtr target;                // a VarExpr or an IndexExpr
+  RefExpr(SourceLoc l, ExprPtr t) : Expr(ExprKind::Ref, l), target(std::move(t)) {}
 };
 
 struct BlockExpr : Expr {
@@ -245,7 +256,7 @@ struct FuncDecl {
   std::vector<Param> params;
   Block body;
   uint32_t numLocals = 0;        // params + LOCALs, set by Sema
-  std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock
+  std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock or passed by reference (shared)
 };
 
 // EXTERN FUNCTION name( params ) attributes: a function the program calls but
@@ -260,7 +271,13 @@ struct ExternDecl {
   bool fold = false;             // FOLD: evaluated at compile time on constant arguments
   bool native = false;           // NATIVE: written in C to the xBase convention (else another module's function)
   uint32_t abbrev = 0;           // ABBREV n: shortest accepted abbreviation (0: none)
+  std::vector<bool> byRef;       // NATIVE: per parameter, `@name`: receives a reference passed to it
+  bool restByRef = false;        // NATIVE: `@...`: so do the arguments past the named parameters
   static constexpr uint32_t kUnlimited = UINT32_MAX;
+  // Whether argument `k` written `@x` reaches the function as a reference. A
+  // native function otherwise receives the value; an xBase function always
+  // receives the reference.
+  bool takesRef(size_t k) const { return !native || (k < byRef.size() ? byRef[k] : restByRef); }
 };
 
 struct Module {

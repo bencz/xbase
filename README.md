@@ -44,6 +44,8 @@ Useful options (`xbc --help` lists all of them):
 | `--target=<triple>` | cross-compile, e.g. `--target=s390x-linux-gnu` |
 | `--print-targets` | list the targets this build of `xbc` supports |
 | `--depfile=<file>` | write a Make-style dependency file (sources and includes read) |
-| `-O0` .. `-O3` | optimization level |
+| `-O0` .. `-O3` | optimization level (default `-O2`) |
+| `--cpu=<name>` | target CPU; default `generic` (runs on any CPU of the target), `native` for this machine only |
+| `--dump-xir=<file>`, `--dump-ir=<file>` | debugging: write the module's xIR or LLVM IR as text |
 
 Documentation for contributors starts at [docs/README.md](docs/README.md).

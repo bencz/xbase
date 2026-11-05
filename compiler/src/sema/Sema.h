@@ -27,6 +27,8 @@ private:
   void lvalue(Expr &e, Scope &s);
   void codeblock(BlockExpr &b, Scope &s);
   bool resolve(VarExpr &v);
+  struct Frame;
+  void markBoxed(Frame &f, uint32_t slot);
   void declare(LocalDecl &d, bool isStatic, Scope &s);
   bool constantInit(const Expr &e, unsigned blockDepth) const;
 

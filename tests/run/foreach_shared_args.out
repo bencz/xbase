@@ -1,0 +1,6 @@
+
+during          2
+after         42         42
+wrote         99          1          2          3 seen:         10         10 seen:         20         20
+after EachP orig static shared         10 static shared         20 local shared         10 local shared         20
+restored          1          1          1          1

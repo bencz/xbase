@@ -4,9 +4,10 @@
 #include <string.h>
 
 /* Grows or shrinks the visible length; new elements are NIL. */
-void xb_array_resize(xb_array *a, size_t len) {
+void xb_array_resize(xb_array *a, uint64_t newLen) {
+  if (newLen > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
+  size_t len = (size_t)newLen;
   if (len > a->cap) {
-    if (len > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
     size_t cap = a->cap ? a->cap * 2 : 4;
     while (cap < len) cap *= 2;
     if (cap > XB_ARRAY_MAX_LEN) cap = XB_ARRAY_MAX_LEN;
@@ -23,8 +24,9 @@ void xb_array_resize(xb_array *a, size_t len) {
 }
 
 /* A new array of `len` NIL items, with room for `len` items in its own allocation. */
-xb_array *xb_array_alloc(size_t len) {
-  if (len > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
+xb_array *xb_array_alloc(uint64_t newLen) {
+  if (newLen > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
+  size_t len = (size_t)newLen;
   size_t cards = xb_array_card_count(len);
   xb_array *a = xb_gc_alloc(XB_GC_ARRAY, sizeof(xb_array) + len * sizeof(xb_item) + cards);
   a->len = len;
@@ -54,18 +56,25 @@ static int64_t position(const xb_array *a, const xb_item *idx) {
   return i >= 1 && (uint64_t)i <= a->len ? i - 1 : -1;
 }
 
-void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
+/* The 0-based position base[idx] reads, or -1 after raising the error. */
+static int64_t read_position(xb_ctx *ctx, const xb_item *base, const xb_item *idx) {
   if (base->type != XB_T_ARRAY || !xb_is_number(idx)) {
     xb_rt_error(ctx, "BASE", 1068, "Argument error", "array access");
-    return;
+    return -1;
   }
-  const xb_array *a = base->v.p;
-  int64_t i = position(a, idx);
-  if (i < 0) {
-    xb_array_bound_error(ctx);
-    return;
-  }
-  *r = a->items[i];
+  int64_t i = position(base->v.p, idx);
+  if (i < 0) xb_array_bound_error(ctx);
+  return i;
+}
+
+void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
+  int64_t i = read_position(ctx, base, idx);
+  if (i >= 0) *r = ((const xb_array *)base->v.p)->items[i];
+}
+
+void xb_ref_elem(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
+  int64_t i = read_position(ctx, base, idx);
+  if (i >= 0) xb_ref_init(r, base, i + 1, 0);
 }
 
 void xb_array_bound_error(xb_ctx *ctx) { xb_rt_error(ctx, "BASE", 1132, "Bound error", "array access"); }

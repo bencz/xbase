@@ -15,11 +15,18 @@ add_executable(xbc
   src/sema/Calls.cpp
   src/sema/Sema.cpp
   src/opt/Fold.cpp
+  src/xir/Analysis.cpp
+  src/xir/Builder.cpp
+  src/xir/Gen.cpp
+  src/xir/GenExpr.cpp
+  src/xir/GenStmt.cpp
+  src/xir/IR.cpp
+  src/xir/Printer.cpp
+  src/xir/Verifier.cpp
   src/codegen/CodeGen.cpp
-  src/codegen/Codeblocks.cpp
-  src/codegen/Expressions.cpp
+  src/codegen/FramePlan.cpp
+  src/codegen/Instructions.cpp
   src/codegen/Literals.cpp
-  src/codegen/Statements.cpp
   src/codegen/Variables.cpp
   src/codegen/Emit.cpp
   src/driver/main.cpp

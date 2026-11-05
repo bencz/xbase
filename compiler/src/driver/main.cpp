@@ -1,12 +1,15 @@
 // xbc - the xbase compiler driver.
 #include "codegen/CodeGen.h"
-#include "common/Diagnostics.h"
 #include "codegen/Emit.h"
+#include "common/Diagnostics.h"
 #include "opt/Fold.h"
 #include "parser/Parser.h"
 #include "preprocessor/Preprocessor.h"
 #include "sema/Calls.h"
 #include "sema/Sema.h"
+#include "xir/Gen.h"
+#include "xir/Printer.h"
+#include "xir/Verifier.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -39,12 +42,14 @@ const char *kUsage =
     "  -O0 | -O1 | -O2 | -O3\n"
     "                     optimization level (default -O2)\n"
     "  --target=<triple>  cross-compile for <triple> (default: host)\n"
-    "  --cpu=<name>       target CPU (default: generic)\n"
+    "  --cpu=<name>       target CPU (default: generic, runs on any CPU of the target); native: this\n"
+    "                     machine's CPU and features (the program may not run on other machines)\n"
     "  --features=<list>  target features, e.g. +sse4.2,-avx\n"
     "  --static           non-PIC code\n"
     "  --no-entry         do not emit the program entry (xb_app_main)\n"
     "  --depfile=<file>   write a Make-style dependency file for the object\n"
     "  --dump-ir=<file>   debug: also write the LLVM module as text\n"
+    "  --dump-xir=<file>  debug: also write the module's xIR as text\n"
     "  --print-targets    list the targets this xbc can generate code for\n"
     "  --version\n";
 
@@ -101,7 +106,7 @@ std::vector<std::string> defaultIncludeDirs(const char *argv0) {
 
 int main(int argc, char **argv) {
   xb::TargetConfig tcfg;
-  std::string input, output, irDump, depFile, stdFile = "std.ch";
+  std::string input, output, irDump, xirDump, depFile, stdFile = "std.ch";
   std::vector<std::string> includeDirs, defines;
   bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false;
 
@@ -125,6 +130,7 @@ int main(int argc, char **argv) {
     else if (!std::strcmp(a, "--static")) tcfg.pic = false;
     else if (!std::strcmp(a, "--no-entry")) emitEntry = false;
     else if (startsWith(a, "--dump-ir=")) irDump = a + 10;
+    else if (startsWith(a, "--dump-xir=")) xirDump = a + 11;
     else if (startsWith(a, "--depfile=")) depFile = a + 10;
     else if (!std::strcmp(a, "--print-targets")) {
       xb::initializeTargets();
@@ -194,6 +200,20 @@ int main(int argc, char **argv) {
   sema.run(*ast);
   if (diag.errorCount()) return 1;
 
+  auto xir = xb::xir::Generator().run(*ast);
+  if (std::string bad = xb::xir::verify(*xir); !bad.empty()) {
+    std::fprintf(stderr, "xbc: internal error: invalid xIR: %s\n", bad.c_str());
+    return 1;
+  }
+  if (!xirDump.empty()) {
+    std::ofstream out(xirDump, std::ios::binary);
+    out << xb::xir::print(*xir);
+    if (!out) {
+      std::fprintf(stderr, "xbc: cannot write '%s'\n", xirDump.c_str());
+      return 1;
+    }
+  }
+
   xb::initializeTargets();
   std::string err;
   auto tm = xb::createTargetMachine(tcfg, err);
@@ -208,7 +228,7 @@ int main(int argc, char **argv) {
   mod.setSourceFileName(input);
 
   xb::CodeGen cg(llctx, mod, diag);
-  if (!cg.run(*ast, emitEntry)) return 1;
+  if (!cg.run(*xir, emitEntry)) return 1;
 
   xb::optimizeModule(mod, *tm, tcfg.optLevel);
 

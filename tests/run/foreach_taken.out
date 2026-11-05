@@ -1,0 +1,4 @@
+old block in iter 2:         10 v now:         20
+after orig         11         20         30         11         20         30
+v := 5         11         30         11         30
+write m[3]          5         99

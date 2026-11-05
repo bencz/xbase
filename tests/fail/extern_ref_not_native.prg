@@ -1,0 +1,4 @@
+EXTERN FUNCTION Other( @x )
+
+PROCEDURE Main()
+   RETURN

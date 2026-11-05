@@ -1,0 +1,10 @@
+# xIR test: the xIR xbc generates for tests/xir/<name>.prg must equal <name>.xir.
+execute_process(COMMAND ${XBC} ${SRC} -o ${OUT}.o --dump-xir=${OUT}.xir RESULT_VARIABLE rc ERROR_VARIABLE err)
+if(NOT rc EQUAL 0)
+  message(FATAL_ERROR "xbc failed:\n${err}")
+endif()
+file(READ ${OUT}.xir actual)
+file(READ ${EXPECTED} expected)
+if(NOT actual STREQUAL expected)
+  message(FATAL_ERROR "xIR mismatch\n--- expected ---\n${expected}\n--- actual ---\n${actual}")
+endif()

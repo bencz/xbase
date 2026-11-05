@@ -36,11 +36,21 @@ StmtPtr Parser::parseStmt() {
     advance();
     auto call = std::make_unique<CallExpr>(cur().loc, cur().upper);
     advance();
-    if (atKw("WITH")) { // empty arguments pass NIL, as in a call
+    if (atKw("WITH")) { // empty arguments pass NIL, as in a call; a variable is passed by reference
       advance();
       do {
-        if (at(Tok::Comma) || atEndOfStmt()) call->args.push_back(std::make_unique<NilExpr>(cur().loc));
-        else call->args.push_back(parseExpr());
+        if (at(Tok::Comma) || atEndOfStmt()) {
+          call->args.push_back(std::make_unique<NilExpr>(cur().loc));
+        } else if (at(Tok::At)) {
+          call->args.push_back(parseRef());
+        } else {
+          ExprPtr arg = parseExpr();
+          if (arg->kind == ExprKind::Var && !arg->parenthesized) {
+            SourceLoc argLoc = arg->loc;
+            arg = std::make_unique<RefExpr>(argLoc, std::move(arg));
+          }
+          call->args.push_back(std::move(arg));
+        }
       } while (accept(Tok::Comma));
     }
     endOfStmt();

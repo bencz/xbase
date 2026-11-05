@@ -1,0 +1,19 @@
+
+local          5
+static          7
+passed on          6
+block sees        100
+block wrote        200
+eval byref         33
+element          1          9
+foreach         50         50
+by value          1
+read param          3          2
+copy of param          1
+array var          3
+valtype N
+nested         30         15
+block param          4
+native by value          3 abc
+many calls      59998
+static in FOR EACH        100        200        300          7

@@ -1,0 +1,189 @@
+// AST to xIR: expressions, in Clipper's evaluation order.
+#include "xir/Gen.h"
+
+#include "opt/Fold.h"
+
+namespace xb::xir {
+
+Value *Generator::genExpr(const Expr &e) {
+  Builder &b = *cur_.b;
+  switch (e.kind) {
+  case ExprKind::Nil: return b.nil();
+  case ExprKind::Logical: return b.logical(static_cast<const LogicalExpr &>(e).value);
+  case ExprKind::Number: {
+    auto &n = static_cast<const NumberExpr &>(e);
+    if (!n.isInt && n.dec == kDefaultDecimals) return b.numDefaultDec(n.dval); // decimals known at run time
+    return b.number(n);
+  }
+  case ExprKind::String: return b.string(static_cast<const StringExpr &>(e).value);
+  case ExprKind::Var: return load(static_cast<const VarExpr &>(e));
+  case ExprKind::Call: return genCall(static_cast<const CallExpr &>(e));
+  case ExprKind::Unary: {
+    auto &u = static_cast<const UnaryExpr &>(e);
+    Value *a = genExpr(*u.operand);
+    return u.op == UnOp::Plus ? a : b.unary(u.op, a);
+  }
+  case ExprKind::Binary: {
+    auto &bin = static_cast<const BinaryExpr &>(e);
+    Value *l = genExpr(*bin.lhs);
+    Value *r = genExpr(*bin.rhs);
+    return b.binary(bin.op, l, r);
+  }
+  case ExprKind::And:
+  case ExprKind::Or: return b.fromBool(genCond(e));
+  case ExprKind::Assign: return genAssign(static_cast<const AssignExpr &>(e));
+  case ExprKind::IncDec: return genIncDec(static_cast<const IncDecExpr &>(e));
+  case ExprKind::IIf: return genIIf(static_cast<const IIfExpr &>(e));
+  case ExprKind::ArrayLit: {
+    std::vector<Value *> elems;
+    for (auto &el : static_cast<const ArrayLitExpr &>(e).elems) elems.push_back(genExpr(*el));
+    return b.arrayLit(elems);
+  }
+  case ExprKind::Index: {
+    auto &ix = static_cast<const IndexExpr &>(e);
+    Value *base = genExpr(*ix.base);
+    Value *idx = genExpr(*ix.index);
+    return b.index(base, idx);
+  }
+  case ExprKind::Block: return genCodeblock(static_cast<const BlockExpr &>(e));
+  case ExprKind::Ref: { // a call argument passed by reference
+    const Expr &target = *static_cast<const RefExpr &>(e).target;
+    if (target.kind == ExprKind::Var) return b.refVar(varOf(static_cast<const VarExpr &>(target)));
+    auto &ix = static_cast<const IndexExpr &>(target);
+    Value *base = genExpr(*ix.base);
+    Value *idx = genExpr(*ix.index);
+    return b.refIndex(base, idx);
+  }
+  }
+  return b.nil();
+}
+
+void Generator::genDiscard(const Expr &e) { genExpr(e); }
+
+// A condition: .AND. and .OR. evaluate their right side only when needed.
+Value *Generator::genCond(const Expr &e) {
+  Builder &b = *cur_.b;
+  switch (e.kind) {
+  case ExprKind::Logical: return b.boolean(static_cast<const LogicalExpr &>(e).value);
+  case ExprKind::And:
+  case ExprKind::Or: {
+    auto &l = static_cast<const LogicExpr &>(e);
+    bool isAnd = e.kind == ExprKind::And;
+    Value *lv = genCond(*l.lhs);
+    BasicBlock *rhs = cur_.fn->addBlock(isAnd ? "and.rhs" : "or.rhs");
+    BasicBlock *join = cur_.fn->addBlock(isAnd ? "and.end" : "or.end");
+    Value *result = join->addParam(Type::Bool);
+    if (isAnd) b.condBr(lv, rhs, join, {}, {b.boolean(false)});
+    else b.condBr(lv, join, rhs, {b.boolean(true)}, {});
+    b.setBlock(rhs);
+    b.br(join, {genCond(*l.rhs)});
+    b.setBlock(join);
+    return result;
+  }
+  case ExprKind::Unary:
+    if (static_cast<const UnaryExpr &>(e).op == UnOp::Not)
+      return b.boolNot(genCond(*static_cast<const UnaryExpr &>(e).operand));
+    break;
+  default:
+    break;
+  }
+  return b.truth(genExpr(e));
+}
+
+Value *Generator::genCall(const CallExpr &c) {
+  std::vector<Value *> args;
+  for (auto &a : c.args) args.push_back(genExpr(*a));
+  Callee callee;
+  if (c.callee) { // resolved to an EXTERN FUNCTION (sema/Calls)
+    callee.name = c.name;
+    callee.native = c.callee->native;
+  } else {
+    callee.function = funcs_.at(c.name);
+  }
+  cur_.b->setLoc(c.loc);
+  return cur_.b->call(std::move(callee), args);
+}
+
+// x := v evaluates v, then stores; x op= v reads x, then evaluates v. The
+// value of the expression is the value stored.
+Value *Generator::genAssign(const AssignExpr &a) {
+  if (a.target->kind == ExprKind::Index) return genIndexAssign(static_cast<const IndexExpr &>(*a.target), &a, nullptr);
+  auto &target = static_cast<const VarExpr &>(*a.target);
+  Value *value;
+  if (a.compound) {
+    Value *l = load(target);
+    Value *r = genExpr(*a.value);
+    value = cur_.b->binary(a.op, l, r);
+  } else {
+    value = genExpr(*a.value);
+  }
+  store(target, value);
+  return value;
+}
+
+Value *Generator::genIncDec(const IncDecExpr &e) {
+  if (e.target->kind == ExprKind::Index) return genIndexAssign(static_cast<const IndexExpr &>(*e.target), nullptr, &e);
+  auto &target = static_cast<const VarExpr &>(*e.target);
+  Value *old = load(target);
+  Value *now = cur_.b->binary(e.increment ? BinOp::Add : BinOp::Sub, old, cur_.b->integer(1, 0));
+  store(target, now);
+  return e.prefix ? now : old;
+}
+
+// Element assignment, in Clipper's evaluation order, each operand once:
+//   a[i] := v          v, then a, then i, then the store;
+//   a[i] op= v, a[i]++ a, then i, then the element, then v.
+Value *Generator::genIndexAssign(const IndexExpr &target, const AssignExpr *assign, const IncDecExpr *incdec) {
+  Builder &b = *cur_.b;
+  if (assign && !assign->compound) {
+    Value *value = genExpr(*assign->value);
+    Value *base = genExpr(*target.base);
+    Value *idx = genExpr(*target.index);
+    b.indexSet(base, idx, value);
+    return value;
+  }
+  Value *base = genExpr(*target.base);
+  Value *idx = genExpr(*target.index);
+  Value *elem = b.index(base, idx);
+  Value *rhs = assign ? genExpr(*assign->value) : b.integer(1, 0);
+  BinOp op = assign ? assign->op : incdec->increment ? BinOp::Add : BinOp::Sub;
+  Value *now = b.binary(op, elem, rhs);
+  b.indexSet(base, idx, now);
+  return incdec && !incdec->prefix ? elem : now;
+}
+
+Value *Generator::genIIf(const IIfExpr &e) {
+  Builder &b = *cur_.b;
+  Value *c = genCond(*e.cond);
+  BasicBlock *thenBB = cur_.fn->addBlock("iif.then");
+  BasicBlock *elseBB = cur_.fn->addBlock("iif.else");
+  BasicBlock *end = cur_.fn->addBlock("iif.end");
+  Value *result = end->addParam(Type::Item);
+  b.condBr(c, thenBB, elseBB);
+  b.setBlock(thenBB);
+  b.br(end, {genExpr(*e.then)});
+  b.setBlock(elseBB);
+  b.br(end, {genExpr(*e.otherwise)});
+  b.setBlock(end);
+  return result;
+}
+
+// The block receives the cells it captures: the current function's shared
+// variables (moved into cells if they are not yet), or cells the current
+// block itself captured.
+Value *Generator::genCodeblock(const BlockExpr &blk) {
+  Function *fn = genCodeblockFunction(blk);
+  std::vector<Var *> captures;
+  for (const BlockExpr::Capture &cap : blk.captures) {
+    if (cap.fromParentCapture) {
+      for (auto &v : cur_.fn->vars)
+        if (v->kind == Var::Kind::Capture && v->index == cap.index) captures.push_back(v.get());
+    } else {
+      captures.push_back(frameVar(cap.index));
+    }
+  }
+  cur_.b->setLoc(blk.loc);
+  return cur_.b->makeBlock(fn, std::move(captures));
+}
+
+} // namespace xb::xir

@@ -8,7 +8,7 @@
 static xb_array *make_dims(xb_ctx *ctx, uint32_t ndims, const xb_item *dims, xb_item *holder) {
   int64_t n = xb_num_to_i64(&dims[0]);
   if (n < 0) n = 0;
-  xb_array *a = xb_array_alloc((size_t)n);
+  xb_array *a = xb_array_alloc((uint64_t)n);
   xb_set_array(holder, a); /* keeps `a` reachable while sub-arrays are allocated */
   if (ndims > 1) {
     xb_item sub;
@@ -56,7 +56,7 @@ void xbf_ASIZE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
-  xb_array_resize(argv[0].v.p, n < 0 ? 0 : (size_t)n);
+  xb_array_resize(argv[0].v.p, n < 0 ? 0 : (uint64_t)n);
   *ret = argv[0];
 }
 

@@ -1,0 +1,48 @@
+module FOREACH_BLOCK
+
+function MAIN params 1 {
+  $f0 = frame 0 "ALIST"
+  $f1 = frame 1 "E"
+  $f2 = frame 2 shared "N"
+  $f3 = frame 3 "B"
+entry:
+  store $f2 maybe_ref, 0:w10
+  barrier $f2 maybe_ref
+  %2 = load $f0 maybe_ref
+  %3 = each.enter $f1, false, %2
+  br each.test(i64 0)
+each.test(%5: i64):
+  %6 = i.add %5, i64 1
+  %7 = enum.len %2
+  %8 = i.cmp le %6, %7
+  cond_br %8, each.body, each.end
+each.body:
+  %10 = i.add %5, i64 1
+  each.move $f1, false, %10
+  %12 = load $f2 maybe_ref
+  %13 = load $f1 ref
+  %14 = binary add %12, %13
+  store $f2 maybe_ref, %14
+  barrier $f2 maybe_ref
+  br each.next
+each.next:
+  %18 = i.add %5, i64 1
+  br each.test(%18)
+each.end:
+  each.leave $f1, false, %3
+  %21 = block MAIN.block1 $f2
+  store $f3, %21
+  %23 = load $f3
+  %24 = call EVAL native %23, 2:w10
+  ret %24
+}
+
+block MAIN.block1 internal params 1 {
+  $f0 = frame 0 "K"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = load $c0 maybe_ref
+  %2 = binary mul %0, %1
+  ret %2
+}

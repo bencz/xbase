@@ -1,7 +1,8 @@
 #pragma once
 
-#include "parser/AST.h"
+#include "codegen/FramePlan.h"
 #include "common/Diagnostics.h"
+#include "xir/IR.h"
 
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/IRBuilder.h>
@@ -17,97 +18,72 @@
 
 namespace xb {
 
-// Lowers the AST of one module into an in-memory LLVM module.
+// Lowers an xIR module into an in-memory LLVM module (docs/xir.md, phase 1).
 //
 // Execution model (see docs/runtime.md):
-//  * every value is an xb_item; params, LOCALs and temporaries live in an
-//    item frame obtained from the runtime (GC roots, stable addresses);
-//  * operators call the runtime (fast paths get inlined later);
-//  * after any call that can fail, ctx->pending is tested and the function
-//    unwinds to its exit block when it is set.
+//  * every item lives in an item frame obtained from the runtime (GC roots,
+//    stable addresses); FramePlan decides which item goes where;
+//  * operations call the runtime;
+//  * after an operation that can fail, ctx->pending is tested and the
+//    function leaves through the operation's unwind block (its exit).
 class CodeGen {
 public:
   CodeGen(llvm::LLVMContext &ctx, llvm::Module &mod, Diagnostics &diag);
-  bool run(const Module &m, bool emitEntry);
+  bool run(const xir::Module &m, bool emitEntry);
 
 private:
   // Fields of xb_item, in the LLVM struct that mirrors it.
   enum ItemField : unsigned { FType = 0, FWidth = 1, FDec = 2, FValue = 3 };
 
-  // CodeGen.cpp: types, runtime declarations, item and basic block helpers,
-  // functions, frames, module initialization, program entry.
+  // CodeGen.cpp: types, runtime declarations, the module, functions and
+  // their frames, item and basic block helpers.
   void initTypes();
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
-  llvm::Function *declareXbFunc(const std::string &xbName, bool internal, bool runtime);
   void addAbiAttributes(llvm::Function *f);
-  void genFunc(const FuncDecl &f);
-  void beginFrame(llvm::Value *argc, llvm::Value *argv, uint32_t nparams, uint32_t nlocals,
-                  const std::vector<bool> &boxed);
-  void endFrame();
-  void genEntry(const FuncDecl &start);
-  void genModuleInit(const Module &m);
-  llvm::Value *slot(uint32_t idx);
-  uint32_t allocTemps(uint32_t n);
-  llvm::Value *tempSlot() { return slot(allocTemps(1)); }
+  llvm::Function *declare(const xir::Function &f);
+  llvm::Function *externFunction(const xir::Callee &c);
+  void genFunction(const xir::Function &f);
+  void genModuleRegistration(const xir::Module &m);
+  void genEntry(const xir::Function &start);
+  llvm::BasicBlock *newBlock(const char *name);
   void copyItem(llvm::Value *dst, llvm::Value *src);
   void setNil(llvm::Value *dst);
-  void storeLogical(llvm::Value *dst, llvm::Value *i1);
-  void checkPending();
-  void startDeadBlock();
-  llvm::BasicBlock *newBlock(const char *name);
+  void storeTagged(llvm::Value *dst, uint32_t tag, llvm::Value *v);
+  void storeLogical(llvm::Value *dst, llvm::Value *bit);
+  void checkPending(llvm::BasicBlock *unwind);
 
   // Literals.cpp
   llvm::StructType *strType(llvm::Type *data);
   llvm::Constant *literalItem(uint32_t type, uint16_t width, uint16_t dec, llvm::Constant *payload);
-  llvm::Constant *nilLiteral();
-  llvm::Constant *logicalLiteral(bool v);
-  llvm::Constant *numberLiteral(const NumberExpr &n);
-  llvm::Constant *intLiteral(int64_t v);
+  llvm::Constant *literal(const xir::Constant &c);
   llvm::Constant *stringLiteral(const std::string &s);
 
-  // Statements.cpp
-  void genBlock(const Block &b);
-  void genStmt(const Stmt &s);
-  llvm::Value *entryAlloca(llvm::Type *ty, const char *name);
-  void genForEach(const ForEachStmt &st);
-  void genSwitch(const SwitchStmt &st);
-
-  // Variables.cpp
-  void boxCaptured(const std::vector<bool> &boxed);
-  llvm::Value *cellOfSlot(uint32_t slot);
-  llvm::Value *capturedCellAddress(llvm::Value *block, uint32_t index);
+  // Variables.cpp: where variables are, references, write barriers.
+  llvm::Value *slot(uint32_t idx);
   llvm::Value *staticAddress(uint32_t idx);
-  bool isBoxed(const VarExpr &v) const;
-  bool isEachVar(const VarExpr &v) const;
-  llvm::Value *refTarget(llvm::Value *ref);
-  llvm::Value *derefIfRef(llvm::Value *item);
-  llvm::Value *varAddress(const Expr &e);
+  llvm::Value *capturedCellAddress(llvm::Value *block, uint32_t index);
+  llvm::Value *capturedCell(const xir::Var &v);
+  llvm::Value *rawAddress(const xir::Var &v);
+  llvm::Value *varAddress(const xir::Var &v, xir::Access a, llvm::BasicBlock *unwind);
+  llvm::Value *refTarget(llvm::Value *ref, llvm::BasicBlock *unwind);
+  llvm::Value *derefIfRef(llvm::Value *item, llvm::BasicBlock *unwind, bool inCellLikely);
   llvm::BasicBlock *beginUnlikely(llvm::Value *cond, const char *name);
   void endUnlikely(llvm::BasicBlock *join);
   llvm::Value *holdsRef(llvm::Value *item);
-  void refWritten(llvm::Value *item);
+  void refWritten(llvm::Value *item, bool inCellLikely);
   void cellWritten(llvm::Value *cell);
-  void writeBarrier(const Expr &e);
+  void writeBarrier(const xir::Var &v, xir::Access a);
+  void refOf(const xir::Var &v, llvm::Value *dst);
 
-  // Expressions.cpp
-  static bool hasSideEffects(const Expr &e);
-  void genExpr(const Expr &e, llvm::Value *dst);
-  void genDiscard(const Expr &e);
-  llvm::Value *genOperand(const Expr &e);
-  std::pair<llvm::Value *, llvm::Value *> genOperands(const Expr &lhs, const Expr &rhs);
-  llvm::Value *genCond(const Expr &e);
-  llvm::Value *testTruth(llvm::Value *item);
-  void genBinary(BinOp op, llvm::Value *dst, llvm::Value *a, llvm::Value *b);
-  void genCall(const CallExpr &c, llvm::Value *dst);
-  void genAssign(const AssignExpr &a, llvm::Value *dst);
-  void genIncDec(const IncDecExpr &e, llvm::Value *dst);
-  void genIIf(const IIfExpr &e, llvm::Value *dst);
-  void genArrayLit(const ArrayLitExpr &a, llvm::Value *dst);
-  void genIndexAssign(const IndexExpr &target, const AssignExpr *assign, const IncDecExpr *incdec, llvm::Value *dst);
-
-  // Codeblocks.cpp
-  void genCodeblock(const BlockExpr &b, llvm::Value *dst);
-  llvm::Function *genCodeblockFunction(const BlockExpr &b);
+  // Instructions.cpp
+  void emit(const xir::Instruction &i);
+  void emitBranch(const xir::Target &t);
+  llvm::Value *addr(const xir::Value *v);
+  llvm::Value *dest(const xir::Instruction &i);
+  llvm::Value *value(const xir::Value *v);
+  llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind);
+  llvm::Value *operandGroup(const xir::Instruction &i);
+  llvm::BasicBlock *unwindOf(const xir::Instruction &i);
 
   llvm::LLVMContext &ctx_;
   llvm::Module &mod_;
@@ -121,6 +97,7 @@ private:
   llvm::PointerType *ptrTy_;
   llvm::FunctionType *xbFuncTy_ = nullptr;
   llvm::FunctionType *blockFnTy_ = nullptr;
+  llvm::FunctionType *initFnTy_ = nullptr;
   llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, ncells, cells[] }
   uint64_t itemSize_ = 0;
   llvm::Align itemAlign_;
@@ -129,55 +106,27 @@ private:
   // runtime entry points
   llvm::FunctionCallee rtFramePush_, rtFramePop_, rtArgsCopy_, rtCondError_, rtForTest_, rtAbiCheck_;
   llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_, rtPending_;
-  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtCellBox_, rtBlockNew_;
-  llvm::FunctionCallee rtEnumLen_, rtEnumRefNew_, rtEnumRefMove_, rtRefTarget_, rtSwitchCheck_, rtSwitchMatch_;
-  llvm::FunctionCallee rtModuleRegister_, rtModulesInit_, rtGcRemember_, rtRefWritten_;
+  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtCellOf_, rtBlockNew_;
+  llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
+  llvm::FunctionCallee rtSwitchMatch_;
+  llvm::FunctionCallee rtModuleRegister_, rtModulesInit_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
   // module state
-  std::unordered_map<std::string, llvm::Function *> funcs_;
+  std::unordered_map<const xir::Function *, llvm::Function *> functions_;
   llvm::GlobalVariable *statics_ = nullptr;   // the module's STATICs
   std::unordered_map<std::string, llvm::Constant *> strLits_;
   std::unordered_map<std::string, llvm::Constant *> numLits_;
   llvm::Constant *nilLit_ = nullptr;
   llvm::Constant *trueLit_ = nullptr, *falseLit_ = nullptr;
 
-  // function state
-  struct Loop {
-    llvm::BasicBlock *exitTo;
-    llvm::BasicBlock *loopTo;
-  };
+  // the function being generated
   llvm::Function *fn_ = nullptr;
-  llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr;
-  llvm::CallInst *fnPush_ = nullptr;
+  llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr;
   llvm::BasicBlock *fnExit_ = nullptr;
-  uint32_t numLocals_ = 0, temps_ = 0, maxSlots_ = 0;
-  std::vector<Loop> loops_;
-  struct EachVar {             // the variable of a FOR EACH loop being generated
-    const VarExpr *var;
-    llvm::Value *raw;          // its slot or STATIC storage, which holds the reference (or the cell)
-    llvm::Value *saved;        // its value before the loop
-  };
-  std::vector<EachVar> eachVars_;
-  const std::vector<bool> *fnBoxed_ = nullptr; // frame slots holding cells
-  llvm::Value *fnSelf_ = nullptr;              // the codeblock, inside a block function
-  unsigned blockCount_ = 0;
-
-  // Everything above that describes the function being generated; saved
-  // while a codeblock's function is generated in the middle of it.
-  struct FnState {
-    llvm::Function *fn;
-    llvm::Value *ctx, *ret, *base, *self;
-    llvm::CallInst *push;
-    llvm::BasicBlock *exit;
-    uint32_t numLocals, temps, maxSlots;
-    std::vector<Loop> loops;
-    std::vector<EachVar> eachVars;
-    const std::vector<bool> *boxed;
-    llvm::IRBuilderBase::InsertPoint ip;
-  };
-  FnState saveFn();           // Codeblocks.cpp
-  void restoreFn(FnState s);
+  const FramePlan *plan_ = nullptr;
+  std::unordered_map<const xir::BasicBlock *, llvm::BasicBlock *> blocks_;
+  std::unordered_map<const xir::Value *, llvm::Value *> values_; // machine values; addresses of Place homes
 };
 
 } // namespace xb

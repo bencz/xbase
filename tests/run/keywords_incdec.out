@@ -1,0 +1,8 @@
+
+if dec          4
+while inc          1
+while inc          2
+case dec          3
+switch inc          4
+return dec          9
+variables          2          0          2          0

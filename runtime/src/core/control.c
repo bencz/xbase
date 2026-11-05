@@ -12,19 +12,35 @@ int64_t xb_enum_len(xb_ctx *ctx, const xb_item *coll) {
   return -1;
 }
 
-void xb_enum_ref_new(xb_ctx *ctx, xb_item *r, const xb_item *coll) {
+/* A variable that holds an element passed to it by reference is shared like
+ * a variable in a cell: it moves into one, and the loop works inside it. */
+uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var) {
   XB_UNUSED(ctx);
-  xb_ref *ref = xb_gc_alloc(XB_GC_REF, sizeof(xb_ref)); /* `coll` is a frame slot: still rooted */
-  ref->coll = *coll;
-  ref->index = 0;
-  xb_set_nil(&ref->value);
-  xb_set_nil(r);
-  r->type = XB_T_REF;
-  r->v.p = ref;
+  if (var->type == XB_T_REF && !xb_is_loop_ref(var)) xb_cell_move(var);
+  return var->type == XB_T_CELL;
 }
 
-void xb_enum_ref_move(xb_ctx *ctx, xb_item *r, int64_t idx) {
-  xb_ref *ref = r->v.p;
+/* The item a FOR EACH loop works on (see xb_each_enter in xbrt.h). */
+static xb_item *each_base(xb_item *var, uint32_t in_cell) {
+  return in_cell ? &((xb_cell *)var->v.p)->value : var;
+}
+
+/* A store into the base is a store into the cell when the variable is shared. */
+static void each_written(xb_item *var, uint32_t in_cell) {
+  if (in_cell) xb_gc_write(var->v.p);
+}
+
+void xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, const xb_item *coll) {
+  XB_UNUSED(ctx);
+  xb_item *base = each_base(var, in_cell);
+  *saved = *base;
+  xb_ref_init(base, coll, 0, 1); /* `coll` and `saved` are frame slots, `base` is reachable: all rooted */
+  each_written(var, in_cell);
+}
+
+void xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx) {
+  xb_item *base = each_base(var, in_cell); /* still holds the loop's reference: taking the variable copies it */
+  xb_ref *ref = base->v.p;
   ref->index = idx;
   if (ref->coll.type == XB_T_STRING) {
     const xb_str *s = ref->coll.v.s;
@@ -33,31 +49,13 @@ void xb_enum_ref_move(xb_ctx *ctx, xb_item *r, int64_t idx) {
       xb_gc_write(ref);
     }
   } else {
-    xb_ref_target(ctx, r); /* an array that shrank under the loop: bound error */
+    xb_ref_target(ctx, base); /* an array that shrank under the loop: bound error */
   }
 }
 
-/* An array element is found again at every use, so the reference follows the
- * array when it grows or moves its items. */
-xb_item *xb_ref_target(xb_ctx *ctx, xb_item *r) {
-  xb_ref *ref = r->v.p;
-  if (ref->coll.type != XB_T_ARRAY) return &ref->value;
-  xb_array *a = ref->coll.v.p;
-  if (ref->index < 1 || (uint64_t)ref->index > a->len) {
-    xb_array_bound_error(ctx);
-    return &ref->value;
-  }
-  return &a->items[ref->index - 1];
-}
-
-/* Write barrier for a store through a reference: the object holding the
- * target (the array, or the reference itself for a string's character). */
-void xb_ref_written(const xb_item *r) {
-  xb_ref *ref = r->v.p;
-  if (ref->coll.type == XB_T_ARRAY && ref->index >= 1 && (uint64_t)ref->index <= ((xb_array *)ref->coll.v.p)->len)
-    xb_gc_write_item(ref->coll.v.p, (size_t)(ref->index - 1));
-  else
-    xb_gc_write(ref); /* the store went to the reference's own item */
+void xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved) {
+  *each_base(var, in_cell) = *saved;
+  each_written(var, in_cell);
 }
 
 /* SWITCH compares integers and strings only. */

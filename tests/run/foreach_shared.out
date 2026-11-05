@@ -1,0 +1,6 @@
+ during         10 during         20
+after          1          1          1          1
+x := 5          5          5          5
+write via block after loop         77         10         20
+write via old block in loop          1         10         55 static during         10 static during         55
+static after          1          1

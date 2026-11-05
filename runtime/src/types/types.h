@@ -5,7 +5,7 @@
 #include "core/context.h"
 
 /* Uninitialized string of `len` bytes (plus the terminating NUL). */
-xb_str *xb_str_alloc(size_t len);
+xb_str *xb_str_alloc(uint64_t len); /* 64-bit: checked before it is narrowed to size_t (32-bit hosts) */
 
 /* An array's items start in the same allocation (`inline_items`); when it
  * grows past that, they move to an XB_GC_ITEMS object. No malloc is involved,
@@ -33,19 +33,38 @@ static inline uint8_t *xb_array_cards(const xb_array *a) {
 /* Longest array: its items must fit in addressable memory with room to grow. */
 #define XB_ARRAY_MAX_LEN (SIZE_MAX / sizeof(xb_item) / 4)
 
-xb_array *xb_array_alloc(size_t len);              /* `len` NIL items */
-void      xb_array_resize(xb_array *a, size_t len); /* new items are NIL; `a` must be reachable */
+/* Lengths are 64-bit so that a length past XB_ARRAY_MAX_LEN is caught before
+ * it is narrowed to size_t (on 32-bit hosts). */
+xb_array *xb_array_alloc(uint64_t len);              /* `len` NIL items */
+void      xb_array_resize(xb_array *a, uint64_t len); /* new items are NIL; `a` must be reachable */
 void      xb_set_array(xb_item *it, xb_array *a);
 void      xb_array_bound_error(xb_ctx *ctx);          /* reading outside 1 .. Len() */
 
 /* What an XB_T_REF item designates: element `index` of `coll`. For a string,
  * `value` holds the one-character element (assigning it leaves the string
- * unchanged). */
+ * unchanged). `loop`: the reference of a FOR EACH loop, else an element passed
+ * by reference (@a[i]). */
 typedef struct xb_ref {
   xb_item coll;
   int64_t index;
   xb_item value;
+  uint32_t loop;
 } xb_ref;
+
+/* Stores in `r` a new reference to element `index` of `coll` (which must stay
+ * reachable meanwhile: a frame slot). xb_ref_copy stores in `r` a new
+ * reference to the element `ref` (a reachable XB_T_REF item) designates. */
+void xb_ref_init(xb_item *r, const xb_item *coll, int64_t index, uint32_t loop);
+void xb_ref_copy(xb_item *r, const xb_item *ref);
+
+/* Whether `it` holds the reference of a FOR EACH loop. */
+static inline int xb_is_loop_ref(const xb_item *it) {
+  return it->type == XB_T_REF && ((const xb_ref *)it->v.p)->loop;
+}
+
+/* Moves the value of the variable whose own item is `var` into a new cell
+ * (unless it holds one) and returns the cell. */
+xb_cell *xb_cell_move(xb_item *var);
 
 /* Dates are Julian day numbers (0: the empty date), years 0 to 9999. Text
  * buffers include the terminating NUL: "YYYYMMDD", and a date by a SET DATE

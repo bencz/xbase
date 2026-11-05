@@ -97,6 +97,16 @@ xb_add_codegen_test(s390x_i32_zeroext s390x-linux-gnu "@xb_frame_push\\(ptr, i32
 xb_add_codegen_test(riscv64_i32_signext riscv64-linux-gnu "@xb_frame_push\\(ptr, i32 signext\\)")
 xb_add_codegen_test(x86_64_i32_plain x86_64-linux-gnu "@xb_frame_push\\(ptr, i32\\)")
 
+# xIR tests: the xIR of tests/xir/<name>.prg (--dump-xir) must equal <name>.xir.
+file(GLOB XB_XIR_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/xir ${CMAKE_CURRENT_SOURCE_DIR}/xir/*.prg)
+foreach(t ${XB_XIR_TESTS})
+  string(REGEX REPLACE "\\.prg$" "" t ${t})
+  add_test(NAME xir.${t}
+    COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.prg
+            -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.xir -DOUT=${CMAKE_CURRENT_BINARY_DIR}/xir_${t}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/xir_test.cmake)
+endforeach()
+
 # include/rtl.ch declares exactly the functions the runtime defines.
 add_test(NAME runtime.declarations
   COMMAND ${CMAKE_COMMAND} -DRTL=${PROJECT_SOURCE_DIR}/include/rtl.ch -DRUNTIME_SRC=${PROJECT_SOURCE_DIR}/runtime/src

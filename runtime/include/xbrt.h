@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 5u
+#define XB_ABI_VERSION 6u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -37,12 +37,13 @@ typedef enum xb_type {
   XB_T_STRING  = 4,
   XB_T_ARRAY   = 5,   /* v.p: runtime array                       */
   XB_T_BLOCK   = 6,   /* v.p: xb_block                             */
-  XB_T_CELL    = 7,   /* v.p: xb_cell; only in the frame slot of a variable a
-                         codeblock captured, never seen by xBase code */
-  XB_T_DATE    = 8,   /* v.i: Julian day number, 0 for the empty date  */
-  XB_T_REF     = 9,   /* v.p: a reference to an element (the variable of a
-                         FOR EACH loop); compiled code goes through
-                         xb_ref_target, xBase code never sees it */
+  XB_T_CELL    = 7,   /* v.p: xb_cell; in the frame slot of a variable that
+                         lives in a cell (captured by a codeblock, or passed
+                         by reference), and as an argument passed by
+                         reference: that variable */
+  XB_T_REF     = 8,   /* v.p: a reference to an element (the variable of a
+                         FOR EACH loop, an argument @a[i]) */
+  XB_T_DATE    = 9,   /* v.i: Julian day number, 0 for the empty date  */
   XB_T_COUNT_
 } xb_type;
 
@@ -163,15 +164,42 @@ void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems)
 void     xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
 void     xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value);
 
-/* FOR EACH: a collection's length (-1 after an error). During the loop the
- * variable holds an XB_T_REF item made by xb_enum_ref_new and pointed at the
- * element `idx` (1-based) by xb_enum_ref_move; xb_ref_target returns the item
- * the reference designates (a bound error if the array shrank). */
-int64_t  xb_enum_len(xb_ctx *ctx, const xb_item *coll);
-void     xb_enum_ref_new(xb_ctx *ctx, xb_item *r, const xb_item *coll);
-void     xb_enum_ref_move(xb_ctx *ctx, xb_item *r, int64_t idx);
+/* References. An item that designates another item is an XB_T_CELL (a
+ * variable in a cell) or an XB_T_REF (an element); xBase code never sees one,
+ * compiled code goes through it. The tags are consecutive, so compiled code
+ * tests for both with one unsigned comparison.
+ * A variable's own item is its frame slot or STATIC storage; it moves into a
+ * cell when it is first shared (a LOCAL or parameter captured by a codeblock,
+ * any variable passed by reference). A LOCAL or parameter that holds the
+ * reference of a FOR EACH loop is not moved: whoever takes it gets the
+ * current element, and the variable stays the loop's.
+ * xb_cell_of returns the cell a codeblock captures for the frame variable
+ * whose own item is `var`; xb_ref_of stores in `r` the reference an argument
+ * @var passes (`is_static`: a STATIC, always the variable itself);
+ * xb_ref_elem the one @base[idx] passes, with the checks of xb_op_index.
+ * A cell may hold an XB_T_REF (a FOR EACH variable); an element never holds
+ * either. xb_ref_target returns the item `r` designates in the end (a bound
+ * error if the array shrank); xb_ref_written is the write barrier after a
+ * store there. */
+xb_cell *xb_cell_of(xb_ctx *ctx, xb_item *var);
 xb_item *xb_ref_target(xb_ctx *ctx, xb_item *r);
-void     xb_ref_written(const xb_item *r);    /* write barrier after a store through `r` */
+void     xb_ref_written(const xb_item *r);
+void     xb_ref_of(xb_ctx *ctx, xb_item *r, xb_item *var, uint32_t is_static);
+void     xb_ref_elem(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
+
+/* FOR EACH: a collection's length (-1 after an error). The loop works on a
+ * base item: the variable's cell when it is shared, else `var`, its own item.
+ * `in_cell` comes from xb_each_shared, when the loop starts (for a STATIC, at
+ * every call: it is one variable for everyone); a variable holding an element
+ * passed to it by reference moves into a cell then. xb_each_enter saves the
+ * base's value in `saved` and puts a reference to the collection there;
+ * xb_each_move points it at element `idx` (1-based); xb_each_leave restores
+ * the saved value. */
+int64_t  xb_enum_len(xb_ctx *ctx, const xb_item *coll);
+uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var);
+void     xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, const xb_item *coll);
+void     xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx);
+void     xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved);
 
 /* SWITCH: the value must be an integer or a string; CASEs match it exactly. */
 void     xb_switch_check(xb_ctx *ctx, const xb_item *value);
@@ -183,11 +211,9 @@ typedef void (*xb_module_init)(xb_ctx *ctx);
 void     xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics);
 void     xb_modules_init(xb_ctx *ctx);
 
-/* Codeblocks. xb_cell_box moves a frame slot's value into a new cell and
- * leaves an XB_T_CELL item in the slot. xb_block_new stores the new block in
- * `r` and returns it; the caller fills cells[0 .. ncells-1] before anything
- * else can allocate. */
-void     xb_cell_box(xb_ctx *ctx, xb_item *slot);
+/* Codeblocks. xb_block_new stores the new block in `r` and returns it; the
+ * caller fills cells[0 .. ncells-1] (xb_cell_of of each captured variable,
+ * obtained first) before anything else can allocate. */
 xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, uint32_t ncells);
 void     xb_block_call(xb_ctx *ctx, xb_item *ret, const xb_item *block, uint32_t argc, xb_item *argv);
 /* FOR ... TO ... STEP test: 1 = keep looping. */

@@ -184,21 +184,40 @@ ExprPtr Parser::parseBraced() {
     return blk;
   }
   auto arr = std::make_unique<ArrayLitExpr>(loc);
-  arr->elems = parseArgs(Tok::RBrace);
+  arr->elems = parseArgs(Tok::RBrace, false);
   expect(Tok::RBrace, "'}'");
   return arr;
 }
 
-std::vector<ExprPtr> Parser::parseArgs(Tok close) {
-  // Empty arguments - f( a, , b ) - are passed as NIL.
+// Empty arguments - f( a, , b ) - are passed as NIL. `refs`: the arguments of
+// a function call, where `@` passes a variable or element by reference.
+std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs) {
   std::vector<ExprPtr> args;
   if (at(close)) return args;
   while (true) {
-    if (at(Tok::Comma) || at(close)) args.push_back(std::make_unique<NilExpr>(cur().loc));
-    else args.push_back(parseExpr());
+    if (at(Tok::Comma) || at(close)) {
+      args.push_back(std::make_unique<NilExpr>(cur().loc));
+    } else if (at(Tok::At)) {
+      if (!refs) diag_.error(cur().loc, "'@' (by reference) is supported only in function call arguments");
+      args.push_back(parseRef());
+    } else {
+      args.push_back(parseExpr());
+    }
     if (!accept(Tok::Comma)) break;
   }
   return args;
+}
+
+// @name or @name[i]... (the '@' is current).
+ExprPtr Parser::parseRef() {
+  SourceLoc loc = cur().loc;
+  advance();
+  ExprPtr target = parsePostfix();
+  if (target->kind == ExprKind::Call)
+    diag_.error(target->loc, "function references (@name()) are not supported yet");
+  else if (!isLvalue(*target) || target->parenthesized)
+    diag_.error(target->loc, "only a variable or an array element can be passed by reference");
+  return std::make_unique<RefExpr>(loc, std::move(target));
 }
 
 ExprPtr Parser::parsePrimary() {
@@ -223,6 +242,7 @@ ExprPtr Parser::parsePrimary() {
     advance();
     ExprPtr e = parseExpr();
     expect(Tok::RParen, "')'");
+    e->parenthesized = true;
     return e;
   }
   case Tok::Ident: {
@@ -231,7 +251,7 @@ ExprPtr Parser::parsePrimary() {
       advance();
       advance();
       if (name == "IIF" || name == "IF") {
-        auto args = parseArgs(Tok::RParen);
+        auto args = parseArgs(Tok::RParen, false);
         expect(Tok::RParen, "')'");
         if (args.size() != 3) {
           diag_.error(loc, name + "() requires exactly 3 arguments");
@@ -240,7 +260,7 @@ ExprPtr Parser::parsePrimary() {
         return std::make_unique<IIfExpr>(loc, std::move(args[0]), std::move(args[1]), std::move(args[2]));
       }
       auto call = std::make_unique<CallExpr>(loc, name);
-      call->args = parseArgs(Tok::RParen);
+      call->args = parseArgs(Tok::RParen, true);
       expect(Tok::RParen, "')'");
       return call;
     }

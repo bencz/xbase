@@ -78,7 +78,8 @@ private:
   ExprPtr parsePostfix();
   ExprPtr parsePrimary();
   ExprPtr parseBraced();
-  std::vector<ExprPtr> parseArgs(Tok close);
+  std::vector<ExprPtr> parseArgs(Tok close, bool refs);
+  ExprPtr parseRef();
 
   std::vector<Token> toks_;
   Diagnostics &diag_;

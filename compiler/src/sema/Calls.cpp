@@ -11,7 +11,8 @@ void CallResolver::run(Module &m) {
     if (!fresh) {
       const ExternDecl &p = *it->second;
       if (p.minArgs != d.minArgs || p.maxArgs != d.maxArgs || p.native != d.native || p.reserved != d.reserved ||
-          p.checked != d.checked || p.fold != d.fold || p.abbrev != d.abbrev) {
+          p.checked != d.checked || p.fold != d.fold || p.abbrev != d.abbrev || p.byRef != d.byRef ||
+          p.restByRef != d.restByRef) {
         diag_.error(d.loc, "EXTERN FUNCTION '" + d.name + "' conflicts with an earlier declaration");
         diag_.note(p.loc, "previous declaration is here");
       }
@@ -63,6 +64,13 @@ void CallResolver::call(CallExpr &c) {
   c.name = d->name;
   c.callee = d;
   checkArgs(c, *d);
+  // A native function that does not take a reference at that position
+  // receives the value.
+  for (size_t k = 0; k < c.args.size(); ++k) {
+    if (c.args[k]->kind != ExprKind::Ref || d->takesRef(k)) continue;
+    ExprPtr target = std::move(static_cast<RefExpr &>(*c.args[k]).target);
+    c.args[k] = std::move(target);
+  }
 }
 
 void CallResolver::checkArgs(const CallExpr &c, const ExternDecl &d) {
@@ -110,6 +118,9 @@ void CallResolver::expr(Expr &e) {
   }
   case ExprKind::IncDec:
     expr(*static_cast<IncDecExpr &>(e).target);
+    break;
+  case ExprKind::Ref:
+    expr(*static_cast<RefExpr &>(e).target);
     break;
   case ExprKind::ArrayLit:
     for (auto &el : static_cast<ArrayLitExpr &>(e).elems) expr(*el);

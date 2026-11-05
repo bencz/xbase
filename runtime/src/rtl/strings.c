@@ -111,9 +111,8 @@ void xbf_SPACE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   int64_t n = xb_num_to_i64(&argv[0]);
-  size_t len = n > 0 ? (size_t)n : 0;
-  xb_str *r = xb_str_alloc(len);
-  memset(r->data, ' ', len);
+  xb_str *r = xb_str_alloc(n > 0 ? (uint64_t)n : 0);
+  memset(r->data, ' ', r->len);
   xb_set_str(ret, r);
 }
 
@@ -124,11 +123,12 @@ void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
-  size_t times = n > 0 && s->len ? (size_t)n : 0;
-  if (times && times > SIZE_MAX / 2 / s->len) {
+  uint64_t count = n > 0 && s->len ? (uint64_t)n : 0;
+  if (count && count > SIZE_MAX / 2 / s->len) { /* tested before narrowing to size_t (32-bit hosts) */
     xb_rt_error(ctx, "BASE", 1234, "String overflow", "REPLICATE");
     return;
   }
+  size_t times = (size_t)count;
   xb_str *r = xb_str_alloc(s->len * times);
   for (size_t i = 0; i < times; ++i) memcpy(r->data + i * s->len, s->data, s->len);
   xb_set_str(ret, r);

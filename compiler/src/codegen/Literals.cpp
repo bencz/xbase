@@ -32,37 +32,36 @@ Constant *CodeGen::literalItem(uint32_t type, uint16_t width, uint16_t dec, Cons
   return gv;
 }
 
-Constant *CodeGen::nilLiteral() {
-  if (!nilLit_) nilLit_ = literalItem(XB_T_NIL, 0, 0, ConstantInt::get(i64_, 0));
-  return nilLit_;
-}
-
-Constant *CodeGen::logicalLiteral(bool v) {
-  Constant *&slotRef = v ? trueLit_ : falseLit_;
-  if (!slotRef) slotRef = literalItem(XB_T_LOGICAL, 0, 0, ConstantInt::get(i32_, v ? 1 : 0));
-  return slotRef;
-}
-
-Constant *CodeGen::intLiteral(int64_t v) {
-  std::string key = "i" + std::to_string(v);
-  Constant *&c = numLits_[key];
-  if (!c) c = literalItem(XB_T_INT, 0, 0, ConstantInt::get(i64_, (uint64_t)v, true));
-  return c;
-}
-
-Constant *CodeGen::numberLiteral(const NumberExpr &n) {
-  if (n.isInt) {
-    std::string key = "i" + std::to_string(n.ival) + ":" + std::to_string(n.width);
-    Constant *&c = numLits_[key];
-    if (!c) c = literalItem(XB_T_INT, n.width, 0, ConstantInt::get(i64_, (uint64_t)n.ival, true));
-    return c;
+// The static item of an xIR item constant; equal constants share one.
+Constant *CodeGen::literal(const xir::Constant &c) {
+  switch (c.lit) {
+  case xir::Constant::Lit::Nil:
+    if (!nilLit_) nilLit_ = literalItem(XB_T_NIL, 0, 0, ConstantInt::get(i64_, 0));
+    return nilLit_;
+  case xir::Constant::Lit::Logical: {
+    Constant *&lit = c.logical ? trueLit_ : falseLit_;
+    if (!lit) lit = literalItem(XB_T_LOGICAL, 0, 0, ConstantInt::get(i32_, c.logical ? 1 : 0));
+    return lit;
   }
-  uint64_t bits;
-  std::memcpy(&bits, &n.dval, sizeof bits);
-  std::string key = "d" + std::to_string(bits) + ":" + std::to_string(n.dec) + ":" + std::to_string(n.width);
-  Constant *&c = numLits_[key];
-  if (!c) c = literalItem(XB_T_DOUBLE, n.width, n.dec, ConstantFP::get(Type::getDoubleTy(ctx_), n.dval));
-  return c;
+  case xir::Constant::Lit::Integer: {
+    std::string key = "i" + std::to_string(c.ival) + ":" + std::to_string(c.width);
+    Constant *&lit = numLits_[key];
+    if (!lit) lit = literalItem(XB_T_INT, c.width, 0, ConstantInt::get(i64_, (uint64_t)c.ival, true));
+    return lit;
+  }
+  case xir::Constant::Lit::Double: {
+    uint64_t bits;
+    std::memcpy(&bits, &c.dval, sizeof bits);
+    std::string key = "d" + std::to_string(bits) + ":" + std::to_string(c.dec) + ":" + std::to_string(c.width);
+    Constant *&lit = numLits_[key];
+    if (!lit) lit = literalItem(XB_T_DOUBLE, c.width, c.dec, ConstantFP::get(Type::getDoubleTy(ctx_), c.dval));
+    return lit;
+  }
+  case xir::Constant::Lit::String: return stringLiteral(c.str);
+  case xir::Constant::Lit::Bool:
+  case xir::Constant::Lit::I64: break; // machine constants are not items
+  }
+  report_fatal_error("xbc: not an item constant");
 }
 
 // Strings are emitted as static xb_str objects (header + bytes + NUL), so a

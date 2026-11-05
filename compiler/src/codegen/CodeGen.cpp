@@ -1,5 +1,4 @@
-// Types, runtime declarations, item and basic block helpers, functions and their frames, module
-// initialization, program entry.
+// Types, runtime declarations, the module, functions and their frames, item and basic block helpers.
 #include "codegen/CodeGen.h"
 
 #include "xbrt.h" // constants only (type tags, ABI version) - never layouts
@@ -47,11 +46,12 @@ void CodeGen::initTypes() {
   itemSize_ = dl_.getTypeAllocSize(itemTy_);
   itemAlign_ = dl_.getABITypeAlign(itemTy_);
 
-  xbFuncTy_ = FunctionType::get(Type::getVoidTy(ctx_), {ptrTy_, ptrTy_, i32_, ptrTy_}, false);
-  blockFnTy_ = FunctionType::get(Type::getVoidTy(ctx_), {ptrTy_, ptrTy_, i32_, ptrTy_, ptrTy_}, false);
+  Type *voidTy = Type::getVoidTy(ctx_);
+  xbFuncTy_ = FunctionType::get(voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_}, false);
+  blockFnTy_ = FunctionType::get(voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, ptrTy_}, false);
+  initFnTy_ = FunctionType::get(voidTy, {ptrTy_}, false);
   blockTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(ptrTy_, 0)}, "xb_block");
 
-  Type *voidTy = Type::getVoidTy(ctx_);
   rtFramePush_ = rt("xb_frame_push", ptrTy_, {ptrTy_, i32_});
   rtFramePop_ = rt("xb_frame_pop", voidTy, {ptrTy_, ptrTy_});
   rtArgsCopy_ = rt("xb_args_copy", voidTy, {ptrTy_, i32_, i32_, ptrTy_});
@@ -65,13 +65,17 @@ void CodeGen::initTypes() {
   rtArrayNew_ = rt("xb_array_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtIndex_ = rt("xb_op_index", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
-  rtCellBox_ = rt("xb_cell_box", voidTy, {ptrTy_, ptrTy_});
+  rtCellOf_ = rt("xb_cell_of", ptrTy_, {ptrTy_, ptrTy_});
   rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtEnumLen_ = rt("xb_enum_len", i64_, {ptrTy_, ptrTy_});
-  rtEnumRefNew_ = rt("xb_enum_ref_new", voidTy, {ptrTy_, ptrTy_, ptrTy_});
-  rtEnumRefMove_ = rt("xb_enum_ref_move", voidTy, {ptrTy_, ptrTy_, i64_});
+  rtEachShared_ = rt("xb_each_shared", i32_, {ptrTy_, ptrTy_});
+  rtEachEnter_ = rt("xb_each_enter", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtEachMove_ = rt("xb_each_move", voidTy, {ptrTy_, ptrTy_, i32_, i64_});
+  rtEachLeave_ = rt("xb_each_leave", voidTy, {ptrTy_, i32_, ptrTy_});
   rtRefTarget_ = rt("xb_ref_target", ptrTy_, {ptrTy_, ptrTy_});
   rtRefWritten_ = rt("xb_ref_written", voidTy, {ptrTy_});
+  rtRefOf_ = rt("xb_ref_of", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_});
+  rtRefElem_ = rt("xb_ref_elem", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtGcRemember_ = rt("xb_gc_remember", voidTy, {ptrTy_});
   rtSwitchCheck_ = rt("xb_switch_check", voidTy, {ptrTy_, ptrTy_});
   rtSwitchMatch_ = rt("xb_switch_match", i32_, {ptrTy_, ptrTy_});
@@ -107,60 +111,32 @@ FunctionCallee CodeGen::rt(const char *name, Type *ret, std::initializer_list<Ty
   return c;
 }
 
-// A function of the program, or of the runtime (an EXTERN FUNCTION): see the
-// symbol prefixes in xbrt.h.
-Function *CodeGen::declareXbFunc(const std::string &xbName, bool internal, bool runtime) {
-  std::string sym = (runtime ? XB_RUNTIME_FUNC_PREFIX : XB_PROGRAM_FUNC_PREFIX) + xbName;
+// The LLVM function of an xIR function: program functions are xbp_NAME (see
+// the symbol prefixes in xbrt.h); codeblocks and the module initialization are
+// internal.
+Function *CodeGen::declare(const xir::Function &f) {
+  FunctionType *ty = f.kind == xir::Function::Kind::Program ? xbFuncTy_
+                     : f.kind == xir::Function::Kind::Block ? blockFnTy_
+                                                            : initFnTy_;
+  std::string sym = f.kind == xir::Function::Kind::Program ? XB_PROGRAM_FUNC_PREFIX + f.name : "xb." + f.name;
+  Function *fn =
+      Function::Create(ty, f.internal ? GlobalValue::InternalLinkage : GlobalValue::ExternalLinkage, sym, mod_);
+  addAbiAttributes(fn);
+  return fn;
+}
+
+// A function of the runtime (NATIVE) or of another module of the program.
+Function *CodeGen::externFunction(const xir::Callee &c) {
+  std::string sym = (c.native ? XB_RUNTIME_FUNC_PREFIX : XB_PROGRAM_FUNC_PREFIX) + c.name;
   Function *f = mod_.getFunction(sym);
   if (!f) {
-    f = Function::Create(xbFuncTy_, internal ? GlobalValue::InternalLinkage : GlobalValue::ExternalLinkage, sym, mod_);
+    f = Function::Create(xbFuncTy_, GlobalValue::ExternalLinkage, sym, mod_);
     addAbiAttributes(f);
   }
   return f;
 }
 
-BasicBlock *CodeGen::newBlock(const char *name) { return BasicBlock::Create(ctx_, name, fn_); }
-
-Value *CodeGen::slot(uint32_t idx) { return b_.CreateConstInBoundsGEP1_32(itemTy_, fnBase_, idx); }
-
-uint32_t CodeGen::allocTemps(uint32_t n) {
-  uint32_t first = numLocals_ + temps_;
-  temps_ += n;
-  maxSlots_ = std::max(maxSlots_, numLocals_ + temps_);
-  return first;
-}
-
-void CodeGen::copyItem(Value *dst, Value *src) {
-  if (dst == src) return;
-  b_.CreateMemCpy(dst, itemAlign_, src, itemAlign_, itemSize_);
-}
-
-void CodeGen::setNil(Value *dst) { b_.CreateMemSet(dst, b_.getInt8(0), itemSize_, itemAlign_); }
-
-void CodeGen::storeLogical(Value *dst, Value *bit) {
-  setNil(dst);
-  b_.CreateStore(ConstantInt::get(i32_, XB_T_LOGICAL), b_.CreateStructGEP(itemTy_, dst, FType));
-  b_.CreateStore(b_.CreateZExt(bit, i32_), b_.CreateStructGEP(itemTy_, dst, FValue));
-}
-
-// One load + one well-predicted branch per fallible call; when something is
-// pending, xb_pending() serves pauses (GC safepoints) and says whether to unwind.
-void CodeGen::checkPending() {
-  Value *pending = b_.CreateLoad(i32_, fnCtx_, "pending");
-  Value *isSet = b_.CreateICmpNE(pending, ConstantInt::get(i32_, 0));
-  BasicBlock *slow = newBlock("pending");
-  BasicBlock *cont = newBlock("ok");
-  MDBuilder md(ctx_);
-  b_.CreateCondBr(isSet, slow, cont, md.createUnlikelyBranchWeights());
-  b_.SetInsertPoint(slow);
-  Value *unwind = b_.CreateCall(rtPending_, {fnCtx_});
-  b_.CreateCondBr(b_.CreateICmpNE(unwind, ConstantInt::get(i32_, 0)), fnExit_, cont);
-  b_.SetInsertPoint(cont);
-}
-
-void CodeGen::startDeadBlock() { b_.SetInsertPoint(newBlock("dead")); }
-
-bool CodeGen::run(const Module &m, bool emitEntry) {
+bool CodeGen::run(const xir::Module &m, bool emitEntry) {
   if (!m.statics.empty()) {
     auto *ty = ArrayType::get(itemTy_, m.statics.size());
     auto *gv = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, ConstantAggregateZero::get(ty),
@@ -168,10 +144,15 @@ bool CodeGen::run(const Module &m, bool emitEntry) {
     gv->setAlignment(itemAlign_);
     statics_ = gv;
   }
-  for (auto &f : m.funcs) funcs_[f->name] = declareXbFunc(f->name, f->isStatic, false);
-  for (auto &f : m.funcs) genFunc(*f);
-  if (!m.statics.empty()) genModuleInit(m);
-  if (emitEntry && !m.funcs.empty()) genEntry(*m.funcs.front());
+  for (auto &f : m.functions) functions_[f.get()] = declare(*f);
+  for (auto &f : m.functions) genFunction(*f);
+  if (!m.statics.empty()) genModuleRegistration(m);
+  if (emitEntry)
+    for (auto &f : m.functions)
+      if (f->kind == xir::Function::Kind::Program) {
+        genEntry(*f); // the first function of the source starts the program
+        break;
+      }
 
   std::string err;
   raw_string_ostream os(err);
@@ -182,58 +163,82 @@ bool CodeGen::run(const Module &m, bool emitEntry) {
   return diag_.errorCount() == 0;
 }
 
-void CodeGen::genFunc(const FuncDecl &f) {
-  fn_ = funcs_[f.name];
-  fn_->addFnAttr(Attribute::NoUnwind);
+// Prologue: the item frame (sized by the frame plan), the parameters copied
+// into it; the body; the exit block, where every path ends, pops the frame.
+void CodeGen::genFunction(const xir::Function &f) {
+  fn_ = functions_.at(&f);
   fn_->setUWTableKind(UWTableKind::Async); // backtraces / profilers
+  FramePlan plan(f);
+  plan_ = &plan;
+  blocks_.clear();
+  values_.clear();
 
-  auto *entry = BasicBlock::Create(ctx_, "entry", fn_);
+  BasicBlock *entry = BasicBlock::Create(ctx_, "entry", fn_);
   b_.SetInsertPoint(entry);
-  auto args = fn_->arg_begin();
-  fnCtx_ = &*args++;
-  fnRet_ = &*args++;
-  Value *argc = &*args++;
-  Value *argv = &*args++;
+  fnCtx_ = fn_->getArg(0);
   fnCtx_->setName("ctx");
-  fnRet_->setName("ret");
-  argc->setName("argc");
-  argv->setName("argv");
-
+  fnRet_ = nullptr;
   fnSelf_ = nullptr;
-  beginFrame(argc, argv, (uint32_t)f.params.size(), f.numLocals, f.boxed);
-  genBlock(f.body);
-  endFrame();
-}
-
-// Function body prologue: an item frame (its size is patched by endFrame),
-// the parameters copied into it, captured variables moved into cells.
-void CodeGen::beginFrame(Value *argc, Value *argv, uint32_t nparams, uint32_t nlocals, const std::vector<bool> &boxed) {
-  numLocals_ = nlocals;
-  temps_ = 0;
-  maxSlots_ = numLocals_;
-  loops_.clear();
-  fnBoxed_ = &boxed;
-  fnPush_ = b_.CreateCall(rtFramePush_, {fnCtx_, ConstantInt::get(i32_, 0)}, "frame");
-  fnBase_ = fnPush_;
-  if (nparams) b_.CreateCall(rtArgsCopy_, {fnBase_, ConstantInt::get(i32_, nparams), argc, argv});
-  boxCaptured(boxed);
+  Value *argc = nullptr, *argv = nullptr;
+  if (f.kind != xir::Function::Kind::ModuleInit) {
+    fnRet_ = fn_->getArg(1);
+    argc = fn_->getArg(2);
+    argv = fn_->getArg(3);
+    fnRet_->setName("ret");
+    argc->setName("argc");
+    argv->setName("argv");
+  }
+  if (f.kind == xir::Function::Kind::Block) {
+    fnSelf_ = fn_->getArg(4);
+    fnSelf_->setName("self");
+  }
+  fnBase_ = b_.CreateCall(rtFramePush_, {fnCtx_, ConstantInt::get(i32_, plan.frameSize())}, "frame");
+  if (f.numParams) b_.CreateCall(rtArgsCopy_, {fnBase_, ConstantInt::get(i32_, f.numParams), argc, argv});
   fnExit_ = BasicBlock::Create(ctx_, "exit", fn_);
-}
 
-// Epilogue: every path ends in the exit block, which pops the frame.
-void CodeGen::endFrame() {
-  if (!b_.GetInsertBlock()->getTerminator()) b_.CreateBr(fnExit_);
-  fnExit_->moveAfter(&fn_->back());
+  // Blocks in reverse postorder; machine-value block parameters become PHIs.
+  for (xir::BasicBlock *xb : plan.cfg().order()) {
+    BasicBlock *bb = BasicBlock::Create(ctx_, xb->name, fn_, fnExit_);
+    blocks_[xb] = bb;
+    b_.SetInsertPoint(bb);
+    for (auto &p : xb->params)
+      if (p->type() != xir::Type::Item)
+        values_[p.get()] = b_.CreatePHI(p->type() == xir::Type::Bool ? b_.getInt1Ty() : (Type *)i64_, 2);
+  }
+  b_.SetInsertPoint(entry);
+  b_.CreateBr(blocks_.at(f.entry()));
+  for (xir::BasicBlock *xb : plan.cfg().order()) {
+    b_.SetInsertPoint(blocks_.at(xb));
+    for (auto &i : xb->insts) emit(*i);
+  }
   b_.SetInsertPoint(fnExit_);
   b_.CreateCall(rtFramePop_, {fnCtx_, fnBase_});
   b_.CreateRetVoid();
-  fnPush_->setArgOperand(1, ConstantInt::get(i32_, maxSlots_));
+  plan_ = nullptr;
+}
+
+// The module's STATICs: a global constructor registers them as GC roots, with
+// the function that gives them their initial values, before main() runs.
+void CodeGen::genModuleRegistration(const xir::Module &m) {
+  Function *init = m.init ? functions_.at(m.init) : nullptr;
+  if (!init) { // no initializers: the STATICs are NIL
+    init = Function::Create(initFnTy_, GlobalValue::InternalLinkage, "xb.module.init", mod_);
+    addAbiAttributes(init);
+    b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", init));
+    b_.CreateRetVoid();
+  }
+  Function *reg = Function::Create(FunctionType::get(Type::getVoidTy(ctx_), {}, false), GlobalValue::InternalLinkage,
+                                   "xb.module.register", mod_);
+  reg->addFnAttr(Attribute::NoUnwind);
+  b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", reg));
+  b_.CreateCall(rtModuleRegister_, {init, statics_, ConstantInt::get(i32_, m.statics.size())});
+  b_.CreateRetVoid();
+  appendToGlobalCtors(mod_, reg, 65535);
 }
 
 // void xb_app_main(xb_ctx *ctx) - called by the runtime's main().
-void CodeGen::genEntry(const FuncDecl &start) {
-  auto *ty = FunctionType::get(Type::getVoidTy(ctx_), {ptrTy_}, false);
-  auto *fn = Function::Create(ty, GlobalValue::ExternalLinkage, "xb_app_main", mod_);
+void CodeGen::genEntry(const xir::Function &start) {
+  auto *fn = Function::Create(initFnTy_, GlobalValue::ExternalLinkage, "xb_app_main", mod_);
   fn->addFnAttr(Attribute::NoUnwind);
   b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", fn));
   Value *ctx = fn->getArg(0);
@@ -245,9 +250,10 @@ void CodeGen::genEntry(const FuncDecl &start) {
   fnCtx_ = ctx;
   fnExit_ = BasicBlock::Create(ctx_, "done", fn);
   b_.CreateCall(rtModulesInit_, {ctx});
-  checkPending(); // an error in a module initialization ends the program
+  checkPending(fnExit_); // an error in a module initialization ends the program
   Value *ret = b_.CreateCall(rtFramePush_, {ctx, ConstantInt::get(i32_, 1)});
-  b_.CreateCall(xbFuncTy_, funcs_[start.name], {ctx, ret, ConstantInt::get(i32_, 0), ConstantPointerNull::get(ptrTy_)});
+  b_.CreateCall(xbFuncTy_, functions_.at(&start),
+                {ctx, ret, ConstantInt::get(i32_, 0), ConstantPointerNull::get(ptrTy_)});
   b_.CreateCall(rtFramePop_, {ctx, ret});
   b_.CreateBr(fnExit_);
   fnExit_->moveAfter(b_.GetInsertBlock());
@@ -255,35 +261,38 @@ void CodeGen::genEntry(const FuncDecl &start) {
   b_.CreateRetVoid();
 }
 
-// The module's STATICs get their initial values in an initialization
-// function; a global constructor registers it, and the STATICs as GC roots,
-// before main() runs.
-void CodeGen::genModuleInit(const Module &m) {
-  auto *initTy = FunctionType::get(Type::getVoidTy(ctx_), {ptrTy_}, false);
-  Function *init = Function::Create(initTy, GlobalValue::InternalLinkage, "xb.module.init", mod_);
-  init->addFnAttr(Attribute::NoUnwind);
-  fn_ = init;
-  b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", init));
-  fnCtx_ = init->getArg(0);
-  fnRet_ = nullptr;
-  fnSelf_ = nullptr;
-  static const std::vector<bool> noBoxed;
-  beginFrame(nullptr, nullptr, 0, 0, noBoxed);
-  for (const LocalDecl *d : m.statics) {
-    if (!d->init) continue;
-    uint32_t mark = temps_;
-    genExpr(*d->init, staticAddress(d->slot));
-    temps_ = mark;
-  }
-  endFrame();
+BasicBlock *CodeGen::newBlock(const char *name) { return BasicBlock::Create(ctx_, name, fn_, fnExit_); }
 
-  auto *regTy = FunctionType::get(Type::getVoidTy(ctx_), {}, false);
-  Function *reg = Function::Create(regTy, GlobalValue::InternalLinkage, "xb.module.register", mod_);
-  reg->addFnAttr(Attribute::NoUnwind);
-  b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", reg));
-  b_.CreateCall(rtModuleRegister_, {init, statics_, ConstantInt::get(i32_, m.statics.size())});
-  b_.CreateRetVoid();
-  appendToGlobalCtors(mod_, reg, 65535);
+void CodeGen::copyItem(Value *dst, Value *src) {
+  if (dst == src) return;
+  b_.CreateMemCpy(dst, itemAlign_, src, itemAlign_, itemSize_);
+}
+
+void CodeGen::setNil(Value *dst) { b_.CreateMemSet(dst, b_.getInt8(0), itemSize_, itemAlign_); }
+
+// An item of type `tag` whose value field starts with `v` (an i32 or a
+// pointer: union members start at its first byte on every target).
+void CodeGen::storeTagged(Value *dst, uint32_t tag, Value *v) {
+  setNil(dst);
+  b_.CreateStore(ConstantInt::get(i32_, tag), b_.CreateStructGEP(itemTy_, dst, FType));
+  b_.CreateStore(v, b_.CreateStructGEP(itemTy_, dst, FValue));
+}
+
+void CodeGen::storeLogical(Value *dst, Value *bit) { storeTagged(dst, XB_T_LOGICAL, b_.CreateZExt(bit, i32_)); }
+
+// One load + one well-predicted branch per fallible call; when something is
+// pending, xb_pending() serves pauses (GC safepoints) and says whether to unwind.
+void CodeGen::checkPending(BasicBlock *unwind) {
+  Value *pending = b_.CreateLoad(i32_, fnCtx_, "pending");
+  Value *isSet = b_.CreateICmpNE(pending, ConstantInt::get(i32_, 0));
+  BasicBlock *slow = newBlock("pending");
+  BasicBlock *cont = newBlock("ok");
+  MDBuilder md(ctx_);
+  b_.CreateCondBr(isSet, slow, cont, md.createUnlikelyBranchWeights());
+  b_.SetInsertPoint(slow);
+  Value *leave = b_.CreateCall(rtPending_, {fnCtx_});
+  b_.CreateCondBr(b_.CreateICmpNE(leave, ConstantInt::get(i32_, 0)), unwind, cont);
+  b_.SetInsertPoint(cont);
 }
 
 } // namespace xb

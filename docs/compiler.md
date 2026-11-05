@@ -4,9 +4,9 @@ Code: `compiler/src/`. The preprocessor is described in [preprocessor.md](prepro
 generated code relies on is in [runtime.md](runtime.md).
 
 Pipeline (`main.cpp`): preprocess `std.ch` and the source, parse, resolve calls, fold constants, run semantic checks,
-generate an in-memory LLVM module, optimize it, emit the object file. Each stage stops the compilation when it reports
-errors. After 100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the preprocessor and the parser stop
-early.
+generate xIR and verify it, lower it to an in-memory LLVM module, optimize it, emit the object file. Each stage stops
+the compilation when it reports errors. After 100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the
+preprocessor and the parser stop early.
 
 ## Grammar
 
@@ -16,7 +16,9 @@ its functions, blocks), `Statements.cpp`, `Expressions.cpp`; `AST.h` holds the s
 Keywords are not reserved. A keyword is recognized at the start of a statement, except when:
 
 - the next token is an assignment or access to a variable (`:=`, `=`, compound assignments, `++`, `--`, `->`, `:`,
-  `[`), so `next := 1` and `exit = 2` assign variables;
+  `[`), so `next := 1` and `exit = 2` assign variables; before `++` and `--`, `IF`, `WHILE`, `ELSEIF`, `CASE`,
+  `RETURN`, `SWITCH`, `NEXT`, `END`, `ENDIF`, `ENDDO` and `ENDCASE` stay keywords, as in Clipper (`IF --n > 0` is an
+  `IF`, `next++` an error);
 - it is one of `EXIT`, `LOOP`, `NEXT`, `END`, `ENDIF`, `ENDDO`, `ELSE`, `ENDCASE`, `OTHERWISE`, `ENDSWITCH` and
   something follows it on the statement;
 - it is `FOR` and the statement has no `TO`, unless `EACH` follows (`FOR each := 1 TO n` is a `FOR` loop over a
@@ -60,8 +62,8 @@ Statements:
 - `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`
 - `EXIT` (leaves the innermost loop or `SWITCH`), `LOOP`
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
-- `DO name [WITH args]`; empty arguments pass `NIL`. Arguments are passed by value (passing plain variables by
-  reference, as Clipper does, needs references, which do not exist yet)
+- `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
+  other arguments (an element, a variable in parentheses, an expression) by value
 - expression statements; at statement level `x = expr` is an assignment
 
 `PRIVATE`, `PUBLIC`, `MEMVAR`, `FIELD` and `PARAMETERS` are recognized and reported as not supported yet.
@@ -70,7 +72,10 @@ Expression precedence, lowest first: `:=` and compound assignments (right-associ
 `=` `==` `!=` `<>` `#`, `<` `<=` `>` `>=` `$`, `+` `-`, `*` `/` `%`, `^`/`**`, unary `-` `+`, prefix and postfix
 `++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`), primaries (literals, `NIL`, variables, calls,
 `IIF(c, a, b)`/`IF(c, a, b)`, parentheses, array literals `{ a, b }`, codeblocks `{| params | expr, ... }`). Empty
-call arguments (`f(a, , b)`) and empty array elements pass `NIL`; a codeblock body has at least one expression.
+call arguments (`f(a, , b)`) and empty array elements pass `NIL`; a codeblock body has at least one expression. A
+call argument `@name` or `@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is
+an error (references in array literals, which Harbour accepts, are not supported yet), and so are function
+references `@name()`.
 Variables and elements (`a[i] := v`, `a[i] += v`, `a[i]++`) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
 declares `a := Array( n1, n2 )`.
 
@@ -88,7 +93,10 @@ EXTERN FUNCTION QOut( ... ) NATIVE
 
 Parameters are names; `[name]` is optional. `[ ]` delimit strings in xBase, so the parser receives a string and takes
 any string whose text is a name as an optional parameter (a `.ppo` listing writes it as `"name"`, which compiles the
-same). Required parameters come first, and `...` allows any number of further arguments. Attributes:
+same). Required parameters come first, and `...` allows any number of further arguments. In a `NATIVE` declaration,
+`@` before a parameter (`@name`, `[@name]`, `@...`) means the function receives a reference passed there (`Eval`
+passes them on to the block); a native function otherwise receives the value of an argument written `@x`. An xBase
+function always receives the reference, so `@` in a declaration without `NATIVE` is an error. Attributes:
 
 | Attribute | Meaning |
 |---|---|
@@ -100,7 +108,8 @@ same). Required parameters come first, and `...` allows any number of further ar
 
 `sema/Calls.*` resolves every call before the other passes. A function the module defines comes first (a name that
 is not `RESERVED` may be redefined); otherwise the call goes to the declaration with that name, or that it
-abbreviates. The call is renamed to the full name and linked to its declaration (`CallExpr::callee`). The argument
+abbreviates. The call is renamed to the full name and linked to its declaration (`CallExpr::callee`), and an argument
+`@x` the declaration does not take by reference becomes `x` (`ExternDecl::takesRef`). The argument
 count of a `CHECKED` name is checked even where the module redefines it. `LOCAL a[n]` calls the declared `Array()`
 even if the module defines one (Clipper creates the array itself). It reports a call to a function that is neither
 defined nor declared, a wrong argument count, a definition of a `RESERVED` name (also through an abbreviation), an
@@ -111,10 +120,12 @@ abbreviation that fits several declarations, conflicting declarations of one nam
 
 `sema/Sema.*` assigns frame slots to parameters and `LOCAL`s (in declaration order; a `LOCAL`'s initializer is resolved
 before its own name becomes visible). A codeblock has its own frame for its parameters. A variable of the enclosing
-function used inside a codeblock is *captured*: it is marked boxed in the function (`FuncDecl::boxed`), and each
-codeblock between the use and the function gets a capture (`BlockExpr::captures`) that passes the cell along; the
-reference resolves to `VarWhere::Capture` with the capture index. Parameters of an enclosing codeblock cannot be
-captured ("outer codeblock variable is out of reach", as in Clipper).
+function used inside a codeblock is *captured*: it is marked shared ("boxed") in the function (`FuncDecl::boxed`),
+and each codeblock between the use and the function gets a capture (`BlockExpr::captures`) that passes the cell
+along; the reference resolves to `VarWhere::Capture` with the capture index. Parameters of an enclosing codeblock
+cannot be captured ("outer codeblock variable is out of reach", as in Clipper). A function's `LOCAL` or parameter
+passed by reference (`@x`) is marked shared too. A shared variable moves into a cell only when a codeblock captures it
+or a reference is taken, at run time.
 
 `STATIC`s get slots in the module's static storage (`Module::statics`, `VarWhere::Static`). File-wide statics are
 visible in every function; a function's statics are visible in that function only. They are never captured: codeblocks
@@ -131,62 +142,97 @@ string constant ("CASE requires either numeric or string constant"), and a `CASE
 
 ## Code generation
 
-`codegen/` lowers each function to an LLVM function with the dynamic calling convention described in
-[runtime.md](runtime.md#calling-convention). One class (`CodeGen.h`), implemented by topic: `CodeGen.cpp` (types,
-runtime declarations, item and basic block helpers, functions and frames, module initialization, program entry),
-`Literals.cpp`, `Statements.cpp`, `Variables.cpp` (variable addresses, cells, references), `Expressions.cpp`,
-`Codeblocks.cpp`; `Emit.cpp` emits the object file.
+Code generation has two steps: the syntax tree becomes xIR ([xir.md](xir.md)), which becomes an LLVM module.
 
-- The entry block obtains the item frame (`xb_frame_push`, sized after the body is generated) and copies the
-  parameters. The caller has already set the result to `NIL`.
-- Expressions evaluate into item slots. Variables and literals are used in place; temporaries come from the frame and
-  are released at the end of each statement.
-- Operators call the runtime (`xb_op_*`). The result may alias an operand. When the right operand of a binary operator
-  has side effects and the left operand is a variable, the left value is copied first.
-- An assignment whose value has side effects computes the value into a temporary first, so `x := x++` assigns the old
-  value. The target's address is taken after the value is computed (a `FOR EACH` variable designates an array element,
-  which moves when the array grows). A `FOR` whose `STEP` has side effects tests a copy of the limit.
-- Calls set the result slot to `NIL`, then pass the arguments in consecutive frame slots. A call to an `EXTERN
-  FUNCTION` goes to `xbf_NAME`, one to a function of the module to `xbp_NAME` (prefixes in `xbrt.h`). A call's result
-  never goes straight into a heap object (a captured `LOCAL`'s cell): it goes through a frame slot first.
-- Boxed variables are moved into cells at function entry (`xb_cell_box`); their uses load the cell from the slot, and
-  captured variables load it from `self->cells[]` (the `xb_block` layout is mirrored with the target `DataLayout`).
-- A codeblock becomes an internal function `<function>.blockN (ctx, ret, argc, argv, self)` with its own frame; the
-  expression creates it with `xb_block_new` and stores the captured cells.
-- Array literals evaluate their elements into consecutive slots and call `xb_array_new`.
-- Element assignment follows Clipper's order: `a[i] := v` evaluates `v`, then `a`, then `i`; `a[i] op= v` and
-  `a[i]++` evaluate `a`, then `i`, then the element, then `v`. A variable operand is copied when something evaluated
-  after it has side effects, so it keeps the value it had. A `FOR` start value with side effects is evaluated into a
-  temporary before it is stored in the loop variable.
-- Conditions test the item type inline; a non-logical value calls `xb_cond_error` and leaves the function.
-- After every call that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it calls
-  `xb_pending` and branches to the function exit if that asks to unwind.
-- The exit block pops the frame and returns.
-- `DO CASE` is lowered as an `IF`/`ELSEIF` chain.
-- `SWITCH` evaluates its value once; `xb_switch_check` rejects values that are not integers or strings (a `SWITCH`
-  without arms accepts anything), and `xb_switch_match` compares it with each `CASE` constant in order (same type and
-  equal; strings compare exactly). The arm bodies are laid out in order so that control falls through.
-- `FOR EACH` evaluates the collections once, in order, and saves the loop variables. During the loop each variable
-  holds a reference (`XB_T_REF`, see [runtime.md](runtime.md#operators)) to the current element, so reading or
-  assigning the variable reads or assigns the element, and changes the body makes to the array through other paths
-  are seen through the variable. An i64 step counter selects the element: index `step + 1`, or with `DESCEND` the
-  collection's length at loop entry minus the step, so each collection is walked from its own end. An ascending loop
-  checks every index against the collection's current length (`xb_enum_len`) before each iteration, so it stops at
-  the shortest collection and sees elements added by the body; a descending one stops when an index reaches 0.
-  The variables get their saved values back at the end (also through `EXIT`); a `STATIC` loop variable also on
-  `RETURN`. One reference per variable serves the whole loop and is moved to each element (`xb_enum_ref_move`),
-  except for a variable a codeblock captures: it gets a new reference and a new cell at every iteration, so a block
-  created in an iteration keeps designating that iteration's element after the loop.
-- Write barrier ([runtime.md](runtime.md#garbage-collector)): after a store into a captured variable, the cell's GC
-  state byte is tested inline and `xb_gc_remember` called for an old cell; after a store into a variable that may
-  hold a reference (`FOR EACH` variables, `STATIC`s, cells), `xb_ref_written` is called for a reference. Stores into
-  frame slots and `STATIC` storage need nothing: they are roots.
-- Variable access: a `FOR EACH` variable of a loop being generated goes through `xb_ref_target`. A `STATIC` and a
-  captured variable may hold a reference made elsewhere (a loop in another function, a block created in a loop), so
-  their accesses test the type inline and call `xb_ref_target` only for a reference. Other variables never hold one.
-- A module with `STATIC`s gets an internal global `xb.statics` (an array of NIL items), an initialization function
-  `xb.module.init` that evaluates the initializers in declaration order, and a global constructor
-  `xb.module.register` that calls `xb_module_register` before `main`.
+### Syntax tree to xIR
+
+`xir/Gen*.cpp` (`xir::Generator`) emits each function's xIR in Clipper's evaluation order; `xir/Verifier.*` checks
+the result before it goes further (an invalid xIR is an internal error), and `--dump-xir=<file>` writes its text.
+
+- Evaluation order: binary operators evaluate the left operand, then the right; calls evaluate their arguments in
+  order; `x := v` evaluates `v`, then stores; `x op= v` loads `x`, then evaluates `v`; `a[i] := v` evaluates `v`,
+  then `a`, then `i`; `a[i] op= v` and `a[i]++` evaluate `a`, then `i`, then the element, then `v`; every operand
+  is evaluated once. A `load` is the variable's value at that point, so `x + (x := 5)`, `x := x + (x := 5)` and
+  `x += (x := 5)` are 6 (Clipper's results; Harbour's own mode rewrites `x := x op v` as `x op= v` and reads `x`
+  last, giving 10), and `x := x++` leaves `x` unchanged; the lowering to LLVM decides where a copy is actually
+  needed.
+- Variables: frame variables (parameters and `LOCAL`s), a codeblock's captures, and the module's `STATIC`s. A frame
+  variable moves into a cell when a codeblock captures it (`block`) or a reference is taken (`ref`), as in Clipper,
+  and a `STATIC` when a reference is taken; its own item then holds the cell (`Var::shared` marks the frame variables
+  that may). A `FOR EACH`
+  variable of a loop being generated is accessed through its reference; a `STATIC`, a shared variable, a captured
+  variable or a parameter is tested at run time for a cell or a reference (an argument passed by reference); other
+  `LOCAL`s never hold one. An argument `@x` is `ref` (the variable's cell), `@a[i]` is `ref.index`. A store into a
+  variable that may live in the heap (a cell, an element through a reference) is followed by `barrier`.
+- `.AND.`, `.OR.` and `IIF` branch; their results are block parameters. Conditions are `truth` tests of items.
+- `DO CASE` becomes an `IF`/`ELSEIF` chain. `SWITCH` evaluates its value once, checks it (`switch.check`; a `SWITCH`
+  without arms accepts anything) and compares it with each `CASE` constant in order (`switch.match`); the arm bodies
+  follow each other so that control falls through.
+- `FOR` re-evaluates the limit and the step at every test (the step after the limit), as Clipper does.
+- `FOR EACH` evaluates the collections once, in order, and saves the loop variables (`each.enter`). During the loop
+  each variable holds a reference (`XB_T_REF`, see [runtime.md](runtime.md#references)) to the current element, so
+  reading or assigning the variable reads or assigns the element, and changes the body makes to the array through
+  other paths are seen through the variable. An `i64` step counter (a block parameter) selects the element: index
+  `step + 1`, or with `DESCEND` the collection's length at loop entry minus the step, so each collection is walked
+  from its own end. An ascending loop checks every index against the collection's current length before each
+  iteration, so it stops at the shortest collection and sees elements added by the body; a descending one stops when
+  an index reaches 0. The variables get their saved values back at the end (`each.leave`, also through `EXIT`), and
+  on `RETURN` those others can see (a `STATIC`, a shared variable, a parameter). One reference per variable serves
+  the loop and is moved to each element (`each.move`). A variable shared when the loop starts (in a cell, or a
+  parameter that received an element by reference; `each.in_cell`) holds it inside its cell, so everyone sharing the
+  variable sees the current element and, after the loop, the restored value. A codeblock or reference that takes a
+  `LOCAL` or parameter while it holds a loop's reference gets the current element instead of the variable, which
+  stays the loop's: later iterations, inner loops on the same variable (here or in a callee) and the restore do not
+  change what it designates. A `STATIC` is one variable for everyone: a reference to it designates it, and the loop
+  follows its cell from the moment one is made.
+- A codeblock becomes an xIR function of its own (`<function>.blockN`) whose frame holds its parameters; `block`
+  creates it with the cells of the variables it captures (moving them into cells if they are not yet).
+- `STATIC` initializers form the module initialization function.
+- Code after `RETURN`, `EXIT` or `LOOP` lands in blocks nothing reaches, removed once the function is complete.
+
+### xIR to LLVM
+
+`codegen/` lowers each xIR function to an LLVM function with the dynamic calling convention described in
+[runtime.md](runtime.md#calling-convention): `CodeGen.cpp` (types, runtime declarations, the module, functions and
+frames), `FramePlan.*` (where each item lives), `Instructions.cpp`, `Variables.cpp` (variable addresses, references,
+write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
+
+- Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
+  from its uses back to its definition, slots are assigned by linear scan and reused once free (frame variables take
+  slots 0 to n-1). The arguments of a call and the elements of an array literal take consecutive slots, and a value
+  used only there (a block parameter too) is computed straight into its slot; a branch argument used only there
+  shares the slot of its block parameter; a `load` whose single use follows with nothing in between that can write
+  the variable uses the variable's own item (no copy); a value used only by the `store` right after it is computed
+  into the variable, and one used only by `ret` into the caller's result slot. A call's result is never computed
+  straight into a heap object (a cell, an element) and only into a plain frame variable, and an operation that can
+  fail is not computed in place through a reference (finding the element can fail too, and the operation's error
+  comes first). Two edges from one block to the same block do not share their arguments' slots.
+- The entry block obtains the frame (`xb_frame_push`, of the planned size) and copies the parameters
+  (`xb_args_copy`); the caller has already set the result to `NIL`. The exit block pops the frame and returns. Blocks
+  are laid out in reverse postorder visiting successors last first, so a block's first successor (a loop body, a
+  THEN branch) follows it and exits come later.
+- Operations call the runtime (`xb_op_*` and the others); the result may alias an operand. Calls set the result slot
+  to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to
+  `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to a function of the module to `xbp_NAME` (prefixes in `xbrt.h`).
+- After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
+  calls `xb_pending` and leaves through the operation's unwind block (the function's exit when it has none) if that
+  asks to unwind.
+  `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
+- Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
+  target `DataLayout`); a `FOR EACH` variable goes through `xb_ref_target`; a `STATIC`, a shared or captured
+  variable or a parameter tests its type inline (one unsigned comparison covers `XB_T_CELL` and `XB_T_REF`), follows
+  a cell inline and calls `xb_ref_target` only for an element.
+- `block` obtains the cells first (`xb_cell_of`: the variable's cell, made now if it has none, or a cell holding the
+  current element of a `FOR EACH` variable), then creates the block.
+  `ref` calls `xb_ref_of` (or builds the `XB_T_CELL` item of a captured variable's cell); `ref.index` calls
+  `xb_ref_elem`. `each.enter`, `each.move` and `each.leave` call `xb_each_enter`, `xb_each_move` and `xb_each_leave`.
+- `barrier` ([runtime.md](runtime.md#garbage-collector)): after a store into a cell, the cell's GC state byte is
+  tested inline and `xb_gc_remember` called for an old cell; after a store through an element reference,
+  `xb_ref_written` is called. Frame slots and `STATIC` storage are roots and need nothing.
+- Block parameters: item parameters live in slots, and branches copy their arguments in (through a staging buffer
+  when a destination is also a source); machine parameters (`bool`, `i64`) become PHIs.
+- A module with `STATIC`s gets an internal global `xb.statics` (an array of NIL items), its initialization function,
+  and a global constructor `xb.module.register` that calls `xb_module_register` before `main`.
 - The start module also gets `xb_app_main`, which checks the ABI, runs the module initializations
   (`xb_modules_init`, followed by the pending check) and calls the first function of the source.
 - 32-bit parameters and results of every declared or defined function carry the extension attribute the target ABI
@@ -235,5 +281,8 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 ## Object emission
 
 `codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
-host), runs the default optimization pipeline for the `-O` level, and writes the object with the target's object writer.
-Code is position independent unless `--static` is given.
+host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), and writes the object with the
+target's object writer (code generation runs on the legacy pass manager: in LLVM 22 it is the one every target
+implements). Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one,
+so programs run on any CPU of the target; `--cpu=native` (host target only) uses the CPU and features of the machine
+xbc runs on.

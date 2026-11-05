@@ -3,6 +3,7 @@
 
 #include "common/Text.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace xb {
@@ -75,14 +76,22 @@ bool Parser::isKw(const Token &t, const char *kw) const {
 }
 
 // A keyword at statement start - unless the "keyword" is really a variable
-// (`next := 1`, `exit = 2`, `end[1]`). Keywords that form a statement on
-// their own are keywords only when nothing follows them, and FOR only when
-// its statement has a TO.
+// (`next := 1`, `exit = 2`, `end[1]`, `loop++`). Keywords that form a statement
+// on their own are keywords only when nothing follows them, and FOR only when
+// its statement has a TO. Before `++` or `--` the keywords that start with an
+// expression (`IF --n > 0`) and the block closers stay keywords, as in Clipper:
+// `next++` is an error.
 bool Parser::atStmtKw(const char *kw) const {
   if (!atKw(kw)) return false;
+  static const char *const keywordBeforeIncDec[] = {"IF",   "WHILE", "ELSEIF", "CASE",  "RETURN", "SWITCH",
+                                                    "NEXT", "END",   "ENDIF",  "ENDDO", "ENDCASE"};
   switch (ahead().kind) {
+  case Tok::Inc: case Tok::Dec:
+    for (const char *k : keywordBeforeIncDec)
+      if (std::strcmp(k, kw) == 0) return true;
+    return false;
   case Tok::Assign: case Tok::PlusEq: case Tok::MinusEq: case Tok::MulEq: case Tok::DivEq:
-  case Tok::ModEq: case Tok::PowEq: case Tok::Inc: case Tok::Dec: case Tok::Arrow:
+  case Tok::ModEq: case Tok::PowEq: case Tok::Arrow:
   case Tok::Colon: case Tok::LBracket: case Tok::Eq:
     return false;
   default:
@@ -214,7 +223,8 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
 
 // EXTERN FUNCTION name( p1, [p2], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ABBREV n]
 // Required parameters come first; `...` ends the list and lifts the maximum.
-// A malformed declaration is reported once and skipped.
+// `@` before a parameter (or `...`) of a NATIVE function: it receives
+// references passed to it. A malformed declaration is reported once and skipped.
 std::optional<ExternDecl> Parser::parseExtern() {
   ExternDecl d;
   d.loc = cur().loc;
@@ -232,15 +242,26 @@ std::optional<ExternDecl> Parser::parseExtern() {
   if (!accept(Tok::LParen)) return fail("expected '(' after the function name");
   if (!accept(Tok::RParen)) {
     while (true) {
+      bool byRef = accept(Tok::At);
       if (accept(Tok::Ellipsis)) {
         d.maxArgs = ExternDecl::kUnlimited;
+        d.restByRef = byRef;
         if (!accept(Tok::RParen)) return fail("expected ')' after '...'");
         break;
       }
       // [name] reaches the parser as a string ([ ] delimit strings, and listings
-      // write them as "name"): a string holding a name is an optional parameter.
-      bool optional = at(Tok::String) && isIdentifier(cur().text);
+      // write them as "name"): a string holding a name, or @name, is an
+      // optional parameter.
+      bool optional = false;
+      if (!byRef && at(Tok::String)) {
+        std::string_view text = cur().text;
+        bool atSign = !text.empty() && text.front() == '@';
+        if (atSign) text.remove_prefix(1);
+        optional = isIdentifier(text);
+        byRef = optional && atSign;
+      }
       if (!optional && !at(Tok::Ident)) return fail("expected a parameter name, [name] or '...'");
+      d.byRef.push_back(byRef);
       if (!optional && d.minArgs != d.maxArgs) {
         diag_.error(cur().loc, "a required parameter cannot follow an optional one");
         skipToEndOfStmt();
@@ -271,6 +292,12 @@ std::optional<ExternDecl> Parser::parseExtern() {
     advance();
   }
   if (!atEndOfStmt()) return fail("expected an EXTERN FUNCTION attribute");
+  bool anyByRef = d.restByRef || std::find(d.byRef.begin(), d.byRef.end(), true) != d.byRef.end();
+  if (anyByRef && !d.native) {
+    diag_.error(d.loc, "'@' parameters are for NATIVE functions (an xBase function always receives references)");
+    endOfStmt();
+    return std::nullopt;
+  }
   endOfStmt();
   return d;
 }

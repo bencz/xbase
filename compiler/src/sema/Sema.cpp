@@ -91,8 +91,14 @@ void Sema::func(FuncDecl &f) {
   curFunc_ = nullptr;
 }
 
+void Sema::markBoxed(Frame &f, uint32_t slot) {
+  std::vector<bool> &boxed = *f.boxed;
+  if (boxed.size() <= slot) boxed.resize(slot + 1);
+  boxed[slot] = true;
+}
+
 // Finds a variable in the current frame or an enclosing one. A variable of the
-// enclosing function is captured: it is boxed in its frame, and every codeblock
+// enclosing function is captured: it is marked shared in its frame, and every codeblock
 // between there and here gets a capture that passes its cell along. Parameters
 // of an enclosing codeblock cannot be captured.
 bool Sema::resolve(VarExpr &v) {
@@ -114,9 +120,7 @@ bool Sema::resolve(VarExpr &v) {
       diag_.error(v.loc, "outer codeblock variable '" + v.name + "' is out of reach");
       return true;
     }
-    std::vector<bool> &boxed = *frames_[fi].boxed;
-    if (boxed.size() <= slot) boxed.resize(slot + 1);
-    boxed[slot] = true;
+    markBoxed(frames_[fi], slot);
     BlockExpr::Capture cap{false, slot};
     for (size_t k = fi + 1; k < frames_.size(); ++k) {
       auto &caps = frames_[k].block->captures;
@@ -133,7 +137,7 @@ bool Sema::resolve(VarExpr &v) {
 }
 
 void Sema::codeblock(BlockExpr &b, Scope &s) {
-  frames_.push_back({{}, nullptr, &b}); // block parameters are never captured
+  frames_.push_back({{}, nullptr, &b}); // parameters only: never captured, and tested for references anyway
   uint32_t n = 0;
   for (const Param &p : b.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, n}).second)
@@ -306,6 +310,18 @@ void Sema::expr(Expr &e, Scope &s) {
   case ExprKind::IncDec:
     lvalue(*static_cast<IncDecExpr &>(e).target, s);
     break;
+  case ExprKind::Ref: {
+    // A variable passed by reference is shared with the callee: a function's
+    // LOCAL or parameter is marked; a codeblock's parameters, STATICs and
+    // captured variables are reached with a run-time test anyway.
+    Expr &target = *static_cast<RefExpr &>(e).target;
+    lvalue(target, s);
+    if (target.kind == ExprKind::Var) {
+      auto &v = static_cast<VarExpr &>(target);
+      if (v.where == VarWhere::Frame && !frames_.back().block) markBoxed(frames_.back(), v.slot);
+    }
+    break;
+  }
   case ExprKind::IIf: {
     auto &i = static_cast<IIfExpr &>(e);
     expr(*i.cond, s);

@@ -215,6 +215,9 @@ void Folder::fold(ExprPtr &e) {
   case ExprKind::IncDec:
     fold(static_cast<IncDecExpr &>(*e).target);
     break;
+  case ExprKind::Ref:
+    fold(static_cast<RefExpr &>(*e).target); // the indexes of an element
+    break;
   case ExprKind::IIf: {
     auto &i = static_cast<IIfExpr &>(*e);
     fold(i.cond);

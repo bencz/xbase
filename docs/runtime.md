@@ -18,8 +18,8 @@ typedef struct xb_item {
 ```
 
 - Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `DATE`, and two kinds the language
-  never shows: `CELL`, only in the frame slot of a variable a codeblock captured, and `REF`, a reference to an element
-  held by a `FOR EACH` variable. An all-zero item is `NIL`.
+  never shows, which designate another item (see [References](#references)): `CELL`, a variable in a cell, and `REF`,
+  an element. An all-zero item is `NIL`.
 - Copying an item is a plain memory copy; there is no reference counting.
 - Strings (`xb_str`: flags, hash, length, bytes) are immutable and NUL-terminated, so they can be shared between items
   and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects.
@@ -65,9 +65,9 @@ each one, so object pointers are what the rest of the runtime and compiled code 
   calls `xb_gc_write(obj)` after storing into a heap object (a grown array's item storage, a reference's character)
   and `xb_gc_write_item(array, index)` after storing an array element; compiled code tests the byte inline after
   storing into a captured variable's cell and calls `xb_gc_remember`, and calls `xb_ref_written` after a store
-  through a `FOR EACH` reference. The barrier comes after the store, with no allocation in between, and an item a
-  call produces never goes straight into a heap object: it goes through a frame slot first (a root). A recorded
-  object is traced by the next young collection and leaves the set.
+  through a reference (a `FOR EACH` variable, a parameter passed by reference). The barrier comes after the store,
+  with no allocation in between, and an item a call produces never goes straight into a heap object: it goes through
+  a frame slot first (a root). A recorded object is traced by the next young collection and leaves the set.
 - Card marking: array storage for 1024 items or more carries one card byte per 64 items after its last item. A store
   into such an old array marks the element's card and records the array for its cards only; the young collection
   scans the marked cards (eight card bytes per step) instead of the whole array. Storage that is replaced (the array
@@ -93,11 +93,32 @@ last full collection found (tests use it).
 
 ## Codeblocks
 
-A `LOCAL` or parameter that a codeblock uses is *boxed*: at function entry `xb_cell_box` moves it into a cell and
-leaves an `XB_T_CELL` item in its slot. The function and every block that captured it share the cell, which outlives
-the function. A codeblock is a compiled function `(ctx, ret, argc, argv, self)` plus the captured cells
-(`self->cells[]`); `xb_block_new` creates it and the compiled code stores the cells. `Eval( bBlock, ... )` and
-`xb_block_call` run it; the caller sets the result to `NIL` first.
+A variable that a codeblock captures, or that is passed by reference, moves into a cell when that first happens: its
+value moves into a new cell and an `XB_T_CELL` item is left in its slot or `STATIC` storage (a parameter passed by
+reference already holds its caller's). `xb_cell_of` returns the cell a codeblock captures; for a `LOCAL` or
+parameter that holds the reference of a `FOR EACH` loop it returns a new cell holding the current element, and the
+variable stays the loop's. The function and every block
+that captured it share the cell, which outlives the function. A codeblock is a compiled function
+`(ctx, ret, argc, argv, self)` plus the captured cells (`self->cells[]`); `xb_block_new` creates it and the compiled
+code stores the cells. `Eval( bBlock, ... )` and `xb_block_call` run it; the caller sets the result to `NIL` first.
+
+## References
+
+An item that designates another item is an `XB_T_CELL` (a variable in a cell: `v.p` is the `xb_cell`) or an `XB_T_REF`
+(an element: `v.p` is an `xb_ref` holding the collection, the 1-based index, and for a string the current character).
+The two tags are consecutive, so compiled code tests for both with one unsigned comparison. A cell may hold an
+`XB_T_REF` (a `FOR EACH` variable); an element never holds either.
+
+- A `FOR EACH` variable holds an `XB_T_REF` during the loop (see [Operators](#operators)).
+- An argument passed by reference: `@x` passes the variable's cell (`xb_ref_of`), or for a `LOCAL` or parameter that
+  holds a loop's reference a copy of it (the current element; a `STATIC` is always passed itself); `@a[i]` passes a
+  new `XB_T_REF` from `xb_ref_elem`, which raises the errors of reading `a[i]` (1068, 1132). So the callee, and a
+  codeblock that captures its parameter, share the caller's variable. A reference records whether a loop made it,
+  so a parameter given an element can be told from a loop variable.
+- `xb_ref_target` returns the item a reference designates in the end (through a cell, then an element); an element
+  is found again at every use, so it follows the array when it grows, and an index outside the array, after the array
+  shrank, raises `Bound error: array access` (1132). `xb_ref_written` is the write barrier after a store there: the
+  cell, the array, or the reference itself for a string's character.
 
 ## Calling convention
 
@@ -114,7 +135,8 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   the `runtime.declarations` test checks that the declarations and the `xbf_` definitions match.
 - The caller evaluates the arguments into consecutive slots of its own frame and sets `ret` to `NIL`; a callee that
   returns nothing leaves it untouched. The callee copies its parameters into its frame (`xb_args_copy`); missing
-  arguments are `NIL`.
+  arguments are `NIL`. An argument passed by reference is an `XB_T_CELL` or `XB_T_REF` item (see
+  [References](#references)); a C function receives one only where its declaration says `@`.
 - Every 32-bit parameter of a runtime entry point is `uint32_t` and every 32-bit result `int32_t`; the compiler
   relies on this to apply the target's argument-extension rules.
 
@@ -160,12 +182,14 @@ expressions whose decimals are decided at run time. Items keep 16 bits of SET DE
 
 `FOR EACH` (`core/control.c`) enumerates arrays (their items) and strings (their characters as one-character strings);
 `xb_enum_len` raises `Argument error: array access` (1068) for any other collection. Indexes are 1-based. The loop
-variable holds an `XB_T_REF` item made by `xb_enum_ref_new`, whose target (`xb_ref`: the collection, the index, and for
-strings the current character) `xb_enum_ref_move` sets. `xb_ref_target` returns the item the reference designates: the
-array element, found again at every use so that it follows the array when the array grows, or for a string the copy of
-the character (assigning it leaves the string unchanged). An index outside the array, after the array shrank, raises
-`Bound error: array access` (1132). `SWITCH` uses `xb_switch_check`, which raises `Argument error: SWITCH` (3104) for a
-value that is not an integer or a string, and `xb_switch_match`.
+variable holds an `XB_T_REF` item (see [References](#references)); for a string the reference holds a copy of the
+character, so assigning it leaves the string unchanged. The loop works on a base item: the variable's cell when it is
+shared at entry (`xb_each_shared`; a parameter holding an element passed by reference moves into a cell then), else
+the variable's own item. `xb_each_enter` saves the base's value and puts the loop's reference there, `xb_each_move`
+points it at the next element (taking the variable copies the reference, so the base keeps it), and `xb_each_leave`
+restores the saved value; for a `STATIC` the compiled code tests for a cell at each call, since a reference taken
+during the loop designates the `STATIC` itself. `SWITCH` uses `xb_switch_check`, which raises
+`Argument error: SWITCH` (3104) for a value that is not an integer or a string, and `xb_switch_match`.
 
 `FOR` uses `xb_for_test`: a non-negative step loops while the counter is not greater than the limit, a negative step
 while it is not less; operands that cannot be compared raise the `>` or `<` argument error, a non-numeric step the

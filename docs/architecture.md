@@ -16,8 +16,9 @@ code through LLVM. There is no p-code and no virtual machine.
 | Runtime `xbrt` | C11 (xBase parts planned) | `runtime/` | [runtime.md](runtime.md) |
 | Standard header | xBase preprocessor rules | `include/std.ch` | [preprocessor.md](preprocessor.md) |
 
-`xbc` builds an `llvm::Module` in memory, runs LLVM's optimization pipeline, and emits the object file through a
-`TargetMachine`. No textual IR is written (except with the debugging option `--dump-ir`) and no external `llc` or
+`xbc` lowers the syntax tree to xIR, its own intermediate representation ([xir.md](xir.md)), then builds an
+`llvm::Module` in memory, runs LLVM's optimization pipeline, and emits the object file through a `TargetMachine`. No
+textual IR is written (except with the debugging options `--dump-xir` and `--dump-ir`) and no external `llc` or
 `clang` runs.
 
 ## Decisions

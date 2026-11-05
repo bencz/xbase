@@ -4,6 +4,9 @@
 //
 //   EXTERN FUNCTION Name( param, [optionalParam], ... ) [attributes]
 //
+// `@` before a parameter (`@param`, `[@param]`, `@...`) of a NATIVE function: an argument written `@var` there
+// reaches it as a reference (an XB_T_CELL or XB_T_REF item); elsewhere a native function receives the value.
+//
 // Attributes:
 //   NATIVE    written in C to the xBase calling convention (symbol xbf_NAME); without it, the function is an xBase
 //             function of another module of the program (symbol xbp_NAME)
@@ -75,7 +78,7 @@ EXTERN FUNCTION Year( dDate ) NATIVE RESERVED CHECKED
 
 // Language, settings and runtime
 EXTERN FUNCTION Empty( xValue ) NATIVE RESERVED CHECKED ABBREV 4
-EXTERN FUNCTION Eval( bBlock, ... ) NATIVE CHECKED
+EXTERN FUNCTION Eval( bBlock, @... ) NATIVE CHECKED
 EXTERN FUNCTION Set( nSetting, ... ) NATIVE
 EXTERN FUNCTION ValType( xValue ) NATIVE RESERVED CHECKED ABBREV 4
 

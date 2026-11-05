@@ -24,7 +24,8 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 | `compiler/src/parser/` | syntax tree and recursive descent parser |
 | `compiler/src/sema/` | scopes, slots, captures, structural checks |
 | `compiler/src/opt/` | optimizations on the syntax tree (constant folding) |
-| `compiler/src/codegen/` | syntax tree to in-memory LLVM module; object emission |
+| `compiler/src/xir/` | xIR: data structures, builder, verifier, printer, control flow analyses; syntax tree to xIR |
+| `compiler/src/codegen/` | xIR to in-memory LLVM module (frame plan, instructions); object emission |
 | `compiler/src/driver/` | `xbc` command line |
 | `include/` | `std.ch`, `set.ch` and the other standard headers |
 | `runtime/include/xbrt.h` | runtime ABI shared with the compiler |
@@ -33,4 +34,4 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 | `runtime/src/types/` | representation and base operations of strings, arrays, codeblocks |
 | `runtime/src/rtl/` | functions of the language, by area |
 | `runtime/src/platform/` | operating-system interface (`platform.h`) and one directory per platform |
-| `tests/run`, `tests/pp`, `tests/fail` | execution, preprocessor and compile-failure tests |
+| `tests/run`, `tests/pp`, `tests/fail`, `tests/xir` | execution, preprocessor, compile-failure and xIR tests |
