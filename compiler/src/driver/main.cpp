@@ -183,10 +183,10 @@ int main(int argc, char **argv) {
   xb::Parser parser(std::move(tokens), diag);
   auto ast = parser.parseModule(moduleNameFor(input));
   if (diag.errorCount()) return 1;
+  xb::Folder().run(*ast); // before Sema: STATIC initializers are checked once folded
   xb::Sema sema(diag);
   sema.run(*ast);
   if (diag.errorCount()) return 1;
-  xb::Folder().run(*ast);
 
   xb::initializeTargets();
   std::string err;

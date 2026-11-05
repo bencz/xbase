@@ -7,6 +7,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/MDBuilder.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <cstring>
@@ -102,6 +103,14 @@ void CodeGen::initTypes() {
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtCellBox_ = rt("xb_cell_box", voidTy, {ptrTy_, ptrTy_});
   rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, i32_});
+  rtEnumLen_ = rt("xb_enum_len", i64_, {ptrTy_, ptrTy_});
+  rtEnumRefNew_ = rt("xb_enum_ref_new", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtEnumRefMove_ = rt("xb_enum_ref_move", voidTy, {ptrTy_, ptrTy_, i64_});
+  rtRefTarget_ = rt("xb_ref_target", ptrTy_, {ptrTy_, ptrTy_});
+  rtSwitchCheck_ = rt("xb_switch_check", voidTy, {ptrTy_, ptrTy_});
+  rtSwitchMatch_ = rt("xb_switch_match", i32_, {ptrTy_, ptrTy_});
+  rtModuleRegister_ = rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_});
+  rtModulesInit_ = rt("xb_modules_init", voidTy, {ptrTy_});
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},
       {BinOp::Div, "xb_op_div"}, {BinOp::Mod, "xb_op_mod"},       {BinOp::Pow, "xb_op_pow"},
@@ -257,8 +266,16 @@ void CodeGen::checkPending() {
 void CodeGen::startDeadBlock() { b_.SetInsertPoint(newBlock("dead")); }
 
 bool CodeGen::run(const Module &m, bool emitEntry) {
+  if (!m.statics.empty()) {
+    auto *ty = ArrayType::get(itemTy_, m.statics.size());
+    auto *gv = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, ConstantAggregateZero::get(ty),
+                                  "xb.statics"); // all NIL
+    gv->setAlignment(itemAlign_);
+    statics_ = gv;
+  }
   for (auto &f : m.funcs) funcs_[f->name] = declareXbFunc(f->name, f->isStatic);
   for (auto &f : m.funcs) genFunc(*f);
+  if (!m.statics.empty()) genModuleInit(m);
   if (emitEntry && !m.funcs.empty()) genEntry(*m.funcs.front());
 
   std::string err;
@@ -329,10 +346,53 @@ void CodeGen::genEntry(const FuncDecl &start) {
   uint64_t blockCells = dl_.getStructLayout(blockTy_)->getElementOffset(2);
   b_.CreateCall(rtAbiCheck_, {ConstantInt::get(i32_, XB_ABI_VERSION), ConstantInt::get(i32_, itemSize_),
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells)});
+  fn_ = fn;
+  fnCtx_ = ctx;
+  fnExit_ = BasicBlock::Create(ctx_, "done", fn);
+  b_.CreateCall(rtModulesInit_, {ctx});
+  checkPending(); // an error in a module initialization ends the program
   Value *ret = b_.CreateCall(rtFramePush_, {ctx, ConstantInt::get(i32_, 1)});
   b_.CreateCall(xbFuncTy_, funcs_[start.name], {ctx, ret, ConstantInt::get(i32_, 0), ConstantPointerNull::get(ptrTy_)});
   b_.CreateCall(rtFramePop_, {ctx, ret});
+  b_.CreateBr(fnExit_);
+  fnExit_->moveAfter(b_.GetInsertBlock());
+  b_.SetInsertPoint(fnExit_);
   b_.CreateRetVoid();
+}
+
+// The module's STATICs get their initial values in an initialization
+// function; a global constructor registers it, and the STATICs as GC roots,
+// before main() runs.
+void CodeGen::genModuleInit(const Module &m) {
+  auto *initTy = FunctionType::get(Type::getVoidTy(ctx_), {ptrTy_}, false);
+  Function *init = Function::Create(initTy, GlobalValue::InternalLinkage, "xb.module.init", mod_);
+  init->addFnAttr(Attribute::NoUnwind);
+  fn_ = init;
+  b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", init));
+  fnCtx_ = init->getArg(0);
+  fnRet_ = nullptr;
+  fnSelf_ = nullptr;
+  static const std::vector<bool> noBoxed;
+  beginFrame(nullptr, nullptr, 0, 0, noBoxed);
+  for (const LocalDecl *d : m.statics) {
+    if (!d->init) continue;
+    uint32_t mark = temps_;
+    genExpr(*d->init, staticAddress(d->slot));
+    temps_ = mark;
+  }
+  endFrame();
+
+  auto *regTy = FunctionType::get(Type::getVoidTy(ctx_), {}, false);
+  Function *reg = Function::Create(regTy, GlobalValue::InternalLinkage, "xb.module.register", mod_);
+  reg->addFnAttr(Attribute::NoUnwind);
+  b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", reg));
+  b_.CreateCall(rtModuleRegister_, {init, statics_, ConstantInt::get(i32_, m.statics.size())});
+  b_.CreateRetVoid();
+  appendToGlobalCtors(mod_, reg, 65535);
+}
+
+Value *CodeGen::staticAddress(uint32_t idx) {
+  return b_.CreateConstInBoundsGEP2_32(statics_->getValueType(), statics_, 0, idx);
 }
 
 void CodeGen::genBlock(const Block &blk) {
@@ -360,6 +420,8 @@ void CodeGen::genStmt(const Stmt &s) {
   case StmtKind::Return: {
     auto &r = static_cast<const ReturnStmt &>(s);
     if (r.value) genExpr(*r.value, fnRet_);
+    for (auto it = eachVars_.rbegin(); it != eachVars_.rend(); ++it) // a STATIC outlives the function
+      if (it->var->where == VarWhere::Static) copyItem(it->raw, it->saved);
     b_.CreateBr(fnExit_);
     startDeadBlock();
     break;
@@ -453,12 +515,155 @@ void CodeGen::genStmt(const Stmt &s) {
     break;
   }
 
+  case StmtKind::Static: // initialized by the module initialization
+    break;
+
+  case StmtKind::ForEach:
+    genForEach(static_cast<const ForEachStmt &>(s));
+    break;
+
+  case StmtKind::Switch:
+    genSwitch(static_cast<const SwitchStmt &>(s));
+    break;
+
   case StmtKind::Exit:
   case StmtKind::Loop:
     b_.CreateBr(s.kind == StmtKind::Exit ? loops_.back().exitTo : loops_.back().loopTo);
     startDeadBlock();
     break;
   }
+}
+
+// A local of the LLVM function, in its entry block (promoted to a register by
+// mem2reg).
+Value *CodeGen::entryAlloca(Type *ty, const char *name) {
+  IRBuilder<> entry(&fn_->getEntryBlock(), fn_->getEntryBlock().begin());
+  return entry.CreateAlloca(ty, nullptr, name);
+}
+
+// FOR EACH: the collections are evaluated once. During the loop each variable
+// holds a reference (XB_T_REF) to the current element, so reading or assigning
+// the variable reads or assigns the element (see varAddress). The variables
+// get their previous values back when the loop ends, by EXIT too, and STATICs
+// also on RETURN. A variable that a codeblock captures gets a new cell and
+// reference at every iteration, so a block keeps designating the element of the
+// iteration that created it.
+void CodeGen::genForEach(const ForEachStmt &st) {
+  size_t n = st.vars.size();
+  std::vector<Value *> colls(n);
+  for (size_t k = 0; k < n; ++k) {
+    colls[k] = tempSlot();
+    genExpr(*st.collections[k], colls[k]);
+  }
+  std::vector<EachVar> vars;
+  for (size_t k = 0; k < n; ++k) {
+    auto &v = static_cast<const VarExpr &>(*st.vars[k]);
+    Value *raw = v.where == VarWhere::Static ? staticAddress(v.slot) : slot(v.slot);
+    Value *saved = tempSlot();
+    copyItem(saved, raw);
+    vars.push_back({&v, raw, saved});
+    if (!isBoxed(v)) b_.CreateCall(rtEnumRefNew_, {fnCtx_, raw, colls[k]});
+  }
+  auto length = [&](size_t k) {
+    Value *len = b_.CreateCall(rtEnumLen_, {fnCtx_, colls[k]});
+    checkPending();
+    return len;
+  };
+  // One step counter; each collection has its own index: step + 1, or for
+  // DESCEND its length at entry minus the step. Ascending loops end at the end
+  // of the shortest collection, as long as it is now; descending ones when an
+  // index reaches 0 (an array that shrank meanwhile gives a bound error).
+  std::vector<Value *> last(n);
+  if (st.descend)
+    for (size_t k = 0; k < n; ++k) last[k] = length(k);
+  Value *step = entryAlloca(i64_, "each.step");
+  b_.CreateStore(ConstantInt::get(i64_, 0), step);
+  auto index = [&](size_t k, Value *cur) {
+    return st.descend ? b_.CreateSub(last[k], cur) : b_.CreateAdd(cur, ConstantInt::get(i64_, 1));
+  };
+
+  BasicBlock *test = newBlock("each.test");
+  BasicBlock *body = newBlock("each.body");
+  BasicBlock *incr = newBlock("each.next");
+  BasicBlock *end = newBlock("each.end");
+  b_.CreateBr(test);
+
+  b_.SetInsertPoint(test);
+  Value *cur = b_.CreateLoad(i64_, step);
+  Value *inRange = ConstantInt::getTrue(ctx_);
+  for (size_t k = 0; k < n; ++k) {
+    Value *i = index(k, cur);
+    inRange = b_.CreateAnd(inRange, st.descend ? b_.CreateICmpSGE(i, ConstantInt::get(i64_, 1))
+                                               : b_.CreateICmpSLE(i, length(k)));
+  }
+  b_.CreateCondBr(inRange, body, end);
+
+  b_.SetInsertPoint(body);
+  cur = b_.CreateLoad(i64_, step);
+  for (size_t k = 0; k < n; ++k) {
+    Value *i = index(k, cur);
+    if (isBoxed(*vars[k].var)) {
+      Value *t = tempSlot();
+      b_.CreateCall(rtEnumRefNew_, {fnCtx_, t, colls[k]});
+      b_.CreateCall(rtEnumRefMove_, {fnCtx_, t, i});
+      checkPending();
+      b_.CreateCall(rtCellBox_, {fnCtx_, t});
+      copyItem(vars[k].raw, t);
+    } else {
+      b_.CreateCall(rtEnumRefMove_, {fnCtx_, vars[k].raw, i});
+      checkPending();
+    }
+  }
+  eachVars_.insert(eachVars_.end(), vars.begin(), vars.end());
+  loops_.push_back({end, incr});
+  genBlock(st.body);
+  loops_.pop_back();
+  eachVars_.resize(eachVars_.size() - n);
+  if (!b_.GetInsertBlock()->getTerminator()) b_.CreateBr(incr);
+
+  incr->moveAfter(b_.GetInsertBlock());
+  b_.SetInsertPoint(incr);
+  b_.CreateStore(b_.CreateAdd(b_.CreateLoad(i64_, step), ConstantInt::get(i64_, 1)), step);
+  b_.CreateBr(test);
+
+  end->moveAfter(incr);
+  b_.SetInsertPoint(end);
+  for (const EachVar &v : vars) copyItem(v.raw, v.saved);
+}
+
+// SWITCH: the value is tested against each CASE in order; the bodies follow
+// each other, so control falls through until EXIT (which leaves the SWITCH).
+void CodeGen::genSwitch(const SwitchStmt &st) {
+  Value *value = tempSlot();
+  genExpr(*st.value, value);
+  if (st.cases.empty()) return; // nothing compares the value, so any type is accepted
+  b_.CreateCall(rtSwitchCheck_, {fnCtx_, value});
+  checkPending();
+  BasicBlock *end = newBlock("switch.end");
+  std::vector<BasicBlock *> bodies;
+  for (size_t i = 0; i < st.cases.size(); ++i) bodies.push_back(newBlock("switch.case"));
+  BasicBlock *otherwise = end;
+  for (size_t i = 0; i < st.cases.size(); ++i) {
+    if (!st.cases[i].value) {
+      otherwise = bodies[i];
+      continue;
+    }
+    Value *match = b_.CreateCall(rtSwitchMatch_, {value, genOperand(*st.cases[i].value)});
+    BasicBlock *next = newBlock("switch.test");
+    b_.CreateCondBr(b_.CreateICmpNE(match, ConstantInt::get(i32_, 0)), bodies[i], next);
+    b_.SetInsertPoint(next);
+  }
+  b_.CreateBr(otherwise);
+  for (size_t i = 0; i < st.cases.size(); ++i) {
+    bodies[i]->moveAfter(b_.GetInsertBlock());
+    b_.SetInsertPoint(bodies[i]);
+    loops_.push_back({end, loops_.empty() ? nullptr : loops_.back().loopTo});
+    genBlock(st.cases[i].body);
+    loops_.pop_back();
+    if (!b_.GetInsertBlock()->getTerminator()) b_.CreateBr(i + 1 < bodies.size() ? bodies[i + 1] : end);
+  }
+  end->moveAfter(b_.GetInsertBlock());
+  b_.SetInsertPoint(end);
 }
 
 // Variables a codeblock captured live in cells: the frame slot holds the
@@ -476,13 +681,56 @@ Value *CodeGen::capturedCellAddress(Value *block, uint32_t index) {
   return b_.CreateInBoundsGEP(blockTy_, block, {b_.getInt32(0), b_.getInt32(2), b_.getInt32(index)});
 }
 
+bool CodeGen::isBoxed(const VarExpr &v) const {
+  return v.where == VarWhere::Frame && v.slot < fnBoxed_->size() && (*fnBoxed_)[v.slot];
+}
+
+bool CodeGen::isEachVar(const VarExpr &v) const {
+  for (const EachVar &e : eachVars_)
+    if (e.var->where == v.where && e.var->slot == v.slot) return true;
+  return false;
+}
+
+// The element an XB_T_REF item designates.
+Value *CodeGen::refTarget(Value *ref) {
+  Value *target = b_.CreateCall(rtRefTarget_, {fnCtx_, ref}, "elem");
+  checkPending();
+  return target;
+}
+
+// `item` itself, or the element it designates when it holds a reference.
+Value *CodeGen::derefIfRef(Value *item) {
+  Value *type = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, item, FType), "type");
+  BasicBlock *from = b_.GetInsertBlock();
+  BasicBlock *isRef = newBlock("ref");
+  BasicBlock *join = newBlock("deref");
+  MDBuilder md(ctx_);
+  b_.CreateCondBr(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_REF)), isRef, join,
+                  md.createUnlikelyBranchWeights());
+  b_.SetInsertPoint(isRef);
+  Value *target = refTarget(item);
+  BasicBlock *refEnd = b_.GetInsertBlock();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+  PHINode *phi = b_.CreatePHI(ptrTy_, 2, "var");
+  phi->addIncoming(item, from);
+  phi->addIncoming(target, refEnd);
+  return phi;
+}
+
 // Address of the item a variable reference designates. A cell's value is at
-// offset 0, so the cell pointer is the item pointer.
+// offset 0, so the cell pointer is the item pointer. The variable of a FOR
+// EACH loop being generated holds a reference to the element; STATICs and
+// captured variables may hold one when the reference was made elsewhere (a
+// FOR EACH in another function, a codeblock created in a loop), so they are
+// tested at run time. Other variables never hold references.
 Value *CodeGen::varAddress(const Expr &e) {
   auto &v = static_cast<const VarExpr &>(e);
-  if (v.where == VarWhere::Capture) return b_.CreateLoad(ptrTy_, capturedCellAddress(fnSelf_, v.slot), "cell");
-  if (v.slot < fnBoxed_->size() && (*fnBoxed_)[v.slot]) return cellOfSlot(v.slot);
-  return slot(v.slot);
+  if (v.where == VarWhere::Capture)
+    return derefIfRef(b_.CreateLoad(ptrTy_, capturedCellAddress(fnSelf_, v.slot), "cell"));
+  Value *item = v.where == VarWhere::Static ? staticAddress(v.slot) : isBoxed(v) ? cellOfSlot(v.slot) : slot(v.slot);
+  if (isEachVar(v)) return refTarget(item);
+  return v.where == VarWhere::Static ? derefIfRef(item) : item;
 }
 
 // Returns a pointer to an item holding the value of `e`, without copying
@@ -706,7 +954,7 @@ void CodeGen::genIndexAssign(const IndexExpr &target, const AssignExpr *assign, 
 
 CodeGen::FnState CodeGen::saveFn() {
   return {fn_, fnCtx_, fnRet_, fnBase_, fnSelf_, fnPush_, fnExit_, numLocals_, temps_, maxSlots_,
-          std::move(loops_), fnBoxed_, b_.saveIP()};
+          std::move(loops_), std::move(eachVars_), fnBoxed_, b_.saveIP()};
 }
 
 void CodeGen::restoreFn(FnState s) {
@@ -721,6 +969,7 @@ void CodeGen::restoreFn(FnState s) {
   temps_ = s.temps;
   maxSlots_ = s.maxSlots;
   loops_ = std::move(s.loops);
+  eachVars_ = std::move(s.eachVars);
   fnBoxed_ = s.boxed;
   b_.restoreIP(s.ip);
 }
@@ -789,17 +1038,22 @@ void CodeGen::genAssign(const AssignExpr &a, Value *dst) {
     genIndexAssign(static_cast<const IndexExpr &>(*a.target), &a, nullptr, dst);
     return;
   }
-  Value *target = varAddress(*a.target);
+  // The target's address is taken after the value is computed: a FOR EACH
+  // variable designates an array element, which moves when the array grows.
+  Value *target;
   if (a.compound) {
     auto [l, r] = genOperands(*a.target, *a.value);
+    target = varAddress(*a.target);
     genBinary(a.op, target, l, r);
   } else if (hasSideEffects(*a.value)) {
     // The value may change the target while it is computed (`x := x++`): the
     // assignment stores the value as computed, after those side effects.
     Value *t = tempSlot();
     genExpr(*a.value, t);
+    target = varAddress(*a.target);
     copyItem(target, t);
   } else {
+    target = varAddress(*a.target);
     genExpr(*a.value, target);
   }
   if (dst) copyItem(dst, target);

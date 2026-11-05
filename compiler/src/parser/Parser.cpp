@@ -17,11 +17,21 @@ bool Parser::accept(Tok k) {
   return true;
 }
 
+// "found 'name'" or "found <token kind>", for messages about the current token.
+std::string Parser::found() const {
+  return "found " + (at(Tok::Ident) ? "'" + cur().text + "'" : std::string(tokName(cur().kind)));
+}
+
 bool Parser::expect(Tok k, const char *what) {
   if (accept(k)) return true;
-  diag_.error(cur().loc, std::string("expected ") + what + ", found " +
-                             (at(Tok::Ident) ? "'" + cur().text + "'" : std::string(tokName(cur().kind))));
+  diag_.error(cur().loc, std::string("expected ") + what + ", " + found());
   return false;
+}
+
+// `FOR each := ...` is a FOR loop over a variable named EACH.
+bool Parser::isAssignAfterEach() const {
+  Tok next = ahead(2).kind;
+  return next == Tok::Assign || next == Tok::Eq;
 }
 
 void Parser::skipToEndOfStmt() {
@@ -53,7 +63,8 @@ bool Parser::isKw(const Token &t, const char *kw) const {
       {"EXIT", 4},   {"FOR", 3},   {"FUNCTION", 4}, {"IF", 2},    {"IIF", 3},    {"LOCAL", 4},
       {"LOOP", 4},   {"NEXT", 4},  {"NIL", 3},    {"PROCEDURE", 4}, {"RETURN", 4}, {"STATIC", 4},
       {"STEP", 4},   {"TO", 2},    {"WHILE", 4},  {"WITH", 4},    {"MEMVAR", 4}, {"FIELD", 4},
-      {"PRIVATE", 4}, {"PUBLIC", 4}, {"PARAMETERS", 4},
+      {"PRIVATE", 4}, {"PUBLIC", 4}, {"PARAMETERS", 4}, {"CASE", 4}, {"OTHERWISE", 4}, {"ENDCASE", 4},
+      {"SWITCH", 4}, {"ENDSWITCH", 5}, {"EACH", 4}, {"IN", 2}, {"DESCEND", 7},
   };
   if (t.kind != Tok::Ident) return false;
   size_t minLen = std::strlen(kw);
@@ -76,10 +87,12 @@ bool Parser::atStmtKw(const char *kw) const {
   default:
     break;
   }
-  static const char *const standalone[] = {"EXIT", "LOOP", "NEXT", "END", "ENDIF", "ENDDO", "ELSE"};
+  static const char *const standalone[] = {"EXIT", "LOOP",    "NEXT",    "END",      "ENDIF",
+                                           "ENDDO", "ELSE", "ENDCASE", "OTHERWISE", "ENDSWITCH"};
   for (const char *s : standalone)
     if (std::strcmp(s, kw) == 0) return ahead().kind == Tok::EndOfStmt || ahead().kind == Tok::Eof;
   if (std::strcmp(kw, "FOR") == 0) {
+    if (isKw(ahead(), "EACH") && !isAssignAfterEach()) return true;
     for (size_t p = pos_ + 1; p < toks_.size() && toks_[p].kind != Tok::EndOfStmt && toks_[p].kind != Tok::Eof; ++p)
       if (isKw(toks_[p], "TO")) return true;
     return false;
@@ -123,6 +136,12 @@ std::unique_ptr<Module> Parser::parseModule(const std::string &moduleName) {
   auto mod = std::make_unique<Module>();
   mod->name = moduleName;
   skipBlankStmts();
+  // STATICs before any other statement or function are visible in the whole file.
+  while (atStmtKw("STATIC") && !atFuncStart()) {
+    StmtPtr decl = parseDecl(StmtKind::Static);
+    for (LocalDecl &d : static_cast<LocalStmt &>(*decl).decls) mod->fileStatics.push_back(std::move(d));
+    skipBlankStmts();
+  }
   if (!at(Tok::Eof) && !atFuncStart()) {
     // Statements before the first FUNCTION/PROCEDURE form an implicit
     // procedure named after the module.
@@ -205,10 +224,13 @@ void Parser::closeBlock(std::initializer_list<const char *> closers, const char 
 StmtPtr Parser::parseStmt() {
   SourceLoc loc = cur().loc;
 
-  if (atStmtKw("LOCAL")) return parseLocal();
+  if (atStmtKw("LOCAL")) return parseDecl(StmtKind::Local);
+  if (atStmtKw("STATIC")) return parseDecl(StmtKind::Static);
+  if (atStmtKw("DO") && isKw(ahead(), "CASE")) return parseDoCase();
+  if (atStmtKw("SWITCH")) return parseSwitch();
   if (atStmtKw("IF") && !atInlineIf()) return parseIf();
   if (atStmtKw("WHILE")) return parseWhile();
-  if (atStmtKw("FOR")) return parseFor();
+  if (atStmtKw("FOR")) return isKw(ahead(), "EACH") && !isAssignAfterEach() ? parseForEach() : parseFor();
   if (atStmtKw("RETURN")) {
     advance();
     ExprPtr v;
@@ -236,14 +258,15 @@ StmtPtr Parser::parseStmt() {
     endOfStmt();
     return std::make_unique<ExprStmt>(loc, std::move(call));
   }
-  for (const char *closer : {"ENDIF", "ENDDO", "NEXT", "END", "ELSE", "ELSEIF"}) {
+  for (const char *closer : {"ENDIF", "ENDDO", "NEXT", "END", "ELSE", "ELSEIF", "CASE", "OTHERWISE", "ENDCASE",
+                             "ENDSWITCH"}) {
     if (atStmtKw(closer)) {
       diag_.error(loc, std::string(closer) + " does not match any open block");
       skipToEndOfStmt();
       return nullptr;
     }
   }
-  if (atStmtKw("STATIC") || atStmtKw("PRIVATE") || atStmtKw("PUBLIC") || atStmtKw("MEMVAR") ||
+  if (atStmtKw("PRIVATE") || atStmtKw("PUBLIC") || atStmtKw("MEMVAR") ||
       atStmtKw("FIELD") || atStmtKw("PARAMETERS")) {
     diag_.error(loc, "'" + cur().text + "' is not supported yet");
     skipToEndOfStmt();
@@ -272,8 +295,8 @@ StmtPtr Parser::parseStmt() {
   return std::make_unique<ExprStmt>(loc, std::move(e));
 }
 
-StmtPtr Parser::parseLocal() {
-  auto st = std::make_unique<LocalStmt>(cur().loc);
+StmtPtr Parser::parseDecl(StmtKind kind) {
+  auto st = std::make_unique<LocalStmt>(cur().loc, kind);
   advance();
   do {
     if (!at(Tok::Ident)) {
@@ -326,6 +349,101 @@ StmtPtr Parser::parseIf() {
     st->elseBody = parseBlock({"ENDIF", "END"});
   }
   closeBlock({"ENDIF", "END"}, "IF", openLoc);
+  return st;
+}
+
+// Statements before the first CASE of DO CASE / SWITCH are not allowed.
+void Parser::rejectBeforeFirstCase(const char *construct, std::initializer_list<const char *> starts) {
+  skipBlankStmts();
+  if (at(Tok::Eof) || atBlockEnd(starts)) return;
+  diag_.error(cur().loc, std::string("statements are not allowed between ") + construct + " and its first CASE");
+  parseBlock(starts);
+}
+
+StmtPtr Parser::parseDoCase() {
+  auto st = std::make_unique<IfStmt>(cur().loc);
+  SourceLoc openLoc = cur().loc;
+  advance(); // DO
+  advance(); // CASE
+  endOfStmt();
+  rejectBeforeFirstCase("DO CASE", {"CASE", "OTHERWISE", "ENDCASE", "END"});
+  while (atStmtKw("CASE")) {
+    advance();
+    IfStmt::Arm arm;
+    arm.cond = parseExpr();
+    endOfStmt();
+    arm.body = parseBlock({"CASE", "OTHERWISE", "ENDCASE", "END"});
+    st->arms.push_back(std::move(arm));
+  }
+  if (atStmtKw("OTHERWISE")) {
+    advance();
+    endOfStmt();
+    st->elseBody = parseBlock({"ENDCASE", "END"});
+  }
+  closeBlock({"ENDCASE", "END"}, "DO CASE", openLoc);
+  return st;
+}
+
+StmtPtr Parser::parseSwitch() {
+  SourceLoc openLoc = cur().loc;
+  advance();
+  auto st = std::make_unique<SwitchStmt>(openLoc, parseExpr());
+  endOfStmt();
+  rejectBeforeFirstCase("SWITCH", {"CASE", "OTHERWISE", "ENDSWITCH", "END"});
+  while (atStmtKw("CASE")) {
+    advance();
+    SwitchStmt::Case c;
+    c.value = parseExpr();
+    endOfStmt();
+    c.body = parseBlock({"CASE", "OTHERWISE", "ENDSWITCH", "END"});
+    st->cases.push_back(std::move(c));
+  }
+  if (atStmtKw("OTHERWISE")) {
+    advance();
+    endOfStmt();
+    SwitchStmt::Case c;
+    c.body = parseBlock({"ENDSWITCH", "END"});
+    st->cases.push_back(std::move(c));
+  }
+  closeBlock({"ENDSWITCH", "END"}, "SWITCH", openLoc);
+  return st;
+}
+
+StmtPtr Parser::parseForEach() {
+  SourceLoc openLoc = cur().loc;
+  auto st = std::make_unique<ForEachStmt>(openLoc);
+  advance(); // FOR
+  advance(); // EACH
+  do {
+    if (!at(Tok::Ident)) {
+      expect(Tok::Ident, "loop variable");
+      skipToEndOfStmt();
+      return nullptr;
+    }
+    st->vars.push_back(std::make_unique<VarExpr>(cur().loc, cur().upper));
+    advance();
+  } while (accept(Tok::Comma));
+  bool hasIn = atKw("IN");
+  if (hasIn) {
+    advance();
+    do {
+      st->collections.push_back(parseExpr());
+    } while (accept(Tok::Comma));
+    if (atKw("DESCEND")) {
+      advance();
+      st->descend = true;
+    }
+    if (st->vars.size() != st->collections.size())
+      diag_.error(openLoc, "FOR EACH needs one collection per loop variable");
+    endOfStmt();
+  } else {
+    diag_.error(cur().loc, "expected IN, " + found());
+    skipToEndOfStmt();
+    endOfStmt();
+  }
+  st->body = parseBlock({"NEXT", "END"});
+  closeBlock({"NEXT", "END"}, "FOR EACH", openLoc);
+  if (!hasIn) return nullptr;
   return st;
 }
 

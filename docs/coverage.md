@@ -4,30 +4,37 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 11 of 603 done. Commands (`std.ch` families): 12 of 157 done.
+Functions: 55 of 603 done. Commands (`std.ch` families): 16 of 157 done.
+
+## Statements (grammar)
+
+Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar)), not `std.ch` rules.
+
+**FUNCTION**, **PROCEDURE**, **LOCAL**, **STATIC**, **RETURN**, **IF**, **DO CASE**, **SWITCH**, **WHILE**,
+**FOR**, **FOR EACH**, **EXIT**, **LOOP**, **DO ... WITH**, *PRIVATE*, *PUBLIC*, *MEMVAR*, *FIELD*, *PARAMETERS*,
+*BEGIN SEQUENCE*, *DECLARE*, *EXTERNAL*, *ANNOUNCE*
 
 ## Commands (std.ch)
 
 Grouped by their leading words; each group covers every variant of the command.
 
-*!*, **?**, **??**, *@*, *ACCEPT*, *APPEND*, *APPEND BLANK*, *AVERAGE*, *CALL*, **CANCEL**, *CLEAR*, *CLEAR ALL*,
-*CLEAR GETS*, *CLEAR MEMORY*, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, *CLOSE*, *CLOSE ALL*, *CLOSE ALTERNATE*,
-*CLOSE DATABASES*, *CLOSE FORMAT*, *CLOSE INDEXES*, *CLOSE PROCEDURE*, *CLS*, *COMMIT*, *CONTINUE*, *COPY*,
-*COPY FILE*, *COUNT*, *CREATE*, *DELETE*, *DELETE FILE*, *DELETE TAG*, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**,
-*ENDCASE*, **ENDDO**, **ENDFOR**, **ENDIF**, *ENDSEQUENCE*, *ERASE*, *FIND*, *GO*, *GOTO*, *INDEX ON*, *INPUT*, *JOIN*,
-*KEYBOARD*, *LABEL FORM*, *LIST*, *LOCATE*, *MENU*, **NEXT**, *PACK*, **QUIT**, *READ*, *READ SAVE*, *RECALL*,
-*REINDEX*, *RELEASE*, *RELEASE ALL*, *RENAME*, *REPLACE*, *REPORT FORM*, *REQUEST*, *RESTORE*, *RESTORE HBV*,
-*RESTORE SCREEN*, *RUN*, *SAVE*, *SAVE ALL*, *SAVE HBV*, *SAVE SCREEN*, *SAVE TO*, *SEEK*, *SELECT*, *SET ALTERNATE*,
-*SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, *SET CENTURY*, *SET COLOR*, *SET COLOUR*, *SET CONFIRM*,
-*SET CONSOLE*, *SET CURSOR*, *SET DATE*, *SET DBFLOCKSCHEME*, **SET DECIMALS**, *SET DEFAULT*, *SET DELETED*,
-*SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET DIRSEPARATOR*, *SET ECHO*, *SET EOL*,
-*SET EPOCH*, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET EXCLUSIVE*, *SET FILECASE*, *SET FILTER*, *SET FIXED*,
-*SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, *SET INDEX*, *SET INTENSITY*, *SET KEY*, *SET MARGIN*,
-*SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, *SET ORDER*, *SET PATH*,
-*SET PRINTER*, *SET PROCEDURE*, *SET RELATION*, *SET SAFETY*, *SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*,
-*SET SCOREBOARD*, *SET SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*,
-*SET UNIQUE*, *SET VIDEOMODE*, *SET WRAP*, *SKIP*, *SORT*, **STORE**, *SUM*, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*,
-*UNLOCK*, *UPDATE*, *USE*, *WAIT*, *ZAP*
+*!*, **?**, **??**, *@*, *ACCEPT*, *APPEND*, *APPEND BLANK*, *AVERAGE*, *CALL*, **CANCEL**, *CLEAR*, *CLEAR ALL*, *CLEAR
+GETS*, *CLEAR MEMORY*, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, *CLOSE*, *CLOSE ALL*, *CLOSE ALTERNATE*, *CLOSE DATABASES*,
+*CLOSE FORMAT*, *CLOSE INDEXES*, *CLOSE PROCEDURE*, *CLS*, *COMMIT*, *CONTINUE*, *COPY*, *COPY FILE*, *COUNT*, *CREATE*,
+*DELETE*, *DELETE FILE*, *DELETE TAG*, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**, **ENDCASE**, **ENDDO**, **ENDFOR**,
+**ENDIF**, *ENDSEQUENCE*, *ERASE*, *FIND*, *GO*, *GOTO*, *INDEX ON*, *INPUT*, *JOIN*, *KEYBOARD*, *LABEL FORM*, *LIST*,
+*LOCATE*, *MENU*, **NEXT**, *PACK*, **QUIT**, *READ*, *READ SAVE*, *RECALL*, *REINDEX*, *RELEASE*, *RELEASE ALL*,
+*RENAME*, *REPLACE*, *REPORT FORM*, *REQUEST*, *RESTORE*, *RESTORE HBV*, *RESTORE SCREEN*, *RUN*, *SAVE*, *SAVE ALL*,
+*SAVE HBV*, *SAVE SCREEN*, *SAVE TO*, *SEEK*, *SELECT*, *SET ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*,
+*SET BELL*, **SET CENTURY**, *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET
+DBFLOCKSCHEME*, **SET DECIMALS**, *SET DEFAULT*, *SET DELETED*, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET
+DIRCASE*, *SET DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET
+EXCLUSIVE*, *SET FILECASE*, *SET FILTER*, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*,
+*SET INDEX*, *SET INTENSITY*, *SET KEY*, *SET MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*, *SET MESSAGE*,
+*SET MFILEEXT*, *SET OPTIMIZE*, *SET ORDER*, *SET PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET RELATION*, *SET SAFETY*,
+*SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, *SET SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET
+STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, *SET UNIQUE*, *SET VIDEOMODE*, *SET WRAP*, *SKIP*, *SORT*,
+**STORE**, *SUM*, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*, *USE*, *WAIT*, *ZAP*
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`,
 `set.ch` (partial), `error.ch`, `fileio.ch`, `box.ch`, `color.ch`, `dbstruct.ch`, `directry.ch`, `getexit.ch`,
@@ -70,9 +77,10 @@ Other standard headers, each to be provided with the matching runtime support: `
 *sx_Thermometer*, *sx_TurboArea*, *sx_Unlock*, *sx_Version*, *sx_VFGet*, *sx_VSigLen*, *sx_Warm*, *sx_WildMatch*,
 *sx_WildSeek*, *_sxOpenInit*, *_sx_IniInit*, *_sx_StrCompress*, *_sx_StrDecompress*
 
-### Dates and times (0 of 13 done)
+### Dates and times (11 of 13 done)
 
-*CDoW*, *CMonth*, *CToD*, *Date*, *Day*, *DoW*, *DToC*, *DToS*, *Month*, *Seconds*, *SToD*, *Time*, *Year*
+**CDoW**, **CMonth**, **CToD**, **Date**, **Day**, **DoW**, **DToC**, **DToS**, **Month**, *Seconds*, **SToD**, *Time*,
+**Year**
 
 ### Arrays (5 of 12 done)
 
@@ -110,24 +118,25 @@ at link time, never by an environment variable.
 
 *DosError*, *ErrorBlock*, *ErrorNew*, *ErrorSys*
 
-### Numbers and math (0 of 21 done)
+### Numbers and math (11 of 21 done)
 
-*Abs*, *Bin2I*, *Bin2L*, *Bin2W*, *Descend*, *Exp*, *I2Bin*, *Int*, *IsPrinter*, *L2Bin*, *LenNum*, *Log*, *Max*,
-*Min*, *Mod*, *Round*, *Sqrt*, *Str*, *SubStr*, *Transform*, *Val*
+**Abs**, *Bin2I*, *Bin2L*, *Bin2W*, *Descend*, **Exp**, *I2Bin*, **Int**, *IsPrinter*, *L2Bin*, *LenNum*, **Log**,
+**Max**, **Min**, *Mod*, **Round**, **Sqrt**, **Str**, **SubStr**, *Transform*, **Val**
 
-### Strings (1 of 33 done)
+### Strings (21 of 33 done)
 
-*AllTrim*, *Asc*, *At*, *Chr*, *HardCR*, *IsAlpha*, *IsDigit*, *IsLower*, *IsUpper*, *Left*, **Len**, *Lower*, *LTrim*,
-*MemoLine*, *MemoTran*, *MLCount*, *MLCToPos*, *MLPos*, *MPosToLC*, *PadC*, *PadL*, *PadR*, *RAt*, *Replicate*,
-*Right*, *RTrim*, *SoundEx*, *Space*, *StrTran*, *StrZero*, *Stuff*, *Upper*, *Word*
+**AllTrim**, **Asc**, **At**, **Chr**, *HardCR*, **IsAlpha**, **IsDigit**, **IsLower**, **IsUpper**, **Left**, **Len**,
+**Lower**, **LTrim**, *MemoLine*, *MemoTran*, *MLCount*, *MLCToPos*, *MLPos*, *MPosToLC*, *PadC*, *PadL*, *PadR*,
+**RAt**, **Replicate**, **Right**, **RTrim**, *SoundEx*, **Space**, **StrTran**, **StrZero**, **Stuff**, **Upper**,
+*Word*
 
-### Language, settings and runtime (3 of 144 done)
+### Language, settings and runtime (5 of 144 done)
 
 *AltD*, *AMPM*, *Break*, *cftsAdd*, *cftsClose*, *cftsCrea*, *cftsDelete*, *cftsIfDel*, *cftsNext*, *cftsOpen*,
 *cftsRecN*, *cftsReplac*, *cftsSet*, *cftsUndel*, *cftsVeri*, *cftsVers*, *CLIPPER520*, *CLIPPER530*, *Days*,
 *dbClearFil*, *dbClearRel*, *dbCloseAre*, *dbDrop*, *dbExists*, *DBFCDX*, *DBFFPT*, *dbFieldInf*, *DBFNSX*, *DBFNTX*,
 *DbgShadow*, *dbOrderInf*, *dbRecordIn*, *dbRename*, *dbRLockLis*, *dbSelectAr*, *dbSetDrive*, *dbSetFilte*,
-*dbSetRelat*, *DefPath*, *DirRemove*, *Do*, *ElapTime*, *Empty*, *ErrorInHan*, *ErrorInHandler*, *ErrorLevel*,
+*dbSetRelat*, *DefPath*, *DirRemove*, *Do*, *ElapTime*, **Empty**, *ErrorInHan*, *ErrorInHandler*, *ErrorLevel*,
 **Eval**, *FieldBlock*, *FieldDec*, *FieldLen*, *FieldType*, *FieldWBlock*, *FKLabel*, *FKMax*, *Get*, *GetE*,
 *HBCheckBox*, *HBEditor*, *HBGetList*, *HBHash*, *HBLabelForm*, *HBListBox*, *HBMemoEditor*, *HBMenuItem*, *HBMenuSys*,
 *HBObject*, *HBPersistent*, *HBPointer*, *HBPopupMenu*, *HBProfile*, *HBProfileEntity*, *HBProfileFunction*,
@@ -138,7 +147,7 @@ at link time, never by an environment variable.
 *NationMsg*, *NetName*, *NoSnow*, *ordListCle*, *ordListReb*, *ordSetFocu*, *ordSetRela*, *OS*, *Pad*, *PCount*,
 *ProcFile*, *ProcLine*, *ProcName*, *PValue*, *rddInfo*, *rddSetDefa*, *ReadKey*, *RestScreen*, *SaveScreen*, *Secs*,
 **Set**, *SetCancel*, *SetMode*, *SetTypeahead*, *SIXCDX*, *sx_ClearOrder*, *sx_FindRec*, *sx_SetTrig*, *SYMBOL*,
-*SYSINIT*, *TBColumn*, *TBrowse*, *TBrowseDB*, *Tone*, *TopBar*, *Trim*, *TString*, *Type*, **ValType**, *Version*,
+*SYSINIT*, *TBColumn*, *TBrowse*, *TBrowseDB*, *Tone*, *TopBar*, **Trim**, *TString*, *Type*, **ValType**, *Version*,
 *_eInstVar*, *_GetNumCol*, *_IsGraphic*, *_NatMsgVer*, *_NatSortVer*, *_SetVideoMode*
 
 ## Harbour extensions

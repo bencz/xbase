@@ -22,6 +22,12 @@ void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
     xb_set_double(r, xb_num_value(a) + xb_num_value(b), max16(num_dec(a), num_dec(b)));
   } else if (a->type == XB_T_STRING && b->type == XB_T_STRING) {
     xb_set_str(r, xb_str_concat(a->v.s, b->v.s));
+  } else if (a->type == XB_T_DATE && xb_is_number(b)) { /* the number is truncated to whole days */
+    xb_set_date(r, xb_add_days(a->v.i, xb_num_to_i64(b)));
+  } else if (xb_is_number(a) && b->type == XB_T_DATE) {
+    xb_set_date(r, xb_add_days(b->v.i, xb_num_to_i64(a)));
+  } else if (a->type == XB_T_DATE && b->type == XB_T_DATE) { /* Clipper adds the day numbers */
+    xb_set_date(r, xb_add_days(a->v.i, b->v.i));
   } else {
     arg_error(ctx, 1081, "+");
   }
@@ -39,6 +45,12 @@ void xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
     xb_str *s = xb_str_alloc(sa->len + sb->len);
     xb_str_minus(s->data, sa->data, sa->len, sb->data, sb->len);
     xb_set_str(r, s);
+  } else if (a->type == XB_T_DATE && b->type == XB_T_DATE) {
+    int64_t v;
+    if (xb_sub_overflow(a->v.i, b->v.i, &v)) xb_set_double(r, (double)a->v.i - (double)b->v.i, 0);
+    else xb_set_int(r, v);
+  } else if (a->type == XB_T_DATE && xb_is_number(b)) {
+    xb_set_date(r, xb_add_days(a->v.i, (int64_t)(0 - (uint64_t)xb_num_to_i64(b))));
   } else {
     arg_error(ctx, 1082, "-");
   }
@@ -130,6 +142,8 @@ static int compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
     return str_cmp(a->v.s, b->v.s, ctx->set_exact);
   if (a->type == XB_T_LOGICAL && b->type == XB_T_LOGICAL)
     return (a->v.l != 0) - (b->v.l != 0);
+  if (a->type == XB_T_DATE && b->type == XB_T_DATE)
+    return (a->v.i > b->v.i) - (a->v.i < b->v.i);
   return 2;
 }
 

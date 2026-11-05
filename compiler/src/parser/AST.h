@@ -69,6 +69,7 @@ struct StringExpr : Expr {
 enum class VarWhere : uint8_t {
   Frame,     // slot of the current function's or codeblock's frame
   Capture,   // captured cell `slot` of the current codeblock
+  Static,    // item `slot` of the module's STATICs
 };
 
 struct VarExpr : Expr {
@@ -149,7 +150,7 @@ struct IIfExpr : Expr {
       : Expr(ExprKind::IIf, l), cond(std::move(c)), then(std::move(a)), otherwise(std::move(b)) {}
 };
 
-enum class StmtKind : uint8_t { Expr, Local, Return, If, While, For, Exit, Loop };
+enum class StmtKind : uint8_t { Expr, Local, Static, Return, If, While, For, ForEach, Switch, Exit, Loop };
 
 struct Stmt {
   StmtKind kind;
@@ -172,9 +173,9 @@ struct LocalDecl {
   uint32_t slot = 0;             // set by Sema
 };
 
-struct LocalStmt : Stmt {
+struct LocalStmt : Stmt {      // LOCAL, or STATIC (kind Static: `slot` indexes the module's statics)
   std::vector<LocalDecl> decls;
-  explicit LocalStmt(SourceLoc l) : Stmt(StmtKind::Local, l) {}
+  explicit LocalStmt(SourceLoc l, StmtKind k = StmtKind::Local) : Stmt(k, l) {}
 };
 
 struct ReturnStmt : Stmt {
@@ -205,6 +206,28 @@ struct ForStmt : Stmt {
   explicit ForStmt(SourceLoc l) : Stmt(StmtKind::For, l) {}
 };
 
+// FOR EACH v1 [, v2...] IN e1 [, e2...] [DESCEND]: each variable takes the
+// elements of its collection in turn; the loop ends with the shortest one.
+struct ForEachStmt : Stmt {
+  std::vector<ExprPtr> vars;     // VarExprs
+  std::vector<ExprPtr> collections;
+  bool descend = false;
+  Block body;
+  explicit ForEachStmt(SourceLoc l) : Stmt(StmtKind::ForEach, l) {}
+};
+
+// SWITCH value: control enters at the first CASE equal to the value (or at
+// OTHERWISE) and falls through the following ones until EXIT.
+struct SwitchStmt : Stmt {
+  struct Case {
+    ExprPtr value;               // a constant; null for OTHERWISE
+    Block body;
+  };
+  ExprPtr value;
+  std::vector<Case> cases;       // OTHERWISE, if present, is last
+  explicit SwitchStmt(SourceLoc l, ExprPtr v) : Stmt(StmtKind::Switch, l), value(std::move(v)) {}
+};
+
 struct JumpStmt : Stmt { // EXIT / LOOP
   explicit JumpStmt(SourceLoc l, StmtKind k) : Stmt(k, l) {}
 };
@@ -224,6 +247,8 @@ struct FuncDecl {
 struct Module {
   std::string name;              // upper-cased source stem
   std::vector<std::unique_ptr<FuncDecl>> funcs;
+  std::vector<LocalDecl> fileStatics; // STATICs before the first function: visible in the whole file
+  std::vector<LocalDecl *> statics;   // every STATIC of the module, in slot order (set by Sema)
 };
 
 } // namespace xb

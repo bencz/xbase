@@ -12,5 +12,7 @@
 
 #define _SET_EXACT      1
 #define _SET_DECIMALS   3
+#define _SET_DATEFORMAT 4
+#define _SET_EPOCH      5
 
 #endif /* _SET_CH */

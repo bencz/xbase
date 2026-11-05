@@ -19,4 +19,7 @@ void xb_mutex_unlock(xb_mutex *m);
 /* One-time process setup. */
 void xb_platform_init(void);
 
+/* Today's date in local time. */
+void xb_platform_local_date(int *year, int *month, int *day);
+
 #endif

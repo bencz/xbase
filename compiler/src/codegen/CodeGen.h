@@ -45,6 +45,15 @@ private:
 
   void genFunc(const FuncDecl &f);
   void genEntry(const FuncDecl &start);
+  void genModuleInit(const Module &m);
+  llvm::Value *staticAddress(uint32_t idx);
+  llvm::Value *entryAlloca(llvm::Type *ty, const char *name);
+  void genForEach(const ForEachStmt &st);
+  bool isBoxed(const VarExpr &v) const;
+  bool isEachVar(const VarExpr &v) const;
+  llvm::Value *refTarget(llvm::Value *ref);
+  llvm::Value *derefIfRef(llvm::Value *item);
+  void genSwitch(const SwitchStmt &st);
   llvm::Value *slot(uint32_t idx);
   uint32_t allocTemps(uint32_t n);
   llvm::Value *tempSlot() { return slot(allocTemps(1)); }
@@ -103,10 +112,13 @@ private:
   llvm::FunctionCallee rtFramePush_, rtFramePop_, rtArgsCopy_, rtCondError_, rtForTest_, rtAbiCheck_;
   llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_, rtPending_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtCellBox_, rtBlockNew_;
+  llvm::FunctionCallee rtEnumLen_, rtEnumRefNew_, rtEnumRefMove_, rtRefTarget_, rtSwitchCheck_, rtSwitchMatch_;
+  llvm::FunctionCallee rtModuleRegister_, rtModulesInit_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
   // module state
   std::unordered_map<std::string, llvm::Function *> funcs_;
+  llvm::GlobalVariable *statics_ = nullptr;   // the module's STATICs
   std::unordered_map<std::string, llvm::Constant *> strLits_;
   std::unordered_map<std::string, llvm::Constant *> numLits_;
   llvm::Constant *nilLit_ = nullptr;
@@ -123,6 +135,12 @@ private:
   llvm::BasicBlock *fnExit_ = nullptr;
   uint32_t numLocals_ = 0, temps_ = 0, maxSlots_ = 0;
   std::vector<Loop> loops_;
+  struct EachVar {             // the variable of a FOR EACH loop being generated
+    const VarExpr *var;
+    llvm::Value *raw;          // its slot or STATIC storage, which holds the reference (or the cell)
+    llvm::Value *saved;        // its value before the loop
+  };
+  std::vector<EachVar> eachVars_;
   const std::vector<bool> *fnBoxed_ = nullptr; // frame slots holding cells
   llvm::Value *fnSelf_ = nullptr;              // the codeblock, inside a block function
   unsigned blockCount_ = 0;
@@ -136,6 +154,7 @@ private:
     llvm::BasicBlock *exit;
     uint32_t numLocals, temps, maxSlots;
     std::vector<Loop> loops;
+    std::vector<EachVar> eachVars;
     const std::vector<bool> *boxed;
     llvm::IRBuilderBase::InsertPoint ip;
   };

@@ -96,6 +96,8 @@ int order(const NumberExpr &a, const NumberExpr &b) {
 
 void Folder::run(Module &m) {
   for (auto &f : m.funcs) moduleFuncs_.insert(f->name);
+  for (LocalDecl &d : m.fileStatics)
+    if (d.init) fold(d.init);
   for (auto &f : m.funcs) block(f->body);
 }
 
@@ -109,9 +111,25 @@ void Folder::stmt(Stmt &s) {
     fold(static_cast<ExprStmt &>(s).expr);
     break;
   case StmtKind::Local:
+  case StmtKind::Static:
     for (LocalDecl &d : static_cast<LocalStmt &>(s).decls)
       if (d.init) fold(d.init);
     break;
+  case StmtKind::ForEach: {
+    auto &f = static_cast<ForEachStmt &>(s);
+    for (auto &c : f.collections) fold(c);
+    block(f.body);
+    break;
+  }
+  case StmtKind::Switch: {
+    auto &w = static_cast<SwitchStmt &>(s);
+    fold(w.value);
+    for (auto &c : w.cases) {
+      if (c.value) fold(c.value);
+      block(c.body);
+    }
+    break;
+  }
   case StmtKind::Return: {
     auto &r = static_cast<ReturnStmt &>(s);
     if (r.value) fold(r.value);

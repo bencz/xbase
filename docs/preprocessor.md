@@ -118,6 +118,10 @@ lists only commands whose runtime support exists and grows with the runtime:
 | `? [<list,...>]`, `?? [<list,...>]` | `QOut( <list> )`, `QQOut( <list> )` |
 | `SET DECIMALS TO [<x>]` | `Set( _SET_DECIMALS, <x> )` (0 without a value) |
 | `SET EXACT ON \| OFF \| &var`, `SET EXACT (<x>)` | `Set( _SET_EXACT, ... )` |
+| `SET DATE [TO] AMERICAN \| ANSI \| BRITISH \| FRENCH \| GERMAN \| ITALIAN \| JAPANESE \| USA` | `Set( _SET_DATEFORMAT, ... )`, the picture with `yyyy` or `yy` as `SET CENTURY` says (`_DFSET`) |
+| `SET DATE FORMAT [TO] <f>` | `Set( _SET_DATEFORMAT, <f> )` |
+| `SET CENTURY ON \| OFF \| &var`, `SET CENTURY (<x>)` | `__SetCentury( ... )` |
+| `SET EPOCH TO <y>` | `Set( _SET_EPOCH, <y> )` |
 | `QUIT`, `CANCEL` | `__Quit()` |
 
 `std.ch` includes `include/set.ch`, which defines the `_SET_*` numbers for `Set()`. It contains only `#define` lines

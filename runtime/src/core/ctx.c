@@ -24,6 +24,9 @@ xb_ctx *xb_ctx_new(void) {
   ctx->seg = seg_alloc(NULL, XB_SEG_DEFAULT);
   ctx->set_decimals = 2;
   ctx->set_exact = 0;
+  xb_ctx_set_date_format(ctx, "mm/dd/yy", 8);
+  ctx->epoch = 1900;
+  ctx->century = 0;
   xb_gc_register(ctx);
   return ctx;
 }
@@ -38,7 +41,17 @@ void xb_ctx_free(xb_ctx *ctx) {
     free(s);
     s = p;
   }
+  free(ctx->date_format);
   free(ctx);
+}
+
+void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len) {
+  char *fmt = malloc(len + 1);
+  if (!fmt) xb_gc_fatal("out of memory");
+  memcpy(fmt, s, len);
+  fmt[len] = '\0';
+  free(ctx->date_format);
+  ctx->date_format = fmt;
 }
 
 uint32_t xb_ctx_pending(const xb_ctx *ctx) { return ctx->pending; }

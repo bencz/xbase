@@ -59,6 +59,12 @@ typedef struct xb_large {
   xb_gc_hdr hdr;            /* immediately followed by the object */
 } xb_large;
 
+typedef struct xb_root {    /* items outside frames */
+  struct xb_root *next;
+  xb_item *items;
+  size_t count;
+} xb_root;
+
 typedef struct xb_tlh {     /* thread-local heap */
   struct xb_tlh *next;
   xb_page *current[XB_GC_CLASSES];
@@ -75,6 +81,7 @@ static struct {
   xb_large *large;
   xb_tlh *threads;
   xb_ctx *contexts;
+  xb_root *roots;
   size_t allocated;                /* bytes allocated since the last collection */
   size_t threshold;
   size_t liveBytes;                /* found by the last marking */
@@ -266,6 +273,17 @@ void xb_gc_unregister(xb_ctx *ctx) {
   xb_mutex_unlock(&heap.lock);
 }
 
+void xb_gc_add_root(xb_item *items, size_t count) {
+  xb_gc_init();
+  xb_root *r = xmalloc(sizeof *r);
+  r->items = items;
+  r->count = count;
+  xb_mutex_lock(&heap.lock);
+  r->next = heap.roots;
+  heap.roots = r;
+  xb_mutex_unlock(&heap.lock);
+}
+
 void xb_gc_root_push(xb_ctx *ctx, xb_item *it) {
   if (ctx->rootLen == XB_GC_MAX_ROOTS) {
     fputs("xbrt: too many temporary GC roots\n", stderr);
@@ -298,6 +316,7 @@ static void mark_item(const xb_item *it) {
     case XB_T_ARRAY:
     case XB_T_BLOCK:
     case XB_T_CELL:
+    case XB_T_REF:
       push(xb_gc_header(it->v.p));
       break;
     default:
@@ -325,6 +344,10 @@ static void trace(xb_gc_hdr *h) {
     case XB_GC_CELL:
       mark_item(&((const xb_cell *)obj)->value);
       break;
+    case XB_GC_REF:
+      mark_item(&((const xb_ref *)obj)->coll);
+      mark_item(&((const xb_ref *)obj)->value);
+      break;
     default:
       break;
   }
@@ -336,6 +359,8 @@ static void mark_roots(void) {
       for (size_t i = 0; i < s->used; ++i) mark_item(&s->items[i]);
     for (unsigned i = 0; i < ctx->rootLen; ++i) mark_item(ctx->roots[i]);
   }
+  for (const xb_root *r = heap.roots; r; r = r->next)
+    for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
 }
 
 void xb_gc_collect(void) {

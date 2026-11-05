@@ -1,0 +1,18 @@
+
+   5373485 00000101 10000   1   1   7 Saturday 01/01/00
+   5373850 00001231 10000  12  31   1 Sunday 12/31/00
+   9999999 26661219 22666  12  19   4 Wednesday 12/19/66
+ 2147438064 47730815 *****   8  15   4 Wednesday 08/15/73
+ 2147483647 48980603 *****   6   3   3 Tuesday 06/03/98
+         1 00000000     0   0   0   0 [Wednesday]
+      1000 00000000     0   0   0   0 [Wednesday]
+   1721059 00000000     0   0   0   0 [Wednesday]
+   1721060 00000101     0   1   1   7 [Sunday]
+   1721061 00000102     0   1   2   1 [Monday]
+   1721424 00001230     0  12  30   7 [Saturday]
+   1721425 00001231     0  12  31   1 [Sunday]
+   1721426 00010101     1   1   1   2 [Monday]
+        -1              0   0   0   0 [Wednesday]
+        -3              0   0   0   0 [Wednesday]
+       -10              0   0   0   0 [Wednesday]
+         0              0   0   0   0 []Friday   6 Saturday   7 Sunday   1 Monday   2 Tuesday   3 Wednesday   4 Thursday   5 Friday   6 Saturday   7 Sunday   1 Monday   2 Tuesday   3 Wednesday   4 Thursday   5 

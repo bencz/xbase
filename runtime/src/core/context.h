@@ -27,9 +27,14 @@ struct xb_ctx {
    * ExecutionContext. */
   int32_t  set_decimals;
   int      set_exact;
+  char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
+  int32_t  epoch;           /* SET EPOCH */
+  int      century;         /* SET CENTURY */
 };
 
 #define XB_SEG_DEFAULT 4096
+
+void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 
 /* SET DECIMALS as an item's decimal count (items keep 16 bits, as in Clipper). */
 static inline uint16_t xb_decimals(const xb_ctx *ctx) { return (uint16_t)ctx->set_decimals; }

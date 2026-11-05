@@ -24,6 +24,7 @@ function(xb_add_run_test name)
       -DEXE=$<TARGET_FILE:t_${name}>
       -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.out
       -DEXPECTED_RC=${rc}
+      -DEXPECTED_ERR=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.err
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endfunction()
 

@@ -17,8 +17,9 @@ typedef struct xb_item {
 } xb_item;
 ```
 
-- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, and `CELL`, which only appears in
-  the frame slot of a variable a codeblock captured. An all-zero item is `NIL`.
+- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `DATE`, and two kinds the language
+  never shows: `CELL`, only in the frame slot of a variable a codeblock captured, and `REF`, a reference to an element
+  held by a `FOR EACH` variable. An all-zero item is `NIL`.
 - Copying an item is a plain memory copy; there is no reference counting.
 - Strings (`xb_str`: flags, hash, length, bytes) are immutable and NUL-terminated, so they can be shared between items
   and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects.
@@ -36,22 +37,22 @@ frames start as `NIL`. Frames are GC roots.
 ## Garbage collector
 
 `runtime/src/gc/gc.c` is a precise, non-moving mark and lazy-sweep collector. Strings, arrays, array item storage,
-codeblocks and cells are its objects; an 8-byte header (size, kind, mark) precedes each one, so object pointers are
-what the rest of the runtime and compiled code use.
+codeblocks, cells and reference targets are its objects; an 8-byte header (size, kind, mark) precedes each one, so
+object pointers are what the rest of the runtime and compiled code use.
 
 - Allocation: objects up to 2048 bytes (header included) come from 64 KB pages of 27 size classes. Every thread has a
   local heap with one page per class and allocates from its free list without locking. Larger objects are allocated
   individually.
 - Roots: the frames and temporary C roots (`xb_gc_root_push`) of every registered context, which includes suspended
-  tasks.
+  tasks, and global item arrays registered with `xb_gc_add_root` (the modules' `STATIC`s).
 - Collection: starts when the bytes allocated since the last one reach the live heap size (at least 8 MB). Marking
   uses an explicit stack. Large objects are freed at once; pages are swept lazily when an allocation needs one (the
   search resumes where the previous one stopped), and a page found empty at a collection returns to a pool of free
   pages. Pages are not returned to the operating system.
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
-- Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, memory exhausted) end the program through
-  `xb_gc_fatal` with a message on standard error and exit code 1.
+- Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, an object above half the address space,
+  memory exhausted) end the program through `xb_gc_fatal` with a message on standard error and exit code 1.
 - Rule for C code: a collection can run inside any allocation, so every object still needed must be reachable from a
   frame or a C root before the next allocation. Objects never move.
 - Threads: global structures are protected by a lock (`xb_mutex`, platform layer); the allocation fast path takes
@@ -123,6 +124,15 @@ outside `1 .. Len( a )`.
 `xb_num_default_dec(ctx, r, value)` makes a double with SET DECIMALS decimals; the compiler uses it for folded
 expressions whose decimals are decided at run time. Items keep 16 bits of SET DECIMALS, as in Clipper.
 
+`FOR EACH` (`core/control.c`) enumerates arrays (their items) and strings (their characters as one-character strings);
+`xb_enum_len` raises `Argument error: array access` (1068) for any other collection. Indexes are 1-based. The loop
+variable holds an `XB_T_REF` item made by `xb_enum_ref_new`, whose target (`xb_ref`: the collection, the index, and for
+strings the current character) `xb_enum_ref_move` sets. `xb_ref_target` returns the item the reference designates: the
+array element, found again at every use so that it follows the array when the array grows, or for a string the copy of
+the character (assigning it leaves the string unchanged). An index outside the array, after the array shrank, raises
+`Bound error: array access` (1132). `SWITCH` uses `xb_switch_check`, which raises `Argument error: SWITCH` (3104) for a
+value that is not an integer or a string, and `xb_switch_match`.
+
 `FOR` uses `xb_for_test`: a non-negative step loops while the counter is not greater than the limit, a negative step
 while it is not less; operands that cannot be compared raise the `>` or `<` argument error, a non-numeric step the
 `<` error.
@@ -148,26 +158,72 @@ there).
 
 ## Functions
 
-| xBase | C symbol | Notes |
-|---|---|---|
-| `QOut( ... )` | `xbf_QOUT` | newline, then the arguments separated by a blank |
-| `QQOut( ... )` | `xbf_QQOUT` | the arguments without a newline |
-| `ValType( x )` | `xbf_VALTYPE` | `U`, `L`, `N`, `C`, `A`, `B` |
-| `Len( x )` | `xbf_LEN` | strings and arrays |
-| `Array( n1 [, n2 ...] )` | `xbf_ARRAY` | nested arrays of `NIL`; a non-numeric argument returns `NIL`, a negative one is error 1131 |
-| `AAdd( a, x )` | `xbf_AADD` | appends and returns `x` |
-| `ASize( a, n )` | `xbf_ASIZE` | resizes (new items are `NIL`) and returns `a` |
-| `ATail( a )` | `xbf_ATAIL` | the last item, `NIL` for an empty array |
-| `AClone( a )` | `xbf_ACLONE` | copies the array and its nested arrays; an array reached twice is copied once, so shared and cyclic structures are kept |
-| `Eval( b [, args...] )` | `xbf_EVAL` | runs a codeblock |
-| `__Quit()` | `xbf___QUIT` | target of `QUIT`/`CANCEL` |
-| `Set( n [, x] )` | `xbf_SET` | returns the setting before the call. `_SET_EXACT`: a logical, or a string starting with `ON`/`OFF` in any case; other values change nothing. `_SET_DECIMALS`: a number of 0 or more (a negative one is error 2020); other types change nothing. |
+The functions of the language live in `runtime/src/rtl/`, by area; [coverage.md](coverage.md) lists which exist.
+Conventions:
 
-Settings live in the task context (`SET EXACT` off and `SET DECIMALS` 2 at start). Their numbers come from
-`include/set.ch`, shared with xBase code.
+- A wrong argument type raises the function's own `BASE` error code (as in Clipper: `SubStr` 1110, `Left` 1124,
+  `Year` 1112, `CMonth` 1116, `StrZero` 6003, ...). An optional argument passed as `NIL` counts as passed where
+  Clipper says so: `SubStr( c, n, NIL )` and `Str( n, NIL )` are argument errors. A few functions return a neutral
+  value instead (`Right` gives `""`, `Stuff` gives `""` unless its arguments are a string, two numbers and a
+  string, `ATail`, `AClone`, `Array` with a non-numeric argument give `NIL`, the `Is*` tests give `.F.`).
+- Number arguments that do not fit 64 bits saturate (`xb_num_to_i64`). Harbour converts them to its C integer type
+  and gets wrapped values, so results for such arguments (`SubStr( c, 1e20 )`, `Round( n, -1e20 )`) may differ.
+- A string result equal to its argument shares it instead of copying it.
+- Number results carry the display width Clipper gives them: `Year` 5 columns, `Month`/`Day`/`DoW` 3, `Val` the
+  width of the text it read (blanks, sign and every character before the dot) and the decimals after it.
+- `Str( n [, nWidth [, nDec]] )`: `nWidth` is the whole field; without it the number's own field is used (at most 90
+  columns), and a `nWidth` below 1 means 10 columns. A field with no room for its decimals (`nDec >= nWidth`, or no
+  integer column left) is all `*`. `StrZero` is `Str` with leading blanks as zeros.
+- `Round` rounds half away from zero; a negative number of decimals rounds to tens, hundreds, ... As in Clipper, the
+  half is added to ten times the scaled value and the result raised by one unit in the last place before truncating,
+  so decimal halves stored just below `.5` (`2.675`) round up while `0.4999999999` rounds down. A scaling that
+  overflows gives a non-finite result (shown as stars). `Int` truncates without that adjustment.
+- `Sqrt` of a negative number and an `Exp` that overflows give 0; `Log` of a negative number gives minus infinity, like
+  `Log( 0 )`.
+- `Replicate` raises `String overflow` (1234) when the result size overflows.
+- `StrTran( c, cSearch, cReplace, nStart, nCount )`: `nStart` or `nCount` of 0 gives `""`; a negative `nStart`
+  replaces nothing, a negative `nCount` replaces every occurrence from `nStart`.
+- `Stuff( c, nStart, nDelete, cInsert )`: `nStart` 0 is 1; a negative `nStart` or `nDelete` counts as past the end.
+- Trimming from the left, `Val` and `Empty` skip blanks, tabs, carriage returns and line feeds (`xb_is_blank`);
+  trimming from the right removes spaces only. Case changes affect ASCII letters only.
+- `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array and the empty date.
+- `Set( n [, x] )` returns the setting before the call. `_SET_EXACT` takes a logical or a string starting with
+  `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020);
+  `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more,
+  off otherwise. `__SetCentury( [lOn] )` rewrites that run as `YYYY` or `YY` (or puts it in front when the picture
+  has no `Y`) and the picture in upper case. Other values change nothing.
+- `__GcCollect()` runs a collection and returns the number of live objects (tests use it).
+
+Settings live in the task context (start: `SET EXACT OFF`, `SET DECIMALS TO 2`, date format `mm/dd/yy`,
+`SET EPOCH TO 1900`, `SET CENTURY OFF`). Their numbers come from `include/set.ch`, shared with xBase code.
+
+## Dates
+
+A date is a Julian day number (0: the empty date) (`types/date.c`). Dates are built for years 0 to 9999; arithmetic can
+go further.
+
+- Day numbers from year 0 up to 2147483647 decode to a calendar date; text shows the last four digits of the year.
+  Negative day numbers show like the empty date, and other day numbers outside that range have no fields (zeros, `0`
+  from `Year`/`Month`/`Day`/`DoW`, `""` from `CMonth`).
+- `date + n`, `n + date` and `date - n` give dates (`n` truncated to whole days); `date - date` gives the number of
+  days; `date + date` adds the day numbers, as Clipper does. Dates compare by day number.
+- Text follows the SET DATE FORMAT picture (`xb_date_format`): runs of `D`, `M`, `Y` become digits (with tens `t` and
+  units `u`, a run of 4 gives `tttu`, 3 `ttu`, 2 `tu`, other lengths `u` and the remaining letters; a year run of 4, 3
+  or 2 gives its last digits), other characters are copied in upper case, at most 10 characters
+  (`XB_DATE_TEXT_SIZE`); the empty date shows blanks for the digits.
+- `CToD` reads the fields in the order the picture gives them; each run of digits fills a field and the first
+  non-digit after it moves to the next. Two-digit years fall in the hundred years starting at SET EPOCH. Invalid
+  dates give the empty date.
+- `CDoW`/`CMonth` give English names (`""` for the empty date); `DoW` counts from Sunday = 1. `DoW` works from the
+  day number (0 outside the calendar); `CDoW`, as in Clipper, applies the Gregorian weekday formula to the decoded
+  year, month and day, so it differs from `DoW` in year 0 and gives `Wednesday` for day numbers outside the calendar.
 
 ## Program startup
 
+Before `main`, the global constructor of every module with `STATIC`s calls `xb_module_register( init, statics, n )`
+(`core/module.c`), which records the module's initialization function and registers its statics as a GC root.
+
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
 in binary mode so programs write the same bytes everywhere), creates the context, calls `xb_app_main` (emitted by the
-compiler), flushes output and returns the exit code.
+compiler), flushes output and returns the exit code. `xb_app_main` checks the ABI, runs the registered module
+initializations in registration order (`xb_modules_init`, which stops at the first error) and calls the start function.

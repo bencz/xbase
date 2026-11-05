@@ -27,13 +27,20 @@ private:
   void lvalue(Expr &e, Scope &s);
   void codeblock(BlockExpr &b, Scope &s);
   bool resolve(VarExpr &v);
+  void declare(LocalDecl &d, bool isStatic, Scope &s);
+  bool constantInit(const Expr &e, unsigned blockDepth) const;
 
-  struct Frame {                 // a function or codeblock being analyzed
-    std::unordered_map<std::string, uint32_t> slots;
-    std::vector<bool> *boxed;    // the function's table; null for a codeblock
-    BlockExpr *block;            // null for the function
+  struct Binding {
+    VarWhere where;              // Frame or Static
+    uint32_t index;
+  };
+  struct Frame {                 // the module (file STATICs), a function or a codeblock
+    std::unordered_map<std::string, Binding> names;
+    std::vector<bool> *boxed;    // the function's table; null for the module and codeblocks
+    BlockExpr *block;            // the codeblock, or null
   };
   std::vector<Frame> frames_;
+  Module *module_ = nullptr;
   Diagnostics &diag_;
   FuncDecl *curFunc_ = nullptr;
 };

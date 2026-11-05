@@ -105,18 +105,17 @@ ASYNC FUNCTION FetchOrders( cUrl )
    `willreturn`, memory effects limited to arguments, `nocapture`); local type inference so that numeric variables
    that are not captured live in SSA registers; then precise GC roots in registers through LLVM statepoints and stack
    maps (`gc.statepoint`, `RewriteStatepointsForGC`), coordinated with the coroutine lowering of async functions.
-3. Compiler gaps: references (`@var`, `DO ... WITH` by reference). Preprocessor gaps: macro tokens (`&var.suffix`),
-   `__FILE__`/`__LINE__`, `#pragma`, `e"..."` strings, date literals, precompiled `std.ch` rules.
-4. Core language: dates, `STATIC`, `MEMVAR`/`PRIVATE`/`PUBLIC`, `FIELD`/aliases, `BEGIN SEQUENCE`,
-   `ErrorBlock`, `DO CASE`, `SWITCH`, `FOR EACH`, hashes, the rest of the array functions (`AIns`, `ADel`, `AFill`,
-   `AScan`, `AEval`, `ACopy`, `ASort`).
-5. GC: non-moving generations (sticky mark bits, remembered set, write barrier emitted by the compiler for cell stores
-   and called by runtime functions that store into arrays), then escape analysis in the compiler to allocate objects
-   that do not leave a function or task in a region freed as a whole. Dynamic symbol table, runtime macro evaluation.
-6. Runtime declarations, FFI, runtime parts written in xBase.
-7. Native classes.
-8. async/await, thread pool, asynchronous I/O.
-9. RDD (DBF, FPT, NTX, CDX, SDF, DELIM) and the terminal layer: one screen/keyboard interface with drivers for plain
-   standard output, ncurses (Linux, macOS, BSD) and the Windows console, chosen by a command-line option or at link
-   time.
-10. Embedded linker (LLD as a library), debug information (DWARF/CodeView).
+3. Compiler gaps: references (`@var`, `DO ... WITH` by reference), building on the `XB_T_REF` item `FOR EACH` uses;
+   argument-count checks of standard functions at compile time (`Empty()` with no argument is a compile error in
+   Clipper); Clipper's 10-significant-character identifiers (programs calling a function by its first 10 characters).
+   Preprocessor gaps: macro tokens (`&var.suffix`), `__FILE__`/`__LINE__`, `#pragma`, `e"..."` strings, date literals,
+   precompiled `std.ch` rules. 4. Core language: date literals, `MEMVAR`/`PRIVATE`/`PUBLIC`, `FIELD`/aliases, `BEGIN
+   SEQUENCE`, `ErrorBlock`, hashes, `FOR EACH` over hashes and user enumerators (yield), the rest of the array functions
+   (`AIns`, `ADel`, `AFill`, `AScan`, `AEval`, `ACopy`, `ASort`). 5. GC: non-moving generations (sticky mark bits,
+   remembered set, write barrier emitted by the compiler for cell stores and called by runtime functions that store into
+   arrays), then escape analysis in the compiler to allocate objects that do not leave a function or task in a region
+   freed as a whole. Dynamic symbol table, runtime macro evaluation. 6. Runtime declarations, FFI, runtime parts written
+   in xBase. 7. Native classes. 8. async/await, thread pool, asynchronous I/O. 9. RDD (DBF, FPT, NTX, CDX, SDF, DELIM)
+   and the terminal layer: one screen/keyboard interface with drivers for plain standard output, ncurses (Linux, macOS,
+   BSD) and the Windows console, chosen by a command-line option or at link time. 10. Embedded linker (LLD as a
+   library), debug information (DWARF/CodeView).

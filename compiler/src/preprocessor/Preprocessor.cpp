@@ -2,6 +2,7 @@
 
 #include "preprocessor/Lexer.h"
 #include "common/Text.h"
+#include "xbrt.h" // shared numeric rules
 
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MathExtras.h>
@@ -1058,8 +1059,7 @@ struct CondEval {
 
   int64_t number(const Token &k) {
     if (k.isInt) return k.ival;
-    constexpr double kLimit = 9223372036854775808.0; // 2^63
-    if (!std::isfinite(k.dval) || k.dval >= kLimit || k.dval < -kLimit) return fail();
+    if (!xb_dbl_fits_i64(k.dval)) return fail();
     return (int64_t)k.dval;
   }
 

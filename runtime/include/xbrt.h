@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 3u
+#define XB_ABI_VERSION 4u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -39,6 +39,10 @@ typedef enum xb_type {
   XB_T_BLOCK   = 6,   /* v.p: xb_block                             */
   XB_T_CELL    = 7,   /* v.p: xb_cell; only in the frame slot of a variable a
                          codeblock captured, never seen by xBase code */
+  XB_T_DATE    = 8,   /* v.i: Julian day number, 0 for the empty date  */
+  XB_T_REF     = 9,   /* v.p: a reference to an element (the variable of a
+                         FOR EACH loop); compiled code goes through
+                         xb_ref_target, xBase code never sees it */
   XB_T_COUNT_
 } xb_type;
 
@@ -151,6 +155,25 @@ void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems)
 void     xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
 void     xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value);
 
+/* FOR EACH: a collection's length (-1 after an error). During the loop the
+ * variable holds an XB_T_REF item made by xb_enum_ref_new and pointed at the
+ * element `idx` (1-based) by xb_enum_ref_move; xb_ref_target returns the item
+ * the reference designates (a bound error if the array shrank). */
+int64_t  xb_enum_len(xb_ctx *ctx, const xb_item *coll);
+void     xb_enum_ref_new(xb_ctx *ctx, xb_item *r, const xb_item *coll);
+void     xb_enum_ref_move(xb_ctx *ctx, xb_item *r, int64_t idx);
+xb_item *xb_ref_target(xb_ctx *ctx, xb_item *r);
+
+/* SWITCH: the value must be an integer or a string; CASEs match it exactly. */
+void     xb_switch_check(xb_ctx *ctx, const xb_item *value);
+int32_t  xb_switch_match(const xb_item *value, const xb_item *c);
+
+/* Modules. A compiled module registers its initialization and its STATICs
+ * before main(); xb_modules_init runs the initializations in order. */
+typedef void (*xb_module_init)(xb_ctx *ctx);
+void     xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics);
+void     xb_modules_init(xb_ctx *ctx);
+
 /* Codeblocks. xb_cell_box moves a frame slot's value into a new cell and
  * leaves an XB_T_CELL item in the slot. xb_block_new stores the new block in
  * `r` and returns it; the caller fills cells[0 .. ncells-1] before anything
@@ -202,6 +225,10 @@ static inline void xb_set_str(xb_item *it, xb_str *s) {
   it->v.s = s;
 }
 
+/* Whether a double converts to int64_t without overflow (false for NaN and
+ * infinities). 2^63 is exact in a double; INT64_MAX is not. */
+static inline int xb_dbl_fits_i64(double d) { return d >= -9223372036854775808.0 && d < 9223372036854775808.0; }
+
 /* Default display width of the integer part of a number (Clipper rule):
  * 10 columns, 20 when the value does not fit in 10. Shared by the compiler
  * (numeric literals) and the runtime (computed values). */
@@ -233,7 +260,7 @@ static inline void xb_str_minus(char *out, const char *a, size_t la, const char 
 }
 
 /* Formats a value the way ? / QOut() shows it. Returns a new string. */
-xb_str  *xb_item_display(const xb_item *it);
+xb_str  *xb_item_display(const xb_ctx *ctx, const xb_item *it);
 
 /* Program entry, emitted by xbc in the start module. */
 void     xb_app_main(xb_ctx *ctx);

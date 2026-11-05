@@ -1,17 +1,23 @@
 add_library(xbrt STATIC
+  src/core/control.c
   src/core/ctx.c
   src/core/display.c
   src/core/main.c
+  src/core/module.c
   src/core/numfmt.c
   src/core/ops.c
   src/core/set.c
   src/gc/gc.c
   src/types/array.c
   src/types/block.c
+  src/types/date.c
   src/types/string.c
   src/rtl/arrays.c
   src/rtl/console.c
+  src/rtl/dates.c
   src/rtl/lang.c
+  src/rtl/numbers.c
+  src/rtl/strings.c
 )
 
 if(WIN32)

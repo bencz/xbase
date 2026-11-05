@@ -1,0 +1,5 @@
+PROCEDURE Main()
+   SWITCH 1
+   CASE Date()
+   ENDSWITCH
+   RETURN

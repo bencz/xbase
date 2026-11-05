@@ -58,11 +58,13 @@ void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *id
   const xb_array *a = base->v.p;
   int64_t i = position(a, idx);
   if (i < 0) {
-    xb_rt_error(ctx, "BASE", 1132, "Bound error", "array access");
+    xb_array_bound_error(ctx);
     return;
   }
   *r = a->items[i];
 }
+
+void xb_array_bound_error(xb_ctx *ctx) { xb_rt_error(ctx, "BASE", 1132, "Bound error", "array access"); }
 
 void xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value) {
   if (base->type != XB_T_ARRAY || !xb_is_number(idx)) {

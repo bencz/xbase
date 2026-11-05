@@ -18,10 +18,9 @@ static inline double xb_num_value(const xb_item *it) { return it->type == XB_T_I
 static inline int64_t xb_num_to_i64(const xb_item *it) {
   if (it->type == XB_T_INT) return it->v.i;
   double d = it->v.d;
+  if (xb_dbl_fits_i64(d)) return (int64_t)d;
   if (d != d) return 0;
-  if (d >= 9223372036854775807.0) return INT64_MAX;
-  if (d <= -9223372036854775808.0) return INT64_MIN;
-  return (int64_t)d;
+  return d > 0 ? INT64_MAX : INT64_MIN;
 }
 
 /* 64-bit integer arithmetic reporting overflow (returns non-zero) instead of

@@ -3,9 +3,9 @@
 Code: `compiler/src/`. The preprocessor is described in [preprocessor.md](preprocessor.md); the runtime contract the
 generated code relies on is in [runtime.md](runtime.md).
 
-Pipeline (`main.cpp`): preprocess `std.ch` and the source, parse, run semantic checks, generate an in-memory LLVM
-module, optimize it, emit the object file. Each stage stops the compilation when it reports errors. After 100 errors
-(`Diagnostics::kMaxErrors`) nothing more is reported and the preprocessor and the parser stop early.
+Pipeline (`main.cpp`): preprocess `std.ch` and the source, parse, fold constants, run semantic checks, generate an
+in-memory LLVM module, optimize it, emit the object file. Each stage stops the compilation when it reports errors.
+After 100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the preprocessor and the parser stop early.
 
 ## Grammar
 
@@ -15,39 +15,53 @@ Keywords are not reserved. A keyword is recognized at the start of a statement, 
 
 - the next token is an assignment or access to a variable (`:=`, `=`, compound assignments, `++`, `--`, `->`, `:`,
   `[`), so `next := 1` and `exit = 2` assign variables;
-- it is one of `EXIT`, `LOOP`, `NEXT`, `END`, `ENDIF`, `ENDDO`, `ELSE` and something follows it on the statement;
-- it is `FOR` and the statement has no `TO`;
+- it is one of `EXIT`, `LOOP`, `NEXT`, `END`, `ENDIF`, `ENDDO`, `ELSE`, `ENDCASE`, `OTHERWISE`, `ENDSWITCH` and
+  something follows it on the statement;
+- it is `FOR` and the statement has no `TO`, unless `EACH` follows (`FOR each := 1 TO n` is a `FOR` loop over a
+  variable named `EACH`);
 - it is `IF` followed by a parenthesized three-argument list ending the statement: `IF( c, a, b )` is an inline IF.
 
 Keywords may be abbreviated down to a minimum length:
 
 | Keyword | Min | Keyword | Min | Keyword | Min |
 |---|---|---|---|---|---|
-| `DO` | 2 | `FOR` | 3 | `PRIVATE` | 4 |
-| `ELSE` | 4 | `FUNCTION` | 4 | `PROCEDURE` | 4 |
-| `ELSEIF` | 5 | `IF` | 2 | `PUBLIC` | 4 |
-| `END` | 3 | `IIF` | 3 | `RETURN` | 4 |
-| `ENDDO` | 4 | `LOCAL` | 4 | `STATIC` | 4 |
-| `ENDIF` | 4 | `LOOP` | 4 | `STEP` | 4 |
-| `EXIT` | 4 | `MEMVAR` | 4 | `TO` | 2 |
-| `FIELD` | 4 | `NEXT` | 4 | `WHILE` | 4 |
-| `NIL` | 3 | `PARAMETERS` | 4 | `WITH` | 4 |
+| `CASE` | 4 | `ENDSWITCH` | 5 | `OTHERWISE` | 4 |
+| `DESCEND` | 7 | `EXIT` | 4 | `PARAMETERS` | 4 |
+| `DO` | 2 | `FIELD` | 4 | `PRIVATE` | 4 |
+| `EACH` | 4 | `FOR` | 3 | `PROCEDURE` | 4 |
+| `ELSE` | 4 | `FUNCTION` | 4 | `PUBLIC` | 4 |
+| `ELSEIF` | 5 | `IF` | 2 | `RETURN` | 4 |
+| `END` | 3 | `IIF` | 3 | `STATIC` | 4 |
+| `ENDCASE` | 4 | `IN` | 2 | `STEP` | 4 |
+| `ENDDO` | 4 | `LOCAL` | 4 | `SWITCH` | 4 |
+| `ENDIF` | 4 | `LOOP` | 4 | `TO` | 2 |
+| | | `MEMVAR` | 4 | `WHILE` | 4 |
+| | | `NEXT` | 4 | `WITH` | 4 |
+| | | `NIL` | 3 | | |
 
 Statements:
 
 - `[STATIC] FUNCTION | PROCEDURE name [( params )]`. Statements before the first function form an implicit procedure
   named after the source file.
-- `LOCAL name [:= expr], ...`
+- `STATIC name [:= expr], ...` before the first function declares file-wide statics, visible in every function of the
+  source file.
+- `LOCAL name [:= expr], ...` and `STATIC name [:= expr], ...` at the start of a function, in any order. A function
+  `STATIC` keeps its value between calls.
 - `RETURN [expr]` (a `PROCEDURE` cannot return a value)
 - `IF ... [ELSEIF ...] [ELSE ...] ENDIF | END`
+- `DO CASE`, then `CASE cond` arms, an optional `OTHERWISE`, and `ENDCASE | END`; the first true arm runs. Nothing
+  may stand between `DO CASE` and the first `CASE`.
+- `SWITCH expr`, then `CASE constant` arms, an optional `OTHERWISE`, and `ENDSWITCH | END`. Control falls through
+  from one arm into the next until `EXIT`, which leaves the `SWITCH`; `LOOP` continues the enclosing loop.
 - `WHILE ... ENDDO | END`
 - `FOR v := start TO limit [STEP step] ... NEXT | END`; the limit and step are re-evaluated on every iteration
-- `EXIT`, `LOOP`
+- `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`
+- `EXIT` (leaves the innermost loop or `SWITCH`), `LOOP`
 - `DO name [WITH args]`; empty arguments pass `NIL`. Arguments are passed by value (passing plain variables by
   reference, as Clipper does, needs references, which do not exist yet)
 - expression statements; at statement level `x = expr` is an assignment
 
-`STATIC`, `PRIVATE`, `PUBLIC`, `MEMVAR`, `FIELD` and `PARAMETERS` are recognized and reported as not supported yet.
+`PRIVATE`, `PUBLIC`, `MEMVAR`, `FIELD` and `PARAMETERS` are recognized and reported as not supported yet.
 
 Expression precedence, lowest first: `:=` and compound assignments (right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`,
 `=` `==` `!=` `<>` `#`, `<` `<=` `>` `>=` `$`, `+` `-`, `*` `/` `%`, `^`/`**`, unary `-` `+`, prefix and postfix
@@ -66,9 +80,18 @@ between the use and the function gets a capture (`BlockExpr::captures`) that pas
 resolves to `VarWhere::Capture` with the capture index. Parameters of an enclosing codeblock cannot be captured ("outer
 codeblock variable is out of reach", as in Clipper).
 
-Sema reports: undeclared variables, duplicate functions, parameters or locals, `EXIT`/`LOOP` outside a loop, invalid
-assignment targets, and a `LOCAL` that follows an executable statement or appears inside an `IF`, `WHILE` or `FOR`
-body.
+`STATIC`s get slots in the module's static storage (`Module::statics`, `VarWhere::Static`). File-wide statics are
+visible in every function; a function's statics are visible in that function only. They are never captured: codeblocks
+use the storage directly. A `STATIC` initializer must be a constant after folding: a number, string, logical, `NIL`,
+an array literal of constants, or a codeblock whose variables are its own parameters and `STATIC`s (anything may be
+called inside it). Anything else, a plain variable included, is "illegal initializer for STATIC". A `STATIC` is
+visible in its own initializer, so a codeblock stored in it can call itself; a `LOCAL`'s initializer is resolved
+before the `LOCAL` exists.
+
+Sema reports: undeclared variables, duplicate functions, parameters or locals, `EXIT` outside a loop or `SWITCH`,
+`LOOP` outside a loop, invalid assignment targets, a `LOCAL` or `STATIC` that follows an executable statement or
+appears inside a nested block, a non-constant `STATIC` initializer, a `SWITCH` `CASE` that is not an integer or
+string constant ("CASE requires either numeric or string constant"), and a `CASE` value repeated in a `SWITCH`.
 
 ## Code generation
 
@@ -82,7 +105,8 @@ body.
 - Operators call the runtime (`xb_op_*`). The result may alias an operand. When the right operand of a binary operator
   has side effects and the left operand is a variable, the left value is copied first.
 - An assignment whose value has side effects computes the value into a temporary first, so `x := x++` assigns the old
-  value. A `FOR` whose `STEP` has side effects tests a copy of the limit.
+  value. The target's address is taken after the value is computed (a `FOR EACH` variable designates an array element,
+  which moves when the array grows). A `FOR` whose `STEP` has side effects tests a copy of the limit.
 - Calls set the result slot to `NIL`, then pass the arguments in consecutive frame slots.
 - Boxed variables are moved into cells at function entry (`xb_cell_box`); their uses load the cell from the slot, and
   captured variables load it from `self->cells[]` (the `xb_block` layout is mirrored with the target `DataLayout`).
@@ -97,13 +121,36 @@ body.
 - After every call that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it calls
   `xb_pending` and branches to the function exit if that asks to unwind.
 - The exit block pops the frame and returns.
-- The start module also gets `xb_app_main`, which checks the ABI and calls the first function of the source.
+- `DO CASE` is lowered as an `IF`/`ELSEIF` chain.
+- `SWITCH` evaluates its value once; `xb_switch_check` rejects values that are not integers or strings (a `SWITCH`
+  without arms accepts anything), and `xb_switch_match` compares it with each `CASE` constant in order (same type and
+  equal; strings compare exactly). The arm bodies are laid out in order so that control falls through.
+- `FOR EACH` evaluates the collections once, in order, and saves the loop variables. During the loop each variable
+  holds a reference (`XB_T_REF`, see [runtime.md](runtime.md#operators)) to the current element, so reading or
+  assigning the variable reads or assigns the element, and changes the body makes to the array through other paths
+  are seen through the variable. An i64 step counter selects the element: index `step + 1`, or with `DESCEND` the
+  collection's length at loop entry minus the step, so each collection is walked from its own end. An ascending loop
+  checks every index against the collection's current length (`xb_enum_len`) before each iteration, so it stops at
+  the shortest collection and sees elements added by the body; a descending one stops when an index reaches 0.
+  The variables get their saved values back at the end (also through `EXIT`); a `STATIC` loop variable also on
+  `RETURN`. One reference per variable serves the whole loop and is moved to each element (`xb_enum_ref_move`),
+  except for a variable a codeblock captures: it gets a new reference and a new cell at every iteration, so a block
+  created in an iteration keeps designating that iteration's element after the loop.
+- Variable access: a `FOR EACH` variable of a loop being generated goes through `xb_ref_target`. A `STATIC` and a
+  captured variable may hold a reference made elsewhere (a loop in another function, a block created in a loop), so
+  their accesses test the type inline and call `xb_ref_target` only for a reference. Other variables never hold one.
+- A module with `STATIC`s gets an internal global `xb.statics` (an array of NIL items), an initialization function
+  `xb.module.init` that evaluates the initializers in declaration order, and a global constructor
+  `xb.module.register` that calls `xb_module_register` before `main`.
+- The start module also gets `xb_app_main`, which checks the ABI, runs the module initializations
+  (`xb_modules_init`, followed by the pending check) and calls the first function of the source.
 - 32-bit parameters and results of every declared or defined function carry the extension attribute the target ABI
   requires (`zeroext` on s390x, `signext` on RISC-V 64, none on x86-64), taken from LLVM's target library information.
 
 ## Constant folding
 
-`opt/Fold.*` evaluates expressions on literals after semantic checks. Folding is part of the language semantics: the
+`opt/Fold.*` evaluates expressions on literals before semantic checks, so that checks on constants (`STATIC`
+initializers, `SWITCH` cases) see the folded values. Folding is part of the language semantics: the
 folded result's type and decimals follow Clipper's compile-time rules, which differ from the run-time operators.
 
 | Expression on literals | Result |

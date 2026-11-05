@@ -12,7 +12,8 @@ namespace xb {
 // runtime: code generation materializes such numbers with a runtime call.
 constexpr uint16_t kDefaultDecimals = 255;
 
-// Compile-time evaluation of expressions on literals (constant folding).
+// Compile-time evaluation of expressions on literals (constant folding). It
+// runs before Sema and only looks at literals, never at names.
 // Folding is part of the language semantics, not only an optimization: an
 // exact integer division of literals is an integer, while the run-time `/`
 // always produces a double.

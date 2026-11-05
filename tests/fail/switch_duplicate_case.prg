@@ -1,0 +1,7 @@
+PROCEDURE Main()
+   SWITCH 1
+   CASE 1
+   CASE 2
+   CASE 1
+   ENDSWITCH
+   RETURN

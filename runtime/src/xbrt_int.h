@@ -6,6 +6,7 @@
 
 #include "core/context.h"
 #include "core/numeric.h"
+#include "core/text.h"
 #include "gc/gc.h"
 #include "platform/platform.h"
 #include "types/types.h"

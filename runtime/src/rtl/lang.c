@@ -2,7 +2,7 @@
 
 void xbf_VALTYPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
-  static const char codes[XB_T_COUNT_] = { 'U', 'L', 'N', 'N', 'C', 'A', 'B', 'U' };
+  static const char codes[XB_T_COUNT_] = { 'U', 'L', 'N', 'N', 'C', 'A', 'B', 'U', 'D', 'U' };
   uint32_t t = argc ? argv[0].type : XB_T_NIL;
   char c = t < XB_T_COUNT_ ? codes[t] : 'U';
   xb_set_str(ret, xb_str_new(&c, 1));

@@ -1,0 +1,23 @@
+
+other          0
+one
+two
+other          3
+only otherwise
+a
+b
+c (fallthrough)
+b
+c (fallthrough)
+c (fallthrough)
+other d
+other ab
+one or two
+after          1
+one or two
+after          2
+three
+x          4
+after          4
+exit switch only
+         5

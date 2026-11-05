@@ -26,6 +26,8 @@ private:
   bool at(Tok k) const { return cur().kind == k; }
   bool accept(Tok k);
   bool expect(Tok k, const char *what);
+  std::string found() const;
+  bool isAssignAfterEach() const;
   void advance() { if (pos_ + 1 < toks_.size()) ++pos_; }
   bool atEndOfStmt() const { return at(Tok::EndOfStmt) || at(Tok::Eof); }
   void endOfStmt();
@@ -44,7 +46,11 @@ private:
   std::unique_ptr<FuncDecl> parseFunc();
   Block parseBlock(std::initializer_list<const char *> enders);
   StmtPtr parseStmt();
-  StmtPtr parseLocal();
+  StmtPtr parseDecl(StmtKind kind);
+  StmtPtr parseDoCase();
+  StmtPtr parseSwitch();
+  StmtPtr parseForEach();
+  void rejectBeforeFirstCase(const char *construct, std::initializer_list<const char *> starts);
   StmtPtr parseIf();
   StmtPtr parseWhile();
   StmtPtr parseFor();
