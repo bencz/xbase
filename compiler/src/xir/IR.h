@@ -197,9 +197,16 @@ public:
   std::vector<std::unique_ptr<Instruction>> insts;
 
   BlockParam *addParam(Type t);
-  // Removes unused parameter k and argument k of `branches`, the terminators
-  // that branch here (see predecessorTerminators in Analysis.h).
-  void removeParam(size_t k, const std::vector<Instruction *> &branches);
+  // Removes argument k of `branches`, the terminators that branch here (see
+  // predecessorTerminators in Analysis.h); then parameter k, once nothing uses
+  // it. Parameters that only feed each other (a cycle through a loop) lose
+  // all their arguments first, then go.
+  void removeArgs(size_t k, const std::vector<Instruction *> &branches);
+  void eraseParam(size_t k);
+  void removeParam(size_t k, const std::vector<Instruction *> &branches) {
+    removeArgs(k, branches);
+    eraseParam(k);
+  }
   Instruction *terminator() const;
   std::unique_ptr<Instruction> takeTerminator(); // removed with its uses undone
   size_t numSuccessors() const; // the targets of the terminator, without allocating
@@ -228,7 +235,6 @@ public:
   BasicBlock *entry() const { return blocks.front().get(); }
   BasicBlock *addBlock(const std::string &name);
   Var *addVar(Var::Kind k, uint32_t index, std::string name);
-  uint32_t numFrameVars() const;
   void renumber() const;          // ids for values, in block order
 
 private:

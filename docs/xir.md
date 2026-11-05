@@ -65,6 +65,11 @@ manager (`PassManager.*`, `optimize`) runs a table of passes on every function, 
 while something changes (at most four rounds), and verifies the function after every pass that changed it; invalid
 xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
 
+- `promote-variables` (mem2reg): `LOCAL`s reached only by direct `load` and `store` (not shared, not parameters,
+  not `FOR EACH` variables) become SSA values. Block parameters go where definitions meet, in the iterated dominance
+  frontiers of the blocks that store (the entry defines the variable as `NIL`); renaming along the dominator tree
+  replaces each `load` with the current value and drops the `store`s; parameters that only feed each other through a
+  loop are removed (their arguments first, then them). The variables leave the frame.
 - `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `from_bool` and `truth` of
   constants (`truth` of a logical just made is its boolean), `cond_br` on a constant becomes `br`. A folded
   instruction is removed at once, also one that can fail in general (`truth`) but not with these operands.
@@ -93,8 +98,8 @@ Still to build for the passes that follow:
 Planned, in layers, each pass with its own tests:
 
 - Cleanup: copy propagation, sparse conditional constant propagation, value numbering (CSE/GVN).
-- Memory: mem2reg (variables that are not shared become SSA values), load elimination and store-to-load forwarding,
-  dead store elimination, write barrier elision (a store into an object allocated with no safepoint since).
+- Memory: load elimination and store-to-load forwarding for the variables that stay in memory, dead store
+  elimination, write barrier elision (a store into an object allocated with no safepoint since).
 - Types: type inference over SSA (the xBase counterpart of known bits: integer, double, string, array, logical,
   date, `NIL`), inline fast paths where a type is proven or likely, unboxed numbers.
 - Loops: loop-invariant code motion, unswitching of type tests, strength reduction, bounds-check elimination for
@@ -112,7 +117,8 @@ LLVM then does instruction selection, register allocation and its own vectorizat
 (`Ops.*`: one row per operation with its name and effects: whether it may fail, reads or writes its variable or the
 heap, depends on SET values, runs xBase code, allocates, ends a block, is commutative; `mayFail` and the copy elision
 of the frame plan consult it), `Builder`, `Verifier`, `Printer`, control flow analyses (`Analysis`: reverse
-postorder, dominators, the predecessor terminators of every block, removal of unreachable blocks), and the lowering
+postorder, dominators and the dominator tree, dominance frontiers, the predecessor terminators of every block,
+removal of unreachable blocks), and the lowering
 from the syntax tree (`Gen*.cpp`). Block names are unique in a function (`while.body.2`).
 `PassManager.*` and `passes/` optimize it (see [Passes](#passes)). `compiler/src/codegen/` lowers xIR to LLVM
 (`FramePlan` assigns the frame).
@@ -150,8 +156,9 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 1. The core, lowering from the syntax tree and to LLVM, reproducing the previous behavior (done).
 2. Native frames: item frames on the machine stack, linked per context (done; each frame is the anchor the stack
    maps of phase 4 are relative to). Direct calls with fixed arity (planned).
-3. The pass manager and the passes (see [Passes](#passes)): the manager and the cleanup passes are done; next
-   mem2reg, type inference and inline fast paths.
+3. The pass manager and the passes (see [Passes](#passes)): the manager, mem2reg and the cleanup passes are done;
+   next value numbering and type inference, so the integer fast paths of the lowering (`codegen/FastPaths.cpp`)
+   drop their type tests where types are proven.
 4. Statepoints: once mem2reg makes items SSA values, LLVM keeps them in registers and records where the live
    object pointers are at each call (stack maps, relative to the frame's anchor), instead of frame slots holding
    every item; relocation, evacuation in the collector, barrier elision.

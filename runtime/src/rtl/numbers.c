@@ -226,3 +226,41 @@ void xbf_EXP(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_LOG(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   math1(ctx, ret, argc, argv, math_log, 1095, "LOG");
 }
+
+/* The bit functions (xb_bit_apply and xb_bit_function in xbrt.h): numbers are
+ * taken as integers (truncated, saturated to 64 bits; NaN is 0); anything else,
+ * or a missing argument, is an argument error. */
+static void bit_function(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item *argv, xb_bit_op op) {
+  const xb_bit_function *f = xb_bit_function_of(op);
+  int64_t v[2] = {0, 0};
+  for (uint32_t k = 0; k < f->arity; ++k) {
+    if (k >= argc || !xb_is_number(&argv[k])) {
+      xb_rt_error(ctx, "BASE", f->code, "Argument error", f->name);
+      return;
+    }
+    v[k] = xb_num_to_i64(&argv[k]);
+  }
+  xb_set_int(ret, xb_bit_apply(f->op, v[0], v[1]));
+}
+
+void xbf_BITAND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  bit_function(ctx, ret, argc, argv, XB_BIT_AND);
+}
+void xbf_BITOR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  bit_function(ctx, ret, argc, argv, XB_BIT_OR);
+}
+void xbf_BITXOR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  bit_function(ctx, ret, argc, argv, XB_BIT_XOR);
+}
+void xbf_BITNOR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  bit_function(ctx, ret, argc, argv, XB_BIT_NOR);
+}
+void xbf_BITNOT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  bit_function(ctx, ret, argc, argv, XB_BIT_NOT);
+}
+void xbf_BITSHL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  bit_function(ctx, ret, argc, argv, XB_BIT_SHL);
+}
+void xbf_BITSHR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  bit_function(ctx, ret, argc, argv, XB_BIT_SHR);
+}

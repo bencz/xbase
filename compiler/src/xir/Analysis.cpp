@@ -67,8 +67,8 @@ CFG::CFG(const Function &f) {
   }
   // Number the dominator tree depth first: a dominates b exactly when b's
   // numbers fall within a's.
-  std::vector<std::vector<uint32_t>> children(n);
-  for (uint32_t i = 1; i < n; ++i) children[idom_[i]].push_back(i);
+  children_.assign(n, {});
+  for (uint32_t i = 1; i < n; ++i) children_[idom_[i]].push_back(rpo_[i]);
   enter_.assign(n, 0);
   leave_.assign(n, 0);
   uint32_t clock = 0;
@@ -76,8 +76,8 @@ CFG::CFG(const Function &f) {
   enter_[0] = clock++;
   while (!walk.empty()) {
     auto &[node, next] = walk.back();
-    if (next < children[node].size()) {
-      uint32_t c = children[node][next++];
+    if (next < children_[node].size()) {
+      uint32_t c = index_[children_[node][next++]];
       enter_[c] = clock++;
       walk.push_back({c, 0});
       continue;
@@ -85,6 +85,29 @@ CFG::CFG(const Function &f) {
     leave_[node] = clock++;
     walk.pop_back();
   }
+}
+
+BasicBlock *CFG::idom(const BasicBlock *b) const {
+  uint32_t i = index_.at(b);
+  return i == 0 ? nullptr : rpo_[idom_[i]];
+}
+
+// Cooper, Harvey and Kennedy: from each predecessor of a join, up the
+// dominator tree to the join's immediate dominator.
+Frontiers dominanceFrontiers(const CFG &cfg) {
+  Frontiers df;
+  for (BasicBlock *b : cfg.order()) {
+    const auto &preds = cfg.preds(b);
+    if (preds.size() < 2) continue;
+    BasicBlock *stop = cfg.idom(b);
+    for (BasicBlock *p : preds) {
+      for (BasicBlock *runner = p; runner != stop; runner = cfg.idom(runner)) {
+        auto &set = df[runner];
+        if (set.empty() || set.back() != b) set.push_back(b); // b is handled once per runner, in this loop
+      }
+    }
+  }
+  return df;
 }
 
 bool CFG::dominates(const BasicBlock *a, const BasicBlock *b) const {

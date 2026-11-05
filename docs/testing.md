@@ -44,3 +44,14 @@ build/compiler/xbc --target=s390x-linux-gnu tests/run/funcs.prg -o /tmp/claude/f
 ```
 
 Running big-endian programs needs a target sysroot and an emulator (for example `qemu-s390x`); this is not automated.
+
+## Benchmarks
+
+`bench/<name>.prg` are benchmark programs: recursive calls (`fib`), an integer loop (`loops`), arrays (`sieve`,
+`matmul`), sorting in xBase (`qsort`) and with `ASort` (`asort`), strings (`strings`), the bit functions and string
+building (`crc32`). Each one times its own work with `ElapsedMs()`, checks its result against a value computed
+independently, and prints one line: `<name> <milliseconds> ok|WRONG`. The `bench` target (not part of the default
+build or of `ctest`) compiles them with `-O2` (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the
+tests) and runs `bench/run_bench.cmake`: every program `XB_BENCH_REPEAT` times (a cache variable, default 3), the best
+time of each in a table, and a failure when one does not run or reports `WRONG`. It warns when the build is not
+Release. Performance changes are measured with it, before and after.

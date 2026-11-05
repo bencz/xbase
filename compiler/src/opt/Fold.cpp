@@ -1,5 +1,6 @@
 #include "opt/Fold.h"
 
+#include "common/BitFunctions.h"
 #include "xbrt.h" // shared numeric rules
 
 #include <llvm/Support/MathExtras.h>
@@ -15,11 +16,14 @@ namespace {
 
 bool isConstant(const Expr &e);
 
-// A folded integer is an integer constant of the program; a folded double has
-// the default display width for its value (width 0).
-ExprPtr makeInt(SourceLoc loc, int64_t v) {
-  return std::make_unique<NumberExpr>(loc, true, v, 0.0, 0, xb_num_const_int_width(v));
+// A folded integer is an integer constant of the program, unless an operand is
+// a computed integer (width 0, a folded bit function): then it is computed too,
+// as at run time. A folded double has the default display width (width 0).
+ExprPtr makeInt(SourceLoc loc, int64_t v, bool computed = false) {
+  return std::make_unique<NumberExpr>(loc, true, v, 0.0, 0, computed ? 0 : xb_num_const_int_width(v));
 }
+
+bool isComputedInt(const NumberExpr &n) { return n.isInt && n.width == 0; }
 
 ExprPtr makeDouble(SourceLoc loc, double v, uint16_t dec) {
   return std::make_unique<NumberExpr>(loc, false, 0, v, dec, 0);
@@ -41,13 +45,14 @@ const LogicalExpr *logical(const ExprPtr &e) {
 
 ExprPtr foldArithmetic(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberExpr &b) {
   bool ints = a.isInt && b.isInt;
+  bool computed = isComputedInt(a) || isComputedInt(b);
   int64_t r;
   switch (op) {
   case BinOp::Add:
   case BinOp::Sub:
     if (ints) {
       bool overflow = op == BinOp::Add ? llvm::AddOverflow(a.ival, b.ival, r) : llvm::SubOverflow(a.ival, b.ival, r);
-      if (!overflow) return makeInt(loc, r);
+      if (!overflow) return makeInt(loc, r, computed);
       double d = op == BinOp::Add ? (double)a.ival + (double)b.ival : (double)a.ival - (double)b.ival;
       return makeDouble(loc, d, 0);
     } else {
@@ -56,18 +61,19 @@ ExprPtr foldArithmetic(SourceLoc loc, BinOp op, const NumberExpr &a, const Numbe
     }
   case BinOp::Mul:
     if (ints) {
-      if (!llvm::MulOverflow(a.ival, b.ival, r)) return makeInt(loc, r);
+      if (!llvm::MulOverflow(a.ival, b.ival, r)) return makeInt(loc, r, computed);
       return makeDouble(loc, (double)a.ival * (double)b.ival, 0);
     }
     return makeDouble(loc, asDouble(a) * asDouble(b), (uint16_t)std::min<int>(a.dec + b.dec, kDefaultDecimals));
   case BinOp::Div:
     if (asDouble(b) == 0.0) return nullptr; // left for the run-time error
     if (ints && !(a.ival == std::numeric_limits<int64_t>::min() && b.ival == -1) && a.ival % b.ival == 0)
-      return makeInt(loc, a.ival / b.ival);
+      return makeInt(loc, a.ival / b.ival, computed);
     return makeDouble(loc, asDouble(a) / asDouble(b), kDefaultDecimals);
   case BinOp::Mod:
     if (asDouble(b) == 0.0) return nullptr;
-    if (ints) return makeInt(loc, b.ival == -1 ? 0 : a.ival % b.ival); // x % -1 is 0 (and INT64_MIN % -1 is UB)
+    // x % -1 is 0 (and INT64_MIN % -1 is UB).
+    if (ints) return makeInt(loc, b.ival == -1 ? 0 : a.ival % b.ival, computed);
     return makeDouble(loc, std::fmod(asDouble(a), asDouble(b)), kDefaultDecimals);
   case BinOp::Pow:
     return makeDouble(loc, std::pow(asDouble(a), asDouble(b)), kDefaultDecimals);
@@ -254,7 +260,7 @@ ExprPtr Folder::foldUnary(UnaryExpr &u) {
   if (u.op == UnOp::Plus) return std::move(u.operand);
   if (!n->isInt) return makeDouble(loc, -n->dval, n->dec);
   if (n->ival == std::numeric_limits<int64_t>::min()) return makeDouble(loc, -(double)n->ival, 0);
-  return makeInt(loc, -n->ival);
+  return makeInt(loc, -n->ival, isComputedInt(*n));
 }
 
 ExprPtr Folder::foldBinary(BinaryExpr &b) {
@@ -336,11 +342,29 @@ ExprPtr evalLen(const CallExpr &c) {
   return nullptr;
 }
 
+// A bit function on integer constants: an integer without a display width
+// of its own, like the one the runtime computes.
+ExprPtr evalBit(const CallExpr &c) {
+  const xb_bit_function *f = findBitFunction(c.callee->name);
+  if (!f || c.args.size() != f->arity) return nullptr;
+  int64_t v[2] = {0, 0};
+  for (size_t k = 0; k < f->arity; ++k) {
+    const NumberExpr *n = num(c.args[k]);
+    if (!n || !n->isInt) return nullptr;
+    v[k] = n->ival;
+  }
+  return makeInt(c.loc, xb_bit_apply(f->op, v[0], v[1]), true);
+}
+
 // Compile-time evaluators of the functions declared FOLD; each returns null
 // when its arguments are not constant enough.
 using Evaluator = ExprPtr (*)(const CallExpr &);
 const std::unordered_map<std::string, Evaluator> &evaluators() {
-  static const std::unordered_map<std::string, Evaluator> table = {{"LEN", evalLen}};
+  static const std::unordered_map<std::string, Evaluator> table = [] {
+    std::unordered_map<std::string, Evaluator> t = {{"LEN", evalLen}};
+    for (uint32_t k = 0; k < XB_BIT_FUNCTION_COUNT; ++k) t[xb_bit_function_of((xb_bit_op)k)->name] = evalBit;
+    return t;
+  }();
   return table;
 }
 

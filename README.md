@@ -25,6 +25,14 @@ default (`-DXB_WARNINGS_AS_ERRORS=OFF` exists for local experiments only).
 ctest --test-dir build --output-on-failure
 ```
 
+## Benchmarks
+
+```sh
+cmake --build build --target bench
+```
+
+Runs the programs in `bench/` (compiled with `-O2`) and prints the best time of each; measure Release builds only.
+
 ## Use
 
 ```sh

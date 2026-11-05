@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 55 of 603 done. Commands (`std.ch` families): 16 of 157 done.
+Functions: 58 of 551 done. Commands (`std.ch` families): 16 of 155 done.
 
 ## Statements (grammar)
 
@@ -24,8 +24,8 @@ GETS*, *CLEAR MEMORY*, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, *CLOSE*, *CLOSE ALL*, 
 *DELETE*, *DELETE FILE*, *DELETE TAG*, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**, **ENDCASE**, **ENDDO**, **ENDFOR**,
 **ENDIF**, *ENDSEQUENCE*, *ERASE*, *FIND*, *GO*, *GOTO*, *INDEX ON*, *INPUT*, *JOIN*, *KEYBOARD*, *LABEL FORM*, *LIST*,
 *LOCATE*, *MENU*, **NEXT**, *PACK*, **QUIT**, *READ*, *READ SAVE*, *RECALL*, *REINDEX*, *RELEASE*, *RELEASE ALL*,
-*RENAME*, *REPLACE*, *REPORT FORM*, *REQUEST*, *RESTORE*, *RESTORE HBV*, *RESTORE SCREEN*, *RUN*, *SAVE*, *SAVE ALL*,
-*SAVE HBV*, *SAVE SCREEN*, *SAVE TO*, *SEEK*, *SELECT*, *SET ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*,
+*RENAME*, *REPLACE*, *REPORT FORM*, *REQUEST*, *RESTORE*, *RESTORE SCREEN*, *RUN*, *SAVE*, *SAVE ALL*,
+*SAVE SCREEN*, *SAVE TO*, *SEEK*, *SELECT*, *SET ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*,
 *SET BELL*, **SET CENTURY**, *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET
 DBFLOCKSCHEME*, **SET DECIMALS**, *SET DEFAULT*, *SET DELETED*, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET
 DIRCASE*, *SET DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET
@@ -38,26 +38,25 @@ STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, *SET UNIQUE*, *SET VIDEOMO
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`,
 `set.ch` (partial), `error.ch`, `fileio.ch`, `box.ch`, `color.ch`, `dbstruct.ch`, `directry.ch`, `getexit.ch`,
-`memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`, `hbclass.ch`
-(classes are native in xbase), `hbsix.ch`.
+`memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
 
 ## Functions
 
 ### Databases (RDD core) (0 of 112 done)
 
 *AFields*, *Alias*, *Bof*, *dbAppend*, *dbClearFilter*, *dbClearIndex*, *dbClearRelation*, *dbCloseAll*, *dbCloseArea*,
-*dbCommit*, *dbCommitAll*, *dbCreate*, *dbCreateIndex*, *dbDelete*, *dbEval*, *Dbf*, *DBFBLOB*, *DBFDBT*,
-*dbFieldInfo*, *dbFileGet*, *dbFilePut*, *dbFilter*, *DBFSMT*, *dbGoBottom*, *dbGoto*, *dbGoTop*, *dbInfo*,
-*dbOrderInfo*, *dbRecall*, *dbRecordInfo*, *dbReindex*, *dbRelation*, *dbRLock*, *dbRLockList*, *dbRSelect*,
-*dbRUnlock*, *dbSeek*, *dbSelectArea*, *dbSetDriver*, *dbSetFilter*, *dbSetIndex*, *dbSetOrder*, *dbSetRelation*,
-*dbSkip*, *dbStruct*, *dbTableExt*, *dbUnlock*, *dbUnlockAll*, *dbUseArea*, *Deleted*, *Delim*, *Eof*, *FCount*,
-*FieldGet*, *FieldName*, *FieldPos*, *FieldPut*, *FLock*, *Found*, *Header*, *IndexExt*, *IndexKey*, *IndexOrd*,
-*LastRec*, *Lock*, *LUpdate*, *NetErr*, *ordBagClear*, *ordBagExt*, *ordBagName*, *ordCondSet*, *ordCount*,
-*ordCreate*, *ordCustom*, *ordDescend*, *ordDestroy*, *ordFindRec*, *ordFor*, *ordIsUnique*, *ordKey*, *ordKeyAdd*,
-*ordKeyCount*, *ordKeyDel*, *ordKeyGoto*, *ordKeyNo*, *ordKeyRelPos*, *ordKeyVal*, *ordListAdd*, *ordListClear*,
-*ordListRebuild*, *ordName*, *ordNumber*, *ordScope*, *ordSetFocus*, *ordSetRelation*, *ordSkipRaw*, *ordSkipUnique*,
-*ordWildSeek*, *rddList*, *rddName*, *rddRegister*, *rddSetDefault*, *RDDSYS*, *RecCount*, *RecNo*, *RecSize*, *RLock*,
-*SDF*, *Select*, *Used*, *_DBF*, *_dtxCondSet*
+*dbCommit*, *dbCommitAll*, *dbCreate*, *dbCreateIndex*, *dbDelete*, *dbEval*, *Dbf*, *DBFBLOB*, *DBFDBT*, *dbFieldInfo*,
+*dbFileGet*, *dbFilePut*, *dbFilter*, *DBFSMT*, *dbGoBottom*, *dbGoto*, *dbGoTop*, *dbInfo*, *dbOrderInfo*, *dbRecall*,
+*dbRecordInfo*, *dbReindex*, *dbRelation*, *dbRLock*, *dbRLockList*, *dbRSelect*, *dbRUnlock*, *dbSeek*, *dbSelectArea*,
+*dbSetDriver*, *dbSetFilter*, *dbSetIndex*, *dbSetOrder*, *dbSetRelation*, *dbSkip*, *dbStruct*, *dbTableExt*,
+*dbUnlock*, *dbUnlockAll*, *dbUseArea*, *Deleted*, *Delim*, *Eof*, *FCount*, *FieldGet*, *FieldName*, *FieldPos*,
+*FieldPut*, *FLock*, *Found*, *Header*, *IndexExt*, *IndexKey*, *IndexOrd*, *LastRec*, *Lock*, *LUpdate*, *NetErr*,
+*ordBagClear*, *ordBagExt*, *ordBagName*, *ordCondSet*, *ordCount*, *ordCreate*, *ordCustom*, *ordDescend*,
+*ordDestroy*, *ordFindRec*, *ordFor*, *ordIsUnique*, *ordKey*, *ordKeyAdd*, *ordKeyCount*, *ordKeyDel*, *ordKeyGoto*,
+*ordKeyNo*, *ordKeyRelPos*, *ordKeyVal*, *ordListAdd*, *ordListClear*, *ordListRebuild*, *ordName*, *ordNumber*,
+*ordScope*, *ordSetFocus*, *ordSetRelation*, *ordSkipRaw*, *ordSkipUnique*, *ordWildSeek*, *rddList*, *rddName*,
+*rddRegister*, *rddSetDefault*, *RDDSYS*, *RecCount*, *RecNo*, *RecSize*, *RLock*, *SDF*, *Select*, *Used*, *_DBF*,
+*_dtxCondSet*
 
 ### Databases (SIx/HiPer-SEEK extensions) (0 of 115 done)
 
@@ -77,14 +76,14 @@ Other standard headers, each to be provided with the matching runtime support: `
 *sx_Thermometer*, *sx_TurboArea*, *sx_Unlock*, *sx_Version*, *sx_VFGet*, *sx_VSigLen*, *sx_Warm*, *sx_WildMatch*,
 *sx_WildSeek*, *_sxOpenInit*, *_sx_IniInit*, *_sx_StrCompress*, *_sx_StrDecompress*
 
-### Dates and times (11 of 13 done)
+### Dates and times (13 of 13 done)
 
-**CDoW**, **CMonth**, **CToD**, **Date**, **Day**, **DoW**, **DToC**, **DToS**, **Month**, *Seconds*, **SToD**, *Time*,
-**Year**
+**CDoW**, **CMonth**, **CToD**, **Date**, **Day**, **DoW**, **DToC**, **DToS**, **Month**, **Seconds**, **SToD**,
+**Time**, **Year**
 
-### Arrays (5 of 12 done)
+### Arrays (6 of 12 done)
 
-**AAdd**, **AClone**, *ACopy*, *ADel*, *AEval*, *AFill*, *AIns*, **Array**, *AScan*, **ASize**, *ASort*, **ATail**
+**AAdd**, **AClone**, *ACopy*, *ADel*, *AEval*, *AFill*, *AIns*, **Array**, *AScan*, **ASize**, **ASort**, **ATail**
 
 ### Files, directories and environment (0 of 23 done)
 
@@ -92,27 +91,27 @@ Other standard headers, each to be provided with the matching runtime support: `
 *FError*, *File*, *FOpen*, *FRead*, *FReadStr*, *FRename*, *FSeek*, *FSetDevMod*, *FWrite*, *GetEnv*, *IsDisk*,
 *MemoRead*, *MemoWrit*
 
-### Screen, keyboard, mouse and UI (2 of 126 done)
+### Screen, keyboard, mouse and UI (2 of 124 done)
 
 Built on one terminal interface (screen buffer of character and color cells, cursor, keyboard) with
 drivers: plain standard output (pipes, tests, servers; the default when output is not a terminal),
 ncurses (Linux, macOS, BSD) and the Windows console. The driver is chosen by a command-line option or
 at link time, never by an environment variable.
 
-*Accelerator*, *AChoice*, *Alert*, *ApplyDefau*, *Browse*, *ButtnDefCo*, *CheckBox*, *CheckDefCo*, *Col*,
-*ColorSelect*, *ComboDefCo*, *dbEdit*, *DevOut*, *DevOutPict*, *DevPos*, *DispBegin*, *DispBox*, *DispCount*,
-*DispEnd*, *DispOut*, *DispOutAt*, *EraseGetMsg*, *GetActive*, *GetApplyKey*, *GetClrBack*, *GetClrFore*, *GetClrPair*,
-*GetDoSetKey*, *GetNew*, *GetPairLen*, *GetPairPos*, *GetPostValidate*, *GetPreValidate*, *GetReader*, *GUIApplyKey*,
-*GUIPostValidate*, *GUIPreValidate*, *GUIReader*, *HBClass*, *HitTest*, *Inkey*, *IsQuick*, *IsShortcut*, *LastKey*,
-*ListBDefCo*, *ListBox*, *MaxCol*, *MaxRow*, *MCol*, *MDblClk*, *MemoEdit*, *MenuDefCol*, *MenuItem*, *MenuModal*,
-*MHide*, *MLeftDown*, *MPresent*, *MRestState*, *MRightDown*, *MRow*, *MSaveState*, *MSetBounds*, *MSetCursor*,
-*MSetPos*, *MShow*, *NextKey*, *OutErr*, *OutStd*, *PCol*, *Popup*, *PRow*, *PushButton*, **QOut**, **QQOut**,
-*RadGrDefCo*, *RadioButto*, *RadioButton*, *RadioGroup*, *RadItDefCo*, *RangeCheck*, *ReadExit*, *ReadFormat*,
-*ReadInsert*, *ReadKill*, *ReadModal*, *ReadStats*, *ReadUpdated*, *ReadVar*, *Row*, *Scroll*, *ScrollBar*, *SetBlink*,
-*SetClrPair*, *SetColor*, *SetCursor*, *SetKey*, *SetPos*, *SetPosBS*, *SetPRC*, *ShowGetMsg*, *ShowMsg*, *TApplyKey*,
-*TBAddCol*, *TBApplyKey*, *TBBBlock*, *TBClose*, *TBColumnNew*, *TBCreate*, *TBDelCol*, *TBDisplay*, *TBEditCell*,
-*TBFBlock*, *TBGoBot*, *TBGoTop*, *TBInsCol*, *TBModal*, *TBMouse*, *TBReader*, *TBrowseNew*, *TBSBlock*, *TBSkip*,
-*Updated*, *_CHECKBOX_*, *_LISTBOX_*, *_PUSHBUTT_*, *_RADIOGRP_*
+*Accelerator*, *AChoice*, *Alert*, *ApplyDefau*, *Browse*, *ButtnDefCo*, *CheckBox*, *CheckDefCo*, *Col*, *ColorSelect*,
+*ComboDefCo*, *dbEdit*, *DevOut*, *DevOutPict*, *DevPos*, *DispBegin*, *DispBox*, *DispCount*, *DispEnd*, *DispOut*,
+*DispOutAt*, *EraseGetMsg*, *GetActive*, *GetApplyKey*, *GetClrBack*, *GetClrFore*, *GetClrPair*, *GetDoSetKey*,
+*GetNew*, *GetPairLen*, *GetPairPos*, *GetPostValidate*, *GetPreValidate*, *GetReader*, *GUIApplyKey*,
+*GUIPostValidate*, *GUIPreValidate*, *GUIReader*, *HitTest*, *Inkey*, *IsQuick*, *IsShortcut*, *LastKey*, *ListBDefCo*,
+*ListBox*, *MaxCol*, *MaxRow*, *MCol*, *MDblClk*, *MemoEdit*, *MenuDefCol*, *MenuItem*, *MenuModal*, *MHide*,
+*MLeftDown*, *MPresent*, *MRestState*, *MRightDown*, *MRow*, *MSaveState*, *MSetBounds*, *MSetCursor*, *MSetPos*,
+*MShow*, *NextKey*, *OutErr*, *OutStd*, *PCol*, *Popup*, *PRow*, *PushButton*, **QOut**, **QQOut**, *RadGrDefCo*,
+*RadioButton*, *RadioGroup*, *RadItDefCo*, *RangeCheck*, *ReadExit*, *ReadFormat*, *ReadInsert*, *ReadKill*,
+*ReadModal*, *ReadStats*, *ReadUpdated*, *ReadVar*, *Row*, *Scroll*, *ScrollBar*, *SetBlink*, *SetClrPair*, *SetColor*,
+*SetCursor*, *SetKey*, *SetPos*, *SetPosBS*, *SetPRC*, *ShowGetMsg*, *ShowMsg*, *TApplyKey*, *TBAddCol*, *TBApplyKey*,
+*TBBBlock*, *TBClose*, *TBColumnNew*, *TBCreate*, *TBDelCol*, *TBDisplay*, *TBEditCell*, *TBFBlock*, *TBGoBot*,
+*TBGoTop*, *TBInsCol*, *TBModal*, *TBMouse*, *TBReader*, *TBrowseNew*, *TBSBlock*, *TBSkip*, *Updated*, *_CHECKBOX_*,
+*_LISTBOX_*, *_PUSHBUTT_*, *_RADIOGRP_*
 
 ### Errors (0 of 4 done)
 
@@ -130,27 +129,21 @@ at link time, never by an environment variable.
 **RAt**, **Replicate**, **Right**, **RTrim**, *SoundEx*, **Space**, **StrTran**, **StrZero**, **Stuff**, **Upper**,
 *Word*
 
-### Language, settings and runtime (5 of 144 done)
+### Language, settings and runtime (5 of 94 done)
 
 *AltD*, *AMPM*, *Break*, *cftsAdd*, *cftsClose*, *cftsCrea*, *cftsDelete*, *cftsIfDel*, *cftsNext*, *cftsOpen*,
-*cftsRecN*, *cftsReplac*, *cftsSet*, *cftsUndel*, *cftsVeri*, *cftsVers*, *CLIPPER520*, *CLIPPER530*, *Days*,
-*dbClearFil*, *dbClearRel*, *dbCloseAre*, *dbDrop*, *dbExists*, *DBFCDX*, *DBFFPT*, *dbFieldInf*, *DBFNSX*, *DBFNTX*,
-*DbgShadow*, *dbOrderInf*, *dbRecordIn*, *dbRename*, *dbRLockLis*, *dbSelectAr*, *dbSetDrive*, *dbSetFilte*,
-*dbSetRelat*, *DefPath*, *DirRemove*, *Do*, *ElapTime*, **Empty**, *ErrorInHan*, *ErrorInHandler*, *ErrorLevel*,
-**Eval**, *FieldBlock*, *FieldDec*, *FieldLen*, *FieldType*, *FieldWBlock*, *FKLabel*, *FKMax*, *Get*, *GetE*,
-*HBCheckBox*, *HBEditor*, *HBGetList*, *HBHash*, *HBLabelForm*, *HBListBox*, *HBMemoEditor*, *HBMenuItem*, *HBMenuSys*,
-*HBObject*, *HBPersistent*, *HBPointer*, *HBPopupMenu*, *HBProfile*, *HBProfileEntity*, *HBProfileFunction*,
-*HBProfileLowLevel*, *HBProfileMethod*, *HBProfileOpcode*, *HBProfileReport*, *HBProfileReportToArray*,
-*HBProfileReportToFile*, *HBProfileReportToString*, *HBProfileReportToTBrowse*, *HBPushButton*, *HBRadioButton*,
-*HBRadioGroup*, *HBReportForm*, *HBScalar*, *HBScrollBar*, *HBTextLine*, *HBTopBarMenu*, *IOUSR_Register*,
-*IOUSR_SetError*, *IsAffirm*, *IsColor*, *IsDefColor*, *IsNegative*, *MakeDir*, *Memory*, *MemVarBlock*, *MMiddleDown*,
-*NationMsg*, *NetName*, *NoSnow*, *ordListCle*, *ordListReb*, *ordSetFocu*, *ordSetRela*, *OS*, *Pad*, *PCount*,
-*ProcFile*, *ProcLine*, *ProcName*, *PValue*, *rddInfo*, *rddSetDefa*, *ReadKey*, *RestScreen*, *SaveScreen*, *Secs*,
-**Set**, *SetCancel*, *SetMode*, *SetTypeahead*, *SIXCDX*, *sx_ClearOrder*, *sx_FindRec*, *sx_SetTrig*, *SYMBOL*,
-*SYSINIT*, *TBColumn*, *TBrowse*, *TBrowseDB*, *Tone*, *TopBar*, **Trim**, *TString*, *Type*, **ValType**, *Version*,
-*_eInstVar*, *_GetNumCol*, *_IsGraphic*, *_NatMsgVer*, *_NatSortVer*, *_SetVideoMode*
+*cftsRecN*, *cftsReplac*, *cftsSet*, *cftsUndel*, *cftsVeri*, *cftsVers*, *CLIPPER520*, *CLIPPER530*, *Days*, *dbDrop*,
+*dbExists*, *DBFCDX*, *DBFFPT*, *DBFNSX*, *DBFNTX*, *DbgShadow*, *dbRename*, *DefPath*, *DirRemove*, *Do*, *ElapTime*,
+**Empty**, *ErrorInHandler*, *ErrorLevel*, **Eval**, *FieldBlock*, *FieldDec*, *FieldLen*, *FieldType*, *FieldWBlock*,
+*FKLabel*, *FKMax*, *Get*, *GetE*, *IOUSR_Register*, *IOUSR_SetError*, *IsAffirm*, *IsColor*, *IsDefColor*,
+*IsNegative*, *MakeDir*, *Memory*, *MemVarBlock*, *MMiddleDown*, *NationMsg*, *NetName*, *NoSnow*, *OS*, *Pad*,
+*PCount*, *ProcFile*, *ProcLine*, *ProcName*, *PValue*, *rddInfo*, *ReadKey*, *RestScreen*, *SaveScreen*, *Secs*,
+**Set**, *SetCancel*, *SetMode*, *SetTypeahead*, *SIXCDX*, *sx_ClearOrder*, *sx_FindRec*, *SYMBOL*, *SYSINIT*,
+*TBColumn*, *TBrowse*, *TBrowseDB*, *Tone*, *TopBar*, **Trim**, *TString*, *Type*, **ValType**, *Version*, *_eInstVar*,
+*_GetNumCol*, *_IsGraphic*, *_NatMsgVer*, *_NatSortVer*, *_SetVideoMode*
 
-## Harbour extensions
+## xbase functions
 
-Programs written for Harbour also use its `hb_*` functions (about 700: hashes, strings, files, threads, ...).
-They are added by area together with the matching Clipper-level support; hashes come with the hash type.
+Functions of xbase's own runtime, beyond Clipper's: **ElapsedMs** (milliseconds since the program started, from a
+monotonic clock, for timing), the bit functions **BitAnd**, **BitOr**, **BitXor**, **BitNor**, **BitNot**,
+**BitShl**, **BitShr** (see [runtime.md](runtime.md#functions)).

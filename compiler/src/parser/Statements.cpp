@@ -82,7 +82,15 @@ StmtPtr Parser::parseStmt() {
     return std::make_unique<ExprStmt>(loc, std::make_unique<AssignExpr>(aloc, std::move(target), std::move(value)));
   }
 
+  // A statement whose expression has an error says nothing more: the rest of
+  // it is skipped (one error per mistake).
+  unsigned errors = diag_.errorCount();
   ExprPtr e = parseExpr();
+  if (diag_.errorCount() != errors) {
+    skipToEndOfStmt();
+    accept(Tok::EndOfStmt);
+    return std::make_unique<ExprStmt>(loc, std::move(e));
+  }
   switch (e->kind) {
   case ExprKind::Call: case ExprKind::Assign: case ExprKind::IncDec: case ExprKind::IIf: case ExprKind::List:
     break;

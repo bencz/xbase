@@ -52,8 +52,14 @@ void Preprocessor::buildResult(const Rule &r, const std::vector<RNode> &nodes, c
       continue;
     }
     if (nd.k == RNode::Opt) {
+      // The first token of each repetition keeps its own space, or takes the
+      // clause's '[' space; a comma keeps only its own.
       size_t times = repeatCount(nd.kids, caps);
-      for (size_t i = 0; i < times; ++i) buildResult(r, nd.kids, caps, (int)i, loc, out);
+      for (size_t i = 0; i < times; ++i) {
+        size_t first = out.size();
+        buildResult(r, nd.kids, caps, (int)i, loc, out);
+        if (out.size() > first && out[first].kind != Tok::Comma) out[first].spaceBefore |= nd.tok.spaceBefore;
+      }
       continue;
     }
 

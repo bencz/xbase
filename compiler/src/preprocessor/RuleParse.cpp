@@ -1,6 +1,8 @@
 // Parsing #command / #translate rules: match patterns and result patterns.
 #include "preprocessor/Preprocessor.h"
 
+#include <algorithm>
+
 #include "preprocessor/Internal.h"
 #include "common/Text.h"
 
@@ -43,7 +45,7 @@ bool Preprocessor::parseRuleParts(Toks &line, Rule &r, bool withResult) {
       --nesting;
     }
   }
-  if (!parsePattern(line, 2, arrow, r, r.pattern, false)) return false;
+  if (!parsePattern(line, 2, arrow, r, r.pattern)) return false;
   if (r.pattern.empty() || r.pattern.front().k != PNode::Lit) {
     diag_.error(line[0].loc, "rule pattern must start with a literal token");
     return false;
@@ -51,6 +53,12 @@ bool Preprocessor::parseRuleParts(Toks &line, Rule &r, bool withResult) {
   Toks pat(line.begin() + 2, line.begin() + (long)arrow);
   r.patternKey = upperCase(render(pat));
   if (withResult && !parseResult(line, arrow + 1, line.size(), r, r.result)) return false;
+  // A marker can take several values (its optional clause matched more than
+  // once) only if every use of it in the result is inside an optional result
+  // clause, which repeats for each value; one used elsewhere has room for one.
+  for (Marker &m : r.markers) m.repeatable = true;
+  for (const RNode &n : r.result)
+    if (n.k == RNode::Mark) r.markers[(size_t)n.marker].repeatable = false;
   return true;
 }
 
@@ -85,7 +93,7 @@ static size_t matchingBracket(const std::vector<Token> &t, size_t open, size_t t
   return SIZE_MAX;
 }
 
-bool Preprocessor::parseMatchMarker(const Toks &t, size_t &i, size_t to, Rule &r, bool inOpt, PNode &node) {
+bool Preprocessor::parseMatchMarker(const Toks &t, size_t &i, size_t to, Rule &r, PNode &node) {
   auto at = [&](size_t k, Tok kind) { return i + k < to && t[i + k].kind == kind; };
   Marker m;
   size_t next;
@@ -134,7 +142,6 @@ bool Preprocessor::parseMatchMarker(const Toks &t, size_t &i, size_t to, Rule &r
     diag_.error(t[i].loc, "duplicate match marker <" + m.name + ">");
     return false;
   }
-  m.repeatable = inOpt;
   node.k = PNode::Mark;
   node.marker = (int)r.markers.size();
   node.tok = t[i];
@@ -143,7 +150,7 @@ bool Preprocessor::parseMatchMarker(const Toks &t, size_t &i, size_t to, Rule &r
   return true;
 }
 
-bool Preprocessor::parsePattern(const Toks &t, size_t from, size_t to, Rule &r, std::vector<PNode> &out, bool inOpt) {
+bool Preprocessor::parsePattern(const Toks &t, size_t from, size_t to, Rule &r, std::vector<PNode> &out) {
   size_t i = from;
   while (i < to) {
     const Token &tk = t[i];
@@ -162,7 +169,8 @@ bool Preprocessor::parsePattern(const Toks &t, size_t from, size_t to, Rule &r, 
       }
       PNode n;
       n.k = PNode::Opt;
-      if (!parsePattern(t, i + 1, close, r, n.kids, true)) return false;
+      n.tok = tk;
+      if (!parsePattern(t, i + 1, close, r, n.kids)) return false;
       if (n.kids.empty()) {
         diag_.error(tk.loc, "empty optional clause in rule pattern");
         return false;
@@ -178,7 +186,7 @@ bool Preprocessor::parsePattern(const Toks &t, size_t from, size_t to, Rule &r, 
     if (tk.kind == Tok::Lt) {
       PNode n;
       unsigned errs = diag_.errorCount();
-      if (parseMatchMarker(t, i, to, r, inOpt, n)) {
+      if (parseMatchMarker(t, i, to, r, n)) {
         out.push_back(std::move(n));
         continue;
       }
@@ -188,6 +196,32 @@ bool Preprocessor::parsePattern(const Toks &t, size_t from, size_t to, Rule &r, 
     n.tok = tk;
     out.push_back(std::move(n));
     ++i;
+  }
+  // In a run of optional clauses, one without a keyword goes after the next
+  // one with a keyword, so it never takes that keyword as an expression
+  // (`[<a>] [TO <b>]` matches like `[TO <b>] [<a>]`); two without keywords in
+  // a row are ambiguous.
+  // A keyword at the clause's level: a literal token, or a restricted marker
+  // (it only takes its listed words).
+  auto hasKeyword = [&r](const std::vector<PNode> &kids) {
+    return std::any_of(kids.begin(), kids.end(), [&r](const PNode &n) {
+      return n.k == PNode::Lit || (n.k == PNode::Mark && r.markers[(size_t)n.marker].kind == MK::Restricted);
+    });
+  };
+  size_t last = SIZE_MAX; // the previous optional clause of the run
+  for (size_t k = 0; k < out.size(); ++k) {
+    if (out[k].k != PNode::Opt) {
+      last = SIZE_MAX;
+      continue;
+    }
+    if (last != SIZE_MAX && !hasKeyword(out[last].kids)) {
+      if (!hasKeyword(out[k].kids)) {
+        diag_.error(out[k].tok.loc, "ambiguous rule pattern: two optional clauses in a row without a keyword");
+        return false;
+      }
+      std::swap(out[last].kids, out[k].kids);
+    }
+    last = k;
   }
   return true;
 }

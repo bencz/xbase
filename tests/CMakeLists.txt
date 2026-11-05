@@ -2,17 +2,6 @@
 # executed, and its stdout compared with <name>.out. An optional <name>.rc
 # holds the expected exit code (default 0). The modules in an optional
 # directory <name>.d/ are compiled with --no-entry and linked into the program.
-function(xb_compile_prg src obj)
-  get_filename_component(file ${src} NAME)
-  add_custom_command(
-    OUTPUT ${obj}
-    COMMAND xbc ${src} -o ${obj} --depfile=${obj}.d ${ARGN}
-    DEPENDS xbc ${src}
-    DEPFILE ${obj}.d
-    COMMENT "xbc ${file}")
-  set_source_files_properties(${obj} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
-endfunction()
-
 function(xb_add_run_test name)
   set(obj ${CMAKE_CURRENT_BINARY_DIR}/${name}.o)
   xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.prg ${obj})

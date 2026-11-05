@@ -32,7 +32,7 @@ Value *CodeGen::rawAddress(const xir::Var &v) {
   switch (v.kind) {
   case xir::Var::Kind::Static: return staticAddress(v.index);
   case xir::Var::Kind::Capture: return capturedCell(v);
-  case xir::Var::Kind::Frame: return slot(v.index);
+  case xir::Var::Kind::Frame: return slot(plan_->slotOf(v));
   }
   return nullptr;
 }

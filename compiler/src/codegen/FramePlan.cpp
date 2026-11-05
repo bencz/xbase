@@ -17,10 +17,24 @@ bool isGroupUser(const Instruction &i) { return i.op == Op::Call || i.op == Op::
 } // namespace
 
 FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f) {
+  placeVariables();
   number();
   chooseHomes();
   computeLiveness();
   allocate();
+}
+
+// Parameters keep their slots; the other frame variables something still
+// loads, stores or captures follow, in declaration order.
+void FramePlan::placeVariables() {
+  std::unordered_set<const Var *> used;
+  for (auto &b : f_.blocks)
+    for (auto &i : b->insts) {
+      if (i->var) used.insert(i->var);
+      used.insert(i->captures.begin(), i->captures.end());
+    }
+  for (auto &v : f_.vars)
+    if (v->kind == Var::Kind::Frame && (v->param || used.count(v.get()))) varSlot_[v.get()] = numVarSlots_++;
 }
 
 void FramePlan::number() {
@@ -135,8 +149,17 @@ void FramePlan::chooseHomes() {
     }
   }
   // Branch arguments used only there share their parameter's slot, when the
-  // parameter is not used after the argument is computed. Two edges to one
-  // block carry two arguments live at once: neither shares.
+  // parameter is not used after the argument is computed. On a forward edge
+  // the parameter is not live yet; on a back edge (a loop carrying a value)
+  // the jump must be the block's only way out, and nothing in the block may
+  // read the parameter after the argument is computed, the jump included (the
+  // argument may be computed from the parameter: results may alias operands).
+  // Two edges to one block carry two arguments live at once: neither shares.
+  auto readAfter = [&](const BlockParam *p, const Value *v, const BasicBlock *b) {
+    for (const Instruction *u : p->users())
+      if (u->parent == b && pos_.at(u) > pos_.at(v)) return true;
+    return false;
+  };
   for (BasicBlock *b : cfg_.order()) {
     const Instruction *t = b->terminator();
     for (const Target &tg : t->targets) {
@@ -147,7 +170,8 @@ void FramePlan::chooseHomes() {
         const BlockParam *p = tg.block->params[k].get();
         if (p->type() != Type::Item || !isItemResult(v) || !v->hasOneUse() || homes_.count(v) || unit_.count(v))
           continue;
-        if (static_cast<const Instruction *>(v)->parent != b || cfg_.dominates(tg.block, b)) continue;
+        if (static_cast<const Instruction *>(v)->parent != b) continue;
+        if (cfg_.dominates(tg.block, b) && (t->op != Op::Br || groupMember_.count(p) || readAfter(p, v, b))) continue;
         unit_[v] = unitOf(p);
         auto m = groupMember_.find(p);
         if (m != groupMember_.end()) groupMember_[v] = m->second;
@@ -209,10 +233,12 @@ void FramePlan::computeLiveness() {
 }
 
 // Linear scan: units in order of start; a unit's slots are free again once
-// the unit has ended before the next one starts (a result never shares a slot
-// with an operand of the same instruction: calls clear their result first).
+// the unit has ended before the next one starts. Slots shared on purpose (a
+// value computed into its loop parameter's slot) are one unit already;
+// otherwise a result never shares a slot with an operand of the same
+// instruction (calls clear their result first).
 void FramePlan::allocate() {
-  const uint32_t base = f_.numFrameVars();
+  const uint32_t base = numVarSlots_;
   std::vector<uint32_t> order(units_.size());
   for (uint32_t k = 0; k < order.size(); ++k) order[k] = k;
   std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {

@@ -138,3 +138,116 @@ void xbf_ACLONE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   free(m.slots);
   free(m.order);
 }
+
+/* ASort( aTarget, [nStart], [nCount], [bOrder] ): sorts the elements from
+ * nStart (1 when missing or 0; past the end: nothing), nCount of them (the
+ * rest when missing, 0 or too many), in place, and returns the array (NIL for
+ * anything else). The sort is stable: a top-down merge sort of positions,
+ * whose left half has n/2 of them and whose right element goes first only
+ * when it is less, so elements that compare equal keep their order. bOrder
+ * receives two elements and answers whether the first goes before the second
+ * (a number: whether it is not 0; anything else: yes). Without it, values of
+ * one kind compare like the operators (strings follow SET EXACT, integers
+ * exactly, other numbers as doubles, dates by day, .F. before .T.), and other
+ * pairs by kind: array, block, string, logical, date, number, NIL. A negative
+ * nStart sorts nothing; a negative nCount means the rest. */
+typedef struct {
+  xb_ctx *ctx;
+  const xb_item *array; /* the rooted argument: the array is read through it after every block call */
+  const xb_item *block;
+  xb_item *call;        /* rooted: the block's two arguments, then its result */
+  int failed;           /* the block left an error or another request to unwind: the sort stops */
+} sorter;
+
+static int sort_kind(const xb_item *it) {
+  switch ((xb_type)it->type) {
+  case XB_T_ARRAY: return 1;
+  case XB_T_BLOCK: return 2;
+  case XB_T_STRING: return 3;
+  case XB_T_LOGICAL: return 4;
+  case XB_T_DATE: return 5;
+  case XB_T_INT: case XB_T_DOUBLE: return 6;
+  default: return 7;
+  }
+}
+
+static int sort_less(sorter *s, size_t i, size_t j) {
+  if (s->failed) return 0;
+  const xb_array *a = s->array->v.p;
+  if (s->block) {
+    if (i >= a->len || j >= a->len) return 0; /* the block shrank the array */
+    s->call[0] = a->items[i];
+    s->call[1] = a->items[j];
+    xb_block_call(s->ctx, &s->call[2], s->block, 2, s->call);
+    if (s->ctx->pending && xb_pending(s->ctx)) {
+      s->failed = 1;
+      return 0;
+    }
+    const xb_item *r = &s->call[2];
+    if (r->type == XB_T_LOGICAL) return r->v.l != 0;
+    if (xb_is_number(r)) return xb_num_value(r) != 0.0;
+    return 1;
+  }
+  const xb_item *x = &a->items[i], *y = &a->items[j];
+  int c = xb_compare(s->ctx, x, y);
+  return c == 2 ? sort_kind(x) < sort_kind(y) : c < 0;
+}
+
+static void merge_sort(sorter *s, size_t *pos, size_t *tmp, size_t n) {
+  if (n < 2) return;
+  size_t left = n / 2;
+  merge_sort(s, pos, tmp, left);
+  merge_sort(s, pos + left, tmp, n - left);
+  size_t i = 0, j = left, k = 0;
+  while (i < left && j < n) tmp[k++] = sort_less(s, pos[j], pos[i]) ? pos[j++] : pos[i++];
+  while (i < left) tmp[k++] = pos[i++];
+  while (j < n) tmp[k++] = pos[j++];
+  memcpy(pos, tmp, n * sizeof *pos);
+}
+
+void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
+  const size_t len = ((const xb_array *)argv[0].v.p)->len;
+  *ret = argv[0];
+  uint64_t start = 1;
+  if (argc > 1 && xb_is_number(&argv[1])) {
+    int64_t v = xb_num_to_i64(&argv[1]);
+    if (v < 0) return; /* a negative start is past any end */
+    if (v > 0) start = (uint64_t)v;
+  }
+  if (start > len) return;
+  uint64_t rest = len - start + 1, count = rest;
+  if (argc > 2 && xb_is_number(&argv[2])) {
+    int64_t v = xb_num_to_i64(&argv[2]);
+    if (v >= 1 && (uint64_t)v < rest) count = (uint64_t)v;
+  }
+  if (count < 2 || count > XB_ARRAY_MAX_LEN) return; /* no array is longer: bounds the buffer below */
+  size_t n = (size_t)count, first = (size_t)(start - 1);
+  size_t *pos = malloc(2 * n * sizeof *pos);
+  if (!pos) xb_gc_fatal("out of memory");
+  for (size_t k = 0; k < n; ++k) pos[k] = first + k;
+  xb_item call[3];
+  for (int k = 0; k < 3; ++k) {
+    xb_set_nil(&call[k]);
+    xb_gc_root_push(ctx, &call[k]);
+  }
+  sorter s = {ctx, &argv[0], argc > 3 && argv[3].type == XB_T_BLOCK ? &argv[3] : NULL, call, 0};
+  merge_sort(&s, pos, pos + n, n);
+  xb_gc_root_pop(ctx, 3);
+  if (!s.failed) {
+    xb_array *a = argv[0].v.p;
+    /* A block may have shrunk the array: the positions still in it go first. */
+    size_t kept = 0;
+    for (size_t k = 0; k < n; ++k)
+      if (pos[k] < a->len) pos[kept++] = pos[k];
+    xb_item *vals = malloc(kept * sizeof *vals + 1);
+    if (!vals) xb_gc_fatal("out of memory");
+    for (size_t k = 0; k < kept; ++k) vals[k] = a->items[pos[k]]; /* nothing allocates until they are back */
+    for (size_t k = 0; k < kept; ++k) {
+      a->items[first + k] = vals[k];
+      xb_gc_write_item(a, first + k); /* a young element may move to another card */
+    }
+    free(vals);
+  }
+  free(pos);
+}

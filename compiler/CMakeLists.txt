@@ -24,11 +24,13 @@ add_executable(xbc
   src/xir/Ops.cpp
   src/xir/PassManager.cpp
   src/xir/passes/FoldConstants.cpp
+  src/xir/passes/PromoteVariables.cpp
   src/xir/passes/RemoveDeadCode.cpp
   src/xir/passes/SimplifyCFG.cpp
   src/xir/Printer.cpp
   src/xir/Verifier.cpp
   src/codegen/CodeGen.cpp
+  src/codegen/FastPaths.cpp
   src/codegen/FramePlan.cpp
   src/codegen/Instructions.cpp
   src/codegen/Literals.cpp

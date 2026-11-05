@@ -1,0 +1,11 @@
+
+overflow N .T. N .T.
+mul overflow N .T. N         12
+mixed .T. .T. .T.          1.5          4.75          2.0
+strings .T. .T. xy
+nil .T. .F. .T.
+kept .T. .T. L
+down         22         -2
+double step          4.5          2.5
+cond         26
+neg         -2         -7          6 .T. .F.

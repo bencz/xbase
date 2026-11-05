@@ -4,7 +4,16 @@
 #include <stdlib.h>
 #include <time.h>
 
-void xb_platform_init(void) {}
+static struct timespec started;
+
+void xb_platform_init(void) { clock_gettime(CLOCK_MONOTONIC, &started); }
+
+int64_t xb_platform_elapsed_ms(void) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  int64_t ns = (int64_t)(now.tv_sec - started.tv_sec) * 1000000000 + (now.tv_nsec - started.tv_nsec);
+  return ns / 1000000; /* the total is never negative: whole milliseconds, rounded down */
+}
 
 typedef struct {
   void (*fn)(void *);
@@ -39,6 +48,17 @@ void xb_mutex_init(xb_mutex *m) {
 
 void xb_mutex_lock(xb_mutex *m) { pthread_mutex_lock(&(*m)->m); }
 void xb_mutex_unlock(xb_mutex *m) { pthread_mutex_unlock(&(*m)->m); }
+
+void xb_platform_local_time(int *hour, int *minute, int *second, int *msec) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  struct tm tm;
+  localtime_r(&ts.tv_sec, &tm);
+  *hour = tm.tm_hour;
+  *minute = tm.tm_min;
+  *second = tm.tm_sec;
+  *msec = (int)(ts.tv_nsec / 1000000);
+}
 
 void xb_platform_local_date(int *year, int *month, int *day) {
   time_t now = time(NULL);

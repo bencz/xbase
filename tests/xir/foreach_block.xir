@@ -29,10 +29,8 @@ each.body:
 each.end:
   each.leave $f1, false, %3
   %20 = block MAIN.block1 $f2
-  store $f3, %20
-  %22 = load $f3
-  %23 = call EVAL native %22, 2:w10
-  ret %23
+  %21 = call EVAL native %20, 2:w10
+  ret %21
 }
 
 block MAIN.block1 internal params 1 {

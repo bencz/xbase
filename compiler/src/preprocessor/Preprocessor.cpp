@@ -228,6 +228,7 @@ bool Preprocessor::applyTranslates(Toks &st, int &budget) {
       if (!tokEqual(st[i], r.pattern[0].tok, r.exact ? Cmp::Std : Cmp::DBase)) continue;
       Caps caps(r.markers.size());
       size_t pos = i;
+      overflow_ = false;
       if (!matchSeq(r, r.pattern, st, pos, st.size(), nullptr, caps) || pos == i) continue;
       Toks res;
       buildResult(r, r.result, caps, -1, st[i].loc, res);
@@ -249,6 +250,7 @@ bool Preprocessor::applyCommand(Toks &st, int &budget) {
     if (!tokEqual(st[0], r.pattern[0].tok, r.exact ? Cmp::Std : Cmp::DBase)) continue;
     Caps caps(r.markers.size());
     size_t pos = 0;
+    overflow_ = false;
     if (!matchSeq(r, r.pattern, st, pos, st.size(), nullptr, caps) || pos != st.size()) continue;
     Toks res;
     buildResult(r, r.result, caps, -1, st[0].loc, res);

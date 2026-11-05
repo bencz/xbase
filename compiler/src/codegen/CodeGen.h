@@ -13,6 +13,7 @@
 #include <map>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -81,6 +82,17 @@ private:
   void writeBarrier(const xir::Var &v, xir::Access a);
   void refOf(const xir::Var &v, llvm::Value *dst);
 
+  // FastPaths.cpp: integer cases of operators inline
+  llvm::Value *isInt(llvm::Value *item);
+  llvm::Value *intValue(llvm::Value *item);
+  void storeInt(llvm::Value *dst, llvm::Value *v);
+  void branchLikely(llvm::Value *cond, llvm::BasicBlock *fast, llvm::BasicBlock *slow);
+  void findFusedComparisons(const xir::BasicBlock &b);
+  static llvm::CmpInst::Predicate llvmPredicate(xir::IntPred p);
+  void emitBinary(const xir::Instruction &i);
+  void emitForTest(const xir::Instruction &i);
+  bool emitBitCall(const xir::Instruction &i);
+
   // Instructions.cpp
   void emit(const xir::Instruction &i);
   void emitBranch(const xir::Target &t);
@@ -88,6 +100,7 @@ private:
   llvm::Value *dest(const xir::Instruction &i);
   llvm::Value *value(const xir::Value *v);
   llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind);
+  llvm::Value *logicalValue(llvm::Value *item);
   llvm::Value *operandGroup(const xir::Instruction &i);
 
   llvm::LLVMContext &ctx_;
@@ -134,6 +147,8 @@ private:
   const FramePlan *plan_ = nullptr;
   std::unordered_map<const xir::BasicBlock *, llvm::BasicBlock *> blocks_;
   std::unordered_map<const xir::Value *, llvm::Value *> values_; // machine values; addresses of Place homes
+  std::unordered_map<const xir::Instruction *, llvm::Value *> fusedTruth_; // truth tests a comparison answered
+  std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
 };
 
 } // namespace xb

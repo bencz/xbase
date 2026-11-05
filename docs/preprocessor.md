@@ -76,7 +76,19 @@ A rule is `#command <pattern> => <result>`; the pattern must start with a litera
 
 An expression ends at a comma or closing bracket at nesting level 0, where two operands meet with no operator between
 them (`a b`, `x TO`), or at the token that follows the marker in the pattern. Inside an optional clause, the token that
-follows the run of optional clauses is the stop token. A marker outside optional clauses may match only once.
+follows the run of optional clauses is the stop token. A rule matches only if it uses the whole statement (a command)
+or the tokens it covers; otherwise the next rule is tried, and a statement no rule matches goes to the parser as it
+is (`? 1 abc` is a syntax error).
+
+- A marker can take several values (its optional clause matched more than once) only if every use of it in the
+  result is inside an optional result clause, which repeats for each value; a second value of any other marker makes
+  the whole rule not match, whatever other order of its optional clauses could have been tried
+  (`#command T [<a>] => F( <a> )` does not match `T 1 2`). A marker outside optional clauses matches at most once.
+- In a run of optional clauses, a clause without a keyword (a literal word, or a restricted marker `<x: w1, w2>`) is
+  tried after the next clause that has one, so it never takes that keyword as an expression: `[<a>] [TO <b>]` matches
+  like `[TO <b>] [<a>]`. Two optional clauses in a row without a keyword make the rule ambiguous, an error.
+- The first token of each repetition of an optional result clause keeps its own space before it, or takes the space
+  before the clause's `[`; a comma keeps only its own.
 
 ### Result markers
 

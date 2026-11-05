@@ -20,7 +20,8 @@ namespace xb {
 //
 // Rules follow Clipper semantics:
 //   match markers  <x> <x,...> <x:w1,w2> <*x*> <(x)> <!x!>, optional [ ]
-//                  clauses (matched in any order, repeatable);
+//                  clauses (matched in any order and repeatedly, those
+//                  without a keyword after the next one with one);
 //   result markers <x> #<x> <"x"> <(x)> <{x}> <.x.>, repeating [ ] clauses.
 // #command/#translate keywords may be abbreviated to 4 letters (dBASE
 // style); the #x... variants require the full word. Commands match whole
@@ -57,7 +58,7 @@ private:
   struct Marker {
     std::string name;            // upper-cased
     MK kind = MK::Regular;
-    bool repeatable = false;     // declared inside an optional clause
+    bool repeatable = false;     // may take several values: used in the result only inside optional clauses
     std::vector<Toks> words;     // Restricted: accepted words
   };
   struct PNode {                 // pattern (match) node
@@ -117,8 +118,8 @@ private:
   void defineRule(Toks &line, bool command, bool exact);
   void undefineRule(Toks &line, bool command, bool exact);
   bool parseRuleParts(Toks &line, Rule &r, bool withResult);
-  bool parsePattern(const Toks &t, size_t from, size_t to, Rule &r, std::vector<PNode> &out, bool inOpt);
-  bool parseMatchMarker(const Toks &t, size_t &i, size_t to, Rule &r, bool inOpt, PNode &node);
+  bool parsePattern(const Toks &t, size_t from, size_t to, Rule &r, std::vector<PNode> &out);
+  bool parseMatchMarker(const Toks &t, size_t &i, size_t to, Rule &r, PNode &node);
   bool parseResult(const Toks &t, size_t from, size_t to, Rule &r, std::vector<RNode> &out);
   int findMarker(const Rule &r, const std::string &name) const;
 
@@ -139,6 +140,9 @@ private:
   static Token makeString(const std::string &value, SourceLoc loc, bool space);
 
   Diagnostics &diag_;
+  // Set by matchSeq when a marker that cannot repeat met a second value: the
+  // rule does not match, however its optional clauses are tried.
+  mutable bool overflow_ = false;
   std::vector<std::string> includeDirs_;
   std::vector<std::string> fileStack_;
   std::vector<std::string> filesRead_;

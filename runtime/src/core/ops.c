@@ -1,6 +1,6 @@
-/* Operators on dynamic values. The compiler inlines the common fast paths
- * (e.g. INT+INT) once type speculation is in place; these are the general
- * cases and the error paths. */
+/* Operators on dynamic values. Compiled code does the integer cases of +, -,
+ * *, the comparisons and xb_for_test inline (compiler/src/codegen/FastPaths.cpp)
+ * and calls these for every other case; both must give the same results. */
 #include "xbrt_int.h"
 
 #include <math.h>
@@ -130,8 +130,7 @@ static int str_cmp(const xb_str *a, const xb_str *b, int exact) {
   return la < lb ? -1 : 1;
 }
 
-/* Returns -1/0/1, or 2 if the operands cannot be compared. */
-static int compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
+int xb_compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_INT && b->type == XB_T_INT)
     return (a->v.i > b->v.i) - (a->v.i < b->v.i);
   if (xb_is_number(a) && xb_is_number(b)) {
@@ -149,14 +148,14 @@ static int compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
 
 void xb_op_eq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
-  int c = compare(ctx, a, b);
+  int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error(ctx, 1071, "=");
   else xb_set_logical(r, c == 0);
 }
 
 void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type != b->type); return; }
-  int c = compare(ctx, a, b);
+  int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error(ctx, 1072, "<>");
   else xb_set_logical(r, c != 0);
 }
@@ -172,14 +171,14 @@ void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) 
     return;
   }
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
-  int c = compare(ctx, a, b);
+  int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error(ctx, 1070, "==");
   else xb_set_logical(r, c == 0);
 }
 
 #define XB_REL_OP(name, code, sym, test)                                         \
-  void name(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {      \
-    int c = compare(ctx, a, b);                                                  \
+  void name(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {       \
+    int c = xb_compare(ctx, a, b);                                               \
     if (c == 2) arg_error(ctx, code, sym);                                       \
     else xb_set_logical(r, test);                                                \
   }
@@ -215,7 +214,7 @@ int32_t xb_for_test(xb_ctx *ctx, const xb_item *counter, const xb_item *limit, c
     return 0;
   }
   int back = xb_num_value(step) < 0;
-  int c = compare(ctx, counter, limit);
+  int c = xb_compare(ctx, counter, limit);
   if (c == 2) {
     arg_error(ctx, back ? 1073 : 1075, back ? "<" : ">");
     return 0;

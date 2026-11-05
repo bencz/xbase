@@ -197,6 +197,8 @@ bool Preprocessor::matchSeq(const Rule &r, const std::vector<PNode> &nodes, cons
         if (matchSeq(r, nodes[o].kids, in, p, end, newStop, caps) && p != pos) {
           pos = p;
           o = k; // restart: clauses may come in any order
+        } else if (overflow_) {
+          return false;
         } else {
           for (size_t c = 0; c < caps.size(); ++c) caps[c].resize(saved[c]); // captures only ever grow
           ++o;
@@ -215,7 +217,10 @@ bool Preprocessor::matchSeq(const Rule &r, const std::vector<PNode> &nodes, cons
       if (!matchMarker(m, in, pos, end, stop, mode)) return false;
       if (pos != before) {
         auto &occ = caps[(size_t)node.marker];
-        if (!occ.empty() && !m.repeatable) return false;
+        if (!occ.empty() && !m.repeatable) { // a second value with no room: the whole rule fails
+          overflow_ = true;
+          return false;
+        }
         occ.emplace_back(in.begin() + (long)before, in.begin() + (long)pos);
       }
     }

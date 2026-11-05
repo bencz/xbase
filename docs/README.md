@@ -35,3 +35,4 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 | `runtime/src/rtl/` | functions of the language, by area |
 | `runtime/src/platform/` | operating-system interface (`platform.h`) and one directory per platform |
 | `tests/run`, `tests/pp`, `tests/fail`, `tests/xir` | execution, preprocessor, compile-failure and xIR tests |
+| `bench/` | benchmark programs and the `bench` target ([testing.md](testing.md#benchmarks)) |

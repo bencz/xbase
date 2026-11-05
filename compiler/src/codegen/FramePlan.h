@@ -23,8 +23,9 @@ struct Home {
   const xir::Instruction *place = nullptr; // Place: the load or the store whose variable holds the value
 };
 
-// The frame of a function: frame variables in slots 0 .. numFrameVars-1, then
-// temporaries. Every live item value that needs storage gets a slot; slots
+// The frame of a function: the parameters in slots 0 .. numParams-1 (the
+// prologue copies them there), then the other frame variables still in memory
+// (those mem2reg did not make values), then temporaries. Every live item value that needs storage gets a slot; slots
 // are assigned by linear scan over live intervals and reused once free.
 // Operands of a call or array literal take consecutive slots (a group), and a
 // value used only there is computed straight into its slot of the group; a
@@ -41,6 +42,7 @@ public:
 
   const xir::CFG &cfg() const { return cfg_; }
   uint32_t frameSize() const { return frameSize_; }
+  uint32_t slotOf(const xir::Var &v) const { return varSlot_.at(&v); } // a frame variable
   const Home &home(const xir::Value *v) const;
   uint32_t groupBase(const xir::Instruction *user) const { return groupBase_.at(user); }
   bool inGroup(const xir::Instruction *user, size_t operand) const; // computed straight into its group slot
@@ -53,6 +55,7 @@ private:
     uint32_t slot = 0;
   };
 
+  void placeVariables();
   void number();
   void chooseHomes();
   void elideLoads(const xir::BasicBlock &b);
@@ -64,6 +67,8 @@ private:
   const xir::Function &f_;
   xir::CFG cfg_;
   uint32_t frameSize_ = 0;
+  uint32_t numVarSlots_ = 0;
+  std::unordered_map<const xir::Var *, uint32_t> varSlot_;
   std::unordered_map<const xir::Value *, uint32_t> pos_;          // definition position
   std::unordered_map<const xir::BasicBlock *, uint32_t> start_, end_, blockIndex_;
   std::unordered_map<const xir::Value *, Home> homes_;

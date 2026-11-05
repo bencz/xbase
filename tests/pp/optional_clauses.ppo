@@ -1,0 +1,23 @@
+PROCEDURE Main()
+TESTA 1 abc
+TESTB 1 2
+TESTC FOO 1 FOO 2
+QOut( 1, 2 )
+QOut( 1, 2 )
+QOut( 1, 2 )
+QOut( 1, 2 )
+TESTD 1 2
+QOut( 1 2 )
+? 1 abc
+? 1, 2 3
+? 1e3
+QOut( "F( 1 2 )" )
+QOut( "F( {1} {2} )" )
+QOut( "F(, 1, 2 )" )
+QOut( "F(x ,1 ,2 )" )
+QOut( "F( 1, 2, 3 )" )
+QOut( "F( 1 2 )" )
+F( 1, "NEW" )
+F( 1, "NEW" )
+T9 FOO 1 BAR 2
+RETURN

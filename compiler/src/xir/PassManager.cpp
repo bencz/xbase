@@ -15,6 +15,7 @@ struct Pass {
 };
 
 constexpr Pass kPipeline[] = {
+    {"promote-variables", promoteVariables},
     {"fold-constants", foldConstants},
     {"simplify-cfg", simplifyCFG},
     {"remove-dead-code", removeDeadCode},

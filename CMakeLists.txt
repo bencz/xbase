@@ -23,8 +23,22 @@ function(xb_target_warnings target)
   endif()
 endfunction()
 
+# Compiles an xBase source with xbc into an object file (extra xbc options in
+# ARGN); used by the tests and the benchmarks.
+function(xb_compile_prg src obj)
+  get_filename_component(file ${src} NAME)
+  add_custom_command(
+    OUTPUT ${obj}
+    COMMAND xbc ${src} -o ${obj} --depfile=${obj}.d ${ARGN}
+    DEPENDS xbc ${src}
+    DEPFILE ${obj}.d
+    COMMENT "xbc ${file}")
+  set_source_files_properties(${obj} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+endfunction()
+
 add_subdirectory(runtime)
 add_subdirectory(compiler)
+add_subdirectory(bench)
 
 include(CTest)
 if(BUILD_TESTING)

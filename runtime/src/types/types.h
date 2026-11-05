@@ -6,6 +6,9 @@
 
 /* Uninitialized string of `len` bytes (plus the terminating NUL). */
 xb_str *xb_str_alloc(uint64_t len); /* 64-bit: checked before it is narrowed to size_t (32-bit hosts) */
+/* -1, 0 or 1 as the comparison operators order two values (strings follow SET
+ * EXACT), or 2 when they cannot be compared (core/ops.c). */
+int xb_compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b);
 
 /* An array's items start in the same allocation (`inline_items`); when it
  * grows past that, they move to an XB_GC_ITEMS object. No malloc is involved,

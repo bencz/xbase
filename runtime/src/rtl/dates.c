@@ -26,6 +26,37 @@ void xbf_DATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_date(ret, xb_date_today());
 }
 
+/* Seconds(): seconds since midnight, local time, to the millisecond; SET
+ * DECIMALS decimals. */
+void xbf_SECONDS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  int h, m, s, ms;
+  xb_platform_local_time(&h, &m, &s, &ms);
+  xb_set_double(ret, h * 3600.0 + m * 60.0 + s + ms / 1000.0, xb_decimals(ctx));
+}
+
+/* Time(): the local time of day as "hh:mm:ss". */
+void xbf_TIME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  int h, m, s, ms;
+  xb_platform_local_time(&h, &m, &s, &ms);
+  char text[9] = {(char)('0' + h / 10), (char)('0' + h % 10), ':', (char)('0' + m / 10), (char)('0' + m % 10), ':',
+                  (char)('0' + s / 10), (char)('0' + s % 10), '\0'};
+  xb_set_str(ret, xb_str_new(text, 8));
+}
+
+/* ElapsedMs(): milliseconds since the program started, from a monotonic
+ * clock: the difference of two calls measures the time between them. */
+void xbf_ELAPSEDMS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_set_int(ret, xb_platform_elapsed_ms());
+}
+
 void xbf_CTOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_STRING) {
     xb_rt_error(ctx, "BASE", 1119, "Argument error", "CTOD");

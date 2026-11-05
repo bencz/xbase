@@ -172,6 +172,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   plan_ = &plan;
   blocks_.clear();
   values_.clear();
+  fusedTruth_.clear();
 
   BasicBlock *entry = BasicBlock::Create(ctx_, "entry", fn_);
   b_.SetInsertPoint(entry);
@@ -208,6 +209,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   b_.CreateBr(blocks_.at(f.entry()));
   for (xir::BasicBlock *xb : plan.cfg().order()) {
     b_.SetInsertPoint(blocks_.at(xb));
+    findFusedComparisons(*xb);
     for (auto &i : xb->insts) emit(*i);
   }
   b_.SetInsertPoint(fnExit_);

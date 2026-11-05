@@ -256,6 +256,22 @@ Conventions:
   off otherwise. `__SetCentury( [lOn] )` rewrites that run as `YYYY` or `YY` (or puts it in front when the picture
   has no `Y`) and the picture in upper case. Other values change nothing.
 - `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector).
+- `ASort( a, [nStart], [nCount], [bOrder] )` sorts in place and returns the array (`NIL` for anything else). `nStart`
+  0 or missing is 1, one past the end or negative sorts nothing; `nCount` missing, 0, negative or reaching past the
+  end means the rest. The sort is stable (a merge sort of positions: equal elements keep their order).
+  `bOrder( x, y )` says whether `x` goes first (a number: whether it is not 0; any other value: yes); without it,
+  values of one kind compare like the operators (strings follow SET EXACT, integers exactly, dates by day, `.F.`
+  before `.T.`) and other pairs by kind: array, block, string, logical, date, number, `NIL`. The block's arguments are
+  kept as roots while it runs, and moving the elements goes through the write barrier.
+- The bit functions, xbase's own: `BitAnd`, `BitOr`, `BitXor`, `BitNor` (two numbers), `BitNot` (one), `BitShl` and
+  `BitShr` (a number and a shift count) work on the 64-bit two's complement form of integers (`xb_bit_apply` in
+  `xbrt.h`): numbers are truncated to integers (saturated; NaN is 0), `BitShr` is a logical shift and a count
+  outside 0..63 gives 0. Anything else than a number is an argument error. xbase's own functions have `BASE` codes
+  from 9001 (`BitAnd` 9001, `BitOr` 9002, `BitXor` 9003, `BitNor` 9004, `BitNot` 9005, `BitShl` 9006, `BitShr` 9007);
+  the names, argument counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too.
+- `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
+  `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
+  program started from a monotonic clock (`xb_platform_elapsed_ms`), for timing: the difference of two calls.
 
 Settings live in the task context (start: `SET EXACT OFF`, `SET DECIMALS TO 2`, date format `mm/dd/yy`,
 `SET EPOCH TO 1900`, `SET CENTURY OFF`). Their numbers come from `include/set.ch`, shared with xBase code.
@@ -287,6 +303,7 @@ Before `main`, the global constructor of every module with `STATIC`s calls `xb_m
 (`core/module.c`), which records the module's initialization function and registers its statics as a GC root.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
-in binary mode so programs write the same bytes everywhere), creates the context, calls `xb_app_main` (emitted by the
-compiler), flushes output and returns the exit code. `xb_app_main` checks the ABI, runs the registered module
+in binary mode so programs write the same bytes everywhere; everywhere, the start of the `ElapsedMs` clock), then on
+the program's thread creates the context, calls `xb_app_main` (emitted by the compiler), flushes output and returns
+the exit code. `xb_app_main` checks the ABI, runs the registered module
 initializations in registration order (`xb_modules_init`, which stops at the first error) and calls the start function.

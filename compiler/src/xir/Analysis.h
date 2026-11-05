@@ -18,14 +18,22 @@ public:
   bool reachable(const BasicBlock *b) const { return index_.count(b) != 0; }
   const std::vector<BasicBlock *> &preds(const BasicBlock *b) const { return preds_[index_.at(b)]; }
   bool dominates(const BasicBlock *a, const BasicBlock *b) const;
+  BasicBlock *idom(const BasicBlock *b) const; // null for the entry
+  const std::vector<BasicBlock *> &children(const BasicBlock *b) const { return children_[index_.at(b)]; }
 
 private:
   std::vector<BasicBlock *> rpo_;
   std::unordered_map<const BasicBlock *, uint32_t> index_;   // position in rpo_
   std::vector<std::vector<BasicBlock *>> preds_;              // by position
   std::vector<uint32_t> idom_;                                // by position; the entry is its own
+  std::vector<std::vector<BasicBlock *>> children_;           // in the dominator tree, by position
   std::vector<uint32_t> enter_, leave_;                       // dominator tree numbering, by position
 };
+
+// For every block, the blocks where its dominance ends: the joins it reaches
+// without dominating them (where a definition in it meets other ones).
+using Frontiers = std::unordered_map<const BasicBlock *, std::vector<BasicBlock *>>;
+Frontiers dominanceFrontiers(const CFG &cfg);
 
 // Removes the blocks the entry cannot reach (code after RETURN, EXIT, LOOP).
 bool removeUnreachableBlocks(Function &f); // true when it removed some

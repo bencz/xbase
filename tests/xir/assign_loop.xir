@@ -6,43 +6,30 @@ function MAIN params 0 {
   $f2 = frame 2 "I"
 entry:
   %0 = array 1:w10, 2:w10
-  store $f0, %0
-  store $f1, 0:w10
-  store $f2, 10:w10
-  br for.test
-for.test:
-  %5 = load $f2
-  %6 = for.test %5, 1:w10, -2:w10
-  cond_br %6, for.body, for.end
+  br for.test(0:w10, 10:w10)
+for.test(%2: item, %3: item):
+  %4 = for.test %3, 1:w10, -2:w10
+  cond_br %4, for.body, for.end
 for.body:
-  %8 = load $f1
-  %9 = load $f2
-  %10 = binary add %8, %9
-  store $f1, %10
-  %12 = load $f2
-  %13 = binary add %12, -2:w10
-  store $f2, %13
-  br for.test
+  %6 = binary add %2, %3
+  %7 = binary add %3, -2:w10
+  br for.test(%6, %7)
 for.end:
-  %16 = load $f0
-  %17 = index %16, 1:w10
-  %18 = binary add %17, 1:w0
-  index.set %16, 1:w10, %18
-  %20 = load $f1
-  %21 = binary gt %20, 2:w10
-  %22 = truth %21
-  cond_br %22, and.rhs, and.end(false)
+  %9 = index %0, 1:w10
+  %10 = binary add %9, 1:w0
+  index.set %0, 1:w10, %10
+  %12 = binary gt %2, 2:w10
+  %13 = truth %12
+  cond_br %13, and.rhs, and.end(false)
 and.rhs:
-  %24 = load $f1
-  %25 = binary lt %24, 100:w10
-  %26 = truth %25
-  br and.end(%26)
-and.end(%28: bool):
-  cond_br %28, iif.then, iif.end("out")
+  %15 = binary lt %2, 100:w10
+  %16 = truth %15
+  br and.end(%16)
+and.end(%18: bool):
+  cond_br %18, iif.then, iif.end("out")
 iif.then:
-  %30 = load $f0
-  %31 = index %30, 1:w10
-  br iif.end(%31)
-iif.end(%33: item):
-  ret %33
+  %20 = index %0, 1:w10
+  br iif.end(%20)
+iif.end(%22: item):
+  ret %22
 }

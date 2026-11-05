@@ -72,6 +72,11 @@ Value *CodeGen::testTruth(Value *item, BasicBlock *unwind) {
   b_.CreateCall(rtCondError_, {fnCtx_, item});
   b_.CreateBr(unwind);
   b_.SetInsertPoint(ok);
+  return logicalValue(item);
+}
+
+// The boolean of a logical item.
+Value *CodeGen::logicalValue(Value *item) {
   Value *v = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, item, FValue), "lval");
   return b_.CreateICmpNE(v, ConstantInt::get(i32_, 0));
 }
@@ -147,16 +152,15 @@ void CodeGen::emit(const xir::Instruction &i) {
     checkPending(fnExit_);
     break;
   }
-  case Op::Binary: {
-    Value *a = addr(ops[0]);
-    Value *bv = addr(ops[1]);
-    b_.CreateCall(rtBin_.at(i.binop), {fnCtx_, dest(i), a, bv});
-    checkPending(fnExit_);
+  case Op::Binary: emitBinary(i); break;
+  case Op::Truth: {
+    auto fused = fusedTruth_.find(&i);
+    values_[&i] = fused != fusedTruth_.end() ? fused->second : testTruth(addr(ops[0]), fnExit_);
     break;
   }
-  case Op::Truth: values_[&i] = testTruth(addr(ops[0]), fnExit_); break;
   case Op::FromBool: storeLogical(dest(i), value(ops[0])); break;
   case Op::Call: {
+    if (emitBitCall(i)) break;
     Value *argv = operandGroup(i);
     Function *callee = i.callee.function ? functions_.at(i.callee.function) : externFunction(i.callee);
     Value *d = dest(i);
@@ -195,12 +199,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     for (uint32_t k = 0; k < cells.size(); ++k) b_.CreateStore(cells[k], capturedCellAddress(block, k));
     break;
   }
-  case Op::ForTest: {
-    Value *go = b_.CreateCall(rtForTest_, {fnCtx_, addr(ops[0]), addr(ops[1]), addr(ops[2])});
-    checkPending(fnExit_);
-    values_[&i] = b_.CreateICmpNE(go, ConstantInt::get(i32_, 0));
-    break;
-  }
+  case Op::ForTest: emitForTest(i); break;
   case Op::EnumLen:
     values_[&i] = b_.CreateCall(rtEnumLen_, {fnCtx_, addr(ops[0])});
     checkPending(fnExit_);
@@ -242,12 +241,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::IntAdd: values_[&i] = b_.CreateAdd(value(ops[0]), value(ops[1])); break;
   case Op::IntSub: values_[&i] = b_.CreateSub(value(ops[0]), value(ops[1])); break;
-  case Op::IntCmp: {
-    static const CmpInst::Predicate preds[] = {CmpInst::ICMP_EQ,  CmpInst::ICMP_NE,  CmpInst::ICMP_SLT,
-                                               CmpInst::ICMP_SLE, CmpInst::ICMP_SGT, CmpInst::ICMP_SGE};
-    values_[&i] = b_.CreateICmp(preds[(int)i.pred], value(ops[0]), value(ops[1]));
-    break;
-  }
+  case Op::IntCmp: values_[&i] = b_.CreateICmp(llvmPredicate(i.pred), value(ops[0]), value(ops[1])); break;
   case Op::BoolAnd: values_[&i] = b_.CreateAnd(value(ops[0]), value(ops[1])); break;
   case Op::BoolNot: values_[&i] = b_.CreateNot(value(ops[0])); break;
   case Op::Br:

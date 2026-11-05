@@ -113,10 +113,17 @@ BlockParam *BasicBlock::addParam(Type t) {
   return params.back().get();
 }
 
-void BasicBlock::removeParam(size_t k, const std::vector<Instruction *> &branches) {
+void BasicBlock::removeArgs(size_t k, const std::vector<Instruction *> &branches) {
   for (Instruction *t : branches)
     for (size_t e = 0; e < t->targets.size(); ++e)
       if (t->targets[e].block == this) t->removeTargetArg(e, k);
+}
+
+void BasicBlock::eraseParam(size_t k) {
+  if (!params[k]->users().empty()) {
+    std::fputs("xbc: internal error: xIR parameter removed while in use\n", stderr);
+    std::abort();
+  }
   params.erase(params.begin() + (ptrdiff_t)k);
   for (size_t i = k; i < params.size(); ++i) params[i]->index = (uint32_t)i;
 }
@@ -158,13 +165,6 @@ BasicBlock *Function::addBlock(const std::string &blockName) {
 Var *Function::addVar(Var::Kind k, uint32_t index, std::string varName) {
   vars.push_back(std::make_unique<Var>(Var{k, index, false, false, std::move(varName)}));
   return vars.back().get();
-}
-
-uint32_t Function::numFrameVars() const {
-  uint32_t n = 0;
-  for (auto &v : vars)
-    if (v->kind == Var::Kind::Frame) ++n;
-  return n;
 }
 
 void Function::renumber() const {

@@ -76,7 +76,7 @@ Expression precedence, lowest first: `:=` and compound assignments (right-associ
 last, array literals `{ a, b }`, codeblocks `{| params | expr, ... }`). Empty
 call arguments (`f(a, , b)`) and empty array elements pass `NIL`; a codeblock body has at least one expression. A
 call argument `@name` or `@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is
-an error (references in array literals, which Harbour accepts, are not supported yet), and so are function
+an error (references in array literals are not supported yet), and so are function
 references `@name()`.
 Variables and elements (`a[i] := v`, `a[i] += v`, `a[i]++`) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
 declares `a := Array( n1, n2 )`.
@@ -156,9 +156,8 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   order; `x := v` evaluates `v`, then stores; `x op= v` loads `x`, then evaluates `v`; `a[i] := v` evaluates `v`,
   then `a`, then `i`; `a[i] op= v` and `a[i]++` evaluate `a`, then `i`, then the element, then `v`; every operand
   is evaluated once. A `load` is the variable's value at that point, so `x + (x := 5)`, `x := x + (x := 5)` and
-  `x += (x := 5)` are 6 (Clipper's results; Harbour's own mode rewrites `x := x op v` as `x op= v` and reads `x`
-  last, giving 10), and `x := x++` leaves `x` unchanged; the lowering to LLVM decides where a copy is actually
-  needed.
+  `x += (x := 5)` are 6, as in Clipper, and `x := x++` leaves `x` unchanged; the lowering to LLVM decides where a
+  copy is actually needed.
 - Variables: frame variables (parameters and `LOCAL`s), a codeblock's captures, and the module's `STATIC`s. A frame
   variable moves into a cell when a codeblock captures it (`block`) or a reference is taken (`ref`), as in Clipper,
   and a `STATIC` when a reference is taken; its own item then holds the cell (`Var::shared` marks the frame variables
@@ -201,24 +200,31 @@ frames), `FramePlan.*` (where each item lives), `Instructions.cpp`, `Variables.c
 write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
 
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
-  from its uses back to its definition, slots are assigned by linear scan and reused once free (frame variables take
-  slots 0 to n-1). The arguments of a call and the elements of an array literal take consecutive slots, and a value
-  used only there (a block parameter too) is computed straight into its slot; a branch argument used only there
-  shares the slot of its block parameter; a `load` whose single use follows with nothing in between that can write
-  the variable uses the variable's own item (no copy); a value used only by the `store` right after it is computed
-  into the variable, and one used only by `ret` into the caller's result slot. A call's result is never computed
-  straight into a heap object (a cell, an element) and only into a plain frame variable, and an operation that can
-  fail is not computed in place through a reference (finding the element can fail too, and the operation's error
-  comes first). Two edges from one block to the same block do not share their arguments' slots.
+  from its uses back to its definition, slots are assigned by linear scan and reused once free. The parameters take
+  slots 0 to n-1 (the prologue copies them there), then the frame variables still in memory (those mem2reg did not
+  make values), then temporaries. The arguments of a call and the elements of an array literal take consecutive
+  slots, and a value used only there (a block parameter too) is computed straight into its slot; a branch argument
+  used only there shares the slot of its block parameter (on a loop's back edge, when the jump is the block's only
+  way out and nothing after the argument reads the parameter); a `load` whose single use follows with nothing in
+  between that can write the variable uses the variable's own item (no copy); a value used only by the `store` right
+  after it is computed into the variable, and one used only by `ret` into the caller's result slot. A call's result
+  is never computed straight into a heap object (a cell, an element) and only into a plain frame variable, and an
+  operation that can fail is not computed in place through a reference (finding the element can fail too, and the
+  operation's error comes first). Two edges from one block to the same block do not share their arguments' slots.
 - The entry block allocates the frame of the planned size on the stack (`pushFrame`: an `alloca` of `xb_frame`, see
   [runtime.md](runtime.md#frames)), copies the parameters branch-free (a selected source: `argv[k]` or a `NIL`
   constant), clears the other slots and links the frame into the context; the caller has already set the result to
   `NIL`. The exit block unlinks the frame and returns. Blocks
   are laid out in reverse postorder visiting successors last first, so a block's first successor (a loop body, a
   THEN branch) follows it and exits come later.
-- Operations call the runtime (`xb_op_*` and the others); the result may alias an operand. Calls set the result slot
-  to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to
-  `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to a function of the module to `xbp_NAME` (prefixes in `xbrt.h`).
+- Operations call the runtime (`xb_op_*` and the others); the result may alias an operand. `FastPaths.cpp` inlines the
+  integer cases first: `+`, `-` and `*` of two integers with LLVM's overflow intrinsics (an overflow, like any other
+  operand types, calls the operator, which makes a double), the comparisons of two integers, and `for.test` with an
+  integer counter, limit and step. A comparison whose only use is the `truth` right after it gives that test its boolean
+  directly, without the logical item. A call to a bit function (`BitAnd`, ..., the table `xb_bit_function` in `xbrt.h`)
+  with integer arguments is the machine operation; other arguments call the runtime function. Calls set the result slot
+  to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME`
+  or `xbp_NAME` (`NATIVE` or not), one to a function of the module to `xbp_NAME` (prefixes in `xbrt.h`).
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
   calls `xb_pending` and leaves through the function's exit if that asks to unwind.
   `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
@@ -260,7 +266,7 @@ folded result's type and decimals follow Clipper's compile-time rules, which dif
 | comparisons of numbers or logicals | `.T.`/`.F.` |
 | strings `+`, `-`, `==`, `$`; `=`/`!=` of two empty strings | the result (`=` on other strings depends on SET EXACT and is not folded) |
 | `.NOT.`, `.AND.`/`.OR.` with a logical literal on the left, `IIF` with a logical literal condition | the result or the remaining operand |
-| a call to a `FOLD` function with constant arguments | its result, from the evaluator table in `opt/Fold.cpp`: `Len` of a string literal (its length) or of an array literal of constants (its element count) |
+| a call to a `FOLD` function with constant arguments | its result, from the evaluator table in `opt/Fold.cpp`: `Len` of a string literal (its length) or of an array literal of constants (its element count); the bit functions on integer constants (an integer without a display width of its own, as the runtime makes it; arithmetic on such an integer gives one too) |
 
 Division or `%` by a literal zero is not folded, so the error happens at run time. A folded integer is a program
 constant (`xb_num_const_int_width`); a folded double has the default display width for its value. "SET DECIMALS
