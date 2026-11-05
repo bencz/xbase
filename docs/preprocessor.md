@@ -1,6 +1,6 @@
 # Preprocessor
 
-Code: `compiler/src/Lexer.*`, `compiler/src/Preprocessor.*`, `include/std.ch`. Tests: `tests/pp`.
+Code: `compiler/src/preprocessor/` (`Lexer.*`, `Preprocessor.*`), `include/std.ch`. Tests: `tests/pp`.
 
 The preprocessor owns tokenization. The parser only sees its output: statements separated by end-of-statement tokens.
 Every command of the language (`?`, `DO WHILE`, `STORE`, `QUIT`, ...) is a rule in `include/std.ch`; the compiler has

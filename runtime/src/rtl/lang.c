@@ -1,0 +1,47 @@
+#include "xbrt_int.h"
+
+void xbf_VALTYPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  static const char codes[XB_T_COUNT_] = { 'U', 'L', 'N', 'N', 'C', 'A', 'B', 'U' };
+  uint32_t t = argc ? argv[0].type : XB_T_NIL;
+  char c = t < XB_T_COUNT_ ? codes[t] : 'U';
+  xb_set_str(ret, xb_str_new(&c, 1));
+}
+
+void xbf_LEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc && argv[0].type == XB_T_STRING) {
+    xb_set_int(ret, (int64_t)argv[0].v.s->len);
+    return;
+  }
+  if (argc && argv[0].type == XB_T_ARRAY) {
+    xb_set_int(ret, (int64_t)((const xb_array *)argv[0].v.p)->len);
+    return;
+  }
+  xb_rt_error(ctx, "BASE", 1111, "Argument error", "LEN");
+}
+
+/* QUIT / CANCEL: unwinds every active function and ends the program. */
+void xbf___QUIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_ctx_raise(ctx, XB_PENDING_QUIT);
+}
+
+/* Eval( bBlock [, xArgs...] ) */
+void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1) {
+    xb_rt_error(ctx, "BASE", 1004, "No exported method", "EVAL");
+    return;
+  }
+  xb_block_call(ctx, ret, &argv[0], argc - 1, argv + 1);
+}
+
+/* __GcCollect(): runs a collection and returns the number of live objects. */
+void xbf___GCCOLLECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_gc_collect();
+  xb_set_int(ret, (int64_t)xb_gc_live_objects());
+}

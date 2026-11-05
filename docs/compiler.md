@@ -9,7 +9,7 @@ module, optimize it, emit the object file. Each stage stops the compilation when
 
 ## Grammar
 
-`Parser.*` is a recursive descent parser over preprocessed statements; `AST.h` holds the syntax tree.
+`parser/Parser.*` is a recursive descent parser over preprocessed statements; `parser/AST.h` holds the syntax tree.
 
 Keywords are not reserved. A keyword is recognized at the start of a statement, except when:
 
@@ -51,19 +51,28 @@ Statements:
 
 Expression precedence, lowest first: `:=` and compound assignments (right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`,
 `=` `==` `!=` `<>` `#`, `<` `<=` `>` `>=` `$`, `+` `-`, `*` `/` `%`, `^`/`**`, unary `-` `+`, prefix and postfix
-`++`/`--`, primaries (literals, `NIL`, variables, calls, `IIF(c, a, b)`/`IF(c, a, b)`, parentheses). Empty call
-arguments (`f(a, , b)`) pass `NIL`.
+`++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`), primaries (literals, `NIL`, variables, calls,
+`IIF(c, a, b)`/`IF(c, a, b)`, parentheses, array literals `{ a, b }`, codeblocks `{| params | expr, ... }`). Empty
+call arguments (`f(a, , b)`) and empty array elements pass `NIL`; a codeblock body has at least one expression.
+Variables and elements (`a[i] := v`, `a[i] += v`, `a[i]++`) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
+declares `a := Array( n1, n2 )`.
 
 ## Semantic checks
 
-`Sema.*` assigns frame slots to parameters and `LOCAL`s (in declaration order; an initializer is resolved before its
-own name becomes visible) and reports: undeclared variables, duplicate functions, parameters or locals, `EXIT`/`LOOP`
-outside a loop, invalid assignment targets, and a `LOCAL` that follows an executable statement or appears inside an
-`IF`, `WHILE` or `FOR` body.
+`sema/Sema.*` assigns frame slots to parameters and `LOCAL`s (in declaration order; an initializer is resolved before
+its own name becomes visible). A codeblock has its own frame for its parameters. A variable of the enclosing function
+used inside a codeblock is *captured*: it is marked boxed in the function (`FuncDecl::boxed`), and each codeblock
+between the use and the function gets a capture (`BlockExpr::captures`) that passes the cell along; the reference
+resolves to `VarWhere::Capture` with the capture index. Parameters of an enclosing codeblock cannot be captured ("outer
+codeblock variable is out of reach", as in Clipper).
+
+Sema reports: undeclared variables, duplicate functions, parameters or locals, `EXIT`/`LOOP` outside a loop, invalid
+assignment targets, and a `LOCAL` that follows an executable statement or appears inside an `IF`, `WHILE` or `FOR`
+body.
 
 ## Code generation
 
-`CodeGen.*` lowers each function to an LLVM function with the dynamic calling convention described in
+`codegen/CodeGen.*` lowers each function to an LLVM function with the dynamic calling convention described in
 [runtime.md](runtime.md#calling-convention):
 
 - The entry block obtains the item frame (`xb_frame_push`, sized after the body is generated) and copies the
@@ -75,9 +84,18 @@ outside a loop, invalid assignment targets, and a `LOCAL` that follows an execut
 - An assignment whose value has side effects computes the value into a temporary first, so `x := x++` assigns the old
   value. A `FOR` whose `STEP` has side effects tests a copy of the limit.
 - Calls set the result slot to `NIL`, then pass the arguments in consecutive frame slots.
+- Boxed variables are moved into cells at function entry (`xb_cell_box`); their uses load the cell from the slot, and
+  captured variables load it from `self->cells[]` (the `xb_block` layout is mirrored with the target `DataLayout`).
+- A codeblock becomes an internal function `<function>.blockN (ctx, ret, argc, argv, self)` with its own frame; the
+  expression creates it with `xb_block_new` and stores the captured cells.
+- Array literals evaluate their elements into consecutive slots and call `xb_array_new`.
+- Element assignment follows Clipper's order: `a[i] := v` evaluates `v`, then `a`, then `i`; `a[i] op= v` and
+  `a[i]++` evaluate `a`, then `i`, then the element, then `v`. A variable operand is copied when something evaluated
+  after it has side effects, so it keeps the value it had. A `FOR` start value with side effects is evaluated into a
+  temporary before it is stored in the loop variable.
 - Conditions test the item type inline; a non-logical value calls `xb_cond_error` and leaves the function.
-- After every call that can fail, the generated code loads `ctx->pending` and branches to the function exit when it is
-  set (marked unlikely).
+- After every call that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it calls
+  `xb_pending` and branches to the function exit if that asks to unwind.
 - The exit block pops the frame and returns.
 - The start module also gets `xb_app_main`, which checks the ABI and calls the first function of the source.
 - 32-bit parameters and results of every declared or defined function carry the extension attribute the target ABI
@@ -85,7 +103,7 @@ outside a loop, invalid assignment targets, and a `LOCAL` that follows an execut
 
 ## Constant folding
 
-`Fold.*` evaluates expressions on literals after semantic checks. Folding is part of the language semantics: the
+`opt/Fold.*` evaluates expressions on literals after semantic checks. Folding is part of the language semantics: the
 folded result's type and decimals follow Clipper's compile-time rules, which differ from the run-time operators.
 
 | Expression on literals | Result |
@@ -124,6 +142,6 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 
 ## Object emission
 
-`Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the host),
-runs the default optimization pipeline for the `-O` level, and writes the object with the target's object writer. Code
-is position independent unless `--static` is given.
+`codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
+host), runs the default optimization pipeline for the `-O` level, and writes the object with the target's object writer.
+Code is position independent unless `--static` is given.

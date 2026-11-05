@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 2u
+#define XB_ABI_VERSION 3u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -35,6 +35,10 @@ typedef enum xb_type {
   XB_T_INT     = 2,   /* numeric, integral (int64)        */
   XB_T_DOUBLE  = 3,   /* numeric, floating point           */
   XB_T_STRING  = 4,
+  XB_T_ARRAY   = 5,   /* v.p: runtime array                       */
+  XB_T_BLOCK   = 6,   /* v.p: xb_block                             */
+  XB_T_CELL    = 7,   /* v.p: xb_cell; only in the frame slot of a variable a
+                         codeblock captured, never seen by xBase code */
   XB_T_COUNT_
 } xb_type;
 
@@ -71,16 +75,19 @@ typedef struct xb_item {
 } xb_item;
 
 /* [ABI] `pending` is tested by compiled code after every call that can
- * fail. Non-zero means: stop and unwind to the nearest handler (or out of
- * the program). It is also how BREAK, QUIT and GC safepoint requests reach
- * compiled code - one predictable branch covers all of them, works on every
- * target, and survives AWAIT (unlike setjmp/longjmp). */
+ * fail. When it is non-zero the code calls xb_pending(), which serves
+ * requests that only need a pause (a GC safepoint) and returns non-zero when
+ * the function must unwind (error, BREAK, QUIT). The common case costs one
+ * load and one predictable branch, works on every target, and survives AWAIT
+ * (unlike setjmp/longjmp). */
 enum {
-  XB_PENDING_NONE  = 0,
-  XB_PENDING_ERROR = 1u << 0,
-  XB_PENDING_BREAK = 1u << 1,
-  XB_PENDING_QUIT  = 1u << 2,
+  XB_PENDING_NONE      = 0,
+  XB_PENDING_ERROR     = 1u << 0,
+  XB_PENDING_BREAK     = 1u << 1,
+  XB_PENDING_QUIT      = 1u << 2,
+  XB_PENDING_SAFEPOINT = 1u << 3,
 };
+#define XB_PENDING_UNWIND (XB_PENDING_ERROR | XB_PENDING_BREAK | XB_PENDING_QUIT)
 
 typedef struct xb_ctx xb_ctx;   /* per-task context; first field is `pending` [ABI] */
 
@@ -89,7 +96,27 @@ typedef struct xb_ctx xb_ctx;   /* per-task context; first field is `pending` [A
  * written to `ret`, which the caller sets to NIL before the call. */
 typedef void (*xb_func)(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
-void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size);
+/* [ABI] A variable captured by a codeblock lives in a cell (value at offset 0)
+ * shared by the function and its blocks. */
+typedef struct xb_cell {
+  xb_item value;
+} xb_cell;
+
+/* [ABI] A codeblock: its function and the cells of the variables it captured.
+ * The block function receives the block itself. */
+typedef struct xb_block xb_block;
+typedef void (*xb_block_fn)(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self);
+#ifndef __cplusplus
+struct xb_block {
+  xb_block_fn fn;
+  uint32_t ncells;
+  xb_cell *cells[];
+};
+#endif
+
+int32_t  xb_pending(xb_ctx *ctx);
+
+void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset);
 
 xb_item *xb_frame_push(xb_ctx *ctx, uint32_t nslots);
 void     xb_frame_pop(xb_ctx *ctx, xb_item *base);
@@ -118,6 +145,19 @@ void     xb_num_default_dec(xb_ctx *ctx, xb_item *r, double value);
 
 /* Non-logical value used as a condition: raises the error, returns 0. */
 int32_t  xb_cond_error(xb_ctx *ctx, const xb_item *a);
+
+/* Arrays (1-based). xb_array_new copies `n` items (consecutive frame slots). */
+void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems);
+void     xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
+void     xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value);
+
+/* Codeblocks. xb_cell_box moves a frame slot's value into a new cell and
+ * leaves an XB_T_CELL item in the slot. xb_block_new stores the new block in
+ * `r` and returns it; the caller fills cells[0 .. ncells-1] before anything
+ * else can allocate. */
+void     xb_cell_box(xb_ctx *ctx, xb_item *slot);
+xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, uint32_t ncells);
+void     xb_block_call(xb_ctx *ctx, xb_item *ret, const xb_item *block, uint32_t argc, xb_item *argv);
 /* FOR ... TO ... STEP test: 1 = keep looping. */
 int32_t  xb_for_test(xb_ctx *ctx, const xb_item *counter, const xb_item *limit, const xb_item *step);
 

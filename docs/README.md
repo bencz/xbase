@@ -9,6 +9,7 @@ Find the task, read the doc it points to, then the code.
 | Grammar, keywords, name resolution, code generation, object emission, cross-compilation, driver options | [compiler.md](compiler.md) |
 | Values (`xb_item`), frames, calling convention, error propagation, operators, the ABI shared with the compiler | [runtime.md](runtime.md) |
 | Adding or running tests | [testing.md](testing.md) |
+| Which commands and functions exist, and what to implement next | [coverage.md](coverage.md) |
 
 Setup, build and run commands are in the top-level [README.md](../README.md); agent rules are in
 [AGENTS.md](../AGENTS.md).
@@ -17,14 +18,18 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 
 | Path | Contents |
 |---|---|
-| `compiler/src/Lexer.*` | tokenizer (one logical line at a time) |
-| `compiler/src/Preprocessor.*` | directives, defines, rule matching and expansion |
-| `compiler/src/Parser.*`, `AST.h` | recursive descent parser and syntax tree |
-| `compiler/src/Sema.*` | scopes, slot assignment, structural checks |
-| `compiler/src/CodeGen.*` | syntax tree to in-memory LLVM module |
-| `compiler/src/Emit.*` | target machines, optimization pipeline, object emission |
-| `compiler/src/main.cpp` | `xbc` driver |
-| `include/std.ch` | standard commands, loaded before every source |
+| `compiler/src/common/` | diagnostics, tokens, text helpers |
+| `compiler/src/preprocessor/` | tokenizer (one logical line at a time), directives, defines, rules |
+| `compiler/src/parser/` | syntax tree and recursive descent parser |
+| `compiler/src/sema/` | scopes, slots, captures, structural checks |
+| `compiler/src/opt/` | optimizations on the syntax tree (constant folding) |
+| `compiler/src/codegen/` | syntax tree to in-memory LLVM module; object emission |
+| `compiler/src/driver/` | `xbc` command line |
+| `include/` | `std.ch`, `set.ch` and the other standard headers |
 | `runtime/include/xbrt.h` | runtime ABI shared with the compiler |
-| `runtime/src/` | runtime implementation |
-| `tests/run`, `tests/pp` | execution and preprocessor tests |
+| `runtime/src/core/` | contexts and frames, operators, number formatting, `Set()`, program startup |
+| `runtime/src/gc/` | garbage collector |
+| `runtime/src/types/` | representation and base operations of strings, arrays, codeblocks |
+| `runtime/src/rtl/` | functions of the language, by area |
+| `runtime/src/platform/` | operating-system interface (`platform.h`) and one directory per platform |
+| `tests/run`, `tests/pp`, `tests/fail` | execution, preprocessor and compile-failure tests |

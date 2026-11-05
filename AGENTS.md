@@ -75,8 +75,8 @@ supports, little- and big-endian, 32- and 64-bit.
 
 - Build paths with `llvm::sys::path` / `std::filesystem`; never hard-code separators, drive letters or a file name's
   case.
-- No OS-only APIs in portable code. Platform-specific runtime code lives behind one interface, implemented for all
-  three operating systems.
+- No OS-only APIs in portable code. Platform-specific runtime code lives in `runtime/src/platform/<platform>/`,
+  implementing the interface of `runtime/src/platform/platform.h` completely for each platform.
 - Never assume the host's byte order, word size or struct layout. The compiler takes sizes, alignments and offsets
   from the target `DataLayout`; on-disk formats are read and written only through explicit little/big-endian helpers.
 - Build and test only through CMake and CTest commands; a script, if one is ever needed, exists as `.sh` and `.ps1`.
@@ -89,6 +89,8 @@ supports, little- and big-endian, 32- and 64-bit.
 - One implementation per rule: a formula, table, constant or check lives in one place and every caller uses it.
   Values shared by the compiler and the runtime (type tags, ABI version, numeric display widths) live in
   `runtime/include/xbrt.h`. Search before adding a helper; extend the one that exists.
+- [docs/coverage.md](docs/coverage.md) lists every command and runtime function of the language with its status;
+  implementing one updates it, and no command or function is added without checking it there.
 - The compiler knows the grammar only. Commands (`?`, `DO WHILE`, `STORE`, `QUIT`, ...) are `#command` rules in
   `include/std.ch`; never special-case them in the lexer, parser or code generator.
 - A type that grows past one responsibility is split by topic. Rule tables are data, not switch chains repeated across

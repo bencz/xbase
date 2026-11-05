@@ -17,17 +17,56 @@ typedef struct xb_item {
 } xb_item;
 ```
 
-- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`. An all-zero item is `NIL`.
+- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, and `CELL`, which only appears in
+  the frame slot of a variable a codeblock captured. An all-zero item is `NIL`.
 - Copying an item is a plain memory copy; there is no reference counting.
 - Strings (`xb_str`: flags, hash, length, bytes) are immutable and NUL-terminated, so they can be shared between items
-  and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC`.
-- Strings created at run time are never freed yet; the tracing GC will reclaim them.
+  and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects.
+- Arrays (`types/array.c`, functions in `rtl/arrays.c`) are 1-based. Their items start in the array's own allocation and
+  move to a separate heap object when the array grows past it.
+- Codeblocks (`xb_block`: function, captured cells) and cells (`xb_cell`: one item at offset 0) are described in
+  [Codeblocks](#codeblocks).
 
 ## Frames
 
 Parameters, `LOCAL`s and temporaries live in item frames taken from a per-context segmented stack
 (`xb_frame_push`/`xb_frame_pop`). Segments are never reallocated, so a frame's address is stable for its lifetime; new
-frames start as `NIL`. Frames will be the GC roots.
+frames start as `NIL`. Frames are GC roots.
+
+## Garbage collector
+
+`runtime/src/gc/gc.c` is a precise, non-moving mark and lazy-sweep collector. Strings, arrays, array item storage,
+codeblocks and cells are its objects; an 8-byte header (size, kind, mark) precedes each one, so object pointers are
+what the rest of the runtime and compiled code use.
+
+- Allocation: objects up to 2048 bytes (header included) come from 64 KB pages of 27 size classes. Every thread has a
+  local heap with one page per class and allocates from its free list without locking. Larger objects are allocated
+  individually.
+- Roots: the frames and temporary C roots (`xb_gc_root_push`) of every registered context, which includes suspended
+  tasks.
+- Collection: starts when the bytes allocated since the last one reach the live heap size (at least 8 MB). Marking
+  uses an explicit stack. Large objects are freed at once; pages are swept lazily when an allocation needs one (the
+  search resumes where the previous one stopped), and a page found empty at a collection returns to a pool of free
+  pages. Pages are not returned to the operating system.
+- Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
+  reused or the function returns.
+- Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, memory exhausted) end the program through
+  `xb_gc_fatal` with a message on standard error and exit code 1.
+- Rule for C code: a collection can run inside any allocation, so every object still needed must be reachable from a
+  frame or a C root before the next allocation. Objects never move.
+- Threads: global structures are protected by a lock (`xb_mutex`, platform layer); the allocation fast path takes
+  none. A collection requires every mutator to be stopped at a safepoint (`XB_PENDING_SAFEPOINT`); while tasks run on
+  one thread the allocating thread is the only mutator.
+
+`__GcCollect()` runs a collection and returns the number of live objects (tests use it).
+
+## Codeblocks
+
+A `LOCAL` or parameter that a codeblock uses is *boxed*: at function entry `xb_cell_box` moves it into a cell and
+leaves an `XB_T_CELL` item in its slot. The function and every block that captured it share the cell, which outlives
+the function. A codeblock is a compiled function `(ctx, ret, argc, argv, self)` plus the captured cells
+(`self->cells[]`); `xb_block_new` creates it and the compiled code stores the cells. `Eval( bBlock, ... )` and
+`xb_block_call` run it; the caller sets the result to `NIL` first.
 
 ## Calling convention
 
@@ -47,8 +86,9 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 ## Errors and pending requests
 
 `xb_ctx` starts with `uint32_t pending`. The runtime sets bits there (`XB_PENDING_ERROR`, `XB_PENDING_BREAK`,
-`XB_PENDING_QUIT`); compiled code tests the field after each fallible call and unwinds to its caller. The same check
-will serve GC safepoints and stays valid across `AWAIT`.
+`XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`). Compiled code tests the field after each fallible call; when it is set the
+code calls `xb_pending`, which serves pauses (a safepoint) and returns non-zero when the function must unwind to its
+caller. The check stays valid across `AWAIT`.
 
 Runtime errors are currently fatal: `xb_rt_error` prints `Error <subsystem>/<code>  <description>: <operation>` to
 standard error, sets exit code 1 and raises `XB_PENDING_ERROR`. `QUIT` raises `XB_PENDING_QUIT` with exit code 0.
@@ -73,7 +113,12 @@ standard error, sets exit code 1 and raises `XB_PENDING_ERROR`. `QUIT` raises `X
 | `$` | substring test; an empty left operand is false |
 | `.NOT.` | logicals only |
 
-Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors.
+Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors. `==` on two arrays
+or two codeblocks tests identity; other comparisons of them are argument errors.
+
+Element access `a[i]` (`xb_op_index`) and assignment (`xb_op_index_set`) raise `Argument error: array access` (1068)
+or `array assign` (1069) when the base is not an array or the index not a number, and `Bound error` (1132/1133)
+outside `1 .. Len( a )`.
 
 `xb_num_default_dec(ctx, r, value)` makes a double with SET DECIMALS decimals; the compiler uses it for folded
 expressions whose decimals are decided at run time. Items keep 16 bits of SET DECIMALS, as in Clipper.
@@ -87,8 +132,9 @@ above 2^53.
 
 ## Display
 
-`xb_item_display` formats values the way `?`/`QOut()` print them: `NIL`, `.T.`/`.F.`, strings as they are, and
-numbers through `xb_num_to_str` (`runtime/src/numfmt.c`):
+`xb_item_display` formats values the way `?`/`QOut()` print them: `NIL`, `.T.`/`.F.`, strings as they are, arrays
+and codeblocks as nothing, and
+numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`):
 
 - the field has the item's width (or `xb_num_int_width`/`xb_num_dbl_width`) for the sign and integer digits, then a
   dot and the item's decimals;
@@ -106,8 +152,14 @@ there).
 |---|---|---|
 | `QOut( ... )` | `xbf_QOUT` | newline, then the arguments separated by a blank |
 | `QQOut( ... )` | `xbf_QQOUT` | the arguments without a newline |
-| `ValType( x )` | `xbf_VALTYPE` | `U`, `L`, `N`, `C` |
-| `Len( c )` | `xbf_LEN` | strings only for now |
+| `ValType( x )` | `xbf_VALTYPE` | `U`, `L`, `N`, `C`, `A`, `B` |
+| `Len( x )` | `xbf_LEN` | strings and arrays |
+| `Array( n1 [, n2 ...] )` | `xbf_ARRAY` | nested arrays of `NIL`; a non-numeric argument returns `NIL`, a negative one is error 1131 |
+| `AAdd( a, x )` | `xbf_AADD` | appends and returns `x` |
+| `ASize( a, n )` | `xbf_ASIZE` | resizes (new items are `NIL`) and returns `a` |
+| `ATail( a )` | `xbf_ATAIL` | the last item, `NIL` for an empty array |
+| `AClone( a )` | `xbf_ACLONE` | copies the array and its nested arrays; an array reached twice is copied once, so shared and cyclic structures are kept |
+| `Eval( b [, args...] )` | `xbf_EVAL` | runs a codeblock |
 | `__Quit()` | `xbf___QUIT` | target of `QUIT`/`CANCEL` |
 | `Set( n [, x] )` | `xbf_SET` | returns the setting before the call. `_SET_EXACT`: a logical, or a string starting with `ON`/`OFF` in any case; other values change nothing. `_SET_DECIMALS`: a number of 0 or more (a negative one is error 2020); other types change nothing. |
 
@@ -116,6 +168,6 @@ Settings live in the task context (`SET EXACT` off and `SET DECIMALS` 2 at start
 
 ## Program startup
 
-`main` (in `runtime/src/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
+`main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
 in binary mode so programs write the same bytes everywhere), creates the context, calls `xb_app_main` (emitted by the
 compiler), flushes output and returns the exit code.

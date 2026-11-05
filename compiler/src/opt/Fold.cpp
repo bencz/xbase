@@ -1,0 +1,290 @@
+#include "opt/Fold.h"
+
+#include "xbrt.h" // shared numeric rules
+
+#include <llvm/Support/MathExtras.h>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+namespace xb {
+
+namespace {
+
+// A folded integer is an integer constant of the program; a folded double has
+// the default display width for its value (width 0).
+ExprPtr makeInt(SourceLoc loc, int64_t v) {
+  return std::make_unique<NumberExpr>(loc, true, v, 0.0, 0, xb_num_const_int_width(v));
+}
+
+ExprPtr makeDouble(SourceLoc loc, double v, uint16_t dec) {
+  return std::make_unique<NumberExpr>(loc, false, 0, v, dec, 0);
+}
+
+ExprPtr makeLogical(SourceLoc loc, bool v) { return std::make_unique<LogicalExpr>(loc, v); }
+
+double asDouble(const NumberExpr &n) { return n.isInt ? (double)n.ival : n.dval; }
+
+const NumberExpr *num(const ExprPtr &e) {
+  return e->kind == ExprKind::Number ? static_cast<const NumberExpr *>(e.get()) : nullptr;
+}
+const StringExpr *str(const ExprPtr &e) {
+  return e->kind == ExprKind::String ? static_cast<const StringExpr *>(e.get()) : nullptr;
+}
+const LogicalExpr *logical(const ExprPtr &e) {
+  return e->kind == ExprKind::Logical ? static_cast<const LogicalExpr *>(e.get()) : nullptr;
+}
+
+ExprPtr foldArithmetic(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberExpr &b) {
+  bool ints = a.isInt && b.isInt;
+  int64_t r;
+  switch (op) {
+  case BinOp::Add:
+  case BinOp::Sub:
+    if (ints) {
+      bool overflow = op == BinOp::Add ? llvm::AddOverflow(a.ival, b.ival, r) : llvm::SubOverflow(a.ival, b.ival, r);
+      if (!overflow) return makeInt(loc, r);
+      double d = op == BinOp::Add ? (double)a.ival + (double)b.ival : (double)a.ival - (double)b.ival;
+      return makeDouble(loc, d, 0);
+    } else {
+      double d = op == BinOp::Add ? asDouble(a) + asDouble(b) : asDouble(a) - asDouble(b);
+      return makeDouble(loc, d, std::max(a.dec, b.dec)); // an integer has 0 decimals
+    }
+  case BinOp::Mul:
+    if (ints) {
+      if (!llvm::MulOverflow(a.ival, b.ival, r)) return makeInt(loc, r);
+      return makeDouble(loc, (double)a.ival * (double)b.ival, 0);
+    }
+    return makeDouble(loc, asDouble(a) * asDouble(b), (uint16_t)std::min<int>(a.dec + b.dec, kDefaultDecimals));
+  case BinOp::Div:
+    if (asDouble(b) == 0.0) return nullptr; // left for the run-time error
+    if (ints && !(a.ival == std::numeric_limits<int64_t>::min() && b.ival == -1) && a.ival % b.ival == 0)
+      return makeInt(loc, a.ival / b.ival);
+    return makeDouble(loc, asDouble(a) / asDouble(b), kDefaultDecimals);
+  case BinOp::Mod:
+    if (asDouble(b) == 0.0) return nullptr;
+    if (ints) return makeInt(loc, b.ival == -1 ? 0 : a.ival % b.ival); // x % -1 is 0 (and INT64_MIN % -1 is UB)
+    return makeDouble(loc, std::fmod(asDouble(a), asDouble(b)), kDefaultDecimals);
+  case BinOp::Pow:
+    return makeDouble(loc, std::pow(asDouble(a), asDouble(b)), kDefaultDecimals);
+  default:
+    return nullptr;
+  }
+}
+
+// Result of a comparison operator given the operands' order c (-1, 0, 1).
+bool comparisonResult(BinOp op, int c, bool &result) {
+  switch (op) {
+  case BinOp::Eq: case BinOp::ExactEq: result = c == 0; return true;
+  case BinOp::NotEq: result = c != 0; return true;
+  case BinOp::Lt: result = c < 0; return true;
+  case BinOp::Le: result = c <= 0; return true;
+  case BinOp::Gt: result = c > 0; return true;
+  case BinOp::Ge: result = c >= 0; return true;
+  default: return false;
+  }
+}
+
+int order(const NumberExpr &a, const NumberExpr &b) {
+  if (a.isInt && b.isInt) return (a.ival > b.ival) - (a.ival < b.ival);
+  double x = asDouble(a), y = asDouble(b);
+  return (x > y) - (x < y);
+}
+
+} // namespace
+
+void Folder::run(Module &m) {
+  for (auto &f : m.funcs) moduleFuncs_.insert(f->name);
+  for (auto &f : m.funcs) block(f->body);
+}
+
+void Folder::block(Block &b) {
+  for (auto &s : b) stmt(*s);
+}
+
+void Folder::stmt(Stmt &s) {
+  switch (s.kind) {
+  case StmtKind::Expr:
+    fold(static_cast<ExprStmt &>(s).expr);
+    break;
+  case StmtKind::Local:
+    for (LocalDecl &d : static_cast<LocalStmt &>(s).decls)
+      if (d.init) fold(d.init);
+    break;
+  case StmtKind::Return: {
+    auto &r = static_cast<ReturnStmt &>(s);
+    if (r.value) fold(r.value);
+    break;
+  }
+  case StmtKind::If: {
+    auto &i = static_cast<IfStmt &>(s);
+    for (auto &arm : i.arms) {
+      fold(arm.cond);
+      block(arm.body);
+    }
+    block(i.elseBody);
+    break;
+  }
+  case StmtKind::While: {
+    auto &w = static_cast<WhileStmt &>(s);
+    fold(w.cond);
+    block(w.body);
+    break;
+  }
+  case StmtKind::For: {
+    auto &f = static_cast<ForStmt &>(s);
+    fold(f.start);
+    fold(f.limit);
+    if (f.step) fold(f.step);
+    block(f.body);
+    break;
+  }
+  case StmtKind::Exit:
+  case StmtKind::Loop:
+    break;
+  }
+}
+
+void Folder::fold(ExprPtr &e) {
+  ExprPtr r;
+  switch (e->kind) {
+  case ExprKind::Unary: {
+    auto &u = static_cast<UnaryExpr &>(*e);
+    fold(u.operand);
+    r = foldUnary(u);
+    break;
+  }
+  case ExprKind::Binary: {
+    auto &b = static_cast<BinaryExpr &>(*e);
+    fold(b.lhs);
+    fold(b.rhs);
+    r = foldBinary(b);
+    break;
+  }
+  case ExprKind::And:
+  case ExprKind::Or: {
+    auto &l = static_cast<LogicExpr &>(*e);
+    fold(l.lhs);
+    fold(l.rhs);
+    r = foldLogic(l, e->kind == ExprKind::And);
+    break;
+  }
+  case ExprKind::Assign: {
+    auto &a = static_cast<AssignExpr &>(*e);
+    fold(a.target); // the indexes of an element target
+    fold(a.value);
+    break;
+  }
+  case ExprKind::Call: {
+    auto &c = static_cast<CallExpr &>(*e);
+    for (auto &arg : c.args) fold(arg);
+    r = foldCall(c);
+    break;
+  }
+  case ExprKind::ArrayLit:
+    for (auto &el : static_cast<ArrayLitExpr &>(*e).elems) fold(el);
+    break;
+  case ExprKind::Index: {
+    auto &ix = static_cast<IndexExpr &>(*e);
+    fold(ix.base);
+    fold(ix.index);
+    break;
+  }
+  case ExprKind::Block:
+    for (auto &b : static_cast<BlockExpr &>(*e).body) fold(b);
+    break;
+  case ExprKind::IncDec:
+    fold(static_cast<IncDecExpr &>(*e).target);
+    break;
+  case ExprKind::IIf: {
+    auto &i = static_cast<IIfExpr &>(*e);
+    fold(i.cond);
+    fold(i.then);
+    fold(i.otherwise);
+    if (const LogicalExpr *c = logical(i.cond)) r = std::move(c->value ? i.then : i.otherwise);
+    break;
+  }
+  default:
+    break;
+  }
+  if (r) e = std::move(r);
+}
+
+ExprPtr Folder::foldUnary(UnaryExpr &u) {
+  SourceLoc loc = u.loc;
+  if (u.op == UnOp::Not) {
+    if (const LogicalExpr *l = logical(u.operand)) return makeLogical(loc, !l->value);
+    return nullptr;
+  }
+  const NumberExpr *n = num(u.operand);
+  if (!n) return nullptr;
+  if (u.op == UnOp::Plus) return std::move(u.operand);
+  if (!n->isInt) return makeDouble(loc, -n->dval, n->dec);
+  if (n->ival == std::numeric_limits<int64_t>::min()) return makeDouble(loc, -(double)n->ival, 0);
+  return makeInt(loc, -n->ival);
+}
+
+ExprPtr Folder::foldBinary(BinaryExpr &b) {
+  SourceLoc loc = b.loc;
+  const NumberExpr *na = num(b.lhs), *nb = num(b.rhs);
+  if (na && nb) {
+    if (ExprPtr r = foldArithmetic(loc, b.op, *na, *nb)) return r;
+    bool result;
+    if (comparisonResult(b.op, order(*na, *nb), result)) return makeLogical(loc, result);
+    return nullptr;
+  }
+  const LogicalExpr *la = logical(b.lhs), *lb = logical(b.rhs);
+  if (la && lb) {
+    bool result;
+    if (comparisonResult(b.op, (int)la->value - (int)lb->value, result)) return makeLogical(loc, result); // .F. < .T.
+    return nullptr;
+  }
+  const StringExpr *sa = str(b.lhs), *sb = str(b.rhs);
+  if (!sa || !sb) return nullptr;
+  const std::string &x = sa->value, &y = sb->value;
+  switch (b.op) {
+  case BinOp::Add:
+    return std::make_unique<StringExpr>(loc, x + y);
+  case BinOp::Sub: {
+    std::string r(x.size() + y.size(), ' ');
+    xb_str_minus(r.data(), x.data(), x.size(), y.data(), y.size());
+    return std::make_unique<StringExpr>(loc, std::move(r));
+  }
+  case BinOp::ExactEq:
+    return makeLogical(loc, x == y);
+  case BinOp::Eq:
+  case BinOp::NotEq: // `=` depends on SET EXACT at run time, except for two empty strings
+    if (!x.empty() || !y.empty()) return nullptr;
+    return makeLogical(loc, b.op == BinOp::Eq);
+  case BinOp::In:
+    return makeLogical(loc, !x.empty() && y.find(x) != std::string::npos);
+  default:
+    return nullptr;
+  }
+}
+
+// A logical literal on the left decides the result or leaves the right
+// operand alone. A literal on the right is not used to drop the left operand:
+// that would discard its side effects.
+ExprPtr Folder::foldLogic(LogicExpr &l, bool isAnd) {
+  const LogicalExpr *a = logical(l.lhs);
+  if (!a) return nullptr;
+  if (const LogicalExpr *b = logical(l.rhs)) {
+    return makeLogical(l.loc, isAnd ? a->value && b->value : a->value || b->value);
+  }
+  if (a->value == isAnd) return std::move(l.rhs); // .T. .AND. x, .F. .OR. x
+  return makeLogical(l.loc, a->value);           // .F. .AND. x, .T. .OR. x
+}
+
+// Runtime functions with a constant result for literal arguments, unless the
+// module defines a function with the same name.
+ExprPtr Folder::foldCall(CallExpr &c) {
+  if (moduleFuncs_.count(c.name)) return nullptr;
+  if (c.name == "LEN" && c.args.size() == 1) {
+    if (const StringExpr *s = str(c.args[0])) return makeInt(c.loc, (int64_t)s->value.size());
+  }
+  return nullptr;
+}
+
+} // namespace xb

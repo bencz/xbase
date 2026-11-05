@@ -2,15 +2,15 @@ find_package(LLVM REQUIRED CONFIG)
 message(STATUS "xbc: using LLVM ${LLVM_PACKAGE_VERSION} (${LLVM_DIR})")
 
 add_executable(xbc
-  src/main.cpp
-  src/Diagnostics.cpp
-  src/Lexer.cpp
-  src/Preprocessor.cpp
-  src/Parser.cpp
-  src/Sema.cpp
-  src/Fold.cpp
-  src/CodeGen.cpp
-  src/Emit.cpp
+  src/common/Diagnostics.cpp
+  src/preprocessor/Lexer.cpp
+  src/preprocessor/Preprocessor.cpp
+  src/parser/Parser.cpp
+  src/sema/Sema.cpp
+  src/opt/Fold.cpp
+  src/codegen/CodeGen.cpp
+  src/codegen/Emit.cpp
+  src/driver/main.cpp
 )
 
 # xbrt.h is included for shared constants only (type tags, ABI version).
