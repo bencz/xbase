@@ -22,7 +22,7 @@ struct xb_ctx {
   /* Later: memvar (PRIVATE) stack, current work area, SETs, ErrorBlock -
    * all per task, so they travel with a Task across threads like .NET's
    * ExecutionContext. */
-  uint16_t set_decimals;
+  int32_t  set_decimals;
   int      set_exact;
 };
 
@@ -37,6 +37,20 @@ xb_str *xb_str_alloc(size_t len);
 /* Text of a number in a field of `width` integer columns and `dec` decimals
  * (`width + 1 + dec` characters when dec > 0), Clipper style. */
 xb_str *xb_num_to_str(const xb_item *it, int width, int dec);
+
+/* SET DECIMALS as an item's decimal count (items keep 16 bits, as in Clipper). */
+static inline uint16_t xb_decimals(const xb_ctx *ctx) { return (uint16_t)ctx->set_decimals; }
+
+/* Integer value of a number item; doubles are truncated, saturating at the
+ * int64 range (NaN gives 0) instead of invoking undefined behavior. */
+static inline int64_t xb_num_to_i64(const xb_item *it) {
+  if (it->type == XB_T_INT) return it->v.i;
+  double d = it->v.d;
+  if (d != d) return 0;
+  if (d >= 9223372036854775807.0) return INT64_MAX;
+  if (d <= -9223372036854775808.0) return INT64_MIN;
+  return (int64_t)d;
+}
 
 /* One-time process setup that differs between operating systems. */
 void xb_platform_init(void);

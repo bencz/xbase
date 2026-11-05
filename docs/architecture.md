@@ -95,9 +95,8 @@ ASYNC FUNCTION FetchOrders( cUrl )
 
 ## Roadmap
 
-1. Compiler gaps: constant folding (it changes results, see [compiler.md](compiler.md#code-generation)), references
-   (`@var`, `DO ... WITH` by reference). Preprocessor gaps: macro tokens (`&var.suffix`), `__FILE__`/`__LINE__`,
-   `#pragma`, `e"..."` strings, date literals, precompiled `std.ch` rules.
+1. Compiler gaps: references (`@var`, `DO ... WITH` by reference). Preprocessor gaps: macro tokens (`&var.suffix`),
+   `__FILE__`/`__LINE__`, `#pragma`, `e"..."` strings, date literals, precompiled `std.ch` rules.
 2. Core language: arrays, codeblocks, `STATIC`, `MEMVAR`/`PRIVATE`/`PUBLIC`, `FIELD`/aliases, `BEGIN SEQUENCE`,
    `ErrorBlock`, `DO CASE`, `SWITCH`, `FOR EACH`, hashes.
 3. Tracing GC, dynamic symbol table, runtime macro evaluation.

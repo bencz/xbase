@@ -116,7 +116,12 @@ lists only commands whose runtime support exists and grows with the runtime:
 | `ENDFOR [<*x*>]`, `NEXT <v> [TO <x>] [STEP <s>]` | `next` |
 | `STORE <v> TO <v1> [, <vN>]` | `<v1> := [ <vN> := ] <v>` |
 | `? [<list,...>]`, `?? [<list,...>]` | `QOut( <list> )`, `QQOut( <list> )` |
+| `SET DECIMALS TO [<x>]` | `Set( _SET_DECIMALS, <x> )` (0 without a value) |
+| `SET EXACT ON \| OFF \| &var`, `SET EXACT (<x>)` | `Set( _SET_EXACT, ... )` |
 | `QUIT`, `CANCEL` | `__Quit()` |
+
+`std.ch` includes `include/set.ch`, which defines the `_SET_*` numbers for `Set()`. It contains only `#define` lines
+and C comments, so the runtime includes the same file and the numbers are defined once.
 
 ## Inspecting the output
 

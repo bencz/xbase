@@ -177,12 +177,11 @@ void Lexer::lexNumber() {
   }
   if (isDouble) t.dval = std::strtod(t.text.c_str(), nullptr);
 
-  // Literals with 10+ integer digits keep their own width (Clipper rule).
-  if (intDigits < 10) {
-    t.width = isDouble ? xb_num_dbl_width(t.dval) : xb_num_int_width(t.ival);
-  } else {
-    t.width = (uint16_t)(intDigits + (dec == 0 ? 1 : 0));
-  }
+  // Integers are program constants; a double literal with 10 or more integer
+  // digits keeps its own width (Clipper rules).
+  if (!isDouble) t.width = xb_num_const_int_width(t.ival);
+  else if (intDigits < 10) t.width = xb_num_dbl_width(t.dval);
+  else t.width = (uint16_t)(intDigits + (dec == 0 ? 1 : 0));
 }
 
 void Lexer::lexString(char close) {

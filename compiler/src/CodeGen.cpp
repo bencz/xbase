@@ -1,5 +1,6 @@
 #include "CodeGen.h"
 
+#include "Fold.h"
 #include "xbrt.h" // constants only (type tags, ABI version) - never layouts
 
 #include <llvm/Analysis/TargetLibraryInfo.h>
@@ -84,6 +85,7 @@ void CodeGen::initTypes() {
   rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_});
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},
       {BinOp::Div, "xb_op_div"}, {BinOp::Mod, "xb_op_mod"},       {BinOp::Pow, "xb_op_pow"},
@@ -430,7 +432,13 @@ Value *CodeGen::genOperand(const Expr &e) {
   switch (e.kind) {
   case ExprKind::Nil: return nilLiteral();
   case ExprKind::Logical: return logicalLiteral(static_cast<const LogicalExpr &>(e).value);
-  case ExprKind::Number: return numberLiteral(static_cast<const NumberExpr &>(e));
+  case ExprKind::Number: {
+    auto &n = static_cast<const NumberExpr &>(e);
+    if (n.isInt || n.dec != kDefaultDecimals) return numberLiteral(n);
+    Value *t = tempSlot(); // decimals known only at run time (SET DECIMALS)
+    b_.CreateCall(rtNumDefaultDec_, {fnCtx_, t, ConstantFP::get(Type::getDoubleTy(ctx_), n.dval)});
+    return t;
+  }
   case ExprKind::String: return stringLiteral(static_cast<const StringExpr &>(e).value);
   case ExprKind::Var: return varSlot(e);
   default: {

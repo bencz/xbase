@@ -2,6 +2,7 @@
 #include "CodeGen.h"
 #include "Diagnostics.h"
 #include "Emit.h"
+#include "Fold.h"
 #include "Parser.h"
 #include "Preprocessor.h"
 #include "Sema.h"
@@ -185,6 +186,7 @@ int main(int argc, char **argv) {
   xb::Sema sema(diag);
   sema.run(*ast);
   if (diag.errorCount()) return 1;
+  xb::Folder().run(*ast);
 
   xb::initializeTargets();
   std::string err;

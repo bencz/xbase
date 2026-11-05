@@ -8,6 +8,7 @@ add_executable(xbc
   src/Preprocessor.cpp
   src/Parser.cpp
   src/Sema.cpp
+  src/Fold.cpp
   src/CodeGen.cpp
   src/Emit.cpp
 )

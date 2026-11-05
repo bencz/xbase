@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 1u
+#define XB_ABI_VERSION 2u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -112,6 +112,10 @@ void     xb_op_ge(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);      /* $  */
 void     xb_op_not(xb_ctx *ctx, xb_item *r, const xb_item *a);
 
+/* A double whose decimals are the current SET DECIMALS (constant-folded `/`,
+ * `%` on doubles and `^`). */
+void     xb_num_default_dec(xb_ctx *ctx, xb_item *r, double value);
+
 /* Non-logical value used as a condition: raises the error, returns 0. */
 int32_t  xb_cond_error(xb_ctx *ctx, const xb_item *a);
 /* FOR ... TO ... STEP test: 1 = keep looping. */
@@ -166,6 +170,26 @@ static inline uint16_t xb_num_int_width(int64_t i) {
 }
 static inline uint16_t xb_num_dbl_width(double d) {
   return (uint16_t)((d > 9999999999.0 || d < -999999999.0) ? 20 : 10);
+}
+
+/* Display width of an integer constant in the program (a literal or a folded
+ * expression): 10 columns plus one per digit beyond nine, 20 for values of
+ * -1000000000 or less. Computed integers use xb_num_int_width instead. */
+static inline uint16_t xb_num_const_int_width(int64_t i) {
+  if (i <= -1000000000) return 20;
+  uint16_t w = 10;
+  for (; i >= 1000000000; i /= 10) ++w;
+  return w;
+}
+
+/* Clipper's string `-`: the trailing blanks of `a` move after `b`. Writes
+ * la + lb bytes to `out`. */
+static inline void xb_str_minus(char *out, const char *a, size_t la, const char *b, size_t lb) {
+  size_t keep = la;
+  while (keep && a[keep - 1] == ' ') --keep;
+  for (size_t i = 0; i < keep; ++i) out[i] = a[i];
+  for (size_t i = 0; i < lb; ++i) out[keep + i] = b[i];
+  for (size_t i = keep + lb; i < la + lb; ++i) out[i] = ' ';
 }
 
 /* Formats a value the way ? / QOut() shows it. Returns a new string. */

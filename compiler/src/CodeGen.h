@@ -89,7 +89,7 @@ private:
 
   // runtime entry points
   llvm::FunctionCallee rtFramePush_, rtFramePop_, rtArgsCopy_, rtCondError_, rtForTest_, rtAbiCheck_;
-  llvm::FunctionCallee rtNeg_, rtNot_;
+  llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
   // module state

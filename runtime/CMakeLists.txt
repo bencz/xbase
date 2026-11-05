@@ -2,6 +2,7 @@ add_library(xbrt STATIC
   src/ctx.c
   src/item.c
   src/numfmt.c
+  src/set.c
   src/str.c
   src/ops.c
   src/console.c
@@ -17,4 +18,6 @@ else()
 endif()
 
 target_include_directories(xbrt PUBLIC include)
+# set.ch is shared with xBase code, so setting numbers are defined once.
+target_include_directories(xbrt PRIVATE ${PROJECT_SOURCE_DIR}/include)
 xb_target_warnings(xbrt)

@@ -37,14 +37,9 @@ void xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   } else if (is_num(a) && is_num(b)) {
     xb_set_double(r, num_d(a) - num_d(b), max16(num_dec(a), num_dec(b)));
   } else if (a->type == XB_T_STRING && b->type == XB_T_STRING) {
-    /* Clipper: trailing blanks of the left operand move to the end. */
     const xb_str *sa = a->v.s, *sb = b->v.s;
-    size_t keep = sa->len;
-    while (keep && sa->data[keep - 1] == ' ') --keep;
     xb_str *s = xb_str_alloc(sa->len + sb->len);
-    memcpy(s->data, sa->data, keep);
-    memcpy(s->data + keep, sb->data, sb->len);
-    memset(s->data + keep + sb->len, ' ', sa->len - keep);
+    xb_str_minus(s->data, sa->data, sa->len, sb->data, sb->len);
     xb_set_str(r, s);
   } else {
     arg_error(ctx, 1082, "-");
@@ -55,7 +50,7 @@ void xb_op_mul(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_INT && b->type == XB_T_INT) {
     int64_t v;
     if (!xb_mul_overflow(a->v.i, b->v.i, &v)) { xb_set_int(r, v); return; }
-    xb_set_double(r, (double)a->v.i * (double)b->v.i, ctx->set_decimals); /* unlike + and - */
+    xb_set_double(r, (double)a->v.i * (double)b->v.i, xb_decimals(ctx)); /* unlike + and - */
   } else if (is_num(a) && is_num(b)) {
     xb_set_double(r, num_d(a) * num_d(b), (uint16_t)(num_dec(a) + num_dec(b)));
   } else {
@@ -68,7 +63,7 @@ void xb_op_mul(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 void xb_op_div(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (!is_num(a) || !is_num(b)) { arg_error(ctx, 1084, "/"); return; }
   if (num_d(b) == 0.0) { xb_rt_error(ctx, "BASE", 1340, "Zero divisor", "/"); return; }
-  xb_set_double(r, num_d(a) / num_d(b), ctx->set_decimals);
+  xb_set_double(r, num_d(a) / num_d(b), xb_decimals(ctx));
 }
 
 void xb_op_mod(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
@@ -77,12 +72,16 @@ void xb_op_mod(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   double v;
   if (a->type == XB_T_INT && b->type == XB_T_INT) v = b->v.i == -1 ? 0.0 : (double)(a->v.i % b->v.i);
   else v = fmod(num_d(a), num_d(b));
-  xb_set_double(r, v, ctx->set_decimals);
+  xb_set_double(r, v, xb_decimals(ctx));
+}
+
+void xb_num_default_dec(xb_ctx *ctx, xb_item *r, double value) {
+  xb_set_double(r, value, xb_decimals(ctx));
 }
 
 void xb_op_pow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (!is_num(a) || !is_num(b)) { arg_error(ctx, 1088, "^"); return; }
-  xb_set_double(r, pow(num_d(a), num_d(b)), ctx->set_decimals);
+  xb_set_double(r, pow(num_d(a), num_d(b)), xb_decimals(ctx));
 }
 
 void xb_op_neg(xb_ctx *ctx, xb_item *r, const xb_item *a) {

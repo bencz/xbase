@@ -27,7 +27,8 @@ and end without one. When Harbour is installed, an execution test's expected out
 `-gtcgi` gives plain console output. A difference is either fixed or documented as a deliberate one in the matching
 doc (for example the last digits of large doubles in [runtime.md](runtime.md#display)). Preprocessor output can be
 compared with `harbour -p -s -q test.prg`, whose `.ppo` keeps a line's statements joined by `;` and differs in
-spacing. Tests whose result depends on compile-time folding use variables until folding exists.
+spacing. Expressions on literals are folded at compile time, with results that can differ from the run-time operators
+(`10 / 5` is `2`, `n / 5` is `2.00`): tests of run-time operators use variables.
 
 Every behavior change adds or extends a test. Changes to code generation or to the runtime ABI are also cross-compiled
 for a 32-bit and a big-endian target, for example:

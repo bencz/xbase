@@ -83,8 +83,30 @@ outside a loop, invalid assignment targets, and a `LOCAL` that follows an execut
 - 32-bit parameters and results of every declared or defined function carry the extension attribute the target ABI
   requires (`zeroext` on s390x, `signext` on RISC-V 64, none on x86-64), taken from LLVM's target library information.
 
-Constant folding (evaluating operators on literals at compile time) is not implemented yet. It changes results, not
-only speed: Clipper and Harbour fold `10 / 5` to the integer `2`, while the run-time operator gives `2.00`.
+## Constant folding
+
+`Fold.*` evaluates expressions on literals after semantic checks. Folding is part of the language semantics: the
+folded result's type and decimals follow Clipper's compile-time rules, which differ from the run-time operators.
+
+| Expression on literals | Result |
+|---|---|
+| integer `+` `-` `*` integer | integer; on 64-bit overflow a double with 0 decimals |
+| `+` `-` with a double | double; decimals: the larger of both, or those of the double operand |
+| `*` with a double | double; decimals: the sum for two doubles, or those of the double operand |
+| integer `/` integer | integer when exact, otherwise a double with SET DECIMALS decimals |
+| `/` with a double, `%` with a double, `^` | double with SET DECIMALS decimals |
+| integer `%` integer | integer |
+| unary `-` | the negated number, same decimals |
+| comparisons of numbers or logicals | `.T.`/`.F.` |
+| strings `+`, `-`, `==`, `$`; `=`/`!=` of two empty strings | the result (`=` on other strings depends on SET EXACT and is not folded) |
+| `.NOT.`, `.AND.`/`.OR.` with a logical literal on the left, `IIF` with a logical literal condition | the result or the remaining operand |
+| `Len( "literal" )` | the length, unless the module defines `LEN` |
+
+Division or `%` by a literal zero is not folded, so the error happens at run time. A folded integer is a program
+constant (`xb_num_const_int_width`); a folded double has the default display width for its value. "SET DECIMALS
+decimals" is resolved at run time: such a number is materialized by `xb_num_default_dec`, so `SET DECIMALS TO 4`
+affects `10 / 4` as it does in Clipper. A logical literal on the right of `.AND.`/`.OR.` is not used to drop the left
+operand, which keeps its side effects; Harbour drops it.
 
 ### Literals
 
@@ -95,10 +117,10 @@ match `xb_item` for the target.
 
 ### Numeric literals
 
-The display width of a numeric literal's integer part is fixed at compile time, as in Clipper: the default width
-(`xb_num_int_width`/`xb_num_dbl_width` in `xbrt.h`) when the literal has fewer than 10 integer digits, otherwise its
-own digit count, plus one when it has no decimals. Literals too large for 64-bit integers become doubles. Hexadecimal
-literals use the runtime default width.
+The display width of a numeric literal's integer part is fixed at compile time, as in Clipper. An integer literal is
+a program constant: `xb_num_const_int_width` (10 columns plus one per digit beyond nine, 20 for -1000000000 or less;
+leading zeros do not count). A double literal gets `xb_num_dbl_width` when it has fewer than 10 integer digits,
+otherwise its own digit count. Literals too large for 64-bit integers become doubles.
 
 ## Object emission
 

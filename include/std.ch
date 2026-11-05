@@ -12,6 +12,8 @@
 #ifndef _STD_CH
 #define _STD_CH
 
+#include "set.ch"
+
 #command DO WHILE <exp>                => while <exp>
 #command END <x>                       => end
 #command ENDDO <*x*>                   => enddo
@@ -24,6 +26,13 @@
 
 #command ?  [<explist,...>]            => QOut( <explist> )
 #command ?? [<explist,...>]            => QQOut( <explist> )
+
+/* Settings (see set.ch); the runtime's Set() holds the values. */
+
+#command SET DECIMALS TO <x>           => Set( _SET_DECIMALS, <x> )
+#command SET DECIMALS TO               => Set( _SET_DECIMALS, 0 )
+#command SET EXACT <x:ON,OFF,&>        => Set( _SET_EXACT, <(x)> )
+#command SET EXACT (<x>)               => Set( _SET_EXACT, <x> )
 
 #command QUIT                          => __Quit()
 #command CANCEL                        => __Quit()

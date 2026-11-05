@@ -75,6 +75,9 @@ standard error, sets exit code 1 and raises `XB_PENDING_ERROR`. `QUIT` raises `X
 
 Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors.
 
+`xb_num_default_dec(ctx, r, value)` makes a double with SET DECIMALS decimals; the compiler uses it for folded
+expressions whose decimals are decided at run time. Items keep 16 bits of SET DECIMALS, as in Clipper.
+
 `FOR` uses `xb_for_test`: a non-negative step loops while the counter is not greater than the limit, a negative step
 while it is not less; operands that cannot be compared raise the `>` or `<` argument error, a non-numeric step the
 `<` error.
@@ -106,6 +109,10 @@ there).
 | `ValType( x )` | `xbf_VALTYPE` | `U`, `L`, `N`, `C` |
 | `Len( c )` | `xbf_LEN` | strings only for now |
 | `__Quit()` | `xbf___QUIT` | target of `QUIT`/`CANCEL` |
+| `Set( n [, x] )` | `xbf_SET` | returns the setting before the call. `_SET_EXACT`: a logical, or a string starting with `ON`/`OFF` in any case; other values change nothing. `_SET_DECIMALS`: a number of 0 or more (a negative one is error 2020); other types change nothing. |
+
+Settings live in the task context (`SET EXACT` off and `SET DECIMALS` 2 at start). Their numbers come from
+`include/set.ch`, shared with xBase code.
 
 ## Program startup
 
