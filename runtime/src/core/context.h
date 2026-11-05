@@ -5,16 +5,16 @@
 #include "gc/gc.h"
 
 struct xb_ctx {
-  uint32_t  pending;        /* [ABI] the first three fields, in this order (see xbrt.h) */
+  uint32_t  pending;        /* [ABI] the first four fields, in this order (see xbrt.h) */
   int32_t   exitcode;
   xb_frame *frames;         /* innermost frame of compiled code; frames are GC roots */
+  int32_t   set_decimals;   /* SET DECIMALS: compiled code reads it for / and % */
   xb_ctx  *gcNext, *gcPrev; /* registered root sets */
   xb_item *roots[XB_GC_MAX_ROOTS];
   unsigned rootLen;
   /* Later: memvar (PRIVATE) stack, current work area, SETs, ErrorBlock -
    * all per task, so they travel with a Task across threads like .NET's
    * ExecutionContext. */
-  int32_t  set_decimals;
   int      set_exact;
   char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
   int32_t  epoch;           /* SET EPOCH */

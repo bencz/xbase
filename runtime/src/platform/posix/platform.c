@@ -1,3 +1,7 @@
+/* The POSIX interfaces this file uses (clock_gettime, localtime_r, threads),
+ * which a strict C11 build declares only on request. */
+#define _POSIX_C_SOURCE 200809L
+
 #include "platform/platform.h"
 
 #include <pthread.h>

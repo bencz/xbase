@@ -10,15 +10,9 @@ xb_str *xb_str_alloc(uint64_t len); /* 64-bit: checked before it is narrowed to 
  * EXACT), or 2 when they cannot be compared (core/ops.c). */
 int xb_compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b);
 
-/* An array's items start in the same allocation (`inline_items`); when it
- * grows past that, they move to an XB_GC_ITEMS object. No malloc is involved,
- * so dead arrays cost nothing to free. */
-typedef struct xb_array {
-  size_t   len;
-  size_t   cap;
-  xb_item *items;
-  xb_item  inline_items[];
-} xb_array;
+/* xb_array is in xbrt.h. Its items move to an XB_GC_ITEMS object when it
+ * grows past its own allocation; no malloc is involved, so dead arrays cost
+ * nothing to free. */
 
 /* Card marking. Storage for XB_ARRAY_CARD_MIN items or more carries one card
  * byte per 2^XB_ARRAY_CARD_SHIFT items, right after the last item it has room

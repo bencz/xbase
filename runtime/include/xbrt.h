@@ -21,12 +21,13 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 8u
+#define XB_ABI_VERSION 9u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -46,6 +47,15 @@ typedef enum xb_type {
   XB_T_DATE    = 9,   /* v.i: Julian day number, 0 for the empty date  */
   XB_T_COUNT_
 } xb_type;
+
+/* [ABI] The tags whose v.p is a heap object form one range, so that one
+ * unsigned comparison tells whether storing an item can make an old object
+ * refer to a young one (the write barrier is needed only then). */
+#define XB_T_HEAP_FIRST XB_T_STRING
+#define XB_T_HEAP_LAST  XB_T_REF
+static inline int xb_type_is_heap(uint32_t type) {
+  return type - (uint32_t)XB_T_HEAP_FIRST <= (uint32_t)(XB_T_HEAP_LAST - XB_T_HEAP_FIRST);
+}
 
 /* [ABI] string header. Strings are immutable: they can be shared freely
  * between items and threads. `data` is always NUL terminated (len excludes
@@ -94,6 +104,20 @@ enum {
 };
 #define XB_PENDING_UNWIND (XB_PENDING_ERROR | XB_PENDING_BREAK | XB_PENDING_QUIT)
 
+/* [ABI] An array: `len` items at `items`, which start in the same
+ * allocation (`inline_items`); when it grows past that, they move to an
+ * object of their own. Compiled code reads `len` and `items` to access
+ * elements in place. */
+typedef struct xb_array xb_array;
+#ifndef __cplusplus
+struct xb_array {
+  size_t   len;
+  size_t   cap;
+  xb_item *items;
+  xb_item  inline_items[];
+};
+#endif
+
 /* [ABI] A compiled function's item frame (parameters, LOCALs, temporaries):
  * on the machine stack, linked into its context's chain while the function
  * runs. The collector scans the frames of every chain; slots are NIL or valid
@@ -110,7 +134,8 @@ struct xb_frame {
 /* [ABI] Per-task context. Compiled code uses its first fields, which the
  * context starts with in this order: `uint32_t pending` (requests tested after
  * every operation that can fail), `int32_t exitcode`, `xb_frame *frames` (the
- * innermost frame of the chain). */
+ * innermost frame of the chain), `int32_t set_decimals` (SET DECIMALS, the
+ * decimals of `/` and `%`, as 16 bits). */
 typedef struct xb_ctx xb_ctx;
 
 /* [ABI] dynamic calling convention used by every xBase-callable function:
@@ -147,9 +172,11 @@ struct xb_block {
 int32_t  xb_pending(xb_ctx *ctx);
 
 /* The layout the module was compiled for: offsets of xb_str.data,
- * xb_block.cells, xb_frame.slots and xb_ctx.frames. */
+ * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals and
+ * xb_array.items (after len and cap). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
-                      uint32_t frame_slots_offset, uint32_t ctx_frames_offset);
+                      uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
+                      uint32_t array_items_offset);
 
 void     xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
@@ -179,6 +206,11 @@ int32_t  xb_cond_error(xb_ctx *ctx, const xb_item *a);
 void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems);
 void     xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
 void     xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value);
+/* Write barrier after storing into element `index` of an array: for a heap
+ * value in an old array, a large array records the element's card, another
+ * the whole array. Compiled code that stores an element in place calls it for
+ * heap values only. */
+void     xb_gc_write_item(xb_array *a, size_t index);
 
 /* References. An item that designates another item is an XB_T_CELL (a
  * variable in a cell) or an XB_T_REF (an element); xBase code never sees one,
@@ -248,32 +280,51 @@ int      xb_ctx_exitcode(const xb_ctx *ctx);
 xb_str  *xb_str_new(const char *p, size_t len);
 xb_str  *xb_str_concat(const xb_str *a, const xb_str *b);
 
-static inline void xb_set_nil(xb_item *it) {
-  it->type = XB_T_NIL;
-  it->width = 0;
-  it->dec = 0;
-  it->v.i = 0;
+/* [ABI] Items are written as two 8-byte words, the header (type, width,
+ * decimals) and the value, by the runtime and by compiled code alike: a load
+ * is served by the store that wrote it (store-to-load forwarding) only when
+ * that store covers it, and compiled code reads items by words; an item
+ * written field by field would stall each read. The value bytes a member does
+ * not use are zero. The byte order is the host's, found by xb_little_endian
+ * (which compilers fold to a constant). */
+static inline int xb_little_endian(void) {
+  const union {
+    uint16_t u;
+    uint8_t b[2];
+  } probe = {1};
+  return probe.b[0] == 1;
 }
+static inline uint64_t xb_header_word(uint32_t type, uint16_t width, uint16_t dec) {
+  return xb_little_endian() ? (uint64_t)type | (uint64_t)width << 32 | (uint64_t)dec << 48
+                            : (uint64_t)type << 32 | (uint64_t)width << 16 | (uint64_t)dec;
+}
+/* The value word of a 4-byte member (a logical, a pointer on 32-bit hosts),
+ * which starts at the first byte of the union. */
+static inline uint64_t xb_short_value_word(uint32_t v) { return xb_little_endian() ? v : (uint64_t)v << 32; }
+static inline uint64_t xb_pointer_word(const void *p) {
+  return sizeof p == 8 ? (uint64_t)(uintptr_t)p : xb_short_value_word((uint32_t)(uintptr_t)p);
+}
+static inline void xb_put(xb_item *it, uint64_t header, uint64_t value) {
+  memcpy(it, &header, 8);
+  memcpy(&it->v, &value, 8);
+}
+
+static inline void xb_set_nil(xb_item *it) { xb_put(it, xb_header_word(XB_T_NIL, 0, 0), 0); }
 static inline void xb_set_logical(xb_item *it, int b) {
-  xb_set_nil(it);
-  it->type = XB_T_LOGICAL;
-  it->v.l = b ? 1 : 0;
+  xb_put(it, xb_header_word(XB_T_LOGICAL, 0, 0), xb_short_value_word(b ? 1u : 0u));
 }
-static inline void xb_set_int(xb_item *it, int64_t n) {
-  xb_set_nil(it);
-  it->type = XB_T_INT;
-  it->v.i = n;
-}
+static inline void xb_set_int(xb_item *it, int64_t n) { xb_put(it, xb_header_word(XB_T_INT, 0, 0), (uint64_t)n); }
 static inline void xb_set_double(xb_item *it, double d, uint16_t dec) {
-  xb_set_nil(it);
-  it->type = XB_T_DOUBLE;
-  it->dec = dec;
-  it->v.d = d;
+  uint64_t bits;
+  memcpy(&bits, &d, 8);
+  xb_put(it, xb_header_word(XB_T_DOUBLE, 0, dec), bits);
 }
 static inline void xb_set_str(xb_item *it, xb_str *s) {
-  xb_set_nil(it);
-  it->type = XB_T_STRING;
-  it->v.s = s;
+  xb_put(it, xb_header_word(XB_T_STRING, 0, 0), xb_pointer_word(s));
+}
+/* An item of a heap type other than a string (an array, a block, a cell, a reference). */
+static inline void xb_set_ptr(xb_item *it, xb_type type, void *p) {
+  xb_put(it, xb_header_word(type, 0, 0), xb_pointer_word(p));
 }
 
 /* [ABI] Write barrier of the generational collector. Every heap object is

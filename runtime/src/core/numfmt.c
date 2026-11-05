@@ -83,7 +83,7 @@ static xb_str *format_double(double v, int width, int dec) {
     if (exp >= -dec) {
       digits[(int64_t)hi - exp] = m[k];
     } else {
-      roundUp = m[k] >= '5';
+      roundUp = exp == -dec - 1 && m[k] >= '5'; /* only the digit right after the last one shown rounds */
       break;
     }
   }

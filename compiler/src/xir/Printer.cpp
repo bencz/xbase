@@ -164,6 +164,10 @@ private:
       out_ += " " + i.blockFn->name;
       for (Var *c : i.captures) out_ += " " + varName(*c);
       break;
+    case Op::ParamsRef:
+      for (Var *c : i.captures) out_ += " " + varName(*c);
+      break;
+    case Op::CallForward: out_ += " " + i.callee.function->name; break;
     default:
       break;
     }

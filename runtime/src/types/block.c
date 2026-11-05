@@ -11,9 +11,7 @@ xb_cell *xb_cell_move(xb_item *var) {
   if (var->type == XB_T_CELL) return var->v.p; /* shared already (a parameter: its caller's variable) */
   xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell)); /* `var` is a root: a frame slot or STATIC storage */
   c->value = *var;
-  xb_set_nil(var);
-  var->type = XB_T_CELL;
-  var->v.p = c;
+  xb_set_ptr(var, XB_T_CELL, c);
   return c;
 }
 
@@ -34,9 +32,7 @@ xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, uint32_t ncells)
   b->fn = fn;
   b->ncells = ncells;
   for (uint32_t i = 0; i < ncells; ++i) b->cells[i] = NULL; /* filled by the caller */
-  xb_set_nil(r);
-  r->type = XB_T_BLOCK;
-  r->v.p = b;
+  xb_set_ptr(r, XB_T_BLOCK, b);
   return b;
 }
 

@@ -36,11 +36,7 @@ xb_array *xb_array_alloc(uint64_t newLen) {
   return a;
 }
 
-void xb_set_array(xb_item *it, xb_array *a) {
-  xb_set_nil(it);
-  it->type = XB_T_ARRAY;
-  it->v.p = a;
-}
+void xb_set_array(xb_item *it, xb_array *a) { xb_set_ptr(it, XB_T_ARRAY, a); }
 
 void xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems) {
   XB_UNUSED(ctx);
@@ -67,6 +63,9 @@ static int64_t read_position(xb_ctx *ctx, const xb_item *base, const xb_item *id
   return i;
 }
 
+/* Compiled code reads and stores elements in place for an array and a number
+ * index within it (compiler/src/codegen/FastPaths.cpp, inlineElement) and calls
+ * these for every other case. */
 void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
   int64_t i = read_position(ctx, base, idx);
   if (i >= 0) *r = ((const xb_array *)base->v.p)->items[i];

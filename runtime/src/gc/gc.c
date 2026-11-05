@@ -396,6 +396,7 @@ static void record(xb_gc_hdr *h, uint8_t how) {
 void xb_gc_remember(void *obj) { record(xb_gc_header(obj), XB_GC_REMEMBERED); }
 
 void xb_gc_write_item(xb_array *a, size_t index) {
+  if (index < a->len && !xb_type_is_heap(a->items[index].type)) return; /* refers to no object */
   xb_gc_hdr *h = xb_gc_header(a);
   if ((h->state & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED) return; /* young, or traced whole anyway */
   uint8_t *cards = xb_array_cards(a);

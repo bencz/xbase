@@ -5,6 +5,46 @@ function MAIN params 1 {
   $f1 = frame 1 "E"
   $f2 = frame 2 shared "N"
   $f3 = frame 3 "B"
+  $f4 = frame 4 "ALIST"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward MAIN.byref
+  ret %2
+body:
+  %4 = load $f0
+  store $f2 maybe_ref, 0:w10
+  barrier $f2 maybe_ref
+  %7 = each.enter $f1, false, %4
+  br each.test(i64 0)
+each.test(%9: i64):
+  %10 = i.add %9, i64 1
+  %11 = enum.len %4
+  %12 = i.cmp le %10, %11
+  cond_br %12, each.body, each.end
+each.body:
+  %14 = i.add %9, i64 1
+  each.move $f1, false, %14
+  %16 = load $f2 maybe_ref
+  %17 = load $f1 ref
+  %18 = binary add %16, %17
+  store $f2 maybe_ref, %18
+  barrier $f2 maybe_ref
+  %21 = i.add %9, i64 1
+  br each.test(%21)
+each.end:
+  each.leave $f1, false, %7
+  %24 = block MAIN.block2 $f2
+  %25 = call EVAL native %24, 2:w10
+  ret %25
+}
+
+function MAIN.byref internal params 1 {
+  $f0 = frame 0 "ALIST"
+  $f1 = frame 1 "E"
+  $f2 = frame 2 shared "N"
+  $f3 = frame 3 "B"
 entry:
   store $f2 maybe_ref, 0:w10
   barrier $f2 maybe_ref
@@ -34,6 +74,16 @@ each.end:
 }
 
 block MAIN.block1 internal params 1 {
+  $f0 = frame 0 "K"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = load $c0 maybe_ref
+  %2 = binary mul %0, %1
+  ret %2
+}
+
+block MAIN.block2 internal params 1 {
   $f0 = frame 0 "K"
   $c0 = capture 0 "N"
 entry:

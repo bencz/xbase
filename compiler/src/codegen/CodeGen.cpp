@@ -51,13 +51,14 @@ void CodeGen::initTypes() {
   blockFnTy_ = FunctionType::get(voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, ptrTy_}, false);
   initFnTy_ = FunctionType::get(voidTy, {ptrTy_}, false);
   blockTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(ptrTy_, 0)}, "xb_block");
-  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_}, "xb_ctx_head"); // the [ABI] fields of xb_ctx
+  arrayTy_ = StructType::create(ctx_, {intPtrTy_, intPtrTy_, ptrTy_}, "xb_array"); // size_t is pointer-sized
+  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, i32_}, "xb_ctx_head"); // the [ABI] fields of xb_ctx
   nilItem_ = new GlobalVariable(mod_, itemTy_, true, GlobalValue::InternalLinkage, Constant::getNullValue(itemTy_),
                                 "xb.nil");
   nilItem_->setAlignment(itemAlign_);
   rtCondError_ = rt("xb_cond_error", i32_, {ptrTy_, ptrTy_});
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
-  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_});
+  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
@@ -65,6 +66,7 @@ void CodeGen::initTypes() {
   rtArrayNew_ = rt("xb_array_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtIndex_ = rt("xb_op_index", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
+  rtWriteItem_ = rt("xb_gc_write_item", voidTy, {ptrTy_, intPtrTy_});
   rtCellOf_ = rt("xb_cell_of", ptrTy_, {ptrTy_, ptrTy_});
   rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtEnumLen_ = rt("xb_enum_len", i64_, {ptrTy_, ptrTy_});
@@ -179,6 +181,9 @@ void CodeGen::genFunction(const xir::Function &f) {
   blocks_.clear();
   values_.clear();
   fusedTruth_.clear();
+  locals_.clear();
+  localItems_.clear();
+  scratch_.clear();
 
   BasicBlock *entry = BasicBlock::Create(ctx_, "entry", fn_);
   b_.SetInsertPoint(entry);
@@ -286,9 +291,12 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t blockCells = dl_.getStructLayout(blockTy_)->getElementOffset(2);
   uint64_t frameSlots = dl_.getStructLayout(frameType(0))->getElementOffset(FrameSlots);
   uint64_t ctxFrames = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxFrames);
+  uint64_t ctxDecimals = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxDecimals);
+  uint64_t arrayItems = dl_.getStructLayout(arrayTy_)->getElementOffset(ArrayItems);
   b_.CreateCall(rtAbiCheck_, {ConstantInt::get(i32_, XB_ABI_VERSION), ConstantInt::get(i32_, itemSize_),
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
-                              ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames)});
+                              ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
+                              ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, arrayItems)});
   fn_ = fn;
   fnCtx_ = ctx;
   fnExit_ = BasicBlock::Create(ctx_, "done", fn);
@@ -305,19 +313,82 @@ void CodeGen::genEntry(const xir::Function &start) {
 
 BasicBlock *CodeGen::newBlock(const char *name) { return BasicBlock::Create(ctx_, name, fn_, fnExit_); }
 
-void CodeGen::copyItem(Value *dst, Value *src) {
-  if (dst == src) return;
-  b_.CreateMemCpy(dst, itemAlign_, src, itemAlign_, itemSize_);
+// Items are written and copied as two 8-byte words, the header (type, width,
+// decimals) and the value, never as narrower pieces read back whole: a load
+// is then served by the store that wrote it (store-to-load forwarding).
+
+// Where a field of the header (type, width, decimals) sits in the header
+// word, as a bit position: its offset in xb_item in the target's byte order.
+unsigned CodeGen::headerShift(ItemField f) {
+  uint64_t offset = dl_.getStructLayout(itemTy_)->getElementOffset(f);
+  uint64_t size = dl_.getTypeAllocSize(itemTy_->getElementType(f));
+  return (unsigned)(dl_.isLittleEndian() ? offset * 8 : (8 - offset - size) * 8);
 }
 
-void CodeGen::setNil(Value *dst) { b_.CreateMemSet(dst, b_.getInt8(0), itemSize_, itemAlign_); }
+// Where a value member of `bits` bits (at the union's first byte) sits in the
+// value word.
+unsigned CodeGen::valueShift(unsigned bits) { return dl_.isLittleEndian() ? 0 : 64 - bits; }
 
-// An item of type `tag` whose value field starts with `v` (an i32 or a
-// pointer: union members start at its first byte on every target).
+// The header word of an item (as xb_header_word in xbrt.h makes it).
+Constant *CodeGen::headerWord(uint32_t tag, uint16_t width, uint16_t dec) {
+  uint64_t w = (uint64_t)tag << headerShift(FType) | (uint64_t)width << headerShift(FWidth) |
+               (uint64_t)dec << headerShift(FDec);
+  return ConstantInt::get(i64_, w);
+}
+
+// An item's fields are read out of its header word, loaded whole: an item in
+// registers is then one word (no field-sized pieces put back together), and a
+// load is served by the 8-byte store that wrote the header.
+Value *CodeGen::loadHeader(Value *item) { return b_.CreateAlignedLoad(i64_, item, itemAlign_, "header"); }
+
+Value *CodeGen::itemType(Value *item) {
+  return b_.CreateTrunc(b_.CreateLShr(loadHeader(item), headerShift(FType)), i32_, "type");
+}
+
+// The type of xIR value `v` (whose item is `item`): a constant when type
+// inference found a single one (LLVM then folds away the tests on it and the
+// paths for other types), else read from the item.
+Value *CodeGen::typeOf(const xir::Value *v, Value *item) {
+  xir::TypeSet t = plan_->types().of(v);
+  if (t != 0 && (t & (t - 1)) == 0) return ConstantInt::get(i32_, (uint64_t)llvm::countr_zero(t));
+  return itemType(item);
+}
+
+// The value word of an item holding `v`: an i64, a double, or a 4-byte member
+// (a logical's i32, a pointer on 32-bit targets), which starts at the first
+// byte of the union, with zeros after it.
+Value *CodeGen::payloadWord(Value *v) {
+  Type *t = v->getType();
+  if (t->isDoubleTy()) return b_.CreateBitCast(v, i64_);
+  if (t->isPointerTy()) v = b_.CreatePtrToInt(v, intPtrTy_);
+  if (v->getType() == i64_) return v;
+  return b_.CreateShl(b_.CreateZExt(v, i64_), valueShift(v->getType()->getIntegerBitWidth()));
+}
+
+void CodeGen::storeWords(Value *dst, Value *header, Value *payload) {
+  b_.CreateAlignedStore(header, dst, itemAlign_);
+  b_.CreateAlignedStore(payload, b_.CreateStructGEP(itemTy_, dst, FValue), itemAlign_);
+}
+
+// Between items in memory the value word moves as a vector of two 32-bit
+// integers (bit for bit, on any target): code generation merges a pair of
+// accesses of one type into a single 16-byte one, which then spans the two
+// stores that wrote the item and cannot be forwarded from them. A Local item
+// becomes registers, where the word keeps its integer type.
+void CodeGen::copyItem(Value *dst, Value *src) {
+  if (dst == src) return;
+  bool registers = localItems_.count(dst) || localItems_.count(src);
+  Type *word = registers ? static_cast<Type *>(i64_) : FixedVectorType::get(i32_, 2);
+  Value *header = b_.CreateAlignedLoad(i64_, src, itemAlign_);
+  Value *payload = b_.CreateAlignedLoad(word, b_.CreateStructGEP(itemTy_, src, FValue), itemAlign_);
+  storeWords(dst, header, payload);
+}
+
+void CodeGen::setNil(Value *dst) { storeWords(dst, headerWord(XB_T_NIL, 0, 0), ConstantInt::get(i64_, 0)); }
+
+// An item of type `tag`, no width or decimals of its own, holding `v`.
 void CodeGen::storeTagged(Value *dst, uint32_t tag, Value *v) {
-  setNil(dst);
-  b_.CreateStore(ConstantInt::get(i32_, tag), b_.CreateStructGEP(itemTy_, dst, FType));
-  b_.CreateStore(v, b_.CreateStructGEP(itemTy_, dst, FValue));
+  storeWords(dst, headerWord(tag, 0, 0), payloadWord(v));
 }
 
 void CodeGen::storeLogical(Value *dst, Value *bit) { storeTagged(dst, XB_T_LOGICAL, b_.CreateZExt(bit, i32_)); }

@@ -7,17 +7,13 @@ void xb_ref_init(xb_item *r, const xb_item *coll, int64_t index, uint32_t loop) 
   ref->index = index;
   ref->loop = loop;
   xb_set_nil(&ref->value);
-  xb_set_nil(r);
-  r->type = XB_T_REF;
-  r->v.p = ref;
+  xb_set_ptr(r, XB_T_REF, ref);
 }
 
 void xb_ref_copy(xb_item *r, const xb_item *ref) {
   xb_ref *copy = xb_gc_alloc(XB_GC_REF, sizeof(xb_ref));
   *copy = *(const xb_ref *)ref->v.p;
-  xb_set_nil(r);
-  r->type = XB_T_REF;
-  r->v.p = copy;
+  xb_set_ptr(r, XB_T_REF, copy);
 }
 
 /* An array element is found again at every use, so the reference follows the
@@ -66,7 +62,5 @@ void xb_ref_of(xb_ctx *ctx, xb_item *r, xb_item *var, uint32_t is_static) {
     return;
   }
   xb_cell *cell = xb_cell_move(var);
-  xb_set_nil(r);
-  r->type = XB_T_CELL;
-  r->v.p = cell;
+  xb_set_ptr(r, XB_T_CELL, cell);
 }

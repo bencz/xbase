@@ -16,7 +16,7 @@ bool isGroupUser(const Instruction &i) { return i.op == Op::Call || i.op == Op::
 
 } // namespace
 
-FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f) {
+FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {
   placeVariables();
   number();
   chooseHomes();
@@ -127,6 +127,13 @@ void FramePlan::chooseHomes() {
       }
     }
   }
+  // Values the collector need not see live outside the frame (Local): block
+  // parameters first, so that their arguments do not share a slot with them;
+  // other values once groups and parameters have taken those computed in
+  // their slots, which saves a copy.
+  for (BasicBlock *b : cfg_.order())
+    for (auto &p : b->params)
+      if (p->type() == Type::Item && types_.noHeap(p.get())) homes_[p.get()] = {Home::Kind::Local, 0, nullptr};
   // Groups: the operands of a call or array literal in consecutive slots.
   for (BasicBlock *b : cfg_.order()) {
     for (auto &ip : b->insts) {
@@ -168,7 +175,8 @@ void FramePlan::chooseHomes() {
       for (size_t k = 0; k < tg.args.size(); ++k) {
         const Value *v = tg.args[k];
         const BlockParam *p = tg.block->params[k].get();
-        if (p->type() != Type::Item || !isItemResult(v) || !v->hasOneUse() || homes_.count(v) || unit_.count(v))
+        if (p->type() != Type::Item || homes_.count(p) || !isItemResult(v) || !v->hasOneUse() || homes_.count(v) ||
+            unit_.count(v))
           continue;
         if (static_cast<const Instruction *>(v)->parent != b) continue;
         if (cfg_.dominates(tg.block, b) && (t->op != Op::Br || groupMember_.count(p) || readAfter(p, v, b))) continue;
@@ -178,10 +186,14 @@ void FramePlan::chooseHomes() {
       }
     }
   }
+  for (BasicBlock *b : cfg_.order())
+    for (auto &i : b->insts)
+      if (isItemResult(i.get()) && !homes_.count(i.get()) && !unit_.count(i.get()) && types_.noHeap(i.get()))
+        homes_[i.get()] = {Home::Kind::Local, 0, nullptr};
   // Every other item value gets a slot of its own.
   for (BasicBlock *b : cfg_.order()) {
     for (auto &p : b->params)
-      if (p->type() == Type::Item) unitOf(p.get());
+      if (p->type() == Type::Item && !homes_.count(p.get())) unitOf(p.get());
     for (auto &i : b->insts)
       if (isItemResult(i.get()) && !homes_.count(i.get())) unitOf(i.get());
   }

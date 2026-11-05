@@ -2,6 +2,7 @@
 
 #include "xir/Analysis.h"
 #include "xir/IR.h"
+#include "xir/Types.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -17,6 +18,8 @@ struct Home {
     Slot,     // a frame slot (a GC root)
     Place,    // the item of a variable: an elided load, or a value computed into the variable of the store using it
     Ret,      // the caller's result slot: the value returned by the `ret` using it
+    Local,    // an item of its own outside the frame: a value that never refers to a heap object, which the
+              // collector need not see (LLVM keeps it in registers)
   };
   Kind kind = Kind::None;
   uint32_t slot = 0;                       // Slot
@@ -35,12 +38,15 @@ struct Home {
 // follows it, or by `ret`, is computed in place. A Place home's address (a
 // cell, an element reached through a reference) stays valid only because
 // nothing between its computation and its use runs user code or grows an
-// array, and objects never move; a moving collector must revisit it.
+// array, and objects never move; a moving collector must revisit it. A value
+// that never refers to a heap object (xir::TypeInfo) and is not computed in
+// place is Local: it takes no slot.
 class FramePlan {
 public:
   explicit FramePlan(const xir::Function &f);
 
   const xir::CFG &cfg() const { return cfg_; }
+  const xir::TypeInfo &types() const { return types_; }
   uint32_t frameSize() const { return frameSize_; }
   uint32_t slotOf(const xir::Var &v) const { return varSlot_.at(&v); } // a frame variable
   const Home &home(const xir::Value *v) const;
@@ -66,6 +72,7 @@ private:
 
   const xir::Function &f_;
   xir::CFG cfg_;
+  xir::TypeInfo types_;
   uint32_t frameSize_ = 0;
   uint32_t numVarSlots_ = 0;
   std::unordered_map<const xir::Var *, uint32_t> varSlot_;

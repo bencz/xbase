@@ -206,12 +206,22 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
   `block`; linear cost.
 - Interned constants; moving, splitting and cloning instructions; cached analyses (CFG, dominators, loops) with
   invalidation; module passes; running single passes for tests (`--xir-passes`).
-- Measured plan, in order: items stored and copied as two 8-byte words (store forwarding); inline `index` and
-  `index.set`; inline double and mixed arithmetic and comparisons; a type lattice with sparse conditional constant
-  propagation; typed operations (boxing, unboxing, overflow checks) with the fast paths as their lowering; values that
-  hold no heap pointer kept in registers; parameter versioning; value numbering, loop-invariant code motion, range
-  analysis and bounds-check elimination; runtime functions as xIR operations, inlining, string appends in place,
-  direct calls with fixed arity.
+- Measured plan (done: items stored and copied as two 8-byte words; inline `index` and `index.set`, also with a
+  double index; inline double and mixed `+`, `-`, `*`, `/`, `%` and comparisons; type sets, with values that hold no
+  heap pointer kept in registers; parameter versioning). Next, in order:
+  1. Loops without slow paths. Every inline fast path keeps a call to the runtime for the other cases, so every loop
+     contains calls, and LLVM moves no load out of a loop that contains a call that may write memory (an array's
+     `len` and `items`, a parameter's value), nor keeps a type it has proven. The fast and slow cases move into xIR:
+     typed operations (a type test, the integer, double or element operation, the generic operation in a block of its
+     own), and a pass that clones each loop. In the fast copy a failed test leaves for the same point of the generic
+     copy, with the values it needs, and never comes back; the fast copy then holds no call, and its types are known
+     after the test that guards them (sparse conditional propagation over the type sets), so LLVM hoists loads out
+     of it, drops repeated tests and keeps every value in registers. Alias information (TBAA: frame items, heap
+     items, array headers and the context are distinct memory) lets it move loads past the stores that remain.
+  2. Value numbering, loop-invariant code motion, range analysis and bounds-check elimination on the typed
+     operations.
+  3. Runtime functions as xIR operations, inlining of xBase functions, string appends in place, direct calls with
+     fixed arity.
 
 ### Runtime
 
@@ -223,6 +233,9 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 - The ABI check for every module, not only the start module.
 - One table of type properties (heap object, `ValType` letter, sort order, `Empty`, display), with an abort on an
   unknown tag while marking.
+- Number display: the cut to 16 significant digits rounds half to even (the C library's), where Clipper rounds half
+  up (`1286742750677284.5` shows `...284`); integer products beyond 2^53 are exact in xbase, where the reference
+  rounds them through a double (to decide).
 - `Array()` with more than 64 dimensions; one substring search and one byte comparison helper; shared one-byte and
   empty strings instead of allocating them.
 - GC pauses: mark epochs instead of clearing every mark, a stack watermark for young collections.

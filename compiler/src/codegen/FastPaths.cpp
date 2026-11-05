@@ -1,7 +1,9 @@
-// Inline fast paths of operators and of the bit functions: the integer cases
-// the runtime takes first (xb_op_add, the comparisons, xb_for_test in
-// core/ops.c, xb_bit_apply), done in place; every other case, and an integer
-// overflow, calls the runtime.
+// Inline fast paths of operators, of element access and of the bit functions:
+// the number cases of xb_op_add, xb_op_sub, xb_op_mul, xb_op_div, xb_op_mod,
+// the comparisons and xb_for_test (core/ops.c), xb_op_index and
+// xb_op_index_set (types/array.c) and xb_bit_apply, done in place; every
+// other case, an integer overflow and an index out of bounds included, calls
+// the runtime, which raises the errors.
 #include "codegen/CodeGen.h"
 
 #include "common/BitFunctions.h"
@@ -17,7 +19,7 @@ using namespace llvm;
 namespace xb {
 
 Value *CodeGen::isInt(Value *item) {
-  Value *type = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, item, FType), "type");
+  Value *type = itemType(item);
   return b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_INT));
 }
 
@@ -26,6 +28,14 @@ Value *CodeGen::intValue(Value *item) { return b_.CreateLoad(i64_, b_.CreateStru
 // A computed integer: no display width or decimals of its own (they come
 // from the value when it is shown), as xb_set_int makes it.
 void CodeGen::storeInt(Value *dst, Value *v) { storeTagged(dst, XB_T_INT, v); }
+
+// A double with `dec` decimals (i16) and no width of its own, as
+// xb_set_double makes it.
+void CodeGen::storeDouble(Value *dst, Value *v, Value *dec) {
+  Value *header =
+      b_.CreateOr(headerWord(XB_T_DOUBLE, 0, 0), b_.CreateShl(b_.CreateZExt(dec, i64_), headerShift(FDec)));
+  storeWords(dst, header, payloadWord(v));
+}
 
 // Branches to `fast` when `cond` holds (likely), else to `slow`.
 void CodeGen::branchLikely(Value *cond, BasicBlock *fast, BasicBlock *slow) {
@@ -76,6 +86,64 @@ void CodeGen::findFusedComparisons(const xir::BasicBlock &b) {
   }
 }
 
+Value *CodeGen::isNumberType(Value *type) {
+  return b_.CreateOr(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_INT)),
+                     b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_DOUBLE)));
+}
+
+// A number item that converts to a double exactly: a double, or an integer
+// of at most 2^53 in magnitude. Larger integers go to the runtime, which
+// converts them, so that the result does not depend on how a target keeps
+// doubles in its registers.
+Value *CodeGen::exactAsDouble(Value *item, Value *type) {
+  Value *small = b_.CreateICmpULE(b_.CreateAdd(intValue(item), ConstantInt::get(i64_, 1ull << 53)),
+                                  ConstantInt::get(i64_, 1ull << 54));
+  return b_.CreateOr(b_.CreateICmpNE(type, ConstantInt::get(i32_, XB_T_INT)), small);
+}
+
+Value *CodeGen::bothInts(Value *ta, Value *tb) {
+  Value *intTag = ConstantInt::get(i32_, XB_T_INT);
+  return b_.CreateAnd(b_.CreateICmpEQ(ta, intTag), b_.CreateICmpEQ(tb, intTag));
+}
+
+// Two numbers that convert to doubles exactly (the operands of the double
+// paths), of types `ta` and `tb`.
+Value *CodeGen::exactNumbers(Value *a, Value *ta, Value *b, Value *tb) {
+  return b_.CreateAnd(b_.CreateAnd(isNumberType(ta), isNumberType(tb)),
+                      b_.CreateAnd(exactAsDouble(a, ta), exactAsDouble(b, tb)));
+}
+
+// The decimals of a number item of type `type` (an integer has none).
+Value *CodeGen::numberDec(Value *item, Value *type) {
+  Value *dec = b_.CreateTrunc(b_.CreateLShr(loadHeader(item), headerShift(FDec)), i16_, "dec");
+  return b_.CreateSelect(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_DOUBLE)), dec, b_.getInt16(0));
+}
+
+// The value of a number item of type `type` as a double.
+Value *CodeGen::numberAsDouble(Value *item, Value *type) {
+  Value *bits = intValue(item);
+  return b_.CreateSelect(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_INT)),
+                         b_.CreateSIToFP(bits, b_.getDoubleTy()), b_.CreateBitCast(bits, b_.getDoubleTy()));
+}
+
+// A comparison of two numbers that are not both integers, as xb_compare makes
+// it: c = (x > y) - (x < y), so NaN compares as equal to anything.
+static Value *doubleCompare(IRBuilder<> &b, xir::IntPred pred, Value *x, Value *y) {
+  Value *gt = b.CreateFCmpOGT(x, y), *lt = b.CreateFCmpOLT(x, y);
+  switch (pred) {
+  case xir::IntPred::Eq: return b.CreateNot(b.CreateOr(gt, lt));
+  case xir::IntPred::Ne: return b.CreateOr(gt, lt);
+  case xir::IntPred::Lt: return lt;
+  case xir::IntPred::Le: return b.CreateNot(gt);
+  case xir::IntPred::Gt: return gt;
+  case xir::IntPred::Ge: return b.CreateNot(lt);
+  }
+  return nullptr;
+}
+
+// +, -, * and the comparisons: two integers (no overflow) and two numbers of
+// which one is a double are done here, with xb_op_add's, xb_op_sub's,
+// xb_op_mul's and xb_compare's rules; everything else calls the operator.
 void CodeGen::emitBinary(const xir::Instruction &i) {
   Value *a = addr(i.operand(0));
   Value *bv = addr(i.operand(1));
@@ -83,41 +151,68 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   xir::IntPred pred;
   Intrinsic::ID arith = overflowIntrinsic(i.binop);
   bool compare = intPredicate(i.binop, pred);
+  if (i.binop == BinOp::Div || i.binop == BinOp::Mod) {
+    emitDivMod(i, a, bv, d);
+    return;
+  }
   if (arith == Intrinsic::not_intrinsic && !compare) {
-    b_.CreateCall(rtBin_.at(i.binop), {fnCtx_, d, a, bv});
+    callItemOp(rtBin_.at(i.binop), d, {a, bv});
     checkPending(fnExit_);
     return;
   }
-  BasicBlock *fast = newBlock("int"), *slow = newBlock("op"), *join = newBlock("join");
-  branchLikely(b_.CreateAnd(isInt(a), isInt(bv)), fast, slow);
-  b_.SetInsertPoint(fast);
-  Value *x = intValue(a), *y = intValue(bv); // read before `d`, which may be an operand, is written
-  Value *fastBool = nullptr;
+  bool fused = fusedComparisons_.count(&i) != 0;
+  BasicBlock *intBB = newBlock("int"), *notInt = newBlock("not.int"), *numBB = newBlock("num");
+  BasicBlock *slow = newBlock("op"), *join = newBlock("join");
+  Value *ta = typeOf(i.operand(0), a);
+  Value *tb = typeOf(i.operand(1), bv);
+  branchLikely(bothInts(ta, tb), intBB, notInt);
+  b_.SetInsertPoint(notInt);
+  branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow);
+
+  // Both operands are read before `d`, which may be one of them, is written.
+  std::vector<std::pair<Value *, BasicBlock *>> bools; // the comparison's result on each fast path
+  b_.SetInsertPoint(intBB);
+  Value *x = intValue(a), *y = intValue(bv);
   if (compare) {
-    fastBool = b_.CreateICmp(llvmPredicate(pred), x, y);
-    if (!fusedComparisons_.count(&i)) storeLogical(d, fastBool);
+    Value *r = b_.CreateICmp(llvmPredicate(pred), x, y);
+    if (!fused) storeLogical(d, r);
+    bools.push_back({r, b_.GetInsertBlock()});
   } else {
     Value *r = b_.CreateBinaryIntrinsic(arith, x, y);
     BasicBlock *done = newBlock("int.done");
     MDBuilder md(ctx_);
-    b_.CreateCondBr(b_.CreateExtractValue(r, 1), slow, done, md.createUnlikelyBranchWeights()); // overflow: a double
+    b_.CreateCondBr(b_.CreateExtractValue(r, 1), slow, done, md.createUnlikelyBranchWeights()); // overflow
     b_.SetInsertPoint(done);
     storeInt(d, b_.CreateExtractValue(r, 0));
   }
-  BasicBlock *fastEnd = b_.GetInsertBlock();
   b_.CreateBr(join);
+
+  b_.SetInsertPoint(numBB);
+  Value *fx = numberAsDouble(a, ta), *fy = numberAsDouble(bv, tb);
+  if (compare) {
+    Value *r = doubleCompare(b_, pred, fx, fy);
+    if (!fused) storeLogical(d, r);
+    bools.push_back({r, b_.GetInsertBlock()});
+  } else {
+    Value *da = numberDec(a, ta), *db = numberDec(bv, tb);
+    Value *dec = i.binop == BinOp::Mul ? b_.CreateAdd(da, db) // wraps at 16 bits, as the runtime's does
+                                       : b_.CreateSelect(b_.CreateICmpUGT(da, db), da, db);
+    Value *r = i.binop == BinOp::Add   ? b_.CreateFAdd(fx, fy)
+               : i.binop == BinOp::Sub ? b_.CreateFSub(fx, fy)
+                                       : b_.CreateFMul(fx, fy);
+    storeDouble(d, r, dec);
+  }
+  b_.CreateBr(join);
+
   b_.SetInsertPoint(slow);
-  b_.CreateCall(rtBin_.at(i.binop), {fnCtx_, d, a, bv});
+  callItemOp(rtBin_.at(i.binop), d, {a, bv});
   checkPending(fnExit_);
-  Value *slowBool = nullptr;
-  if (compare && fusedComparisons_.count(&i)) slowBool = logicalValue(d); // the operator made a logical
-  BasicBlock *slowEnd = b_.GetInsertBlock();
+  if (fused) bools.push_back({logicalValue(d), b_.GetInsertBlock()}); // the operator made a logical
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
-  if (slowBool) {
-    PHINode *phi = b_.CreatePHI(b_.getInt1Ty(), 2, "cmp");
-    phi->addIncoming(fastBool, fastEnd);
-    phi->addIncoming(slowBool, slowEnd);
+  if (fused) {
+    PHINode *phi = b_.CreatePHI(b_.getInt1Ty(), (unsigned)bools.size(), "cmp");
+    for (auto &[v, from] : bools) phi->addIncoming(v, from);
     fusedTruth_[i.users().front()] = phi;
   }
 }
@@ -164,6 +259,40 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
   return true;
 }
 
+// `/` and `%` of two numbers and a divisor other than 0 (-0 included): a
+// double with SET DECIMALS decimals, as xb_op_div and xb_op_mod make it; `%`
+// of two integers is their remainder (0 for a divisor of -1). Anything else
+// calls the operator, which raises the errors.
+void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *d) {
+  BasicBlock *numBB = newBlock("num"), *done = newBlock("num.done"), *slow = newBlock("op"), *join = newBlock("join");
+  Value *ta = typeOf(i.operand(0), a), *tb = typeOf(i.operand(1), bv);
+  branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow);
+  b_.SetInsertPoint(numBB);
+  Value *fx = numberAsDouble(a, ta), *fy = numberAsDouble(bv, tb);
+  Value *r;
+  if (i.binop == BinOp::Div) {
+    r = b_.CreateFDiv(fx, fy);
+  } else {
+    Value *xi = intValue(a), *yi = intValue(bv);
+    Value *minus1 = b_.CreateICmpEQ(yi, ConstantInt::getSigned(i64_, -1));
+    Value *safe = b_.CreateSelect(b_.CreateOr(minus1, b_.CreateICmpEQ(yi, ConstantInt::get(i64_, 0))),
+                                  ConstantInt::get(i64_, 1), yi); // srem must not trap where it is not used
+    Value *ir = b_.CreateSelect(minus1, ConstantFP::get(b_.getDoubleTy(), 0.0),
+                                b_.CreateSIToFP(b_.CreateSRem(xi, safe), b_.getDoubleTy()));
+    r = b_.CreateSelect(bothInts(ta, tb), ir, b_.CreateFRem(fx, fy));
+  }
+  Value *dec = b_.CreateTrunc(b_.CreateLoad(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxDecimals)), i16_);
+  branchLikely(b_.CreateFCmpUNE(fy, ConstantFP::get(b_.getDoubleTy(), 0.0)), done, slow);
+  b_.SetInsertPoint(done);
+  storeDouble(d, r, dec);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  callItemOp(rtBin_.at(i.binop), d, {a, bv});
+  checkPending(fnExit_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
 // FOR's test with an integer counter, limit and step: a negative step counts
 // down (xb_for_test).
 void CodeGen::emitForTest(const xir::Instruction &i) {
@@ -177,7 +306,7 @@ void CodeGen::emitForTest(const xir::Instruction &i) {
   BasicBlock *fastEnd = b_.GetInsertBlock();
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
-  Value *go = b_.CreateCall(rtForTest_, {fnCtx_, counter, limit, step});
+  Value *go = b_.CreateCall(rtForTest_, {fnCtx_, callArg(counter, 0), callArg(limit, 1), callArg(step, 2)});
   checkPending(fnExit_);
   Value *slowGo = b_.CreateICmpNE(go, ConstantInt::get(i32_, 0));
   BasicBlock *slowEnd = b_.GetInsertBlock();
@@ -187,6 +316,93 @@ void CodeGen::emitForTest(const xir::Instruction &i) {
   phi->addIncoming(fastGo, fastEnd);
   phi->addIncoming(slowGo, slowEnd);
   values_[&i] = phi;
+}
+
+// The element base[idx] when base is an array and idx a number within it
+// (1-based; a double is truncated, as xb_num_to_i64 does): its address, in the
+// block where that holds; any other case branches to `slow`. Also gives the
+// array and the 0-based position. An integer index, the usual one, has a path
+// of its own.
+Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx, BasicBlock *slow, Value *&array,
+                               Value *&pos) {
+  Value *baseType = typeOf(i.operand(0), base), *idxType = typeOf(i.operand(1), idx);
+  Value *isArray = b_.CreateICmpEQ(baseType, ConstantInt::get(i32_, XB_T_ARRAY));
+  BasicBlock *intIdx = newBlock("index.int"), *notInt = newBlock("index.other"), *dblIdx = newBlock("index.double");
+  BasicBlock *inBounds = newBlock("element");
+  branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_INT))), intIdx, notInt);
+  b_.SetInsertPoint(notInt);
+  b_.CreateCondBr(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
+  auto arrayAndLen = [&](Value *&arr) {
+    arr = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(itemTy_, base, FValue), "arr");
+    return b_.CreateZExtOrTrunc(b_.CreateLoad(intPtrTy_, b_.CreateStructGEP(arrayTy_, arr, ArrayLen)), i64_);
+  };
+  Value *one = ConstantInt::get(i64_, 1);
+
+  b_.SetInsertPoint(intIdx);
+  Value *intArr, *intLen = arrayAndLen(intArr);
+  Value *intPos = b_.CreateSub(intValue(idx), one);
+  branchLikely(b_.CreateICmpULT(intPos, intLen), inBounds, slow); // 1 <= idx <= len
+  BasicBlock *intEnd = b_.GetInsertBlock();
+
+  // A double from 1 to len + 1 (excluded) truncates to a position; NaN and
+  // anything else go to the runtime. The position is checked again as an
+  // integer: len + 1 rounds for huge arrays.
+  b_.SetInsertPoint(dblIdx);
+  Value *dblArr, *dblLen = arrayAndLen(dblArr);
+  Type *f64 = b_.getDoubleTy();
+  Value *d = b_.CreateBitCast(intValue(idx), f64);
+  Value *end = b_.CreateFAdd(b_.CreateUIToFP(dblLen, f64), ConstantFP::get(f64, 1.0));
+  Value *fits = b_.CreateAnd(b_.CreateFCmpOGE(d, ConstantFP::get(f64, 1.0)), b_.CreateFCmpOLT(d, end));
+  Value *dblPos = b_.CreateSub(b_.CreateFPToSI(b_.CreateSelect(fits, d, ConstantFP::get(f64, 1.0)), i64_), one);
+  b_.CreateCondBr(b_.CreateAnd(fits, b_.CreateICmpULT(dblPos, dblLen)), inBounds, slow);
+  BasicBlock *dblEnd = b_.GetInsertBlock();
+
+  b_.SetInsertPoint(inBounds);
+  PHINode *arr = b_.CreatePHI(ptrTy_, 2, "arr");
+  arr->addIncoming(intArr, intEnd);
+  arr->addIncoming(dblArr, dblEnd);
+  PHINode *p = b_.CreatePHI(i64_, 2, "pos");
+  p->addIncoming(intPos, intEnd);
+  p->addIncoming(dblPos, dblEnd);
+  array = arr;
+  pos = p;
+  Value *items = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayItems), "items");
+  return b_.CreateInBoundsGEP(itemTy_, items, b_.CreateZExtOrTrunc(pos, intPtrTy_), "elem");
+}
+
+void CodeGen::emitIndex(const xir::Instruction &i) {
+  Value *base = addr(i.operand(0)), *idx = addr(i.operand(1)), *d = dest(i);
+  BasicBlock *slow = newBlock("index.call"), *join = newBlock("index.end");
+  Value *array, *pos;
+  copyItem(d, inlineElement(i, base, idx, slow, array, pos)); // base and idx are read before d is written
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  callItemOp(rtIndex_, d, {base, idx});
+  checkPending(fnExit_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// The store in place needs the write barrier only for a value that refers to
+// a heap object (xb_type_is_heap).
+void CodeGen::emitIndexSet(const xir::Instruction &i) {
+  Value *base = addr(i.operand(0)), *idx = addr(i.operand(1)), *v = addr(i.operand(2));
+  BasicBlock *slow = newBlock("index.set.call"), *join = newBlock("index.set.end");
+  Value *array, *pos;
+  copyItem(inlineElement(i, base, idx, slow, array, pos), v);
+  Value *type = typeOf(i.operand(2), v);
+  Value *heap = b_.CreateICmpULE(b_.CreateSub(type, ConstantInt::get(i32_, XB_T_HEAP_FIRST)),
+                                 ConstantInt::get(i32_, XB_T_HEAP_LAST - XB_T_HEAP_FIRST));
+  BasicBlock *barrier = newBlock("barrier");
+  b_.CreateCondBr(heap, barrier, join);
+  b_.SetInsertPoint(barrier);
+  b_.CreateCall(rtWriteItem_, {array, b_.CreateZExtOrTrunc(pos, intPtrTy_)});
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  b_.CreateCall(rtIndexSet_, {fnCtx_, callArg(base, 0), callArg(idx, 1), callArg(v, 2)});
+  checkPending(fnExit_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
 }
 
 } // namespace xb

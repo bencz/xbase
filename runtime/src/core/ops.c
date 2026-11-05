@@ -1,6 +1,9 @@
-/* Operators on dynamic values. Compiled code does the integer cases of +, -,
- * *, the comparisons and xb_for_test inline (compiler/src/codegen/FastPaths.cpp)
- * and calls these for every other case; both must give the same results. */
+/* Operators on dynamic values. Compiled code does the number cases of +, -, *,
+ * /, %, the comparisons and xb_for_test inline (compiler/src/codegen/
+ * FastPaths.cpp) and calls these for every other case; both must give the same
+ * results. The compiler's type inference (compiler/src/xir/Types.cpp,
+ * binaryResult) mirrors the types these operators produce: a change here that
+ * lets an operator produce a new type must change it too. */
 #include "xbrt_int.h"
 
 #include <math.h>

@@ -15,8 +15,7 @@ static int64_t date_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv, const c
 
 /* Number results of the date functions have fixed display widths. */
 static void ret_number(xb_item *ret, int64_t v, uint16_t width) {
-  xb_set_int(ret, v);
-  ret->width = width;
+  xb_put(ret, xb_header_word(XB_T_INT, width, 0), (uint64_t)v);
 }
 
 void xbf_DATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

@@ -22,6 +22,7 @@ private:
   // Gen.cpp: module, functions, codeblocks, variables
   Function *declare(const FuncDecl &f);
   void genFunction(const FuncDecl &f, Function *fn);
+  void genBody(const FuncDecl &f, Function *fn, Function *byRef, const std::vector<uint32_t> &plain);
   void genModuleInit(const xb::Module &ast);
   Function *genCodeblockFunction(const BlockExpr &b);
   Var *frameVar(uint32_t slot);
@@ -78,6 +79,7 @@ private:
     std::vector<Loop> loops;
     std::vector<EachVar> eachVars;
     std::string scope;             // name prefix for codeblock functions
+    std::unordered_map<uint32_t, Var *> paramLocals; // parameter slot -> the LOCAL standing for it
   };
   FnState cur_;
 };

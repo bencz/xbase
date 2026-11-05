@@ -33,6 +33,8 @@ constexpr OpInfo kOps[] = {
     {Op::RefIndex, "ref.index", Fails | ReadsHeap | Allocates},
     {Op::SwitchCheck, "switch.check", Fails},
     {Op::SwitchMatch, "switch.match", 0},
+    {Op::ParamsRef, "params.ref", ReadsVar},
+    {Op::CallForward, "call.forward", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
     {Op::IntAdd, "i.add", Commutative},
     {Op::IntSub, "i.sub", 0},
     {Op::IntCmp, "i.cmp", 0},

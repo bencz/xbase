@@ -44,10 +44,7 @@ static inline xb_gc_hdr *xb_gc_header(const void *obj) { return (xb_gc_hdr *)obj
 /* Items outside frames that stay alive for the whole run (module STATICs). */
 void  xb_gc_add_root(xb_item *items, size_t count); /* may run before the first context */
 
-/* Write barrier after storing into element `index` of an array: a large old
- * array records the element's card instead of the whole array. */
-struct xb_array;
-void  xb_gc_write_item(struct xb_array *a, size_t index);
+/* xb_gc_write_item, the barrier for array elements, is in xbrt.h. */
 
 void  xb_gc_init(void);                    /* by the first context, before other threads exist */
 void *xb_gc_alloc(xb_gc_kind kind, size_t size);

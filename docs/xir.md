@@ -58,6 +58,19 @@ stay visible to the collector and compatible with statepoints.
 analysis, polymorphic sites get inline caches, and multiple inheritance uses subobject layouts with `self`
 adjustment, as C++ compilers do.
 
+## Types
+
+`xir/Types.*` infers, for each item value of a function, the set of types it may hold (`TypeSet`, one bit per type
+tag): an optimistic fixpoint over the SSA form in reverse postorder, where block parameters start empty and grow with
+the values their branches pass, `binary` follows its operands with the runtime operators' rules (a table,
+`binaryResult`: two integers give an integer or, on overflow, a double; a double with a number gives a double; two
+strings a string; dates and numbers a date; ...), `unary`, `from_bool`,
+literals and the constructors give their type, and anything read from memory (a variable, an element, a call's
+result) may hold any type. The lowering uses it to keep values that never refer to a heap object out of the frame
+([compiler.md](compiler.md#xir-to-llvm)), and where a value has a single possible type, the lowering uses it as a
+constant instead of reading it. An operation that fails produces no value, since errors end the function;
+when an error handler can substitute a value, the rules must allow any type for it.
+
 ## Passes
 
 The syntax tree is folded first (`opt/Fold`, [compiler.md](compiler.md#constant-folding)). From `-O1` on, the pass
@@ -92,8 +105,8 @@ Still to build for the passes that follow:
   `FOLD`, so calls such as `Len` can be moved, merged and removed.
 - Cached analyses with invalidation: natural loops and their nesting, post-dominators and dominance frontiers
   (mem2reg), liveness.
-- Types on values (the lattice type inference computes) and branch weights (error paths are cold before LLVM sees
-  them).
+- Types on operations: the type sets ([Types](#types)) are computed for the lowering only; passes need them on the
+  values, refined by the operations that test them, and branch weights (error paths are cold before LLVM sees them).
 
 Planned, in layers, each pass with its own tests:
 
@@ -140,25 +153,28 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 - Operations mirror the runtime: unary and binary operators, the truth test, calls (to the module's functions or to
   declared externals), array literals, element read and write, codeblock creation with the cells of its captured
   variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`, `each.move`, `each.leave`), the
-  `SWITCH` check and match.
+  `SWITCH` check and match, and for parameter versioning `params.ref` (whether parameters hold references their
+  caller passed) and `call.forward` (a call with the function's own arguments, as received).
 - An operation that fails, or leaves another pending request that asks to unwind, makes the function return (unwind
   successors are planned, see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `ret`.
-- Lowering to LLVM gives every live `item` value a frame slot (a GC root): liveness is computed per value by walking
-  from its uses back to its definition, and slots are assigned by linear scan, so slots are reused once their values
-  die. The arguments of a call and the elements of an array literal form a group of consecutive slots; a value used
-  only there (a block parameter too, such as the result of `IIF`) is computed straight into its slot of the group. A
-  `load` whose single use follows with nothing in between that can write the variable uses the variable's own item
-  instead of a copy; a value used only by the `store` that follows it, or by `ret`, is computed in place.
+- Lowering to LLVM gives every live `item` value that may refer to a heap object a frame slot (a GC root; others are
+  `Local`, see [compiler.md](compiler.md#xir-to-llvm)): liveness is computed per value by walking from its uses back to
+  its definition, and slots are assigned by linear scan, so slots are reused once their values die. The arguments of a
+  call and the elements of an array literal form a group of consecutive slots; a value used only there (a block
+  parameter too, such as the result of `IIF`) is computed straight into its slot of the group. A `load` whose single use
+  follows with nothing in between that can write the variable uses the variable's own item instead of a copy; a value
+  used only by the `store` that follows it, or by `ret`, is computed in place.
 
 ## Phases
 
 1. The core, lowering from the syntax tree and to LLVM, reproducing the previous behavior (done).
 2. Native frames: item frames on the machine stack, linked per context (done; each frame is the anchor the stack
    maps of phase 4 are relative to). Direct calls with fixed arity (planned).
-3. The pass manager and the passes (see [Passes](#passes)): the manager, mem2reg and the cleanup passes are done;
-   next value numbering and type inference, so the integer fast paths of the lowering (`codegen/FastPaths.cpp`)
-   drop their type tests where types are proven.
+3. The pass manager and the passes (see [Passes](#passes)): the manager, mem2reg and the cleanup passes are done,
+   and type inference ([Types](#types)) keeps values without heap references in registers and removes the type
+   tests of the lowering's fast paths (`codegen/FastPaths.cpp`) for values with a single possible type; next value
+   numbering and typed operations.
 4. Statepoints: once mem2reg makes items SSA values, LLVM keeps them in registers and records where the live
    object pointers are at each call (stack maps, relative to the frame's anchor), instead of frame slots holding
    every item; relocation, evacuation in the collector, barrier elision.

@@ -43,7 +43,8 @@ private:
   // that mirror them.
   enum ItemField : unsigned { FType = 0, FWidth = 1, FDec = 2, FValue = 3 };
   enum FrameField : unsigned { FramePrev = 0, FrameCount = 1, FrameSlots = 2 };
-  enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2 };
+  enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2, CtxDecimals = 3 };
+  enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
 
   // CodeGen.cpp: types, runtime declarations, the module, functions and
   // their frames, item and basic block helpers.
@@ -59,6 +60,14 @@ private:
   void genModuleRegistration(const xir::Module &m);
   void genEntry(const xir::Function &start);
   llvm::BasicBlock *newBlock(const char *name);
+  unsigned headerShift(ItemField f);
+  unsigned valueShift(unsigned bits);
+  llvm::Constant *headerWord(uint32_t tag, uint16_t width, uint16_t dec);
+  llvm::Value *loadHeader(llvm::Value *item);
+  llvm::Value *itemType(llvm::Value *item);
+  llvm::Value *typeOf(const xir::Value *v, llvm::Value *item);
+  llvm::Value *payloadWord(llvm::Value *v);
+  void storeWords(llvm::Value *dst, llvm::Value *header, llvm::Value *payload);
   void copyItem(llvm::Value *dst, llvm::Value *src);
   void setNil(llvm::Value *dst);
   void storeTagged(llvm::Value *dst, uint32_t tag, llvm::Value *v);
@@ -92,20 +101,42 @@ private:
   llvm::Value *isInt(llvm::Value *item);
   llvm::Value *intValue(llvm::Value *item);
   void storeInt(llvm::Value *dst, llvm::Value *v);
+  void storeDouble(llvm::Value *dst, llvm::Value *v, llvm::Value *dec);
+  llvm::Value *isNumberType(llvm::Value *type);
+  llvm::Value *bothInts(llvm::Value *ta, llvm::Value *tb);
+  llvm::Value *exactNumbers(llvm::Value *a, llvm::Value *ta, llvm::Value *b, llvm::Value *tb);
+  llvm::Value *exactAsDouble(llvm::Value *item, llvm::Value *type);
+  llvm::Value *numberDec(llvm::Value *item, llvm::Value *type);
+  llvm::Value *numberAsDouble(llvm::Value *item, llvm::Value *type);
   void branchLikely(llvm::Value *cond, llvm::BasicBlock *fast, llvm::BasicBlock *slow);
   void findFusedComparisons(const xir::BasicBlock &b);
   static llvm::CmpInst::Predicate llvmPredicate(xir::IntPred p);
   void emitBinary(const xir::Instruction &i);
+  void emitDivMod(const xir::Instruction &i, llvm::Value *a, llvm::Value *b, llvm::Value *d);
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);
+  llvm::Value *inlineElement(const xir::Instruction &i, llvm::Value *base, llvm::Value *idx, llvm::BasicBlock *slow,
+                             llvm::Value *&array, llvm::Value *&pos);
+  void emitIndex(const xir::Instruction &i);
+  void emitIndexSet(const xir::Instruction &i);
 
   // Instructions.cpp
   void emit(const xir::Instruction &i);
   void emitBranch(const xir::Target &t);
   llvm::Value *addr(const xir::Value *v);
+  llvm::AllocaInst *entryAlloca(const char *name);
+  llvm::Value *scratchItem(unsigned k);
+  llvm::Value *callArg(llvm::Value *item, unsigned k);
+  struct CallResult {
+    llvm::Value *arg;   // what the call writes
+    llvm::Value *local; // the Local home it is copied to after the call, or null
+  };
+  CallResult callResult(llvm::Value *item, unsigned k);
+  void callDone(const CallResult &r);
+  void callItemOp(llvm::FunctionCallee fn, llvm::Value *result, std::initializer_list<llvm::Value *> operands);
   llvm::Value *dest(const xir::Instruction &i);
   llvm::Value *value(const xir::Value *v);
-  llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind);
+  llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind, llvm::Value *type);
   llvm::Value *logicalValue(llvm::Value *item);
   llvm::Value *operandGroup(const xir::Instruction &i);
 
@@ -123,7 +154,8 @@ private:
   llvm::FunctionType *blockFnTy_ = nullptr;
   llvm::FunctionType *initFnTy_ = nullptr;
   llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, ncells, cells[] }
-  llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, exitcode, frames }
+  llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, items } (its items follow)
+  llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, exitcode, frames, decimals }
   llvm::GlobalVariable *nilItem_ = nullptr; // a NIL item: missing arguments
   uint64_t itemSize_ = 0;
   llvm::Align itemAlign_;
@@ -132,7 +164,7 @@ private:
   // runtime entry points
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
   llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_, rtPending_;
-  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtCellOf_, rtBlockNew_;
+  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;
   llvm::FunctionCallee rtModuleRegister_, rtModulesInit_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
@@ -154,6 +186,9 @@ private:
   std::unordered_map<const xir::BasicBlock *, llvm::BasicBlock *> blocks_;
   std::unordered_map<const xir::Value *, llvm::Value *> values_; // machine values; addresses of Place homes
   std::unordered_map<const xir::Instruction *, llvm::Value *> fusedTruth_; // truth tests a comparison answered
+  std::unordered_map<const xir::Value *, llvm::AllocaInst *> locals_;       // Local homes
+  std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
+  std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
   std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
 };
 

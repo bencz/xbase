@@ -125,15 +125,18 @@ void xbf_VAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   if (dec) dv /= pow(10.0, (double)dec);
   dec += decRest;
-  if (isDouble) xb_set_double(ret, neg ? -dv : dv, (uint16_t)(dec > UINT16_MAX ? UINT16_MAX : dec));
-  else xb_set_int(ret, neg ? -iv : iv);
+  double d = neg ? -dv : dv;
+  int64_t i = neg ? (int64_t)(0 - (uint64_t)iv) : iv; /* iv may have wrapped (a double then) */
   uint16_t w;
-  if (width > 10) w = isDouble ? xb_num_dbl_width(ret->v.d) : xb_num_int_width(ret->v.i);
+  if (width > 10) w = isDouble ? xb_num_dbl_width(d) : xb_num_int_width(i);
   else if (dec == 0) w = (uint16_t)len;
   else if (width == 0) w = 1;
   else if (neg && width == 1 && dv != 0) w = 2;
   else w = (uint16_t)width;
-  ret->width = w;
+  uint64_t value = (uint64_t)i;
+  if (isDouble) memcpy(&value, &d, 8);
+  uint16_t dec16 = isDouble ? (uint16_t)(dec > UINT16_MAX ? UINT16_MAX : dec) : 0;
+  xb_put(ret, xb_header_word(isDouble ? XB_T_DOUBLE : XB_T_INT, w, dec16), value);
 }
 
 void xbf_INT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

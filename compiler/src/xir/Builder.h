@@ -37,6 +37,8 @@ public:
   Instruction *index(Value *base, Value *idx);
   Instruction *indexSet(Value *base, Value *idx, Value *value);
   Instruction *makeBlock(Function *blockFn, std::vector<Var *> captures);
+  Instruction *paramsRef(std::vector<Var *> params);
+  Instruction *callForward(Function *callee);
   Instruction *forTest(Value *counter, Value *limit, Value *step);
   Instruction *enumLen(Value *coll);
   Instruction *eachInCell(Var *v);

@@ -37,11 +37,7 @@ void xb_date_decode(int64_t jd, int *year, int *month, int *day) {
   *year = (int)(100 * (n - 49) + i + l);
 }
 
-void xb_set_date(xb_item *it, int64_t jd) {
-  xb_set_nil(it);
-  it->type = XB_T_DATE;
-  it->v.i = jd;
-}
+void xb_set_date(xb_item *it, int64_t jd) { xb_put(it, xb_header_word(XB_T_DATE, 0, 0), (uint64_t)jd); }
 
 /* "YYYYMMDD" with the last four digits of the year: spaces for the empty
  * date and negative day numbers, zeros for other day numbers outside the

@@ -32,6 +32,8 @@ enum class Op : uint8_t {
   RefIndex,       // base, index -> Item: a reference to an element (an argument @a[i]) [may fail]
   SwitchCheck,    // value                                  [may fail]
   SwitchMatch,    // value, case constant -> Bool
+  ParamsRef,      // parameters (captures) -> Bool: one of them holds a reference its caller passed
+  CallForward,    // callee -> Item: calls it with this function's own arguments, as received [may fail]
   IntAdd,         // I64, I64 -> I64
   IntSub,         // I64, I64 -> I64
   IntCmp,         // pred; I64, I64 -> Bool

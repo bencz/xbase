@@ -20,11 +20,18 @@ typedef struct xb_item {
 - Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `DATE`, and two kinds the language
   never shows, which designate another item (see [References](#references)): `CELL`, a variable in a cell, and `REF`,
   an element. An all-zero item is `NIL`.
-- Copying an item is a plain memory copy; there is no reference counting.
+- Copying an item is a plain memory copy; there is no reference counting. Items are written as two 8-byte words, the
+  header and the value (`xb_put` with `xb_header_word` and the value word in `xbrt.h`), by the runtime's setters
+  (`xb_set_int`, ...) and by compiled code alike, never field by field: compiled code reads an item by words, and a
+  load is served by the store that wrote it only when that store covers it. The value bytes a member does not use are
+  zero.
+- The heap types (`STRING` to `REF`) are one range of tags (`XB_T_HEAP_FIRST`, `XB_T_HEAP_LAST`, `xb_type_is_heap`):
+  an item of another type refers to no object, so the collector need not see it.
 - Strings (`xb_str`: flags, hash, length, bytes) are immutable and NUL-terminated, so they can be shared between items
   and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects.
-- Arrays (`types/array.c`, functions in `rtl/arrays.c`) are 1-based. Their items start in the array's own allocation and
-  move to a separate heap object when the array grows past it.
+- Arrays (`xb_array` in `xbrt.h`: `len`, `cap`, `items`; `types/array.c`, functions in `rtl/arrays.c`) are 1-based.
+  Their items start in the array's own allocation and move to a separate heap object when the array grows past it.
+  Compiled code reads `len` and `items` to access elements in place.
 - Codeblocks (`xb_block`: function, captured cells) and cells (`xb_cell`: one item at offset 0) are described in
   [Codeblocks](#codeblocks).
 
@@ -67,12 +74,14 @@ each one, so object pointers are what the rest of the runtime and compiled code 
 - Write barrier: storing a pointer into an old object must record that object in the remembered set, because a young
   collection does not scan old objects. The state byte sits `XB_GC_STATE_BACK` bytes before the object; its bits
   `XB_GC_STATE_OLD` and `XB_GC_STATE_RECORDED` tell whether a store must record it (`xb_gc_write` in `xbrt.h`). C code
-  calls `xb_gc_write(obj)` after storing into a heap object (a grown array's item storage, a reference's character)
-  and `xb_gc_write_item(array, index)` after storing an array element; compiled code tests the byte inline after
-  storing into a captured variable's cell and calls `xb_gc_remember`, and calls `xb_ref_written` after a store
-  through a reference (a `FOR EACH` variable, a parameter passed by reference). The barrier comes after the store,
-  with no allocation in between, and an item a call produces never goes straight into a heap object: it goes through
-  a frame slot first (a root). A recorded object is traced by the next young collection and leaves the set.
+  calls `xb_gc_write(obj)` after storing into a heap object (a grown array's item storage, a reference's character) and
+  `xb_gc_write_item(array, index)` after storing an array element (it returns at once for a value of a type that refers
+  to no object, `xb_type_is_heap`; compiled code that stores an element in place calls it only for such values);
+  compiled code tests the byte inline after storing into a captured variable's cell and calls `xb_gc_remember`, and
+  calls `xb_ref_written` after a store through a reference (a `FOR EACH` variable, a parameter passed by reference). The
+  barrier comes after the store, with no allocation in between, and an item a call produces never goes straight into a
+  heap object: it goes through a frame slot first (a root). A recorded object is traced by the next young collection and
+  leaves the set.
 - Card marking: array storage for 1024 items or more carries one card byte per 64 items after its last item. A store
   into such an old array marks the element's card and records the array for its cards only; the young collection
   scans the marked cards (eight card bytes per step) instead of the whole array. Storage that is replaced (the array
@@ -149,10 +158,11 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
 ## Errors and pending requests
 
-`xb_ctx` starts with `uint32_t pending`. The runtime sets bits there (`XB_PENDING_ERROR`, `XB_PENDING_BREAK`,
-`XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`). Compiled code tests the field after each fallible call; when it is set the
-code calls `xb_pending`, which serves pauses (a safepoint) and returns non-zero when the function must unwind to its
-caller. The check stays valid across `AWAIT`.
+`xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t exitcode`,
+`xb_frame *frames` and `int32_t set_decimals` (SET DECIMALS, which inline `/` and `%` read). `pending` holds requests.
+The runtime sets bits there (`XB_PENDING_ERROR`, `XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`).
+Compiled code tests the field after each fallible call; when it is set the code calls `xb_pending`, which serves pauses
+(a safepoint) and returns non-zero when the function must unwind to its caller. The check stays valid across `AWAIT`.
 
 Runtime errors are currently fatal: `xb_rt_error` prints `Error <subsystem>/<code>  <description>: <operation>` to
 standard error, sets exit code 1 and raises `XB_PENDING_ERROR`. `QUIT` raises `XB_PENDING_QUIT` with exit code 0.
@@ -315,6 +325,6 @@ the command-line arguments in UTF-8 (`xb_platform_args`: as `main` received them
 wide command line on Windows). Then, on the program's thread, it creates the context, makes the arguments after the
 program's name strings in a frame of its own linked into the context's chain (so the collector sees them), calls
 `xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes output and returns the exit code.
-`xb_app_main` checks the ABI, runs the registered module initializations in registration order (`xb_modules_init`,
-which stops at the first error) and calls the start function with the arguments, as Clipper passes them: strings,
-`NIL` for a parameter without one, and arguments past the parameters passed too.
+`xb_app_main` checks the ABI, runs the registered module initializations in registration order (`xb_modules_init`, which
+stops at the first error) and calls the start function with the arguments, as Clipper passes them: strings, `NIL` for a
+parameter without one, and arguments past the parameters passed too.

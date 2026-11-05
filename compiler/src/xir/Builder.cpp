@@ -126,6 +126,18 @@ Instruction *Builder::makeBlock(Function *blockFn, std::vector<Var *> captures) 
   return i;
 }
 
+Instruction *Builder::paramsRef(std::vector<Var *> params) {
+  Instruction *i = make(Op::ParamsRef, Type::Bool);
+  i->captures = std::move(params);
+  return i;
+}
+
+Instruction *Builder::callForward(Function *callee) {
+  Instruction *i = make(Op::CallForward, Type::Item);
+  i->callee.function = callee;
+  i->callee.name = callee->name;
+  return i;
+}
 
 Instruction *Builder::forTest(Value *counter, Value *limit, Value *step) {
   return make(Op::ForTest, Type::Bool, {counter, limit, step});

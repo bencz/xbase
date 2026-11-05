@@ -75,7 +75,7 @@ void CodeGen::endUnlikely(BasicBlock *join) {
 // tags are consecutive (xbrt.h).
 Value *CodeGen::holdsRef(Value *item) {
   static_assert(XB_T_REF == XB_T_CELL + 1, "one range test covers both reference tags");
-  Value *type = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, item, FType), "type");
+  Value *type = itemType(item);
   Value *offset = b_.CreateSub(type, ConstantInt::get(i32_, XB_T_CELL));
   return b_.CreateICmpULE(offset, ConstantInt::get(i32_, XB_T_REF - XB_T_CELL));
 }
@@ -94,10 +94,10 @@ Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind, bool inCellLikely) {
   } else {
     join = beginUnlikely(holdsRef(item), "ref");
   }
-  Value *type = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, item, FType), "type");
+  Value *type = itemType(item);
   Value *cell = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), "cell");
   Value *inner = b_.CreateSelect(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), cell, item, "inner");
-  Value *innerType = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, inner, FType), "type");
+  Value *innerType = itemType(inner);
   BasicBlock *innerFrom = b_.GetInsertBlock();
   BasicBlock *elemJoin = beginUnlikely(b_.CreateICmpEQ(innerType, ConstantInt::get(i32_, XB_T_REF)), "elem");
   Value *target = refTarget(inner, unwind);
@@ -127,7 +127,7 @@ void CodeGen::refWritten(Value *item, bool inCellLikely) {
   } else {
     join = beginUnlikely(holdsRef(item), "ref.written");
   }
-  Value *type = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, item, FType), "type");
+  Value *type = itemType(item);
   BasicBlock *inCell = newBlock("cell.written");
   BasicBlock *element = newBlock("elem.written");
   b_.CreateCondBr(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), inCell, element);
@@ -136,7 +136,7 @@ void CodeGen::refWritten(Value *item, bool inCellLikely) {
   b_.CreateBr(join);
   b_.SetInsertPoint(inCell);
   Value *cell = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), "cell");
-  Value *cellType = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, cell, FType), "type");
+  Value *cellType = itemType(cell);
   BasicBlock *throughCell = beginUnlikely(b_.CreateICmpEQ(cellType, ConstantInt::get(i32_, XB_T_REF)), "elem");
   b_.CreateCall(rtRefWritten_, {cell});
   endUnlikely(throughCell);

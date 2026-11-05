@@ -163,6 +163,20 @@ private:
         if (!ok) fail("a block captures something other than a shared variable of this function");
       }
       break;
+    case Op::ParamsRef:
+      expect(i, 0, {});
+      for (Var *c : i.captures) {
+        bool ok = false;
+        for (auto &v : f_.vars) ok |= v.get() == c && c->param;
+        if (!ok) fail("params.ref tests something other than a parameter of this function");
+      }
+      break;
+    case Op::CallForward:
+      expect(i, 0, {});
+      if (!i.callee.function || i.callee.function->kind != Function::Kind::Program ||
+          i.callee.function->numParams != f_.numParams)
+        fail("call.forward to a function that does not take this one's parameters");
+      break;
     case Op::EachInCell: case Op::EachEnter: case Op::EachMove: case Op::EachLeave:
       needsVar(i);
       if (i.var && i.var->kind == Var::Kind::Capture) fail("a FOR EACH over a captured variable");

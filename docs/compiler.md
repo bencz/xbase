@@ -194,6 +194,11 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   variable or a parameter is tested at run time for a cell or a reference (an argument passed by reference); other
   `LOCAL`s never hold one. An argument `@x` is `ref` (the variable's cell), `@a[i]` is `ref.index`. A store into a
   variable that may live in the heap (a cell, an element through a reference) is followed by `barrier`.
+- Parameter versioning: a parameter may hold a reference only if its caller passed one, and one that is never shared
+  cannot become one. A function with such parameters is generated twice: its own body starts with `params.ref`,
+  which tests them; when none holds a reference, each is copied once into a `LOCAL` standing for it (which mem2reg
+  makes an SSA value), and otherwise `call.forward` passes the arguments as received to the other body, `NAME.byref`
+  (internal), which reaches the parameters through their references. Codeblocks inside are generated with each body.
 - `.AND.`, `.OR.` and `IIF` branch; their results are block parameters. Conditions are `truth` tests of items. The
   left side of `.AND.`/`.OR.` must be logical; when it does not settle the result, the right side's value is the
   result as it is, whatever its type (`.T. .AND. 5` is 5, as in Clipper), and only a condition tests it.
@@ -231,16 +236,29 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
 
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
   from its uses back to its definition, slots are assigned by linear scan and reused once free. The parameters take
-  slots 0 to n-1 (the prologue copies them there), then the frame variables still in memory (those mem2reg did not
-  make values), then temporaries. The arguments of a call and the elements of an array literal take consecutive
-  slots, and a value used only there (a block parameter too) is computed straight into its slot; a branch argument
-  used only there shares the slot of its block parameter (on a loop's back edge, when the jump is the block's only
-  way out and nothing after the argument reads the parameter); a `load` whose single use follows with nothing in
-  between that can write the variable uses the variable's own item (no copy); a value used only by the `store` right
-  after it is computed into the variable, and one used only by `ret` into the caller's result slot. A call's result
-  is never computed straight into a heap object (a cell, an element) and only into a plain frame variable, and an
-  operation that can fail is not computed in place through a reference (finding the element can fail too, and the
-  operation's error comes first). Two edges from one block to the same block do not share their arguments' slots.
+  slots 0 to n-1 (the prologue copies them there), then the frame variables still in memory (those mem2reg did not make
+  values), then temporaries. The arguments of a call and the elements of an array literal take consecutive slots, and a
+  value used only there (a block parameter too) is computed straight into its slot; a branch argument used only there
+  shares the slot of its block parameter (on a loop's back edge, when the jump is the block's only way out and nothing
+  after the argument reads the parameter); a `load` whose single use follows with nothing in between that can write the
+  variable uses the variable's own item (no copy); a value used only by the `store` right after it is computed into the
+  variable, and one used only by `ret` into the caller's result slot. A call's result is never computed straight into a
+  heap object (a cell, an element) and only into a plain frame variable, and an operation that can fail is not computed
+  in place through a reference (finding the element can fail too, and the operation's error comes first). Two edges from
+  one block to the same block do not share their arguments' slots. A value that never refers to a heap object
+  (`xir::TypeInfo`, [xir.md](xir.md#types)) and is not computed in a slot as above is `Local`: an item of its own
+  outside the frame (an `alloca` reached only by loads and stores, which LLVM keeps in registers). Block parameters are
+  chosen first, other values after the groups and the parameter slots. Runtime calls never receive a `Local`'s address:
+  an operand goes through a scratch item, and a result is written there and copied back (`callArg`, `callResult`). When
+  type inference finds a single possible type for an operand (`typeOf`), the fast paths take its tag as a constant, and
+  LLVM removes the tests and the paths of other types: arithmetic on values known to be doubles is plain floating-point
+  code.
+- Items are stored and copied as two 8-byte words, the header (type, width, decimals; `headerWord`, in the target's byte
+  order, as `xb_header_word` in `xbrt.h`) and the value, and fields are read out of the header word (their bit positions
+  come from the target's layout, `headerShift`): a load is served by the store that wrote it (store forwarding) only
+  when that store covers it. Between items in memory the value word is copied as two 32-bit integers (bit for bit), a
+  type different from the header's, so that code generation does not merge the pair into one 16-byte access spanning two
+  stores.
 - The entry block allocates the frame of the planned size on the stack (`pushFrame`: an `alloca` of `xb_frame`, see
   [runtime.md](runtime.md#frames)), copies the parameters branch-free (a selected source: `argv[k]` or a `NIL`
   constant), clears the other slots and links the frame into the context; the caller has already set the result to
@@ -248,15 +266,23 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   are laid out in reverse postorder visiting successors last first, so a block's first successor (a loop body, a
   THEN branch) follows it and exits come later.
 - Operations call the runtime (`xb_op_*` and the others); the result may alias an operand. `FastPaths.cpp` inlines the
-  integer cases first: `+`, `-` and `*` of two integers with LLVM's overflow intrinsics (an overflow, like any other
-  operand types, calls the operator, which makes a double), the comparisons of two integers, and `for.test` with an
-  integer counter, limit and step. A comparison whose only use is the `truth` right after it gives that test its boolean
-  directly, without the logical item. A call to a bit function (`BitAnd`, ..., the table `xb_bit_function` in `xbrt.h`)
-  with integer arguments is the machine operation; other arguments call the runtime function. Calls set the result slot
-  to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME`
-  or `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module
-  straight to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
-  initialization are internal, under names nothing looks up, so modules sharing the object never clash.
+  common cases first: `/` and `%` of two numbers with a divisor other than 0 (a double with SET DECIMALS decimals, read
+  from the context's head; `%` of two integers is their remainder, 0 for a divisor of -1); `+`, `-` and `*` of two
+  integers with LLVM's overflow intrinsics (an overflow, like any other operand types, calls the operator, which makes a
+  double); `+`, `-` and `*` of two numbers of which one is a double, in doubles (an integer beyond 2^53 in magnitude,
+  which a double cannot hold exactly, goes to the runtime, so that every target converts it as the runtime does), with
+  the decimals the runtime gives (the larger for `+` and `-`, the sum for `*`); the comparisons of two numbers (integers
+  exactly, others as doubles with `xb_compare`'s rule, NaN comparing equal); `for.test` with an integer counter, limit
+  and step; `index` and `index.set` of an array with an index within it, an integer or a truncated double (the array's
+  `len` and `items`, `xb_array` in `xbrt.h`), where the store calls `xb_gc_write_item` only for a value of a heap type
+  (`xb_type_is_heap`), and an index out of bounds calls the runtime, which raises the error. A comparison whose only use
+  is the `truth` right after it gives that test its boolean directly, without the logical item. A call to a bit function
+  (`BitAnd`, ..., the table `xb_bit_function` in `xbrt.h`) with integer arguments is the machine operation; other
+  arguments call the runtime function. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at the
+  argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another
+  module's function to `xbp_NAME`, one to a function of the module straight to it. A public function is `xbp_NAME`
+  (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under names nothing
+  looks up, so modules sharing the object never clash.
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
   calls `xb_pending` and leaves through the function's exit if that asks to unwind.
   `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
@@ -327,6 +353,8 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 `codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
 host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), and writes the object with the
 target's object writer (code generation runs on the legacy pass manager: in LLVM 22 it is the one every target
-implements). Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one,
-so programs run on any CPU of the target; `--cpu=native` (host target only) uses the CPU and features of the machine
-xbc runs on.
+implements). Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one, so
+programs run on any CPU of the target (a processor that keeps doubles with more precision than 64 bits between
+operations, as some 32-bit processors do, can give a different last digit in rounding edge cases; xbase does not change
+a processor's floating-point mode); `--cpu=native` (host target only) uses the CPU and features of the machine xbc runs
+on.

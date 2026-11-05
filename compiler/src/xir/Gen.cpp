@@ -29,9 +29,33 @@ Function *Generator::declare(const FuncDecl &f) {
   return fn;
 }
 
-// The frame holds the parameters, then the LOCALs; a shared one moves into a
-// cell when a codeblock captures it or it is passed by reference.
+// Parameter versioning. A parameter may hold a reference only if its caller
+// passed one: one that is never shared (not captured, never passed on by
+// reference) cannot become one. A function with such parameters is generated
+// twice. Its own body starts by testing them (params.ref): when none holds a
+// reference, each is copied once into a LOCAL that stands for it, which
+// mem2reg can make an SSA value; otherwise the call goes, with its arguments
+// as received, to the other body (NAME.byref), which reaches the parameters
+// through their references as written.
 void Generator::genFunction(const FuncDecl &f, Function *fn) {
+  std::vector<uint32_t> plain;
+  for (uint32_t s = 0; s < f.params.size(); ++s)
+    if (!(s < f.boxed.size() && f.boxed[s])) plain.push_back(s);
+  if (plain.empty()) {
+    genBody(f, fn, nullptr, {});
+    return;
+  }
+  mod_->functions.push_back(std::make_unique<Function>(Function::Kind::Program, f.name + ".byref"));
+  Function *byRef = mod_->functions.back().get();
+  byRef->internal = true;
+  genBody(f, byRef, nullptr, {});
+  genBody(f, fn, byRef, plain);
+}
+
+// The frame holds the parameters, then the LOCALs; a shared one moves into a
+// cell when a codeblock captures it or it is passed by reference. With
+// `byRef`, the parameters `plain` stand as LOCALs when none holds a reference.
+void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const std::vector<uint32_t> &plain) {
   cur_ = FnState{};
   cur_.fn = fn;
   cur_.b = std::make_unique<Builder>(fn);
@@ -45,6 +69,21 @@ void Generator::genFunction(const FuncDecl &f, Function *fn) {
   Builder &b = *cur_.b;
   b.setBlock(fn->addBlock("entry"));
   b.setLoc(f.loc);
+  if (byRef) {
+    std::vector<Var *> params;
+    for (uint32_t s : plain) params.push_back(frameVar(s));
+    BasicBlock *forward = fn->addBlock("byref"), *body = fn->addBlock("body");
+    b.condBr(b.paramsRef(params), forward, body);
+    b.setBlock(forward);
+    b.ret(b.callForward(byRef));
+    b.setBlock(body);
+    for (size_t k = 0; k < plain.size(); ++k) {
+      Var *param = params[k];
+      Var *local = fn->addVar(Var::Kind::Frame, f.numLocals + (uint32_t)k, param->name);
+      b.store(local, Access::Direct, b.load(param, Access::Direct)); // no reference: its own item
+      cur_.paramLocals[plain[k]] = local;
+    }
+  }
   genBlock(f.body);
   if (!b.terminated()) b.ret(nullptr);
 }
@@ -103,6 +142,8 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
 }
 
 Var *Generator::frameVar(uint32_t slot) {
+  auto local = cur_.paramLocals.find(slot);
+  if (local != cur_.paramLocals.end()) return local->second;
   for (auto &v : cur_.fn->vars)
     if (v->kind == Var::Kind::Frame && v->index == slot) return v.get();
   return nullptr;
