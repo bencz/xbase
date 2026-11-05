@@ -1,0 +1,11 @@
+SET FOO ALWA
+SetFoo( "always" )
+SortIt( nVal - DESC )
+f( 1, 2 )
+f( 1, 3 )
+g( "a", "b" )
+h( cVar, (e) )
+y := F(1)
+Cmp( x, y )
+OPT
+Opt( "ON" )

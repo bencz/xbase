@@ -1,0 +1,7 @@
+x := 10 + 99
+y := IIf( (x) > (10 * 2), (x), (10 * 2) )
+z := LIMIT
+QOut( "ifdef taken" )
+QOut( "ifndef taken" )
+QOut( "if taken" )
+QOut( "elif taken" )

@@ -1,0 +1,74 @@
+#pragma once
+
+#include "AST.h"
+#include "Diagnostics.h"
+#include "Token.h"
+
+#include <initializer_list>
+#include <vector>
+
+namespace xb {
+
+// Hand-written recursive descent parser over the preprocessor's output.
+// Keywords are not reserved: they are recognised by position (statement
+// start) and may be abbreviated, as in Clipper (FUNC, PROC, RETU, ENDD, ...).
+// Commands such as ?, DO WHILE, STORE, QUIT are NOT handled here: they are
+// #command rules in include/std.ch.
+class Parser {
+public:
+  Parser(std::vector<Token> toks, Diagnostics &diag) : toks_(std::move(toks)), diag_(diag) {}
+  std::unique_ptr<Module> parseModule(const std::string &moduleName);
+
+private:
+  // token access
+  const Token &cur() const { return toks_[pos_]; }
+  const Token &ahead(size_t n = 1) const;
+  bool at(Tok k) const { return cur().kind == k; }
+  bool accept(Tok k);
+  bool expect(Tok k, const char *what);
+  void advance() { if (pos_ + 1 < toks_.size()) ++pos_; }
+  bool atEndOfStmt() const { return at(Tok::EndOfStmt) || at(Tok::Eof); }
+  void endOfStmt();
+  void skipToEndOfStmt();
+  void skipBlankStmts();
+
+  // keywords
+  bool isKw(const Token &t, const char *kw) const;
+  bool atKw(const char *kw) const { return isKw(cur(), kw); }
+  bool atStmtKw(const char *kw) const;
+  bool atFuncStart() const;
+  bool atInlineIf() const;
+  bool atBlockEnd(std::initializer_list<const char *> enders) const;
+
+  // declarations / statements
+  std::unique_ptr<FuncDecl> parseFunc();
+  Block parseBlock(std::initializer_list<const char *> enders);
+  StmtPtr parseStmt();
+  StmtPtr parseLocal();
+  StmtPtr parseIf();
+  StmtPtr parseWhile();
+  StmtPtr parseFor();
+  void closeBlock(std::initializer_list<const char *> closers, const char *opener, SourceLoc openLoc);
+
+  // expressions
+  ExprPtr parseExpr();
+  ExprPtr parseAssign();
+  ExprPtr parseOr();
+  ExprPtr parseAnd();
+  ExprPtr parseNot();
+  ExprPtr parseEquality();
+  ExprPtr parseRelational();
+  ExprPtr parseAdditive();
+  ExprPtr parseMultiplicative();
+  ExprPtr parsePower();
+  ExprPtr parseUnary();
+  ExprPtr parsePostfix();
+  ExprPtr parsePrimary();
+  std::vector<ExprPtr> parseArgs(Tok close);
+
+  std::vector<Token> toks_;
+  Diagnostics &diag_;
+  size_t pos_ = 0;
+};
+
+} // namespace xb

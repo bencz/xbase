@@ -1,0 +1,19 @@
+ShowIt( "a",,, )
+ShowIt( "b", "R", 1, 2 )
+ShowIt( "c", "G",, )
+SetFlag( "ON" )
+SetFlag( "off" )
+SetFlag( cVar )
+LogIt( 'anything at all, even "strings" + 1' )
+dbUse( "customer.dbf", "cust", .T. )
+dbUse( (cFile),, .F. )
+ListIt( "name", "age + 1" )
+ListB( {|| name }, {|| age + 1 } )
+a := b := c := 0
+DispIt( 1 )
+DispIt( 2 )
+XDispIt( 3 )
+XDISP 4
+y := 1 + ( (x + 1) * (x + 1) ) + 2
+First( 1 )
+Second( 2 )

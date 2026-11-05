@@ -1,0 +1,8 @@
+execute_process(COMMAND ${EXE} OUTPUT_VARIABLE out ERROR_VARIABLE err RESULT_VARIABLE rc)
+file(READ ${EXPECTED} expected)
+if(NOT rc STREQUAL EXPECTED_RC)
+  message(FATAL_ERROR "exit code ${rc}, expected ${EXPECTED_RC}\nstderr:\n${err}")
+endif()
+if(NOT out STREQUAL expected)
+  message(FATAL_ERROR "output mismatch\n--- expected ---\n${expected}\n--- actual ---\n${out}\n--- stderr ---\n${err}")
+endif()
