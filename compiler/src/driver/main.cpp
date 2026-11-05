@@ -5,6 +5,7 @@
 #include "opt/Fold.h"
 #include "parser/Parser.h"
 #include "preprocessor/Preprocessor.h"
+#include "sema/Calls.h"
 #include "sema/Sema.h"
 
 #include <llvm/IR/LLVMContext.h>
@@ -166,12 +167,15 @@ int main(int argc, char **argv) {
     }
     pp.processFile(path);
   }
+  // What std.ch (and the files it includes, such as rtl.ch) produces is the
+  // program's prelude: parsed, but not part of the preprocessed listing.
+  size_t prelude = pp.outputSize();
   pp.processFile(input);
   std::vector<xb::Token> tokens = pp.takeOutput();
   if (diag.errorCount()) return 1;
 
   if (ppOnly || ppFile) {
-    std::string text = xb::Preprocessor::render(tokens);
+    std::string text = xb::Preprocessor::render(tokens, prelude);
     if (ppOnly) {
       std::fputs(text.c_str(), stdout);
       return 0;
@@ -182,6 +186,8 @@ int main(int argc, char **argv) {
 
   xb::Parser parser(std::move(tokens), diag);
   auto ast = parser.parseModule(moduleNameFor(input));
+  if (diag.errorCount()) return 1;
+  xb::CallResolver(diag, xb::Folder::canEvaluate).run(*ast);
   if (diag.errorCount()) return 1;
   xb::Folder().run(*ast); // before Sema: STATIC initializers are checked once folded
   xb::Sema sema(diag);

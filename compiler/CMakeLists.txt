@@ -12,6 +12,7 @@ add_executable(xbc
   src/parser/Expressions.cpp
   src/parser/Parser.cpp
   src/parser/Statements.cpp
+  src/sema/Calls.cpp
   src/sema/Sema.cpp
   src/opt/Fold.cpp
   src/codegen/CodeGen.cpp

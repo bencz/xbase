@@ -270,8 +270,8 @@ void CodeGen::genCall(const CallExpr &c, Value *dst) {
   for (uint32_t i = 0; i < n; ++i) genExpr(*c.args[i], slot(first + i));
   Value *argv = n ? slot(first) : ConstantPointerNull::get(ptrTy_);
 
-  auto it = funcs_.find(c.name);
-  Function *callee = it != funcs_.end() ? it->second : declareXbFunc(c.name, false);
+  // Resolution (sema/Calls) linked calls to EXTERN FUNCTIONs; the others go to this module's functions.
+  Function *callee = c.callee ? declareXbFunc(c.name, false, c.callee->native) : funcs_.at(c.name);
   setNil(dst); // the caller clears the result, so callees that return nothing need not
   b_.CreateCall(xbFuncTy_, callee, {fnCtx_, dst, ConstantInt::get(i32_, n), argv});
   checkPending();
@@ -282,8 +282,9 @@ void CodeGen::genAssign(const AssignExpr &a, Value *dst) {
     genIndexAssign(static_cast<const IndexExpr &>(*a.target), &a, nullptr, dst);
     return;
   }
-  // The target's address is taken after the value is computed: a FOR EACH
-  // variable designates an array element, which moves when the array grows.
+  // The target's address is taken after anything that can run code: a FOR
+  // EACH variable designates an array element, which moves when the array
+  // grows. A value without side effects is computed in place.
   Value *target;
   if (a.compound) {
     auto [l, r] = genOperands(*a.target, *a.value);
@@ -300,6 +301,7 @@ void CodeGen::genAssign(const AssignExpr &a, Value *dst) {
     target = varAddress(*a.target);
     genExpr(*a.value, target);
   }
+  writeBarrier(*a.target);
   if (dst) copyItem(dst, target);
 }
 
@@ -311,6 +313,7 @@ void CodeGen::genIncDec(const IncDecExpr &e, Value *dst) {
   Value *target = varAddress(*e.target);
   if (dst && !e.prefix) copyItem(dst, target);
   genBinary(e.increment ? BinOp::Add : BinOp::Sub, target, target, intLiteral(1));
+  writeBarrier(*e.target);
   if (dst && e.prefix) copyItem(dst, target);
 }
 

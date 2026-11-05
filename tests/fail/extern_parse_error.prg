@@ -1,0 +1,4 @@
+EXTERN FUNCTION Foo( , a )
+
+PROCEDURE Main()
+   RETURN

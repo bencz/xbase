@@ -28,9 +28,9 @@ code through LLVM. There is no p-code and no virtual machine.
 | Commands | Preprocessor rules in `std.ch`; the compiler knows the grammar only. |
 | Typing | The language is untyped: any variable holds any value. Types exist only for FFI declarations and structures. |
 | Strings | Immutable byte strings with a codepage; UTF-8 is the default codepage. `Len()` counts bytes. |
-| Names | Compiler `xbc`, runtime `xbrt`, C symbols `xb_*`, xBase functions `xbf_<NAME>`. |
+| Names | Compiler `xbc`, runtime `xbrt`, C symbols `xb_*`, xBase functions `xbf_<NAME>` (runtime) and `xbp_<NAME>` (program). |
 | Errors | Propagated through the task context's pending flag; no `setjmp`/`longjmp`, no unwinder. |
-| Memory | Tracing GC: precise, non-moving mark and lazy sweep, size-class pages with per-thread allocation; no reference counting. Generations (planned) stay non-moving, with a write barrier. |
+| Memory | Tracing GC: precise, non-moving mark and lazy sweep, size-class pages with per-thread allocation; no reference counting; two generations (sticky marks, remembered set, write barrier). |
 | Macros `&` | Evaluated by an expression interpreter in the runtime; no JIT. *(planned)* |
 | Classes | Native in the compiler, Clipper-style syntax (`CLASS`/`ENDCLASS`, `METHOD ... CLASS`). *(planned)* |
 | async/await | .NET task model on stackless coroutines and a thread pool. *(planned)* |
@@ -100,22 +100,30 @@ ASYNC FUNCTION FetchOrders( cUrl )
 
 1. Several `.prg` files in one `xbc` run (one module each, a single program entry, calls resolved across them), then
    separate compilation with a symbol table per module.
-2. Generated code performance, in order of gain: operator, comparison and truth-test fast paths inlined with a type
-   tag check (the runtime only for the general case); LLVM attributes on runtime entry points (`nounwind`,
-   `willreturn`, memory effects limited to arguments, `nocapture`); local type inference so that numeric variables
-   that are not captured live in SSA registers; then precise GC roots in registers through LLVM statepoints and stack
-   maps (`gc.statepoint`, `RewriteStatepointsForGC`), coordinated with the coroutine lowering of async functions.
-3. Compiler gaps: references (`@var`, `DO ... WITH` by reference), building on the `XB_T_REF` item `FOR EACH` uses;
-   argument-count checks of standard functions at compile time (`Empty()` with no argument is a compile error in
-   Clipper); Clipper's 10-significant-character identifiers (programs calling a function by its first 10 characters).
-   Preprocessor gaps: macro tokens (`&var.suffix`), `__FILE__`/`__LINE__`, `#pragma`, `e"..."` strings, date literals,
-   precompiled `std.ch` rules. 4. Core language: date literals, `MEMVAR`/`PRIVATE`/`PUBLIC`, `FIELD`/aliases, `BEGIN
-   SEQUENCE`, `ErrorBlock`, hashes, `FOR EACH` over hashes and user enumerators (yield), the rest of the array functions
-   (`AIns`, `ADel`, `AFill`, `AScan`, `AEval`, `ACopy`, `ASort`). 5. GC: non-moving generations (sticky mark bits,
-   remembered set, write barrier emitted by the compiler for cell stores and called by runtime functions that store into
-   arrays), then escape analysis in the compiler to allocate objects that do not leave a function or task in a region
-   freed as a whole. Dynamic symbol table, runtime macro evaluation. 6. Runtime declarations, FFI, runtime parts written
-   in xBase. 7. Native classes. 8. async/await, thread pool, asynchronous I/O. 9. RDD (DBF, FPT, NTX, CDX, SDF, DELIM)
-   and the terminal layer: one screen/keyboard interface with drivers for plain standard output, ncurses (Linux, macOS,
-   BSD) and the Windows console, chosen by a command-line option or at link time. 10. Embedded linker (LLD as a
-   library), debug information (DWARF/CodeView).
+2. xIR ([xir.md](xir.md)), a mid-level IR between the syntax tree and LLVM: functions in SSA form over xBase values,
+   with explicit evaluation order, frames, pending checks and write barriers, so that language-level optimizations run
+   on it before lowering: type inference (integers, doubles and logicals unboxed in registers when a variable never
+   holds anything else), constant and copy propagation, dead code, inline fast paths of the operators with the runtime
+   call only for the general case, loop-invariant code motion and unswitching of type tests, escape analysis (objects
+   that do not leave a function or task allocated in a region freed as a whole, or on the stack).
+3. GC integration with LLVM, together with the IR: object pointers kept in SSA values across calls become precise,
+   relocatable roots through statepoints and stack maps (`gc.statepoint`, `gc.relocate`, `RewriteStatepointsForGC`),
+   so that the collector can move objects: an Immix heap (blocks and lines, bump allocation) with evacuation of young
+   objects and defragmentation, objects handed to C pinned. Frames keep only what must outlive registers.
+4. Runtime entry points with LLVM attributes (`nounwind`, `willreturn`, memory effects limited to arguments,
+   `nocapture`), so that LLVM's own passes see through them.
+5. Compiler gaps: references (`@var`, `DO ... WITH` by reference), building on the `XB_T_REF` item `FOR EACH` uses;
+   Clipper's 10-significant-character identifiers (programs calling a function by its first 10 characters); declaration
+   files generated per module for separate compilation. Preprocessor gaps: macro tokens (`&var.suffix`),
+   `__FILE__`/`__LINE__`, `#pragma`, `e"..."` strings, date literals, precompiled `std.ch` rules.
+6. Core language: date literals, `MEMVAR`/`PRIVATE`/`PUBLIC`, `FIELD`/aliases, `BEGIN SEQUENCE`, `ErrorBlock`, hashes,
+   `FOR EACH` over hashes and user enumerators (yield), the rest of the array functions (`AIns`, `ADel`, `AFill`,
+   `AScan`, `AEval`, `ACopy`, `ASort`). Dynamic symbol table, runtime macro evaluation.
+7. GC: promotion after two young collections (aging), so that objects of medium lifetime die young; pages returned
+   to the operating system. FFI (`EXTERN "C" FUNCTION` with types), runtime parts written in xBase.
+8. Native classes.
+9. async/await, thread pool, asynchronous I/O.
+10. RDD (DBF, FPT, NTX, CDX, SDF, DELIM) and the terminal layer: one screen/keyboard interface with drivers for plain
+    standard output, ncurses (Linux, macOS, BSD) and the Windows console, chosen by a command-line option or at link
+    time.
+11. Embedded linker (LLD as a library), debug information (DWARF/CodeView).

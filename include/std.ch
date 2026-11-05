@@ -13,6 +13,7 @@
 #define _STD_CH
 
 #include "set.ch"
+#include "rtl.ch"   /* the runtime's EXTERN FUNCTION declarations */
 
 #command DO WHILE <exp>                => while <exp>
 #command END <x>                       => end

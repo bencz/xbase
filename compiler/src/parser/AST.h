@@ -79,9 +79,13 @@ struct VarExpr : Expr {
   VarExpr(SourceLoc l, std::string n) : Expr(ExprKind::Var, l), name(std::move(n)) {}
 };
 
+struct ExternDecl;
+
 struct CallExpr : Expr {
-  std::string name;              // upper-cased
+  std::string name;              // upper-cased; the full name once resolved
   std::vector<ExprPtr> args;
+  const ExternDecl *callee = nullptr; // the declaration, when the call goes to an EXTERN FUNCTION
+  bool declaredOnly = false;     // always the declared function, even if the module defines one (LOCAL a[n])
   CallExpr(SourceLoc l, std::string n) : Expr(ExprKind::Call, l), name(std::move(n)) {}
 };
 
@@ -244,11 +248,27 @@ struct FuncDecl {
   std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock
 };
 
+// EXTERN FUNCTION name( params ) attributes: a function the program calls but
+// does not define (the runtime's are declared in include/rtl.ch).
+struct ExternDecl {
+  SourceLoc loc;
+  std::string name;              // upper-cased
+  uint32_t minArgs = 0;          // required parameters
+  uint32_t maxArgs = 0;          // all parameters; kUnlimited with `...`
+  bool reserved = false;         // RESERVED: the program cannot define it
+  bool checked = false;          // CHECKED: argument count checked at compile time
+  bool fold = false;             // FOLD: evaluated at compile time on constant arguments
+  bool native = false;           // NATIVE: written in C to the xBase convention (else another module's function)
+  uint32_t abbrev = 0;           // ABBREV n: shortest accepted abbreviation (0: none)
+  static constexpr uint32_t kUnlimited = UINT32_MAX;
+};
+
 struct Module {
   std::string name;              // upper-cased source stem
   std::vector<std::unique_ptr<FuncDecl>> funcs;
   std::vector<LocalDecl> fileStatics; // STATICs before the first function: visible in the whole file
   std::vector<LocalDecl *> statics;   // every STATIC of the module, in slot order (set by Sema)
+  std::vector<ExternDecl> externs;
 };
 
 } // namespace xb

@@ -6,6 +6,7 @@
 
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -43,9 +44,11 @@ private:
   bool atFuncStart() const;
   bool atInlineIf() const;
   bool atBlockEnd(std::initializer_list<const char *> enders) const;
+  bool atExtern() const;
 
-  // Parser.cpp: functions and blocks
+  // Parser.cpp: functions, declarations and blocks
   std::unique_ptr<FuncDecl> parseFunc();
+  std::optional<ExternDecl> parseExtern();
   Block parseBlock(std::initializer_list<const char *> enders);
   void closeBlock(std::initializer_list<const char *> closers, const char *opener, SourceLoc openLoc);
 

@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 4u
+#define XB_ABI_VERSION 5u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -100,6 +100,14 @@ typedef struct xb_ctx xb_ctx;   /* per-task context; first field is `pending` [A
  * written to `ret`, which the caller sets to NIL before the call. */
 typedef void (*xb_func)(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
+/* [ABI] Symbols of xBase-callable functions: the upper-cased name with a
+ * prefix. The runtime's functions (declared with EXTERN FUNCTION) and those of
+ * the program get different prefixes, so a program may define a function of
+ * the same name as a runtime one that is not RESERVED without a clash at link
+ * time. */
+#define XB_RUNTIME_FUNC_PREFIX "xbf_"
+#define XB_PROGRAM_FUNC_PREFIX "xbp_"
+
 /* [ABI] A variable captured by a codeblock lives in a cell (value at offset 0)
  * shared by the function and its blocks. */
 typedef struct xb_cell {
@@ -163,6 +171,7 @@ int64_t  xb_enum_len(xb_ctx *ctx, const xb_item *coll);
 void     xb_enum_ref_new(xb_ctx *ctx, xb_item *r, const xb_item *coll);
 void     xb_enum_ref_move(xb_ctx *ctx, xb_item *r, int64_t idx);
 xb_item *xb_ref_target(xb_ctx *ctx, xb_item *r);
+void     xb_ref_written(const xb_item *r);    /* write barrier after a store through `r` */
 
 /* SWITCH: the value must be an integer or a string; CASEs match it exactly. */
 void     xb_switch_check(xb_ctx *ctx, const xb_item *value);
@@ -223,6 +232,22 @@ static inline void xb_set_str(xb_item *it, xb_str *s) {
   xb_set_nil(it);
   it->type = XB_T_STRING;
   it->v.s = s;
+}
+
+/* [ABI] Write barrier of the generational collector. Every heap object is
+ * preceded by a header; the byte XB_GC_STATE_BACK bytes before the object is
+ * its state. An object that survived a collection is old; storing a pointer to
+ * a newer object into an old one must record the old one (xb_gc_remember), so
+ * that a young collection, which does not scan old objects, still sees the
+ * store. Code that stores an item into a heap object (a cell, an array) calls
+ * xb_gc_write on it after the store; compiled code inlines the same test. */
+#define XB_GC_STATE_BACK     3u
+#define XB_GC_STATE_OLD      1u   /* bit: survived a collection */
+#define XB_GC_STATE_RECORDED 2u   /* bit: in the remembered set, to be traced whole */
+void xb_gc_remember(void *obj);
+static inline void xb_gc_write(void *obj) {
+  uint8_t state = *((const uint8_t *)obj - XB_GC_STATE_BACK);
+  if ((state & (XB_GC_STATE_OLD | XB_GC_STATE_RECORDED)) == XB_GC_STATE_OLD) xb_gc_remember(obj);
 }
 
 /* Whether a double converts to int64_t without overflow (false for NaN and

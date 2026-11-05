@@ -13,6 +13,16 @@ inline std::string upperCase(std::string_view s) {
   return u;
 }
 
+// Identifiers: a letter or `_`, then letters, digits and `_`.
+inline bool isIdentStart(char c) { return std::isalpha((unsigned char)c) || c == '_'; }
+inline bool isIdentChar(char c) { return std::isalnum((unsigned char)c) || c == '_'; }
+inline bool isIdentifier(std::string_view s) {
+  if (s.empty() || !isIdentStart(s[0])) return false;
+  for (char c : s)
+    if (!isIdentChar(c)) return false;
+  return true;
+}
+
 // Shortest abbreviation dBASE-style keywords accept (#command words, directive names).
 constexpr size_t kMinAbbreviation = 4;
 

@@ -17,6 +17,19 @@ typedef struct xb_array {
   xb_item  inline_items[];
 } xb_array;
 
+/* Card marking. Storage for XB_ARRAY_CARD_MIN items or more carries one card
+ * byte per 2^XB_ARRAY_CARD_SHIFT items, right after the last item it has room
+ * for. A store into an old array marks the element's card, and a young
+ * collection rescans only the marked cards instead of the whole array. */
+#define XB_ARRAY_CARD_SHIFT 6
+#define XB_ARRAY_CARD_MIN   1024u
+static inline size_t xb_array_card_count(size_t cap) {
+  return cap >= XB_ARRAY_CARD_MIN ? (cap + ((size_t)1 << XB_ARRAY_CARD_SHIFT) - 1) >> XB_ARRAY_CARD_SHIFT : 0;
+}
+static inline uint8_t *xb_array_cards(const xb_array *a) {
+  return a->cap >= XB_ARRAY_CARD_MIN ? (uint8_t *)(a->items + a->cap) : NULL;
+}
+
 /* Longest array: its items must fit in addressable memory with room to grow. */
 #define XB_ARRAY_MAX_LEN (SIZE_MAX / sizeof(xb_item) / 4)
 

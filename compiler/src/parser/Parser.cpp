@@ -64,7 +64,7 @@ bool Parser::isKw(const Token &t, const char *kw) const {
       {"EXIT", 4},   {"FOR", 3},   {"FUNCTION", 4}, {"IF", 2},    {"IIF", 3},    {"LOCAL", 4},
       {"LOOP", 4},   {"NEXT", 4},  {"NIL", 3},    {"PROCEDURE", 4}, {"RETURN", 4}, {"STATIC", 4},
       {"STEP", 4},   {"TO", 2},    {"WHILE", 4},  {"WITH", 4},    {"MEMVAR", 4}, {"FIELD", 4},
-      {"PRIVATE", 4}, {"PUBLIC", 4}, {"PARAMETERS", 4}, {"CASE", 4}, {"OTHERWISE", 4}, {"ENDCASE", 4},
+      {"PRIVATE", 4}, {"PUBLIC", 4}, {"PARAMETERS", 4}, {"EXTERNAL", 4}, {"CASE", 4}, {"OTHERWISE", 4}, {"ENDCASE", 4},
       {"SWITCH", 4}, {"ENDSWITCH", 5}, {"EACH", 4}, {"IN", 2}, {"DESCEND", 7},
   };
   if (t.kind != Tok::Ident) return false;
@@ -127,6 +127,9 @@ bool Parser::atFuncStart() const {
   return atStmtKw("STATIC") && (isKw(ahead(), "FUNCTION") || isKw(ahead(), "PROCEDURE"));
 }
 
+// EXTERN[AL] FUNCTION: a declaration, at file level like FUNCTION.
+bool Parser::atExtern() const { return atStmtKw("EXTERNAL") && isKw(ahead(), "FUNCTION"); }
+
 bool Parser::atBlockEnd(std::initializer_list<const char *> enders) const {
   for (const char *e : enders)
     if (atStmtKw(e)) return true;
@@ -138,9 +141,13 @@ std::unique_ptr<Module> Parser::parseModule(const std::string &moduleName) {
   mod->name = moduleName;
   skipBlankStmts();
   // STATICs before any other statement or function are visible in the whole file.
-  while (atStmtKw("STATIC") && !atFuncStart()) {
-    StmtPtr decl = parseDecl(StmtKind::Static);
-    for (LocalDecl &d : static_cast<LocalStmt &>(*decl).decls) mod->fileStatics.push_back(std::move(d));
+  while ((atStmtKw("STATIC") && !atFuncStart()) || atExtern()) {
+    if (atExtern()) {
+      if (auto d = parseExtern()) mod->externs.push_back(std::move(*d));
+    } else {
+      StmtPtr decl = parseDecl(StmtKind::Static);
+      for (LocalDecl &d : static_cast<LocalStmt &>(*decl).decls) mod->fileStatics.push_back(std::move(d));
+    }
     skipBlankStmts();
   }
   if (!at(Tok::Eof) && !atFuncStart()) {
@@ -157,6 +164,10 @@ std::unique_ptr<Module> Parser::parseModule(const std::string &moduleName) {
   while (!at(Tok::Eof) && !diag_.limitReached()) {
     skipBlankStmts();
     if (at(Tok::Eof)) break;
+    if (atExtern()) {
+      if (auto d = parseExtern()) mod->externs.push_back(std::move(*d));
+      continue;
+    }
     if (!atFuncStart()) { // only reachable after an error
       diag_.error(cur().loc, "statement outside of a function");
       skipToEndOfStmt();
@@ -201,11 +212,78 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
   return fn;
 }
 
+// EXTERN FUNCTION name( p1, [p2], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ABBREV n]
+// Required parameters come first; `...` ends the list and lifts the maximum.
+// A malformed declaration is reported once and skipped.
+std::optional<ExternDecl> Parser::parseExtern() {
+  ExternDecl d;
+  d.loc = cur().loc;
+  auto fail = [&](const std::string &msg) -> std::optional<ExternDecl> {
+    diag_.error(cur().loc, msg + ", " + found());
+    skipToEndOfStmt();
+    endOfStmt();
+    return std::nullopt;
+  };
+  advance(); // EXTERN
+  advance(); // FUNCTION
+  if (!at(Tok::Ident)) return fail("expected the function name");
+  d.name = cur().upper;
+  advance();
+  if (!accept(Tok::LParen)) return fail("expected '(' after the function name");
+  if (!accept(Tok::RParen)) {
+    while (true) {
+      if (accept(Tok::Ellipsis)) {
+        d.maxArgs = ExternDecl::kUnlimited;
+        if (!accept(Tok::RParen)) return fail("expected ')' after '...'");
+        break;
+      }
+      // [name] reaches the parser as a string ([ ] delimit strings, and listings
+      // write them as "name"): a string holding a name is an optional parameter.
+      bool optional = at(Tok::String) && isIdentifier(cur().text);
+      if (!optional && !at(Tok::Ident)) return fail("expected a parameter name, [name] or '...'");
+      if (!optional && d.minArgs != d.maxArgs) {
+        diag_.error(cur().loc, "a required parameter cannot follow an optional one");
+        skipToEndOfStmt();
+        endOfStmt();
+        return std::nullopt;
+      }
+      if (!optional) ++d.minArgs;
+      ++d.maxArgs;
+      advance();
+      if (accept(Tok::RParen)) break;
+      if (!accept(Tok::Comma)) return fail("expected ',' or ')'");
+    }
+  }
+  while (at(Tok::Ident)) {
+    const std::string &attr = cur().upper;
+    if (attr == "NATIVE") d.native = true;
+    else if (attr == "RESERVED") d.reserved = true;
+    else if (attr == "CHECKED") d.checked = true;
+    else if (attr == "FOLD") d.fold = true;
+    else if (attr == "ABBREV") {
+      advance();
+      if (!at(Tok::Number) || !cur().isInt || cur().ival < 1 || (size_t)cur().ival > d.name.size())
+        return fail("ABBREV needs a length between 1 and the length of the name");
+      d.abbrev = (uint32_t)cur().ival;
+    } else {
+      return fail("unknown EXTERN FUNCTION attribute");
+    }
+    advance();
+  }
+  if (!atEndOfStmt()) return fail("expected an EXTERN FUNCTION attribute");
+  endOfStmt();
+  return d;
+}
+
 Block Parser::parseBlock(std::initializer_list<const char *> enders) {
   Block b;
   while (true) {
     skipBlankStmts();
-    if (at(Tok::Eof) || diag_.limitReached() || atFuncStart() || atBlockEnd(enders)) break;
+    // EXTERN FUNCTION ends a function body, like FUNCTION; inside a nested block
+    // parseStmt reports it.
+    if (at(Tok::Eof) || diag_.limitReached() || atFuncStart() || (enders.size() == 0 && atExtern()) ||
+        atBlockEnd(enders))
+      break;
     size_t before = pos_;
     if (StmtPtr s = parseStmt()) b.push_back(std::move(s));
     if (pos_ == before) advance(); // guarantee progress after errors

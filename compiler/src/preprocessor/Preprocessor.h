@@ -40,6 +40,8 @@ public:
   // Every file opened so far (sources and includes), for dependency files.
   const std::vector<std::string> &filesRead() const { return filesRead_; }
 
+  // Tokens produced so far (the driver marks where the program's own output starts).
+  size_t outputSize() const { return out_.size(); }
   // Terminates the stream with Tok::Eof and hands it over.
   std::vector<Token> takeOutput();
   // Text form of a token stream (.ppo files, stringification).

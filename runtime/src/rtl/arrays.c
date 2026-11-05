@@ -17,6 +17,7 @@ static xb_array *make_dims(xb_ctx *ctx, uint32_t ndims, const xb_item *dims, xb_
     for (int64_t i = 0; i < n; ++i) {
       make_dims(ctx, ndims - 1, dims + 1, &sub);
       a->items[i] = sub;
+      xb_gc_write_item(a, (size_t)i); /* `a` may have aged while the sub-array was allocated */
     }
     xb_gc_root_pop(ctx, 1);
   }
@@ -42,7 +43,10 @@ void xbf_AADD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   xb_array *a = argv[0].v.p;
   xb_array_resize(a, a->len + 1);
-  if (argc > 1) a->items[a->len - 1] = argv[1];
+  if (argc > 1) {
+    a->items[a->len - 1] = argv[1];
+    xb_gc_write_item(a, a->len - 1);
+  }
   *ret = a->items[a->len - 1];
 }
 
@@ -128,6 +132,7 @@ void xbf_ACLONE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
         map_add(&m, src, dst);
       }
       xb_set_array(&copy->items[i], dst);
+      xb_gc_write_item(copy, i);
     }
   }
   free(m.slots);

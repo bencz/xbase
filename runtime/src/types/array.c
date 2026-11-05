@@ -10,10 +10,13 @@ void xb_array_resize(xb_array *a, size_t len) {
     size_t cap = a->cap ? a->cap * 2 : 4;
     while (cap < len) cap *= 2;
     if (cap > XB_ARRAY_MAX_LEN) cap = XB_ARRAY_MAX_LEN;
-    xb_item *items = xb_gc_alloc(XB_GC_ITEMS, cap * sizeof(xb_item)); /* `a` is reachable */
+    size_t cards = xb_array_card_count(cap);
+    xb_item *items = xb_gc_alloc(XB_GC_ITEMS, cap * sizeof(xb_item) + cards); /* `a` is reachable */
     if (a->len) memcpy(items, a->items, a->len * sizeof(xb_item));
+    memset(items + cap, 0, cards);
     a->items = items;
     a->cap = cap;
+    xb_gc_write(a); /* new storage: the whole array is traced */
   }
   if (len > a->len) memset(a->items + a->len, 0, (len - a->len) * sizeof(xb_item)); /* NIL */
   a->len = len;
@@ -22,11 +25,12 @@ void xb_array_resize(xb_array *a, size_t len) {
 /* A new array of `len` NIL items, with room for `len` items in its own allocation. */
 xb_array *xb_array_alloc(size_t len) {
   if (len > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
-  xb_array *a = xb_gc_alloc(XB_GC_ARRAY, sizeof(xb_array) + len * sizeof(xb_item));
+  size_t cards = xb_array_card_count(len);
+  xb_array *a = xb_gc_alloc(XB_GC_ARRAY, sizeof(xb_array) + len * sizeof(xb_item) + cards);
   a->len = len;
   a->cap = len;
   a->items = a->inline_items;
-  if (len) memset(a->items, 0, len * sizeof(xb_item));
+  memset(a->items, 0, len * sizeof(xb_item) + cards); /* NIL items, clean cards */
   return a;
 }
 
@@ -78,4 +82,5 @@ void xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const
     return;
   }
   a->items[i] = *value;
+  xb_gc_write_item(a, (size_t)i);
 }

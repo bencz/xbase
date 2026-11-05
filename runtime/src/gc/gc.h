@@ -18,9 +18,19 @@ typedef enum xb_gc_kind {
 typedef struct xb_gc_hdr {
   uint32_t size;            /* object bytes (statistics) */
   uint8_t  kind;            /* xb_gc_kind */
-  uint8_t  marked;
+  uint8_t  state;           /* XB_GC_MARKED | XB_GC_REMEMBERED */
   uint16_t reserved;
 } xb_gc_hdr;
+
+/* Marked by the last collection that saw it, i.e. old (marks are sticky). */
+#define XB_GC_MARKED     XB_GC_STATE_OLD
+/* An old object in the remembered set, to be traced whole: it may point to
+ * young objects anywhere. */
+#define XB_GC_REMEMBERED XB_GC_STATE_RECORDED
+/* An old array in the remembered set for its dirty cards only. */
+#define XB_GC_CARDED     0x4u
+
+_Static_assert(sizeof(xb_gc_hdr) - offsetof(xb_gc_hdr, state) == XB_GC_STATE_BACK, "state byte position (xbrt.h)");
 
 static inline xb_gc_hdr *xb_gc_header(const void *obj) { return (xb_gc_hdr *)obj - 1; }
 
@@ -29,14 +39,20 @@ static inline xb_gc_hdr *xb_gc_header(const void *obj) { return (xb_gc_hdr *)obj
 /* Items outside frames that stay alive for the whole run (module STATICs). */
 void  xb_gc_add_root(xb_item *items, size_t count); /* may run before the first context */
 
+/* Write barrier after storing into element `index` of an array: a large old
+ * array records the element's card instead of the whole array. */
+struct xb_array;
+void  xb_gc_write_item(struct xb_array *a, size_t index);
+
 void  xb_gc_init(void);                    /* by the first context, before other threads exist */
 void *xb_gc_alloc(xb_gc_kind kind, size_t size);
-void  xb_gc_collect(void);
+void  xb_gc_collect(void);                 /* a full collection */
+void  xb_gc_collect_young(void);           /* a young collection */
 void  xb_gc_register(xb_ctx *ctx);
 void  xb_gc_unregister(xb_ctx *ctx);
 void  xb_gc_root_push(xb_ctx *ctx, xb_item *it);
 void  xb_gc_root_pop(xb_ctx *ctx, unsigned n);
-size_t xb_gc_live_objects(void);           /* found by the last collection */
-void  xb_gc_fatal(const char *why);        /* unrecoverable: reports and ends the process */
+size_t xb_gc_live_objects(void);           /* found by the last full collection */
+_Noreturn void xb_gc_fatal(const char *why); /* unrecoverable: reports and ends the process */
 
 #endif

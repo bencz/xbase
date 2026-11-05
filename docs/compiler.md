@@ -3,9 +3,10 @@
 Code: `compiler/src/`. The preprocessor is described in [preprocessor.md](preprocessor.md); the runtime contract the
 generated code relies on is in [runtime.md](runtime.md).
 
-Pipeline (`main.cpp`): preprocess `std.ch` and the source, parse, fold constants, run semantic checks, generate an
-in-memory LLVM module, optimize it, emit the object file. Each stage stops the compilation when it reports errors.
-After 100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the preprocessor and the parser stop early.
+Pipeline (`main.cpp`): preprocess `std.ch` and the source, parse, resolve calls, fold constants, run semantic checks,
+generate an in-memory LLVM module, optimize it, emit the object file. Each stage stops the compilation when it reports
+errors. After 100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the preprocessor and the parser stop
+early.
 
 ## Grammar
 
@@ -36,7 +37,7 @@ Keywords may be abbreviated down to a minimum length:
 | `ENDCASE` | 4 | `IN` | 2 | `STEP` | 4 |
 | `ENDDO` | 4 | `LOCAL` | 4 | `SWITCH` | 4 |
 | `ENDIF` | 4 | `LOOP` | 4 | `TO` | 2 |
-| | | `MEMVAR` | 4 | `WHILE` | 4 |
+| `EXTERNAL` | 4 | `MEMVAR` | 4 | `WHILE` | 4 |
 | | | `NEXT` | 4 | `WITH` | 4 |
 | | | `NIL` | 3 | | |
 
@@ -58,6 +59,7 @@ Statements:
 - `FOR v := start TO limit [STEP step] ... NEXT | END`; the limit and step are re-evaluated on every iteration
 - `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`
 - `EXIT` (leaves the innermost loop or `SWITCH`), `LOOP`
+- `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
 - `DO name [WITH args]`; empty arguments pass `NIL`. Arguments are passed by value (passing plain variables by
   reference, as Clipper does, needs references, which do not exist yet)
 - expression statements; at statement level `x = expr` is an assignment
@@ -71,6 +73,39 @@ Expression precedence, lowest first: `:=` and compound assignments (right-associ
 call arguments (`f(a, , b)`) and empty array elements pass `NIL`; a codeblock body has at least one expression.
 Variables and elements (`a[i] := v`, `a[i] += v`, `a[i]++`) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
 declares `a := Array( n1, n2 )`.
+
+## Calls
+
+A call goes to a function the module defines or to a declared external function. `EXTERN FUNCTION` (`EXTERNAL`, which
+may be abbreviated down to `EXTE`) declares a function the module calls but does not define (a runtime function, a
+function of a C library written to the runtime's convention, or a function of another module of the program); the
+runtime's are declared in `include/rtl.ch`, which `std.ch` includes:
+
+```
+EXTERN FUNCTION SubStr( cString, nStart, [nCount] ) NATIVE RESERVED CHECKED ABBREV 4
+EXTERN FUNCTION QOut( ... ) NATIVE
+```
+
+Parameters are names; `[name]` is optional. `[ ]` delimit strings in xBase, so the parser receives a string and takes
+any string whose text is a name as an optional parameter (a `.ppo` listing writes it as `"name"`, which compiles the
+same). Required parameters come first, and `...` allows any number of further arguments. Attributes:
+
+| Attribute | Meaning |
+|---|---|
+| `RESERVED` | the program cannot define a function of this name (Clipper's predefined functions) |
+| `CHECKED` | the argument count is checked at compile time, between the required and all parameters |
+| `NATIVE` | written in C to the xBase calling convention: the call goes to `xbf_NAME`; without it the declaration names an xBase function of another module (`xbp_NAME`) |
+| `ABBREV n` | calls may abbreviate the name to its first `n` or more letters (the keyword rule, `keywordMatches`) |
+| `FOLD` | calls with constant arguments are evaluated at compile time (see [Constant folding](#constant-folding)) |
+
+`sema/Calls.*` resolves every call before the other passes. A function the module defines comes first (a name that
+is not `RESERVED` may be redefined); otherwise the call goes to the declaration with that name, or that it
+abbreviates. The call is renamed to the full name and linked to its declaration (`CallExpr::callee`). The argument
+count of a `CHECKED` name is checked even where the module redefines it. `LOCAL a[n]` calls the declared `Array()`
+even if the module defines one (Clipper creates the array itself). It reports a call to a function that is neither
+defined nor declared, a wrong argument count, a definition of a `RESERVED` name (also through an abbreviation), an
+abbreviation that fits several declarations, conflicting declarations of one name (identical ones are accepted), a
+`FOLD` function the compiler has no evaluator for, and a declaration inside a function.
 
 ## Semantic checks
 
@@ -111,7 +146,9 @@ runtime declarations, item and basic block helpers, functions and frames, module
 - An assignment whose value has side effects computes the value into a temporary first, so `x := x++` assigns the old
   value. The target's address is taken after the value is computed (a `FOR EACH` variable designates an array element,
   which moves when the array grows). A `FOR` whose `STEP` has side effects tests a copy of the limit.
-- Calls set the result slot to `NIL`, then pass the arguments in consecutive frame slots.
+- Calls set the result slot to `NIL`, then pass the arguments in consecutive frame slots. A call to an `EXTERN
+  FUNCTION` goes to `xbf_NAME`, one to a function of the module to `xbp_NAME` (prefixes in `xbrt.h`). A call's result
+  never goes straight into a heap object (a captured `LOCAL`'s cell): it goes through a frame slot first.
 - Boxed variables are moved into cells at function entry (`xb_cell_box`); their uses load the cell from the slot, and
   captured variables load it from `self->cells[]` (the `xb_block` layout is mirrored with the target `DataLayout`).
 - A codeblock becomes an internal function `<function>.blockN (ctx, ret, argc, argv, self)` with its own frame; the
@@ -140,6 +177,10 @@ runtime declarations, item and basic block helpers, functions and frames, module
   `RETURN`. One reference per variable serves the whole loop and is moved to each element (`xb_enum_ref_move`),
   except for a variable a codeblock captures: it gets a new reference and a new cell at every iteration, so a block
   created in an iteration keeps designating that iteration's element after the loop.
+- Write barrier ([runtime.md](runtime.md#garbage-collector)): after a store into a captured variable, the cell's GC
+  state byte is tested inline and `xb_gc_remember` called for an old cell; after a store into a variable that may
+  hold a reference (`FOR EACH` variables, `STATIC`s, cells), `xb_ref_written` is called for a reference. Stores into
+  frame slots and `STATIC` storage need nothing: they are roots.
 - Variable access: a `FOR EACH` variable of a loop being generated goes through `xb_ref_target`. A `STATIC` and a
   captured variable may hold a reference made elsewhere (a loop in another function, a block created in a loop), so
   their accesses test the type inline and call `xb_ref_target` only for a reference. Other variables never hold one.
@@ -169,7 +210,7 @@ folded result's type and decimals follow Clipper's compile-time rules, which dif
 | comparisons of numbers or logicals | `.T.`/`.F.` |
 | strings `+`, `-`, `==`, `$`; `=`/`!=` of two empty strings | the result (`=` on other strings depends on SET EXACT and is not folded) |
 | `.NOT.`, `.AND.`/`.OR.` with a logical literal on the left, `IIF` with a logical literal condition | the result or the remaining operand |
-| `Len( "literal" )` | the length, unless the module defines `LEN` |
+| a call to a `FOLD` function with constant arguments | its result, from the evaluator table in `opt/Fold.cpp`: `Len` of a string literal (its length) or of an array literal of constants (its element count) |
 
 Division or `%` by a literal zero is not folded, so the error happens at run time. A folded integer is a program
 constant (`xb_num_const_int_width`); a folded double has the default display width for its value. "SET DECIMALS

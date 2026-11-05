@@ -1,17 +1,30 @@
 # Run tests: tests/run/<name>.prg is compiled with xbc, linked against xbrt,
 # executed, and its stdout compared with <name>.out. An optional <name>.rc
-# holds the expected exit code (default 0).
-function(xb_add_run_test name)
-  set(src ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.prg)
-  set(obj ${CMAKE_CURRENT_BINARY_DIR}/${name}.o)
+# holds the expected exit code (default 0). The modules in an optional
+# directory <name>.d/ are compiled with --no-entry and linked into the program.
+function(xb_compile_prg src obj)
+  get_filename_component(file ${src} NAME)
   add_custom_command(
     OUTPUT ${obj}
-    COMMAND xbc ${src} -o ${obj} --depfile=${obj}.d
+    COMMAND xbc ${src} -o ${obj} --depfile=${obj}.d ${ARGN}
     DEPENDS xbc ${src}
     DEPFILE ${obj}.d
-    COMMENT "xbc ${name}.prg")
+    COMMENT "xbc ${file}")
   set_source_files_properties(${obj} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
-  add_executable(t_${name} ${obj})
+endfunction()
+
+function(xb_add_run_test name)
+  set(obj ${CMAKE_CURRENT_BINARY_DIR}/${name}.o)
+  xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.prg ${obj})
+  set(objs ${obj})
+  file(GLOB modules ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.d/*.prg)
+  foreach(module ${modules})
+    get_filename_component(stem ${module} NAME_WE)
+    set(mobj ${CMAKE_CURRENT_BINARY_DIR}/${name}.d.${stem}.o)
+    xb_compile_prg(${module} ${mobj} --no-entry)
+    list(APPEND objs ${mobj})
+  endforeach()
+  add_executable(t_${name} ${objs})
   set_target_properties(t_${name} PROPERTIES LINKER_LANGUAGE C)
   target_link_libraries(t_${name} PRIVATE xbrt)
   set(rc 0)
@@ -83,6 +96,11 @@ endfunction()
 xb_add_codegen_test(s390x_i32_zeroext s390x-linux-gnu "@xb_frame_push\\(ptr, i32 zeroext\\)")
 xb_add_codegen_test(riscv64_i32_signext riscv64-linux-gnu "@xb_frame_push\\(ptr, i32 signext\\)")
 xb_add_codegen_test(x86_64_i32_plain x86_64-linux-gnu "@xb_frame_push\\(ptr, i32\\)")
+
+# include/rtl.ch declares exactly the functions the runtime defines.
+add_test(NAME runtime.declarations
+  COMMAND ${CMAKE_COMMAND} -DRTL=${PROJECT_SOURCE_DIR}/include/rtl.ch -DRUNTIME_SRC=${PROJECT_SOURCE_DIR}/runtime/src
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/declarations_test.cmake)
 
 # A test that hangs or loops must fail quickly instead of exhausting the machine.
 get_property(XB_ALL_TESTS DIRECTORY PROPERTY TESTS)

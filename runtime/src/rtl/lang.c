@@ -37,11 +37,11 @@ void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_block_call(ctx, ret, &argv[0], argc - 1, argv + 1);
 }
 
-/* __GcCollect(): runs a collection and returns the number of live objects. */
+/* __GcCollect( [lYoung] ): a full collection (or a young one with .T.);
+ * returns the live objects found by the last full collection. */
 void xbf___GCCOLLECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
-  XB_UNUSED(argc);
-  XB_UNUSED(argv);
-  xb_gc_collect();
+  if (argc > 0 && argv[0].type == XB_T_LOGICAL && argv[0].v.l) xb_gc_collect_young();
+  else xb_gc_collect();
   xb_set_int(ret, (int64_t)xb_gc_live_objects());
 }

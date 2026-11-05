@@ -6,6 +6,12 @@ namespace xb {
 StmtPtr Parser::parseStmt() {
   SourceLoc loc = cur().loc;
 
+  if (atExtern()) { // only nested blocks get here: a function body ends at it
+    diag_.error(loc, "EXTERN FUNCTION must be outside of functions");
+    skipToEndOfStmt();
+    endOfStmt();
+    return nullptr;
+  }
   if (atStmtKw("LOCAL")) return parseDecl(StmtKind::Local);
   if (atStmtKw("STATIC")) return parseDecl(StmtKind::Static);
   if (atStmtKw("DO") && isKw(ahead(), "CASE")) return parseDoCase();
@@ -92,6 +98,7 @@ StmtPtr Parser::parseDecl(StmtKind kind) {
     advance();
     if (at(Tok::LBracket)) { // LOCAL a[n1, n2] or a[n1][n2] is LOCAL a := Array( n1, n2 )
       auto dims = std::make_unique<CallExpr>(cur().loc, "ARRAY");
+      dims->declaredOnly = true; // Clipper creates the array: a program's own Array() is not used
       while (accept(Tok::LBracket)) {
         do {
           dims->args.push_back(parseExpr());

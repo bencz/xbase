@@ -1,0 +1,5 @@
+PROCEDURE Main()
+   IF .T.
+      EXTERN FUNCTION Foo( x )
+   ENDIF
+   RETURN

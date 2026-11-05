@@ -4,10 +4,11 @@ Tests run through CTest (`ctest --test-dir build --output-on-failure`); `tests/C
 
 | Kind | Files | Check |
 |---|---|---|
-| Execution | `tests/run/<name>.prg`, `<name>.out`, optional `<name>.rc` | The program is compiled with `xbc`, linked with `xbrt` and run; standard output must equal `<name>.out` and the exit code must equal `<name>.rc` (default 0). |
+| Execution | `tests/run/<name>.prg`, `<name>.out`, optional `<name>.rc`, `<name>.err`, `<name>.d/*.prg` | The program is compiled with `xbc`, linked with `xbrt` (and with the modules in `<name>.d/`, compiled with `--no-entry`) and run; standard output must equal `<name>.out`, the exit code must equal `<name>.rc` (default 0), and standard error must contain `<name>.err`. |
 | Preprocessor | `tests/pp/<name>.prg`, `<name>.ppo` | `xbc -E` output must equal `<name>.ppo`. |
 | Compile failure | `tests/fail/<name>.prg`, `<name>.err` | Compiling must fail, report the text in `<name>.err`, and report exactly one error. |
 | Code generation | `xb_add_codegen_test` in `tests/CMakeLists.txt` | The IR `xbc --dump-ir` emits for a cross target must match a regular expression. |
+| Declarations | `runtime.declarations` (`tests/declarations_test.cmake`) | `include/rtl.ch` declares exactly the `xbf_` functions defined in `runtime/src`. |
 
 Every test has a 30-second timeout, so a hang or a loop fails instead of stalling the run.
 

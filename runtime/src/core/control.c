@@ -28,7 +28,10 @@ void xb_enum_ref_move(xb_ctx *ctx, xb_item *r, int64_t idx) {
   ref->index = idx;
   if (ref->coll.type == XB_T_STRING) {
     const xb_str *s = ref->coll.v.s;
-    if (idx >= 1 && (uint64_t)idx <= s->len) xb_set_str(&ref->value, xb_str_new(s->data + idx - 1, 1));
+    if (idx >= 1 && (uint64_t)idx <= s->len) {
+      xb_set_str(&ref->value, xb_str_new(s->data + idx - 1, 1));
+      xb_gc_write(ref);
+    }
   } else {
     xb_ref_target(ctx, r); /* an array that shrank under the loop: bound error */
   }
@@ -45,6 +48,16 @@ xb_item *xb_ref_target(xb_ctx *ctx, xb_item *r) {
     return &ref->value;
   }
   return &a->items[ref->index - 1];
+}
+
+/* Write barrier for a store through a reference: the object holding the
+ * target (the array, or the reference itself for a string's character). */
+void xb_ref_written(const xb_item *r) {
+  xb_ref *ref = r->v.p;
+  if (ref->coll.type == XB_T_ARRAY && ref->index >= 1 && (uint64_t)ref->index <= ((xb_array *)ref->coll.v.p)->len)
+    xb_gc_write_item(ref->coll.v.p, (size_t)(ref->index - 1));
+  else
+    xb_gc_write(ref); /* the store went to the reference's own item */
 }
 
 /* SWITCH compares integers and strings only. */

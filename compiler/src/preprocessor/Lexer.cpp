@@ -224,7 +224,7 @@ void Lexer::lexIdent() {
   SourceLoc loc = here();
   bool atStmt = stmtStart_;
   size_t start = pos_;
-  while (std::isalnum((unsigned char)peek()) || peek() == '_') get();
+  while (isIdentChar(peek())) get();
   std::string w = src_.substr(start, pos_ - start);
   std::string up = upperCase(w);
   if (atStmt && up == "NOTE") { // NOTE comment: first token of a statement
@@ -341,7 +341,7 @@ bool Lexer::nextLine(std::vector<Token> &line) {
       lexNumber();
       continue;
     }
-    if (std::isalpha((unsigned char)c) || c == '_') {
+    if (isIdentStart(c)) {
       lexIdent();
       continue;
     }

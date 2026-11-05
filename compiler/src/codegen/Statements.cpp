@@ -24,8 +24,19 @@ void CodeGen::genStmt(const Stmt &s) {
   case StmtKind::Local:
     for (const LocalDecl &d : static_cast<const LocalStmt &>(s).decls) {
       if (!d.init) continue;
-      bool boxed = d.slot < fnBoxed_->size() && (*fnBoxed_)[d.slot];
-      genExpr(*d.init, boxed ? cellOfSlot(d.slot) : slot(d.slot));
+      if (d.slot >= fnBoxed_->size() || !(*fnBoxed_)[d.slot]) {
+        genExpr(*d.init, slot(d.slot));
+        continue;
+      }
+      // A captured LOCAL lives in a heap cell, which may age while the value is
+      // computed: the value goes through a frame slot (a root), then the cell.
+      uint32_t mark = temps_;
+      Value *t = tempSlot();
+      genExpr(*d.init, t);
+      Value *cell = cellOfSlot(d.slot);
+      copyItem(cell, t);
+      cellWritten(cell);
+      temps_ = mark;
     }
     break;
 
@@ -80,15 +91,17 @@ void CodeGen::genStmt(const Stmt &s) {
   case StmtKind::For: {
     // The TO and STEP expressions are re-evaluated on every iteration, as in
     // Clipper.
+    // The variable's address is taken at each use: it may designate an array
+    // element (a FOR EACH variable), which moves when the array grows.
     auto &st = static_cast<const ForStmt &>(s);
-    Value *var = varAddress(*st.var);
     if (hasSideEffects(*st.start)) { // the start value may read the variable (through a codeblock)
       Value *t = tempSlot();
       genExpr(*st.start, t);
-      copyItem(var, t);
+      copyItem(varAddress(*st.var), t);
     } else {
-      genExpr(*st.start, var);
+      genExpr(*st.start, varAddress(*st.var));
     }
+    writeBarrier(*st.var);
     BasicBlock *test = newBlock("for.test");
     BasicBlock *body = newBlock("for.body");
     BasicBlock *incr = newBlock("for.incr");
@@ -104,7 +117,7 @@ void CodeGen::genStmt(const Stmt &s) {
       limit = t;
     }
     Value *step = st.step ? genOperand(*st.step) : intLiteral(1);
-    Value *go = b_.CreateCall(rtForTest_, {fnCtx_, var, limit, step});
+    Value *go = b_.CreateCall(rtForTest_, {fnCtx_, varAddress(*st.var), limit, step});
     checkPending();
     b_.CreateCondBr(b_.CreateICmpNE(go, ConstantInt::get(i32_, 0)), body, end);
     temps_ = mark;
@@ -118,7 +131,9 @@ void CodeGen::genStmt(const Stmt &s) {
     incr->moveAfter(b_.GetInsertBlock());
     b_.SetInsertPoint(incr);
     step = st.step ? genOperand(*st.step) : intLiteral(1);
+    Value *var = varAddress(*st.var);
     genBinary(BinOp::Add, var, var, step);
+    writeBarrier(*st.var);
     temps_ = mark;
     b_.CreateBr(test);
 

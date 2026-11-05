@@ -9,13 +9,23 @@
  * what the rest of the runtime and compiled code use (an xb_str* is still the
  * string, a cell's value is at offset 0).
  *
+ * Generations. Marks are sticky: an object marked by a collection stays
+ * marked, and a marked object is old. A young collection marks from the roots
+ * and from the remembered set, never traverses old objects, and frees only
+ * unmarked (young) objects; its survivors become old. The write barrier
+ * (xb_gc_write, xbrt.h) puts an old object that receives a store into the
+ * remembered set, so the young objects it points to are found. A full
+ * collection clears every mark first and traces the whole heap; it runs when
+ * the old generation has doubled since the previous full one.
+ *
  * Collection. Marking starts from the item frames and C roots of every
  * registered context (every task, running or suspended) and from the global
  * roots, and uses an explicit stack. Large objects are swept right away;
  * pages are swept lazily, when an allocation needs a page with free slots,
- * so the cost is spread over the following allocations. Collections are
- * triggered by the bytes allocated since the last one, scaled to the live
- * heap.
+ * so the cost is spread over the following allocations. A young collection
+ * only needs to sweep the pages that received objects since their last sweep:
+ * old objects do not die in it. Collections are triggered by the bytes
+ * allocated since the last one.
  *
  * Threads. Global structures are protected by one lock; the allocation fast
  * path takes none. A collection must run with every mutator thread stopped at
@@ -29,7 +39,14 @@
 
 #define XB_GC_PAGE_SIZE ((size_t)64 << 10)
 #define XB_GC_SMALL_MAX 2048u                    /* largest slot, header included */
-#define XB_GC_MIN_THRESHOLD ((size_t)8 << 20)    /* bytes between collections, at least */
+/* Bytes allocated between young collections: they adapt to the survival
+ * rate: they double while most young objects survive (collecting them early
+ * only promotes them) and halve while few do. They never exceed the size of
+ * the old generation, so memory stays proportional to the live data. */
+#define XB_GC_YOUNG_MIN ((size_t)8 << 20)
+#define XB_GC_SURVIVAL_HIGH 2u                    /* survivors above 1/2 of the allocation */
+#define XB_GC_SURVIVAL_LOW 8u                     /* survivors below 1/8 */
+#define XB_GC_MIN_FULL ((size_t)32 << 20)        /* old bytes that trigger the first full collection */
 #define XB_GC_ALIGN 8u
 
 /* Slot sizes (header included): fine steps for small objects, ~25% steps above. */
@@ -46,8 +63,9 @@ typedef struct xb_page {
   uint32_t slotSize;
   uint32_t nslots;
   uint32_t live;            /* slots in use after the last sweep */
-  uint8_t needsSweep;       /* marked since its last sweep */
+  uint8_t needsSweep;       /* a collection ran since its last sweep */
   uint8_t cached;           /* some thread heap allocates from it */
+  uint8_t young;            /* received objects since its last sweep */
   char *data;               /* first slot, XB_GC_ALIGN aligned */
 } xb_page;
 
@@ -83,16 +101,21 @@ static struct {
   xb_ctx *contexts;
   xb_root *roots;
   size_t allocated;                /* bytes allocated since the last collection */
-  size_t threshold;
-  size_t liveBytes;                /* found by the last marking */
-  size_t liveObjects;
+  size_t youngBudget;              /* allocation that triggers a young collection */
+  size_t oldBytes;                 /* estimated size of the old generation */
+  size_t fullThreshold;            /* old bytes that trigger a full collection */
+  size_t markedBytes;              /* marked by the current collection */
+  size_t markedObjects;
+  size_t liveObjects;              /* found by the last full collection */
   xb_gc_hdr **stack;               /* marking stack */
   size_t stackLen, stackCap;
+  xb_gc_hdr **remembered;          /* old objects that received stores */
+  size_t rememberedLen, rememberedCap;
 } heap;
 
 static XB_THREAD_LOCAL xb_tlh *tlh;
 
-void xb_gc_fatal(const char *why) {
+_Noreturn void xb_gc_fatal(const char *why) {
   fflush(stdout);
   fprintf(stderr, "xbrt: %s\n", why);
   exit(EXIT_FAILURE);
@@ -114,10 +137,10 @@ void xb_gc_init(void) {
     while (class_sizes[c] < units * XB_GC_ALIGN) ++c;
     heap.classOf[units] = (uint8_t)c;
   }
-  heap.threshold = XB_GC_MIN_THRESHOLD;
+  heap.fullThreshold = XB_GC_MIN_FULL;
+  heap.youngBudget = XB_GC_YOUNG_MIN;
   heap.ready = 1;
 }
-
 
 static xb_tlh *thread_heap(void) {
   if (!tlh) {
@@ -136,6 +159,17 @@ static void report_allocation(xb_tlh *t) {
   t->allocated = 0;
 }
 
+/* Appends to one of the collector's pointer stacks, growing it. */
+static void stack_push(xb_gc_hdr ***stack, size_t *len, size_t *cap, xb_gc_hdr *h) {
+  if (*len == *cap) {
+    size_t n = *cap ? *cap * 2 : 4096;
+    xb_gc_hdr **s = realloc(*stack, n * sizeof *s);
+    if (!s) out_of_memory();
+    *stack = s;
+    *cap = n;
+  }
+  (*stack)[(*len)++] = h;
+}
 
 static void page_format(xb_page *p, uint32_t cls) {
   p->cls = cls;
@@ -143,11 +177,12 @@ static void page_format(xb_page *p, uint32_t cls) {
   p->nslots = (uint32_t)((XB_GC_PAGE_SIZE - (size_t)(p->data - (char *)p)) / p->slotSize);
   p->live = 0;
   p->needsSweep = 0;
+  p->young = 0;
   p->freeList = NULL;
   for (uint32_t i = p->nslots; i-- > 0;) {
     xb_gc_hdr *h = (xb_gc_hdr *)(p->data + (size_t)i * p->slotSize);
     h->kind = XB_GC_FREE;
-    h->marked = 0;
+    h->state = 0;
     *(void **)(h + 1) = p->freeList;
     p->freeList = h;
   }
@@ -169,15 +204,15 @@ static xb_page *page_new(uint32_t cls) {
   return p;
 }
 
-/* Rebuilds the free list from the mark bits of the last collection. */
+/* Rebuilds the free list from the marks of the last collection; the marked
+ * objects stay marked (old). */
 static void page_sweep(xb_page *p) {
   void *freeList = NULL;
   uint32_t live = 0;
   for (uint32_t i = p->nslots; i-- > 0;) {
     xb_gc_hdr *h = (xb_gc_hdr *)(p->data + (size_t)i * p->slotSize);
     if (h->kind != XB_GC_FREE) {
-      if (h->marked) {
-        h->marked = 0;
+      if (h->state & XB_GC_MARKED) {
         ++live;
         continue;
       }
@@ -189,6 +224,7 @@ static void page_sweep(xb_page *p) {
   p->freeList = freeList;
   p->live = live;
   p->needsSweep = 0;
+  p->young = 0;
 }
 
 /* A page of class `cls` with a free slot, for the thread heap. Under the lock.
@@ -214,13 +250,14 @@ static void *alloc_small(uint32_t cls) {
   if (!p || !p->freeList) {
     xb_mutex_lock(&heap.lock);
     report_allocation(t);
-    int collect = heap.allocated >= heap.threshold;
+    int collect = heap.allocated >= heap.youngBudget;
     xb_mutex_unlock(&heap.lock);
-    if (collect) xb_gc_collect();
+    if (collect) xb_gc_collect_young();
     xb_mutex_lock(&heap.lock);
     if (t->current[cls]) t->current[cls]->cached = 0;
     p = page_for(cls);
     p->cached = 1;
+    p->young = 1;
     t->current[cls] = p;
     xb_mutex_unlock(&heap.lock);
   }
@@ -234,9 +271,9 @@ static void *alloc_small(uint32_t cls) {
 static void *alloc_large(size_t size) {
   xb_mutex_lock(&heap.lock);
   heap.allocated += size;
-  int collect = heap.allocated >= heap.threshold;
+  int collect = heap.allocated >= heap.youngBudget;
   xb_mutex_unlock(&heap.lock);
-  if (collect) xb_gc_collect();
+  if (collect) xb_gc_collect_young();
   xb_large *l = xmalloc(sizeof(xb_large) + size);
   xb_mutex_lock(&heap.lock);
   l->link.next = heap.large;
@@ -250,7 +287,7 @@ void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
   size_t total = sizeof(xb_gc_hdr) + ((size + XB_GC_ALIGN - 1) & ~(size_t)(XB_GC_ALIGN - 1));
   xb_gc_hdr *h = total <= XB_GC_SMALL_MAX ? alloc_small(heap.classOf[total / XB_GC_ALIGN]) : alloc_large(size);
   h->kind = (uint8_t)kind;
-  h->marked = 0;
+  h->state = 0;
   h->size = (uint32_t)(size > UINT32_MAX ? UINT32_MAX : size);
   return h + 1;
 }
@@ -295,17 +332,40 @@ void xb_gc_root_push(xb_ctx *ctx, xb_item *it) {
 void xb_gc_root_pop(xb_ctx *ctx, unsigned n) { ctx->rootLen -= n; }
 
 
+/* Marks a young object and queues it for tracing; old objects are already
+ * marked, so a young collection stops at them. */
 static void push(xb_gc_hdr *h) {
-  if (h->marked) return;
-  h->marked = 1;
-  if (heap.stackLen == heap.stackCap) {
-    size_t cap = heap.stackCap ? heap.stackCap * 2 : 4096;
-    xb_gc_hdr **s = realloc(heap.stack, cap * sizeof *s);
-    if (!s) out_of_memory();
-    heap.stack = s;
-    heap.stackCap = cap;
+  if (h->state & XB_GC_MARKED) return;
+  h->state |= XB_GC_MARKED;
+  heap.markedBytes += h->size;
+  ++heap.markedObjects;
+  stack_push(&heap.stack, &heap.stackLen, &heap.stackCap, h);
+}
+
+/* Puts an old object in the remembered set (once), to be traced whole
+ * (XB_GC_REMEMBERED) or for its dirty cards (XB_GC_CARDED). */
+static void record(xb_gc_hdr *h, uint8_t how) {
+  xb_mutex_lock(&heap.lock);
+  if ((h->state & XB_GC_MARKED) && !(h->state & how)) {
+    if (!(h->state & (XB_GC_REMEMBERED | XB_GC_CARDED)))
+      stack_push(&heap.remembered, &heap.rememberedLen, &heap.rememberedCap, h);
+    h->state = (uint8_t)(h->state | how);
   }
-  heap.stack[heap.stackLen++] = h;
+  xb_mutex_unlock(&heap.lock);
+}
+
+void xb_gc_remember(void *obj) { record(xb_gc_header(obj), XB_GC_REMEMBERED); }
+
+void xb_gc_write_item(xb_array *a, size_t index) {
+  xb_gc_hdr *h = xb_gc_header(a);
+  if ((h->state & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED) return; /* young, or traced whole anyway */
+  uint8_t *cards = xb_array_cards(a);
+  if (!cards || index >= a->cap) {
+    record(h, XB_GC_REMEMBERED);
+    return;
+  }
+  cards[index >> XB_ARRAY_CARD_SHIFT] = 1;
+  if (!(h->state & XB_GC_CARDED)) record(h, XB_GC_CARDED);
 }
 
 static void mark_item(const xb_item *it) {
@@ -324,15 +384,38 @@ static void mark_item(const xb_item *it) {
   }
 }
 
-static void trace(xb_gc_hdr *h) {
-  heap.liveBytes += h->size;
-  ++heap.liveObjects;
+/* The items under the dirty cards of an old array, eight cards per step. */
+static void trace_cards(const xb_array *a) {
+  uint8_t *cards = xb_array_cards(a);
+  size_t n = xb_array_card_count(a->cap);
+  for (size_t c = 0; c < n;) {
+    uint64_t word = 0;
+    if (c + sizeof word <= n) {
+      memcpy(&word, cards + c, sizeof word);
+      if (!word) {
+        c += sizeof word;
+        continue;
+      }
+    }
+    if (cards[c]) {
+      cards[c] = 0;
+      size_t from = c << XB_ARRAY_CARD_SHIFT, to = from + ((size_t)1 << XB_ARRAY_CARD_SHIFT);
+      if (to > a->len) to = a->len;
+      for (size_t i = from; i < to; ++i) mark_item(&a->items[i]);
+    }
+    ++c;
+  }
+}
+
+static void trace(const xb_gc_hdr *h) {
   const void *obj = h + 1;
   switch ((xb_gc_kind)h->kind) {
     case XB_GC_ARRAY: {
       const xb_array *a = obj;
       if (a->items != a->inline_items) push(xb_gc_header(a->items));
       for (size_t i = 0; i < a->len; ++i) mark_item(&a->items[i]);
+      uint8_t *cards = xb_array_cards(a); /* everything was scanned */
+      if (cards) memset(cards, 0, xb_array_card_count(a->cap));
       break;
     }
     case XB_GC_BLOCK: {
@@ -363,7 +446,16 @@ static void mark_roots(void) {
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
 }
 
-void xb_gc_collect(void) {
+/* Clears the marks of every object, before a full collection. */
+static void unmark_all(void) {
+  for (size_t c = 0; c < XB_GC_CLASSES; ++c)
+    for (xb_page *p = heap.pages[c]; p; p = p->next)
+      for (uint32_t k = 0; k < p->nslots; ++k) ((xb_gc_hdr *)(p->data + (size_t)k * p->slotSize))->state = 0;
+  for (xb_large *l = heap.large; l; l = l->link.next) l->hdr.state = 0;
+  heap.rememberedLen = 0;
+}
+
+static void collect(int full) {
   xb_mutex_lock(&heap.lock);
   for (xb_tlh *t = heap.threads; t; t = t->next) {
     report_allocation(t);
@@ -372,32 +464,45 @@ void xb_gc_collect(void) {
       t->current[c] = NULL;
     }
   }
-  /* Pages not swept since the previous collection still hold its marks. */
-  for (size_t c = 0; c < XB_GC_CLASSES; ++c)
-    for (xb_page *p = heap.pages[c]; p; p = p->next)
-      if (p->needsSweep) page_sweep(p);
-
-  heap.liveBytes = 0;
-  heap.liveObjects = 0;
+  /* Unswept pages keep the marks of the previous collection: their unmarked
+   * objects are dead, and stay unmarked since nothing reaches them. */
+  if (full) unmark_all();
+  heap.markedBytes = 0;
+  heap.markedObjects = 0;
   mark_roots();
+  for (size_t i = 0; i < heap.rememberedLen; ++i) { /* their young objects get marked: they stop being young */
+    xb_gc_hdr *h = heap.remembered[i];
+    uint8_t how = h->state;
+    h->state = XB_GC_MARKED;
+    if (how & XB_GC_REMEMBERED) trace(h);
+    else trace_cards((const xb_array *)(h + 1));
+  }
+  heap.rememberedLen = 0;
   while (heap.stackLen) trace(heap.stack[--heap.stackLen]);
 
   for (xb_large **pl = &heap.large; *pl;) {
     xb_large *l = *pl;
-    if (l->hdr.marked) {
-      l->hdr.marked = 0;
+    if (l->hdr.state & XB_GC_MARKED) {
       pl = &l->link.next;
     } else {
       *pl = l->link.next;
       free(l);
     }
   }
-  /* Pages are swept lazily; a page whose objects all died goes back to the pool. */
+  /* After a young collection pages are swept lazily, and only those that
+   * received objects can have dead ones. A full collection, which already
+   * touched every object, sweeps every page at once and gives the pages whose
+   * objects all died back to the pool, for any size class. */
   for (size_t c = 0; c < XB_GC_CLASSES; ++c) {
     for (xb_page **pp = &heap.pages[c]; *pp;) {
       xb_page *p = *pp;
-      p->needsSweep = 1;
-      if (p->live == 0) { /* nothing was allocated in it since its last sweep */
+      if (!full) {
+        if (p->young) p->needsSweep = 1;
+        pp = &p->next;
+        continue;
+      }
+      page_sweep(p);
+      if (p->live == 0) {
         *pp = p->next;
         p->next = heap.emptyPages;
         heap.emptyPages = p;
@@ -407,10 +512,25 @@ void xb_gc_collect(void) {
     }
   }
   for (size_t c = 0; c < XB_GC_CLASSES; ++c) heap.cursor[c] = heap.pages[c];
+  if (full) {
+    heap.oldBytes = heap.markedBytes;
+    heap.liveObjects = heap.markedObjects;
+    heap.fullThreshold = heap.oldBytes * 2 > XB_GC_MIN_FULL ? heap.oldBytes * 2 : XB_GC_MIN_FULL;
+  } else {
+    heap.oldBytes += heap.markedBytes; /* the survivors were promoted */
+    if (heap.markedBytes > heap.allocated / XB_GC_SURVIVAL_HIGH) heap.youngBudget *= 2;
+    else if (heap.markedBytes < heap.allocated / XB_GC_SURVIVAL_LOW) heap.youngBudget /= 2;
+  }
+  if (heap.youngBudget > heap.oldBytes) heap.youngBudget = heap.oldBytes;
+  if (heap.youngBudget < XB_GC_YOUNG_MIN) heap.youngBudget = XB_GC_YOUNG_MIN;
   heap.allocated = 0;
-  heap.threshold = heap.liveBytes > XB_GC_MIN_THRESHOLD ? heap.liveBytes : XB_GC_MIN_THRESHOLD;
+  int fullNext = heap.oldBytes >= heap.fullThreshold;
   xb_mutex_unlock(&heap.lock);
+  if (!full && fullNext) collect(1);
 }
+
+void xb_gc_collect(void) { collect(1); }
+void xb_gc_collect_young(void) { collect(0); }
 
 size_t xb_gc_live_objects(void) {
   xb_mutex_lock(&heap.lock);

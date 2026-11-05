@@ -38,9 +38,8 @@ private:
   // functions, frames, module initialization, program entry.
   void initTypes();
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
-  llvm::Function *declareXbFunc(const std::string &xbName, bool internal);
+  llvm::Function *declareXbFunc(const std::string &xbName, bool internal, bool runtime);
   void addAbiAttributes(llvm::Function *f);
-  static std::string mangle(const std::string &xbName) { return "xbf_" + xbName; }
   void genFunc(const FuncDecl &f);
   void beginFrame(llvm::Value *argc, llvm::Value *argv, uint32_t nparams, uint32_t nlocals,
                   const std::vector<bool> &boxed);
@@ -83,6 +82,12 @@ private:
   llvm::Value *refTarget(llvm::Value *ref);
   llvm::Value *derefIfRef(llvm::Value *item);
   llvm::Value *varAddress(const Expr &e);
+  llvm::BasicBlock *beginUnlikely(llvm::Value *cond, const char *name);
+  void endUnlikely(llvm::BasicBlock *join);
+  llvm::Value *holdsRef(llvm::Value *item);
+  void refWritten(llvm::Value *item);
+  void cellWritten(llvm::Value *cell);
+  void writeBarrier(const Expr &e);
 
   // Expressions.cpp
   static bool hasSideEffects(const Expr &e);
@@ -126,7 +131,7 @@ private:
   llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_, rtPending_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtCellBox_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEnumRefNew_, rtEnumRefMove_, rtRefTarget_, rtSwitchCheck_, rtSwitchMatch_;
-  llvm::FunctionCallee rtModuleRegister_, rtModulesInit_;
+  llvm::FunctionCallee rtModuleRegister_, rtModulesInit_, rtGcRemember_, rtRefWritten_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
   // module state

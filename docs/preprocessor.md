@@ -129,10 +129,13 @@ lists only commands whose runtime support exists and grows with the runtime:
 | `QUIT`, `CANCEL` | `__Quit()` |
 
 `std.ch` includes `include/set.ch`, which defines the `_SET_*` numbers for `Set()`. It contains only `#define` lines
-and C comments, so the runtime includes the same file and the numbers are defined once.
+and C comments, so the runtime includes the same file and the numbers are defined once. It also includes
+`include/rtl.ch`, the runtime's `EXTERN FUNCTION` declarations ([compiler.md](compiler.md#calls)); a program
+compiled with `-u` or a custom standard file includes `rtl.ch` itself to call runtime functions.
 
 ## Inspecting the output
 
-`xbc -E file.prg` prints the preprocessed statements, one per line; `-p` also writes them to `file.ppo` and continues
-compiling. Strings are written with a delimiter they do not contain; a string that contains `"`, `'` and `]` is written
-as a concatenation.
+`xbc -E file.prg` prints the preprocessed statements of the source, one per line (what `std.ch` and its includes
+produce, such as the declarations of `rtl.ch`, is parsed but not listed); `-p` also writes them to `file.ppo` and
+continues compiling. Strings are written with a delimiter they do not contain; a string that contains `"`, `'` and
+`]` is written as a concatenation.

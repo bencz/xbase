@@ -71,6 +71,8 @@ void CodeGen::initTypes() {
   rtEnumRefNew_ = rt("xb_enum_ref_new", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtEnumRefMove_ = rt("xb_enum_ref_move", voidTy, {ptrTy_, ptrTy_, i64_});
   rtRefTarget_ = rt("xb_ref_target", ptrTy_, {ptrTy_, ptrTy_});
+  rtRefWritten_ = rt("xb_ref_written", voidTy, {ptrTy_});
+  rtGcRemember_ = rt("xb_gc_remember", voidTy, {ptrTy_});
   rtSwitchCheck_ = rt("xb_switch_check", voidTy, {ptrTy_, ptrTy_});
   rtSwitchMatch_ = rt("xb_switch_match", i32_, {ptrTy_, ptrTy_});
   rtModuleRegister_ = rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_});
@@ -105,8 +107,10 @@ FunctionCallee CodeGen::rt(const char *name, Type *ret, std::initializer_list<Ty
   return c;
 }
 
-Function *CodeGen::declareXbFunc(const std::string &xbName, bool internal) {
-  std::string sym = mangle(xbName);
+// A function of the program, or of the runtime (an EXTERN FUNCTION): see the
+// symbol prefixes in xbrt.h.
+Function *CodeGen::declareXbFunc(const std::string &xbName, bool internal, bool runtime) {
+  std::string sym = (runtime ? XB_RUNTIME_FUNC_PREFIX : XB_PROGRAM_FUNC_PREFIX) + xbName;
   Function *f = mod_.getFunction(sym);
   if (!f) {
     f = Function::Create(xbFuncTy_, internal ? GlobalValue::InternalLinkage : GlobalValue::ExternalLinkage, sym, mod_);
@@ -164,7 +168,7 @@ bool CodeGen::run(const Module &m, bool emitEntry) {
     gv->setAlignment(itemAlign_);
     statics_ = gv;
   }
-  for (auto &f : m.funcs) funcs_[f->name] = declareXbFunc(f->name, f->isStatic);
+  for (auto &f : m.funcs) funcs_[f->name] = declareXbFunc(f->name, f->isStatic, false);
   for (auto &f : m.funcs) genFunc(*f);
   if (!m.statics.empty()) genModuleInit(m);
   if (emitEntry && !m.funcs.empty()) genEntry(*m.funcs.front());

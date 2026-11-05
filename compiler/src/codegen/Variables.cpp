@@ -46,20 +46,34 @@ Value *CodeGen::refTarget(Value *ref) {
   return target;
 }
 
-// `item` itself, or the element it designates when it holds a reference.
-Value *CodeGen::derefIfRef(Value *item) {
-  Value *type = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, item, FType), "type");
-  BasicBlock *from = b_.GetInsertBlock();
-  BasicBlock *isRef = newBlock("ref");
-  BasicBlock *join = newBlock("deref");
+// Branches to a new block when `cond` holds (marked unlikely) and continues
+// there; endUnlikely joins the returned block.
+BasicBlock *CodeGen::beginUnlikely(Value *cond, const char *name) {
+  BasicBlock *then = newBlock(name);
+  BasicBlock *join = newBlock("join");
   MDBuilder md(ctx_);
-  b_.CreateCondBr(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_REF)), isRef, join,
-                  md.createUnlikelyBranchWeights());
-  b_.SetInsertPoint(isRef);
-  Value *target = refTarget(item);
-  BasicBlock *refEnd = b_.GetInsertBlock();
+  b_.CreateCondBr(cond, then, join, md.createUnlikelyBranchWeights());
+  b_.SetInsertPoint(then);
+  return join;
+}
+
+void CodeGen::endUnlikely(BasicBlock *join) {
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
+}
+
+Value *CodeGen::holdsRef(Value *item) {
+  Value *type = b_.CreateLoad(i32_, b_.CreateStructGEP(itemTy_, item, FType), "type");
+  return b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_REF));
+}
+
+// `item` itself, or the element it designates when it holds a reference.
+Value *CodeGen::derefIfRef(Value *item) {
+  BasicBlock *from = b_.GetInsertBlock();
+  BasicBlock *join = beginUnlikely(holdsRef(item), "ref");
+  Value *target = refTarget(item);
+  BasicBlock *refEnd = b_.GetInsertBlock();
+  endUnlikely(join);
   PHINode *phi = b_.CreatePHI(ptrTy_, 2, "var");
   phi->addIncoming(item, from);
   phi->addIncoming(target, refEnd);
@@ -79,6 +93,44 @@ Value *CodeGen::varAddress(const Expr &e) {
   Value *item = v.where == VarWhere::Static ? staticAddress(v.slot) : isBoxed(v) ? cellOfSlot(v.slot) : slot(v.slot);
   if (isEachVar(v)) return refTarget(item);
   return v.where == VarWhere::Static ? derefIfRef(item) : item;
+}
+
+// After a store through `item` when it holds a reference: the write barrier
+// of the object holding the target.
+void CodeGen::refWritten(Value *item) {
+  BasicBlock *join = beginUnlikely(holdsRef(item), "ref.written");
+  b_.CreateCall(rtRefWritten_, {item});
+  endUnlikely(join);
+}
+
+// After a store into a cell: the inline test of xb_gc_write (xbrt.h).
+void CodeGen::cellWritten(Value *cell) {
+  Value *back = ConstantInt::getSigned(i64_, -static_cast<int64_t>(XB_GC_STATE_BACK));
+  Value *state = b_.CreateLoad(i8_, b_.CreateGEP(i8_, cell, back), "gc.state");
+  Value *bits = b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
+  BasicBlock *join = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gc.old");
+  b_.CreateCall(rtGcRemember_, {cell});
+  endUnlikely(join);
+}
+
+// Write barrier after a store into a variable (see xb_gc_write in xbrt.h). A
+// captured variable's cell is a heap object; a STATIC, a cell and a FOR EACH
+// variable may hold a reference, whose target lives in a heap object. Frame
+// slots and STATIC storage are roots and need nothing.
+void CodeGen::writeBarrier(const Expr &e) {
+  auto &v = static_cast<const VarExpr &>(e);
+  if (v.where == VarWhere::Static) {
+    refWritten(staticAddress(v.slot));
+    return;
+  }
+  if (v.where == VarWhere::Frame && !isBoxed(v)) {
+    if (isEachVar(v)) b_.CreateCall(rtRefWritten_, {slot(v.slot)});
+    return;
+  }
+  Value *cell = v.where == VarWhere::Capture ? b_.CreateLoad(ptrTy_, capturedCellAddress(fnSelf_, v.slot), "cell")
+                                             : cellOfSlot(v.slot);
+  cellWritten(cell);
+  refWritten(cell);
 }
 
 } // namespace xb

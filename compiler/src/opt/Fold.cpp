@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 
 namespace xb {
 
@@ -95,7 +96,6 @@ int order(const NumberExpr &a, const NumberExpr &b) {
 } // namespace
 
 void Folder::run(Module &m) {
-  for (auto &f : m.funcs) moduleFuncs_.insert(f->name);
   for (LocalDecl &d : m.fileStatics)
     if (d.init) fold(d.init);
   for (auto &f : m.funcs) block(f->body);
@@ -295,14 +295,50 @@ ExprPtr Folder::foldLogic(LogicExpr &l, bool isAnd) {
   return makeLogical(l.loc, a->value);           // .F. .AND. x, .T. .OR. x
 }
 
-// Runtime functions with a constant result for literal arguments, unless the
-// module defines a function with the same name.
-ExprPtr Folder::foldCall(CallExpr &c) {
-  if (moduleFuncs_.count(c.name)) return nullptr;
-  if (c.name == "LEN" && c.args.size() == 1) {
-    if (const StringExpr *s = str(c.args[0])) return makeInt(c.loc, (int64_t)s->value.size());
+namespace {
+
+// A value known at compile time whose evaluation does nothing else: a literal,
+// or an array literal of such values.
+bool isConstant(const Expr &e) {
+  switch (e.kind) {
+  case ExprKind::Nil: case ExprKind::Logical: case ExprKind::Number: case ExprKind::String:
+    return true;
+  case ExprKind::ArrayLit:
+    for (auto &el : static_cast<const ArrayLitExpr &>(e).elems)
+      if (!isConstant(*el)) return false;
+    return true;
+  default:
+    return false;
   }
+}
+
+// Len( x ): the length of a string literal, or the element count of an array
+// literal of constants (the array itself is not needed).
+ExprPtr evalLen(const CallExpr &c) {
+  if (c.args.size() != 1) return nullptr;
+  if (const StringExpr *s = str(c.args[0])) return makeInt(c.loc, (int64_t)s->value.size());
+  if (c.args[0]->kind == ExprKind::ArrayLit && isConstant(*c.args[0]))
+    return makeInt(c.loc, (int64_t)static_cast<const ArrayLitExpr &>(*c.args[0]).elems.size());
   return nullptr;
+}
+
+// Compile-time evaluators of the functions declared FOLD; each returns null
+// when its arguments are not constant enough.
+using Evaluator = ExprPtr (*)(const CallExpr &);
+const std::unordered_map<std::string, Evaluator> &evaluators() {
+  static const std::unordered_map<std::string, Evaluator> table = {{"LEN", evalLen}};
+  return table;
+}
+
+} // namespace
+
+bool Folder::canEvaluate(const std::string &name) { return evaluators().count(name) != 0; }
+
+// A call to a FOLD function whose arguments are constant becomes its result.
+ExprPtr Folder::foldCall(CallExpr &c) {
+  if (!c.callee || !c.callee->fold) return nullptr;
+  auto it = evaluators().find(c.callee->name);
+  return it == evaluators().end() ? nullptr : it->second(c);
 }
 
 } // namespace xb

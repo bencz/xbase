@@ -36,30 +36,57 @@ frames start as `NIL`. Frames are GC roots.
 
 ## Garbage collector
 
-`runtime/src/gc/gc.c` is a precise, non-moving mark and lazy-sweep collector. Strings, arrays, array item storage,
-codeblocks, cells and reference targets are its objects; an 8-byte header (size, kind, mark) precedes each one, so
-object pointers are what the rest of the runtime and compiled code use.
+`runtime/src/gc/gc.c` is a precise, non-moving, generational mark and lazy-sweep collector. Strings, arrays, array
+item storage, codeblocks, cells and reference targets are its objects; an 8-byte header (size, kind, state) precedes
+each one, so object pointers are what the rest of the runtime and compiled code use.
 
 - Allocation: objects up to 2048 bytes (header included) come from 64 KB pages of 27 size classes. Every thread has a
   local heap with one page per class and allocates from its free list without locking. Larger objects are allocated
   individually.
 - Roots: the frames and temporary C roots (`xb_gc_root_push`) of every registered context, which includes suspended
   tasks, and global item arrays registered with `xb_gc_add_root` (the modules' `STATIC`s).
-- Collection: starts when the bytes allocated since the last one reach the live heap size (at least 8 MB). Marking
-  uses an explicit stack. Large objects are freed at once; pages are swept lazily when an allocation needs one (the
-  search resumes where the previous one stopped), and a page found empty at a collection returns to a pool of free
-  pages. Pages are not returned to the operating system.
+- Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young.
+  A young collection marks from the roots and the remembered set, stops at old objects instead of traversing them,
+  and frees only unmarked objects; the survivors become old. A full collection clears every mark and traces the
+  whole heap; it runs when the old generation reaches twice its size after the previous full one (at least 32 MB).
+- Young budget: a young collection runs when the allocation since the last collection reaches the budget, at least
+  8 MB. The budget doubles after a collection where more than half of the allocation survived (collecting such
+  objects early only promotes them) and halves when less than an eighth did; it never exceeds the size of the old
+  generation.
+- Write barrier: storing a pointer into an old object must record that object in the remembered set, because a young
+  collection does not scan old objects. The state byte sits `XB_GC_STATE_BACK` bytes before the object; its bits
+  `XB_GC_STATE_OLD` and `XB_GC_STATE_RECORDED` tell whether a store must record it (`xb_gc_write` in `xbrt.h`). C code
+  calls `xb_gc_write(obj)` after storing into a heap object (a grown array's item storage, a reference's character)
+  and `xb_gc_write_item(array, index)` after storing an array element; compiled code tests the byte inline after
+  storing into a captured variable's cell and calls `xb_gc_remember`, and calls `xb_ref_written` after a store
+  through a `FOR EACH` reference. The barrier comes after the store, with no allocation in between, and an item a
+  call produces never goes straight into a heap object: it goes through a frame slot first (a root). A recorded
+  object is traced by the next young collection and leaves the set.
+- Card marking: array storage for 1024 items or more carries one card byte per 64 items after its last item. A store
+  into such an old array marks the element's card and records the array for its cards only; the young collection
+  scans the marked cards (eight card bytes per step) instead of the whole array. Storage that is replaced (the array
+  grew) records the whole array.
+- Collection: marking uses an explicit stack. Large objects are freed at once. After a young collection pages are
+  swept lazily when an allocation needs one (the search resumes where the previous one stopped), and only pages that
+  received objects since their last sweep need it, since old objects do not die there. A full collection sweeps
+  every page at once and gives pages whose objects all died back to a pool shared by all size classes. Pages are not
+  returned to the operating system.
+- Known cost: objects that live through one young collection and die soon after (a table whose entries are
+  replaced) are promoted and wait for a full collection, so such programs use more memory than with a single
+  generation. Promotion after two young collections (aging) is planned.
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
 - Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, an object above half the address space,
   memory exhausted) end the program through `xb_gc_fatal` with a message on standard error and exit code 1.
-- Rule for C code: a collection can run inside any allocation, so every object still needed must be reachable from a
-  frame or a C root before the next allocation. Objects never move.
+- Rules for C code: a collection can run inside any allocation, so every object still needed must be reachable from
+  a frame or a C root before the next allocation, and a store into a heap object that may have aged since it was
+  allocated (any allocation in between) is followed by `xb_gc_write` or `xb_gc_write_item`. Objects never move.
 - Threads: global structures are protected by a lock (`xb_mutex`, platform layer); the allocation fast path takes
   none. A collection requires every mutator to be stopped at a safepoint (`XB_PENDING_SAFEPOINT`); while tasks run on
   one thread the allocating thread is the only mutator.
 
-`__GcCollect()` runs a collection and returns the number of live objects (tests use it).
+`__GcCollect( [lYoung] )` runs a full collection (a young one with `.T.`) and returns the number of live objects the
+last full collection found (tests use it).
 
 ## Codeblocks
 
@@ -77,7 +104,11 @@ Every xBase-callable function, compiled or written in C, has the dynamic convent
 void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 ```
 
-- `NAME` is the upper-cased xBase name.
+- `NAME` is the upper-cased xBase name. Runtime functions are `xbf_NAME` (`XB_RUNTIME_FUNC_PREFIX`) and the
+  program's are `xbp_NAME` (`XB_PROGRAM_FUNC_PREFIX`), so a program may define a function named like a runtime one
+  that is not `RESERVED` without a clash at link time.
+- Every runtime function is declared in `include/rtl.ch` (`EXTERN FUNCTION`, see [compiler.md](compiler.md#calls));
+  the `runtime.declarations` test checks that the declarations and the `xbf_` definitions match.
 - The caller evaluates the arguments into consecutive slots of its own frame and sets `ret` to `NIL`; a callee that
   returns nothing leaves it untouched. The callee copies its parameters into its frame (`xb_args_copy`); missing
   arguments are `NIL`.
@@ -192,7 +223,7 @@ Conventions:
   `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more,
   off otherwise. `__SetCentury( [lOn] )` rewrites that run as `YYYY` or `YY` (or puts it in front when the picture
   has no `Y`) and the picture in upper case. Other values change nothing.
-- `__GcCollect()` runs a collection and returns the number of live objects (tests use it).
+- `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector).
 
 Settings live in the task context (start: `SET EXACT OFF`, `SET DECIMALS TO 2`, date format `mm/dd/yy`,
 `SET EPOCH TO 1900`, `SET CENTURY OFF`). Their numbers come from `include/set.ch`, shared with xBase code.

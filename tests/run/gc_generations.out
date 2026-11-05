@@ -1,0 +1,10 @@
+
+         1 .T.         51
+         2 .T.         52
+         3 .T.         53
+         4 .T.         54
+         5 .T.         55
+loop    300000 loop    299999 .T.
+         1 keep         1 made         3       2000 N
+.T. grown         1 after         2       5001
+regrown         3 fresh         4 U regrown         3 clone         5       3000 U
