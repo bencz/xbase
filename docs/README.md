@@ -5,6 +5,7 @@ Find the task, read the doc it points to, then the code.
 | Task | Read |
 |---|---|
 | Overall design, decisions, roadmap, planned features (classes, async/await, FFI, GC) | [architecture.md](architecture.md) |
+| The planned mid-level IR (xIR): form, GC, exceptions, coroutines, classes, passes | [xir.md](xir.md) |
 | Directives, `#command`/`#translate` rules, `std.ch`, tokenization, comments, string literals | [preprocessor.md](preprocessor.md) |
 | Grammar, keywords, name resolution, code generation, object emission, cross-compilation, driver options | [compiler.md](compiler.md) |
 | Values (`xb_item`), frames, calling convention, error propagation, operators, the ABI shared with the compiler | [runtime.md](runtime.md) |
