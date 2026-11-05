@@ -9,7 +9,8 @@ After 100 errors (`Diagnostics::kMaxErrors`) nothing more is reported and the pr
 
 ## Grammar
 
-`parser/Parser.*` is a recursive descent parser over preprocessed statements; `parser/AST.h` holds the syntax tree.
+`parser/` is a recursive descent parser over preprocessed statements: `Parser.cpp` (tokens, keywords, the module and
+its functions, blocks), `Statements.cpp`, `Expressions.cpp`; `AST.h` holds the syntax tree.
 
 Keywords are not reserved. A keyword is recognized at the start of a statement, except when:
 
@@ -73,12 +74,12 @@ declares `a := Array( n1, n2 )`.
 
 ## Semantic checks
 
-`sema/Sema.*` assigns frame slots to parameters and `LOCAL`s (in declaration order; an initializer is resolved before
-its own name becomes visible). A codeblock has its own frame for its parameters. A variable of the enclosing function
-used inside a codeblock is *captured*: it is marked boxed in the function (`FuncDecl::boxed`), and each codeblock
-between the use and the function gets a capture (`BlockExpr::captures`) that passes the cell along; the reference
-resolves to `VarWhere::Capture` with the capture index. Parameters of an enclosing codeblock cannot be captured ("outer
-codeblock variable is out of reach", as in Clipper).
+`sema/Sema.*` assigns frame slots to parameters and `LOCAL`s (in declaration order; a `LOCAL`'s initializer is resolved
+before its own name becomes visible). A codeblock has its own frame for its parameters. A variable of the enclosing
+function used inside a codeblock is *captured*: it is marked boxed in the function (`FuncDecl::boxed`), and each
+codeblock between the use and the function gets a capture (`BlockExpr::captures`) that passes the cell along; the
+reference resolves to `VarWhere::Capture` with the capture index. Parameters of an enclosing codeblock cannot be
+captured ("outer codeblock variable is out of reach", as in Clipper).
 
 `STATIC`s get slots in the module's static storage (`Module::statics`, `VarWhere::Static`). File-wide statics are
 visible in every function; a function's statics are visible in that function only. They are never captured: codeblocks
@@ -95,8 +96,11 @@ string constant ("CASE requires either numeric or string constant"), and a `CASE
 
 ## Code generation
 
-`codegen/CodeGen.*` lowers each function to an LLVM function with the dynamic calling convention described in
-[runtime.md](runtime.md#calling-convention):
+`codegen/` lowers each function to an LLVM function with the dynamic calling convention described in
+[runtime.md](runtime.md#calling-convention). One class (`CodeGen.h`), implemented by topic: `CodeGen.cpp` (types,
+runtime declarations, item and basic block helpers, functions and frames, module initialization, program entry),
+`Literals.cpp`, `Statements.cpp`, `Variables.cpp` (variable addresses, cells, references), `Expressions.cpp`,
+`Codeblocks.cpp`; `Emit.cpp` emits the object file.
 
 - The entry block obtains the item frame (`xb_frame_push`, sized after the body is generated) and copies the
   parameters. The caller has already set the result to `NIL`.

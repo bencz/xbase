@@ -5,6 +5,8 @@
 #include "common/Token.h"
 
 #include <initializer_list>
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace xb {
@@ -20,7 +22,7 @@ public:
   std::unique_ptr<Module> parseModule(const std::string &moduleName);
 
 private:
-  // token access
+  // Parser.cpp: token access
   const Token &cur() const { return toks_[pos_]; }
   const Token &ahead(size_t n = 1) const;
   bool at(Tok k) const { return cur().kind == k; }
@@ -34,7 +36,7 @@ private:
   void skipToEndOfStmt();
   void skipBlankStmts();
 
-  // keywords
+  // Parser.cpp: keywords
   bool isKw(const Token &t, const char *kw) const;
   bool atKw(const char *kw) const { return isKw(cur(), kw); }
   bool atStmtKw(const char *kw) const;
@@ -42,9 +44,12 @@ private:
   bool atInlineIf() const;
   bool atBlockEnd(std::initializer_list<const char *> enders) const;
 
-  // declarations / statements
+  // Parser.cpp: functions and blocks
   std::unique_ptr<FuncDecl> parseFunc();
   Block parseBlock(std::initializer_list<const char *> enders);
+  void closeBlock(std::initializer_list<const char *> closers, const char *opener, SourceLoc openLoc);
+
+  // Statements.cpp
   StmtPtr parseStmt();
   StmtPtr parseDecl(StmtKind kind);
   StmtPtr parseDoCase();
@@ -54,9 +59,8 @@ private:
   StmtPtr parseIf();
   StmtPtr parseWhile();
   StmtPtr parseFor();
-  void closeBlock(std::initializer_list<const char *> closers, const char *opener, SourceLoc openLoc);
 
-  // expressions
+  // Expressions.cpp
   ExprPtr parseExpr();
   ExprPtr parseAssign();
   ExprPtr parseOr();

@@ -1,6 +1,10 @@
 # Preprocessor
 
-Code: `compiler/src/preprocessor/` (`Lexer.*`, `Preprocessor.*`), `include/std.ch`. Tests: `tests/pp`.
+Code: `compiler/src/preprocessor/`, `include/std.ch`. Tests: `tests/pp`. `Lexer.*` tokenizes; the `Preprocessor` class
+(`Preprocessor.h`) is implemented by topic: `Preprocessor.cpp` (files and includes, statement rewriting, output text),
+`Directives.cpp` (directives and `#if` expressions), `RuleParse.cpp`, `RuleMatch.cpp` and `RuleResult.cpp` (defining,
+matching and applying `#command`/`#translate` rules); `Internal.h` holds the preprocessor's limits and the token helpers
+its files use.
 
 The preprocessor owns tokenization. The parser only sees its output: statements separated by end-of-statement tokens.
 Every command of the language (`?`, `DO WHILE`, `STORE`, `QUIT`, ...) is a rule in `include/std.ch`; the compiler has

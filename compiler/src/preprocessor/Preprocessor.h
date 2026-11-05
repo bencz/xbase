@@ -3,6 +3,7 @@
 #include "common/Diagnostics.h"
 #include "common/Token.h"
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -29,7 +30,7 @@ public:
   explicit Preprocessor(Diagnostics &diag) : diag_(diag) {}
 
   void addIncludeDir(const std::string &dir) { includeDirs_.push_back(dir); }
-  // -D on the command line: NAME or NAME=value
+  // -D on the command line: NAME or NAME=value (Directives.cpp)
   void defineFromCommandLine(const std::string &spec);
 
   // Processes a file; statements it produces go to the output stream.
@@ -90,12 +91,8 @@ private:
   };
   using Caps = std::vector<std::vector<Toks>>; // per marker: list of matches
 
-  // files and lines
+  // Preprocessor.cpp: lines and statements
   void processLine(Toks &line);
-  void directive(Toks &line);
-  bool active() const { return conds_.empty() || conds_.back().active; }
-
-  // statements
   struct Rewrite {              // shared by everything one source statement expands into
     int budget;
     bool failed = false;
@@ -107,8 +104,14 @@ private:
   bool expandDefines(Toks &st, int &budget);
   bool applyTranslates(Toks &st, int &budget);
   bool applyCommand(Toks &st, int &budget);
+  static std::string quoteString(const std::string &value);
 
-  // rules
+  // Directives.cpp
+  void directive(Toks &line);
+  bool active() const { return conds_.empty() || conds_.back().active; }
+  bool evalCondition(Toks expr, SourceLoc loc);
+
+  // RuleParse.cpp
   void defineRule(Toks &line, bool command, bool exact);
   void undefineRule(Toks &line, bool command, bool exact);
   bool parseRuleParts(Toks &line, Rule &r, bool withResult);
@@ -117,7 +120,7 @@ private:
   bool parseResult(const Toks &t, size_t from, size_t to, Rule &r, std::vector<RNode> &out);
   int findMarker(const Rule &r, const std::string &name) const;
 
-  // matching
+  // RuleMatch.cpp
   bool matchSeq(const Rule &r, const std::vector<PNode> &nodes, const Toks &in, size_t &pos, size_t end,
                 const PNode *outerStop, Caps &caps) const;
   bool matchMarker(const Marker &m, const Toks &in, size_t &pos, size_t end, const PNode *stop, Cmp mode) const;
@@ -126,16 +129,12 @@ private:
   static bool skipExp(const Toks &in, size_t &pos, size_t end, const PNode *stop, Cmp mode, bool *fStop);
   static bool skipMacro(const Toks &in, size_t &pos, size_t end);
 
-  // results
+  // RuleResult.cpp
   void buildResult(const Rule &r, const std::vector<RNode> &nodes, const Caps &caps, int rep, SourceLoc loc,
                    Toks &out) const;
   static size_t repeatCount(const std::vector<RNode> &nodes, const Caps &caps);
   static std::vector<Toks> splitList(const Toks &t);
   static Token makeString(const std::string &value, SourceLoc loc, bool space);
-  static std::string quoteString(const std::string &value);
-
-  // #if expressions
-  bool evalCondition(Toks expr, SourceLoc loc);
 
   Diagnostics &diag_;
   std::vector<std::string> includeDirs_;

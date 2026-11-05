@@ -4,11 +4,22 @@ message(STATUS "xbc: using LLVM ${LLVM_PACKAGE_VERSION} (${LLVM_DIR})")
 add_executable(xbc
   src/common/Diagnostics.cpp
   src/preprocessor/Lexer.cpp
+  src/preprocessor/Directives.cpp
   src/preprocessor/Preprocessor.cpp
+  src/preprocessor/RuleMatch.cpp
+  src/preprocessor/RuleParse.cpp
+  src/preprocessor/RuleResult.cpp
+  src/parser/Expressions.cpp
   src/parser/Parser.cpp
+  src/parser/Statements.cpp
   src/sema/Sema.cpp
   src/opt/Fold.cpp
   src/codegen/CodeGen.cpp
+  src/codegen/Codeblocks.cpp
+  src/codegen/Expressions.cpp
+  src/codegen/Literals.cpp
+  src/codegen/Statements.cpp
+  src/codegen/Variables.cpp
   src/codegen/Emit.cpp
   src/driver/main.cpp
 )

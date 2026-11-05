@@ -8,9 +8,11 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
+#include <initializer_list>
 #include <map>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace xb {
@@ -29,35 +31,25 @@ public:
   bool run(const Module &m, bool emitEntry);
 
 private:
+  // Fields of xb_item, in the LLVM struct that mirrors it.
+  enum ItemField : unsigned { FType = 0, FWidth = 1, FDec = 2, FValue = 3 };
+
+  // CodeGen.cpp: types, runtime declarations, item and basic block helpers,
+  // functions, frames, module initialization, program entry.
   void initTypes();
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
   llvm::Function *declareXbFunc(const std::string &xbName, bool internal);
   void addAbiAttributes(llvm::Function *f);
-  llvm::StructType *strType(llvm::Type *data);
   static std::string mangle(const std::string &xbName) { return "xbf_" + xbName; }
-
-  llvm::Constant *literalItem(uint32_t type, uint16_t width, uint16_t dec, llvm::Constant *payload);
-  llvm::Constant *nilLiteral();
-  llvm::Constant *logicalLiteral(bool v);
-  llvm::Constant *numberLiteral(const NumberExpr &n);
-  llvm::Constant *intLiteral(int64_t v);
-  llvm::Constant *stringLiteral(const std::string &s);
-
   void genFunc(const FuncDecl &f);
+  void beginFrame(llvm::Value *argc, llvm::Value *argv, uint32_t nparams, uint32_t nlocals,
+                  const std::vector<bool> &boxed);
+  void endFrame();
   void genEntry(const FuncDecl &start);
   void genModuleInit(const Module &m);
-  llvm::Value *staticAddress(uint32_t idx);
-  llvm::Value *entryAlloca(llvm::Type *ty, const char *name);
-  void genForEach(const ForEachStmt &st);
-  bool isBoxed(const VarExpr &v) const;
-  bool isEachVar(const VarExpr &v) const;
-  llvm::Value *refTarget(llvm::Value *ref);
-  llvm::Value *derefIfRef(llvm::Value *item);
-  void genSwitch(const SwitchStmt &st);
   llvm::Value *slot(uint32_t idx);
   uint32_t allocTemps(uint32_t n);
   llvm::Value *tempSlot() { return slot(allocTemps(1)); }
-
   void copyItem(llvm::Value *dst, llvm::Value *src);
   void setNil(llvm::Value *dst);
   void storeLogical(llvm::Value *dst, llvm::Value *i1);
@@ -65,9 +57,35 @@ private:
   void startDeadBlock();
   llvm::BasicBlock *newBlock(const char *name);
 
+  // Literals.cpp
+  llvm::StructType *strType(llvm::Type *data);
+  llvm::Constant *literalItem(uint32_t type, uint16_t width, uint16_t dec, llvm::Constant *payload);
+  llvm::Constant *nilLiteral();
+  llvm::Constant *logicalLiteral(bool v);
+  llvm::Constant *numberLiteral(const NumberExpr &n);
+  llvm::Constant *intLiteral(int64_t v);
+  llvm::Constant *stringLiteral(const std::string &s);
+
+  // Statements.cpp
   void genBlock(const Block &b);
   void genStmt(const Stmt &s);
+  llvm::Value *entryAlloca(llvm::Type *ty, const char *name);
+  void genForEach(const ForEachStmt &st);
+  void genSwitch(const SwitchStmt &st);
 
+  // Variables.cpp
+  void boxCaptured(const std::vector<bool> &boxed);
+  llvm::Value *cellOfSlot(uint32_t slot);
+  llvm::Value *capturedCellAddress(llvm::Value *block, uint32_t index);
+  llvm::Value *staticAddress(uint32_t idx);
+  bool isBoxed(const VarExpr &v) const;
+  bool isEachVar(const VarExpr &v) const;
+  llvm::Value *refTarget(llvm::Value *ref);
+  llvm::Value *derefIfRef(llvm::Value *item);
+  llvm::Value *varAddress(const Expr &e);
+
+  // Expressions.cpp
+  static bool hasSideEffects(const Expr &e);
   void genExpr(const Expr &e, llvm::Value *dst);
   void genDiscard(const Expr &e);
   llvm::Value *genOperand(const Expr &e);
@@ -81,15 +99,10 @@ private:
   void genIIf(const IIfExpr &e, llvm::Value *dst);
   void genArrayLit(const ArrayLitExpr &a, llvm::Value *dst);
   void genIndexAssign(const IndexExpr &target, const AssignExpr *assign, const IncDecExpr *incdec, llvm::Value *dst);
+
+  // Codeblocks.cpp
   void genCodeblock(const BlockExpr &b, llvm::Value *dst);
   llvm::Function *genCodeblockFunction(const BlockExpr &b);
-  void boxCaptured(const std::vector<bool> &boxed);
-  void beginFrame(llvm::Value *argc, llvm::Value *argv, uint32_t nparams, uint32_t nlocals,
-                  const std::vector<bool> &boxed);
-  void endFrame();
-  llvm::Value *varAddress(const Expr &e);
-  llvm::Value *cellOfSlot(uint32_t slot);
-  llvm::Value *capturedCellAddress(llvm::Value *block, uint32_t index);
 
   llvm::LLVMContext &ctx_;
   llvm::Module &mod_;
@@ -158,7 +171,7 @@ private:
     const std::vector<bool> *boxed;
     llvm::IRBuilderBase::InsertPoint ip;
   };
-  FnState saveFn();
+  FnState saveFn();           // Codeblocks.cpp
   void restoreFn(FnState s);
 };
 
