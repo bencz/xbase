@@ -21,6 +21,7 @@ add_executable(xbc
   src/xir/GenExpr.cpp
   src/xir/GenStmt.cpp
   src/xir/IR.cpp
+  src/xir/Ops.cpp
   src/xir/Printer.cpp
   src/xir/Verifier.cpp
   src/codegen/CodeGen.cpp

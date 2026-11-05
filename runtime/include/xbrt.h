@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 6u
+#define XB_ABI_VERSION 7u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -94,7 +94,24 @@ enum {
 };
 #define XB_PENDING_UNWIND (XB_PENDING_ERROR | XB_PENDING_BREAK | XB_PENDING_QUIT)
 
-typedef struct xb_ctx xb_ctx;   /* per-task context; first field is `pending` [ABI] */
+/* [ABI] A compiled function's item frame (parameters, LOCALs, temporaries):
+ * on the machine stack, linked into its context's chain while the function
+ * runs. The collector scans the frames of every chain; slots are NIL or valid
+ * items whenever something can allocate. */
+typedef struct xb_frame xb_frame;
+#ifndef __cplusplus
+struct xb_frame {
+  xb_frame *prev;
+  uint32_t nslots;
+  xb_item slots[];
+};
+#endif
+
+/* [ABI] Per-task context. Compiled code uses its first fields, which the
+ * context starts with in this order: `uint32_t pending` (requests tested after
+ * every operation that can fail), `int32_t exitcode`, `xb_frame *frames` (the
+ * innermost frame of the chain). */
+typedef struct xb_ctx xb_ctx;
 
 /* [ABI] dynamic calling convention used by every xBase-callable function:
  * arguments are an array of items owned by the caller, the result is
@@ -129,11 +146,10 @@ struct xb_block {
 
 int32_t  xb_pending(xb_ctx *ctx);
 
-void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset);
-
-xb_item *xb_frame_push(xb_ctx *ctx, uint32_t nslots);
-void     xb_frame_pop(xb_ctx *ctx, xb_item *base);
-void     xb_args_copy(xb_item *dst, uint32_t nparams, uint32_t argc, const xb_item *argv);
+/* The layout the module was compiled for: offsets of xb_str.data,
+ * xb_block.cells, xb_frame.slots and xb_ctx.frames. */
+void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
+                      uint32_t frame_slots_offset, uint32_t ctx_frames_offset);
 
 void     xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);

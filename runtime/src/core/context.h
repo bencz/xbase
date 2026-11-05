@@ -1,24 +1,13 @@
-/* Task contexts and item frames. */
+/* Task contexts. */
 #ifndef XB_CONTEXT_H
 #define XB_CONTEXT_H
 
 #include "gc/gc.h"
 
-/* Item frames live in a segmented stack: a segment is never reallocated,
- * so pointers handed to compiled code stay valid for the frame lifetime.
- * Frames are GC roots. */
-typedef struct xb_seg {
-  struct xb_seg *prev;
-  struct xb_seg *next;      /* spare segment kept for reuse */
-  size_t         cap;
-  size_t         used;
-  xb_item        items[];
-} xb_seg;
-
 struct xb_ctx {
-  uint32_t pending;         /* [ABI] must stay the first field */
-  int32_t  exitcode;
-  xb_seg  *seg;
+  uint32_t  pending;        /* [ABI] the first three fields, in this order (see xbrt.h) */
+  int32_t   exitcode;
+  xb_frame *frames;         /* innermost frame of compiled code; frames are GC roots */
   xb_ctx  *gcNext, *gcPrev; /* registered root sets */
   xb_item *roots[XB_GC_MAX_ROOTS];
   unsigned rootLen;
@@ -31,8 +20,6 @@ struct xb_ctx {
   int32_t  epoch;           /* SET EPOCH */
   int      century;         /* SET CENTURY */
 };
-
-#define XB_SEG_DEFAULT 4096
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 

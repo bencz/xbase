@@ -21,8 +21,8 @@ namespace xb {
 // Lowers an xIR module into an in-memory LLVM module (docs/xir.md, phase 1).
 //
 // Execution model (see docs/runtime.md):
-//  * every item lives in an item frame obtained from the runtime (GC roots,
-//    stable addresses); FramePlan decides which item goes where;
+//  * every item lives in the function's item frame, an alloca linked into
+//    the context's chain (GC roots); FramePlan decides which item goes where;
 //  * operations call the runtime;
 //  * after an operation that can fail, ctx->pending is tested and the
 //    function leaves through the operation's unwind block (its exit).
@@ -32,12 +32,18 @@ public:
   bool run(const xir::Module &m, bool emitEntry);
 
 private:
-  // Fields of xb_item, in the LLVM struct that mirrors it.
+  // Fields of xb_item, xb_frame and the head of xb_ctx, in the LLVM structs
+  // that mirror them.
   enum ItemField : unsigned { FType = 0, FWidth = 1, FDec = 2, FValue = 3 };
+  enum FrameField : unsigned { FramePrev = 0, FrameCount = 1, FrameSlots = 2 };
+  enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2 };
 
   // CodeGen.cpp: types, runtime declarations, the module, functions and
   // their frames, item and basic block helpers.
   void initTypes();
+  llvm::StructType *frameType(uint32_t nslots);
+  void pushFrame(uint32_t nslots, uint32_t nparams, llvm::Value *argc, llvm::Value *argv);
+  void popFrame();
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
   void addAbiAttributes(llvm::Function *f);
   llvm::Function *declare(const xir::Function &f);
@@ -99,12 +105,14 @@ private:
   llvm::FunctionType *blockFnTy_ = nullptr;
   llvm::FunctionType *initFnTy_ = nullptr;
   llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, ncells, cells[] }
+  llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, exitcode, frames }
+  llvm::GlobalVariable *nilItem_ = nullptr; // a NIL item: missing arguments
   uint64_t itemSize_ = 0;
   llvm::Align itemAlign_;
   uint64_t unionSize_ = 0;
 
   // runtime entry points
-  llvm::FunctionCallee rtFramePush_, rtFramePop_, rtArgsCopy_, rtCondError_, rtForTest_, rtAbiCheck_;
+  llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
   llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_, rtPending_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
@@ -122,7 +130,7 @@ private:
 
   // the function being generated
   llvm::Function *fn_ = nullptr;
-  llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr;
+  llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
   llvm::BasicBlock *fnExit_ = nullptr;
   const FramePlan *plan_ = nullptr;
   std::unordered_map<const xir::BasicBlock *, llvm::BasicBlock *> blocks_;

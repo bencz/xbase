@@ -30,9 +30,14 @@ typedef struct xb_item {
 
 ## Frames
 
-Parameters, `LOCAL`s and temporaries live in item frames taken from a per-context segmented stack
-(`xb_frame_push`/`xb_frame_pop`). Segments are never reallocated, so a frame's address is stable for its lifetime; new
-frames start as `NIL`. Frames are GC roots.
+Parameters, `LOCAL`s and temporaries of a compiled function live in its item frame (`xb_frame`: link, slot count,
+items), an `alloca` on the machine stack. The function links it into its context's chain (`xb_ctx.frames`) at entry,
+with the parameters copied from `argv` (`NIL` past `argc`) and the other slots `NIL`, and unlinks it at exit; every
+exit goes through one block, and errors return normally (the pending flag), so the chain is always right. The
+collector scans the frames of every context's chain. A frame dies with its function: nothing keeps a pointer to a slot
+(a variable that outlives it moves into a heap cell first). The program runs on a thread whose stack is reserved at
+256 MB (`XB_PROGRAM_STACK_SIZE` in `core/main.c`; pages are committed as used), so deep recursion has room; running
+past it is not detected yet and ends the process.
 
 ## Garbage collector
 
@@ -43,8 +48,8 @@ each one, so object pointers are what the rest of the runtime and compiled code 
 - Allocation: objects up to 2048 bytes (header included) come from 64 KB pages of 27 size classes. Every thread has a
   local heap with one page per class and allocates from its free list without locking. Larger objects are allocated
   individually.
-- Roots: the frames and temporary C roots (`xb_gc_root_push`) of every registered context, which includes suspended
-  tasks, and global item arrays registered with `xb_gc_add_root` (the modules' `STATIC`s).
+- Roots: the frames and temporary C roots (`xb_gc_root_push`) of every registered context, and global item arrays
+  registered with `xb_gc_add_root` (the modules' `STATIC`s).
 - Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young.
   A young collection marks from the roots and the remembered set, stops at old objects instead of traversing them,
   and frees only the young objects it did not reach. A full collection clears every mark and traces the whole heap;
@@ -134,8 +139,8 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 - Every runtime function is declared in `include/rtl.ch` (`EXTERN FUNCTION`, see [compiler.md](compiler.md#calls));
   the `runtime.declarations` test checks that the declarations and the `xbf_` definitions match.
 - The caller evaluates the arguments into consecutive slots of its own frame and sets `ret` to `NIL`; a callee that
-  returns nothing leaves it untouched. The callee copies its parameters into its frame (`xb_args_copy`); missing
-  arguments are `NIL`. An argument passed by reference is an `XB_T_CELL` or `XB_T_REF` item (see
+  returns nothing leaves it untouched. The callee copies its parameters into its frame; missing arguments are
+  `NIL`. An argument passed by reference is an `XB_T_CELL` or `XB_T_REF` item (see
   [References](#references)); a C function receives one only where its declaration says `@`.
 - Every 32-bit parameter of a runtime entry point is `uint32_t` and every 32-bit result `int32_t`; the compiler
   relies on this to apply the target's argument-extension rules.

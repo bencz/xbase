@@ -548,8 +548,8 @@ static void settle_young(void) {
 
 static void mark_roots(void) {
   for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) {
-    for (const xb_seg *s = ctx->seg; s; s = s->prev)
-      for (size_t i = 0; i < s->used; ++i) mark_item(&s->items[i]);
+    for (const xb_frame *f = ctx->frames; f; f = f->prev)
+      for (uint32_t i = 0; i < f->nslots; ++i) mark_item(&f->slots[i]);
     for (unsigned i = 0; i < ctx->rootLen; ++i) mark_item(ctx->roots[i]);
   }
   for (const xb_root *r = heap.roots; r; r = r->next)

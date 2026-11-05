@@ -51,13 +51,13 @@ void CodeGen::initTypes() {
   blockFnTy_ = FunctionType::get(voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, ptrTy_}, false);
   initFnTy_ = FunctionType::get(voidTy, {ptrTy_}, false);
   blockTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(ptrTy_, 0)}, "xb_block");
-
-  rtFramePush_ = rt("xb_frame_push", ptrTy_, {ptrTy_, i32_});
-  rtFramePop_ = rt("xb_frame_pop", voidTy, {ptrTy_, ptrTy_});
-  rtArgsCopy_ = rt("xb_args_copy", voidTy, {ptrTy_, i32_, i32_, ptrTy_});
+  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_}, "xb_ctx_head"); // the [ABI] fields of xb_ctx
+  nilItem_ = new GlobalVariable(mod_, itemTy_, true, GlobalValue::InternalLinkage, Constant::getNullValue(itemTy_),
+                                "xb.nil");
+  nilItem_->setAlignment(itemAlign_);
   rtCondError_ = rt("xb_cond_error", i32_, {ptrTy_, ptrTy_});
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
-  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_});
+  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_});
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
@@ -164,7 +164,7 @@ bool CodeGen::run(const xir::Module &m, bool emitEntry) {
 }
 
 // Prologue: the item frame (sized by the frame plan), the parameters copied
-// into it; the body; the exit block, where every path ends, pops the frame.
+// into it; the body; the exit block, where every path ends, unlinks the frame.
 void CodeGen::genFunction(const xir::Function &f) {
   fn_ = functions_.at(&f);
   fn_->setUWTableKind(UWTableKind::Async); // backtraces / profilers
@@ -192,8 +192,7 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnSelf_ = fn_->getArg(4);
     fnSelf_->setName("self");
   }
-  fnBase_ = b_.CreateCall(rtFramePush_, {fnCtx_, ConstantInt::get(i32_, plan.frameSize())}, "frame");
-  if (f.numParams) b_.CreateCall(rtArgsCopy_, {fnBase_, ConstantInt::get(i32_, f.numParams), argc, argv});
+  pushFrame(plan.frameSize(), f.numParams, argc, argv);
   fnExit_ = BasicBlock::Create(ctx_, "exit", fn_);
 
   // Blocks in reverse postorder; machine-value block parameters become PHIs.
@@ -212,9 +211,40 @@ void CodeGen::genFunction(const xir::Function &f) {
     for (auto &i : xb->insts) emit(*i);
   }
   b_.SetInsertPoint(fnExit_);
-  b_.CreateCall(rtFramePop_, {fnCtx_, fnBase_});
+  popFrame();
   b_.CreateRetVoid();
   plan_ = nullptr;
+}
+
+// The frame of a compiled function (xb_frame in xbrt.h): an alloca linked into
+// the context's chain. Parameters come from argv (NIL past argc), the other
+// slots start as NIL; all of them are valid before anything can allocate.
+StructType *CodeGen::frameType(uint32_t nslots) {
+  return StructType::get(ctx_, {ptrTy_, i32_, ArrayType::get(itemTy_, nslots)});
+}
+
+void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *argv) {
+  StructType *ty = frameType(nslots);
+  BasicBlock &entry = fn_->getEntryBlock(); // a static alloca, whatever block the frame is linked in
+  AllocaInst *frame = IRBuilder<>(&entry, entry.getFirstInsertionPt()).CreateAlloca(ty, nullptr, "frame");
+  fnBase_ = b_.CreateConstInBoundsGEP2_32(ty, frame, 0, FrameSlots, "slots");
+  for (uint32_t k = 0; k < nparams; ++k) {
+    Value *given = b_.CreateICmpULT(ConstantInt::get(i32_, k), argc);
+    Value *src = b_.CreateSelect(given, b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k), nilItem_);
+    copyItem(slot(k), src);
+  }
+  if (nslots > nparams)
+    b_.CreateMemSet(slot(nparams), b_.getInt8(0), (uint64_t)(nslots - nparams) * itemSize_, itemAlign_);
+  b_.CreateStore(ConstantInt::get(i32_, nslots), b_.CreateStructGEP(ty, frame, FrameCount));
+  Value *frames = b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames);
+  b_.CreateStore(b_.CreateLoad(ptrTy_, frames, "prev"), b_.CreateStructGEP(ty, frame, FramePrev));
+  b_.CreateStore(frame, frames);
+  fnFrame_ = frame;
+}
+
+void CodeGen::popFrame() {
+  Value *prev = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(frameType(0), fnFrame_, FramePrev), "prev");
+  b_.CreateStore(prev, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames));
 }
 
 // The module's STATICs: a global constructor registers them as GC roots, with
@@ -244,17 +274,20 @@ void CodeGen::genEntry(const xir::Function &start) {
   Value *ctx = fn->getArg(0);
   uint64_t strHdr = dl_.getStructLayout(strType(ArrayType::get(i8_, 0)))->getElementOffset(3);
   uint64_t blockCells = dl_.getStructLayout(blockTy_)->getElementOffset(2);
+  uint64_t frameSlots = dl_.getStructLayout(frameType(0))->getElementOffset(FrameSlots);
+  uint64_t ctxFrames = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxFrames);
   b_.CreateCall(rtAbiCheck_, {ConstantInt::get(i32_, XB_ABI_VERSION), ConstantInt::get(i32_, itemSize_),
-                              ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells)});
+                              ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
+                              ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames)});
   fn_ = fn;
   fnCtx_ = ctx;
   fnExit_ = BasicBlock::Create(ctx_, "done", fn);
   b_.CreateCall(rtModulesInit_, {ctx});
   checkPending(fnExit_); // an error in a module initialization ends the program
-  Value *ret = b_.CreateCall(rtFramePush_, {ctx, ConstantInt::get(i32_, 1)});
+  pushFrame(1, 0, nullptr, nullptr); // the start function's result slot, a root
   b_.CreateCall(xbFuncTy_, functions_.at(&start),
-                {ctx, ret, ConstantInt::get(i32_, 0), ConstantPointerNull::get(ptrTy_)});
-  b_.CreateCall(rtFramePop_, {ctx, ret});
+                {ctx, slot(0), ConstantInt::get(i32_, 0), ConstantPointerNull::get(ptrTy_)});
+  popFrame();
   b_.CreateBr(fnExit_);
   fnExit_->moveAfter(b_.GetInsertBlock());
   b_.SetInsertPoint(fnExit_);
@@ -283,7 +316,7 @@ void CodeGen::storeLogical(Value *dst, Value *bit) { storeTagged(dst, XB_T_LOGIC
 // One load + one well-predicted branch per fallible call; when something is
 // pending, xb_pending() serves pauses (GC safepoints) and says whether to unwind.
 void CodeGen::checkPending(BasicBlock *unwind) {
-  Value *pending = b_.CreateLoad(i32_, fnCtx_, "pending");
+  Value *pending = b_.CreateLoad(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxPending), "pending");
   Value *isSet = b_.CreateICmpNE(pending, ConstantInt::get(i32_, 0));
   BasicBlock *slow = newBlock("pending");
   BasicBlock *cont = newBlock("ok");

@@ -93,9 +93,9 @@ function(xb_add_codegen_test name triple regex)
 endfunction()
 
 # 32-bit runtime arguments are extended as the target ABI requires.
-xb_add_codegen_test(s390x_i32_zeroext s390x-linux-gnu "@xb_frame_push\\(ptr, i32 zeroext\\)")
-xb_add_codegen_test(riscv64_i32_signext riscv64-linux-gnu "@xb_frame_push\\(ptr, i32 signext\\)")
-xb_add_codegen_test(x86_64_i32_plain x86_64-linux-gnu "@xb_frame_push\\(ptr, i32\\)")
+xb_add_codegen_test(s390x_i32_zeroext s390x-linux-gnu "@xb_abi_check\\(i32 zeroext, i32 zeroext,")
+xb_add_codegen_test(riscv64_i32_signext riscv64-linux-gnu "@xb_abi_check\\(i32 signext, i32 signext,")
+xb_add_codegen_test(x86_64_i32_plain x86_64-linux-gnu "@xb_abi_check\\(i32, i32,")
 
 # xIR tests: the xIR of tests/xir/<name>.prg (--dump-xir) must equal <name>.xir.
 file(GLOB XB_XIR_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/xir ${CMAKE_CURRENT_SOURCE_DIR}/xir/*.prg)

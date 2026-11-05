@@ -208,8 +208,10 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   straight into a heap object (a cell, an element) and only into a plain frame variable, and an operation that can
   fail is not computed in place through a reference (finding the element can fail too, and the operation's error
   comes first). Two edges from one block to the same block do not share their arguments' slots.
-- The entry block obtains the frame (`xb_frame_push`, of the planned size) and copies the parameters
-  (`xb_args_copy`); the caller has already set the result to `NIL`. The exit block pops the frame and returns. Blocks
+- The entry block allocates the frame of the planned size on the stack (`pushFrame`: an `alloca` of `xb_frame`, see
+  [runtime.md](runtime.md#frames)), copies the parameters branch-free (a selected source: `argv[k]` or a `NIL`
+  constant), clears the other slots and links the frame into the context; the caller has already set the result to
+  `NIL`. The exit block unlinks the frame and returns. Blocks
   are laid out in reverse postorder visiting successors last first, so a block's first successor (a loop body, a
   THEN branch) follows it and exits come later.
 - Operations call the runtime (`xb_op_*` and the others); the result may alias an operand. Calls set the result slot

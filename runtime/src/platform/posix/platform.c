@@ -6,6 +6,28 @@
 
 void xb_platform_init(void) {}
 
+typedef struct {
+  void (*fn)(void *);
+  void *arg;
+} thread_start;
+
+static void *run_thread(void *p) {
+  thread_start *start = p;
+  start->fn(start->arg);
+  return NULL;
+}
+
+int xb_platform_run_on_stack(size_t stack_size, void (*fn)(void *), void *arg) {
+  pthread_attr_t attr;
+  pthread_t thread;
+  thread_start start = {fn, arg};
+  if (pthread_attr_init(&attr) != 0) return 0;
+  int ok = pthread_attr_setstacksize(&attr, stack_size) == 0 && pthread_create(&thread, &attr, run_thread, &start) == 0;
+  pthread_attr_destroy(&attr);
+  if (ok) pthread_join(thread, NULL);
+  return ok;
+}
+
 struct xb_mutex_impl {
   pthread_mutex_t m;
 };

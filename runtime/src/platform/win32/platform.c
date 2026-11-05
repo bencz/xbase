@@ -13,6 +13,26 @@ void xb_platform_init(void) {
   _setmode(_fileno(stderr), _O_BINARY);
 }
 
+typedef struct {
+  void (*fn)(void *);
+  void *arg;
+} thread_start;
+
+static DWORD WINAPI run_thread(LPVOID p) {
+  thread_start *start = p;
+  start->fn(start->arg);
+  return 0;
+}
+
+int xb_platform_run_on_stack(size_t stack_size, void (*fn)(void *), void *arg) {
+  thread_start start = {fn, arg};
+  HANDLE thread = CreateThread(NULL, stack_size, run_thread, &start, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+  if (!thread) return 0;
+  WaitForSingleObject(thread, INFINITE);
+  CloseHandle(thread);
+  return 1;
+}
+
 struct xb_mutex_impl {
   SRWLOCK lock;
 };

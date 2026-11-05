@@ -1,6 +1,7 @@
 #pragma once
 
 #include "parser/AST.h"
+#include "xir/Ops.h"
 
 #include <cstdint>
 #include <memory>
@@ -108,46 +109,6 @@ inline bool usuallyInCell(const Var &v) { return v.kind == Var::Kind::Frame && v
 // neither shared nor a parameter): only stores of the variable itself can
 // change what a load of it reads, and nothing it holds lives in the heap.
 inline bool isPlain(const Var &v, Access a) { return v.kind == Var::Kind::Frame && a == Access::Direct; }
-
-enum class Op : uint8_t {
-  // values
-  NumDefaultDec,  // f64 immediate -> Item with SET DECIMALS decimals
-  Load,           // var, access -> Item
-  Store,          // var, access; value
-  Barrier,        // var, access: write barrier after a store
-  Unary,          // unop; a -> Item                        [may fail]
-  Binary,         // binop; a, b -> Item                    [may fail]
-  Truth,          // a -> Bool: .T./.F., anything else fails [may fail]
-  FromBool,       // Bool -> Item: .T. or .F.
-  Call,           // callee; args... -> Item                [may fail]
-  ArrayLit,       // elems... -> Item
-  Index,          // base, index -> Item                    [may fail]
-  IndexSet,       // base, index, value                     [may fail]
-  MakeBlock,      // block function, captured vars (moved into cells) -> Item
-  ForTest,        // counter, limit, step -> Bool           [may fail]
-  EnumLen,        // collection -> I64                      [may fail]
-  EachInCell,     // var -> Bool: it is shared, in a cell the loop works inside (moved into one if it holds an
-                  // element passed to it by reference)
-  EachEnter,      // var; Bool in_cell, collection -> Item: saves the variable, installs the loop's reference
-  EachMove,       // var; Bool in_cell, I64 index: the loop's reference at an element         [may fail]
-  EachLeave,      // var; Bool in_cell, saved value: restores the variable
-  RefVar,         // var -> Item: a reference to the variable, for an argument passed by reference
-  RefIndex,       // base, index -> Item: a reference to an element (an argument @a[i]) [may fail]
-  SwitchCheck,    // value                                  [may fail]
-  SwitchMatch,    // value, case constant -> Bool
-  IntAdd,         // I64, I64 -> I64
-  IntSub,         // I64, I64 -> I64
-  IntCmp,         // pred; I64, I64 -> Bool
-  BoolAnd,        // Bool, Bool -> Bool
-  BoolNot,        // Bool -> Bool
-  // terminators
-  Br,             // target(args)
-  CondBr,         // Bool; then(args), else(args)
-  Ret,            // [Item]
-};
-
-const char *opName(Op op);
-bool isTerminator(Op op);
 
 enum class IntPred : uint8_t { Eq, Ne, Lt, Le, Gt, Ge };
 

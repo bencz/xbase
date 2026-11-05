@@ -12,8 +12,8 @@ coroutines, classes) run before lowering, where LLVM can no longer see them.
 
 - Functions of basic blocks in SSA form. Blocks take parameters, and branches pass arguments to them (the
   equivalent of PHI nodes, easier to transform: splitting blocks, inlining, building state machines). Lowering turns
-  machine-typed block parameters into LLVM PHIs; while items live in frame slots (phase 1), an `item` parameter is a
-  slot that each branch writes its argument into.
+  machine-typed block parameters into LLVM PHIs; while items live in frame slots (until phase 4), an `item` parameter
+  is a slot that each branch writes its argument into.
 - Values are typed. `item` is a dynamic value of unknown type; type inference narrows values to `int` (64-bit),
   `double`, `logical`, `date`, `nil`, `string`, `array`, `block`, `object<Class>` and `ref`. A narrowed value is
   unboxed (an `int` lives in a register, not in an item).
@@ -65,9 +65,6 @@ The passes need infrastructure xIR does not have yet:
 
 - Mutation: replacing all uses of a value, erasing and moving instructions, splitting blocks, cloning blocks and
   functions (inlining, unrolling, unswitching).
-- An effect table, one row per operation (data, not switches spread over passes): what it reads and writes (a
-  variable, an element, any heap object), whether it may fail, run user code (calls, codeblocks) or allocate (a
-  safepoint), whether it is pure or commutative. `mayFail` and the writes the frame plan tracks become lookups in it.
 - Attributes of external functions in their declarations (pure, no allocation, reads its arguments only), next to
   `FOLD`, so calls such as `Len` can be moved, merged and removed.
 - Cached analyses with invalidation: natural loops and their nesting, post-dominators and dominance frontiers
@@ -94,10 +91,13 @@ LLVM then does instruction selection, register allocation and its own vectorizat
 
 ## Code
 
-`compiler/src/xir/`: the IR (`IR.h`: functions, blocks, values, instructions, variables), `Builder`, `Verifier`,
-`Printer`, control flow analyses (`Analysis`: reverse postorder, dominators, removal of unreachable blocks), and the
-lowering from the syntax tree (`Gen*.cpp`). `compiler/src/codegen/` lowers xIR to LLVM (`FramePlan` assigns the
-frame). Optimization passes on xIR come with phase 2.
+`compiler/src/xir/`: the IR (`IR.h`: functions, blocks, values, instructions, variables), the catalog of operations
+(`Ops.*`: one row per operation with its name and effects: whether it may fail, reads or writes its variable or the
+heap, depends on SET values, runs xBase code, allocates, ends a block, is commutative; `mayFail` and the copy elision
+of the frame plan consult it), `Builder`, `Verifier`, `Printer`, control flow analyses (`Analysis`: reverse
+postorder, dominators, removal of unreachable blocks), and the lowering from the syntax tree (`Gen*.cpp`).
+`compiler/src/codegen/` lowers xIR to LLVM (`FramePlan` assigns the frame). Optimization passes on xIR come with
+phase 3.
 
 ## Phase 1 in detail
 
@@ -130,9 +130,11 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 ## Phases
 
 1. The core, lowering from the syntax tree and to LLVM, reproducing the previous behavior (done).
-2. Native frames: item values in LLVM values, with the collector finding them through LLVM stack maps
-   (statepoints) instead of frame slots; direct calls with fixed arity.
+2. Native frames: item frames on the machine stack, linked per context (done; each frame is the anchor the stack
+   maps of phase 4 are relative to). Direct calls with fixed arity (planned).
 3. The pass manager and the passes (see [Passes](#passes)), starting with mem2reg, type inference and inline fast
    paths.
-4. Relocation through statepoints, evacuation in the collector, barrier elision.
+4. Statepoints: once mem2reg makes items SSA values, LLVM keeps them in registers and records where the live
+   object pointers are at each call (stack maps, relative to the frame's anchor), instead of frame slots holding
+   every item; relocation, evacuation in the collector, barrier elision.
 5. Unwind edges and `BEGIN SEQUENCE`; resumable functions (async/await, yield); classes.

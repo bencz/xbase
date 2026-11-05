@@ -37,8 +37,8 @@ void FramePlan::number() {
 // A load whose single use comes later in the same block, with nothing in
 // between that can write the variable, is served by the variable's own item.
 // A plain frame variable changes only by its own stores; one in a cell, a
-// STATIC, or one reached through a reference can also change through calls,
-// element stores and any store (references may designate the same element).
+// STATIC, or one reached through a reference can also change through anything
+// that writes a variable or the heap or runs code (see Effect in IR.h).
 // One pass per block: the position of the last write of each variable and of
 // the last instruction that may write any variable indirectly.
 void FramePlan::elideLoads(const BasicBlock &b) {
@@ -59,22 +59,12 @@ void FramePlan::elideLoads(const BasicBlock &b) {
       }
     }
     uint32_t p = pos_.at(&u);
-    switch (u.op) {
-    case Op::Store: case Op::EachInCell: case Op::EachEnter: case Op::EachMove: case Op::EachLeave:
-    case Op::RefVar: // moves the variable into a cell
-      lastWrite[u.var] = p;
-      lastIndirect = p;
-      break;
-    case Op::MakeBlock: // moves the captured variables into cells
+    uint16_t e = opInfo(u.op).effects;
+    if (e & WritesVar) {
+      if (u.var) lastWrite[u.var] = p;
       for (const Var *c : u.captures) lastWrite[c] = p;
-      lastIndirect = p;
-      break;
-    case Op::Call: case Op::IndexSet:
-      lastIndirect = p;
-      break;
-    default:
-      break;
     }
+    if (e & (WritesVar | WritesHeap | RunsCode)) lastIndirect = p;
   }
 }
 

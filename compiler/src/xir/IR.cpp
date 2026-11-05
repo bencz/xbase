@@ -15,56 +15,9 @@ const char *typeName(Type t) {
   return "?";
 }
 
-const char *opName(Op op) {
-  switch (op) {
-  case Op::NumDefaultDec: return "num.default_dec";
-  case Op::Load: return "load";
-  case Op::Store: return "store";
-  case Op::Barrier: return "barrier";
-  case Op::Unary: return "unary";
-  case Op::Binary: return "binary";
-  case Op::Truth: return "truth";
-  case Op::FromBool: return "from_bool";
-  case Op::Call: return "call";
-  case Op::ArrayLit: return "array";
-  case Op::Index: return "index";
-  case Op::IndexSet: return "index.set";
-  case Op::MakeBlock: return "block";
-  case Op::ForTest: return "for.test";
-  case Op::EnumLen: return "enum.len";
-  case Op::EachInCell: return "each.in_cell";
-  case Op::EachEnter: return "each.enter";
-  case Op::EachMove: return "each.move";
-  case Op::EachLeave: return "each.leave";
-  case Op::RefVar: return "ref";
-  case Op::RefIndex: return "ref.index";
-  case Op::SwitchCheck: return "switch.check";
-  case Op::SwitchMatch: return "switch.match";
-  case Op::IntAdd: return "i.add";
-  case Op::IntSub: return "i.sub";
-  case Op::IntCmp: return "i.cmp";
-  case Op::BoolAnd: return "and";
-  case Op::BoolNot: return "not";
-  case Op::Br: return "br";
-  case Op::CondBr: return "cond_br";
-  case Op::Ret: return "ret";
-  }
-  return "?";
-}
-
-bool isTerminator(Op op) { return op == Op::Br || op == Op::CondBr || op == Op::Ret; }
-
 bool Instruction::mayFail() const {
-  switch (op) {
-  case Op::Unary: case Op::Binary: case Op::Truth: case Op::Call: case Op::Index: case Op::IndexSet:
-  case Op::ForTest: case Op::EnumLen: case Op::EachMove: case Op::SwitchCheck:
-  case Op::RefIndex:
-    return true;
-  case Op::Load: case Op::Store: // through a reference: a bound error when the array shrank
-    return access != Access::Direct;
-  default:
-    return false;
-  }
+  uint16_t e = opInfo(op).effects;
+  return (e & Fails) || ((e & FailsByRef) && access != Access::Direct);
 }
 
 Instruction::~Instruction() { dropOperands(); }
