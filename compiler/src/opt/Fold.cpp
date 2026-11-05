@@ -13,6 +13,8 @@ namespace xb {
 
 namespace {
 
+bool isConstant(const Expr &e);
+
 // A folded integer is an integer constant of the program; a folded double has
 // the default display width for its value (width 0).
 ExprPtr makeInt(SourceLoc loc, int64_t v) {
@@ -218,6 +220,15 @@ void Folder::fold(ExprPtr &e) {
   case ExprKind::Ref:
     fold(static_cast<RefExpr &>(*e).target); // the indexes of an element
     break;
+  case ExprKind::List: {
+    // The elements before the last are evaluated for their effects only.
+    auto &l = static_cast<ListExpr &>(*e);
+    for (auto &x : l.exprs) fold(x);
+    bool effects = false;
+    for (size_t k = 0; k + 1 < l.exprs.size(); ++k) effects |= !isConstant(*l.exprs[k]);
+    if (!effects) r = std::move(l.exprs.back());
+    break;
+  }
   case ExprKind::IIf: {
     auto &i = static_cast<IIfExpr &>(*e);
     fold(i.cond);

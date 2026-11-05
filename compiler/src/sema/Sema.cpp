@@ -322,6 +322,9 @@ void Sema::expr(Expr &e, Scope &s) {
     }
     break;
   }
+  case ExprKind::List:
+    for (auto &x : static_cast<ListExpr &>(e).exprs) expr(*x, s);
+    break;
   case ExprKind::IIf: {
     auto &i = static_cast<IIfExpr &>(e);
     expr(*i.cond, s);

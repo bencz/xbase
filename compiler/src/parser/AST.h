@@ -20,6 +20,7 @@ enum class ExprKind : uint8_t {
   IncDec,     // ++x x++ --x x--
   IIf,        // IIF( c, a, b ) / IF( c, a, b )
   Ref,        // @var, @a[i]: a call argument passed by reference
+  List,       // ( a, b, ... ): evaluated in order, the value of the last
   ArrayLit,   // { a, b, ... }
   Index,      // base[ index ]
   Block,      // {| params | exprs }
@@ -143,6 +144,11 @@ struct IndexExpr : Expr { // a[i, j] is Index( Index( a, i ), j )
 struct RefExpr : Expr {
   ExprPtr target;                // a VarExpr or an IndexExpr
   RefExpr(SourceLoc l, ExprPtr t) : Expr(ExprKind::Ref, l), target(std::move(t)) {}
+};
+
+struct ListExpr : Expr {
+  std::vector<ExprPtr> exprs;    // at least two
+  explicit ListExpr(SourceLoc l) : Expr(ExprKind::List, l) {}
 };
 
 struct BlockExpr : Expr {

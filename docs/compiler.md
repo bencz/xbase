@@ -71,7 +71,8 @@ Statements:
 Expression precedence, lowest first: `:=` and compound assignments (right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`,
 `=` `==` `!=` `<>` `#`, `<` `<=` `>` `>=` `$`, `+` `-`, `*` `/` `%`, `^`/`**`, unary `-` `+`, prefix and postfix
 `++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`), primaries (literals, `NIL`, variables, calls,
-`IIF(c, a, b)`/`IF(c, a, b)`, parentheses, array literals `{ a, b }`, codeblocks `{| params | expr, ... }`). Empty
+`IIF(c, a, b)`/`IF(c, a, b)`, parentheses, expression lists `( a, b, ... )` evaluated in order with the value of the
+last, array literals `{ a, b }`, codeblocks `{| params | expr, ... }`). Empty
 call arguments (`f(a, , b)`) and empty array elements pass `NIL`; a codeblock body has at least one expression. A
 call argument `@name` or `@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is
 an error (references in array literals, which Harbour accepts, are not supported yet), and so are function

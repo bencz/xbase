@@ -238,9 +238,15 @@ ExprPtr Parser::parsePrimary() {
   case Tok::False: advance(); return std::make_unique<LogicalExpr>(loc, false);
   case Tok::LBrace:
     return parseBraced();
-  case Tok::LParen: {
+  case Tok::LParen: { // ( expr ) or the expression list ( expr, expr, ... )
     advance();
     ExprPtr e = parseExpr();
+    if (at(Tok::Comma)) {
+      auto list = std::make_unique<ListExpr>(loc);
+      list->exprs.push_back(std::move(e));
+      while (accept(Tok::Comma)) list->exprs.push_back(parseExpr());
+      e = std::move(list);
+    }
     expect(Tok::RParen, "')'");
     e->parenthesized = true;
     return e;

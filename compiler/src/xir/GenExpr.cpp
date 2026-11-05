@@ -34,6 +34,11 @@ Value *Generator::genExpr(const Expr &e) {
   case ExprKind::Assign: return genAssign(static_cast<const AssignExpr &>(e));
   case ExprKind::IncDec: return genIncDec(static_cast<const IncDecExpr &>(e));
   case ExprKind::IIf: return genIIf(static_cast<const IIfExpr &>(e));
+  case ExprKind::List: {
+    auto &l = static_cast<const ListExpr &>(e);
+    for (size_t k = 0; k + 1 < l.exprs.size(); ++k) genDiscard(*l.exprs[k]);
+    return genExpr(*l.exprs.back());
+  }
   case ExprKind::ArrayLit: {
     std::vector<Value *> elems;
     for (auto &el : static_cast<const ArrayLitExpr &>(e).elems) elems.push_back(genExpr(*el));
@@ -79,6 +84,11 @@ Value *Generator::genCond(const Expr &e) {
     b.br(join, {genCond(*l.rhs)});
     b.setBlock(join);
     return result;
+  }
+  case ExprKind::List: {
+    auto &l = static_cast<const ListExpr &>(e);
+    for (size_t k = 0; k + 1 < l.exprs.size(); ++k) genDiscard(*l.exprs[k]);
+    return genCond(*l.exprs.back());
   }
   case ExprKind::Unary:
     if (static_cast<const UnaryExpr &>(e).op == UnOp::Not)

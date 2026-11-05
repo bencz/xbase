@@ -134,6 +134,9 @@ void CallResolver::expr(Expr &e) {
   case ExprKind::Block:
     for (auto &b : static_cast<BlockExpr &>(e).body) expr(*b);
     break;
+  case ExprKind::List:
+    for (auto &x : static_cast<ListExpr &>(e).exprs) expr(*x);
+    break;
   case ExprKind::IIf: {
     auto &i = static_cast<IIfExpr &>(e);
     expr(*i.cond);

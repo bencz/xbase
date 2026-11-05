@@ -1,0 +1,14 @@
+
+several          2         20          3
+passed on to a block        102        102
+passed on to a function         40         40
+compound and ++         12          6          2
+element         10         40         30
+static          2
+own capture          0          0
+recursion        120
+for each        100        400        300
+extra arguments          7          1
+missing argument U
+array through ref          2 set          2
+block from a function          8

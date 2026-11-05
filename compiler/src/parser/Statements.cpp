@@ -84,7 +84,7 @@ StmtPtr Parser::parseStmt() {
 
   ExprPtr e = parseExpr();
   switch (e->kind) {
-  case ExprKind::Call: case ExprKind::Assign: case ExprKind::IncDec: case ExprKind::IIf:
+  case ExprKind::Call: case ExprKind::Assign: case ExprKind::IncDec: case ExprKind::IIf: case ExprKind::List:
     break;
   default:
     diag_.warning(e->loc, "meaningless use of expression");
