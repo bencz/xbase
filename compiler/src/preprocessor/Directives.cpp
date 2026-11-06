@@ -63,6 +63,7 @@ struct CondEval {
     case Tok::Ident: v = 0; break; // undefined name
     case Tok::Not: v = !unary(); break;
     case Tok::Plus: v = unary(); break;
+    case Tok::Tilde: v = xb_bit_apply(XB_BIT_NOT, unary(), 0); break;
     case Tok::Minus: {
       int64_t r = unary();
       if (llvm::SubOverflow<int64_t>(0, r, v)) v = fail();
@@ -106,15 +107,24 @@ struct CondEval {
     }
     return v;
   }
-  int64_t rel() {
+  int64_t shift() {
     int64_t v = add();
+    while (!bad && (at(Tok::Shl) || at(Tok::Shr))) {
+      xb_bit_op op = at(Tok::Shl) ? XB_BIT_SHL : XB_BIT_SAR;
+      ++i;
+      v = xb_bit_apply(op, v, add());
+    }
+    return v;
+  }
+  int64_t rel() {
+    int64_t v = shift();
     while (!bad && cur()) {
       Tok op = cur()->kind;
       if (op != Tok::Lt && op != Tok::Le && op != Tok::Gt && op != Tok::Ge && op != Tok::Eq && op != Tok::ExactEq &&
           op != Tok::NotEq)
         break;
       ++i;
-      int64_t r = add();
+      int64_t r = shift();
       switch (op) {
       case Tok::Lt: v = v < r; break;
       case Tok::Le: v = v <= r; break;
@@ -126,11 +136,23 @@ struct CondEval {
     }
     return v;
   }
+  // A level of the bit operators & ^^ | (C's order: below the comparisons).
+  int64_t bits(int64_t (CondEval::*next)(), Tok tok, xb_bit_op op) {
+    int64_t v = (this->*next)();
+    while (!bad && at(tok)) {
+      ++i;
+      v = xb_bit_apply(op, v, (this->*next)());
+    }
+    return v;
+  }
+  int64_t bitAnd() { return bits(&CondEval::rel, Tok::Amp, XB_BIT_AND); }
+  int64_t bitXor() { return bits(&CondEval::bitAnd, Tok::BitXor, XB_BIT_XOR); }
+  int64_t bitOr() { return bits(&CondEval::bitXor, Tok::Pipe, XB_BIT_OR); }
   int64_t andExpr() {
-    int64_t v = rel();
+    int64_t v = bitOr();
     while (!bad && at(Tok::And)) {
       ++i;
-      int64_t r = rel();
+      int64_t r = bitOr();
       v = v && r;
     }
     return v;

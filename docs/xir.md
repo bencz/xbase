@@ -75,20 +75,20 @@ adjustment, as C++ compilers do.
 
 ## Types
 
-`xir/Types.*` infers, for each item value of a function, the set of types it may hold (`TypeSet`, one bit per type
-tag): an optimistic fixpoint over the SSA form in reverse postorder, where block parameters start empty and grow with
-the values their branches pass, `binary` follows its operands with the runtime operators' rules (a table,
-`binaryResult`: two integers give an integer or, on overflow, a double; a double with a number gives a double; two
-strings a string; dates and numbers a date; ...), `unary`, `from_bool`,
-literals and the constructors give their type, and anything read from memory (a variable, an element, a call's
-result) may hold any type. The lowering uses it to keep values that never refer to a heap object out of the frame
+`xir/Types.*` infers, for each item value of a function, the set of types it may hold (`TypeSet`, one bit per type tag):
+an optimistic fixpoint over the SSA form in reverse postorder, where block parameters start empty and grow with the
+values their branches pass, `binary` follows its operands with the runtime operators' rules (a table, `binaryResult`:
+two integers give an integer or, on overflow, a double; a double with a number gives a double; two strings a string;
+dates and numbers a date; the bit operators on numbers an integer; ...), `unary` (`~` gives an integer), `from_bool`,
+literals and the constructors give their type, and anything read from memory (a variable, an element, a call's result)
+may hold any type. The lowering uses it to keep values that never refer to a heap object out of the frame
 ([compiler.md](compiler.md#xir-to-llvm)), and where a value has a single possible type, the lowering uses it as a
-constant instead of reading it. The error block may substitute a value of any type for the result of an operation
-that fails ([Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that
-may fail may produce any type: `binaryMayFail` tells when operands can make a `binary` fail (an operand type pair it
-does not take, a divisor that may be zero: not a non-zero constant), `unary` and `switch.check` fail for types they
-do not take. An operation that `subst.check` follows gives only its own types (see `typed-continuations` in
-[Passes](#passes)). `Substitution::None` types every operation as if no error block substituted anything.
+constant instead of reading it. The error block may substitute a value of any type for the result of an operation that
+fails ([Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that may fail
+may produce any type: `binaryMayFail` tells when operands can make a `binary` fail (an operand type pair it does not
+take, a divisor that may be zero: not a non-zero constant), `unary` and `switch.check` fail for types they do not take.
+An operation that `subst.check` follows gives only its own types (see `typed-continuations` in [Passes](#passes)).
+`Substitution::None` types every operation as if no error block substituted anything.
 
 ## Passes
 

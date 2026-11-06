@@ -28,6 +28,10 @@ enum class Tok : uint8_t {
   NotEq,       // != <> #
   Lt, Le, Gt, Ge,
   Dollar,      // $
+  BitXor,      // ^^ (& and | are Amp and Pipe)
+  Shl, Shr,    // << >>
+  Tilde,       // ~
+  AndEq, OrEq, XorEq, ShlEq, ShrEq, // &= |= ^^= <<= >>=
   And, Or, Not,   // .AND. .OR. .NOT. / !
   LParen, RParen, LBracket, RBracket, LBrace, RBrace,
   Comma, Colon, DoubleColon, Arrow, Pipe, At, Amp,
@@ -41,6 +45,17 @@ enum class Tok : uint8_t {
 };
 
 const char *tokName(Tok t);
+
+// `:=` and the compound assignments (`+=` ... `>>=`).
+inline bool isAssignment(Tok t) {
+  switch (t) {
+  case Tok::Assign: case Tok::PlusEq: case Tok::MinusEq: case Tok::MulEq: case Tok::DivEq: case Tok::ModEq:
+  case Tok::PowEq: case Tok::AndEq: case Tok::OrEq: case Tok::XorEq: case Tok::ShlEq: case Tok::ShrEq:
+    return true;
+  default:
+    return false;
+  }
+}
 
 struct Token {
   Tok kind = Tok::Eof;

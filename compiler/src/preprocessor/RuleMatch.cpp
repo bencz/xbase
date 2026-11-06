@@ -24,9 +24,9 @@ bool canJoin(Tok k) {
 
 // Tokens that need something on their left and so cannot start an expression.
 bool needLeft(const Token &t, const Token *next) {
+  if (isAssignment(t.kind)) return true;
   switch (t.kind) {
-  case Tok::Assign: case Tok::PlusEq: case Tok::MinusEq: case Tok::MulEq: case Tok::DivEq:
-  case Tok::ModEq: case Tok::PowEq: case Tok::ExactEq: case Tok::Eq:
+  case Tok::ExactEq: case Tok::Eq:
     return true;
   case Tok::Colon:
     return !t.spaceBefore && next && next->kind == Tok::Ident;

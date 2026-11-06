@@ -75,6 +75,7 @@ void CodeGen::initTypes() {
   rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtBitNot_ = rt("xb_op_bitnot", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
   rtPending_ = rt("xb_pending", i32_, {ptrTy_});
   rtSend_ = rt("xb_op_send", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
@@ -111,7 +112,9 @@ void CodeGen::initTypes() {
       {BinOp::Div, "xb_op_div"}, {BinOp::Mod, "xb_op_mod"},       {BinOp::Pow, "xb_op_pow"},
       {BinOp::Eq, "xb_op_eq"},   {BinOp::ExactEq, "xb_op_exacteq"}, {BinOp::NotEq, "xb_op_ne"},
       {BinOp::Lt, "xb_op_lt"},   {BinOp::Le, "xb_op_le"},         {BinOp::Gt, "xb_op_gt"},
-      {BinOp::Ge, "xb_op_ge"},   {BinOp::In, "xb_op_in"},
+      {BinOp::Ge, "xb_op_ge"},   {BinOp::In, "xb_op_in"},         {BinOp::BitAnd, "xb_op_bitand"},
+      {BinOp::BitOr, "xb_op_bitor"}, {BinOp::BitXor, "xb_op_bitxor"}, {BinOp::Shl, "xb_op_shl"},
+      {BinOp::Shr, "xb_op_shr"},
   };
   for (auto &[op, name] : bins) rtBin_[op] = rt(name, voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
 }

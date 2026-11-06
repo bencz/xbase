@@ -2,6 +2,7 @@
 #include "preprocessor/Preprocessor.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "preprocessor/Internal.h"
 #include "common/Text.h"
@@ -18,7 +19,57 @@ int Preprocessor::findMarker(const Rule &r, const std::string &name) const {
   return -1;
 }
 
+// The operators made of < > and = (<= >= <> << >> <<= >>=) are one token
+// each, which would swallow the bracket of a marker next to them (`<a><<b>`,
+// `<n>>2`, `<x,...>>1`, `<a>=<b>`). In a rule they are split into their
+// characters before the markers are found; the characters left as literals
+// next to each other are joined again afterwards.
+static void splitAngleOperators(std::vector<Token> &line) {
+  for (size_t i = 0; i < line.size(); ++i) {
+    Token &t = line[i];
+    if (t.text.size() < 2 || (t.text[0] != '<' && t.text[0] != '>') || t.kind == Tok::String) continue;
+    std::vector<Token> chars;
+    for (size_t c = 0; c < t.text.size(); ++c) {
+      Token ch = t;
+      ch.text = t.text.substr(c, 1);
+      ch.kind = ch.text == "<" ? Tok::Lt : ch.text == ">" ? Tok::Gt : Tok::Eq;
+      ch.loc.col += (uint32_t)c;
+      if (c) ch.spaceBefore = false;
+      chars.push_back(std::move(ch));
+    }
+    line.erase(line.begin() + (long)i);
+    line.insert(line.begin() + (long)i, chars.begin(), chars.end());
+    i += chars.size() - 1;
+  }
+}
+
+// Joins literal tokens of single characters written together (`<` `<` is
+// `<<`), the longest operator first, in a rule's nodes and their clauses.
+template <class Node> static void joinAngleOperators(std::vector<Node> &nodes) {
+  static const std::pair<const char *, Tok> ops[] = {{"<<=", Tok::ShlEq}, {">>=", Tok::ShrEq}, {"<<", Tok::Shl},
+                                                     {">>", Tok::Shr},    {"<=", Tok::Le},      {">=", Tok::Ge},
+                                                     {"<>", Tok::NotEq}};
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (nodes[i].k != Node::Lit || (nodes[i].tok.kind != Tok::Lt && nodes[i].tok.kind != Tok::Gt)) continue;
+    std::string text = nodes[i].tok.text;
+    size_t n = 1;
+    while (n < 3 && i + n < nodes.size() && nodes[i + n].k == Node::Lit && !nodes[i + n].tok.spaceBefore &&
+           nodes[i + n].tok.text.size() == 1 && std::string("<>=").find(nodes[i + n].tok.text[0]) != std::string::npos)
+      text += nodes[i + n++].tok.text;
+    for (auto [op, kind] : ops) {
+      size_t len = std::strlen(op);
+      if (len > n || text.compare(0, len, op) != 0) continue;
+      nodes[i].tok.kind = kind;
+      nodes[i].tok.text = op;
+      nodes.erase(nodes.begin() + (long)i + 1, nodes.begin() + (long)(i + len));
+      break;
+    }
+  }
+  for (Node &node : nodes) joinAngleOperators(node.kids);
+}
+
 bool Preprocessor::parseRuleParts(Toks &line, Rule &r, bool withResult) {
+  splitAngleOperators(line);
   size_t arrow = line.size();
   for (size_t i = 2; i < line.size(); ++i) {
     if (line[i].kind == Tok::FatArrow && !(i > 2 && line[i - 1].kind == Tok::Backslash)) {
@@ -53,6 +104,8 @@ bool Preprocessor::parseRuleParts(Toks &line, Rule &r, bool withResult) {
   Toks pat(line.begin() + 2, line.begin() + (long)arrow);
   r.patternKey = upperCase(render(pat));
   if (withResult && !parseResult(line, arrow + 1, line.size(), r, r.result)) return false;
+  joinAngleOperators(r.pattern);
+  joinAngleOperators(r.result);
   // A marker can take several values (its optional clause matched more than
   // once) only if every use of it in the result is inside an optional result
   // clause, which repeats for each value; one used elsewhere has room for one.

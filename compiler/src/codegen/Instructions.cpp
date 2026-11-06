@@ -2,6 +2,8 @@
 // frame plan placed, and tests the pending flag after operations that can fail.
 #include "codegen/CodeGen.h"
 
+#include "common/BitFunctions.h"
+
 #include "xbrt.h" // constants only (type tags)
 
 #include <llvm/IR/Constants.h>
@@ -207,8 +209,16 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   case Op::Barrier: writeBarrier(*i.var, i.access); break;
   case Op::Unary: {
+    if (const xb_bit_function *f = bitOperator(i.unop)) {
+      emitBitOperator(i, *f);
+      break;
+    }
+    if (i.unop == UnOp::Neg) {
+      emitNeg(i);
+      break;
+    }
     Value *a = addr(ops[0]);
-    callItemOp(i.unop == UnOp::Neg ? rtNeg_ : rtNot_, dest(i), {a});
+    callItemOp(rtNot_, dest(i), {a});
     checkPending(unwind_);
     break;
   }

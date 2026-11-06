@@ -95,9 +95,9 @@ some of its own. Their names and syntax are xbase's own: other dialects' library
 function names below are proposals, settled when each feature is designed in detail. Behavior is checked against the
 reference implementation where it has the feature.
 
-Already done: `FOR EACH` (also `FOR EACH k => v`), `SWITCH`, `++`/`--` and the compound assignments, references to
-array elements (`@a[i]`), the bit functions, `ElapsedMs()`, hashes (literals, the `H*` functions, see
-[runtime.md](runtime.md#hashes)).
+Already done: `FOR EACH` (also `FOR EACH k => v`), `SWITCH`, `++`/`--` and the compound assignments, references to array
+elements (`@a[i]`), the bit functions and operators (`& | ^^ << >> ~` and their compound assignments), `ElapsedMs()`,
+hashes (literals, the `H*` functions, see [runtime.md](runtime.md#hashes)).
 
 ### Classes
 

@@ -28,8 +28,11 @@ enum class ExprKind : uint8_t {
   HashLit,    // { k => v, ... }, {=>}
 };
 
-enum class BinOp : uint8_t { Add, Sub, Mul, Div, Mod, Pow, Eq, ExactEq, NotEq, Lt, Le, Gt, Ge, In };
-enum class UnOp : uint8_t { Neg, Plus, Not };
+enum class BinOp : uint8_t {
+  Add, Sub, Mul, Div, Mod, Pow, Eq, ExactEq, NotEq, Lt, Le, Gt, Ge, In,
+  BitAnd, BitOr, BitXor, Shl, Shr, // & | ^^ << >> (xbase's own)
+};
+enum class UnOp : uint8_t { Neg, Plus, Not, BitNot }; // BitNot: ~ (xbase's own)
 
 struct Param {
   SourceLoc loc;

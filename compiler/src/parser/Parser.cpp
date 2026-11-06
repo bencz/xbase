@@ -93,14 +93,13 @@ bool Parser::atStmtKw(const char *kw) const {
   if (!atKw(kw)) return false;
   static const char *const keywordBeforeIncDec[] = {"IF",   "WHILE", "ELSEIF", "CASE",  "RETURN", "SWITCH",
                                                     "NEXT", "END",   "ENDIF",  "ENDDO", "ENDCASE"};
+  if (isAssignment(ahead().kind)) return false;
   switch (ahead().kind) {
   case Tok::Inc: case Tok::Dec:
     for (const char *k : keywordBeforeIncDec)
       if (std::strcmp(k, kw) == 0) return true;
     return false;
-  case Tok::Assign: case Tok::PlusEq: case Tok::MinusEq: case Tok::MulEq: case Tok::DivEq:
-  case Tok::ModEq: case Tok::PowEq: case Tok::Arrow:
-  case Tok::Colon: case Tok::LBracket: case Tok::Eq:
+  case Tok::Arrow: case Tok::Colon: case Tok::LBracket: case Tok::Eq:
     return false;
   default:
     break;

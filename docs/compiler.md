@@ -96,17 +96,23 @@ Statements:
 
 `PRIVATE`, `PUBLIC`, `MEMVAR`, `FIELD` and `PARAMETERS` are recognized and reported as not supported yet.
 
-Expression precedence, lowest first: `:=` and compound assignments (right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`,
-`=` `==` `!=` `<>` `#`, `<` `<=` `>` `>=` `$`, `+` `-`, `*` `/` `%`, `^`/`**`, unary `-` `+`, prefix and postfix
-`++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`) and messages `o:name`, `o:name( args )` (in any order:
-`a[1]:cargo[2]`), primaries (literals, `NIL`, variables, calls, `IIF(c, a, b)`/`IF(c, a, b)`, parentheses, expression
-lists `( a, b, ... )` evaluated in order with the value of the last, array literals `{ a, b }`, hash literals `{ k => v,
-... }` and `{=>}`, codeblocks `{| params | expr, ... }`). Empty call arguments (`f(a, , b)`) and empty array elements
-pass `NIL`; a codeblock body has at least one expression. A call argument `@name` or `@name[i]...` passes a variable or
-an element by reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not supported yet),
-and so are function references `@name()`. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`) and instance
-variables (`o:x := v`, a message without arguments) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a :=
-Array( n1, n2 )`.
+Expression precedence, lowest first: `:=` and compound assignments (`+=` `-=` `*=` `/=` `%=` `^=`, and xbase's `&=` `|=`
+`^^=` `<<=` `>>=`; right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`, xbase's bit operators `|`, `^^` and `&`, `=` `==`
+`!=` `<>` `#`, `<` `<=` `>` `>=` `$`, the shifts `<<` `>>`, `+` `-`, `*` `/` `%`, `^`/`**`, unary `-` `+` `~`, prefix
+and postfix `++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`) and messages `o:name`, `o:name( args )` (in any
+order: `a[1]:cargo[2]`), primaries (literals, `NIL`, variables, calls, `IIF(c, a, b)`/`IF(c, a, b)`, parentheses,
+expression lists `( a, b, ... )` evaluated in order with the value of the last, array literals `{ a, b }`, hash literals
+`{ k => v, ... }` and `{=>}`, codeblocks `{| params | expr, ... }`). Empty call arguments (`f(a, , b)`) and empty array
+elements pass `NIL`; a codeblock body has at least one expression. A call argument `@name` or `@name[i]...` passes a
+variable or an element by reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not
+supported yet), and so are function references `@name()`. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`) and
+instance variables (`o:x := v`, a message without arguments) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
+declares `a := Array( n1, n2 )`.
+
+The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
+C has them, so a comparison binds tighter than `&`, `^^` and `|`: `x & 1 == 0` is `x & ( 1 == 0 )`, an argument error at
+run time, and is written `( x & 1 ) == 0`. `&` is the bit operator after an operand; before one it is the macro operator
+(planned). `|` is the operator inside a codeblock's body; the bars around its parameters stay delimiters.
 
 Nesting is limited, so that a deep source is reported instead of exhausting the compiler's stack: 1024 levels of
 nested expressions (parentheses, calls, arrays, codeblocks, prefix operators; `Parser::kMaxExprNesting`) and 1024 of
@@ -308,9 +314,12 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   and step; `index` and `index.set` of an array with an index within it, an integer or a truncated double (the array's
   `len` and `items`, `xb_array` in `xbrt.h`), where the store calls `xb_gc_write_item` only for a value of a heap type
   (`xb_type_is_heap`), and an index out of bounds calls the runtime, which raises the error. A comparison whose only use
-  is the `truth` right after it gives that test its boolean directly, without the logical item. A call to a bit function
-  (`BitAnd`, ..., the table `xb_bit_function` in `xbrt.h`) with integer arguments is the machine operation; other
-  arguments call the runtime function. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at the
+  is the `truth` right after it gives that test its boolean directly, without the logical item. The bit operators (`&`
+  `|` `^^` `<<` `>>` `~`) and the calls to a bit function (`BitAnd`, ..., the table `xb_bit_function` in `xbrt.h`) with
+  number operands are the machine operation (`and`, `or`, `xor`, `shl`, `ashr`, `lshr`, a select for counts outside
+  0..63), a double taken as an integer by `llvm.fptosi.sat` (truncated, saturated, NaN 0, as `xb_dbl_to_i64`); other
+  operands call the runtime operator or function, which raises the error. Unary `-` of an integer other than INT64_MIN
+  or of a double is done in place too. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at the
   argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another
   module's function to `xbp_NAME`, one to a function of the module straight to it. A public function is `xbp_NAME`
   (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under names nothing
@@ -368,10 +377,11 @@ folded result's type and decimals follow Clipper's compile-time rules, which dif
 | `/` with a double, `%` with a double, `^` | double with SET DECIMALS decimals |
 | integer `%` integer | integer |
 | unary `-` | the negated number, same decimals |
+| bit operators `&` `\|` `^^` `<<` `>>` `~` on numbers | an integer without a display width of its own (`xb_bit_apply`, the operands taken as integers by `xb_dbl_to_i64`) |
 | comparisons of numbers or logicals | `.T.`/`.F.` |
 | strings `+`, `-`, `==`, `$`; `=`/`!=` of two empty strings | the result (`=` on other strings depends on SET EXACT and is not folded) |
 | `.NOT.`, `.AND.`/`.OR.` with a logical literal on the left, `IIF` with a logical literal condition | the result or the remaining operand |
-| a call to a `FOLD` function with constant arguments | its result, from the evaluator table in `opt/Fold.cpp`: `Len` of a string literal (its length) or of an array literal of constants (its element count); the bit functions on integer constants (an integer without a display width of its own, as the runtime makes it; arithmetic on such an integer gives one too) |
+| a call to a `FOLD` function with constant arguments | its result, from the evaluator table in `opt/Fold.cpp`: `Len` of a string literal (its length) or of an array literal of constants (its element count); the bit functions on number constants (an integer without a display width of its own, as the runtime makes it; arithmetic on such an integer gives one too) |
 
 Division or `%` by a literal zero is not folded, so the error happens at run time. A folded integer is a program
 constant (`xb_num_const_int_width`); a folded double has the default display width for its value. "SET DECIMALS

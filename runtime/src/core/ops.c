@@ -120,6 +120,27 @@ void xb_op_not(xb_ctx *ctx, xb_item *r, const xb_item *a) {
   else xb_arg_error(ctx, r, 1077, ".NOT.", 1, a);
 }
 
+/* The bit operators (xb_bit_apply and xb_bit_function in xbrt.h): numbers
+ * are taken as integers, truncated and saturated to 64 bits (NaN is 0), as
+ * the bit functions take them; anything else is the argument error of the
+ * operator, with the code of its operation. `b` is NULL for ~. */
+static void bit_op(xb_ctx *ctx, xb_item *r, xb_bit_op op, const xb_item *a, const xb_item *b) {
+  const xb_bit_function *f = xb_bit_function_of(op);
+  if (!xb_is_number(a) || (b && !xb_is_number(b))) {
+    if (b) arg_error2(ctx, r, f->code, f->symbol, a, b);
+    else xb_arg_error(ctx, r, f->code, f->symbol, 1, a);
+    return;
+  }
+  xb_set_int(r, xb_bit_apply(op, xb_num_to_i64(a), b ? xb_num_to_i64(b) : 0));
+}
+
+void xb_op_bitand(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { bit_op(ctx, r, XB_BIT_AND, a, b); }
+void xb_op_bitor(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { bit_op(ctx, r, XB_BIT_OR, a, b); }
+void xb_op_bitxor(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { bit_op(ctx, r, XB_BIT_XOR, a, b); }
+void xb_op_shl(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { bit_op(ctx, r, XB_BIT_SHL, a, b); }
+void xb_op_shr(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { bit_op(ctx, r, XB_BIT_SAR, a, b); }
+void xb_op_bitnot(xb_ctx *ctx, xb_item *r, const xb_item *a) { bit_op(ctx, r, XB_BIT_NOT, a, NULL); }
+
 /* String comparison. Non-exact (SET EXACT OFF, operator =): when the right
  * operand is shorter, only its length is compared ("abc" = "ab" is .T.). */
 static int str_cmp(const xb_str *a, const xb_str *b, int exact) {

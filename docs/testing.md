@@ -48,7 +48,7 @@ Running big-endian programs needs a target sysroot and an emulator (for example 
 ## Benchmarks
 
 `bench/<name>.prg` are benchmark programs: recursive calls (`fib`), an integer loop (`loops`), arrays (`sieve`,
-`matmul`), sorting in xBase (`qsort`) and with `ASort` (`asort`), strings (`strings`), the bit functions and string
+`matmul`), sorting in xBase (`qsort`) and with `ASort` (`asort`), strings (`strings`), the bit operators and string
 building (`crc32`), array cells read and changed in place in deeply nested loops (`pi`, digits of pi from a tape-machine
 program; `bench_pi <n>` prints n digits), double arithmetic (`float`, the Mandelbrot set) and integers mixed with
 doubles (`mixed`: `i + 3.14`, `i / 4`, `Int()`, comparisons across both). Each one times its own work with

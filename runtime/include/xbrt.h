@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 14u
+#define XB_ABI_VERSION 15u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -209,6 +209,14 @@ void     xb_op_gt(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_ge(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);      /* $  */
 void     xb_op_not(xb_ctx *ctx, xb_item *r, const xb_item *a);
+/* The bit operators & | ^^ << >> and ~ (xb_bit_apply's rules; numbers are
+ * taken as integers like the bit functions take them). */
+void     xb_op_bitand(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+void     xb_op_bitor(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+void     xb_op_bitxor(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+void     xb_op_shl(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+void     xb_op_shr(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+void     xb_op_bitnot(xb_ctx *ctx, xb_item *r, const xb_item *a);
 
 /* A double whose decimals are the current SET DECIMALS (constant-folded `/`,
  * `%` on doubles and `^`). */
@@ -392,6 +400,13 @@ static inline void xb_gc_write(void *obj) {
 /* Whether a double converts to int64_t without overflow (false for NaN and
  * infinities). 2^63 is exact in a double; INT64_MAX is not. */
 static inline int xb_dbl_fits_i64(double d) { return d >= -9223372036854775808.0 && d < 9223372036854775808.0; }
+/* A double as an integer: truncated toward zero, saturated to 64 bits, NaN
+ * as 0 (how functions and the bit operators take a number as an integer). */
+static inline int64_t xb_dbl_to_i64(double d) {
+  if (xb_dbl_fits_i64(d)) return (int64_t)d;
+  if (d != d) return 0;
+  return d > 0 ? INT64_MAX : INT64_MIN;
+}
 
 /* ASCII letter case: other bytes pass unchanged (keywords, letter case aside
  * in hash keys; the compiler hashes literal keys with the same rule). */
@@ -444,13 +459,18 @@ static inline uint16_t xb_num_dbl_width(double d) {
 }
 
 /* xbase's bit functions (BitAnd, BitOr, BitXor, BitNor, BitNot, BitShl,
- * BitShr) work on the 64-bit two's complement form of integers; BitShr is a
- * logical shift, and a shift count outside 0..63 gives 0. The runtime, the
- * compiler's folding of constant calls and its inline code for integer
- * arguments share these rules. */
-typedef enum xb_bit_op { XB_BIT_AND, XB_BIT_OR, XB_BIT_XOR, XB_BIT_NOR, XB_BIT_NOT, XB_BIT_SHL, XB_BIT_SHR } xb_bit_op;
+ * BitShr) and bit operators (& | ^^ ~ << >>) work on the 64-bit two's
+ * complement form of integers. BitShr is a logical shift, >> an arithmetic
+ * one (XB_BIT_SAR: the sign fills the vacated bits); a shift count outside
+ * 0..63 shifts every bit out (0, or -1 for >> of a negative number). The
+ * runtime, the compiler's folding of constants and its inline code share
+ * these rules. */
+typedef enum xb_bit_op {
+  XB_BIT_AND, XB_BIT_OR, XB_BIT_XOR, XB_BIT_NOR, XB_BIT_NOT, XB_BIT_SHL, XB_BIT_SHR, XB_BIT_SAR
+} xb_bit_op;
 static inline int64_t xb_bit_apply(xb_bit_op op, int64_t a, int64_t b) {
   uint64_t x = (uint64_t)a, y = (uint64_t)b;
+  uint64_t sign = a < 0 ? ~UINT64_C(0) : 0; /* SAR without relying on >> of a negative int64_t */
   switch (op) {
   case XB_BIT_AND: return (int64_t)(x & y);
   case XB_BIT_OR: return (int64_t)(x | y);
@@ -459,26 +479,30 @@ static inline int64_t xb_bit_apply(xb_bit_op op, int64_t a, int64_t b) {
   case XB_BIT_NOT: return (int64_t)~x;
   case XB_BIT_SHL: return y < 64 ? (int64_t)(x << y) : 0;
   case XB_BIT_SHR: return y < 64 ? (int64_t)(x >> y) : 0;
+  case XB_BIT_SAR: return (int64_t)(y < 64 ? ((x ^ sign) >> y) ^ sign : sign);
   }
   return 0;
 }
 
-/* Each bit function: its name (upper-cased, as calls are resolved), argument
- * count and BASE error code (xbase's own functions have codes from 9001).
- * Indexed by xb_bit_op; the runtime's functions and the compiler's folding
- * and inline code read this table. */
+/* Each bit operation: the name of its function (upper-cased, as calls are
+ * resolved; NULL without one), the symbol of its operator (NULL without one),
+ * its operand count and the BASE error code of both (xbase's own codes start
+ * at 9001). Indexed by xb_bit_op; the runtime's functions and operators and
+ * the compiler's folding and inline code read this table. */
 typedef struct xb_bit_function {
   xb_bit_op op;
   const char *name;
+  const char *symbol;
   uint32_t arity;
   int code;
 } xb_bit_function;
-#define XB_BIT_FUNCTION_COUNT (XB_BIT_SHR + 1)
+#define XB_BIT_OP_COUNT (XB_BIT_SAR + 1)
 static inline const xb_bit_function *xb_bit_function_of(xb_bit_op op) {
-  static const xb_bit_function table[XB_BIT_FUNCTION_COUNT] = {
-      {XB_BIT_AND, "BITAND", 2, 9001}, {XB_BIT_OR, "BITOR", 2, 9002},   {XB_BIT_XOR, "BITXOR", 2, 9003},
-      {XB_BIT_NOR, "BITNOR", 2, 9004}, {XB_BIT_NOT, "BITNOT", 1, 9005}, {XB_BIT_SHL, "BITSHL", 2, 9006},
-      {XB_BIT_SHR, "BITSHR", 2, 9007},
+  static const xb_bit_function table[XB_BIT_OP_COUNT] = {
+      {XB_BIT_AND, "BITAND", "&", 2, 9001},  {XB_BIT_OR, "BITOR", "|", 2, 9002},
+      {XB_BIT_XOR, "BITXOR", "^^", 2, 9003}, {XB_BIT_NOR, "BITNOR", NULL, 2, 9004},
+      {XB_BIT_NOT, "BITNOT", "~", 1, 9005},  {XB_BIT_SHL, "BITSHL", "<<", 2, 9006},
+      {XB_BIT_SHR, "BITSHR", NULL, 2, 9007}, {XB_BIT_SAR, NULL, ">>", 2, 9008},
   };
   return &table[op];
 }

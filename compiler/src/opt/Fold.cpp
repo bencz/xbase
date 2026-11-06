@@ -32,6 +32,7 @@ ExprPtr makeDouble(SourceLoc loc, double v, uint16_t dec) {
 ExprPtr makeLogical(SourceLoc loc, bool v) { return std::make_unique<LogicalExpr>(loc, v); }
 
 double asDouble(const NumberExpr &n) { return n.isInt ? (double)n.ival : n.dval; }
+int64_t asInteger(const NumberExpr &n) { return n.isInt ? n.ival : xb_dbl_to_i64(n.dval); } // as the runtime takes it
 
 const NumberExpr *num(const ExprPtr &e) {
   return e->kind == ExprKind::Number ? static_cast<const NumberExpr *>(e.get()) : nullptr;
@@ -78,6 +79,8 @@ ExprPtr foldArithmetic(SourceLoc loc, BinOp op, const NumberExpr &a, const Numbe
   case BinOp::Pow:
     return makeDouble(loc, std::pow(asDouble(a), asDouble(b)), kDefaultDecimals);
   default:
+    if (const xb_bit_function *f = bitOperator(op)) // an integer without a display width, as the runtime makes it
+      return makeInt(loc, xb_bit_apply(f->op, asInteger(a), asInteger(b)), true);
     return nullptr;
   }
 }
@@ -278,6 +281,7 @@ ExprPtr Folder::foldUnary(UnaryExpr &u) {
   const NumberExpr *n = num(u.operand);
   if (!n) return nullptr;
   if (u.op == UnOp::Plus) return std::move(u.operand);
+  if (u.op == UnOp::BitNot) return makeInt(loc, xb_bit_apply(XB_BIT_NOT, asInteger(*n), 0), true);
   if (!n->isInt) return makeDouble(loc, -n->dval, n->dec);
   if (n->ival == std::numeric_limits<int64_t>::min()) return makeDouble(loc, -(double)n->ival, 0);
   return makeInt(loc, -n->ival, isComputedInt(*n));
@@ -362,7 +366,7 @@ ExprPtr evalLen(const CallExpr &c) {
   return nullptr;
 }
 
-// A bit function on integer constants: an integer without a display width
+// A bit function on number constants: an integer without a display width
 // of its own, like the one the runtime computes.
 ExprPtr evalBit(const CallExpr &c) {
   const xb_bit_function *f = findBitFunction(c.callee->name);
@@ -370,8 +374,8 @@ ExprPtr evalBit(const CallExpr &c) {
   int64_t v[2] = {0, 0};
   for (size_t k = 0; k < f->arity; ++k) {
     const NumberExpr *n = num(c.args[k]);
-    if (!n || !n->isInt) return nullptr;
-    v[k] = n->ival;
+    if (!n) return nullptr;
+    v[k] = asInteger(*n);
   }
   return makeInt(c.loc, xb_bit_apply(f->op, v[0], v[1]), true);
 }
@@ -382,7 +386,8 @@ using Evaluator = ExprPtr (*)(const CallExpr &);
 const std::unordered_map<std::string, Evaluator> &evaluators() {
   static const std::unordered_map<std::string, Evaluator> table = [] {
     std::unordered_map<std::string, Evaluator> t = {{"LEN", evalLen}};
-    for (uint32_t k = 0; k < XB_BIT_FUNCTION_COUNT; ++k) t[xb_bit_function_of((xb_bit_op)k)->name] = evalBit;
+    for (uint32_t k = 0; k < XB_BIT_OP_COUNT; ++k)
+      if (const char *name = xb_bit_function_of((xb_bit_op)k)->name) t[name] = evalBit;
     return t;
   }();
   return table;

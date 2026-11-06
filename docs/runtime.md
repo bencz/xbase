@@ -319,6 +319,7 @@ function, and the program ends quietly with exit code 0.
 | `<` `<=` `>` `>=` `!=` | numbers, strings (same rule as `=`), logicals (`.F.` < `.T.`) |
 | `$` | substring test; an empty left operand is false; with a hash on the right, whether the left is one of its keys |
 | `.NOT.` | logicals only |
+| `&` `\|` `^^` `<<` `>>` `~` | xbase's bit operators (`xb_op_bitand`, ..., `xb_op_bitnot`): numbers taken as integers (`xb_dbl_to_i64`: truncated, saturated, NaN 0), an integer result; `>>` is arithmetic; anything else is an argument error with the operator and the code of its operation (`xb_bit_function`) |
 
 Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors (whose error block
 may substitute the result, see [Errors and pending requests](#errors-and-pending-requests)). `==` on two arrays,
@@ -435,10 +436,12 @@ Conventions:
   write barrier.
 - The bit functions, xbase's own: `BitAnd`, `BitOr`, `BitXor`, `BitNor` (two numbers), `BitNot` (one), `BitShl` and
   `BitShr` (a number and a shift count) work on the 64-bit two's complement form of integers (`xb_bit_apply` in
-  `xbrt.h`): numbers are truncated to integers (saturated; NaN is 0), `BitShr` is a logical shift and a count
-  outside 0..63 gives 0. Anything else than a number is an argument error. xbase's own functions have `BASE` codes
-  from 9001 (`BitAnd` 9001, `BitOr` 9002, `BitXor` 9003, `BitNor` 9004, `BitNot` 9005, `BitShl` 9006, `BitShr` 9007);
-  the names, argument counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too.
+  `xbrt.h`): numbers are truncated to integers (saturated; NaN is 0), `BitShr` is a logical shift and a count outside
+  0..63 gives 0. Anything else than a number is an argument error. xbase's own functions have `BASE` codes from 9001
+  (`BitAnd` 9001, `BitOr` 9002, `BitXor` 9003, `BitNor` 9004, `BitNot` 9005, `BitShl` 9006, `BitShr` 9007). The bit
+  operators raise the code of their operation: `&` 9001, `|` 9002, `^^` 9003, `~` 9005, `<<` 9006, and `>>`, an
+  arithmetic shift (a count past 63 gives 0, or -1 for a negative number), 9008. The function names, operator symbols,
+  operand counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too.
 - `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
   program started from a monotonic clock (`xb_platform_elapsed_ms`), for timing: the difference of two calls.

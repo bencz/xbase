@@ -81,11 +81,7 @@ private:
   ExprPtr parseOr();
   ExprPtr parseAnd();
   ExprPtr parseNot();
-  ExprPtr parseEquality();
-  ExprPtr parseRelational();
-  ExprPtr parseAdditive();
-  ExprPtr parseMultiplicative();
-  ExprPtr parsePower();
+  ExprPtr parseBinary(size_t level);
   bool enterExpr();
   ExprPtr parseUnary();
   ExprPtr parsePostfix();

@@ -43,6 +43,15 @@ const char *tokName(Tok t) {
   case Tok::Gt: return ">";
   case Tok::Ge: return ">=";
   case Tok::Dollar: return "$";
+  case Tok::BitXor: return "^^";
+  case Tok::Shl: return "<<";
+  case Tok::Shr: return ">>";
+  case Tok::Tilde: return "~";
+  case Tok::AndEq: return "&=";
+  case Tok::OrEq: return "|=";
+  case Tok::XorEq: return "^^=";
+  case Tok::ShlEq: return "<<=";
+  case Tok::ShrEq: return ">>=";
   case Tok::And: return ".AND.";
   case Tok::Or: return ".OR.";
   case Tok::Not: return ".NOT.";
@@ -257,6 +266,8 @@ bool Lexer::lexOperator() {
     Tok k;
   };
   static const Op ops[] = {
+      {"^^=", Tok::XorEq},  {"<<=", Tok::ShlEq},    {">>=", Tok::ShrEq},  {"^^", Tok::BitXor},
+      {"<<", Tok::Shl},     {">>", Tok::Shr},       {"&=", Tok::AndEq},   {"|=", Tok::OrEq},
       {"**=", Tok::PowEq},  {"...", Tok::Ellipsis}, {":=", Tok::Assign}, {"+=", Tok::PlusEq},
       {"-=", Tok::MinusEq}, {"*=", Tok::MulEq},     {"/=", Tok::DivEq},   {"%=", Tok::ModEq},
       {"^=", Tok::PowEq},   {"==", Tok::ExactEq},   {"=>", Tok::FatArrow}, {"!=", Tok::NotEq},
@@ -269,6 +280,7 @@ bool Lexer::lexOperator() {
       {")", Tok::RParen},   {"[", Tok::LBracket},   {"]", Tok::RBracket}, {"{", Tok::LBrace},
       {"}", Tok::RBrace},   {",", Tok::Comma},      {":", Tok::Colon},    {"|", Tok::Pipe},
       {"@", Tok::At},       {"&", Tok::Amp},        {"?", Tok::Question}, {".", Tok::Dot},
+      {"~", Tok::Tilde},
   };
   for (const Op &op : ops) {
     size_t n = std::strlen(op.s);

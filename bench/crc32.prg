@@ -1,4 +1,4 @@
-// CRC-32 of 20,000 bytes, 100 times: the bit functions, string building and Asc/SubStr.
+// CRC-32 of 20,000 bytes, 100 times: the bit operators, string building and Asc/SubStr.
 PROCEDURE Main()
    LOCAL t := ElapsedMs(), rep, ok := .T.
    FOR rep := 1 TO 100
@@ -12,11 +12,7 @@ FUNCTION Crc32Of20K()
    FOR i := 0 TO 255
       c := i
       FOR k := 1 TO 8
-         IF BitAnd( c, 1 ) == 1
-            c := BitXor( 0xEDB88320, BitShr( c, 1 ) )
-         ELSE
-            c := BitShr( c, 1 )
-         ENDIF
+         c := ( c >> 1 ) ^^ ( 0xEDB88320 & -( c & 1 ) )
       NEXT
       table[ i + 1 ] := c
    NEXT
@@ -29,6 +25,6 @@ FUNCTION Crc32Of20K()
    NEXT
    crc := 0xFFFFFFFF
    FOR i := 1 TO Len( data )
-      crc := BitXor( table[ BitAnd( BitXor( crc, Asc( SubStr( data, i, 1 ) ) ), 255 ) + 1 ], BitShr( crc, 8 ) )
+      crc := table[ ( ( crc ^^ Asc( SubStr( data, i, 1 ) ) ) & 0xFF ) + 1 ] ^^ ( crc >> 8 )
    NEXT
-   RETURN BitXor( crc, 0xFFFFFFFF )
+   RETURN crc ^^ 0xFFFFFFFF

@@ -17,6 +17,11 @@ ExprPtr Parser::parseAssign() {
   case Tok::DivEq: op = BinOp::Div; break;
   case Tok::ModEq: op = BinOp::Mod; break;
   case Tok::PowEq: op = BinOp::Pow; break;
+  case Tok::AndEq: op = BinOp::BitAnd; break;
+  case Tok::OrEq: op = BinOp::BitOr; break;
+  case Tok::XorEq: op = BinOp::BitXor; break;
+  case Tok::ShlEq: op = BinOp::Shl; break;
+  case Tok::ShrEq: op = BinOp::Shr; break;
   default: return lhs;
   }
   SourceLoc loc = cur().loc;
@@ -50,7 +55,7 @@ ExprPtr Parser::parseAnd() {
 }
 
 ExprPtr Parser::parseNot() {
-  if (!at(Tok::Not)) return parseEquality();
+  if (!at(Tok::Not)) return parseBinary(0);
   SourceLoc loc = cur().loc;
   if (!enterExpr()) return std::make_unique<NilExpr>(loc);
   advance();
@@ -59,70 +64,48 @@ ExprPtr Parser::parseNot() {
   return e;
 }
 
-ExprPtr Parser::parseEquality() {
-  ExprPtr lhs = parseRelational();
-  while (true) {
-    BinOp op;
-    switch (cur().kind) {
-    case Tok::Eq: op = BinOp::Eq; break;
-    case Tok::ExactEq: op = BinOp::ExactEq; break;
-    case Tok::NotEq: op = BinOp::NotEq; break;
-    default: return lhs;
-    }
-    SourceLoc loc = cur().loc;
-    advance();
-    lhs = std::make_unique<BinaryExpr>(loc, op, std::move(lhs), parseRelational());
-  }
+namespace {
+
+struct BinaryToken {
+  Tok tok;
+  BinOp op;
+};
+
+// The binary operators below .NOT., one precedence level per row from the
+// lowest, each level left-associative. The bit operators sit where C has
+// them: | below ^^ below & below the comparisons, the shifts between the
+// comparisons and + -.
+const std::vector<std::vector<BinaryToken>> &binaryLevels() {
+  static const std::vector<std::vector<BinaryToken>> levels = {
+      {{Tok::Pipe, BinOp::BitOr}},
+      {{Tok::BitXor, BinOp::BitXor}},
+      {{Tok::Amp, BinOp::BitAnd}},
+      {{Tok::Eq, BinOp::Eq}, {Tok::ExactEq, BinOp::ExactEq}, {Tok::NotEq, BinOp::NotEq}},
+      {{Tok::Lt, BinOp::Lt}, {Tok::Le, BinOp::Le}, {Tok::Gt, BinOp::Gt}, {Tok::Ge, BinOp::Ge},
+       {Tok::Dollar, BinOp::In}},
+      {{Tok::Shl, BinOp::Shl}, {Tok::Shr, BinOp::Shr}},
+      {{Tok::Plus, BinOp::Add}, {Tok::Minus, BinOp::Sub}},
+      {{Tok::Star, BinOp::Mul}, {Tok::Slash, BinOp::Div}, {Tok::Percent, BinOp::Mod}},
+      {{Tok::Power, BinOp::Pow}},
+  };
+  return levels;
 }
 
-ExprPtr Parser::parseRelational() {
-  ExprPtr lhs = parseAdditive();
-  while (true) {
-    BinOp op;
-    switch (cur().kind) {
-    case Tok::Lt: op = BinOp::Lt; break;
-    case Tok::Le: op = BinOp::Le; break;
-    case Tok::Gt: op = BinOp::Gt; break;
-    case Tok::Ge: op = BinOp::Ge; break;
-    case Tok::Dollar: op = BinOp::In; break;
-    default: return lhs;
-    }
-    SourceLoc loc = cur().loc;
-    advance();
-    lhs = std::make_unique<BinaryExpr>(loc, op, std::move(lhs), parseAdditive());
-  }
-}
+} // namespace
 
-ExprPtr Parser::parseAdditive() {
-  ExprPtr lhs = parseMultiplicative();
-  while (at(Tok::Plus) || at(Tok::Minus)) {
-    BinOp op = at(Tok::Plus) ? BinOp::Add : BinOp::Sub;
+ExprPtr Parser::parseBinary(size_t level) {
+  const auto &levels = binaryLevels();
+  if (level == levels.size()) return parseUnary();
+  ExprPtr lhs = parseBinary(level + 1);
+  for (;;) {
+    const BinaryToken *found = nullptr;
+    for (const BinaryToken &bt : levels[level])
+      if (at(bt.tok)) found = &bt;
+    if (!found) return lhs;
     SourceLoc loc = cur().loc;
     advance();
-    lhs = std::make_unique<BinaryExpr>(loc, op, std::move(lhs), parseMultiplicative());
+    lhs = std::make_unique<BinaryExpr>(loc, found->op, std::move(lhs), parseBinary(level + 1));
   }
-  return lhs;
-}
-
-ExprPtr Parser::parseMultiplicative() {
-  ExprPtr lhs = parsePower();
-  while (at(Tok::Star) || at(Tok::Slash) || at(Tok::Percent)) {
-    BinOp op = at(Tok::Star) ? BinOp::Mul : at(Tok::Slash) ? BinOp::Div : BinOp::Mod;
-    SourceLoc loc = cur().loc;
-    advance();
-    lhs = std::make_unique<BinaryExpr>(loc, op, std::move(lhs), parsePower());
-  }
-  return lhs;
-}
-
-ExprPtr Parser::parsePower() {
-  ExprPtr lhs = parseUnary();
-  while (at(Tok::Power)) {
-    SourceLoc loc = cur().loc;
-    advance();
-    lhs = std::make_unique<BinaryExpr>(loc, BinOp::Pow, std::move(lhs), parseUnary());
-  }
-  return lhs;
 }
 
 // One more level of expression nesting (each nested expression and each
@@ -146,6 +129,8 @@ ExprPtr Parser::parseUnary() {
     e = std::make_unique<UnaryExpr>(loc, UnOp::Neg, parseUnary());
   } else if (accept(Tok::Plus)) {
     e = std::make_unique<UnaryExpr>(loc, UnOp::Plus, parseUnary());
+  } else if (accept(Tok::Tilde)) {
+    e = std::make_unique<UnaryExpr>(loc, UnOp::BitNot, parseUnary());
   } else if (at(Tok::Inc) || at(Tok::Dec)) {
     bool inc = at(Tok::Inc);
     advance();

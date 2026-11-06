@@ -1,9 +1,9 @@
-// Inline fast paths of operators, of element access and of the bit functions:
-// the number cases of xb_op_add, xb_op_sub, xb_op_mul, xb_op_div, xb_op_mod,
-// the comparisons and xb_for_test (core/ops.c), xb_op_index and
-// xb_op_index_set (types/array.c) and xb_bit_apply, done in place; every
-// other case, an integer overflow and an index out of bounds included, calls
-// the runtime, which raises the errors.
+// Inline fast paths of operators, of element access and of the bit
+// functions: the number cases of xb_op_add, xb_op_sub, xb_op_mul, xb_op_div,
+// xb_op_mod, xb_op_neg, the bit operators, the comparisons and xb_for_test
+// (core/ops.c), xb_op_index and xb_op_index_set (types/array.c) and
+// xb_bit_apply, done in place; every other case, an integer overflow and an
+// index out of bounds included, calls the runtime, which raises the errors.
 #include "codegen/CodeGen.h"
 
 #include "common/BitFunctions.h"
@@ -150,6 +150,10 @@ static Value *doubleCompare(IRBuilderBase &b, xir::IntPred pred, Value *x, Value
 // which one is a double are done here, with xb_op_add's, xb_op_sub's,
 // xb_op_mul's and xb_compare's rules; everything else calls the operator.
 void CodeGen::emitBinary(const xir::Instruction &i) {
+  if (const xb_bit_function *f = bitOperator(i.binop)) {
+    emitBitOperator(i, *f);
+    return;
+  }
   Value *a = addr(i.operand(0));
   Value *bv = addr(i.operand(1));
   Value *d = dest(i);
@@ -225,45 +229,112 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   }
 }
 
-// A call to one of xbase's bit functions (xb_bit_function in xbrt.h) with integer
-// arguments is the machine operation (xb_bit_apply's rules); other arguments
-// go to the runtime function. Returns false for any other call.
+// Unary minus: an integer other than INT64_MIN, and a double (keeping its
+// decimals), are negated in place, as xb_op_neg does; anything else calls it.
+void CodeGen::emitNeg(const xir::Instruction &i) {
+  Value *a = addr(i.operand(0));
+  Value *d = dest(i);
+  Value *ta = typeOf(i.operand(0), a);
+  BasicBlock *intBB = newBlock("int"), *intDone = newBlock("int.done"), *notInt = newBlock("not.int");
+  BasicBlock *dblBB = newBlock("dbl"), *slow = newBlock("op"), *join = newBlock("join");
+  b_.CreateCondBr(b_.CreateICmpEQ(ta, ConstantInt::get(i32_, XB_T_INT)), intBB, notInt);
+  b_.SetInsertPoint(intBB);
+  Value *r = b_.CreateBinaryIntrinsic(Intrinsic::ssub_with_overflow, ConstantInt::get(i64_, 0), intValue(a));
+  MDBuilder md(ctx_);
+  b_.CreateCondBr(b_.CreateExtractValue(r, 1), slow, intDone, md.createUnlikelyBranchWeights()); // INT64_MIN
+  b_.SetInsertPoint(intDone);
+  storeInt(d, b_.CreateExtractValue(r, 0));
+  b_.CreateBr(join);
+  b_.SetInsertPoint(notInt);
+  branchLikely(b_.CreateICmpEQ(ta, ConstantInt::get(i32_, XB_T_DOUBLE)), dblBB, slow);
+  b_.SetInsertPoint(dblBB);
+  Value *dec = numberDec(a, ta); // read before `d`, which may be `a`, is written
+  storeDouble(d, b_.CreateFNeg(numberAsDouble(a, ta)), dec);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  callItemOp(rtNeg_, d, {a});
+  checkPending(unwind_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// A number item of type `type` as an integer, as the runtime takes it
+// (xb_dbl_to_i64): llvm.fptosi.sat truncates, saturates and gives 0 for NaN.
+Value *CodeGen::numberAsInteger(Value *item, Value *type) {
+  Value *bits = intValue(item);
+  Value *fromDouble =
+      b_.CreateIntrinsic(Intrinsic::fptosi_sat, {i64_, b_.getDoubleTy()}, {b_.CreateBitCast(bits, b_.getDoubleTy())});
+  return b_.CreateSelect(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_INT)), bits, fromDouble);
+}
+
+// xb_bit_apply's operation on machine integers (`y` unused by XB_BIT_NOT).
+Value *CodeGen::bitApply(xb_bit_op op, Value *x, Value *y) {
+  auto shift = [&](Instruction::BinaryOps kind, Value *outOfRange) { // a count outside 0..63 shifts every bit out
+    Value *inRange = b_.CreateICmpULT(y, ConstantInt::get(i64_, 64));
+    Value *count = b_.CreateAnd(y, ConstantInt::get(i64_, 63));
+    return b_.CreateSelect(inRange, b_.CreateBinOp(kind, x, count), outOfRange);
+  };
+  switch (op) {
+  case XB_BIT_AND: return b_.CreateAnd(x, y);
+  case XB_BIT_OR: return b_.CreateOr(x, y);
+  case XB_BIT_XOR: return b_.CreateXor(x, y);
+  case XB_BIT_NOR: return b_.CreateNot(b_.CreateOr(x, y));
+  case XB_BIT_NOT: return b_.CreateNot(x);
+  case XB_BIT_SHL: return shift(Instruction::Shl, ConstantInt::get(i64_, 0));
+  case XB_BIT_SHR: return shift(Instruction::LShr, ConstantInt::get(i64_, 0));
+  case XB_BIT_SAR: return shift(Instruction::AShr, b_.CreateAShr(x, 63));
+  }
+  return nullptr;
+}
+
+// Bit operation `op` on the items `x` and `y` (null for one operand), of
+// types `tx` and `ty`, into `d`: numbers are the machine operation, in place;
+// for anything else `slow` emits the runtime call, which raises the error.
+void CodeGen::emitBitOp(xb_bit_op op, Value *x, Value *tx, Value *y, Value *ty, Value *d,
+                        function_ref<void()> slow) {
+  Value *numbers = y ? b_.CreateAnd(isNumberType(tx), isNumberType(ty)) : isNumberType(tx);
+  BasicBlock *fast = newBlock("bits"), *other = newBlock("bits.other"), *join = newBlock("join");
+  branchLikely(numbers, fast, other);
+  b_.SetInsertPoint(fast);
+  Value *ix = numberAsInteger(x, tx); // both operands are read before `d`, which may be one of them, is written
+  Value *iy = y ? numberAsInteger(y, ty) : nullptr;
+  storeInt(d, bitApply(op, ix, iy));
+  b_.CreateBr(join);
+  b_.SetInsertPoint(other);
+  slow();
+  checkPending(unwind_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// A bit operator (& | ^^ << >> ~); anything but numbers calls the operator.
+void CodeGen::emitBitOperator(const xir::Instruction &i, const xb_bit_function &f) {
+  bool binary = f.arity > 1;
+  Value *a = addr(i.operand(0));
+  Value *bv = binary ? addr(i.operand(1)) : nullptr;
+  Value *d = dest(i);
+  emitBitOp(f.op, a, typeOf(i.operand(0), a), bv, binary ? typeOf(i.operand(1), bv) : nullptr, d, [&] {
+    if (binary) callItemOp(rtBin_.at(i.binop), d, {a, bv});
+    else callItemOp(rtBitNot_, d, {a});
+  });
+}
+
+// A call to one of xbase's bit functions (xb_bit_function in xbrt.h): number
+// arguments are the machine operation; others call the runtime function.
+// Returns false for any other call.
 bool CodeGen::emitBitCall(const xir::Instruction &i) {
   if (i.callee.function || !i.callee.native) return false;
   const xb_bit_function *f = findBitFunction(i.callee.name);
   if (!f || i.operands().size() != f->arity) return false;
   Value *argv = operandGroup(i);
   Value *d = dest(i);
-  Value *allInt = isInt(slot(plan_->groupBase(&i)));
-  for (unsigned k = 1; k < f->arity; ++k) allInt = b_.CreateAnd(allInt, isInt(slot(plan_->groupBase(&i) + k)));
-  BasicBlock *fast = newBlock("int"), *slow = newBlock("call"), *join = newBlock("join");
-  branchLikely(allInt, fast, slow);
-  b_.SetInsertPoint(fast);
-  Value *x = intValue(slot(plan_->groupBase(&i)));
-  Value *y = f->arity > 1 ? intValue(slot(plan_->groupBase(&i) + 1)) : nullptr;
-  Value *r = nullptr;
-  auto shift = [&](bool left) { // a count outside 0..63 gives 0
-    Value *inRange = b_.CreateICmpULT(y, ConstantInt::get(i64_, 64));
-    Value *count = b_.CreateAnd(y, ConstantInt::get(i64_, 63));
-    return b_.CreateSelect(inRange, left ? b_.CreateShl(x, count) : b_.CreateLShr(x, count), ConstantInt::get(i64_, 0));
-  };
-  switch (f->op) {
-  case XB_BIT_AND: r = b_.CreateAnd(x, y); break;
-  case XB_BIT_OR: r = b_.CreateOr(x, y); break;
-  case XB_BIT_XOR: r = b_.CreateXor(x, y); break;
-  case XB_BIT_NOR: r = b_.CreateNot(b_.CreateOr(x, y)); break;
-  case XB_BIT_NOT: r = b_.CreateNot(x); break;
-  case XB_BIT_SHL: r = shift(true); break;
-  case XB_BIT_SHR: r = shift(false); break;
-  }
-  storeInt(d, r);
-  b_.CreateBr(join);
-  b_.SetInsertPoint(slow);
-  setNil(d);
-  b_.CreateCall(xbFuncTy_, externFunction(i.callee), {fnCtx_, d, ConstantInt::get(i32_, f->arity), argv});
-  checkPending(unwind_);
-  b_.CreateBr(join);
-  b_.SetInsertPoint(join);
+  bool binary = f->arity > 1;
+  Value *x = slot(plan_->groupBase(&i));
+  Value *y = binary ? slot(plan_->groupBase(&i) + 1) : nullptr;
+  emitBitOp(f->op, x, typeOf(i.operand(0), x), y, binary ? typeOf(i.operand(1), y) : nullptr, d, [&] {
+    setNil(d);
+    b_.CreateCall(xbFuncTy_, externFunction(i.callee), {fnCtx_, d, ConstantInt::get(i32_, f->arity), argv});
+  });
   return true;
 }
 

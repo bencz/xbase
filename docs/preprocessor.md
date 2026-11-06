@@ -22,6 +22,12 @@ The lexer delivers one logical line at a time. A UTF-8 byte order mark at the st
 - Strings: `"..."`, `'...'` and `[...]`. A `[` starts a string unless it follows something that can be indexed (an
   identifier, a literal or a closing bracket), and only when a `]` follows on the same line.
 - Logical literals and operators: `.T.` `.Y.` `.F.` `.N.` `.AND.` `.OR.` `.NOT.`, case-insensitive.
+- Operators of several characters are one token each, the longest first: `:=`, the compound assignments (xbase's
+  `&=` `|=` `^^=` `<<=` `>>=` among them), `==` `!=` `<>` `<=` `>=` `=>` `++` `--` `->` `**` `::` `??` `...`, and
+  xbase's `^^` `<<` `>>`; `~` is a token of its own. In a rule definition the operators made of `<`, `>` and `=` are
+  split into their characters before the markers are found, and the characters left as literals next to each other
+  are joined again afterwards, so a marker written next to one keeps its brackets: `<a><<b>` is `<a>`, `<`, `<b>`;
+  `<n>>2` is `<n>`, `>>`, `2`; `<x,...>>1` and `<a>>=<b>` work alike.
 - Numbers: decimal with optional fraction, and `0x` hexadecimal. The lexer computes the display width of numeric
   literals (see [compiler.md](compiler.md#numeric-literals)).
 - A line whose first token is `#` is a directive line. There `[` never starts a string, `\` escapes the next token, and
@@ -45,8 +51,9 @@ Directive names may be abbreviated to four letters, like dBASE keywords (`#ifde`
 | `#error`, `#warning`, `#stdout` | Report an error, a warning, or print the text. |
 | `#pragma` | Accepted and ignored. |
 
-`#if` expressions support integers, `.T.`/`.F.`, `defined(NAME)`, `!`/`.NOT.`, unary `+`/`-`, `*` `/` `%` `+` `-`,
-comparisons (`=` `==` `!=` `<>` `#` `<` `<=` `>` `>=`), `.AND.` and `.OR.`, on 64-bit integers. Defines are expanded
+`#if` expressions support integers, `.T.`/`.F.`, `defined(NAME)`, `!`/`.NOT.`, unary `+` `-` `~`, `*` `/` `%` `+` `-`,
+the shifts `<<` `>>`, comparisons (`=` `==` `!=` `<>` `#` `<` `<=` `>` `>=`), the bit operators `&` `^^` `|` (with
+the language's precedence and rules, `xb_bit_apply`), `.AND.` and `.OR.`, on 64-bit integers. Defines are expanded
 first; names that remain are 0. Overflow, division by zero, a number outside the 64-bit range, or more than 256
 nested operators make the expression invalid.
 

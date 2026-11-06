@@ -133,6 +133,12 @@ private:
   void emitDivMod(const xir::Instruction &i, llvm::Value *a, llvm::Value *b, llvm::Value *d);
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);
+  void emitBitOp(xb_bit_op op, llvm::Value *x, llvm::Value *tx, llvm::Value *y, llvm::Value *ty, llvm::Value *d,
+                 llvm::function_ref<void()> slow);
+  void emitBitOperator(const xir::Instruction &i, const xb_bit_function &f);
+  void emitNeg(const xir::Instruction &i);
+  llvm::Value *numberAsInteger(llvm::Value *item, llvm::Value *type);
+  llvm::Value *bitApply(xb_bit_op op, llvm::Value *x, llvm::Value *y);
   llvm::Value *inlineElement(const xir::Instruction &i, llvm::Value *base, llvm::Value *idx, llvm::BasicBlock *slow,
                              llvm::Value *&array, llvm::Value *&pos);
   void emitIndex(const xir::Instruction &i);
@@ -186,7 +192,7 @@ private:
 
   // runtime entry points
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
-  llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_, rtPending_;
+  llvm::FunctionCallee rtNeg_, rtNot_, rtBitNot_, rtNumDefaultDec_, rtPending_;
   llvm::FunctionCallee rtSend_, rtSeqCatch_, rtSeqValue_, rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;

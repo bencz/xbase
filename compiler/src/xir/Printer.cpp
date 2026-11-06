@@ -23,6 +23,11 @@ const char *binopName(BinOp op) {
   case BinOp::Gt: return "gt";
   case BinOp::Ge: return "ge";
   case BinOp::In: return "in";
+  case BinOp::BitAnd: return "bitand";
+  case BinOp::BitOr: return "bitor";
+  case BinOp::BitXor: return "bitxor";
+  case BinOp::Shl: return "shl";
+  case BinOp::Shr: return "shr";
   }
   return "?";
 }
@@ -148,7 +153,7 @@ private:
     if (i.type() != Type::Void) out_ += "%" + std::to_string(i.id) + " = ";
     out_ += opName(i.op);
     switch (i.op) {
-    case Op::Unary: out_ += i.unop == UnOp::Neg ? " neg" : " not"; break;
+    case Op::Unary: out_ += i.unop == UnOp::Neg ? " neg" : i.unop == UnOp::BitNot ? " bitnot" : " not"; break;
     case Op::Binary: out_ += std::string(" ") + binopName(i.binop); break;
     case Op::IntCmp: out_ += std::string(" ") + predName(i.pred); break;
     case Op::NumDefaultDec: {

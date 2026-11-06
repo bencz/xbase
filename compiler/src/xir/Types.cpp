@@ -37,6 +37,11 @@ constexpr BinaryRule kBinaryRules[] = {
     {BinOp::Div, kNumberTypes, kNumberTypes, kDouble},
     {BinOp::Mod, kNumberTypes, kNumberTypes, kDouble},
     {BinOp::Pow, kNumberTypes, kNumberTypes, kDouble},
+    {BinOp::BitAnd, kNumberTypes, kNumberTypes, kInt}, // numbers taken as integers
+    {BinOp::BitOr, kNumberTypes, kNumberTypes, kInt},
+    {BinOp::BitXor, kNumberTypes, kNumberTypes, kInt},
+    {BinOp::Shl, kNumberTypes, kNumberTypes, kInt},
+    {BinOp::Shr, kNumberTypes, kNumberTypes, kInt},
 };
 
 TypeSet literalType(const Constant &c) {
@@ -167,6 +172,7 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   case Op::Unary: {
     TypeSet a = t.of(i.operand(0));
     if (i.unop == UnOp::Not) return {kLogical, (a & ~kLogical) != 0};
+    if (i.unop == UnOp::BitNot) return {a & kNumberTypes ? kInt : 0, (a & ~kNumberTypes) != 0};
     return {(a & kInt ? kNumberTypes : 0) | (a & kDouble), (a & ~kNumberTypes) != 0}; // -INT64_MIN is a double
   }
   case Op::SwitchCheck: {
