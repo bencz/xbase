@@ -38,9 +38,11 @@ static uint32_t key_hash(const xb_hash *h, const xb_item *k) {
   if (k->type == XB_T_STRING) {
     xb_str *s = k->v.s;
     if (h->flags & XB_HASH_IGNORECASE) return xb_hash_bytes_as(s->data, s->len, 1);
-    if (s->hash) return s->hash;
+    /* a string an append grows keeps its room in `hash` (only its variable sees it, so it never gets here) */
+    int growing = (s->flags & XB_STR_APPEND) != 0;
+    if (s->hash && !growing) return s->hash; /* literals carry theirs */
     uint32_t v = xb_hash_bytes(s->data, s->len);
-    if (!(s->flags & XB_STR_STATIC)) s->hash = v; /* strings are immutable: the hash holds */
+    if (!growing && !(s->flags & XB_STR_STATIC)) s->hash = v; /* strings are immutable: the hash holds */
     return v;
   }
   if (k->type == XB_T_DATE) return fold((uint64_t)k->v.i ^ UINT64_C(0xd6e8feb86659fd93));

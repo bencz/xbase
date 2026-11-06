@@ -10,6 +10,9 @@ after stu
 substituted SUB
 then SUB!
 large      40001    2449991 B-C--DE- -G--
+reread        124        124     614440 .T.         12        101
+while     100000 qq
+handler abcd abcdZ
 block bc bcd
 numbers          8.5
 then ab

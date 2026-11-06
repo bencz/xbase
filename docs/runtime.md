@@ -33,12 +33,14 @@ typedef struct xb_item {
   those for results of up to one byte (`Chr()`, `SubStr( c, n, 1 )`, ...), so making one allocates nothing, and compiled
   code takes them from the table too. One exception to immutability is invisible to programs: `xb_op_append( ctx, var, b
   )`, which compiled code calls for `x := x + y` on a `LOCAL` only its function sees (`append-in-place` in
-  [xir.md](xir.md#passes)), makes a string result with room to grow (twice its length, at least 32 bytes, none past what
-  a GC header can record) and the flag `XB_STR_APPEND`, and while the variable still holds it with the flag, a later
-  append copies the bytes into the room instead of making a new string (`xb_str_room` reads the room from the object's
-  size in its header). Compiled code clears the flag whenever it reads such a variable otherwise, before the value goes
-  anywhere, so a string seen by anything but its variable never changes. Other types are `+`, and the variable changes
-  only when `+` gives a value.
+  [xir.md](xir.md#passes)), makes a string result with room to grow (twice its length, at least 32 bytes;
+  `xb_str_growing`) with the flag `XB_STR_APPEND` and the room in its `hash` field (at most 4 GB; a string past that has
+  no room and no flag), and while the variable still holds it with the flag, a later append copies the bytes into the
+  room instead of making a new string; compiled code does that case in place and calls the function for the others.
+  Compiled code ends the growth (clears the flag and sets `hash` back to 0, not computed, as `xb_str_share` does)
+  whenever such a variable is read otherwise (`Len()` and `Asc()` read it in place), before the value goes anywhere, so
+  a string seen by anything but its variable never changes and a hash key's hash is never the room. Other types are `+`,
+  and the variable changes only when `+` gives a value.
 - Arrays (`xb_array` in `xbrt.h`: `len`, `cap`, `items`; `types/array.c`, functions in `rtl/arrays.c`) are 1-based.
   Their items start in the array's own allocation and move to a separate heap object when the array grows past it.
   Compiled code reads `len` and `items` to access elements in place.

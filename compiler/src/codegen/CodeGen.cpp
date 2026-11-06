@@ -208,10 +208,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   blocks_.clear();
   values_.clear();
   fusedTruth_.clear();
-  appendVars_.clear();
-  for (const auto &xb : f.blocks)
-    for (const auto &ins : xb->insts)
-      if (ins->op == xir::Op::Append) appendVars_.insert(ins->var);
+  findSharingLoads(f, plan.cfg());
   locals_.clear();
   localItems_.clear();
   heapItems_.clear();

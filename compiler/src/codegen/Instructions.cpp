@@ -196,7 +196,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::Load: {
     Value *p = varAddress(*i.var, i.access, unwind_);
-    if (appendVars_.count(i.var)) shareString(p); // the value leaves the variable: its string stops growing
+    if (sharingLoads_.count(&i)) shareString(p); // the value leaves the variable: its string stops growing
     const Home &h = plan_->home(&i);
     if (h.kind == Home::Kind::Place && h.place == &i) values_[&i] = p; // the variable's own item serves the use
     else copyItem(addr(&i), p);
@@ -208,12 +208,7 @@ void CodeGen::emit(const xir::Instruction &i) {
       copyItem(varAddress(*i.var, i.access, unwind_), src);
     }
     break;
-  case Op::Append: {
-    Value *src = addr(ops[0]);
-    b_.CreateCall(rtAppend_, {fnCtx_, varAddress(*i.var, i.access, unwind_), src});
-    checkPending(unwind_);
-    break;
-  }
+  case Op::Append: emitAppend(i); break;
   case Op::Barrier: writeBarrier(*i.var, i.access); break;
   case Op::Unary: {
     if (const xb_bit_function *f = bitOperator(i.unop)) {
@@ -370,14 +365,18 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::BoolAnd: values_[&i] = b_.CreateAnd(value(ops[0]), value(ops[1])); break;
   case Op::BoolNot: values_[&i] = b_.CreateNot(value(ops[0])); break;
   case Op::Br:
+    shareOnEdge(i.parent, i.targets[0].block);
     emitBranch(i.targets[0]);
     b_.CreateBr(blocks_.at(i.targets[0].block));
     break;
   case Op::CondBr: {
-    // A target with arguments gets an edge block of its own for them.
+    // A target with arguments, or whose edge ends a string's growth, gets an edge block of its own.
     BasicBlock *dests[2];
-    for (size_t k = 0; k < 2; ++k)
-      dests[k] = i.targets[k].args.empty() ? blocks_.at(i.targets[k].block) : newBlock("edge");
+    bool own[2];
+    for (size_t k = 0; k < 2; ++k) {
+      own[k] = !i.targets[k].args.empty() || shareOnEdge_.count({i.parent, i.targets[k].block});
+      dests[k] = own[k] ? newBlock("edge") : blocks_.at(i.targets[k].block);
+    }
     const auto *cond = ops[0]->kind() == xir::Value::Kind::Instruction ? static_cast<const xir::Instruction *>(ops[0])
                                                                        : nullptr;
     if (cond && cond->op == xir::Op::SubstCheck) // a substituted value of another type: rare
@@ -385,8 +384,9 @@ void CodeGen::emit(const xir::Instruction &i) {
     else
       b_.CreateCondBr(value(ops[0]), dests[0], dests[1]);
     for (size_t k = 0; k < 2; ++k) {
-      if (i.targets[k].args.empty()) continue;
+      if (!own[k]) continue;
       b_.SetInsertPoint(dests[k]);
+      shareOnEdge(i.parent, i.targets[k].block);
       emitBranch(i.targets[k]);
       b_.CreateBr(blocks_.at(i.targets[k].block));
     }

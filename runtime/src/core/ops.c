@@ -46,8 +46,7 @@ void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 
 void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
   if (var->type != XB_T_STRING || b->type != XB_T_STRING) {
-    if (var->type == XB_T_STRING && (var->v.s->flags & XB_STR_APPEND))
-      var->v.s->flags &= ~XB_STR_APPEND; /* the error's arguments see it */
+    if (var->type == XB_T_STRING) xb_str_share(var->v.s); /* the error's arguments see it */
     xb_item sum; /* the variable changes only if the + gives a value: an error that unwinds leaves it */
     xb_set_nil(&sum);
     xb_gc_root_push(ctx, &sum);
@@ -58,7 +57,7 @@ void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
   }
   xb_str *s = var->v.s;
   const xb_str *t = b->v.s;
-  if ((s->flags & XB_STR_APPEND) && t->len <= xb_str_room(s) - s->len) {
+  if ((s->flags & XB_STR_APPEND) && t->len <= s->hash - s->len) { /* also done in place by compiled code */
     memcpy(s->data + s->len, t->data, t->len);
     s->len += t->len;
     s->data[s->len] = '\0';
@@ -69,10 +68,9 @@ void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
     xb_set_str(var, xb_str_concat(s, t));
     return;
   }
-  xb_str *r = xb_str_alloc_room(len, len < 16 ? 32 : 2 * len); /* doubling: appends cost O(1) amortized */
+  xb_str *r = xb_str_growing(len, len < 16 ? 32 : 2 * len); /* doubling: appends cost O(1) amortized */
   memcpy(r->data, s->data, s->len);
   memcpy(r->data + s->len, t->data, t->len);
-  r->flags = XB_STR_APPEND;
   xb_set_str(var, r);
 }
 

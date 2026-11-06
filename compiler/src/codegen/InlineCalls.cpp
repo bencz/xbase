@@ -11,6 +11,8 @@
 
 #include <llvm/IR/Constants.h>
 
+#include <algorithm>
+
 using namespace llvm;
 
 namespace xb {
@@ -31,6 +33,15 @@ Inline inlineKind(const xir::Instruction &i) {
   for (const auto &e : table)
     if (i.callee.name == e.name && i.operands().size() == e.argc) return e.kind;
   return Inline::None;
+}
+
+// A load whose value goes only to Len() and Asc() calls, which read a string
+// in place and keep nothing: it need not end a string's growth.
+bool readOnly(const xir::Instruction &load) {
+  return !load.users().empty() && std::all_of(load.users().begin(), load.users().end(), [](const xir::Instruction *u) {
+    Inline k = inlineKind(*u);
+    return k == Inline::Len || k == Inline::Asc;
+  });
 }
 
 } // namespace
@@ -68,22 +79,191 @@ Value *CodeGen::byteString(Value *c) {
   return b_.CreateInBoundsGEP(table, strBytes_, {ConstantInt::get(i64_, 0), c});
 }
 
+Value *CodeGen::isGrowing(Value *flags) {
+  return b_.CreateICmpNE(b_.CreateAnd(flags, ConstantInt::get(i32_, XB_STR_APPEND)), ConstantInt::get(i32_, 0));
+}
+
 // A string an `append` made may grow in place only while its variable is
 // the one holding it: when the item is such a string (XB_STR_APPEND), the
-// flag goes, and the string is immutable from then on.
+// flag goes and `hash`, which held the room, is 0 again (not computed), as
+// xb_str_share does; the string is immutable from then on.
 void CodeGen::shareString(Value *item) {
   BasicBlock *str = newBlock("share.str"), *clear = newBlock("share"), *done = newBlock("share.done");
   b_.CreateCondBr(b_.CreateICmpEQ(itemType(item), ConstantInt::get(i32_, XB_T_STRING)), str, done);
   b_.SetInsertPoint(str);
-  Value *flagsAt = b_.CreateStructGEP(strType(ArrayType::get(i8_, 0)), itemPointer(item, "str"), StrFlags);
+  StructType *ty = strType(ArrayType::get(i8_, 0));
+  Value *s = itemPointer(item, "str");
+  Value *flagsAt = b_.CreateStructGEP(ty, s, StrFlags);
   Value *flags = loadFrom(i32_, flagsAt, Mem::String, "flags");
-  Value *growing =
-      b_.CreateICmpNE(b_.CreateAnd(flags, ConstantInt::get(i32_, XB_STR_APPEND)), ConstantInt::get(i32_, 0));
-  b_.CreateCondBr(growing, clear, done);
+  b_.CreateCondBr(isGrowing(flags), clear, done);
   b_.SetInsertPoint(clear);
   tag(b_.CreateStore(b_.CreateAnd(flags, ConstantInt::get(i32_, ~XB_STR_APPEND)), flagsAt), Mem::String);
+  tag(b_.CreateStore(ConstantInt::get(i32_, 0), b_.CreateStructGEP(ty, s, StrHash)), Mem::String);
   b_.CreateBr(done);
   b_.SetInsertPoint(done);
+}
+
+// `append`: a string the variable grows (XB_STR_APPEND) takes a string's
+// bytes in place when they fit its room (`hash`), as xb_op_append does;
+// anything else calls it.
+void CodeGen::emitAppend(const xir::Instruction &i) {
+  Value *var = varAddress(*i.var, i.access, unwind_);
+  Value *y = addr(i.operand(0));
+  StructType *ty = strType(ArrayType::get(i8_, 0));
+  BasicBlock *strings = newBlock("append.strings"), *fits = newBlock("append.fits"), *one = newBlock("append.byte");
+  BasicBlock *many = newBlock("append.bytes"), *end = newBlock("append.end"), *slow = newBlock("append.call");
+  BasicBlock *join = newBlock("join");
+  Value *str = ConstantInt::get(i32_, XB_T_STRING);
+  branchLikely(b_.CreateAnd(b_.CreateICmpEQ(itemType(var), str), b_.CreateICmpEQ(typeOf(i.operand(0), y), str)),
+               strings, slow);
+  b_.SetInsertPoint(strings);
+  Value *s = itemPointer(var, "str"), *t = itemPointer(y, "str");
+  Value *flags = loadFrom(i32_, b_.CreateStructGEP(ty, s, StrFlags), Mem::String, "flags");
+  Value *room = b_.CreateZExt(loadFrom(i32_, b_.CreateStructGEP(ty, s, StrHash), Mem::String, "room"), i64_);
+  Value *len = strLength(s), *more = strLength(t);
+  branchLikely(b_.CreateAnd(isGrowing(flags), b_.CreateICmpULE(more, b_.CreateSub(room, len))), fits, slow);
+  b_.SetInsertPoint(fits);
+  Value *data = b_.CreateStructGEP(ty, s, StrData);
+  Value *tail = b_.CreateInBoundsGEP(i8_, data, b_.CreateZExtOrTrunc(len, intPtrTy_));
+  Value *from = b_.CreateStructGEP(ty, t, StrData);
+  b_.CreateCondBr(b_.CreateICmpEQ(more, ConstantInt::get(i64_, 1)), one, many);
+  b_.SetInsertPoint(one);
+  tag(b_.CreateStore(loadFrom(i8_, from, Mem::String, "byte"), tail), Mem::String);
+  b_.CreateBr(end);
+  b_.SetInsertPoint(many);
+  b_.CreateMemCpy(tail, MaybeAlign(1), from, MaybeAlign(1), b_.CreateZExtOrTrunc(more, intPtrTy_));
+  b_.CreateBr(end);
+  b_.SetInsertPoint(end);
+  Value *newLen = b_.CreateAdd(len, more);
+  tag(b_.CreateStore(b_.CreateZExtOrTrunc(newLen, intPtrTy_), b_.CreateStructGEP(ty, s, StrLen)), Mem::String);
+  Value *nul = b_.CreateInBoundsGEP(i8_, data, b_.CreateZExtOrTrunc(newLen, intPtrTy_));
+  tag(b_.CreateStore(ConstantInt::get(i8_, 0), nul), Mem::String);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  b_.CreateCall(rtAppend_, {fnCtx_, var, y});
+  checkPending(unwind_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// The loads that must end the growth: those an `append` of their variable
+// reaches with no load in between (one that did has ended it already). A
+// forward data flow over the blocks; a block that operations unwind to may
+// be entered from the middle of another, so every variable may be growing
+// there. A load whose value only Len() and Asc() read keeps the growth. A
+// block reached growing along some of its edges only, from which every path
+// ends the growth before any append (a loop that reads what a loop before it
+// built), ends it on those edges instead (shareOnEdge_), once, rather than at
+// every load: ending it earlier is safe, and costs nothing there.
+void CodeGen::findSharingLoads(const xir::Function &f, const xir::CFG &cfg) {
+  sharingLoads_.clear();
+  shareOnEdge_.clear();
+  std::unordered_map<const xir::Var *, size_t> bit;
+  std::unordered_set<const xir::BasicBlock *> unwindTargets;
+  for (const auto &b : f.blocks) {
+    if (b->unwind) unwindTargets.insert(b->unwind);
+    for (const auto &i : b->insts)
+      if (i->op == xir::Op::Append && !bit.count(i->var)) bit.emplace(i->var, bit.size());
+  }
+  if (bit.empty()) return;
+  using Growing = std::vector<bool>;
+  std::unordered_map<const xir::BasicBlock *, Growing> out;
+  auto transfer = [&](const xir::BasicBlock &b, Growing g, bool record) {
+    for (const auto &i : b.insts) {
+      auto it = i->var ? bit.find(i->var) : bit.end();
+      if (it == bit.end()) continue;
+      if (i->op == xir::Op::Append) {
+        g[it->second] = true;
+      } else if (i->op == xir::Op::Load && g[it->second] && !readOnly(*i)) {
+        if (record) sharingLoads_.insert(i.get());
+        g[it->second] = false;
+      }
+    }
+    return g;
+  };
+  auto in = [&](const xir::BasicBlock *b) {
+    Growing g(bit.size(), unwindTargets.count(b) != 0);
+    for (const xir::BasicBlock *p : cfg.preds(b)) {
+      auto o = out.find(p);
+      if (o == out.end()) continue;
+      Growing along = o->second;
+      auto edge = shareOnEdge_.find({p, b});
+      if (edge != shareOnEdge_.end())
+        for (const xir::Var *v : edge->second) along[bit.at(v)] = false;
+      for (size_t k = 0; k < g.size(); ++k) g[k] = g[k] || along[k];
+    }
+    return g;
+  };
+  auto settle = [&] {
+    out.clear();
+    for (bool changed = true; changed;) { // the sets only grow
+      changed = false;
+      for (const xir::BasicBlock *b : cfg.order()) {
+        Growing g = transfer(*b, in(b), false);
+        auto &o = out[b];
+        if (o != g) {
+          o = std::move(g);
+          changed = true;
+        }
+      }
+    }
+  };
+  settle();
+  // Whether, from a block's start, every path ends the growth of each variable (a load that is not read-only) or
+  // leaves the function before an append grows it: there, ending it earlier costs nothing. A backward data flow, from
+  // "everywhere" down to the fixpoint; an unwind edge counts as a path.
+  std::unordered_map<const xir::BasicBlock *, Growing> ends;
+  auto endsAt = [&](const xir::BasicBlock &b) {
+    Growing e(bit.size(), true);
+    for (size_t k = 0; k < b.numSuccessors(); ++k) {
+      auto it = ends.find(b.successor(k));
+      if (it != ends.end())
+        for (size_t v = 0; v < e.size(); ++v) e[v] = e[v] && it->second[v];
+    }
+    for (auto i = b.insts.rbegin(); i != b.insts.rend(); ++i) {
+      auto it = (*i)->var ? bit.find((*i)->var) : bit.end();
+      if (it == bit.end()) continue;
+      if ((*i)->op == xir::Op::Append) e[it->second] = false;
+      else if ((*i)->op == xir::Op::Load && !readOnly(**i)) e[it->second] = true;
+    }
+    return e;
+  };
+  for (const xir::BasicBlock *b : cfg.order()) ends[b] = Growing(bit.size(), true);
+  for (bool changed = true; changed;) { // the sets only shrink
+    changed = false;
+    for (auto b = cfg.order().rbegin(); b != cfg.order().rend(); ++b) {
+      Growing e = endsAt(**b);
+      if (e != ends[*b]) {
+        ends[*b] = std::move(e);
+        changed = true;
+      }
+    }
+  }
+  for (const xir::BasicBlock *b : cfg.order()) {
+    if (unwindTargets.count(b) || cfg.preds(b).size() < 2) continue;
+    Growing g = in(b);
+    for (const auto &[var, k] : bit) {
+      if (!g[k] || !ends.at(b)[k]) continue;
+      bool someNot = std::any_of(cfg.preds(b).begin(), cfg.preds(b).end(), [&](const xir::BasicBlock *p) {
+        auto o = out.find(p);
+        return o != out.end() && !o->second[k];
+      });
+      if (!someNot) continue;
+      for (const xir::BasicBlock *p : cfg.preds(b)) {
+        auto o = out.find(p);
+        if (o != out.end() && o->second[k]) shareOnEdge_[{p, b}].push_back(var);
+      }
+    }
+  }
+  if (!shareOnEdge_.empty()) settle();
+  for (const xir::BasicBlock *b : cfg.order()) transfer(*b, in(b), true);
+}
+
+// The growth ends on the edge `from` -> `to` (findSharingLoads).
+void CodeGen::shareOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to) {
+  auto edge = shareOnEdge_.find({from, to});
+  if (edge == shareOnEdge_.end()) return;
+  for (const xir::Var *v : edge->second) shareString(varAddress(*v, xir::Access::Direct, unwind_));
 }
 
 bool CodeGen::emitInlineCall(const xir::Instruction &i) {
@@ -93,11 +273,9 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
   const xir::Instruction *asc = nullptr;                        // the Asc() lowered with this SubStr()
   if (kind == Inline::SubStr && i.hasOneUse() && fusedCalls_.count(i.users().front()))
     asc = static_cast<const xir::Instruction *>(i.users().front());
-  Value *argv = operandGroup(i);
   Value *d = dest(i);
   Value *ascDest = asc ? dest(*asc) : nullptr; // computed here, where both paths start
-  uint32_t base = plan_->groupBase(&i);
-  auto arg = [&](unsigned n) { return slot(base + n); };
+  auto arg = [&](unsigned n) { return addr(i.operand(n)); }; // read in place: the argument group is for the call
   auto argType = [&](unsigned n) { return typeOf(i.operand(n), arg(n)); };
   auto isType = [&](Value *type, uint32_t tag) { return b_.CreateICmpEQ(type, ConstantInt::get(i32_, tag)); };
   BasicBlock *slow = newBlock("call"), *join = newBlock("join");
@@ -150,6 +328,7 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
   }
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
+  Value *argv = operandGroup(i);
   setNil(d);
   b_.CreateCall(xbFuncTy_, externFunction(i.callee), {fnCtx_, d, ConstantInt::get(i32_, i.operands().size()), argv});
   checkPending(unwind_);

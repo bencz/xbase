@@ -71,6 +71,45 @@ PROCEDURE Main()
    NEXT
    ? "large", Len( x ), n, Left( x, 8 ), Right( x, 4 )
 
+   // Read in a loop that also appends to it: the growth ends at the reads and starts again with a new string; one
+   // byte, several bytes and NUL bytes are copied alike.
+   x := ""
+   FOR i := 1 TO 50
+      x += "ab"
+   NEXT
+   t := ""
+   FOR i := 1 TO Len( x )
+      t += SubStr( x, i, 1 )
+      IF i % 10 == 0
+         x += Chr( 0 ) + "Z"
+      ENDIF
+   NEXT
+   n := 0
+   FOR i := 1 TO Len( x )
+      n += Asc( SubStr( x, i, 1 ) ) * i
+   NEXT
+   ? "reread", Len( x ), Len( t ), n, t == x, Len( x ) - Len( StrTran( x, Chr( 0 ) ) ), At( Chr( 0 ) + "Z", x )
+
+   // Len() and Asc() read the growing string in place: a loop that tests its length keeps growing it.
+   x := ""
+   DO WHILE Len( x ) < 100000 .AND. Asc( x ) != 63
+      x += "q"
+   ENDDO
+   ? "while", Len( x ), Right( x, 2 )
+
+   // A handler block is entered from the middle of the sequence's body: reading there ends the growth too.
+   x := ""
+   ErrorBlock( {| err | Break( err ) } )
+   BEGIN SEQUENCE
+      x += "ab"
+      x += "cd"
+      Boom()
+      t := x
+   RECOVER
+      t := x
+      x += "Z"
+   END
+   ? "handler", t, x
    ErrorBlock( {| err | Break( err ) } )
    BlockView()
    OtherTypes()
@@ -95,6 +134,10 @@ STATIC PROCEDURE BlockView()
    t := Eval( blk )
    x += "d"
    ? "block", t, Eval( blk )
+RETURN
+
+STATIC PROCEDURE Boom()
+   Eval( {|| 1 + "a" } )
 RETURN
 
 STATIC FUNCTION Kept( s )

@@ -176,11 +176,11 @@ void     xb_hash_reindex(xb_hash *h);
 
 /* The empty string, never collected. */
 xb_str *xb_str_empty(void);
-/* A heap string of `len` bytes (unset) with room for `room` (none past the
- * size a GC header records); the bytes a heap string has room for (at least
- * its length). */
-xb_str *xb_str_alloc_room(uint64_t len, uint64_t room);
-size_t  xb_str_room(const xb_str *s);
+/* A string of `len` bytes (unset) that may grow in place up to `room`
+ * (XB_STR_APPEND, the room in `hash`; without the flag when the room cannot
+ * be recorded); xb_str_share ends the growth. */
+xb_str *xb_str_growing(uint64_t len, uint64_t room);
+void    xb_str_share(xb_str *s);
 
 /* Dates are Julian day numbers (0: the empty date), years 0 to 9999. Text
  * buffers include the terminating NUL: "YYYYMMDD", and a date by a SET DATE

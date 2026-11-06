@@ -323,11 +323,18 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   allow it, with their rules: `Len()` of a string or an array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n,
   1 )` with `n` within `c` (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()` whose argument
   is the `SubStr()` right before it, used nowhere else, reads the byte itself; anything else calls the function, which
-  raises the errors. `append` calls `xb_op_append` on the variable, and every other `load` of a variable an `append`
-  grows clears the string's `XB_STR_APPEND` in place before the value goes on (`shareString`). Calls set the result slot
-  to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME`
-  or `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module
-  straight to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
+  raises the errors. `append` copies a string's bytes into the room of the variable's growing string in place (one store
+  for one byte) when they fit, and calls `xb_op_append` otherwise. A `load` that an `append` of its variable reaches
+  with no other load in between ends the growth before the value goes on (`shareString`), unless only `Len()` and
+  `Asc()` read its value, in place; a forward data flow finds them (`findSharingLoads`), where a block entered by
+  unwinding (a `BEGIN SEQUENCE` handler, a `FOR EACH` cleanup) starts with every such variable growing, and a block
+  reached growing along some edges only, from which every path ends the growth before any append (a loop that reads what
+  a loop before it built), ends it on those edges instead, so the loop does not test it again. The bit operators and
+  functions take two integers in two instructions and convert doubles on a path of their own, and the fast paths of
+  calls read their operands in place: the argument group is built only for the call. Calls set the result slot to `NIL`,
+  then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or
+  `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module straight
+  to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
   initialization are internal, under names nothing looks up, so modules sharing the object never clash.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`) in the frame. While an xIR instruction is lowered, every call the builder creates is

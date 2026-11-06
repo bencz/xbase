@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 17u
+#define XB_ABI_VERSION 18u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -63,7 +63,8 @@ static inline int xb_type_is_heap(uint32_t type) {
  * between items and threads. `data` is always NUL terminated (len excludes
  * the terminator) so it can be handed to C without copying. */
 #define XB_STR_STATIC 0x1u   /* not a heap object, never freed: literals, the empty and one-byte strings */
-#define XB_STR_APPEND 0x2u   /* made by xb_op_append and seen only by its variable: may grow in place */
+#define XB_STR_APPEND 0x2u   /* made by xb_op_append and seen only by its variable: may grow in place;
+                                `hash` then holds the bytes it has room for (its length at least) */
 
 typedef struct xb_str xb_str;
 #ifndef __cplusplus
@@ -213,8 +214,9 @@ void     xb_op_not(xb_ctx *ctx, xb_item *r, const xb_item *a);
 /* var := var + b for a variable that nothing else sees (a LOCAL the compiler
  * keeps in its frame): a string the call made earlier (XB_STR_APPEND) takes
  * b's bytes in its spare room; another string result is made with room to
- * grow; anything else is xb_op_add. Compiled code clears XB_STR_APPEND when it
- * reads the variable otherwise, so a string that escapes is immutable. */
+ * grow; anything else is xb_op_add. Compiled code does the first case in
+ * place, and clears XB_STR_APPEND (and `hash`, the room) when it reads the
+ * variable otherwise, so a string that escapes is immutable. */
 void     xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b);
 /* The bit operators & | ^^ << >> and ~ (xb_bit_apply's rules; numbers are
  * taken as integers like the bit functions take them). */

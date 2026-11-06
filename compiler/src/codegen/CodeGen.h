@@ -50,8 +50,9 @@ private:
   // items outside the heap (frames, Local and scratch items, STATIC storage,
   // literals), items in the heap (elements, cells, reference targets), array
   // headers, codeblocks' cell pointers, the context's head, frame links, the
-  // collector's state bytes, and strings (compiled code reads their lengths
-  // and bytes and clears XB_STR_APPEND). Unknown memory is not tagged.
+  // collector's state bytes, and strings (compiled code reads them, and
+  // writes the strings an `append` grows: bytes, length, flags, room).
+  // Unknown memory is not tagged.
   enum class Mem : uint8_t {
     Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, String, Count_
   };
@@ -121,6 +122,7 @@ private:
 
   // FastPaths.cpp: integer cases of operators inline
   llvm::Value *isInt(llvm::Value *item);
+  llvm::Value *isIntType(llvm::Value *type);
   llvm::Value *intValue(llvm::Value *item);
   llvm::Value *itemPointer(llvm::Value *item, const char *name);
   llvm::Value *arrayLength(llvm::Value *array);
@@ -146,6 +148,10 @@ private:
   llvm::Value *strByte(llvm::Value *str, llvm::Value *pos);
   llvm::Value *byteString(llvm::Value *c);
   void shareString(llvm::Value *item);
+  llvm::Value *isGrowing(llvm::Value *flags);
+  void emitAppend(const xir::Instruction &i);
+  void findSharingLoads(const xir::Function &f, const xir::CFG &cfg);
+  void shareOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to);
   void emitBitOp(xb_bit_op op, llvm::Value *x, llvm::Value *tx, llvm::Value *y, llvm::Value *ty, llvm::Value *d,
                  llvm::function_ref<void()> slow);
   void emitBitOperator(const xir::Instruction &i, const xb_bit_function &f);
@@ -238,7 +244,9 @@ private:
   std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
   std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
-  std::unordered_set<const xir::Var *> appendVars_;                       // variables an `append` grows
+  std::unordered_set<const xir::Instruction *> sharingLoads_;              // loads that end an `append`'s growth
+  std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<const xir::Var *>>
+      shareOnEdge_; // and the edges (from, to) that do it instead of the loads after them
   std::unordered_set<const xir::Instruction *> fusedCalls_;                // Asc() calls lowered with their SubStr()
   std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
 };

@@ -18,10 +18,9 @@ using namespace llvm;
 
 namespace xb {
 
-Value *CodeGen::isInt(Value *item) {
-  Value *type = itemType(item);
-  return b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_INT));
-}
+Value *CodeGen::isInt(Value *item) { return isIntType(itemType(item)); }
+
+Value *CodeGen::isIntType(Value *type) { return b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_INT)); }
 
 // The pointer an item of a heap type holds (a string, an array, a cell, ...).
 Value *CodeGen::itemPointer(Value *item, const char *name) {
@@ -117,10 +116,7 @@ Value *CodeGen::exactAsDouble(Value *item, Value *type) {
   return b_.CreateOr(b_.CreateICmpNE(type, ConstantInt::get(i32_, XB_T_INT)), small);
 }
 
-Value *CodeGen::bothInts(Value *ta, Value *tb) {
-  Value *intTag = ConstantInt::get(i32_, XB_T_INT);
-  return b_.CreateAnd(b_.CreateICmpEQ(ta, intTag), b_.CreateICmpEQ(tb, intTag));
-}
+Value *CodeGen::bothInts(Value *ta, Value *tb) { return b_.CreateAnd(isIntType(ta), isIntType(tb)); }
 
 // Two numbers that convert to doubles exactly (the operands of the double
 // paths), of types `ta` and `tb`.
@@ -303,13 +299,22 @@ Value *CodeGen::bitApply(xb_bit_op op, Value *x, Value *y) {
 // for anything else `slow` emits the runtime call, which raises the error.
 void CodeGen::emitBitOp(xb_bit_op op, Value *x, Value *tx, Value *y, Value *ty, Value *d,
                         function_ref<void()> slow) {
+  Value *ints = y ? bothInts(tx, ty) : isIntType(tx);
   Value *numbers = y ? b_.CreateAnd(isNumberType(tx), isNumberType(ty)) : isNumberType(tx);
-  BasicBlock *fast = newBlock("bits"), *other = newBlock("bits.other"), *join = newBlock("join");
-  branchLikely(numbers, fast, other);
-  b_.SetInsertPoint(fast);
-  Value *ix = numberAsInteger(x, tx); // both operands are read before `d`, which may be one of them, is written
-  Value *iy = y ? numberAsInteger(y, ty) : nullptr;
-  storeInt(d, bitApply(op, ix, iy));
+  BasicBlock *intBB = newBlock("bits.int"), *notInt = newBlock("bits.not_int"), *numBB = newBlock("bits.num");
+  BasicBlock *other = newBlock("bits.other"), *join = newBlock("join");
+  // Integers, the usual operands, take two instructions; a double is converted on a path of its own.
+  branchLikely(ints, intBB, notInt);
+  b_.SetInsertPoint(intBB);
+  Value *ix = intValue(x); // both operands are read before `d`, which may be one of them, is written
+  storeInt(d, bitApply(op, ix, y ? intValue(y) : nullptr));
+  b_.CreateBr(join);
+  b_.SetInsertPoint(notInt);
+  branchLikely(numbers, numBB, other);
+  b_.SetInsertPoint(numBB);
+  Value *nx = numberAsInteger(x, tx);
+  Value *ny = y ? numberAsInteger(y, ty) : nullptr;
+  storeInt(d, bitApply(op, nx, ny));
   b_.CreateBr(join);
   b_.SetInsertPoint(other);
   slow();
@@ -337,12 +342,12 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
   if (i.callee.function || !i.callee.native) return false;
   const xb_bit_function *f = findBitFunction(i.callee.name);
   if (!f || i.operands().size() != f->arity) return false;
-  Value *argv = operandGroup(i);
   Value *d = dest(i);
   bool binary = f->arity > 1;
-  Value *x = slot(plan_->groupBase(&i));
-  Value *y = binary ? slot(plan_->groupBase(&i) + 1) : nullptr;
+  Value *x = addr(i.operand(0)); // read in place: the argument group is built only for the call
+  Value *y = binary ? addr(i.operand(1)) : nullptr;
   emitBitOp(f->op, x, typeOf(i.operand(0), x), y, binary ? typeOf(i.operand(1), y) : nullptr, d, [&] {
+    Value *argv = operandGroup(i);
     setNil(d);
     b_.CreateCall(xbFuncTy_, externFunction(i.callee), {fnCtx_, d, ConstantInt::get(i32_, f->arity), argv});
   });
