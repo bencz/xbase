@@ -74,7 +74,7 @@ bool Parser::isKw(const Token &t, const char *kw) const {
       {"STEP", 4},   {"TO", 2},    {"WHILE", 4},  {"WITH", 4},    {"MEMVAR", 4}, {"FIELD", 4},
       {"PRIVATE", 4}, {"PUBLIC", 4}, {"PARAMETERS", 4}, {"EXTERNAL", 4}, {"CASE", 4}, {"OTHERWISE", 4}, {"ENDCASE", 4},
       {"SWITCH", 4}, {"ENDSWITCH", 5}, {"EACH", 4}, {"IN", 2}, {"DESCEND", 7},
-      {"BEGIN", 4},  {"SEQUENCE", 4}, {"RECOVER", 4}, {"USING", 4},
+      {"BEGIN", 4},  {"SEQUENCE", 4}, {"RECOVER", 4}, {"USING", 4}, {"INIT", 4},
   };
   if (t.kind != Tok::Ident) return false;
   size_t minLen = std::strlen(kw);
@@ -139,9 +139,11 @@ bool Parser::atInlineIf() const {
   return false;
 }
 
+// FUNCTION or PROCEDURE, after STATIC, INIT or EXIT.
 bool Parser::atFuncStart() const {
   if (atStmtKw("FUNCTION") || atStmtKw("PROCEDURE")) return true;
-  return atStmtKw("STATIC") && (isKw(ahead(), "FUNCTION") || isKw(ahead(), "PROCEDURE"));
+  bool qualified = atStmtKw("STATIC") || (at(Tok::Ident) && (isKw(cur(), "INIT") || isKw(cur(), "EXIT")));
+  return qualified && (isKw(ahead(), "FUNCTION") || isKw(ahead(), "PROCEDURE"));
 }
 
 // EXTERN[AL] FUNCTION: a declaration, at file level like FUNCTION.
@@ -200,6 +202,10 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
   fn->loc = cur().loc;
   if (atKw("STATIC")) {
     fn->isStatic = true;
+    advance();
+  } else if (atKw("INIT") || atKw("EXIT")) {
+    fn->startup = atKw("INIT") ? FuncDecl::Startup::Init : FuncDecl::Startup::Exit;
+    fn->isStatic = true; // the runtime runs it; nothing calls it by name
     advance();
   }
   fn->isProcedure = atKw("PROCEDURE");

@@ -1,0 +1,6 @@
+
+init foo
+init x
+main
+public x in another module
+public foo

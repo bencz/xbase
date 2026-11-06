@@ -1,0 +1,9 @@
+
+init second
+init first static
+init b
+main static
+b
+exit last
+exit last2
+exit b

@@ -76,3 +76,50 @@ void xbf_PROCLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_frame *f = stack_level(ctx, argc, argv, &n);
   xb_set_int(ret, n >= 0 && f ? f->line : 0);
 }
+
+/* ErrorLevel( [nNew] ): the program's exit code; an argument replaces it: a
+ * number wrapped to 32 bits, anything else 0. */
+void xbf_ERRORLEVEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_int(ret, ctx->exitcode);
+  if (argc) ctx->exitcode = xb_is_number(&argv[0]) ? xb_num_wrap_int32(&argv[0]) : 0;
+}
+
+/* Do( cName | bBlock, [xArgs...] ): the result of the function named cName
+ * (letter case aside; the name ends at a NUL) or of the block, called with the
+ * arguments; references go on as passed where the function takes them, a
+ * runtime function receives the value elsewhere. Do shows on the call stack
+ * while it runs. */
+#define DO_NAME_MAX 256
+void xbf_DO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  static const xb_proc proc = {"DO"};
+  xb_frame frame;
+  if (argc && argv[0].type == XB_T_STRING) {
+    const char *name = argv[0].v.s->data;
+    size_t len = strlen(name);
+    char upper[DO_NAME_MAX];
+    const xb_symbol_entry *e = NULL;
+    if (len < sizeof upper) {
+      for (size_t i = 0; i < len; ++i) upper[i] = xb_ascii_upper(name[i]);
+      e = xb_symbol_find(upper, len);
+    }
+    if (!e) {
+      xb_error_in(ctx, "DO", NULL, EG_NOFUNC, 1001, name, 0, argc, argv);
+      return;
+    }
+    for (uint32_t k = 1; k < argc; ++k)
+      if ((argv[k].type == XB_T_CELL || argv[k].type == XB_T_REF) && !xb_symbol_takes_ref(e, k - 1)) {
+        const xb_item *v = xb_ref_target(ctx, &argv[k]);
+        if (ctx->pending && xb_pending(ctx)) return;
+        argv[k] = *v;
+      }
+    xb_frame_push(ctx, &frame, &proc);
+    e->fn(ctx, ret, argc - 1, argv + 1);
+    xb_frame_pop(ctx, &frame);
+  } else if (argc && argv[0].type == XB_T_BLOCK) {
+    xb_frame_push(ctx, &frame, &proc);
+    xb_block_call(ctx, ret, &argv[0], argc - 1, argv + 1);
+    xb_frame_pop(ctx, &frame);
+  } else {
+    xb_fn_arg_error(ctx, ret, 3012, "DO", argc, argv);
+  }
+}

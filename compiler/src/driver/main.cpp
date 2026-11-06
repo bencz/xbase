@@ -172,14 +172,15 @@ struct Source {
 };
 
 // The function that starts the program: a public MAIN in any module, or else
-// the first function of the first source that has one.
+// the first function (not an INIT or EXIT procedure) of the first source that
+// has one.
 const xb::xir::Function *startFunction(const std::vector<Source> &sources) {
   for (const Source &s : sources)
     for (auto &f : s.xir->functions)
       if (f->kind == xb::xir::Function::Kind::Program && !f->internal && f->name == "MAIN") return f.get();
   for (const Source &s : sources)
     for (auto &f : s.xir->functions)
-      if (f->kind == xb::xir::Function::Kind::Program) return f.get();
+      if (f->kind == xb::xir::Function::Kind::Program && !f->startup) return f.get();
   return nullptr;
 }
 

@@ -407,8 +407,17 @@ go further.
 
 ## Program startup
 
-Before `main`, the global constructor of every module with `STATIC`s calls `xb_module_register( init, statics, n )`
-(`core/module.c`), which records the module's initialization function and registers its statics as a GC root.
+Before `main`, the global constructor of every module calls `xb_module_register` (`core/module.c`) with the
+initialization of its `STATIC`s (which become a GC root), its `INIT` and `EXIT` procedures, and its public functions by
+name. These go into the symbol table (`core/symbols.c`): an open-addressing hash of upper-cased names that the runtime's
+own functions join when the program starts (`xb_program_run`), from a table generated from `include/rtl.ch` at build time
+(`runtime/symbols.cmake`, with which parameters take references, read from the declarations by
+`runtime/rtl_declarations.cmake`); a program function hides a runtime function of its name. The table refers to every
+runtime function, so every program links them all in. `Do( cName | bBlock, [args] )` calls a function found there
+(letter case aside; spaces are part of the name, which ends at a NUL) or a codeblock, with its arguments: a reference
+goes on as passed to a compiled function and to a runtime function's parameter declared `@`, other runtime parameters
+receive the value. Do shows as `DO` on the call stack; an unknown name is `BASE/1001` `Undefined function` (not
+substitutable), anything else as its first argument `BASE/3012`.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
 in binary mode so programs write the same bytes everywhere; everywhere, the start of the `ElapsedMs` clock) and takes
@@ -416,6 +425,18 @@ the command-line arguments in UTF-8 (`xb_platform_args`: as `main` received them
 wide command line on Windows). Then, on the program's thread, it creates the context, makes the arguments after the
 program's name strings in a frame of its own linked into the context's chain (so the collector sees them), calls
 `xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes output and returns the exit code.
-`xb_app_main` checks the ABI, runs the registered module initializations in registration order (`xb_modules_init`, which
-stops at the first error) and calls the start function with the arguments, as Clipper passes them: strings, `NIL` for a
-parameter without one, and arguments past the parameters passed too.
+`xb_app_main` checks the ABI and calls `xb_program_run`, which runs, in this order:
+
+1. the modules' `STATIC` initializations, in registration order;
+2. the `INIT` procedures, module by module in registration order and, within a module, from the last one written to
+   the first (as the reference does), each with the command-line arguments;
+3. the start function, with the arguments, as Clipper passes them: strings, `NIL` for a parameter without one, and
+   arguments past the parameters passed too;
+4. the `EXIT` procedures, module by module, each module's in the order written, without arguments.
+
+A request to unwind (a `QUIT`, a `BREAK` with no sequence, an error that ended the program) stops steps 1 to 3; the
+request is then dropped (with a `BREAK` value) and step 4 runs, a new request stopping it. The exit code is kept
+throughout: `ErrorLevel( [nNew] )` returns it and sets it from an argument, a number wrapped to 32 bits, anything else
+0 (the default error block sets 1). Registration order follows the global constructors,
+which is the link order on the usual toolchains. Inside an `EXIT` procedure the call stack starts with it (the
+reference shows the function that ended the program, such as `__QUIT`, under it).

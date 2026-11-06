@@ -25,7 +25,12 @@ Function *Generator::declare(const FuncDecl &f) {
   mod_->functions.push_back(std::make_unique<Function>(Function::Kind::Program, f.name));
   Function *fn = mod_->functions.back().get();
   fn->internal = f.isStatic;
-  funcs_[f.name] = fn;
+  switch (f.startup) {
+  case FuncDecl::Startup::None: funcs_[f.name] = fn; break;
+  case FuncDecl::Startup::Init: mod_->initProcs.push_back(fn); break;
+  case FuncDecl::Startup::Exit: mod_->exitProcs.push_back(fn); break;
+  }
+  fn->startup = f.startup != FuncDecl::Startup::None;
   return fn;
 }
 

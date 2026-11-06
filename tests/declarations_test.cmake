@@ -1,12 +1,6 @@
 # include/rtl.ch must declare exactly the runtime's xBase-callable functions (xbf_NAME in runtime/src).
-file(READ ${RTL} decls)
-string(REGEX MATCHALL "\nEXTERN FUNCTION [A-Za-z_][A-Za-z0-9_]*" declared "\n${decls}") # declarations start a line
-set(names "")
-foreach(d ${declared})
-  string(REGEX REPLACE "\nEXTERN FUNCTION " "" n "${d}")
-  string(TOUPPER "${n}" n)
-  list(APPEND names ${n})
-endforeach()
+include(${RUNTIME_SRC}/../rtl_declarations.cmake)
+xb_rtl_functions(${RTL} names masks)
 file(GLOB_RECURSE sources ${RUNTIME_SRC}/*.c)
 set(defined "")
 foreach(src ${sources})

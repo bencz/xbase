@@ -1,0 +1,47 @@
+/* Functions by name at run time: the program's public functions, then the
+ * runtime's (a program function hides a runtime one of its name). */
+#ifndef XB_SYMBOLS_H
+#define XB_SYMBOLS_H
+
+#include "xbrt.h"
+
+#include <stddef.h>
+
+/* A runtime function (generated from include/rtl.ch): `byref` has bit k set
+ * when parameter k receives references; bit 31 stands for every parameter
+ * from 31 on. */
+typedef struct xb_runtime_symbol {
+  const char *name;
+  xb_func fn;
+  uint32_t byref;
+} xb_runtime_symbol;
+extern const xb_runtime_symbol xb_runtime_symbols[];
+extern const uint32_t xb_runtime_symbol_count;
+
+/* What a name designates. A compiled function receives references as they
+ * are; a runtime function only where `byref` says so. */
+typedef struct xb_symbol_entry {
+  const char *name;
+  size_t len;
+  xb_func fn;
+  int native;
+  uint32_t byref;
+} xb_symbol_entry;
+
+/* Adds the program's symbols (names upper-cased); a name already there keeps
+ * its first function. Called while modules register, before the program runs. */
+void xb_symbols_add(const xb_symbol *symbols, uint32_t n);
+
+/* Adds the runtime's functions: the table is complete. xb_program_run calls
+ * it before anything runs, on the program's one thread. */
+void xb_symbols_seal(void);
+
+/* The entry of `name` (upper-cased, `len` bytes), or NULL. */
+const xb_symbol_entry *xb_symbol_find(const char *name, size_t len);
+
+/* Whether argument `k` of a call to `e` passes a reference on as it is. */
+static inline int xb_symbol_takes_ref(const xb_symbol_entry *e, uint32_t k) {
+  return !e->native || ((e->byref >> (k < 31 ? k : 31)) & 1u);
+}
+
+#endif

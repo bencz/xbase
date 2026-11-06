@@ -34,7 +34,7 @@ static const struct {
   const char *text;
 } descriptions[] = {
   {EG_ARG, "Argument error"},          {EG_BOUND, "Bound error"},    {EG_STROVERFLOW, "String overflow"},
-  {EG_ZERODIV, "Zero divisor"},        {EG_NOMETHOD, "No exported method"},
+  {EG_ZERODIV, "Zero divisor"},        {EG_NOFUNC, "Undefined function"},  {EG_NOMETHOD, "No exported method"},
   {EG_NOVARMETHOD, "No exported variable"},
 };
 

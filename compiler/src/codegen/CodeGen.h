@@ -191,7 +191,7 @@ private:
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;
-  llvm::FunctionCallee rtModuleRegister_, rtModulesInit_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
+  llvm::FunctionCallee rtModuleRegister_, rtProgramRun_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
   // state of the object (every module added)

@@ -27,14 +27,6 @@ static const char *const type_class_names[XB_T_COUNT_] = {
   [XB_T_STRING] = "CHARACTER", [XB_T_ARRAY] = "ARRAY", [XB_T_BLOCK] = "BLOCK",  [XB_T_DATE] = "DATE",
 };
 
-/* A number truncated toward zero and wrapped to 32 bits signed (0 for a
- * double beyond 64 bits). */
-static int64_t wrap_int32(const xb_item *n) {
-  int64_t i = n->type == XB_T_INT ? n->v.i : xb_dbl_fits_i64(n->v.d) ? (int64_t)n->v.d : 0;
-  uint32_t low = (uint32_t)i;
-  return low < UINT32_C(0x80000000) ? (int64_t)low : (int64_t)low - (INT64_C(1) << 32);
-}
-
 /* What the call stack shows of a message while its error block runs:
  * "CLASS:MESSAGE" for an object (MESSAGE as sent: "_NAME" to assign), else
  * the message. Longer names are cut. */
@@ -79,7 +71,7 @@ static void assign_var(xb_ctx *ctx, xb_item *r, const xb_item *self, uint32_t k,
                     XB_ERR_SUBSTITUTE, 1, value);
         return;
       }
-      int64_t i = wrap_int32(value);
+      int64_t i = xb_num_wrap_int32(value);
       xb_set_int(r, i);
       xb_set_int(&o->vars[k], var->rule == XB_VAR_UINT16 ? (uint16_t)i : i); /* no barrier: not a heap value */
       return;

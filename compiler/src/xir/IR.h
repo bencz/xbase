@@ -230,7 +230,8 @@ public:
   std::string name;               // Program: upper-cased xBase name; others: a symbol suffix
   std::string stackName;          // what ProcName() and "Called from" show: the xBase name, "(b)NAME" for a
                                   // codeblock of NAME; empty for the module initialization
-  bool internal = false;          // STATIC FUNCTION, codeblocks, module initialization
+  bool internal = false;          // STATIC FUNCTION, codeblocks, module initialization, INIT and EXIT procedures
+  bool startup = false;           // an INIT or EXIT procedure: the runtime runs it, nothing calls it
   uint32_t numParams = 0;
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures
   std::vector<std::unique_ptr<BasicBlock>> blocks;
@@ -251,6 +252,7 @@ public:
   std::vector<std::unique_ptr<Function>> functions; // program functions first, in source order
   std::vector<std::unique_ptr<Var>> statics;        // index = static slot
   Function *init = nullptr;                         // initializes the STATICs (null: none have initializers)
+  std::vector<Function *> initProcs, exitProcs;     // INIT and EXIT procedures, in source order
 };
 
 } // namespace xb::xir

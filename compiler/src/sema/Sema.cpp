@@ -24,7 +24,9 @@ void Sema::run(Module &m) {
   for (LocalDecl &d : m.fileStatics) declare(d, true, fileScope);
   std::unordered_map<std::string, SourceLoc> seen;
   for (auto &f : m.funcs) {
-    auto [it, fresh] = seen.emplace(f->name, f->loc);
+    // INIT and EXIT procedures have names of their own: nothing calls them.
+    auto [it, fresh] = f->startup == FuncDecl::Startup::None ? seen.emplace(f->name, f->loc)
+                                                             : std::pair{seen.end(), true};
     if (!fresh) {
       diag_.error(f->loc, "function '" + f->name + "' is already defined");
       diag_.note(it->second, "previous definition is here");

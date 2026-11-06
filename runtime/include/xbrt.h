@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 12u
+#define XB_ABI_VERSION 13u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -273,11 +273,26 @@ void     xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved);
 void     xb_switch_check(xb_ctx *ctx, xb_item *r, const xb_item *value);
 int32_t  xb_switch_match(const xb_item *value, const xb_item *c);
 
-/* Modules. A compiled module registers its initialization and its STATICs
- * before main(); xb_modules_init runs the initializations in order. */
+/* Modules. A compiled module registers, before main(), the function that
+ * initializes its STATICs (which become GC roots) and its INIT and EXIT
+ * procedures: `procs` holds `ninit` INIT procedures, then `nexit` EXIT ones,
+ * each in source order. xb_program_run (called by the start module's
+ * xb_app_main) runs the STATICs' initializations, the INIT procedures (module
+ * by module in registration order, each module's from its last; they receive
+ * the command-line arguments), the start function, then the EXIT procedures
+ * (module by module, each module's in order), also after a QUIT, a BREAK or
+ * an error that ended the program. A request to unwind stops the
+ * initializations and INIT procedures (the start function does not run) and
+ * the EXIT procedures. `symbols` are the module's public functions, by
+ * upper-cased name, for lookups by name at run time (Do()). */
 typedef void (*xb_module_init)(xb_ctx *ctx);
-void     xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics);
-void     xb_modules_init(xb_ctx *ctx);
+typedef struct xb_symbol {
+  const char *name;
+  xb_func fn;
+} xb_symbol;
+void     xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics, const xb_func *procs,
+                            uint32_t ninit, uint32_t nexit, const xb_symbol *symbols, uint32_t nsymbols);
+void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv);
 
 /* Codeblocks. xb_block_new stores the new block in `r` and returns it; the
  * caller fills cells[0 .. ncells-1] (xb_cell_of of each captured variable,

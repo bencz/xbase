@@ -20,11 +20,11 @@ Two modules defining the same public function is an error. Then every module is 
 object (`-o`, by default the first source's name with `.o`), where calls between the modules are direct and LLVM can
 inline across them; `-p` writes a `.ppo` per source, `-E` prints them all, `--depfile` lists every file read.
 
-The program starts at the public function `MAIN` of any module, or else at the first function of the first source
-that has one (a `STATIC` function named `MAIN` does not count). Clipper starts at the first function; xbase prefers
-`MAIN`, so that `xbc *.prg` works whatever order the files come in, and a source may define helpers before `Main`.
-`--no-entry` leaves the entry out, for modules compiled on their own and linked into a program whose entry is in
-another object.
+The program starts at the public function `MAIN` of any module, or else at the first function of the first source that
+has one (a `STATIC` function named `MAIN`, and `INIT` and `EXIT` procedures, do not count). Clipper starts at the first
+function; xbase prefers `MAIN`, so that `xbc *.prg` works whatever order the files come in, and a source may define
+helpers before `Main`. `--no-entry` leaves the entry out, for modules compiled on their own and linked into a program
+whose entry is in another object.
 
 ## Grammar
 
@@ -64,8 +64,10 @@ Keywords may be abbreviated down to a minimum length:
 
 Statements:
 
-- `[STATIC] FUNCTION | PROCEDURE name [( params )]`. Statements before the first function form an implicit procedure
-  named after the source file.
+- `[STATIC | INIT | EXIT] FUNCTION | PROCEDURE name [( params )]`. An `INIT` or `EXIT` procedure runs before or after
+  the start function ([runtime.md](runtime.md#program-startup)); its name is its own: no call reaches it, a call by that
+  name goes to the function of that name (of the module or another one), and a function may share it. Statements before
+  the first function form an implicit procedure named after the source file.
 - `STATIC name [:= expr], ...` before the first function declares file-wide statics, visible in every function of the
   source file.
 - `LOCAL name [:= expr], ...` and `STATIC name [:= expr], ...` at the start of a function, in any order. A function
@@ -337,12 +339,14 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   `xb_ref_written` is called. Frame slots and `STATIC` storage are roots and need nothing.
 - Block parameters: item parameters live in slots, and branches copy their arguments in (through a staging buffer
   when a destination is also a source); machine parameters (`bool`, `i64`) become PHIs.
-- A module with `STATIC`s gets an internal global `xb.statics` (an array of NIL items), its initialization function,
-  and a global constructor `xb.module.register` that calls `xb_module_register` before `main`. `CodeGen::run` adds
+- A module with `STATIC`s gets an internal global `xb.statics` (an array of NIL items) and its initialization
+  function; every module gets a global constructor `xb.module.register` that calls `xb_module_register` before
+  `main` with them, its `INIT` and `EXIT` procedures (`xb.module.procs`) and its public functions by name
+  (`xb.module.symbols`, `xb_symbol`). `CodeGen::run` adds
   one module to the LLVM module; several modules share it.
-- `CodeGen::finish` adds `xb_app_main( ctx, argc, argv )` (unless `--no-entry`), which checks the ABI, runs the
-  module initializations (`xb_modules_init`, followed by the pending check) and calls the start function (see
-  [Sources and modules](#sources-and-modules)) with the command-line arguments the runtime passes it.
+- `CodeGen::finish` adds `xb_app_main( ctx, argc, argv )` (unless `--no-entry`), which checks the ABI and calls
+  `xb_program_run` with the start function (see [Sources and modules](#sources-and-modules)) and the command-line
+  arguments the runtime passes it ([runtime.md](runtime.md#program-startup)).
 - 32-bit parameters and results of every declared or defined function carry the extension attribute the target ABI
   requires (`zeroext` on s390x, `signext` on RISC-V 64, none on x86-64), taken from LLVM's target library information.
 

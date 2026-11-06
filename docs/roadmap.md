@@ -16,9 +16,11 @@ design of the larger parts.
   is reported by the linker, as in Clipper; reporting it in `xbc` waits for `xbc` to link programs itself.
 - Already as in Clipper: `STATIC FUNCTION`/`STATIC PROCEDURE` are visible only in their module, and a file-wide
   `STATIC` has one value per module.
-- Missing: `INIT PROCEDURE` and `EXIT PROCEDURE` (run before and after `Main`), `ANNOUNCE`, `REQUEST`/`EXTERNAL`
-  (symbols linked in for macros and `Do()`), a dynamic symbol table (name to function, for `&`, `Do()`, `Eval` of
-  macro-built blocks), and Clipper's 10 significant characters of names.
+- Done: `INIT PROCEDURE` and `EXIT PROCEDURE`, the symbol table of public and runtime functions by name, `Do()`
+  ([runtime.md](runtime.md#program-startup)).
+- Missing: `ANNOUNCE`, `REQUEST`/`EXTERNAL` (every public function is in the symbol table already: they would only
+  name what must be linked in), the macro operator's use of the table, and Clipper's 10 significant characters of
+  names.
 
 ### Variables
 
@@ -241,7 +243,7 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. The dynamic symbol table; `INIT`/`EXIT PROCEDURE`.
+1. `ANNOUNCE`, `REQUEST`/`EXTERNAL` (the symbol table and `INIT`/`EXIT PROCEDURE` are done).
 2. Errors: `ErrorSys` (`BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind edges, typed
    continuations and the call stack are done).
 3. Memory variables and Clipper's rule for undeclared names; `Type()`.

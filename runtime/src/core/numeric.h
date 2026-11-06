@@ -61,4 +61,12 @@ static inline int xb_mul_overflow(int64_t a, int64_t b, int64_t *r) {
  * every size limit rejects. */
 static inline uint64_t xb_mul_sat_u64(uint64_t a, uint64_t b) { return a && b > UINT64_MAX / a ? UINT64_MAX : a * b; }
 
+/* A number truncated toward zero and wrapped to 32 bits signed (0 for a
+ * double beyond 64 bits), as the C integers of the reference keep numbers. */
+static inline int32_t xb_num_wrap_int32(const xb_item *n) {
+  int64_t i = n->type == XB_T_INT ? n->v.i : xb_dbl_fits_i64(n->v.d) ? (int64_t)n->v.d : 0;
+  uint32_t low = (uint32_t)i;
+  return low < UINT32_C(0x80000000) ? (int32_t)low : (int32_t)((int64_t)low - (INT64_C(1) << 32));
+}
+
 #endif

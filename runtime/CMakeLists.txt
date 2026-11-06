@@ -5,6 +5,7 @@ add_library(xbrt STATIC
   src/core/error.c
   src/core/main.c
   src/core/module.c
+  src/core/symbols.c
   src/core/numfmt.c
   src/core/ops.c
   src/core/set.c
@@ -31,6 +32,16 @@ else()
   find_package(Threads REQUIRED)
   target_link_libraries(xbrt PUBLIC m Threads::Threads)
 endif()
+
+# The runtime's functions by name (runtime/symbols.cmake), from include/rtl.ch.
+set(XB_RUNTIME_SYMBOLS ${CMAKE_CURRENT_BINARY_DIR}/rtl_symbols.c)
+add_custom_command(OUTPUT ${XB_RUNTIME_SYMBOLS}
+  COMMAND ${CMAKE_COMMAND} -DRTL=${PROJECT_SOURCE_DIR}/include/rtl.ch -DOUT=${XB_RUNTIME_SYMBOLS}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/symbols.cmake
+  DEPENDS ${PROJECT_SOURCE_DIR}/include/rtl.ch ${CMAKE_CURRENT_SOURCE_DIR}/symbols.cmake
+          ${CMAKE_CURRENT_SOURCE_DIR}/rtl_declarations.cmake
+  COMMENT "runtime symbol table")
+target_sources(xbrt PRIVATE ${XB_RUNTIME_SYMBOLS})
 
 target_include_directories(xbrt PUBLIC include PRIVATE src)
 # set.ch is shared with xBase code, so setting numbers are defined once.

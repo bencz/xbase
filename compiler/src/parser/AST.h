@@ -291,7 +291,9 @@ struct FuncDecl {
   SourceLoc loc;
   std::string name;              // upper-cased
   bool isProcedure = false;
-  bool isStatic = false;         // STATIC FUNCTION: module-private
+  bool isStatic = false;         // STATIC FUNCTION: module-private (INIT and EXIT procedures too)
+  enum class Startup : uint8_t { None, Init, Exit };
+  Startup startup = Startup::None; // INIT PROCEDURE: runs before the start function; EXIT: after it
   bool implicit = false;         // code before the first FUNCTION/PROCEDURE
   std::vector<Param> params;
   Block body;

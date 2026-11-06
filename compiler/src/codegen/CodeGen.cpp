@@ -98,11 +98,11 @@ void CodeGen::initTypes() {
   rtGcRemember_ = rt("xb_gc_remember", voidTy, {ptrTy_});
   rtSwitchCheck_ = rt("xb_switch_check", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtSwitchMatch_ = rt("xb_switch_match", i32_, {ptrTy_, ptrTy_});
-  rtModuleRegister_ = rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_});
-  rtModulesInit_ = rt("xb_modules_init", voidTy, {ptrTy_});
+  rtModuleRegister_ = rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, i32_, ptrTy_, i32_});
+  rtProgramRun_ = rt("xb_program_run", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
-                           rtSeqCatch_, rtSeqValue_, rtAbiCheck_, rtModuleRegister_, rtModulesInit_})
+                           rtSeqCatch_, rtSeqValue_, rtAbiCheck_, rtModuleRegister_})
     quietCalls_.insert(c.getCallee());
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},
@@ -178,7 +178,7 @@ void CodeGen::run(const xir::Module &m) {
   }
   for (auto &f : m.functions) functions_[f.get()] = declare(*f);
   for (auto &f : m.functions) genFunction(*f);
-  if (!m.statics.empty()) genModuleRegistration(m);
+  genModuleRegistration(m); // its public functions go into the symbol table
 }
 
 bool CodeGen::finish(const xir::Function *start) {
@@ -335,8 +335,8 @@ void CodeGen::popFrame() {
   tag(b_.CreateStore(prev, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
 }
 
-// The module's STATICs: a global constructor registers them as GC roots, with
-// the function that gives them their initial values, before main() runs.
+// The module's STATICs, with the function that gives them their initial values,
+// and its INIT and EXIT procedures: a global constructor registers them before main() runs.
 void CodeGen::genModuleRegistration(const xir::Module &m) {
   Function *init = m.init ? functions_.at(m.init) : nullptr;
   if (!init) { // no initializers: the STATICs are NIL
@@ -349,7 +349,33 @@ void CodeGen::genModuleRegistration(const xir::Module &m) {
                                    "xb.module.register", mod_);
   reg->addFnAttr(Attribute::NoUnwind);
   b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", reg));
-  b_.CreateCall(rtModuleRegister_, {init, statics_, ConstantInt::get(i32_, m.statics.size())});
+  std::vector<Constant *> procs;
+  for (const auto *list : {&m.initProcs, &m.exitProcs})
+    for (const xir::Function *f : *list) procs.push_back(functions_.at(f));
+  Constant *table = ConstantPointerNull::get(ptrTy_);
+  if (!procs.empty()) {
+    auto *ty = ArrayType::get(ptrTy_, procs.size());
+    table = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage, ConstantArray::get(ty, procs),
+                               "xb.module.procs");
+  }
+  // The public functions by name (xb_symbol: name, function), for lookups at run time.
+  auto *symTy = StructType::get(ctx_, {ptrTy_, ptrTy_});
+  std::vector<Constant *> symbols;
+  for (auto &f : m.functions)
+    if (f->kind == xir::Function::Kind::Program && !f->internal)
+      symbols.push_back(ConstantStruct::get(
+          symTy, {b_.CreateGlobalString(f->name, ".xb.symname", 0, &mod_), functions_.at(f.get())}));
+  Constant *symbolTable = ConstantPointerNull::get(ptrTy_);
+  if (!symbols.empty()) {
+    auto *ty = ArrayType::get(symTy, symbols.size());
+    symbolTable = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage, ConstantArray::get(ty, symbols),
+                                     "xb.module.symbols");
+  }
+  Value *statics = statics_ ? static_cast<Value *>(statics_) : ConstantPointerNull::get(ptrTy_);
+  b_.CreateCall(rtModuleRegister_, {init, statics, ConstantInt::get(i32_, m.statics.size()), table,
+                                    ConstantInt::get(i32_, m.initProcs.size()),
+                                    ConstantInt::get(i32_, m.exitProcs.size()), symbolTable,
+                                    ConstantInt::get(i32_, symbols.size())});
   b_.CreateRetVoid();
   appendToGlobalCtors(mod_, reg, 65535);
 }
@@ -372,17 +398,7 @@ void CodeGen::genEntry(const xir::Function &start) {
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
                               ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
                               ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, arrayItems)});
-  fn_ = fn;
-  fnCtx_ = ctx;
-  fnExit_ = BasicBlock::Create(ctx_, "done", fn);
-  b_.CreateCall(rtModulesInit_, {ctx});
-  checkPending(fnExit_); // an error in a module initialization ends the program
-  pushFrame(1, 0, nullptr, nullptr, ConstantPointerNull::get(ptrTy_)); // the start function's result slot, a root
-  b_.CreateCall(xbFuncTy_, functions_.at(&start), {ctx, slot(0), fn->getArg(1), fn->getArg(2)});
-  popFrame();
-  b_.CreateBr(fnExit_);
-  fnExit_->moveAfter(b_.GetInsertBlock());
-  b_.SetInsertPoint(fnExit_);
+  b_.CreateCall(rtProgramRun_, {ctx, functions_.at(&start), fn->getArg(1), fn->getArg(2)});
   b_.CreateRetVoid();
 }
 
