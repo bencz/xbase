@@ -43,7 +43,7 @@ Value *CodeGen::varAddress(const xir::Var &v, xir::Access a, BasicBlock *unwind)
   switch (a) {
   case xir::Access::Direct: return item;
   case xir::Access::ThroughRef: return refTarget(item, unwind);
-  case xir::Access::MaybeRef: return derefIfRef(item, unwind, xir::usuallyInCell(v));
+  case xir::Access::MaybeRef: return derefIfRef(item, unwind);
   }
   return item;
 }
@@ -81,19 +81,15 @@ Value *CodeGen::holdsRef(Value *item) {
 }
 
 // `item` itself, or the item it designates when it holds a reference. A
-// cell is followed inline (its value is at offset 0); only an element (an
-// XB_T_REF, also inside a cell) needs the runtime. `inCellLikely`: the
-// variable is shared, so its item usually holds a cell.
-Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind, bool inCellLikely) {
+// cell is followed inline (its value is at offset 0): a plain branch, since
+// a shared variable, or a parameter passed by reference, holds one all the
+// time; only an element (an XB_T_REF, also inside a cell) needs the runtime,
+// on a cold edge.
+Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind) {
   BasicBlock *from = b_.GetInsertBlock();
-  BasicBlock *join = inCellLikely ? newBlock("join") : nullptr;
-  if (inCellLikely) {
-    BasicBlock *then = newBlock("ref");
-    b_.CreateCondBr(holdsRef(item), then, join);
-    b_.SetInsertPoint(then);
-  } else {
-    join = beginUnlikely(holdsRef(item), "ref");
-  }
+  BasicBlock *join = newBlock("join"), *then = newBlock("ref");
+  b_.CreateCondBr(holdsRef(item), then, join);
+  b_.SetInsertPoint(then);
   Value *type = itemType(item);
   Value *cell = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), "cell");
   Value *inner = b_.CreateSelect(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), cell, item, "inner");
@@ -116,21 +112,16 @@ Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind, bool inCellLikely) {
 
 // After a store through `item` when it holds a reference: the write barrier
 // of the object holding the target. A cell's is the inline test of
-// cellWritten; an element's (also inside a cell) is xb_ref_written.
-void CodeGen::refWritten(Value *item, bool inCellLikely) {
-  BasicBlock *join;
-  if (inCellLikely) {
-    BasicBlock *then = newBlock("ref.written");
-    join = newBlock("join");
-    b_.CreateCondBr(holdsRef(item), then, join);
-    b_.SetInsertPoint(then);
-  } else {
-    join = beginUnlikely(holdsRef(item), "ref.written");
-  }
+// cellWritten (a plain branch, as in derefIfRef); an element's (also inside a
+// cell) is xb_ref_written, on a cold edge.
+void CodeGen::refWritten(Value *item) {
+  BasicBlock *then = newBlock("ref.written"), *join = newBlock("join");
+  b_.CreateCondBr(holdsRef(item), then, join);
+  b_.SetInsertPoint(then);
   Value *type = itemType(item);
   BasicBlock *inCell = newBlock("cell.written");
   BasicBlock *element = newBlock("elem.written");
-  b_.CreateCondBr(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), inCell, element);
+  branchLikely(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), inCell, element);
   b_.SetInsertPoint(element);
   b_.CreateCall(rtRefWritten_, {item});
   b_.CreateBr(join);
@@ -164,12 +155,12 @@ void CodeGen::writeBarrier(const xir::Var &v, xir::Access a) {
   if (v.kind == xir::Var::Kind::Capture) {
     Value *cell = capturedCell(v);
     cellWritten(cell);
-    refWritten(cell, false);
+    refWritten(cell);
     return;
   }
   Value *item = rawAddress(v);
   if (a == xir::Access::ThroughRef) b_.CreateCall(rtRefWritten_, {item});
-  else if (a == xir::Access::MaybeRef) refWritten(item, xir::usuallyInCell(v));
+  else if (a == xir::Access::MaybeRef) refWritten(item);
 }
 
 // A reference to the variable, for an argument passed by reference: its cell

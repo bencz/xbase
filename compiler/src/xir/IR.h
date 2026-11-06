@@ -123,10 +123,6 @@ inline bool mayBeInCell(const Var &v) {
   return v.kind == Var::Kind::Static || (v.kind == Var::Kind::Frame && (v.shared || v.param));
 }
 
-// A frame variable shared with codeblocks or callees: its own item usually
-// holds its cell.
-inline bool usuallyInCell(const Var &v) { return v.kind == Var::Kind::Frame && v.shared; }
-
 // Reached directly in its frame slot (the access of a frame variable that is
 // neither shared nor a parameter): only stores of the variable itself can
 // change what a load of it reads, and nothing it holds lives in the heap.

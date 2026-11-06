@@ -37,7 +37,10 @@ void CodeGen::storeDouble(Value *dst, Value *v, Value *dec) {
   storeWords(dst, header, payloadWord(v));
 }
 
-// Branches to `fast` when `cond` holds (likely), else to `slow`.
+// Branches to `fast` when `cond` holds (likely), else to `slow`. The edge to
+// `slow` is cold: splitColdLoopPaths moves it out of loops. Edges to runtime
+// calls are weighted so; a choice between two inline paths is a plain branch
+// unless one of them is rare.
 void CodeGen::branchLikely(Value *cond, BasicBlock *fast, BasicBlock *slow) {
   MDBuilder md(ctx_);
   b_.CreateCondBr(cond, fast, slow, md.createLikelyBranchWeights());
@@ -165,7 +168,7 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   BasicBlock *slow = newBlock("op"), *join = newBlock("join");
   Value *ta = typeOf(i.operand(0), a);
   Value *tb = typeOf(i.operand(1), bv);
-  branchLikely(bothInts(ta, tb), intBB, notInt);
+  b_.CreateCondBr(bothInts(ta, tb), intBB, notInt); // both paths are fast: neither is cold
   b_.SetInsertPoint(notInt);
   branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow);
 
@@ -329,9 +332,11 @@ Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx
   Value *isArray = b_.CreateICmpEQ(baseType, ConstantInt::get(i32_, XB_T_ARRAY));
   BasicBlock *intIdx = newBlock("index.int"), *notInt = newBlock("index.other"), *dblIdx = newBlock("index.double");
   BasicBlock *inBounds = newBlock("element");
+  // An integer index is the usual one: a loop indexing with doubles runs in the
+  // generic copy of splitColdLoopPaths, which keeps the double path inline.
   branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_INT))), intIdx, notInt);
   b_.SetInsertPoint(notInt);
-  b_.CreateCondBr(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
+  branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
   auto arrayAndLen = [&](Value *&arr) {
     arr = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(itemTy_, base, FValue), "arr");
     return b_.CreateZExtOrTrunc(b_.CreateLoad(intPtrTy_, b_.CreateStructGEP(arrayTy_, arr, ArrayLen)), i64_);

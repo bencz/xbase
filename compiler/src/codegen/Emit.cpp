@@ -1,6 +1,9 @@
 #include "codegen/Emit.h"
 
+#include "codegen/LoopSplit.h"
+
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/FileSystem.h>
@@ -90,6 +93,21 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
                                         : OptimizationLevel::O2;
   ModulePassManager mpm = optLevel == 0 ? pb.buildO0DefaultPipeline(lvl) : pb.buildPerModuleDefaultPipeline(lvl);
   mpm.run(m, mam);
+  if (optLevel == 0) return;
+  // Loops whose slow paths leave for a generic copy (LoopSplit.h), then the
+  // function simplification pipeline again on the functions that changed.
+  std::vector<Function *> split;
+  for (Function &f : m)
+    if (!f.isDeclaration() && splitColdLoopPaths(f)) split.push_back(&f);
+  if (split.empty()) return;
+  std::string err;
+  raw_string_ostream os(err);
+  if (verifyModule(m, &os)) report_fatal_error(Twine("xbc: internal error: loop splitting broke the module:\n") + err);
+  FunctionPassManager fpm = pb.buildFunctionSimplificationPipeline(lvl, ThinOrFullLTOPhase::None);
+  for (Function *f : split) {
+    fam.invalidate(*f, PreservedAnalyses::none());
+    fpm.run(*f, fam);
+  }
 }
 
 // Code generation runs on the legacy pass manager: in LLVM 22 it is the one

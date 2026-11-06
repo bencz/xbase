@@ -351,10 +351,23 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 ## Object emission
 
 `codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
-host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), and writes the object with the
-target's object writer (code generation runs on the legacy pass manager: in LLVM 22 it is the one every target
-implements). Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one, so
-programs run on any CPU of the target (a processor that keeps doubles with more precision than 64 bits between
+host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), then, from `-O1` on, splits the
+loops whose fast paths have cold edges (`LoopSplit.*`, below) and runs the pipeline again when it did, and writes the
+object with the target's object writer (code generation runs on the legacy pass manager: in LLVM 22 it is the one every
+target implements). Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names
+one, so programs run on any CPU of the target (a processor that keeps doubles with more precision than 64 bits between
 operations, as some 32-bit processors do, can give a different last digit in rounding edge cases; xbase does not change
 a processor's floating-point mode); `--cpu=native` (host target only) uses the CPU and features of the machine xbc runs
 on.
+
+Loops without slow paths (`codegen/LoopSplit.*`): every inline fast path keeps a call to the runtime for the other
+cases, behind an edge weighted unlikely (`branchLikely`: edges to runtime calls, and to the rare double index; a choice
+between two inline paths, such as an integer or a double operand, or a variable that holds a cell, is a plain branch).
+The innermost loops with such cold edges, found once per function, are put in simplified and LCSSA form and cloned: in
+the original, every cold edge goes to the same block of the copy, which runs the rest of the loop generically and
+never comes back; `SSAUpdater` joins the values of both where the edges enter the copy, and the exits receive the
+copy's values. The original keeps only the calls on its own paths (a `Len()` in a `FOR` limit stays), so the
+function simplification pipeline, run again on the functions that changed, optimizes it as a fast loop: values keep
+the types its fast paths give them, and loads can leave it. A loop of more than 2000 instructions or 64 cold edges is
+left as it is, and the copies grow a function by at most its own size (`kMaxLoopInstructions`, `kMaxColdEdges`). The
+module is verified after the split (an invalid module is an internal error).

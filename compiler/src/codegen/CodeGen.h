@@ -88,11 +88,11 @@ private:
   llvm::Value *rawAddress(const xir::Var &v);
   llvm::Value *varAddress(const xir::Var &v, xir::Access a, llvm::BasicBlock *unwind);
   llvm::Value *refTarget(llvm::Value *ref, llvm::BasicBlock *unwind);
-  llvm::Value *derefIfRef(llvm::Value *item, llvm::BasicBlock *unwind, bool inCellLikely);
+  llvm::Value *derefIfRef(llvm::Value *item, llvm::BasicBlock *unwind);
   llvm::BasicBlock *beginUnlikely(llvm::Value *cond, const char *name);
   void endUnlikely(llvm::BasicBlock *join);
   llvm::Value *holdsRef(llvm::Value *item);
-  void refWritten(llvm::Value *item, bool inCellLikely);
+  void refWritten(llvm::Value *item);
   void cellWritten(llvm::Value *cell);
   void writeBarrier(const xir::Var &v, xir::Access a);
   void refOf(const xir::Var &v, llvm::Value *dst);
