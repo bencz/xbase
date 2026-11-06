@@ -285,12 +285,12 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   code.
 - Alias information (TBAA): every load and store of generated code whose memory is known is tagged with its class,
   classes that never overlap (`CodeGen::Mem`): items outside the heap (an `alloca` or a global of the module: frames,
-  `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements,
-  cells, reference targets), array headers, codeblocks' cell pointers, the context's head, frame links and the
-  collector's state bytes. An address that may be either kind (a variable reached through a possible reference, an
-  argument such as `argv` or the result pointer) is not tagged. LLVM then knows that a store into an element changes
-  no frame slot and no array header; by itself this changes little in the code today, and it is the ground for moving
-  array headers out of fast loops.
+  `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements, cells,
+  reference targets), array headers, codeblocks' cell pointers, the context's head, frame links, the collector's state
+  bytes and strings (lengths and bytes, which compiled code only reads). An address that may be either kind (a variable
+  reached through a possible reference, an argument such as `argv` or the result pointer) is not tagged. LLVM then knows
+  that a store into an element changes no frame slot and no array header; by itself this changes little in the code
+  today, and it is the ground for moving array headers out of fast loops.
 - Items are stored and copied as two 8-byte words, the header (type, width, decimals; `headerWord`, in the target's byte
   order, as `xb_header_word` in `xbrt.h`) and the value, and fields are read out of the header word (their bit positions
   come from the target's layout, `headerShift`): a load is served by the store that wrote it (store forwarding) only
@@ -319,11 +319,15 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   number operands are the machine operation (`and`, `or`, `xor`, `shl`, `ashr`, `lshr`, a select for counts outside
   0..63), a double taken as an integer by `llvm.fptosi.sat` (truncated, saturated, NaN 0, as `xb_dbl_to_i64`); other
   operands call the runtime operator or function, which raises the error. Unary `-` of an integer other than INT64_MIN
-  or of a double is done in place too. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at the
-  argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another
-  module's function to `xbp_NAME`, one to a function of the module straight to it. A public function is `xbp_NAME`
-  (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under names nothing
-  looks up, so modules sharing the object never clash.
+  or of a double is done in place too. `InlineCalls.cpp` does a few runtime functions in place when their arguments
+  allow it, with their rules: `Len()` of a string or an array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n,
+  1 )` with `n` within `c` (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()` whose argument
+  is the `SubStr()` right before it, used nowhere else, reads the byte itself; anything else calls the function, which
+  raises the errors. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call
+  to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another module's function to
+  `xbp_NAME`, one to a function of the module straight to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a
+  `STATIC` function, a codeblock and a module initialization are internal, under names nothing looks up, so modules
+  sharing the object never clash.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`) in the frame. While an xIR instruction is lowered, every call the builder creates is
   marked with the instruction's source line (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is

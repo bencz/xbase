@@ -34,6 +34,7 @@ add_executable(xbc
   src/codegen/CodeGen.cpp
   src/codegen/FastPaths.cpp
   src/codegen/FramePlan.cpp
+  src/codegen/InlineCalls.cpp
   src/codegen/Instructions.cpp
   src/codegen/Literals.cpp
   src/codegen/LoopSplit.cpp

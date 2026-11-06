@@ -45,12 +45,16 @@ private:
   enum FrameField : unsigned { FramePrev = 0, FrameProc = 1, FrameCount = 2, FrameLine = 3, FrameSlots = 4 };
   enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2, CtxDecimals = 3 };
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
+  enum StrField : unsigned { StrFlags = 0, StrHash = 1, StrLen = 2, StrData = 3 }; // xb_str
   // Classes of memory compiled code reaches, which never overlap (TBAA):
   // items outside the heap (frames, Local and scratch items, STATIC storage,
   // literals), items in the heap (elements, cells, reference targets), array
-  // headers, codeblocks' cell pointers, the context's head, frame links, and
-  // the collector's state bytes. Unknown memory is not tagged.
-  enum class Mem : uint8_t { Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, Count_ };
+  // headers, codeblocks' cell pointers, the context's head, frame links, the
+  // collector's state bytes, and strings (their lengths and bytes, which
+  // compiled code only reads). Unknown memory is not tagged.
+  enum class Mem : uint8_t {
+    Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, String, Count_
+  };
 
   // CodeGen.cpp: types, runtime declarations, the module, functions and
   // their frames, item and basic block helpers.
@@ -118,6 +122,8 @@ private:
   // FastPaths.cpp: integer cases of operators inline
   llvm::Value *isInt(llvm::Value *item);
   llvm::Value *intValue(llvm::Value *item);
+  llvm::Value *itemPointer(llvm::Value *item, const char *name);
+  llvm::Value *arrayLength(llvm::Value *array);
   void storeInt(llvm::Value *dst, llvm::Value *v);
   void storeDouble(llvm::Value *dst, llvm::Value *v, llvm::Value *dec);
   llvm::Value *isNumberType(llvm::Value *type);
@@ -133,6 +139,12 @@ private:
   void emitDivMod(const xir::Instruction &i, llvm::Value *a, llvm::Value *b, llvm::Value *d);
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);
+  // InlineCalls.cpp: Len, Asc, Chr and SubStr( c, n, 1 ) in place.
+  void findFusedCalls(const xir::BasicBlock &b);
+  bool emitInlineCall(const xir::Instruction &i);
+  llvm::Value *strLength(llvm::Value *str);
+  llvm::Value *strByte(llvm::Value *str, llvm::Value *pos);
+  llvm::Value *byteString(llvm::Value *c);
   void emitBitOp(xb_bit_op op, llvm::Value *x, llvm::Value *tx, llvm::Value *y, llvm::Value *ty, llvm::Value *d,
                  llvm::function_ref<void()> slow);
   void emitBitOperator(const xir::Instruction &i, const xb_bit_function &f);
@@ -186,6 +198,7 @@ private:
   llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, items } (its items follow)
   llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, exitcode, frames, decimals }
   llvm::GlobalVariable *nilItem_ = nullptr; // a NIL item: missing arguments
+  llvm::GlobalVariable *strBytes_ = nullptr; // xb_str_bytes, declared when first used
   uint64_t itemSize_ = 0;
   llvm::Align itemAlign_;
   uint64_t unionSize_ = 0;
@@ -224,6 +237,7 @@ private:
   std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
   std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
+  std::unordered_set<const xir::Instruction *> fusedCalls_;                // Asc() calls lowered with their SubStr()
   std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
 };
 

@@ -91,7 +91,7 @@ Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind) {
   b_.CreateCondBr(holdsRef(item), then, join);
   b_.SetInsertPoint(then);
   Value *type = itemType(item);
-  Value *cell = heapItem(loadFrom(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), "cell"));
+  Value *cell = heapItem(itemPointer(item, "cell"));
   Value *inner = b_.CreateSelect(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), cell, item, "inner");
   Value *innerType = itemType(inner);
   BasicBlock *innerFrom = b_.GetInsertBlock();
@@ -126,7 +126,7 @@ void CodeGen::refWritten(Value *item) {
   b_.CreateCall(rtRefWritten_, {item});
   b_.CreateBr(join);
   b_.SetInsertPoint(inCell);
-  Value *cell = heapItem(loadFrom(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), "cell"));
+  Value *cell = heapItem(itemPointer(item, "cell"));
   Value *cellType = itemType(cell);
   BasicBlock *throughCell = beginUnlikely(b_.CreateICmpEQ(cellType, ConstantInt::get(i32_, XB_T_REF)), "elem");
   b_.CreateCall(rtRefWritten_, {cell});

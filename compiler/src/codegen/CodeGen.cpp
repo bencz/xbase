@@ -59,7 +59,7 @@ void CodeGen::initTypes() {
   static const std::pair<Mem, const char *> kMemNames[] = {
       {Mem::Item, "item"},           {Mem::HeapItem, "heap item"}, {Mem::ArrayHeader, "array header"},
       {Mem::BlockCells, "block cells"}, {Mem::Ctx, "context"},     {Mem::FrameLink, "frame link"},
-      {Mem::GcState, "gc state"},
+      {Mem::GcState, "gc state"},       {Mem::String, "string"},
   };
   static_assert(std::size(kMemNames) + 1 == (size_t)Mem::Count_, "one name per memory class but Unknown");
   for (auto [m, name] : kMemNames) {
@@ -249,6 +249,7 @@ void CodeGen::genFunction(const xir::Function &f) {
     b_.SetInsertPoint(blocks_.at(xb));
     unwind_ = xb->unwind ? blocks_.at(xb->unwind) : fnExit_;
     findFusedComparisons(*xb);
+    findFusedCalls(*xb);
     for (auto &i : xb->insts) {
       line_ = i->loc.line;
       emit(*i);
@@ -393,7 +394,7 @@ void CodeGen::genEntry(const xir::Function &start) {
   addAbiAttributes(fn);
   b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", fn));
   Value *ctx = fn->getArg(0);
-  uint64_t strHdr = dl_.getStructLayout(strType(ArrayType::get(i8_, 0)))->getElementOffset(3);
+  uint64_t strHdr = dl_.getStructLayout(strType(ArrayType::get(i8_, 0)))->getElementOffset(StrData);
   uint64_t blockCells = dl_.getStructLayout(blockTy_)->getElementOffset(2);
   uint64_t frameSlots = dl_.getStructLayout(frameType(0))->getElementOffset(FrameSlots);
   uint64_t ctxFrames = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxFrames);

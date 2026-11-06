@@ -235,7 +235,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::FromBool: storeLogical(dest(i), value(ops[0])); break;
   case Op::Call: {
-    if (emitBitCall(i)) break;
+    if (emitBitCall(i) || emitInlineCall(i)) break;
     Value *argv = operandGroup(i);
     Function *callee = i.callee.function ? functions_.at(i.callee.function) : externFunction(i.callee);
     Value *d = dest(i);

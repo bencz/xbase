@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 15u
+#define XB_ABI_VERSION 16u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -62,7 +62,7 @@ static inline int xb_type_is_heap(uint32_t type) {
 /* [ABI] string header. Strings are immutable: they can be shared freely
  * between items and threads. `data` is always NUL terminated (len excludes
  * the terminator) so it can be handed to C without copying. */
-#define XB_STR_STATIC 0x1u   /* emitted by the compiler, never freed */
+#define XB_STR_STATIC 0x1u   /* not a heap object, never freed: literals, the empty and one-byte strings */
 
 typedef struct xb_str xb_str;
 #ifndef __cplusplus
@@ -331,6 +331,20 @@ uint32_t xb_ctx_pending(const xb_ctx *ctx);
 void     xb_ctx_raise(xb_ctx *ctx, uint32_t what);
 int      xb_ctx_exitcode(const xb_ctx *ctx);
 
+/* [ABI] The 256 strings of one byte, never collected (XB_STR_STATIC): what
+ * xb_str_new and xb_str_concat return for a one-byte result (Chr(),
+ * SubStr( c, n, 1 ), ...) instead of a new string; compiled code takes them
+ * from this table. The layout of xb_str with a two-byte payload. */
+typedef struct xb_str1 {
+  uint32_t flags;
+  uint32_t hash;
+  size_t   len;
+  char     data[2];
+} xb_str1;
+extern const xb_str1 xb_str_bytes[256];
+
+/* A string of `len` bytes from `p` (the shared empty or one-byte string for
+ * up to one byte), and the concatenation of two. */
 xb_str  *xb_str_new(const char *p, size_t len);
 xb_str  *xb_str_concat(const xb_str *a, const xb_str *b);
 

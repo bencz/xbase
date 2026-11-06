@@ -1,0 +1,17 @@
+
+len          3          0          3          0          1       1000
+asc         97          0        195        255          0
+chr ABCA          1         66
+substr a b c [] [a] c b bc bc [] b []
+fused         97         98          0         99         98         98          0
+loops    6382179 cba .T. .T.
+targets         99         98         97
+error       1111 Argument error LEN
+error       1107 Argument error ASC
+error       1104 Argument error CHR
+error       1110 Argument error SUBSTR
+error       1110 Argument error SUBSTR
+error       1110 Argument error SUBSTR
+error       1110 Argument error SUBSTR
+recovered          7       1110
+substituted         63 ? ?         63

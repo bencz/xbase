@@ -23,6 +23,17 @@ Value *CodeGen::isInt(Value *item) {
   return b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_INT));
 }
 
+// The pointer an item of a heap type holds (a string, an array, a cell, ...).
+Value *CodeGen::itemPointer(Value *item, const char *name) {
+  return loadFrom(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), name);
+}
+
+// An array's length, as an i64.
+Value *CodeGen::arrayLength(Value *array) {
+  return b_.CreateZExtOrTrunc(loadFrom(intPtrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayLen), Mem::ArrayHeader),
+                              i64_);
+}
+
 Value *CodeGen::intValue(Value *item) {
   return loadFrom(i64_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), "int");
 }
@@ -414,9 +425,8 @@ Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx
   b_.SetInsertPoint(notInt);
   branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
   auto arrayAndLen = [&](Value *&arr) {
-    arr = loadFrom(ptrTy_, b_.CreateStructGEP(itemTy_, base, FValue), itemMemory(base), "arr");
-    return b_.CreateZExtOrTrunc(loadFrom(intPtrTy_, b_.CreateStructGEP(arrayTy_, arr, ArrayLen), Mem::ArrayHeader),
-                                i64_);
+    arr = itemPointer(base, "arr");
+    return arrayLength(arr);
   };
   Value *one = ConstantInt::get(i64_, 1);
 
