@@ -144,7 +144,7 @@ comparisons are argument errors; `ASort` ranks objects with arrays, and `AScan` 
 array: `Len( o )` and `o[ i ]` are argument errors (Harbour, whose objects are arrays inside, gives the number of its
 items and an item).
 
-The `Error` class (`rtl/errors.c`, `ErrorNew()`) has the variables `args` (an array), `canDefault`, `canRetry`,
+The `Error` class (`core/error.c`, `ErrorNew()`) has the variables `args` (an array), `canDefault`, `canRetry`,
 `canSubstitute` (logicals), `cargo` (any value), `description`, `filename`, `operation`, `subSystem` (strings),
 `genCode`, `osCode`, `subCode` (32-bit numbers), and `severity` and `tries` (16-bit numbers).
 
@@ -190,12 +190,42 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
 `xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t exitcode`,
 `xb_frame *frames` and `int32_t set_decimals` (SET DECIMALS, which inline `/` and `%` read). `pending` holds requests.
-The runtime sets bits there (`XB_PENDING_ERROR`, `XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`).
-Compiled code tests the field after each fallible call; when it is set the code calls `xb_pending`, which serves pauses
-(a safepoint) and returns non-zero when the function must unwind to its caller. The check stays valid across `AWAIT`.
+The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`). Compiled code tests the
+field after each fallible call; when it is set the code calls `xb_pending`, which serves pauses (a safepoint) and
+returns non-zero when the function must unwind: to a `BEGIN SEQUENCE` handler of the function, or to its caller
+([xir.md](xir.md#control-flow-for-errors-and-exceptions)). The check stays valid across `AWAIT`. `QUIT` raises
+`XB_PENDING_QUIT` with exit code 0.
 
-Runtime errors are currently fatal: `xb_rt_error` prints `Error <subsystem>/<code>  <description>: <operation>` to
-standard error, sets exit code 1 and raises `XB_PENDING_ERROR`. `QUIT` raises `XB_PENDING_QUIT` with exit code 0.
+A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`) makes an `Error` object (see
+[Objects and messages](#objects-and-messages)): subsystem `BASE`, the subcode, the generic code (`error.ch`, shared
+with xBase code like `set.ch`) and its description, the operation, severity `ES_ERROR`, `canSubstitute`, and in
+`args` the operands of an operator or the arguments of a function. Then it evaluates the context's error block with
+it (`ErrorBlock( [bNew] )` returns the block and replaces it with a codeblock argument; the block and the `BREAK`
+value are roots of the collector). After the block:
+
+- a request to unwind is pending (the block called `Break()`, or quit): the operation fails with it;
+- the error allows substitution (`XB_ERR_SUBSTITUTE`: operators, `SWITCH`, a non-numeric index, messages, `Eval` and
+  the runtime functions, except `ASize`, `AEval`, `AFill`, `Set` and the array dimension): the block's return value
+  becomes the operation's result, and the program goes on;
+- otherwise (a bound error, an assignment to an element, a condition that is not logical, the collection of
+  `FOR EACH`, ...) the program ends: `Unrecoverable error 9001: Error recovery failure` on standard error, exit code
+  1, a `QUIT` pending.
+
+Which errors allow substitution, and their `args`, follow Clipper/Harbour. An error raised while the error block runs
+is handled the same way, nested at most 8 deep (`XB_ERROR_MAX_DEPTH`); one more ends the program (`Unrecoverable
+error 9003: Too many recursive error handler calls`). In a `FOR` test, a substituted result stands for the comparison
+`counter > limit` (`<` stepping back): a logical, else the error of a condition. Retrying (`canRetry`) and defaults
+(`canDefault`) are not used by any error yet.
+
+The default error block, set up with the context, gives 0 for a division by zero (as Clipper's default handler does);
+for any other error it prints `Error <subsystem>/<subcode>  <description>: <operation>` (the file name instead of the
+operation when there is one; `Warning` for a severity below `ES_ERROR`) to standard error and quits with exit code 1.
+It does not show the calling functions yet.
+
+`Break( [xValue] )` (and the `BREAK [value]` command, `__Break`) stores the value in the context and raises
+`XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only request pending,
+and `xb_seq_value` moves the value out (`RECOVER USING`). With no sequence active the `BREAK` reaches the start
+function, and the program ends quietly with exit code 0.
 
 ## Operators
 
@@ -217,7 +247,8 @@ standard error, sets exit code 1 and raises `XB_PENDING_ERROR`. `QUIT` raises `X
 | `$` | substring test; an empty left operand is false |
 | `.NOT.` | logicals only |
 
-Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors. `==` on two arrays,
+Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors (whose error block
+may substitute the result, see [Errors and pending requests](#errors-and-pending-requests)). `==` on two arrays,
 two codeblocks or two objects tests identity; other comparisons of them are argument errors.
 
 Element access `a[i]` (`xb_op_index`) and assignment (`xb_op_index_set`) raise `Argument error: array access` (1068)

@@ -65,6 +65,8 @@ private:
 
   void block(const BasicBlock &b) {
     if (b.parent != &f_) fail(b.name + " belongs to another function");
+    if (b.unwind && (b.unwind->parent != &f_ || !b.unwind->params.empty()))
+      fail(b.name + " unwinds to a block of another function or with parameters");
     for (size_t k = 0; k < b.params.size(); ++k)
       if (b.params[k]->block != &b || b.params[k]->index != k) fail(b.name + " has a parameter with a wrong place");
     if (b.insts.empty() || !isTerminator(b.insts.back()->op)) {
@@ -96,7 +98,14 @@ private:
         fail("a value used in " + at->name + " is defined after its use");
       return;
     }
-    if (!cfg_.reachable(def) || !cfg_.dominates(def, at)) fail("a value used in " + at->name + " does not dominate it");
+    if (!cfg_.reachable(def) || !cfg_.dominates(def, at)) {
+      fail("a value used in " + at->name + " does not dominate it");
+      return;
+    }
+    // The unwind edge leaves from the operation that failed, before the rest
+    // of the block: the block's instructions do not reach its unwind block.
+    if (v->kind() == Value::Kind::Instruction && def->unwind && cfg_.dominates(def->unwind, at))
+      fail("a value used in " + at->name + " comes from a block that unwinds before it");
   }
 
   void expect(const Instruction &i, size_t n, std::initializer_list<Type> types) {
@@ -176,6 +185,7 @@ private:
         if (!ok) fail("params.ref tests something other than a parameter of this function");
       }
       break;
+    case Op::SeqCatch: case Op::SeqValue: expect(i, 0, {}); break;
     case Op::CallForward:
       expect(i, 0, {});
       if (!i.callee.function || i.callee.function->kind != Function::Kind::Program ||

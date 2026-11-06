@@ -3,13 +3,14 @@
 
 #include <string.h>
 
-static int64_t date_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv, const char *fn, int code, int *ok) {
+static int64_t date_arg(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item *argv, const char *fn, int code,
+                        int *ok) {
   if (argc >= 1 && argv[0].type == XB_T_DATE) {
     *ok = 1;
     return argv[0].v.i;
   }
   *ok = 0;
-  xb_rt_error(ctx, "BASE", code, "Argument error", fn);
+  xb_arg_error(ctx, ret, code, fn, argc, argv);
   return 0;
 }
 
@@ -58,7 +59,7 @@ void xbf_ELAPSEDMS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_CTOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_STRING) {
-    xb_rt_error(ctx, "BASE", 1119, "Argument error", "CTOD");
+    xb_arg_error(ctx, ret, 1119, "CTOD", argc, argv);
     return;
   }
   xb_set_date(ret, xb_date_parse(argv[0].v.s->data, argv[0].v.s->len, ctx->date_format, ctx->epoch));
@@ -66,7 +67,7 @@ void xbf_CTOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_DTOC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int ok;
-  int64_t jd = date_arg(ctx, argc, argv, "DTOC", 1118, &ok);
+  int64_t jd = date_arg(ctx, ret, argc, argv, "DTOC", 1118, &ok);
   if (!ok) return;
   char out[XB_DATE_TEXT_SIZE];
   size_t n = xb_date_format(jd, ctx->date_format, out);
@@ -75,7 +76,7 @@ void xbf_DTOC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_DTOS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int ok;
-  int64_t jd = date_arg(ctx, argc, argv, "DTOS", 1120, &ok);
+  int64_t jd = date_arg(ctx, ret, argc, argv, "DTOS", 1120, &ok);
   if (!ok) return;
   char out[XB_DATE_DIGITS_SIZE];
   xb_date_to_digits(jd, out);
@@ -101,7 +102,7 @@ void xbf_STOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void date_part(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, const char *fn, int part) {
   static const int codes[] = {1112, 1113, 1114}; /* YEAR, MONTH, DAY */
   int ok;
-  int64_t jd = date_arg(ctx, argc, argv, fn, codes[part], &ok);
+  int64_t jd = date_arg(ctx, ret, argc, argv, fn, codes[part], &ok);
   if (!ok) return;
   int y, m, d;
   xb_date_decode(jd, &y, &m, &d);
@@ -123,7 +124,7 @@ static int day_of_week(int64_t jd) {
 
 void xbf_DOW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int ok;
-  int64_t jd = date_arg(ctx, argc, argv, "DOW", 1115, &ok);
+  int64_t jd = date_arg(ctx, ret, argc, argv, "DOW", 1115, &ok);
   if (ok) ret_number(ret, day_of_week(jd), 3);
 }
 
@@ -144,7 +145,7 @@ static int weekday_of_fields(int64_t jd) {
 void xbf_CDOW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   static const char *const names[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
   int ok;
-  int64_t jd = date_arg(ctx, argc, argv, "CDOW", 1117, &ok);
+  int64_t jd = date_arg(ctx, ret, argc, argv, "CDOW", 1117, &ok);
   if (!ok) return;
   const char *s = jd ? names[weekday_of_fields(jd) - 1] : "";
   xb_set_str(ret, xb_str_new(s, strlen(s)));
@@ -154,7 +155,7 @@ void xbf_CMONTH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   static const char *const names[] = {"January", "February", "March",     "April",   "May",      "June",
                                       "July",    "August",   "September", "October", "November", "December"};
   int ok;
-  int64_t jd = date_arg(ctx, argc, argv, "CMONTH", 1116, &ok);
+  int64_t jd = date_arg(ctx, ret, argc, argv, "CMONTH", 1116, &ok);
   if (!ok) return;
   int y, m, d;
   xb_date_decode(jd, &y, &m, &d);

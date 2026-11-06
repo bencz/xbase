@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 65 of 551 done. Commands (`std.ch` families): 16 of 155 done.
+Functions: 67 of 551 done. Commands (`std.ch` families): 17 of 155 done.
 
 ## Statements (grammar)
 
@@ -12,7 +12,7 @@ Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar
 
 **FUNCTION**, **PROCEDURE**, **LOCAL**, **STATIC**, **RETURN**, **IF**, **DO CASE**, **SWITCH**, **WHILE**,
 **FOR**, **FOR EACH**, **EXIT**, **LOOP**, **DO ... WITH**, *PRIVATE*, *PUBLIC*, *MEMVAR*, *FIELD*, *PARAMETERS*,
-**EXTERN FUNCTION** (an xbase declaration), *BEGIN SEQUENCE*, *DECLARE*, *EXTERNAL* (Clipper's name list), *ANNOUNCE*
+**EXTERN FUNCTION** (an xbase declaration), **BEGIN SEQUENCE**, *DECLARE*, *EXTERNAL* (Clipper's name list), *ANNOUNCE*
 
 ## Commands (std.ch)
 
@@ -22,23 +22,23 @@ Grouped by their leading words; each group covers every variant of the command.
 GETS*, *CLEAR MEMORY*, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, *CLOSE*, *CLOSE ALL*, *CLOSE ALTERNATE*, *CLOSE DATABASES*,
 *CLOSE FORMAT*, *CLOSE INDEXES*, *CLOSE PROCEDURE*, *CLS*, *COMMIT*, *CONTINUE*, *COPY*, *COPY FILE*, *COUNT*, *CREATE*,
 *DELETE*, *DELETE FILE*, *DELETE TAG*, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**, **ENDCASE**, **ENDDO**, **ENDFOR**,
-**ENDIF**, *ENDSEQUENCE*, *ERASE*, *FIND*, *GO*, *GOTO*, *INDEX ON*, *INPUT*, *JOIN*, *KEYBOARD*, *LABEL FORM*, *LIST*,
-*LOCATE*, *MENU*, **NEXT**, *PACK*, **QUIT**, *READ*, *READ SAVE*, *RECALL*, *REINDEX*, *RELEASE*, *RELEASE ALL*,
-*RENAME*, *REPLACE*, *REPORT FORM*, *REQUEST*, *RESTORE*, *RESTORE SCREEN*, *RUN*, *SAVE*, *SAVE ALL*,
-*SAVE SCREEN*, *SAVE TO*, *SEEK*, *SELECT*, *SET ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*,
-*SET BELL*, **SET CENTURY**, *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET
-DBFLOCKSCHEME*, **SET DECIMALS**, *SET DEFAULT*, *SET DELETED*, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET
-DIRCASE*, *SET DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET
-EXCLUSIVE*, *SET FILECASE*, *SET FILTER*, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*,
-*SET INDEX*, *SET INTENSITY*, *SET KEY*, *SET MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*, *SET MESSAGE*,
-*SET MFILEEXT*, *SET OPTIMIZE*, *SET ORDER*, *SET PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET RELATION*, *SET SAFETY*,
-*SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, *SET SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET
-STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, *SET UNIQUE*, *SET VIDEOMODE*, *SET WRAP*, *SKIP*, *SORT*,
-**STORE**, *SUM*, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*, *USE*, *WAIT*, *ZAP*
+**ENDIF**, **ENDSEQUENCE**, *ERASE*, *FIND*, *GO*, *GOTO*, *INDEX ON*, *INPUT*, *JOIN*, *KEYBOARD*, *LABEL FORM*,
+*LIST*, *LOCATE*, *MENU*, **NEXT**, *PACK*, **QUIT**, *READ*, *READ SAVE*, *RECALL*, *REINDEX*, *RELEASE*, *RELEASE
+ALL*, *RENAME*, *REPLACE*, *REPORT FORM*, *REQUEST*, *RESTORE*, *RESTORE SCREEN*, *RUN*, *SAVE*, *SAVE ALL*, *SAVE
+SCREEN*, *SAVE TO*, *SEEK*, *SELECT*, *SET ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET
+CENTURY**, *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*,
+**SET DECIMALS**, *SET DEFAULT*, *SET DELETED*, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET
+DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET EXCLUSIVE*, *SET
+FILECASE*, *SET FILTER*, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, *SET INDEX*, *SET
+INTENSITY*, *SET KEY*, *SET MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET
+OPTIMIZE*, *SET ORDER*, *SET PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET RELATION*, *SET SAFETY*, *SET SCOPE*, *SET
+SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, *SET SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*,
+*SET TIME*, *SET TYPEAHEAD*, *SET UNIQUE*, *SET VIDEOMODE*, *SET WRAP*, *SKIP*, *SORT*, **STORE**, *SUM*, *TEXT*,
+*TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*, *USE*, *WAIT*, *ZAP*
 
-Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`,
-`set.ch` (partial), `error.ch`, `fileio.ch`, `box.ch`, `color.ch`, `dbstruct.ch`, `directry.ch`, `getexit.ch`,
-`memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
+Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`, `set.ch`
+(partial), `error.ch` (provided: the severities and generic codes), `fileio.ch`, `box.ch`, `color.ch`, `dbstruct.ch`,
+`directry.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
 
 ## Functions
 
@@ -114,9 +114,9 @@ at link time, never by an environment variable.
 *TBGoTop*, *TBInsCol*, *TBModal*, *TBMouse*, *TBReader*, *TBrowseNew*, *TBSBlock*, *TBSkip*, *Updated*, *_CHECKBOX_*,
 *_LISTBOX_*, *_PUSHBUTT_*, *_RADIOGRP_*
 
-### Errors (1 of 4 done)
+### Errors (2 of 4 done)
 
-*DosError*, *ErrorBlock*, **ErrorNew**, *ErrorSys*
+*DosError*, **ErrorBlock**, **ErrorNew**, *ErrorSys*
 
 ### Numbers and math (11 of 21 done)
 
@@ -130,9 +130,9 @@ at link time, never by an environment variable.
 **RAt**, **Replicate**, **Right**, **RTrim**, *SoundEx*, **Space**, **StrTran**, **StrZero**, **Stuff**, **Upper**,
 *Word*
 
-### Language, settings and runtime (5 of 94 done)
+### Language, settings and runtime (6 of 94 done)
 
-*AltD*, *AMPM*, *Break*, *cftsAdd*, *cftsClose*, *cftsCrea*, *cftsDelete*, *cftsIfDel*, *cftsNext*, *cftsOpen*,
+*AltD*, *AMPM*, **Break**, *cftsAdd*, *cftsClose*, *cftsCrea*, *cftsDelete*, *cftsIfDel*, *cftsNext*, *cftsOpen*,
 *cftsRecN*, *cftsReplac*, *cftsSet*, *cftsUndel*, *cftsVeri*, *cftsVers*, *CLIPPER520*, *CLIPPER530*, *Days*, *dbDrop*,
 *dbExists*, *DBFCDX*, *DBFFPT*, *DBFNSX*, *DBFNTX*, *DbgShadow*, *dbRename*, *DefPath*, *DirRemove*, *Do*, *ElapTime*,
 **Empty**, *ErrorInHandler*, *ErrorLevel*, **Eval**, *FieldBlock*, *FieldDec*, *FieldLen*, *FieldType*, *FieldWBlock*,

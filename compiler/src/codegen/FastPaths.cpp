@@ -162,7 +162,7 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   }
   if (arith == Intrinsic::not_intrinsic && !compare) {
     callItemOp(rtBin_.at(i.binop), d, {a, bv});
-    checkPending(fnExit_);
+    checkPending(unwind_);
     return;
   }
   bool fused = fusedComparisons_.count(&i) != 0;
@@ -211,8 +211,11 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
 
   b_.SetInsertPoint(slow);
   callItemOp(rtBin_.at(i.binop), d, {a, bv});
-  checkPending(fnExit_);
-  if (fused) bools.push_back({logicalValue(d), b_.GetInsertBlock()}); // the operator made a logical
+  checkPending(unwind_);
+  if (fused) { // a logical, unless an error's handler substituted something else
+    Value *r = testTruth(d, unwind_, itemType(d));
+    bools.push_back({r, b_.GetInsertBlock()});
+  }
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
   if (fused) {
@@ -258,7 +261,7 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
   b_.SetInsertPoint(slow);
   setNil(d);
   b_.CreateCall(xbFuncTy_, externFunction(i.callee), {fnCtx_, d, ConstantInt::get(i32_, f->arity), argv});
-  checkPending(fnExit_);
+  checkPending(unwind_);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
   return true;
@@ -293,7 +296,7 @@ void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   callItemOp(rtBin_.at(i.binop), d, {a, bv});
-  checkPending(fnExit_);
+  checkPending(unwind_);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
 }
@@ -312,7 +315,7 @@ void CodeGen::emitForTest(const xir::Instruction &i) {
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   Value *go = b_.CreateCall(rtForTest_, {fnCtx_, callArg(counter, 0), callArg(limit, 1), callArg(step, 2)});
-  checkPending(fnExit_);
+  checkPending(unwind_);
   Value *slowGo = b_.CreateICmpNE(go, ConstantInt::get(i32_, 0));
   BasicBlock *slowEnd = b_.GetInsertBlock();
   b_.CreateBr(join);
@@ -386,7 +389,7 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   callItemOp(rtIndex_, d, {base, idx});
-  checkPending(fnExit_);
+  checkPending(unwind_);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
 }
@@ -408,7 +411,7 @@ void CodeGen::emitIndexSet(const xir::Instruction &i) {
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   b_.CreateCall(rtIndexSet_, {fnCtx_, callArg(base, 0), callArg(idx, 1), callArg(v, 2)});
-  checkPending(fnExit_);
+  checkPending(unwind_);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
 }

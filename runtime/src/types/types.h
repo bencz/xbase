@@ -42,7 +42,7 @@ static inline int64_t xb_array_index(const xb_array *a, int64_t n) {
 xb_array *xb_array_alloc(uint64_t len);              /* `len` NIL items */
 void      xb_array_resize(xb_array *a, uint64_t len); /* new items are NIL; `a` must be reachable */
 void      xb_set_array(xb_item *it, xb_array *a);
-void      xb_array_bound_error(xb_ctx *ctx);          /* reading outside 1 .. Len() */
+void      xb_array_bound_error(xb_ctx *ctx, const xb_item *base, const xb_item *idx); /* reading outside 1 .. Len() */
 
 /* What an XB_T_REF item designates: element `index` of `coll`. For a string,
  * `value` holds the one-character element (assigning it leaves the string

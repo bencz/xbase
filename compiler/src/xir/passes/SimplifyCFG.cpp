@@ -9,10 +9,19 @@
 #include <algorithm>
 #include <iterator>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace xb::xir {
 
 namespace {
+
+// The blocks something unwinds to: reached without a branch, they stay.
+std::unordered_set<const BasicBlock *> unwindBlocks(const Function &f) {
+  std::unordered_set<const BasicBlock *> out;
+  for (auto &b : f.blocks)
+    if (b->unwind) out.insert(b->unwind);
+  return out;
+}
 
 // `cond_br c, T(..., true, ...), T(..., false, ...)`, with the arguments
 // otherwise the same, is `br T(..., c, ...)`.
@@ -42,9 +51,10 @@ bool branchesToOneBlock(Function &f) {
 // directly, with the arguments it would have passed.
 bool threadJumps(Function &f, Predecessors &preds) {
   bool changed = false;
+  std::unordered_set<const BasicBlock *> unwinds = unwindBlocks(f);
   for (auto &bp : f.blocks) {
     BasicBlock *e = bp.get();
-    if (e == f.entry() || e->insts.size() != 1 || e->insts[0]->op != Op::Br) continue;
+    if (e == f.entry() || unwinds.count(e) || e->insts.size() != 1 || e->insts[0]->op != Op::Br) continue;
     Instruction &jump = *e->insts[0];
     BasicBlock *to = jump.targets[0].block;
     if (to == e) continue;
@@ -72,12 +82,15 @@ bool threadJumps(Function &f, Predecessors &preds) {
 }
 
 // A block whose only predecessor jumps to it unconditionally joins that
-// predecessor: its parameters become the jump's arguments.
+// predecessor when both unwind to the same block: its parameters become the
+// jump's arguments.
 bool mergeBlocks(Function &f) {
   std::unordered_map<const BasicBlock *, unsigned> edges;
-  for (auto &bp : f.blocks)
+  for (auto &bp : f.blocks) {
     if (const Instruction *t = bp->terminator())
       for (const Target &tg : t->targets) ++edges[tg.block];
+    if (bp->unwind) ++edges[bp->unwind];
+  }
   bool changed = false;
   for (auto &bp : f.blocks) {
     BasicBlock *a = bp.get();
@@ -85,7 +98,7 @@ bool mergeBlocks(Function &f) {
       Instruction *t = a->terminator();
       if (!t || t->op != Op::Br) break;
       BasicBlock *next = t->targets[0].block;
-      if (next == a || next == f.entry() || edges[next] != 1) break;
+      if (next == a || next == f.entry() || edges[next] != 1 || next->unwind != a->unwind) break;
       std::vector<Value *> args = t->targets[0].args;
       a->takeTerminator();
       for (size_t k = 0; k < args.size(); ++k) next->params[k]->replaceAllUsesWith(args[k]);

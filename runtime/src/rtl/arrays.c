@@ -29,7 +29,7 @@ void xbf_ARRAY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   for (uint32_t i = 0; i < argc; ++i) {
     if (!xb_is_number(&argv[i])) return; /* NIL, no error */
     if (xb_num_value(&argv[i]) < 0) {
-      xb_rt_error(ctx, "BASE", 1131, "Bound error", "array dimension");
+      xb_error(ctx, NULL, EG_BOUND, 1131, "array dimension", 0, argc, argv);
       return;
     }
   }
@@ -38,7 +38,7 @@ void xbf_ARRAY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_AADD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_ARRAY) {
-    xb_rt_error(ctx, "BASE", 1123, "Argument error", "AADD");
+    xb_arg_error(ctx, ret, 1123, "AADD", argc, argv);
     return;
   }
   xb_array *a = argv[0].v.p;
@@ -52,7 +52,7 @@ void xbf_AADD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_ASIZE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 2 || argv[0].type != XB_T_ARRAY || !xb_is_number(&argv[1])) {
-    xb_rt_error(ctx, "BASE", 2023, "Argument error", "ASIZE");
+    xb_error(ctx, NULL, EG_ARG, 2023, "ASIZE", 0, argc, argv);
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
@@ -156,7 +156,7 @@ typedef struct {
   const xb_item *array; /* the rooted argument: the array is read through it after every block call */
   const xb_item *block;
   xb_item *call;        /* rooted: the block's two arguments, then its result */
-  int failed;           /* the block left an error or another request to unwind: the sort stops */
+  int failed;           /* the block left a request to unwind (a BREAK, a QUIT): the sort stops */
 } sorter;
 
 static int sort_kind(const xb_item *it) {
@@ -230,8 +230,8 @@ static uint64_t range_count(uint32_t argc, const xb_item *argv, uint32_t k, uint
 
 /* Calls `block` with an element and its position (1-based), as AScan and AEval
  * do; `call` holds three rooted items (root_call): the two arguments, then
- * the result. Returns 0 when the block left an error or another request to
- * unwind. */
+ * the result. Returns 0 when the block left a request to unwind (a BREAK, a
+ * QUIT). */
 static int call_with_element(xb_ctx *ctx, const xb_item *block, xb_item *call, const xb_item *elem, size_t i) {
   call[0] = *elem;
   xb_set_int(&call[1], (int64_t)i + 1);
@@ -292,7 +292,7 @@ void xbf_ASCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * comes; returns the array. */
 void xbf_AEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 2 || argv[0].type != XB_T_ARRAY || argv[1].type != XB_T_BLOCK) {
-    xb_rt_error(ctx, "BASE", 2017, "Argument error", "AEVAL");
+    xb_error(ctx, NULL, EG_ARG, 2017, "AEVAL", 0, argc, argv);
     return;
   }
   *ret = argv[0];
@@ -381,7 +381,7 @@ void xbf_ACOPY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * less) takes the value; without a value nothing changes. */
 void xbf_AFILL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_ARRAY) {
-    xb_rt_error(ctx, "BASE", 6004, "Argument error", "AFILL");
+    xb_error(ctx, NULL, EG_ARG, 6004, "AFILL", 0, argc, argv);
     return;
   }
   *ret = argv[0];

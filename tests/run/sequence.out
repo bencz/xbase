@@ -1,0 +1,19 @@
+
+in
+recovered          5
+after          5
+inner got inner
+outer got inner!
+no break
+no value: U
+without RECOVER
+n          2 changed deep
+loop break        300          3
+iteration          1
+skipped          2
+iteration          3
+each         20 kept         20
+each static          2 before          3
+NIL         21
+x keeps          5
+y keeps          7

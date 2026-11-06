@@ -44,6 +44,8 @@ private:
   struct EachVar;
   Value *eachInCell(const EachVar &v);
   void genSwitch(const SwitchStmt &s);
+  void genSequence(const SequenceStmt &s);
+  void unwindOnward();
   void genReturn(const ReturnStmt &s);
   void startDeadBlock();
 

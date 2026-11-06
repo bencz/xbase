@@ -8,7 +8,7 @@
 int64_t xb_enum_len(xb_ctx *ctx, const xb_item *coll) {
   if (coll->type == XB_T_ARRAY) return (int64_t)((const xb_array *)coll->v.p)->len;
   if (coll->type == XB_T_STRING) return (int64_t)coll->v.s->len;
-  xb_rt_error(ctx, "BASE", 1068, "Argument error", "array access");
+  xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, coll);
   return -1;
 }
 
@@ -59,9 +59,9 @@ void xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved) {
 }
 
 /* SWITCH compares integers and strings only. */
-void xb_switch_check(xb_ctx *ctx, const xb_item *value) {
-  if (value->type != XB_T_INT && value->type != XB_T_STRING)
-    xb_rt_error(ctx, "BASE", 3104, "Argument error", "SWITCH");
+void xb_switch_check(xb_ctx *ctx, xb_item *r, const xb_item *value) {
+  if (value->type == XB_T_INT || value->type == XB_T_STRING) *r = *value;
+  else xb_arg_error(ctx, r, 3104, "SWITCH", 1, value);
 }
 
 int32_t xb_switch_match(const xb_item *value, const xb_item *c) {

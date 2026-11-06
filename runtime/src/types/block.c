@@ -39,7 +39,7 @@ xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, uint32_t ncells)
 void xb_block_call(xb_ctx *ctx, xb_item *ret, const xb_item *block, uint32_t argc, xb_item *argv) {
   xb_set_nil(ret);
   if (block->type != XB_T_BLOCK) {
-    xb_rt_error(ctx, "BASE", 1004, "No exported method", "EVAL");
+    xb_error(ctx, ret, EG_NOMETHOD, 1004, "EVAL", XB_ERR_SUBSTITUTE, 1, block);
     return;
   }
   xb_block *b = block->v.p;

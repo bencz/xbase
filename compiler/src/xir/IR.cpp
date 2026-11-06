@@ -142,10 +142,14 @@ Instruction *BasicBlock::terminator() const {
 
 size_t BasicBlock::numSuccessors() const {
   Instruction *t = terminator();
-  return t ? t->targets.size() : 0;
+  return (t ? t->targets.size() : 0) + (unwind ? 1 : 0);
 }
 
-BasicBlock *BasicBlock::successor(size_t k) const { return insts.back()->targets[k].block; }
+BasicBlock *BasicBlock::successor(size_t k) const {
+  Instruction *t = terminator();
+  size_t targets = t ? t->targets.size() : 0;
+  return k < targets ? t->targets[k].block : unwind;
+}
 
 // Values are freed in an arbitrary order (blocks, then constants), so every
 // use is undone first: no destructor touches a value already freed.

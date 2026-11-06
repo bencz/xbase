@@ -76,6 +76,8 @@ void CodeGen::initTypes() {
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
   rtPending_ = rt("xb_pending", i32_, {ptrTy_});
   rtSend_ = rt("xb_op_send", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtSeqCatch_ = rt("xb_seq_catch", i32_, {ptrTy_});
+  rtSeqValue_ = rt("xb_seq_value", voidTy, {ptrTy_, ptrTy_});
   rtArrayNew_ = rt("xb_array_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtIndex_ = rt("xb_op_index", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
@@ -92,7 +94,7 @@ void CodeGen::initTypes() {
   rtRefOf_ = rt("xb_ref_of", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtRefElem_ = rt("xb_ref_elem", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtGcRemember_ = rt("xb_gc_remember", voidTy, {ptrTy_});
-  rtSwitchCheck_ = rt("xb_switch_check", voidTy, {ptrTy_, ptrTy_});
+  rtSwitchCheck_ = rt("xb_switch_check", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtSwitchMatch_ = rt("xb_switch_match", i32_, {ptrTy_, ptrTy_});
   rtModuleRegister_ = rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_});
   rtModulesInit_ = rt("xb_modules_init", voidTy, {ptrTy_});
@@ -234,6 +236,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   b_.CreateBr(blocks_.at(f.entry()));
   for (xir::BasicBlock *xb : plan.cfg().order()) {
     b_.SetInsertPoint(blocks_.at(xb));
+    unwind_ = xb->unwind ? blocks_.at(xb->unwind) : fnExit_;
     findFusedComparisons(*xb);
     for (auto &i : xb->insts) emit(*i);
   }

@@ -53,7 +53,7 @@ static void assign_var(xb_ctx *ctx, xb_item *r, xb_object *o, uint32_t k, const 
     case XB_VAR_INT32:
     case XB_VAR_UINT16: {
       if (!xb_is_number(value)) {
-        xb_rt_error(ctx, "BASE", 0, "Argument error", var->name);
+        xb_arg_error(ctx, r, 0, var->name, 1, value);
         return;
       }
       int64_t i = wrap_int32(value);
@@ -92,6 +92,6 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
     xb_set_str(r, xb_str_new(cn, strlen(cn)));
     return;
   }
-  if (assign) xb_rt_error(ctx, "BASE", 1005, "No exported variable", name);
-  else xb_rt_error(ctx, "BASE", 1004, "No exported method", name);
+  if (assign) xb_error(ctx, r, EG_NOVARMETHOD, 1005, name, XB_ERR_SUBSTITUTE, argc, argv);
+  else xb_error(ctx, r, EG_NOMETHOD, 1004, name, XB_ERR_SUBSTITUTE, argc, argv);
 }

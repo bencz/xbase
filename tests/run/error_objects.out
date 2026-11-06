@@ -1,0 +1,19 @@
+
+default          0          0
+B B
+ERROR BASE       1340          5 Zero divisor [/]          2 .T. .F. .F.          0 []          0 U args: N N
+ERROR BASE       1081          1 Argument error [+]          2 .T. .F. .F.          0 []          0 U args: C N
+ERROR BASE       1132          2 Bound error [array access]          2 .F. .F. .F.          0 []          0 U args: A N
+ERROR BASE       1110          1 Argument error [SUBSTR]          2 .T. .F. .F.          0 []          0 U args: N N
+ERROR BASE       1004         13 No exported method [FOO]          2 .T. .F. .F.          0 []          0 U args: O N
+ERROR BASE       1109          1 Argument error [$]          2 .T. .F. .F.          0 []          0 U args: C N
+B
+s C s!
+      1081
+
+      1110       1111       1004       1004       1080       1077
+      1068
+substituted comparison
+case 1
+otherwise
+B

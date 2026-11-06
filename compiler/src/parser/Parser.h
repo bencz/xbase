@@ -70,6 +70,7 @@ private:
   void rejectBeforeFirstCase(const char *construct, std::initializer_list<const char *> starts);
   StmtPtr parseIf();
   StmtPtr parseWhile();
+  StmtPtr parseSequence();
   StmtPtr parseFor();
 
   // Expressions.cpp

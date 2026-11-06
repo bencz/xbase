@@ -22,7 +22,9 @@ static xb_item *element_target(xb_ctx *ctx, xb_ref *ref) {
   if (ref->coll.type != XB_T_ARRAY) return &ref->value;
   xb_array *a = ref->coll.v.p;
   if (ref->index < 1 || (uint64_t)ref->index > a->len) {
-    xb_array_bound_error(ctx);
+    xb_item idx;
+    xb_set_int(&idx, ref->index);
+    xb_array_bound_error(ctx, &ref->coll, &idx);
     return &ref->value;
   }
   return &a->items[ref->index - 1];

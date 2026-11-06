@@ -2,6 +2,7 @@ add_library(xbrt STATIC
   src/core/control.c
   src/core/ctx.c
   src/core/display.c
+  src/core/error.c
   src/core/main.c
   src/core/module.c
   src/core/numfmt.c
@@ -17,7 +18,6 @@ add_library(xbrt STATIC
   src/rtl/arrays.c
   src/rtl/console.c
   src/rtl/dates.c
-  src/rtl/errors.c
   src/rtl/lang.c
   src/rtl/numbers.c
   src/rtl/strings.c

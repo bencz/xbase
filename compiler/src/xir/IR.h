@@ -192,6 +192,11 @@ public:
   std::string name;
   std::vector<std::unique_ptr<BlockParam>> params;
   std::vector<std::unique_ptr<Instruction>> insts;
+  // Where an operation of this block that fails or leaves a request to unwind
+  // goes, with the request pending: a block without parameters inside the
+  // function (a BEGIN SEQUENCE handler, a FOR EACH cleanup); null: the function
+  // returns. It is the block's last successor in the control flow graph.
+  BasicBlock *unwind = nullptr;
 
   BlockParam *addParam(Type t);
   // Removes argument k of `branches`, the terminators that branch here (see
@@ -206,7 +211,7 @@ public:
   }
   Instruction *terminator() const;
   std::unique_ptr<Instruction> takeTerminator(); // removed with its uses undone
-  size_t numSuccessors() const; // the targets of the terminator, without allocating
+  size_t numSuccessors() const; // the targets of the terminator, then the unwind block, without allocating
   BasicBlock *successor(size_t k) const;
 };
 

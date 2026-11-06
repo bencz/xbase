@@ -139,6 +139,9 @@ Instruction *Builder::paramsRef(std::vector<Var *> params) {
   return i;
 }
 
+Instruction *Builder::seqCatch() { return make(Op::SeqCatch, Type::Bool); }
+Instruction *Builder::seqValue() { return make(Op::SeqValue, Type::Item); }
+
 Instruction *Builder::callForward(Function *callee) {
   Instruction *i = make(Op::CallForward, Type::Item);
   i->callee.function = callee;
@@ -182,7 +185,7 @@ Instruction *Builder::refVar(Var *v) {
 }
 
 Instruction *Builder::refIndex(Value *base, Value *idx) { return make(Op::RefIndex, Type::Item, {base, idx}); }
-Instruction *Builder::switchCheck(Value *v) { return make(Op::SwitchCheck, Type::Void, {v}); }
+Instruction *Builder::switchCheck(Value *v) { return make(Op::SwitchCheck, Type::Item, {v}); }
 Instruction *Builder::switchMatch(Value *v, Value *c) { return make(Op::SwitchMatch, Type::Bool, {v, c}); }
 Instruction *Builder::intAdd(Value *a, Value *b) { return make(Op::IntAdd, Type::I64, {a, b}); }
 Instruction *Builder::intSub(Value *a, Value *b) { return make(Op::IntSub, Type::I64, {a, b}); }

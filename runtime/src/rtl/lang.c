@@ -21,7 +21,7 @@ void xbf_LEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_set_int(ret, (int64_t)((const xb_array *)argv[0].v.p)->len);
     return;
   }
-  xb_rt_error(ctx, "BASE", 1111, "Argument error", "LEN");
+  xb_arg_error(ctx, ret, 1111, "LEN", argc, argv);
 }
 
 /* QUIT / CANCEL: unwinds every active function and ends the program. */
@@ -35,7 +35,7 @@ void xbf___QUIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* Eval( bBlock [, xArgs...] ) */
 void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1) {
-    xb_rt_error(ctx, "BASE", 1004, "No exported method", "EVAL");
+    xb_error(ctx, ret, EG_NOMETHOD, 1004, "EVAL", XB_ERR_SUBSTITUTE, 0, argv);
     return;
   }
   xb_block_call(ctx, ret, &argv[0], argc - 1, argv + 1);

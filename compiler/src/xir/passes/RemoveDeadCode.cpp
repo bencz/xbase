@@ -14,7 +14,7 @@ namespace {
 // Removing it changes nothing but its result (see Effect): it cannot fail and
 // writes nothing. Reading, depending on settings and allocating are harmless.
 bool removable(const Instruction &i) {
-  return !i.mayFail() && !(opInfo(i.op).effects & (WritesVar | WritesHeap | RunsCode | Terminator));
+  return !i.mayFail() && !(opInfo(i.op).effects & (WritesVar | WritesHeap | WritesState | RunsCode | Terminator));
 }
 
 } // namespace

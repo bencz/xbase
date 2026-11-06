@@ -31,10 +31,12 @@ enum class Op : uint8_t {
   EachLeave,      // var; Bool in_cell, saved value: restores the variable
   RefVar,         // var -> Item: a reference to the variable, for an argument passed by reference
   RefIndex,       // base, index -> Item: a reference to an element (an argument @a[i]) [may fail]
-  SwitchCheck,    // value                                  [may fail]
+  SwitchCheck,    // value -> Item: the value the CASEs match [may fail]
   SwitchMatch,    // value, case constant -> Bool
   ParamsRef,      // parameters (captures) -> Bool: one of them holds a reference its caller passed
   CallForward,    // callee -> Item: calls it with this function's own arguments, as received [may fail]
+  SeqCatch,       // -> Bool: in an unwind block of BEGIN SEQUENCE, the request is a BREAK alone (then taken)
+  SeqValue,       // -> Item: the BREAK value (RECOVER USING), moved out of the context
   IntAdd,         // I64, I64 -> I64
   IntSub,         // I64, I64 -> I64
   IntCmp,         // pred; I64, I64 -> Bool
@@ -50,7 +52,8 @@ enum class Op : uint8_t {
 // the passes that move, merge or remove operations (one row per operation in
 // Ops.cpp). "Its variable" is `var`, and for `block` the captured variables.
 enum Effect : uint16_t {
-  Fails       = 1u << 0,  // may raise an error (the function returns with it pending)
+  Fails       = 1u << 0,  // may raise an error: runs the error block (xBase code), then either the function
+                          // returns with a request to unwind or the operation goes on with a substituted result
   FailsByRef  = 1u << 1,  // fails only when its access goes through a reference (an element may be gone)
   ReadsVar    = 1u << 2,  // reads its variable
   WritesVar   = 1u << 3,  // changes its variable, or its own item (moving it into a cell)
@@ -61,6 +64,7 @@ enum Effect : uint16_t {
   Allocates   = 1u << 8,  // may allocate: a safepoint of the collector
   Terminator  = 1u << 9,
   Commutative = 1u << 10, // the two operands may be swapped
+  WritesState = 1u << 11, // changes the context's state (the pending requests, the BREAK value)
 };
 
 struct OpInfo {

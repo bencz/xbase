@@ -84,7 +84,7 @@ Value *CodeGen::dest(const xir::Instruction &i) {
   const Home &h = plan_->home(&i);
   if (h.kind == Home::Kind::Place) {
     const xir::Instruction &store = *h.place;
-    Value *p = varAddress(*store.var, store.access, fnExit_);
+    Value *p = varAddress(*store.var, store.access, unwind_);
     values_[&i] = p;
     return p;
   }
@@ -193,7 +193,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::Load: {
-    Value *p = varAddress(*i.var, i.access, fnExit_);
+    Value *p = varAddress(*i.var, i.access, unwind_);
     const Home &h = plan_->home(&i);
     if (h.kind == Home::Kind::Place && h.place == &i) values_[&i] = p; // the variable's own item serves the use
     else copyItem(addr(&i), p);
@@ -202,14 +202,14 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::Store:
     if (!plan_->forwarded(&i)) {
       Value *src = addr(ops[0]);
-      copyItem(varAddress(*i.var, i.access, fnExit_), src);
+      copyItem(varAddress(*i.var, i.access, unwind_), src);
     }
     break;
   case Op::Barrier: writeBarrier(*i.var, i.access); break;
   case Op::Unary: {
     Value *a = addr(ops[0]);
     callItemOp(i.unop == UnOp::Neg ? rtNeg_ : rtNot_, dest(i), {a});
-    checkPending(fnExit_);
+    checkPending(unwind_);
     break;
   }
   case Op::Binary: emitBinary(i); break;
@@ -219,7 +219,7 @@ void CodeGen::emit(const xir::Instruction &i) {
       values_[&i] = fused->second;
     } else {
       Value *item = addr(ops[0]);
-      values_[&i] = testTruth(item, fnExit_, typeOf(ops[0], item));
+      values_[&i] = testTruth(item, unwind_, typeOf(ops[0], item));
     }
     break;
   }
@@ -231,7 +231,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     setNil(d); // the caller clears the result, so callees that return nothing need not
     b_.CreateCall(xbFuncTy_, callee, {fnCtx_, d, ConstantInt::get(i32_, ops.size()), argv});
-    checkPending(fnExit_);
+    checkPending(unwind_);
     break;
   }
   case Op::Send: {
@@ -239,7 +239,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     setNil(d);
     b_.CreateCall(rtSend_, {fnCtx_, d, messageName(i.message), ConstantInt::get(i32_, ops.size()), argv});
-    checkPending(fnExit_);
+    checkPending(unwind_);
     break;
   }
   case Op::ArrayLit: {
@@ -262,7 +262,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     // to every call's stack, but the common path's prologue does not prepare
     // a call, which measured faster (fib: 261 ms against 299 ms).
     b_.CreateCall(xbFuncTy_, functions_.at(i.callee.function), {fnCtx_, d, fn_->getArg(2), fn_->getArg(3)});
-    checkPending(fnExit_);
+    checkPending(unwind_);
     break;
   }
   case Op::MakeBlock: {
@@ -283,7 +283,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::ForTest: emitForTest(i); break;
   case Op::EnumLen:
     values_[&i] = b_.CreateCall(rtEnumLen_, {fnCtx_, callArg(addr(ops[0]), 0)});
-    checkPending(fnExit_);
+    checkPending(unwind_);
     break;
   case Op::EachInCell: {
     Value *shared = b_.CreateCall(rtEachShared_, {fnCtx_, rawAddress(*i.var)}, "shared");
@@ -298,7 +298,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::EachMove: {
     Value *inCell = b_.CreateZExt(value(ops[0]), i32_);
     b_.CreateCall(rtEachMove_, {fnCtx_, rawAddress(*i.var), inCell, value(ops[1])});
-    checkPending(fnExit_);
+    checkPending(unwind_);
     break;
   }
   case Op::EachLeave: {
@@ -309,11 +309,15 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::RefVar: refOf(*i.var, dest(i)); break;
   case Op::RefIndex:
     b_.CreateCall(rtRefElem_, {fnCtx_, dest(i), callArg(addr(ops[0]), 0), callArg(addr(ops[1]), 1)});
-    checkPending(fnExit_);
+    checkPending(unwind_);
     break;
+  case Op::SeqCatch:
+    values_[&i] = b_.CreateICmpNE(b_.CreateCall(rtSeqCatch_, {fnCtx_}), ConstantInt::get(i32_, 0));
+    break;
+  case Op::SeqValue: callItemOp(rtSeqValue_, dest(i), {}); break;
   case Op::SwitchCheck:
-    b_.CreateCall(rtSwitchCheck_, {fnCtx_, callArg(addr(ops[0]), 0)});
-    checkPending(fnExit_);
+    callItemOp(rtSwitchCheck_, dest(i), {addr(ops[0])});
+    checkPending(unwind_);
     break;
   case Op::SwitchMatch: {
     Value *m = b_.CreateCall(rtSwitchMatch_, {callArg(addr(ops[0]), 0), callArg(addr(ops[1]), 1)});

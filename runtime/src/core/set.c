@@ -48,7 +48,7 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_set_int(ret, ctx->set_decimals);
       if (value && xb_is_number(value)) {
         int64_t n = xb_num_to_i64(value);
-        if (n < 0) xb_rt_error(ctx, "BASE", 2020, "Argument error", "SET");
+        if (n < 0) xb_error(ctx, NULL, EG_ARG, 2020, "SET", 0, argc, argv);
         else ctx->set_decimals = n > INT32_MAX ? INT32_MAX : (int32_t)n;
       }
       break;
@@ -64,7 +64,7 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_set_int(ret, ctx->epoch);
       if (value && xb_is_number(value)) {
         int64_t n = xb_num_to_i64(value);
-        if (n < 0) xb_rt_error(ctx, "BASE", 2020, "Argument error", "SET");
+        if (n < 0) xb_error(ctx, NULL, EG_ARG, 2020, "SET", 0, argc, argv);
         else ctx->epoch = n > INT32_MAX ? INT32_MAX : (int32_t)n;
       }
       break;

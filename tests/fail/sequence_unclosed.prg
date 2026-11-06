@@ -1,0 +1,5 @@
+// BEGIN SEQUENCE needs its END.
+PROCEDURE Main()
+   BEGIN SEQUENCE
+      ? 1
+   RETURN

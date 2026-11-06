@@ -20,6 +20,7 @@
 #command ENDDO <*x*>                   => enddo
 #command ENDIF <*x*>                   => endif
 #command ENDCASE <*x*>                 => endcase
+#command ENDSEQUENCE                   => end
 #command ENDFOR [<*x*>]                => next
 #command NEXT <v> [TO <x>] [STEP <s>]  => next
 
@@ -51,5 +52,7 @@
 
 #command QUIT                          => __Quit()
 #command CANCEL                        => __Quit()
+
+#command BREAK [<x>]                   => __Break( <x> )
 
 #endif /* _STD_CH */

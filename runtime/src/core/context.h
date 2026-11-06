@@ -12,9 +12,11 @@ struct xb_ctx {
   xb_ctx  *gcNext, *gcPrev; /* registered root sets */
   xb_item **roots;          /* temporary C roots (xb_gc_root_push) */
   unsigned rootLen, rootCap;
-  /* Later: memvar (PRIVATE) stack, current work area, SETs, ErrorBlock -
-   * all per task, so they travel with a Task across threads like .NET's
-   * ExecutionContext. */
+  xb_item  error_block;     /* ErrorBlock(): a codeblock (roots of the collector, like the next one) */
+  xb_item  break_value;     /* the value of a pending BREAK */
+  uint32_t error_depth;     /* error blocks running */
+  /* Later: memvar (PRIVATE) stack, current work area, SETs - all per task, so
+   * they travel with a Task across threads like .NET's ExecutionContext. */
   int      set_exact;
   char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
   int32_t  epoch;           /* SET EPOCH */

@@ -53,6 +53,45 @@ TypeSet literalType(const Constant &c) {
 
 } // namespace
 
+namespace {
+
+// Whether one operand type pair of `op` gives a result instead of an error
+// (core/ops.c): the comparisons take two numbers, strings, logicals or dates
+// (xb_compare), = <> and == also NIL against anything, == also the same array,
+// block or object type; $ takes strings; the arithmetic follows kBinaryRules.
+bool pairWorks(BinOp op, TypeSet a, TypeSet b) {
+  const TypeSet comparable[] = {kNumberTypes, kString, kLogical, kDate};
+  auto compares = [&] {
+    for (TypeSet kind : comparable)
+      if ((a & kind) && (b & kind)) return true;
+    return false;
+  };
+  constexpr TypeSet kNil = typeBit(XB_T_NIL);
+  constexpr TypeSet kIdentity = typeBit(XB_T_ARRAY) | typeBit(XB_T_BLOCK) | typeBit(XB_T_OBJECT);
+  switch (op) {
+  case BinOp::Eq: case BinOp::NotEq: return ((a | b) & kNil) || compares();
+  case BinOp::ExactEq: return ((a | b) & kNil) || (a == b && (a & kIdentity)) || compares();
+  case BinOp::Lt: case BinOp::Le: case BinOp::Gt: case BinOp::Ge: return compares();
+  case BinOp::In: return a == kString && b == kString;
+  default:
+    for (const BinaryRule &rule : kBinaryRules)
+      if (rule.op == op && (a & rule.a) && (b & rule.b)) return true;
+    return false;
+  }
+}
+
+} // namespace
+
+bool binaryMayFail(BinOp op, TypeSet a, TypeSet b) {
+  if ((op == BinOp::Div || op == BinOp::Mod) && (b & kNumberTypes)) return true; // a zero divisor
+  for (unsigned ta = 0; ta < XB_T_COUNT_; ++ta)
+    for (unsigned tb = 0; tb < XB_T_COUNT_; ++tb)
+      if ((a & typeBit(xb_type(ta))) && (b & typeBit(xb_type(tb))) &&
+          !pairWorks(op, typeBit(xb_type(ta)), typeBit(xb_type(tb))))
+        return true;
+  return false;
+}
+
 TypeSet binaryResult(BinOp op, TypeSet a, TypeSet b) {
   switch (op) {
   case BinOp::Eq: case BinOp::ExactEq: case BinOp::NotEq: case BinOp::Lt: case BinOp::Le: case BinOp::Gt:
@@ -107,11 +146,20 @@ TypeSet TypeInfo::of(const Value *v) const {
 TypeSet TypeInfo::compute(const Instruction &i) const {
   switch (i.op) {
   case Op::NumDefaultDec: return kDouble;
-  case Op::Binary: return binaryResult(i.binop, of(i.operand(0)), of(i.operand(1)));
+  case Op::Binary: {
+    TypeSet a = of(i.operand(0)), b = of(i.operand(1));
+    return binaryResult(i.binop, a, b) | (binaryMayFail(i.binop, a, b) ? kAnyType : 0);
+  }
   case Op::Unary: {
-    if (i.unop == UnOp::Not) return kLogical;
-    TypeSet a = of(i.operand(0)); // -INT64_MIN is a double
-    return (a & kInt ? kNumberTypes : 0) | (a & kDouble);
+    TypeSet a = of(i.operand(0));
+    if (i.unop == UnOp::Not) return kLogical | (a & ~kLogical ? kAnyType : 0);
+    // -INT64_MIN is a double
+    return (a & kInt ? kNumberTypes : 0) | (a & kDouble) | (a & ~kNumberTypes ? kAnyType : 0);
+  }
+  case Op::SwitchCheck: {
+    constexpr TypeSet kSwitchTypes = kInt | kString;
+    TypeSet a = of(i.operand(0));
+    return (a & kSwitchTypes) | (a & ~kSwitchTypes ? kAnyType : 0);
   }
   case Op::FromBool: return kLogical;
   case Op::ArrayLit: return typeBit(XB_T_ARRAY);

@@ -52,7 +52,8 @@ void FramePlan::number() {
 // between that can write the variable, is served by the variable's own item.
 // A plain frame variable changes only by its own stores; one in a cell, a
 // STATIC, or one reached through a reference can also change through anything
-// that writes a variable or the heap or runs code (see Effect in Ops.h).
+// that writes a variable or the heap or runs code (see Effect in Ops.h), which
+// includes an operation that may fail: its error runs the error block.
 // One pass per block: the position of the last write of each variable and of
 // the last instruction that may write any variable indirectly.
 void FramePlan::elideLoads(const BasicBlock &b) {
@@ -78,7 +79,7 @@ void FramePlan::elideLoads(const BasicBlock &b) {
       if (u.var) lastWrite[u.var] = p;
       for (const Var *c : u.captures) lastWrite[c] = p;
     }
-    if (e & (WritesVar | WritesHeap | RunsCode)) lastIndirect = p;
+    if ((e & (WritesVar | WritesHeap | RunsCode)) || u.mayFail()) lastIndirect = p;
   }
 }
 
@@ -87,10 +88,13 @@ void FramePlan::elideLoads(const BasicBlock &b) {
 // into a heap object (a cell, an element), and the callee must not see the
 // variable cleared. The address is reached before the operation, so a store
 // whose address can fail (through a reference) takes no operation that can:
-// the operation's error comes first.
+// the operation's error comes first. In a block that unwinds (to a BEGIN
+// SEQUENCE handler, which may read the variable, or a FOR EACH cleanup), an
+// operation that can fail is not computed in place either: a call clears its
+// result first.
 bool FramePlan::canForward(const Instruction &value, const Instruction &store) const {
   if (store.op != Op::Store || store.operand(0) != &value || !value.hasOneUse()) return false;
-  if (store.mayFail() && value.mayFail()) return false;
+  if (value.mayFail() && (store.mayFail() || store.parent->unwind)) return false;
   switch (value.op) {
   case Op::Unary: case Op::Binary: case Op::Index: case Op::ArrayLit: case Op::MakeBlock: case Op::NumDefaultDec:
   case Op::FromBool:

@@ -39,11 +39,26 @@ coroutines, classes) run before lowering, where LLVM can no longer see them.
 
 ## Control flow for errors and exceptions
 
-Planned (phase 5): every operation that can fail gets an optional unwind successor (like LLVM's `invoke`), an edge
-of the control flow graph that the analyses and passes follow. `BEGIN SEQUENCE` / `RECOVER`, `BREAK`, `TRY` /
-`CATCH` / `FINALLY`, and the restoring of `FOR EACH` variables on unwinding become such edges. The runtime's pending
-flag ([runtime.md](runtime.md#errors-and-pending-requests)) is one way to lower them. Until then a failing operation
-makes its function return, with the error pending.
+An operation that fails runs the error block ([runtime.md](runtime.md#errors-and-pending-requests)); then either it
+goes on with a value the block substituted, or a request to unwind (a `BREAK`, a `QUIT`) is pending. Every block has
+an optional unwind block (`BasicBlock::unwind`, printed `unwind <block>` after its label): where its operations go
+with a request pending, like LLVM's `invoke` for every operation of the block at once; without one, the function
+returns. The unwind block is the block's last successor in the control flow graph (`numSuccessors`, `successor`), so
+reachability, dominance and liveness follow it; it has no parameters, since no branch passes values along it. The
+edge leaves from the operation that failed, so the block's own instructions do not reach the unwind block or the
+blocks it dominates (the verifier checks it).
+`simplify-cfg` neither skips nor merges into an unwind block, and merges two blocks only when they unwind to the same
+one.
+
+- `BEGIN SEQUENCE`: the body's blocks unwind to a handler, `seq.catch` (`xb_seq_catch`: the request is a `BREAK`
+  alone, now taken) then `cond_br` to `RECOVER`, which starts with `seq.value` (the `BREAK` value, stored in the
+  `USING` variable), or onward. A function with a sequence keeps its variables in memory (`promote-variables` leaves
+  it alone), so the handler reads them as the failed operation left them.
+- `FOR EACH`: inside a sequence of the function, or when a loop variable may be seen by others (a `STATIC`, a shared
+  variable, a parameter), the loop's blocks unwind to a cleanup block that restores the variables (`each.leave`).
+- Onward: an unwind block that has done its work branches to the enclosing one, or returns with the request pending.
+
+`TRY` / `CATCH` / `FINALLY` and `ALWAYS` are planned on the same edges.
 
 ## Resumable functions
 
@@ -68,8 +83,10 @@ strings a string; dates and numbers a date; ...), `unary`, `from_bool`,
 literals and the constructors give their type, and anything read from memory (a variable, an element, a call's
 result) may hold any type. The lowering uses it to keep values that never refer to a heap object out of the frame
 ([compiler.md](compiler.md#xir-to-llvm)), and where a value has a single possible type, the lowering uses it as a
-constant instead of reading it. An operation that fails produces no value, since errors end the function;
-when an error handler can substitute a value, the rules must allow any type for it.
+constant instead of reading it. The error block may substitute a value of any type for the result of an operation
+that fails ([Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that
+may fail may produce any type: `binaryMayFail` tells when operands can make a `binary` fail (an operand type pair it
+does not take, a divisor that may be zero), `unary` and `switch.check` fail for types they do not take.
 
 ## Passes
 
@@ -78,11 +95,12 @@ manager (`PassManager.*`, `optimize`) runs a table of passes on every function, 
 while something changes (at most four rounds), and verifies the function after every pass that changed it; invalid
 xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
 
-- `promote-variables` (mem2reg): `LOCAL`s reached only by direct `load` and `store` (not shared, not parameters,
-  not `FOR EACH` variables) become SSA values. Block parameters go where definitions meet, in the iterated dominance
-  frontiers of the blocks that store (the entry defines the variable as `NIL`); renaming along the dominator tree
-  replaces each `load` with the current value and drops the `store`s; parameters that only feed each other through a
-  loop are removed (their arguments first, then them). The variables leave the frame.
+- `promote-variables` (mem2reg): `LOCAL`s reached only by direct `load` and `store` (not shared, not parameters, not
+  `FOR EACH` variables) become SSA values, except in a function with `BEGIN SEQUENCE`. Block parameters go where
+  definitions meet, in the iterated dominance frontiers of the blocks that store (the entry defines the variable as
+  `NIL`); renaming along the dominator tree replaces each `load` with the current value and drops the `store`s;
+  parameters that only feed each other through a loop are removed (their arguments first, then them). The variables
+  leave the frame.
 - `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `from_bool` and `truth` of
   constants (`truth` of a logical just made is its boolean), `cond_br` on a constant becomes `br`. A folded
   instruction is removed at once, also one that can fail in general (`truth`) but not with these operands.
@@ -153,11 +171,12 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 - Operations mirror the runtime: unary and binary operators, the truth test, calls (to the module's functions or to
   declared externals), `send` (a message to the first operand, with the others as arguments), array literals, element
   read and write, codeblock creation with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations
-  (`each.in_cell`, `each.enter`, `each.move`, `each.leave`), the `SWITCH` check and match, and for parameter versioning
-  `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the function's
-  own arguments, as received).
-- An operation that fails, or leaves another pending request that asks to unwind, makes the function return (unwind
-  successors are planned, see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
+  (`each.in_cell`, `each.enter`, `each.move`, `each.leave`), the `SWITCH` check (whose result is the value the `CASE`s
+  match: a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, and for
+  parameter versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a
+  call with the function's own arguments, as received).
+- An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
+  or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `ret`.
 - Lowering to LLVM gives every live `item` value that may refer to a heap object a frame slot (a GC root; others are
   `Local`, see [compiler.md](compiler.md#xir-to-llvm)): liveness is computed per value by walking from its uses back to
@@ -179,4 +198,4 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 4. Statepoints: once mem2reg makes items SSA values, LLVM keeps them in registers and records where the live
    object pointers are at each call (stack maps, relative to the frame's anchor), instead of frame slots holding
    every item; relocation, evacuation in the collector, barrier elision.
-5. Unwind edges and `BEGIN SEQUENCE`; resumable functions (async/await, yield); classes.
+5. Unwind edges and `BEGIN SEQUENCE` (done); resumable functions (async/await, yield); classes.

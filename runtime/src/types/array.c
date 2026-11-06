@@ -50,14 +50,17 @@ static int64_t position(const xb_array *a, const xb_item *idx) {
   return xb_is_number(idx) ? xb_array_index(a, xb_num_to_i64(idx)) : -1;
 }
 
-/* The 0-based position base[idx] reads, or -1 after raising the error. */
-static int64_t read_position(xb_ctx *ctx, const xb_item *base, const xb_item *idx) {
+/* The 0-based position base[idx] reads, or -1 after raising the error. The
+ * handler of the error for an index that is not a number may substitute the
+ * element's value, into `r` when given. */
+static int64_t read_position(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
   if (base->type != XB_T_ARRAY || !xb_is_number(idx)) {
-    xb_rt_error(ctx, "BASE", 1068, "Argument error", "array access");
+    xb_item args[2] = {*base, *idx};
+    xb_error(ctx, r, EG_ARG, 1068, "array access", r && !xb_is_number(idx) ? XB_ERR_SUBSTITUTE : 0, 2, args);
     return -1;
   }
   int64_t i = position(base->v.p, idx);
-  if (i < 0) xb_array_bound_error(ctx);
+  if (i < 0) xb_array_bound_error(ctx, base, idx);
   return i;
 }
 
@@ -65,26 +68,29 @@ static int64_t read_position(xb_ctx *ctx, const xb_item *base, const xb_item *id
  * index within it (compiler/src/codegen/FastPaths.cpp, inlineElement) and calls
  * these for every other case. */
 void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
-  int64_t i = read_position(ctx, base, idx);
+  int64_t i = read_position(ctx, r, base, idx);
   if (i >= 0) *r = ((const xb_array *)base->v.p)->items[i];
 }
 
 void xb_ref_elem(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
-  int64_t i = read_position(ctx, base, idx);
+  int64_t i = read_position(ctx, NULL, base, idx);
   if (i >= 0) xb_ref_init(r, base, i + 1, 0);
 }
 
-void xb_array_bound_error(xb_ctx *ctx) { xb_rt_error(ctx, "BASE", 1132, "Bound error", "array access"); }
+void xb_array_bound_error(xb_ctx *ctx, const xb_item *base, const xb_item *idx) {
+  xb_item args[2] = {*base, *idx};
+  xb_error(ctx, NULL, EG_BOUND, 1132, "array access", 0, 2, args);
+}
 
 void xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value) {
   if (base->type != XB_T_ARRAY || !xb_is_number(idx)) {
-    xb_rt_error(ctx, "BASE", 1069, "Argument error", "array assign");
+    xb_error(ctx, NULL, EG_ARG, 1069, "array assign", 0, 1, idx);
     return;
   }
   xb_array *a = base->v.p;
   int64_t i = position(a, idx);
   if (i < 0) {
-    xb_rt_error(ctx, "BASE", 1133, "Bound error", "array assign");
+    xb_error(ctx, NULL, EG_BOUND, 1133, "array assign", 0, 1, idx);
     return;
   }
   a->items[i] = *value;

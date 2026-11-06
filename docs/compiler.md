@@ -47,19 +47,20 @@ Keywords may be abbreviated down to a minimum length:
 
 | Keyword | Min | Keyword | Min | Keyword | Min |
 |---|---|---|---|---|---|
-| `CASE` | 4 | `ENDSWITCH` | 5 | `OTHERWISE` | 4 |
-| `DESCEND` | 7 | `EXIT` | 4 | `PARAMETERS` | 4 |
-| `DO` | 2 | `FIELD` | 4 | `PRIVATE` | 4 |
-| `EACH` | 4 | `FOR` | 3 | `PROCEDURE` | 4 |
-| `ELSE` | 4 | `FUNCTION` | 4 | `PUBLIC` | 4 |
-| `ELSEIF` | 5 | `IF` | 2 | `RETURN` | 4 |
-| `END` | 3 | `IIF` | 3 | `STATIC` | 4 |
-| `ENDCASE` | 4 | `IN` | 2 | `STEP` | 4 |
-| `ENDDO` | 4 | `LOCAL` | 4 | `SWITCH` | 4 |
-| `ENDIF` | 4 | `LOOP` | 4 | `TO` | 2 |
-| `EXTERNAL` | 4 | `MEMVAR` | 4 | `WHILE` | 4 |
-| | | `NEXT` | 4 | `WITH` | 4 |
-| | | `NIL` | 3 | | |
+| `BEGIN` | 4 | `FIELD` | 4 | `PROCEDURE` | 4 |
+| `CASE` | 4 | `FOR` | 3 | `PUBLIC` | 4 |
+| `DESCEND` | 7 | `FUNCTION` | 4 | `RECOVER` | 4 |
+| `DO` | 2 | `IF` | 2 | `RETURN` | 4 |
+| `EACH` | 4 | `IIF` | 3 | `SEQUENCE` | 4 |
+| `ELSE` | 4 | `IN` | 2 | `STATIC` | 4 |
+| `ELSEIF` | 5 | `LOCAL` | 4 | `STEP` | 4 |
+| `END` | 3 | `LOOP` | 4 | `SWITCH` | 4 |
+| `ENDCASE` | 4 | `MEMVAR` | 4 | `TO` | 2 |
+| `ENDDO` | 4 | `NEXT` | 4 | `USING` | 4 |
+| `ENDIF` | 4 | `NIL` | 3 | `WHILE` | 4 |
+| `ENDSWITCH` | 5 | `OTHERWISE` | 4 | `WITH` | 4 |
+| `EXIT` | 4 | `PARAMETERS` | 4 |  |  |
+| `EXTERNAL` | 4 | `PRIVATE` | 4 |  |  |
 
 Statements:
 
@@ -79,6 +80,10 @@ Statements:
 - `FOR v := start TO limit [STEP step] ... NEXT | END`; the limit and step are re-evaluated on every iteration
 - `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`
 - `EXIT` (leaves the innermost loop or `SWITCH`), `LOOP`
+- `BEGIN SEQUENCE ... [RECOVER [USING v] ...] END` (`std.ch` makes `END SEQUENCE` and `ENDSEQUENCE` an `END`); a
+  `BREAK` in the body, or in what it calls, continues after `RECOVER` (or `END`). `RETURN`, and `EXIT` or `LOOP` for
+  a loop around the sequence, cannot leave its body (Clipper rule); in `RECOVER` they can. `BREAK [value]` is a
+  `std.ch` command (`__Break()`, the same as `Break()`).
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
   other arguments (an element, a variable in parentheses, an expression) by value
@@ -90,14 +95,16 @@ Statements:
 
 Expression precedence, lowest first: `:=` and compound assignments (right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`,
 `=` `==` `!=` `<>` `#`, `<` `<=` `>` `>=` `$`, `+` `-`, `*` `/` `%`, `^`/`**`, unary `-` `+`, prefix and postfix
-`++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`), primaries (literals, `NIL`, variables, calls,
+`++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`) and messages `o:name`, `o:name( args )` (in any
+order: `a[1]:cargo[2]`), primaries (literals, `NIL`, variables, calls,
 `IIF(c, a, b)`/`IF(c, a, b)`, parentheses, expression lists `( a, b, ... )` evaluated in order with the value of the
 last, array literals `{ a, b }`, codeblocks `{| params | expr, ... }`). Empty
 call arguments (`f(a, , b)`) and empty array elements pass `NIL`; a codeblock body has at least one expression. A
 call argument `@name` or `@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is
 an error (references in array literals are not supported yet), and so are function
 references `@name()`.
-Variables and elements (`a[i] := v`, `a[i] += v`, `a[i]++`) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
+Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`) and instance variables (`o:x := v`, a message without
+arguments) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
 declares `a := Array( n1, n2 )`.
 
 Nesting is limited, so that a deep source is reported instead of exhausting the compiler's stack: 1024 levels of
@@ -220,7 +227,8 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   from its own end. An ascending loop checks every index against the collection's current length before each
   iteration, so it stops at the shortest collection and sees elements added by the body; a descending one stops when
   an index reaches 0. The variables get their saved values back at the end (`each.leave`, also through `EXIT`), and
-  on `RETURN` those others can see (a `STATIC`, a shared variable, a parameter). One reference per variable serves
+  on `RETURN` and when unwinding leaves the loop those others can see (a `STATIC`, a shared variable, a parameter),
+  all of them when the unwinding stops at a `BEGIN SEQUENCE` of the function. One reference per variable serves
   the loop and is moved to each element (`each.move`). A variable shared when the loop starts (in a cell, or a
   parameter that received an element by reference; `each.in_cell`) holds it inside its cell, so everyone sharing the
   variable sees the current element and, after the loop, the restored value. A codeblock or reference that takes a
@@ -228,6 +236,9 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   stays the loop's: later iterations, inner loops on the same variable (here or in a callee) and the restore do not
   change what it designates. A `STATIC` is one variable for everyone: a reference to it designates it, and the loop
   follows its cell from the moment one is made.
+- `BEGIN SEQUENCE` gives the blocks of its body an unwind block, the handler: a `BREAK` (pending after an operation
+  of the body, or a call) is taken there and `RECOVER` follows, with the `BREAK` value stored in the `USING`
+  variable; other requests go on unwinding (see [xir.md](xir.md#control-flow-for-errors-and-exceptions)).
 - A codeblock becomes an xIR function of its own (`<function>.blockN`) whose frame holds its parameters; `block`
   creates it with the cells of the variables it captures (moving them into cells if they are not yet).
 - `STATIC` initializers form the module initialization function.
@@ -298,7 +309,10 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under names nothing
   looks up, so modules sharing the object never clash.
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
-  calls `xb_pending` and leaves through the function's exit if that asks to unwind.
+  calls `xb_pending` and, if that asks to unwind, goes to the LLVM block of the xIR block's unwind block, or leaves
+  through the function's exit. A runtime operator may also return a value the error block substituted, of any type:
+  the code after it reads the result's type instead of assuming one, and a comparison that feeds a condition tests
+  the truth of what its slow path returned.
   `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
 - Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
   target `DataLayout`); a `FOR EACH` variable goes through `xb_ref_target`; a `STATIC`, a shared or captured

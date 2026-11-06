@@ -12,8 +12,16 @@
 static uint16_t num_dec(const xb_item *a) { return a->type == XB_T_DOUBLE ? a->dec : 0; }
 static uint16_t max16(uint16_t a, uint16_t b) { return a > b ? a : b; }
 
-static void arg_error(xb_ctx *ctx, int code, const char *op) {
-  xb_rt_error(ctx, "BASE", code, "Argument error", op);
+/* The argument error of a binary operator; its handler may substitute the
+ * result. */
+static void arg_error2(xb_ctx *ctx, xb_item *r, int32_t code, const char *op, const xb_item *a, const xb_item *b) {
+  xb_item args[2] = {*a, *b};
+  xb_arg_error(ctx, r, code, op, 2, args);
+}
+
+static void zero_divisor(xb_ctx *ctx, xb_item *r, int32_t code, const char *op, const xb_item *a, const xb_item *b) {
+  xb_item args[2] = {*a, *b};
+  xb_error(ctx, r, EG_ZERODIV, code, op, XB_ERR_SUBSTITUTE, 2, args);
 }
 
 void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
@@ -32,7 +40,7 @@ void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   } else if (a->type == XB_T_DATE && b->type == XB_T_DATE) { /* Clipper adds the day numbers */
     xb_set_date(r, xb_add_days(a->v.i, b->v.i));
   } else {
-    arg_error(ctx, 1081, "+");
+    arg_error2(ctx, r, 1081, "+", a, b);
   }
 }
 
@@ -55,7 +63,7 @@ void xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   } else if (a->type == XB_T_DATE && xb_is_number(b)) {
     xb_set_date(r, xb_add_days(a->v.i, (int64_t)(0 - (uint64_t)xb_num_to_i64(b))));
   } else {
-    arg_error(ctx, 1082, "-");
+    arg_error2(ctx, r, 1082, "-", a, b);
   }
 }
 
@@ -67,21 +75,21 @@ void xb_op_mul(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   } else if (xb_is_number(a) && xb_is_number(b)) {
     xb_set_double(r, xb_num_value(a) * xb_num_value(b), (uint16_t)(num_dec(a) + num_dec(b)));
   } else {
-    arg_error(ctx, 1083, "*");
+    arg_error2(ctx, r, 1083, "*", a, b);
   }
 }
 
 /* `/` and `%` always produce a double with SET DECIMALS decimals; an integer
  * result for exact division only comes from compile-time folding. */
 void xb_op_div(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
-  if (!xb_is_number(a) || !xb_is_number(b)) { arg_error(ctx, 1084, "/"); return; }
-  if (xb_num_value(b) == 0.0) { xb_rt_error(ctx, "BASE", 1340, "Zero divisor", "/"); return; }
+  if (!xb_is_number(a) || !xb_is_number(b)) { arg_error2(ctx, r, 1084, "/", a, b); return; }
+  if (xb_num_value(b) == 0.0) { zero_divisor(ctx, r, 1340, "/", a, b); return; }
   xb_set_double(r, xb_num_value(a) / xb_num_value(b), xb_decimals(ctx));
 }
 
 void xb_op_mod(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
-  if (!xb_is_number(a) || !xb_is_number(b)) { arg_error(ctx, 1085, "%"); return; }
-  if (xb_num_value(b) == 0.0) { xb_rt_error(ctx, "BASE", 1341, "Zero divisor", "%"); return; }
+  if (!xb_is_number(a) || !xb_is_number(b)) { arg_error2(ctx, r, 1085, "%", a, b); return; }
+  if (xb_num_value(b) == 0.0) { zero_divisor(ctx, r, 1341, "%", a, b); return; }
   double v;
   if (a->type == XB_T_INT && b->type == XB_T_INT) v = b->v.i == -1 ? 0.0 : (double)(a->v.i % b->v.i);
   else v = fmod(xb_num_value(a), xb_num_value(b));
@@ -93,7 +101,7 @@ void xb_num_default_dec(xb_ctx *ctx, xb_item *r, double value) {
 }
 
 void xb_op_pow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
-  if (!xb_is_number(a) || !xb_is_number(b)) { arg_error(ctx, 1088, "^"); return; }
+  if (!xb_is_number(a) || !xb_is_number(b)) { arg_error2(ctx, r, 1088, "^", a, b); return; }
   xb_set_double(r, pow(xb_num_value(a), xb_num_value(b)), xb_decimals(ctx));
 }
 
@@ -103,13 +111,13 @@ void xb_op_neg(xb_ctx *ctx, xb_item *r, const xb_item *a) {
   } else if (xb_is_number(a)) {
     xb_set_double(r, -xb_num_value(a), num_dec(a));
   } else {
-    arg_error(ctx, 1080, "-");
+    xb_arg_error(ctx, r, 1080, "-", 1, a);
   }
 }
 
 void xb_op_not(xb_ctx *ctx, xb_item *r, const xb_item *a) {
   if (a->type == XB_T_LOGICAL) xb_set_logical(r, !a->v.l);
-  else arg_error(ctx, 1077, ".NOT.");
+  else xb_arg_error(ctx, r, 1077, ".NOT.", 1, a);
 }
 
 /* String comparison. Non-exact (SET EXACT OFF, operator =): when the right
@@ -152,14 +160,14 @@ int xb_compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
 void xb_op_eq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
   int c = xb_compare(ctx, a, b);
-  if (c == 2) arg_error(ctx, 1071, "=");
+  if (c == 2) arg_error2(ctx, r, 1071, "=", a, b);
   else xb_set_logical(r, c == 0);
 }
 
 void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type != b->type); return; }
   int c = xb_compare(ctx, a, b);
-  if (c == 2) arg_error(ctx, 1072, "<>");
+  if (c == 2) arg_error2(ctx, r, 1072, "<>", a, b);
   else xb_set_logical(r, c != 0);
 }
 
@@ -175,14 +183,14 @@ void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) 
   }
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
   int c = xb_compare(ctx, a, b);
-  if (c == 2) arg_error(ctx, 1070, "==");
+  if (c == 2) arg_error2(ctx, r, 1070, "==", a, b);
   else xb_set_logical(r, c == 0);
 }
 
 #define XB_REL_OP(name, code, sym, test)                                         \
   void name(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {       \
     int c = xb_compare(ctx, a, b);                                               \
-    if (c == 2) arg_error(ctx, code, sym);                                       \
+    if (c == 2) arg_error2(ctx, r, code, sym, a, b);                             \
     else xb_set_logical(r, test);                                                \
   }
 
@@ -192,7 +200,7 @@ XB_REL_OP(xb_op_gt, 1075, ">", c > 0)
 XB_REL_OP(xb_op_ge, 1076, ">=", c >= 0)
 
 void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
-  if (a->type != XB_T_STRING || b->type != XB_T_STRING) { arg_error(ctx, 1109, "$"); return; }
+  if (a->type != XB_T_STRING || b->type != XB_T_STRING) { arg_error2(ctx, r, 1109, "$", a, b); return; }
   const xb_str *x = a->v.s, *y = b->v.s;
   int found = 0;
   if (x->len == 0) found = 0; /* Clipper: "" $ "abc" is .F. */
@@ -204,23 +212,39 @@ void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 }
 
 int32_t xb_cond_error(xb_ctx *ctx, const xb_item *a) {
-  XB_UNUSED(a);
-  arg_error(ctx, 1066, "conditional");
+  xb_error(ctx, NULL, EG_ARG, 1066, "conditional", 0, 1, a);
   return 0;
 }
 
-/* FOR test: a non-negative step loops while counter <= limit (fails with the
- * '>' error), a negative step while counter >= limit (the '<' error). */
+/* The comparison a substituted result stands for: a logical, else the error
+ * of a condition. */
+static int32_t substituted_truth(xb_ctx *ctx, const xb_item *v) {
+  if (v->type == XB_T_LOGICAL) return v->v.l != 0;
+  return xb_cond_error(ctx, v);
+}
+
+/* FOR test: a non-negative step loops while counter <= limit, that is until
+ * counter > limit (whose error is the '>' one), a negative step until counter
+ * < limit (the '<' error); a substituted result is that comparison's. A
+ * non-numeric step is the '<' error between the step and 0, whose substituted
+ * result tells whether the step goes back. */
 int32_t xb_for_test(xb_ctx *ctx, const xb_item *counter, const xb_item *limit, const xb_item *step) {
-  if (!xb_is_number(step)) {
-    arg_error(ctx, 1073, "<");
-    return 0;
+  int back;
+  xb_item r;
+  if (xb_is_number(step)) {
+    back = xb_num_value(step) < 0;
+  } else {
+    xb_item zero;
+    xb_set_int(&zero, 0);
+    arg_error2(ctx, &r, 1073, "<", step, &zero);
+    if (ctx->pending & XB_PENDING_UNWIND) return 0;
+    back = substituted_truth(ctx, &r);
+    if (ctx->pending & XB_PENDING_UNWIND) return 0;
   }
-  int back = xb_num_value(step) < 0;
   int c = xb_compare(ctx, counter, limit);
-  if (c == 2) {
-    arg_error(ctx, back ? 1073 : 1075, back ? "<" : ">");
-    return 0;
-  }
-  return back ? c >= 0 : c <= 0;
+  if (c != 2) return back ? c >= 0 : c <= 0;
+  arg_error2(ctx, &r, back ? 1073 : 1075, back ? "<" : ">", counter, limit);
+  if (ctx->pending & XB_PENDING_UNWIND) return 0;
+  int32_t past = substituted_truth(ctx, &r);
+  return !past && !(ctx->pending & XB_PENDING_UNWIND);
 }

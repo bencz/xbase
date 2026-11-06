@@ -138,6 +138,7 @@ private:
                 typeName(b.params[i]->type());
       out_ += ")";
     }
+    if (b.unwind) out_ += " unwind " + b.unwind->name;
     out_ += ":\n";
     for (auto &i : b.insts) inst(*i);
   }

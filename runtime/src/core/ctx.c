@@ -14,6 +14,7 @@ xb_ctx *xb_ctx_new(void) {
   ctx->epoch = 1900;
   ctx->century = 0;
   xb_gc_register(ctx);
+  xb_error_init(ctx);
   return ctx;
 }
 
@@ -64,15 +65,4 @@ void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, u
              (unsigned)offsetof(xb_array, items));
     xb_gc_fatal(why);
   }
-}
-
-void xb_rt_error(xb_ctx *ctx, const char *subsystem, int code, const char *desc,
-                 const char *operation) {
-  /* Until ErrorBlock()/BEGIN SEQUENCE exist, every error is fatal. */
-  fflush(stdout);
-  fprintf(stderr, "\nError %s/%d  %s", subsystem, code, desc);
-  if (operation && *operation) fprintf(stderr, ": %s", operation);
-  fputc('\n', stderr);
-  ctx->exitcode = 1;
-  ctx->pending |= XB_PENDING_ERROR;
 }

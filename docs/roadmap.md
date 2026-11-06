@@ -46,15 +46,13 @@ variables.
 
 ### Errors
 
-Runtime errors end the program today, with the message and the call stack. Done: objects of runtime classes, messages
-(`o:x`, `o:x := v`, `o:m( args )`) and the `Error` object from `ErrorNew()`
-([runtime.md](runtime.md#objects-and-messages)). Missing:
+Done: objects of runtime classes, messages (`o:x`, `o:x := v`, `o:m( args )`), runtime errors as `Error` objects,
+`ErrorBlock()`, substitution, the default error block, `BREAK`/`Break()`, `BEGIN SEQUENCE` / `RECOVER [USING x]` on
+xIR unwind edges ([runtime.md](runtime.md#errors-and-pending-requests),
+[xir.md](xir.md#control-flow-for-errors-and-exceptions)). Missing:
 
-- `BEGIN SEQUENCE` / `RECOVER [USING x]` / `BREAK [x]` / `END SEQUENCE`, `Break()`.
-- Runtime errors as `Error` objects, `ErrorBlock()`, the default handler (`ErrorSys`), `error.ch`, and the retry,
-  default and substitute protocol (the handler's return value decides).
-- The compiler side is the unwind edges of xIR phase 5 ([xir.md](xir.md#control-flow-for-errors-and-exceptions));
-  the runtime keeps propagating through the pending flag.
+- `ErrorSys()` and a default handler written in xBase that prints the `Called from` lines (needs the call stack).
+- Retrying (`canRetry`, `tries`) and defaults (`canDefault`) once file and database errors exist; `ErrorLevel()`.
 
 ### Procedures, parameters and the call stack
 
@@ -199,9 +197,14 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ### xIR and code generation
 
-- Before `BEGIN SEQUENCE`: a call writes its destination only once it succeeds (today the destination is cleared
-  first); operations that fail may run code (an error handler), which the effects catalog and every pass that moves
-  or merges operations must respect; a store and its write barrier move together.
+- A call writes its destination only once it succeeds (today the destination is cleared first, so under a
+  `BEGIN SEQUENCE` handler its result is not computed into a variable); a pass that moves or merges operations must
+  respect that an operation that fails runs the error block; a store and its write barrier move together.
+- Typed continuations: since the error block may substitute a value of any type, an operation that may fail gives
+  any type, which costs the values that follow it their registers and constant tags (`float` 30 to 49 ms when this
+  came). Planned: the type the operation would give, checked after its slow path, with a generic copy of the rest
+  of the function taking over when the substituted value has another type.
+- `promote-variables` in functions with `BEGIN SEQUENCE`: the variables the handlers do not read.
 - Verifier: no parameters on the entry block and no branches to it, the access kind of a variable, the captures of a
   `block`; linear cost.
 - Interned constants; moving, splitting and cloning instructions; cached analyses (CFG, dominators, loops) with
@@ -222,10 +225,8 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ### Runtime
 
-- The error subsystem in one ABI change: a frame descriptor (function name, file) and the current line in each frame,
-  error state owned by the context and marked by the collector, a table of errors with their generic codes and
-  abilities (retry, default, substitute), `ErrorBlock`, `BREAK`/`RECOVER`, a default handler written in xBase that
-  substitutes 0 for a division by zero and prints the `Called from` lines.
+- The call stack: a frame descriptor (function name, file) and the current line in each frame, for `ProcName()`,
+  `ProcLine()` and the `Called from` lines of the default error handler.
 - A stack limit checked in function prologues (deep recursion is a crash today).
 - The ABI check for every module, not only the start module.
 - One table of type properties (heap object, `ValType` letter, sort order, `Empty`, display), with an abort on an
@@ -240,7 +241,8 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 ## Order of the work
 
 1. The dynamic symbol table; `INIT`/`EXIT PROCEDURE`.
-2. Errors: `BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the default handler; xIR unwind edges.
+2. Errors: the call stack and `ErrorSys`; typed continuations (`BEGIN SEQUENCE`, `Break`, the `Error` object,
+   `ErrorBlock` and the unwind edges are done).
 3. Memory variables and Clipper's rule for undeclared names; `Type()`.
 4. The macro operator.
 5. The rest of the array, string and number functions; the call-stack functions.

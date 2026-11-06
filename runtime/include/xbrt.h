@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 10u
+#define XB_ABI_VERSION 11u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -93,17 +93,17 @@ typedef struct xb_item {
 /* [ABI] `pending` is tested by compiled code after every call that can
  * fail. When it is non-zero the code calls xb_pending(), which serves
  * requests that only need a pause (a GC safepoint) and returns non-zero when
- * the function must unwind (error, BREAK, QUIT). The common case costs one
+ * the function must unwind (a BREAK or a QUIT; an error that is not recovered
+ * ends in one). The common case costs one
  * load and one predictable branch, works on every target, and survives AWAIT
  * (unlike setjmp/longjmp). */
 enum {
   XB_PENDING_NONE      = 0,
-  XB_PENDING_ERROR     = 1u << 0,
   XB_PENDING_BREAK     = 1u << 1,
   XB_PENDING_QUIT      = 1u << 2,
   XB_PENDING_SAFEPOINT = 1u << 3,
 };
-#define XB_PENDING_UNWIND (XB_PENDING_ERROR | XB_PENDING_BREAK | XB_PENDING_QUIT)
+#define XB_PENDING_UNWIND (XB_PENDING_BREAK | XB_PENDING_QUIT)
 
 /* [ABI] An array: `len` items at `items`, which start in the same
  * allocation (`inline_items`); when it grows past that, they move to an
@@ -254,8 +254,10 @@ void     xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_ce
 void     xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx);
 void     xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved);
 
-/* SWITCH: the value must be an integer or a string; CASEs match it exactly. */
-void     xb_switch_check(xb_ctx *ctx, const xb_item *value);
+/* SWITCH: the value must be an integer or a string (else an error, whose
+ * handler may substitute another value); xb_switch_check stores in `r` the
+ * value the CASEs match exactly. */
+void     xb_switch_check(xb_ctx *ctx, xb_item *r, const xb_item *value);
 int32_t  xb_switch_match(const xb_item *value, const xb_item *c);
 
 /* Modules. A compiled module registers its initialization and its STATICs
@@ -272,9 +274,12 @@ void     xb_block_call(xb_ctx *ctx, xb_item *ret, const xb_item *block, uint32_t
 /* FOR ... TO ... STEP test: 1 = keep looping. */
 int32_t  xb_for_test(xb_ctx *ctx, const xb_item *counter, const xb_item *limit, const xb_item *step);
 
-/* Reports a runtime error ("Error <subsystem>/<code>  <desc>: <operation>")
- * and raises XB_PENDING_ERROR. Errors are fatal until ErrorBlock() exists. */
-void     xb_rt_error(xb_ctx *ctx, const char *subsystem, int code, const char *desc, const char *operation);
+/* BEGIN SEQUENCE. Where an operation of the sequence's body unwinds,
+ * xb_seq_catch tells whether the request is a BREAK alone, and takes it (1);
+ * otherwise the unwinding goes on (0). xb_seq_value then moves the BREAK value
+ * into `r` (RECOVER USING). */
+int32_t  xb_seq_catch(xb_ctx *ctx);
+void     xb_seq_value(xb_ctx *ctx, xb_item *r);
 
 xb_ctx  *xb_ctx_new(void);
 void     xb_ctx_free(xb_ctx *ctx);

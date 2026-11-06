@@ -192,7 +192,7 @@ struct IIfExpr : Expr {
       : Expr(ExprKind::IIf, l), cond(std::move(c)), then(std::move(a)), otherwise(std::move(b)) {}
 };
 
-enum class StmtKind : uint8_t { Expr, Local, Static, Return, If, While, For, ForEach, Switch, Exit, Loop };
+enum class StmtKind : uint8_t { Expr, Local, Static, Return, If, While, For, ForEach, Switch, Sequence, Exit, Loop };
 
 struct Stmt {
   StmtKind kind;
@@ -268,6 +268,17 @@ struct SwitchStmt : Stmt {
   ExprPtr value;
   std::vector<Case> cases;       // OTHERWISE, if present, is last
   explicit SwitchStmt(SourceLoc l, ExprPtr v) : Stmt(StmtKind::Switch, l), value(std::move(v)) {}
+};
+
+// BEGIN SEQUENCE body [RECOVER [USING var] recover] END: a BREAK in the body
+// (in what it calls, too) continues after RECOVER, the BREAK value in `var`;
+// without RECOVER, after END.
+struct SequenceStmt : Stmt {
+  Block body;
+  bool hasRecover = false;
+  ExprPtr usingVar;              // a VarExpr, or null
+  Block recover;
+  explicit SequenceStmt(SourceLoc l) : Stmt(StmtKind::Sequence, l) {}
 };
 
 struct JumpStmt : Stmt { // EXIT / LOOP

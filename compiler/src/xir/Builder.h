@@ -10,7 +10,17 @@ class Builder {
 public:
   explicit Builder(Function *f) : fn_(f) {}
 
-  void setBlock(BasicBlock *b) { bb_ = b; }
+  // While generating code, the blocks it fills unwind to the block given here
+  // (setUnwind); a builder used by a pass leaves unwind blocks as they are.
+  void setBlock(BasicBlock *b) {
+    bb_ = b;
+    if (assignUnwind_) b->unwind = unwind_;
+  }
+  void setUnwind(BasicBlock *u) {
+    assignUnwind_ = true;
+    unwind_ = u;
+  }
+  BasicBlock *unwindBlock() const { return unwind_; }
   bool terminated() const { return bb_->terminator() != nullptr; }
   void setLoc(SourceLoc l) { loc_ = l; }
 
@@ -40,6 +50,8 @@ public:
   Instruction *makeBlock(Function *blockFn, std::vector<Var *> captures);
   Instruction *paramsRef(std::vector<Var *> params);
   Instruction *callForward(Function *callee);
+  Instruction *seqCatch();
+  Instruction *seqValue();
   Instruction *forTest(Value *counter, Value *limit, Value *step);
   Instruction *enumLen(Value *coll);
   Instruction *eachInCell(Var *v);
@@ -71,6 +83,8 @@ private:
 
   Function *fn_;
   BasicBlock *bb_ = nullptr;
+  BasicBlock *unwind_ = nullptr;
+  bool assignUnwind_ = false;
   SourceLoc loc_;
 };
 

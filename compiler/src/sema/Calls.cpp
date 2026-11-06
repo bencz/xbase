@@ -206,6 +206,12 @@ void CallResolver::block(Block &b) {
       }
       break;
     }
+    case StmtKind::Sequence: {
+      auto &q = static_cast<SequenceStmt &>(*st);
+      block(q.body);
+      block(q.recover);
+      break;
+    }
     case StmtKind::Exit: case StmtKind::Loop:
       break;
     }

@@ -166,6 +166,12 @@ void Folder::stmt(Stmt &s) {
     block(f.body);
     break;
   }
+  case StmtKind::Sequence: {
+    auto &q = static_cast<SequenceStmt &>(s);
+    block(q.body);
+    block(q.recover);
+    break;
+  }
   case StmtKind::Exit:
   case StmtKind::Loop:
     break;

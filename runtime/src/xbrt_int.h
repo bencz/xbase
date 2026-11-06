@@ -5,6 +5,7 @@
 #include "xbrt.h"
 
 #include "core/context.h"
+#include "core/error.h"
 #include "core/numeric.h"
 #include "core/text.h"
 #include "gc/gc.h"

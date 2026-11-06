@@ -24,6 +24,7 @@ void Generator::genStmt(const Stmt &s) {
   case StmtKind::For: genFor(static_cast<const ForStmt &>(s)); break;
   case StmtKind::ForEach: genForEach(static_cast<const ForEachStmt &>(s)); break;
   case StmtKind::Switch: genSwitch(static_cast<const SwitchStmt &>(s)); break;
+  case StmtKind::Sequence: genSequence(static_cast<const SequenceStmt &>(s)); break;
   case StmtKind::Exit:
   case StmtKind::Loop:
     b.br(s.kind == StmtKind::Exit ? cur_.loops.back().exitTo : cur_.loops.back().loopTo);
@@ -138,7 +139,9 @@ Value *Generator::eachInCell(const EachVar &v) {
 // holds a reference to the current element, so reading or assigning it reads
 // or assigns the element; a variable shared with codeblocks or a caller holds
 // it inside its cell, so they see the elements too. The variables get their
-// previous values back when the loop ends (by EXIT too).
+// previous values back when the loop ends (by EXIT too), and when unwinding
+// leaves it for a BEGIN SEQUENCE of the function, or for the caller when one
+// of them may be seen there.
 void Generator::genForEach(const ForEachStmt &st) {
   Builder &b = *cur_.b;
   size_t n = st.vars.size();
@@ -151,6 +154,17 @@ void Generator::genForEach(const ForEachStmt &st) {
     Value *inCell = mayBeInCell(*x) ? static_cast<Value *>(b.eachInCell(x)) : b.boolean(false);
     Value *saved = b.eachEnter(x, inCell, colls[k]);
     vars.push_back({&v, inCell, saved});
+  }
+  BasicBlock *outer = b.unwindBlock();
+  bool cleanup = outer != nullptr;
+  for (const EachVar &v : vars) cleanup |= mayBeInCell(*varOf(*v.var));
+  BasicBlock *restore = nullptr;
+  if (cleanup) {
+    restore = cur_.fn->addBlock("each.unwind");
+    BasicBlock *start = cur_.fn->addBlock("each.start");
+    b.br(start);
+    b.setUnwind(restore);
+    b.setBlock(start);
   }
   // One step counter; each collection has its own index: step + 1, or for
   // DESCEND its length at entry minus the step. Ascending loops end at the end
@@ -199,8 +213,54 @@ void Generator::genForEach(const ForEachStmt &st) {
   b.setBlock(incr);
   b.br(test, {b.intAdd(step, b.i64(1))});
 
+  if (cleanup) {
+    b.setUnwind(outer);
+    b.setBlock(restore);
+    for (const EachVar &v : vars) b.eachLeave(varOf(*v.var), eachInCell(v), v.saved);
+    unwindOnward();
+  }
   b.setBlock(end);
   for (const EachVar &v : vars) b.eachLeave(varOf(*v.var), eachInCell(v), v.saved);
+}
+
+// The end of an unwind block whose work is done: unwinding goes on to the
+// enclosing one, or the function returns with the request pending.
+void Generator::unwindOnward() {
+  Builder &b = *cur_.b;
+  if (BasicBlock *outer = b.unwindBlock()) b.br(outer);
+  else b.ret(nullptr);
+}
+
+// BEGIN SEQUENCE: the body's blocks unwind to a handler, which takes a BREAK
+// (seq.catch) and goes on with RECOVER, storing the BREAK value in the USING
+// variable; any other request (QUIT, an error that ends the program) goes on
+// unwinding. The handler reads variables as the failed operation left them:
+// the function keeps them in memory (promote-variables leaves it alone).
+void Generator::genSequence(const SequenceStmt &st) {
+  Builder &b = *cur_.b;
+  BasicBlock *outer = b.unwindBlock();
+  BasicBlock *body = cur_.fn->addBlock("seq.body");
+  BasicBlock *handler = cur_.fn->addBlock("seq.unwind");
+  BasicBlock *end = cur_.fn->addBlock("seq.end");
+  b.br(body);
+  b.setUnwind(handler);
+  b.setBlock(body);
+  genBlock(st.body);
+  if (!b.terminated()) b.br(end);
+
+  b.setUnwind(outer);
+  b.setBlock(handler);
+  BasicBlock *recover = cur_.fn->addBlock("seq.recover");
+  BasicBlock *onward = cur_.fn->addBlock("seq.onward");
+  b.condBr(b.seqCatch(), recover, onward);
+  b.setBlock(onward);
+  unwindOnward();
+  b.setBlock(recover);
+  Value *value = b.seqValue(); // taken even without USING, so the context does not keep it alive
+  if (st.usingVar) store(static_cast<const VarExpr &>(*st.usingVar), value);
+  genBlock(st.recover);
+  if (!b.terminated()) b.br(end);
+  b.setBlock(end);
 }
 
 // SWITCH: the value is tested against each CASE in order; the bodies follow
@@ -209,7 +269,7 @@ void Generator::genSwitch(const SwitchStmt &st) {
   Builder &b = *cur_.b;
   Value *value = genExpr(*st.value);
   if (st.cases.empty()) return; // nothing compares the value, so any type is accepted
-  b.switchCheck(value);
+  value = b.switchCheck(value);  // an error's handler may substitute another value
   BasicBlock *end = cur_.fn->addBlock("switch.end");
   std::vector<BasicBlock *> bodies;
   for (size_t i = 0; i < st.cases.size(); ++i) bodies.push_back(cur_.fn->addBlock("switch.case"));

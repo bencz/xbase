@@ -22,16 +22,18 @@ constexpr TypeSet kHeapTypes = ((TypeSet(1) << (XB_T_HEAP_LAST + 1)) - 1) & ~((T
 // and `b`, as the runtime's operators make them (core/ops.c); an operand pair
 // that is an error adds nothing.
 TypeSet binaryResult(BinOp op, TypeSet a, TypeSet b);
+// Whether such operands can make it fail: an operand pair it does not take,
+// or a divisor that may be zero.
+bool binaryMayFail(BinOp op, TypeSet a, TypeSet b);
 
 // Type inference over a function's SSA values: the set of types each item
 // value may hold. An optimistic fixpoint: block parameters start empty and
 // grow with the values their branches pass, operations follow their operands
 // (binaryResult), and anything read from memory (a variable, an element, a
-// call's result) may hold any type. An operation that fails produces no value
-// (errors end the function); once an error handler can substitute a value for
-// a failed operation, that value may be of any type, and these rules must say
-// so: the lowering keeps values it finds without heap references out of the
-// collector's sight.
+// call's result) may hold any type. The handler of an operation's error may
+// substitute a value of any type for its result, so an operation that may fail
+// that way may produce any type: the lowering keeps values it finds without
+// heap references out of the collector's sight.
 class TypeInfo {
 public:
   explicit TypeInfo(const CFG &cfg); // the function the CFG was built for

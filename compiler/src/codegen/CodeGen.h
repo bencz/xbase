@@ -181,7 +181,7 @@ private:
   // runtime entry points
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
   llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_, rtPending_;
-  llvm::FunctionCallee rtSend_;
+  llvm::FunctionCallee rtSend_, rtSeqCatch_, rtSeqValue_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;
@@ -201,6 +201,7 @@ private:
   llvm::Function *fn_ = nullptr;
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
   llvm::BasicBlock *fnExit_ = nullptr;
+  llvm::BasicBlock *unwind_ = nullptr; // where an operation of the current block that fails goes (xir unwind)
   const FramePlan *plan_ = nullptr;
   std::unordered_map<const xir::BasicBlock *, llvm::BasicBlock *> blocks_;
   std::unordered_map<const xir::Value *, llvm::Value *> values_; // machine values; addresses of Place homes

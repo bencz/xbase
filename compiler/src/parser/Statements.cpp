@@ -18,6 +18,7 @@ StmtPtr Parser::parseStmt() {
   if (atStmtKw("SWITCH")) return parseSwitch();
   if (atStmtKw("IF") && !atInlineIf()) return parseIf();
   if (atStmtKw("WHILE")) return parseWhile();
+  if (atStmtKw("BEGIN") && isKw(ahead(), "SEQUENCE")) return parseSequence();
   if (atStmtKw("FOR")) return isKw(ahead(), "EACH") && !isAssignAfterEach() ? parseForEach() : parseFor();
   if (atStmtKw("RETURN")) {
     advance();
@@ -57,7 +58,7 @@ StmtPtr Parser::parseStmt() {
     return std::make_unique<ExprStmt>(loc, std::move(call));
   }
   for (const char *closer : {"ENDIF", "ENDDO", "NEXT", "END", "ELSE", "ELSEIF", "CASE", "OTHERWISE", "ENDCASE",
-                             "ENDSWITCH"}) {
+                             "ENDSWITCH", "RECOVER"}) {
     if (atStmtKw(closer)) {
       diag_.error(loc, std::string(closer) + " does not match any open block");
       skipToEndOfStmt();
@@ -272,6 +273,34 @@ StmtPtr Parser::parseForEach() {
   st->body = parseBlock({"NEXT", "END"});
   closeBlock({"NEXT", "END"}, "FOR EACH", openLoc);
   if (!hasIn) return nullptr;
+  return st;
+}
+
+// BEGIN SEQUENCE ... [RECOVER [USING var]] ... END (std.ch makes END SEQUENCE
+// and ENDSEQUENCE an END)
+StmtPtr Parser::parseSequence() {
+  SourceLoc openLoc = cur().loc;
+  advance(); // BEGIN
+  advance(); // SEQUENCE
+  endOfStmt();
+  auto st = std::make_unique<SequenceStmt>(openLoc);
+  st->body = parseBlock({"RECOVER", "END"});
+  if (atStmtKw("RECOVER")) {
+    advance();
+    st->hasRecover = true;
+    if (atKw("USING")) {
+      advance();
+      if (at(Tok::Ident)) {
+        st->usingVar = std::make_unique<VarExpr>(cur().loc, cur().upper);
+        advance();
+      } else {
+        expect(Tok::Ident, "variable name");
+      }
+    }
+    endOfStmt();
+    st->recover = parseBlock({"END"});
+  }
+  closeBlock({"END"}, "BEGIN SEQUENCE", openLoc);
   return st;
 }
 
