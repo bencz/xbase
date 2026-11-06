@@ -4,6 +4,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Same layout as xb_str with a one-byte payload. */
+static const struct {
+  uint32_t flags;
+  uint32_t hash;
+  size_t len;
+  char data[1];
+} empty_string = {XB_STR_STATIC, 0, 0, {0}};
+
+xb_str *xb_str_empty(void) { return (xb_str *)&empty_string; }
+
 xb_str *xb_str_alloc(uint64_t newLen) {
   if (newLen > XB_STR_MAX_LEN) xb_gc_fatal("out of memory");
   size_t len = (size_t)newLen;

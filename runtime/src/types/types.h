@@ -70,6 +70,45 @@ static inline int xb_is_loop_ref(const xb_item *it) {
  * (unless it holds one) and returns the cell. */
 xb_cell *xb_cell_move(xb_item *var);
 
+/* What an instance variable of a class accepts. A value of another type is
+ * ignored by XB_VAR_ARRAY, _LOGICAL and _STRING; the numeric rules raise an
+ * argument error for it, and keep a number truncated toward zero, wrapped to
+ * 32 bits signed or 16 bits unsigned (0 for a double beyond 64 bits). */
+typedef enum xb_var_rule {
+  XB_VAR_ANY,
+  XB_VAR_ARRAY,
+  XB_VAR_LOGICAL,
+  XB_VAR_STRING,
+  XB_VAR_INT32,
+  XB_VAR_UINT16,
+} xb_var_rule;
+
+typedef struct xb_class_var {
+  const char *name;             /* upper-cased */
+  xb_var_rule rule;
+} xb_class_var;
+
+/* A class defined by the runtime. */
+typedef struct xb_class {
+  const char *name;             /* upper-cased, as ClassName() returns it */
+  uint32_t nvars;
+  const xb_class_var *vars;     /* in the order of an object's items */
+} xb_class;
+
+/* An instance of a class: one item per variable, each starting as its rule's
+ * empty value (NIL, .F., "" or 0). */
+typedef struct xb_object {
+  const xb_class *cls;
+  uint32_t nvars;
+  xb_item vars[];
+} xb_object;
+
+xb_object *xb_object_new(const xb_class *cls);
+void       xb_set_object(xb_item *it, xb_object *o);
+
+/* The empty string, never collected. */
+xb_str *xb_str_empty(void);
+
 /* Dates are Julian day numbers (0: the empty date), years 0 to 9999. Text
  * buffers include the terminating NUL: "YYYYMMDD", and a date by a SET DATE
  * FORMAT picture, which is cut at 10 characters. */

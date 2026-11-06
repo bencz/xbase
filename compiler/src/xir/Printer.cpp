@@ -160,6 +160,7 @@ private:
       out_ += " " + (i.callee.function ? i.callee.function->name : i.callee.name) +
               (i.callee.function ? "" : i.callee.native ? " native" : " extern");
       break;
+    case Op::Send: out_ += " " + i.message; break;
     case Op::MakeBlock:
       out_ += " " + i.blockFn->name;
       for (Var *c : i.captures) out_ += " " + varName(*c);

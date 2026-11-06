@@ -33,6 +33,7 @@ public:
   Instruction *truth(Value *a);
   Instruction *fromBool(Value *b);
   Instruction *call(Callee c, const std::vector<Value *> &args);
+  Instruction *send(std::string message, Value *object, const std::vector<Value *> &args);
   Instruction *arrayLit(const std::vector<Value *> &elems);
   Instruction *index(Value *base, Value *idx);
   Instruction *indexSet(Value *base, Value *idx, Value *value);

@@ -180,12 +180,18 @@ Code generation has two steps: the syntax tree becomes xIR ([xir.md](xir.md)), w
 the result before it goes further (an invalid xIR is an internal error). From `-O1` on the xIR passes run
 ([xir.md](xir.md#passes)); `--dump-xir=<file>` writes the xIR that is lowered to LLVM.
 
-- Evaluation order: binary operators evaluate the left operand, then the right; calls evaluate their arguments in
-  order; `x := v` evaluates `v`, then stores; `x op= v` loads `x`, then evaluates `v`; `a[i] := v` evaluates `v`,
-  then `a`, then `i`; `a[i] op= v` and `a[i]++` evaluate `a`, then `i`, then the element, then `v`; every operand
-  is evaluated once. A `load` is the variable's value at that point, so `x + (x := 5)`, `x := x + (x := 5)` and
-  `x += (x := 5)` are 6, as in Clipper, and `x := x++` leaves `x` unchanged; the lowering to LLVM decides where a
-  copy is actually needed.
+- Evaluation order: binary operators evaluate the left operand, then the right; calls evaluate their arguments in order;
+  `x := v` evaluates `v`, then stores; `x op= v` loads `x`, then evaluates `v`; `a[i] := v` evaluates `v`, then `a`,
+  then `i`; `a[i] op= v` and `a[i]++` evaluate `a`, then `i`, then the element, then `v`; `o:x := v` evaluates `o`, then
+  `v`, then sends `_X` with it; `o:x op= v` and `o:x++` evaluate `o`, send `X`, evaluate `v`, then send `_X` with the
+  new value (the expression's value is what `_X` returns, the old value for `o:x++` and `o:x--`); every operand is
+  evaluated once. A `load` is the variable's value at that point, so `x + (x := 5)`, `x := x + (x := 5)` and
+  `x += (x := 5)` are 6, as in Clipper, and `x := x++` leaves `x` unchanged; the lowering to LLVM decides where a copy
+  is actually needed.
+- Messages: `o:name` and `o:name( args )` (`SendExpr`; postfix like `[`, so `a[1]:cargo[2]` chains) are `send`, the
+  object first and then the arguments, all by value (`@` is not accepted there). A message written without arguments
+  is an lvalue (`isLvalue`): it can be assigned, incremented and be the target of a statement `o:x = v`, but not
+  passed by reference.
 - Variables: frame variables (parameters and `LOCAL`s), a codeblock's captures, and the module's `STATIC`s. A frame
   variable moves into a cell when a codeblock captures it (`block`) or a reference is taken (`ref`), as in Clipper,
   and a `STATIC` when a reference is taken; its own item then holds the cell (`Var::shared` marks the frame variables

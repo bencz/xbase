@@ -17,6 +17,7 @@ enum class Op : uint8_t {
   Truth,          // a -> Bool: .T./.F., anything else fails [may fail]
   FromBool,       // Bool -> Item: .T. or .F.
   Call,           // callee; args... -> Item                [may fail]
+  Send,           // message; object, args... -> Item       [may fail]
   ArrayLit,       // elems... -> Item
   Index,          // base, index -> Item                    [may fail]
   IndexSet,       // base, index, value                     [may fail]

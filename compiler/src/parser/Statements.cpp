@@ -72,7 +72,7 @@ StmtPtr Parser::parseStmt() {
   }
 
   // A statement `operand = expr` is an assignment (`x = y = 3` is
-  // `x := ( y = 3 )`), whose target must be a variable or an element, also in
+  // `x := ( y = 3 )`), whose target must be an lvalue (isLvalue), also in
   // parentheses: the statement is read as a postfix expression first, and from
   // its start again when no `=` follows. The first reading's errors are the
   // statement's.
@@ -112,6 +112,9 @@ StmtPtr Parser::parseStmt() {
   switch (e->kind) {
   case ExprKind::Call: case ExprKind::Assign: case ExprKind::IncDec: case ExprKind::IIf: case ExprKind::List:
     break;
+  case ExprKind::Send:
+    if (static_cast<const SendExpr &>(*e).withArgs) break;
+    [[fallthrough]];
   default:
     diag_.warning(e->loc, "meaningless use of expression");
   }

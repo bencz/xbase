@@ -423,6 +423,7 @@ static int mark_item(const xb_item *it) {
     case XB_T_BLOCK:
     case XB_T_CELL:
     case XB_T_REF:
+    case XB_T_OBJECT:
       return mark_ref(xb_gc_header(it->v.p));
     default:
       return 0;
@@ -484,6 +485,11 @@ static int trace(const xb_gc_hdr *h) {
       young = mark_item(&((const xb_ref *)obj)->coll);
       young |= mark_item(&((const xb_ref *)obj)->value);
       break;
+    case XB_GC_OBJECT: {
+      const xb_object *o = obj;
+      for (uint32_t i = 0; i < o->nvars; ++i) young |= mark_item(&o->vars[i]);
+      break;
+    }
     default:
       break;
   }

@@ -234,6 +234,14 @@ void CodeGen::emit(const xir::Instruction &i) {
     checkPending(fnExit_);
     break;
   }
+  case Op::Send: {
+    Value *argv = operandGroup(i);
+    Value *d = dest(i);
+    setNil(d);
+    b_.CreateCall(rtSend_, {fnCtx_, d, messageName(i.message), ConstantInt::get(i32_, ops.size()), argv});
+    checkPending(fnExit_);
+    break;
+  }
   case Op::ArrayLit: {
     Value *elems = operandGroup(i);
     b_.CreateCall(rtArrayNew_, {fnCtx_, dest(i), ConstantInt::get(i32_, ops.size()), elems});

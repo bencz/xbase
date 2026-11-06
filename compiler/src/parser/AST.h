@@ -24,6 +24,7 @@ enum class ExprKind : uint8_t {
   ArrayLit,   // { a, b, ... }
   Index,      // base[ index ]
   Block,      // {| params | exprs }
+  Send,       // object:message, object:message( args )
 };
 
 enum class BinOp : uint8_t { Add, Sub, Mul, Div, Mod, Pow, Eq, ExactEq, NotEq, Lt, Le, Gt, Ge, In };
@@ -116,7 +117,7 @@ struct LogicExpr : Expr { // And / Or
 struct AssignExpr : Expr {
   bool compound = false;         // x op= y
   BinOp op = BinOp::Add;         // valid when compound
-  ExprPtr target;                // lvalue (VarExpr for now)
+  ExprPtr target;                // an lvalue (isLvalue)
   ExprPtr value;
   AssignExpr(SourceLoc l, ExprPtr t, ExprPtr v)
       : Expr(ExprKind::Assign, l), target(std::move(t)), value(std::move(v)) {}
@@ -140,9 +141,24 @@ struct IndexExpr : Expr { // a[i, j] is Index( Index( a, i ), j )
   IndexExpr(SourceLoc l, ExprPtr b, ExprPtr i) : Expr(ExprKind::Index, l), base(std::move(b)), index(std::move(i)) {}
 };
 
-// What can be assigned, incremented or passed by reference: a variable or an
-// element.
-inline bool isLvalue(const Expr &e) { return e.kind == ExprKind::Var || e.kind == ExprKind::Index; }
+// A message sent to an object. Written without arguments, it reads an
+// instance variable (or calls a method of that name); assigning it sends
+// "_" + message with the value.
+struct SendExpr : Expr {
+  ExprPtr object;
+  std::string message;           // upper-cased
+  std::vector<ExprPtr> args;
+  bool withArgs = false;         // written object:message( ... )
+  SendExpr(SourceLoc l, ExprPtr o, std::string m)
+      : Expr(ExprKind::Send, l), object(std::move(o)), message(std::move(m)) {}
+};
+
+// What can be assigned or incremented: a variable, an element, or an instance
+// variable (a message written without arguments).
+inline bool isLvalue(const Expr &e) {
+  return e.kind == ExprKind::Var || e.kind == ExprKind::Index ||
+         (e.kind == ExprKind::Send && !static_cast<const SendExpr &>(e).withArgs);
+}
 
 // A call argument passed by reference: the callee's parameter designates the
 // variable or element, so assigning the parameter assigns it.

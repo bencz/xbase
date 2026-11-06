@@ -149,8 +149,8 @@ void xbf_ACLONE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * (a number: whether it is not 0; anything else: yes). Without it, values of
  * one kind compare like the operators (strings follow SET EXACT, integers
  * exactly, other numbers as doubles, dates by day, .F. before .T.), and other
- * pairs by kind: array, block, string, logical, date, number, NIL. A negative
- * nStart sorts nothing; a negative nCount means the rest. */
+ * pairs by kind: array or object, block, string, logical, date, number, NIL.
+ * A negative nStart sorts nothing; a negative nCount means the rest. */
 typedef struct {
   xb_ctx *ctx;
   const xb_item *array; /* the rooted argument: the array is read through it after every block call */
@@ -161,7 +161,7 @@ typedef struct {
 
 static int sort_kind(const xb_item *it) {
   switch ((xb_type)it->type) {
-  case XB_T_ARRAY: return 1;
+  case XB_T_ARRAY: case XB_T_OBJECT: return 1;
   case XB_T_BLOCK: return 2;
   case XB_T_STRING: return 3;
   case XB_T_LOGICAL: return 4;
@@ -250,9 +250,9 @@ static void root_call(xb_ctx *ctx, xb_item *call) {
 
 /* AScan( aTarget, xSearch, [nStart], [nCount] ): the position of the first
  * element in the range that is equal to xSearch (values of one comparable
- * kind, with SET EXACT for strings, or two NILs; arrays and blocks never
- * match), or for which the block xSearch( element, position ) returns .T.;
- * 0 when none is (or aTarget is not an array). */
+ * kind, with SET EXACT for strings, or two NILs; arrays, blocks and objects
+ * never match), or for which the block xSearch( element, position ) returns
+ * .T.; 0 when none is (or aTarget is not an array). */
 void xbf_ASCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_int(ret, 0);
   if (argc < 2 || argv[0].type != XB_T_ARRAY) return; /* without xSearch (even NIL) nothing matches */

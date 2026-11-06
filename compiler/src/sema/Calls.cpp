@@ -131,6 +131,12 @@ void CallResolver::expr(Expr &e) {
     expr(*ix.index);
     break;
   }
+  case ExprKind::Send: {
+    auto &m = static_cast<SendExpr &>(e);
+    expr(*m.object);
+    for (auto &a : m.args) expr(*a);
+    break;
+  }
   case ExprKind::Block:
     for (auto &b : static_cast<BlockExpr &>(e).body) expr(*b);
     break;

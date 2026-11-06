@@ -153,6 +153,11 @@ private:
         fail("call to a non-program function");
       if (!i.callee.function && i.callee.name.empty()) fail("call without a callee");
       break;
+    case Op::Send:
+      allItems(i);
+      if (i.operands().empty()) fail("send without an object");
+      if (i.message.empty()) fail("send without a message");
+      break;
     case Op::ArrayLit: allItems(i); break;
     case Op::MakeBlock:
       expect(i, 0, {});

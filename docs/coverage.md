@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 64 of 551 done. Commands (`std.ch` families): 16 of 155 done.
+Functions: 65 of 551 done. Commands (`std.ch` families): 16 of 155 done.
 
 ## Statements (grammar)
 
@@ -114,9 +114,9 @@ at link time, never by an environment variable.
 *TBGoTop*, *TBInsCol*, *TBModal*, *TBMouse*, *TBReader*, *TBrowseNew*, *TBSBlock*, *TBSkip*, *Updated*, *_CHECKBOX_*,
 *_LISTBOX_*, *_PUSHBUTT_*, *_RADIOGRP_*
 
-### Errors (0 of 4 done)
+### Errors (1 of 4 done)
 
-*DosError*, *ErrorBlock*, *ErrorNew*, *ErrorSys*
+*DosError*, *ErrorBlock*, **ErrorNew**, *ErrorSys*
 
 ### Numbers and math (11 of 21 done)
 

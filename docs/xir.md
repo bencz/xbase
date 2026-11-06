@@ -151,20 +151,21 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   parameter is tested for a cell or reference at run time. `ref` and `ref.index` make the reference an argument `@x`
   or `@a[i]` passes.
 - Operations mirror the runtime: unary and binary operators, the truth test, calls (to the module's functions or to
-  declared externals), array literals, element read and write, codeblock creation with the cells of its captured
-  variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`, `each.move`, `each.leave`), the
-  `SWITCH` check and match, and for parameter versioning `params.ref` (whether parameters hold references their
-  caller passed) and `call.forward` (a call with the function's own arguments, as received).
+  declared externals), `send` (a message to the first operand, with the others as arguments), array literals, element
+  read and write, codeblock creation with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations
+  (`each.in_cell`, `each.enter`, `each.move`, `each.leave`), the `SWITCH` check and match, and for parameter versioning
+  `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the function's
+  own arguments, as received).
 - An operation that fails, or leaves another pending request that asks to unwind, makes the function return (unwind
   successors are planned, see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `ret`.
 - Lowering to LLVM gives every live `item` value that may refer to a heap object a frame slot (a GC root; others are
   `Local`, see [compiler.md](compiler.md#xir-to-llvm)): liveness is computed per value by walking from its uses back to
-  its definition, and slots are assigned by linear scan, so slots are reused once their values die. The arguments of a
-  call and the elements of an array literal form a group of consecutive slots; a value used only there (a block
-  parameter too, such as the result of `IIF`) is computed straight into its slot of the group. A `load` whose single use
-  follows with nothing in between that can write the variable uses the variable's own item instead of a copy; a value
-  used only by the `store` that follows it, or by `ret`, is computed in place.
+  its definition, and slots are assigned by linear scan, so slots are reused once their values die. The operands of a
+  call or a `send` and the elements of an array literal form a group of consecutive slots; a value used only there (a
+  block parameter too, such as the result of `IIF`) is computed straight into its slot of the group. A `load` whose
+  single use follows with nothing in between that can write the variable uses the variable's own item instead of a copy;
+  a value used only by the `store` that follows it, or by `ret`, is computed in place.
 
 ## Phases
 

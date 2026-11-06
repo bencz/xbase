@@ -17,15 +17,15 @@ typedef struct xb_item {
 } xb_item;
 ```
 
-- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `DATE`, and two kinds the language
-  never shows, which designate another item (see [References](#references)): `CELL`, a variable in a cell, and `REF`,
-  an element. An all-zero item is `NIL`.
+- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `OBJECT`, `DATE`, and two kinds the
+  language never shows, which designate another item (see [References](#references)): `CELL`, a variable in a cell,
+  and `REF`, an element. An all-zero item is `NIL`.
 - Copying an item is a plain memory copy; there is no reference counting. Items are written as two 8-byte words, the
   header and the value (`xb_put` with `xb_header_word` and the value word in `xbrt.h`), by the runtime's setters
   (`xb_set_int`, ...) and by compiled code alike, never field by field: compiled code reads an item by words, and a
   load is served by the store that wrote it only when that store covers it. The value bytes a member does not use are
   zero.
-- The heap types (`STRING` to `REF`) are one range of tags (`XB_T_HEAP_FIRST`, `XB_T_HEAP_LAST`, `xb_type_is_heap`):
+- The heap types (`STRING` to `OBJECT`) are one range of tags (`XB_T_HEAP_FIRST`, `XB_T_HEAP_LAST`, `xb_type_is_heap`):
   an item of another type refers to no object, so the collector need not see it.
 - Strings (`xb_str`: flags, hash, length, bytes) are immutable and NUL-terminated, so they can be shared between items
   and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects.
@@ -33,7 +33,7 @@ typedef struct xb_item {
   Their items start in the array's own allocation and move to a separate heap object when the array grows past it.
   Compiled code reads `len` and `items` to access elements in place.
 - Codeblocks (`xb_block`: function, captured cells) and cells (`xb_cell`: one item at offset 0) are described in
-  [Codeblocks](#codeblocks).
+  [Codeblocks](#codeblocks), objects in [Objects and messages](#objects-and-messages).
 
 ## Frames
 
@@ -48,9 +48,9 @@ past it is not detected yet and ends the process.
 
 ## Garbage collector
 
-`runtime/src/gc/gc.c` is a precise, non-moving, generational mark and lazy-sweep collector. Strings, arrays, array
-item storage, codeblocks, cells and reference targets are its objects; an 8-byte header (size, kind, state) precedes
-each one, so object pointers are what the rest of the runtime and compiled code use.
+`runtime/src/gc/gc.c` is a precise, non-moving, generational mark and lazy-sweep collector. Strings, arrays, array item
+storage, codeblocks, cells, reference targets and objects (instances of classes) are its objects; an 8-byte header
+(size, kind, state) precedes each one, so object pointers are what the rest of the runtime and compiled code use.
 
 - Allocation: objects up to 2048 bytes (header included) come from 64 KB pages of 27 size classes. Every thread has a
   local heap with one page per class and allocates from its free list without locking. Larger objects are allocated
@@ -118,6 +118,35 @@ variable stays the loop's. The function and every block
 that captured it share the cell, which outlives the function. A codeblock is a compiled function
 `(ctx, ret, argc, argv, self)` plus the captured cells (`self->cells[]`); `xb_block_new` creates it and the compiled
 code stores the cells. `Eval( bBlock, ... )` and `xb_block_call` run it; the caller sets the result to `NIL` first.
+
+## Objects and messages
+
+An object (`xb_object` in `types/types.h`, `types/object.c`) is an instance of a class: its class and one item per
+instance variable. The runtime defines its classes in C (`xb_class`: name and variables); methods and classes written
+in xBase are planned. `xb_op_send(ctx, ret, message, argc, argv)` sends a message to `argv[0]` with the arguments
+`argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment `o:x := v` sends `_X` with `v`.
+
+- An object's variables: `X` returns the variable (arguments are ignored), `_X` assigns it (without an argument, `NIL`).
+  A variable's rule (`xb_var_rule`) says what it accepts: any value; only an array, a logical or a string (a value of
+  another type is ignored); or a number, kept as an integer truncated toward zero and wrapped to 32 bits signed or 16
+  bits unsigned (0 for a double beyond 64 bits), where a value of another type raises `BASE/0` `Argument error` with
+  the variable's name as the operation. `_X` returns the value kept, except that an ignored array or logical gives
+  `NIL`, a string variable returns its argument even when it ignores it, and a 16-bit variable returns the number
+  wrapped to 32 bits only. That result is the value of `o:x := v` (see [compiler.md](compiler.md#syntax-tree-to-xir)).
+  A new object holds its rules' empty values (`NIL`, `.F.`, `""`, 0).
+- `ClassName` works on every value: an object's class name, else `NUMERIC`, `CHARACTER`, `ARRAY`, `BLOCK`, `NIL`,
+  `LOGICAL` or `DATE`.
+- Any other message raises `BASE/1004` `No exported method` (`BASE/1005` `No exported variable` for an assignment)
+  with the message name (without `_`) as the operation, also when the receiver is not an object.
+
+`ValType` of an object is `O`; `?` shows it as nothing, `Empty` is `.F.`, `==` tests identity and the other
+comparisons are argument errors; `ASort` ranks objects with arrays, and `AScan` never matches one. An object is not an
+array: `Len( o )` and `o[ i ]` are argument errors (Harbour, whose objects are arrays inside, gives the number of its
+items and an item).
+
+The `Error` class (`rtl/errors.c`, `ErrorNew()`) has the variables `args` (an array), `canDefault`, `canRetry`,
+`canSubstitute` (logicals), `cargo` (any value), `description`, `filename`, `operation`, `subSystem` (strings),
+`genCode`, `osCode`, `subCode` (32-bit numbers), and `severity` and `tries` (16-bit numbers).
 
 ## References
 
@@ -188,8 +217,8 @@ standard error, sets exit code 1 and raises `XB_PENDING_ERROR`. `QUIT` raises `X
 | `$` | substring test; an empty left operand is false |
 | `.NOT.` | logicals only |
 
-Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors. `==` on two arrays
-or two codeblocks tests identity; other comparisons of them are argument errors.
+Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors. `==` on two arrays,
+two codeblocks or two objects tests identity; other comparisons of them are argument errors.
 
 Element access `a[i]` (`xb_op_index`) and assignment (`xb_op_index_set`) raise `Argument error: array access` (1068)
 or `array assign` (1069) when the base is not an array or the index not a number, and `Bound error` (1132/1133)
@@ -218,8 +247,8 @@ above 2^53.
 
 ## Display
 
-`xb_item_display` formats values the way `?`/`QOut()` print them: `NIL`, `.T.`/`.F.`, strings as they are, arrays
-and codeblocks as nothing, and
+`xb_item_display` formats values the way `?`/`QOut()` print them: `NIL`, `.T.`/`.F.`, strings as they are, arrays,
+codeblocks and objects as nothing, and
 numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`):
 
 - the field has the item's width (or `xb_num_int_width`/`xb_num_dbl_width`) for the sign and integer digits, then a

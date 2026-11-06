@@ -93,6 +93,7 @@ private:
   llvm::Constant *literalItem(uint32_t type, uint16_t width, uint16_t dec, llvm::Constant *payload);
   llvm::Constant *literal(const xir::Constant &c);
   llvm::Constant *stringLiteral(const std::string &s);
+  llvm::Constant *messageName(const std::string &message);
 
   // Variables.cpp: where variables are, references, write barriers.
   llvm::Value *slot(uint32_t idx);
@@ -180,6 +181,7 @@ private:
   // runtime entry points
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
   llvm::FunctionCallee rtNeg_, rtNot_, rtNumDefaultDec_, rtPending_;
+  llvm::FunctionCallee rtSend_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;
@@ -191,6 +193,7 @@ private:
   llvm::GlobalVariable *statics_ = nullptr;   // the STATICs of the module being added
   std::unordered_map<std::string, llvm::Constant *> strLits_;
   std::unordered_map<std::string, llvm::Constant *> numLits_;
+  std::unordered_map<std::string, llvm::Constant *> messages_;
   llvm::Constant *nilLit_ = nullptr;
   llvm::Constant *trueLit_ = nullptr, *falseLit_ = nullptr;
 

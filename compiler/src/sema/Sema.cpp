@@ -278,6 +278,12 @@ void Sema::expr(Expr &e, Scope &s) {
   case ExprKind::Call:
     for (auto &a : static_cast<CallExpr &>(e).args) expr(*a, s);
     break;
+  case ExprKind::Send: {
+    auto &m = static_cast<SendExpr &>(e);
+    expr(*m.object, s);
+    for (auto &a : m.args) expr(*a, s);
+    break;
+  }
   case ExprKind::Unary:
     expr(*static_cast<UnaryExpr &>(e).operand, s);
     break;

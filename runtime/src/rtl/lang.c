@@ -4,7 +4,8 @@ void xbf_VALTYPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   static const char codes[XB_T_COUNT_] = {
     [XB_T_NIL] = 'U',    [XB_T_LOGICAL] = 'L', [XB_T_INT] = 'N',  [XB_T_DOUBLE] = 'N', [XB_T_STRING] = 'C',
-    [XB_T_ARRAY] = 'A',  [XB_T_BLOCK] = 'B',   [XB_T_CELL] = 'U', [XB_T_REF] = 'U',    [XB_T_DATE] = 'D',
+    [XB_T_ARRAY] = 'A',  [XB_T_BLOCK] = 'B',   [XB_T_CELL] = 'U', [XB_T_REF] = 'U',    [XB_T_OBJECT] = 'O',
+    [XB_T_DATE] = 'D',
   };
   uint32_t t = argc ? argv[0].type : XB_T_NIL;
   char c = t < XB_T_COUNT_ ? codes[t] : 'U';

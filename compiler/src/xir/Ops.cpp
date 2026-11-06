@@ -19,6 +19,7 @@ constexpr OpInfo kOps[] = {
     {Op::Truth, "truth", Fails},
     {Op::FromBool, "from_bool", 0},
     {Op::Call, "call", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
+    {Op::Send, "send", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
     {Op::ArrayLit, "array", Allocates},
     {Op::Index, "index", Fails | ReadsHeap},
     {Op::IndexSet, "index.set", Fails | WritesHeap},

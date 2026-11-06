@@ -174,6 +174,7 @@ public:
   Var *var = nullptr;                 // Load, Store, Barrier, Each*, RefVar
   Access access = Access::Direct;     // Load, Store, Barrier
   Callee callee;                      // Call
+  std::string message;                // Send: upper-cased, "_NAME" to assign NAME
   Function *blockFn = nullptr;        // MakeBlock
   std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
   std::vector<Target> targets;        // Br: one; CondBr: then, else (operand 0 is the condition)

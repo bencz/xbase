@@ -75,6 +75,7 @@ void CodeGen::initTypes() {
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
   rtPending_ = rt("xb_pending", i32_, {ptrTy_});
+  rtSend_ = rt("xb_op_send", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
   rtArrayNew_ = rt("xb_array_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtIndex_ = rt("xb_op_index", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});

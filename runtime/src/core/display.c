@@ -1,13 +1,5 @@
 #include "xbrt_int.h"
 
-/* Same layout as xb_str with a one-byte payload; never collected. */
-static const struct {
-  uint32_t flags;
-  uint32_t hash;
-  size_t len;
-  char data[1];
-} empty_string = {XB_STR_STATIC, 0, 0, {0}};
-
 xb_str *xb_item_display(const xb_ctx *ctx, const xb_item *it) {
   switch ((xb_type)it->type) {
     case XB_T_NIL:
@@ -26,8 +18,9 @@ xb_str *xb_item_display(const xb_ctx *ctx, const xb_item *it) {
       return xb_str_new(out, n);
     }
     case XB_T_ARRAY:
-    case XB_T_BLOCK: /* shown as nothing, as in Clipper */
-      return (xb_str *)&empty_string;
+    case XB_T_BLOCK:
+    case XB_T_OBJECT: /* shown as nothing, as in Clipper */
+      return xb_str_empty();
     default:
       return xb_str_new("<?>", 3);
   }

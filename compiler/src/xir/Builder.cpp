@@ -107,6 +107,13 @@ Instruction *Builder::call(Callee c, const std::vector<Value *> &args) {
   return i;
 }
 
+Instruction *Builder::send(std::string message, Value *object, const std::vector<Value *> &args) {
+  Instruction *i = make(Op::Send, Type::Item, {object});
+  for (Value *a : args) i->addOperand(a);
+  i->message = std::move(message);
+  return i;
+}
+
 Instruction *Builder::arrayLit(const std::vector<Value *> &elems) {
   Instruction *i = make(Op::ArrayLit, Type::Item);
   for (Value *e : elems) i->addOperand(e);

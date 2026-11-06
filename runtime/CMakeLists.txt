@@ -11,11 +11,13 @@ add_library(xbrt STATIC
   src/types/array.c
   src/types/block.c
   src/types/date.c
+  src/types/object.c
   src/types/ref.c
   src/types/string.c
   src/rtl/arrays.c
   src/rtl/console.c
   src/rtl/dates.c
+  src/rtl/errors.c
   src/rtl/lang.c
   src/rtl/numbers.c
   src/rtl/strings.c

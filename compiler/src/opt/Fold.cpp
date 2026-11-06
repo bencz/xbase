@@ -217,6 +217,12 @@ void Folder::fold(ExprPtr &e) {
     fold(ix.index);
     break;
   }
+  case ExprKind::Send: {
+    auto &m = static_cast<SendExpr &>(*e);
+    fold(m.object);
+    for (auto &a : m.args) fold(a);
+    break;
+  }
   case ExprKind::Block:
     for (auto &b : static_cast<BlockExpr &>(*e).body) fold(b);
     break;

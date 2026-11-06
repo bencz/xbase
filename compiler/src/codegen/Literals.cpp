@@ -83,4 +83,16 @@ Constant *CodeGen::stringLiteral(const std::string &s) {
   return c;
 }
 
+// A message name as the C string xb_op_send receives.
+Constant *CodeGen::messageName(const std::string &message) {
+  Constant *&c = messages_[message];
+  if (c) return c;
+  auto *data = ConstantDataArray::getString(ctx_, message, /*AddNull=*/true);
+  auto *name = new GlobalVariable(mod_, data->getType(), true, GlobalValue::PrivateLinkage, data, ".xb.msg");
+  name->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+  name->setAlignment(Align(1));
+  c = name;
+  return c;
+}
+
 } // namespace xb

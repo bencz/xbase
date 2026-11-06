@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 9u
+#define XB_ABI_VERSION 10u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -44,7 +44,8 @@ typedef enum xb_type {
                          reference: that variable */
   XB_T_REF     = 8,   /* v.p: a reference to an element (the variable of a
                          FOR EACH loop, an argument @a[i]) */
-  XB_T_DATE    = 9,   /* v.i: Julian day number, 0 for the empty date  */
+  XB_T_OBJECT  = 9,   /* v.p: an object (an instance of a class)   */
+  XB_T_DATE    = 10,  /* v.i: Julian day number, 0 for the empty date  */
   XB_T_COUNT_
 } xb_type;
 
@@ -52,7 +53,7 @@ typedef enum xb_type {
  * unsigned comparison tells whether storing an item can make an old object
  * refer to a young one (the write barrier is needed only then). */
 #define XB_T_HEAP_FIRST XB_T_STRING
-#define XB_T_HEAP_LAST  XB_T_REF
+#define XB_T_HEAP_LAST  XB_T_OBJECT
 static inline int xb_type_is_heap(uint32_t type) {
   return type - (uint32_t)XB_T_HEAP_FIRST <= (uint32_t)(XB_T_HEAP_LAST - XB_T_HEAP_FIRST);
 }
@@ -206,6 +207,10 @@ int32_t  xb_cond_error(xb_ctx *ctx, const xb_item *a);
 void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems);
 void     xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
 void     xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value);
+/* Sends `message` (upper-cased; "_NAME" assigns the variable NAME) to argv[0]
+ * with the arguments argv[1 .. argc-1]; argc is at least 1. */
+void     xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
+
 /* Write barrier after storing into element `index` of an array: for a heap
  * value in an old array, a large array records the element's card, another
  * the whole array. Compiled code that stores an element in place calls it for
@@ -322,7 +327,7 @@ static inline void xb_set_double(xb_item *it, double d, uint16_t dec) {
 static inline void xb_set_str(xb_item *it, xb_str *s) {
   xb_put(it, xb_header_word(XB_T_STRING, 0, 0), xb_pointer_word(s));
 }
-/* An item of a heap type other than a string (an array, a block, a cell, a reference). */
+/* An item of a heap type other than a string (an array, a block, a cell, a reference, an object). */
 static inline void xb_set_ptr(xb_item *it, xb_type type, void *p) {
   xb_put(it, xb_header_word(type, 0, 0), xb_pointer_word(p));
 }

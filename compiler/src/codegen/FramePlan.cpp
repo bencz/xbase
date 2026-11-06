@@ -12,7 +12,7 @@ namespace {
 
 bool isItemResult(const Value *v) { return v->kind() == Value::Kind::Instruction && v->type() == Type::Item; }
 
-bool isGroupUser(const Instruction &i) { return i.op == Op::Call || i.op == Op::ArrayLit; }
+bool isGroupUser(const Instruction &i) { return i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit; }
 
 } // namespace
 
@@ -95,7 +95,7 @@ bool FramePlan::canForward(const Instruction &value, const Instruction &store) c
   case Op::Unary: case Op::Binary: case Op::Index: case Op::ArrayLit: case Op::MakeBlock: case Op::NumDefaultDec:
   case Op::FromBool:
     return true;
-  case Op::Call:
+  case Op::Call: case Op::Send:
     return isPlain(*store.var, store.access);
   default:
     return false;

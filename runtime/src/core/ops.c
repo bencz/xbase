@@ -164,7 +164,7 @@ void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 }
 
 void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
-  if ((a->type == XB_T_ARRAY || a->type == XB_T_BLOCK) && a->type == b->type) { /* identity */
+  if ((a->type == XB_T_ARRAY || a->type == XB_T_BLOCK || a->type == XB_T_OBJECT) && a->type == b->type) { /* identity */
     xb_set_logical(r, a->v.p == b->v.p);
     return;
   }

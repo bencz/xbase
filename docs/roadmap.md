@@ -46,13 +46,13 @@ variables.
 
 ### Errors
 
-Runtime errors end the program today, with the message and the call stack. Missing:
+Runtime errors end the program today, with the message and the call stack. Done: objects of runtime classes, messages
+(`o:x`, `o:x := v`, `o:m( args )`) and the `Error` object from `ErrorNew()`
+([runtime.md](runtime.md#objects-and-messages)). Missing:
 
 - `BEGIN SEQUENCE` / `RECOVER [USING x]` / `BREAK [x]` / `END SEQUENCE`, `Break()`.
-- The `Error` object (`ErrorNew()`, its exported variables: `args`, `canDefault`, `canRetry`, `canSubstitute`,
-  `cargo`, `description`, `filename`, `genCode`, `operation`, `osCode`, `severity`, `subCode`, `subSystem`,
-  `tries`), `ErrorBlock()`, the default handler (`ErrorSys`), `error.ch`, and the retry, default and substitute
-  protocol (the handler's return value decides).
+- Runtime errors as `Error` objects, `ErrorBlock()`, the default handler (`ErrorSys`), `error.ch`, and the retry,
+  default and substitute protocol (the handler's return value decides).
 - The compiler side is the unwind edges of xIR phase 5 ([xir.md](xir.md#control-flow-for-errors-and-exceptions));
   the runtime keeps propagating through the pending flag.
 
@@ -112,7 +112,7 @@ the bit functions, `ElapsedMs()`.
   ...), operator overloading.
 - Compiled natively: dispatch by interned selector with inline caches, devirtualization when the class is known,
   object layouts from the target `DataLayout` ([xir.md](xir.md#classes)).
-- Reflection with xbase names (for example `o:ClassName()`, `ObjIsKindOf( o, "Name" )`, `ObjHasVar( o, "name" )`).
+- Reflection with xbase names (for example `ObjIsKindOf( o, "Name" )`, `ObjHasVar( o, "name" )`; `ClassName` exists).
 
 ### Hashes
 
@@ -184,7 +184,7 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
   inner ones with one error; an error node in the tree, so the semantic checks run after a syntax error; an undeclared
   name reported once per function.
 - A statement that is an expression without effect (`x == 3`) is an error in Clipper; xbase warns.
-- Messages show names as written and the text of tokens; Clipper's `EXTERNAL name` and `REQUEST name`, sends, aliases,
+- Messages show names as written and the text of tokens; Clipper's `EXTERNAL name` and `REQUEST name`, aliases,
   macros and `BEGIN SEQUENCE` give one "not supported yet" error each.
 
 ### Front end

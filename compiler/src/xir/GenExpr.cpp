@@ -51,6 +51,14 @@ Value *Generator::genExpr(const Expr &e) {
     return b.index(base, idx);
   }
   case ExprKind::Block: return genCodeblock(static_cast<const BlockExpr &>(e));
+  case ExprKind::Send: {
+    auto &m = static_cast<const SendExpr &>(e);
+    Value *object = genExpr(*m.object);
+    std::vector<Value *> args;
+    for (auto &a : m.args) args.push_back(genExpr(*a));
+    b.setLoc(m.loc);
+    return b.send(m.message, object, args);
+  }
   case ExprKind::Ref: { // a call argument passed by reference
     const Expr &target = *static_cast<const RefExpr &>(e).target;
     if (target.kind == ExprKind::Var) return b.refVar(varOf(static_cast<const VarExpr &>(target)));
@@ -118,6 +126,7 @@ Value *Generator::genCall(const CallExpr &c) {
 // value of the expression is the value stored.
 Value *Generator::genAssign(const AssignExpr &a) {
   if (a.target->kind == ExprKind::Index) return genIndexAssign(static_cast<const IndexExpr &>(*a.target), &a, nullptr);
+  if (a.target->kind == ExprKind::Send) return genSendAssign(static_cast<const SendExpr &>(*a.target), &a, nullptr);
   auto &target = static_cast<const VarExpr &>(*a.target);
   Value *value;
   if (a.compound) {
@@ -133,6 +142,7 @@ Value *Generator::genAssign(const AssignExpr &a) {
 
 Value *Generator::genIncDec(const IncDecExpr &e) {
   if (e.target->kind == ExprKind::Index) return genIndexAssign(static_cast<const IndexExpr &>(*e.target), nullptr, &e);
+  if (e.target->kind == ExprKind::Send) return genSendAssign(static_cast<const SendExpr &>(*e.target), nullptr, &e);
   auto &target = static_cast<const VarExpr &>(*e.target);
   Value *old = load(target);
   Value *now = cur_.b->binary(e.increment ? BinOp::Add : BinOp::Sub, old, cur_.b->integer(1, 0));
@@ -160,6 +170,30 @@ Value *Generator::genIndexAssign(const IndexExpr &target, const AssignExpr *assi
   Value *now = b.binary(op, elem, rhs);
   b.indexSet(base, idx, now);
   return incdec && !incdec->prefix ? elem : now;
+}
+
+// Instance variable assignment, each operand once: the object first, then
+//   o:x := v           v, then the message _X with it;
+//   o:x op= v, o:x++   the message X, then v, then _X with the new value.
+// The expression's value is what _X returns (a variable may keep a converted
+// value, or ignore it), except for o:x++ and o:x--, whose value is the old one.
+Value *Generator::genSendAssign(const SendExpr &target, const AssignExpr *assign, const IncDecExpr *incdec) {
+  Builder &b = *cur_.b;
+  Value *object = genExpr(*target.object);
+  std::string setter = "_" + target.message;
+  if (assign && !assign->compound) {
+    Value *value = genExpr(*assign->value);
+    b.setLoc(target.loc);
+    return b.send(setter, object, {value});
+  }
+  b.setLoc(target.loc);
+  Value *old = b.send(target.message, object, {});
+  Value *rhs = assign ? genExpr(*assign->value) : b.integer(1, 0);
+  BinOp op = assign ? assign->op : incdec->increment ? BinOp::Add : BinOp::Sub;
+  Value *now = b.binary(op, old, rhs);
+  b.setLoc(target.loc);
+  Value *result = b.send(setter, object, {now});
+  return incdec && !incdec->prefix ? old : result;
 }
 
 // .AND. and .OR. as a value: the left side decides (it must be logical) and,

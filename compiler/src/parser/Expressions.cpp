@@ -161,13 +161,31 @@ ExprPtr Parser::parseUnary() {
 
 ExprPtr Parser::parsePostfix() {
   ExprPtr e = parsePrimary();
-  while (at(Tok::LBracket)) { // a[i], a[i, j] == a[i][j]
-    advance();
-    do {
+  while (true) {
+    if (accept(Tok::LBracket)) { // a[i], a[i, j] == a[i][j]
+      do {
+        SourceLoc loc = cur().loc;
+        e = std::make_unique<IndexExpr>(loc, std::move(e), parseExpr());
+      } while (accept(Tok::Comma));
+      expect(Tok::RBracket, "']'");
+    } else if (at(Tok::Colon)) { // o:message, o:message( args )
       SourceLoc loc = cur().loc;
-      e = std::make_unique<IndexExpr>(loc, std::move(e), parseExpr());
-    } while (accept(Tok::Comma));
-    expect(Tok::RBracket, "']'");
+      advance();
+      if (!at(Tok::Ident)) {
+        expect(Tok::Ident, "message name");
+        return e;
+      }
+      auto send = std::make_unique<SendExpr>(loc, std::move(e), cur().upper);
+      advance();
+      if (accept(Tok::LParen)) {
+        send->withArgs = true;
+        send->args = parseArgs(Tok::RParen, false);
+        expect(Tok::RParen, "')'");
+      }
+      e = std::move(send);
+    } else {
+      break;
+    }
   }
   while (at(Tok::Inc) || at(Tok::Dec)) {
     bool inc = at(Tok::Inc);
@@ -234,7 +252,7 @@ ExprPtr Parser::parseRef() {
   ExprPtr target = parsePostfix();
   if (target->kind == ExprKind::Call)
     diag_.error(target->loc, "function references (@name()) are not supported yet");
-  else if (!isLvalue(*target) || target->parenthesized)
+  else if (!isLvalue(*target) || target->kind == ExprKind::Send || target->parenthesized)
     diag_.error(target->loc, "only a variable or an array element can be passed by reference");
   return std::make_unique<RefExpr>(loc, std::move(target));
 }
