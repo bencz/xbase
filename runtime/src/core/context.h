@@ -25,6 +25,18 @@ struct xb_ctx {
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 
+/* A runtime function shows on the call stack while what it does can be seen
+ * (a codeblock it calls, an error block it runs): a frame without slots,
+ * linked from push to pop (see xb_frame in xbrt.h). */
+static inline void xb_frame_push(xb_ctx *ctx, xb_frame *f, const xb_proc *proc) {
+  f->prev = ctx->frames;
+  f->proc = proc;
+  f->nslots = 0;
+  f->line = 0;
+  ctx->frames = f;
+}
+static inline void xb_frame_pop(xb_ctx *ctx, const xb_frame *f) { ctx->frames = f->prev; }
+
 /* SET DECIMALS as an item's decimal count (items keep 16 bits, as in Clipper). */
 static inline uint16_t xb_decimals(const xb_ctx *ctx) { return (uint16_t)ctx->set_decimals; }
 

@@ -14,6 +14,7 @@ void Generator::startDeadBlock() { cur_.b->setBlock(cur_.fn->addBlock("dead")); 
 void Generator::genStmt(const Stmt &s) {
   Builder &b = *cur_.b;
   b.setLoc(s.loc);
+  b.setLine(s.line);
   switch (s.kind) {
   case StmtKind::Expr: genDiscard(*static_cast<const ExprStmt &>(s).expr); break;
   case StmtKind::Local: genLocals(static_cast<const LocalStmt &>(s)); break;
@@ -65,6 +66,7 @@ void Generator::genIf(const IfStmt &st) {
   Builder &b = *cur_.b;
   BasicBlock *end = cur_.fn->addBlock("endif");
   for (auto &arm : st.arms) {
+    b.setLine(arm.line);
     Value *c = genCond(*arm.cond);
     BasicBlock *then = cur_.fn->addBlock("then");
     BasicBlock *next = cur_.fn->addBlock("else");
@@ -119,6 +121,7 @@ void Generator::genFor(const ForStmt &st) {
   if (!b.terminated()) b.br(incr);
 
   b.setBlock(incr);
+  b.setLine(st.line); // the step comes after the body, from the FOR line
   step = st.step ? genExpr(*st.step) : b.integer(1, 0);
   store(var, b.binary(BinOp::Add, load(var), step));
   b.br(test);

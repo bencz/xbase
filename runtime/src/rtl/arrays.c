@@ -29,7 +29,7 @@ void xbf_ARRAY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   for (uint32_t i = 0; i < argc; ++i) {
     if (!xb_is_number(&argv[i])) return; /* NIL, no error */
     if (xb_num_value(&argv[i]) < 0) {
-      xb_error(ctx, NULL, EG_BOUND, 1131, "array dimension", 0, argc, argv);
+      xb_error_in(ctx, "ARRAY", NULL, EG_BOUND, 1131, "array dimension", 0, argc, argv);
       return;
     }
   }
@@ -38,7 +38,7 @@ void xbf_ARRAY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_AADD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_ARRAY) {
-    xb_arg_error(ctx, ret, 1123, "AADD", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1123, "AADD", argc, argv);
     return;
   }
   xb_array *a = argv[0].v.p;
@@ -52,7 +52,7 @@ void xbf_AADD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_ASIZE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 2 || argv[0].type != XB_T_ARRAY || !xb_is_number(&argv[1])) {
-    xb_error(ctx, NULL, EG_ARG, 2023, "ASIZE", 0, argc, argv);
+    xb_error_in(ctx, "ASIZE", NULL, EG_ARG, 2023, "ASIZE", 0, argc, argv);
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
@@ -229,7 +229,7 @@ static uint64_t range_count(uint32_t argc, const xb_item *argv, uint32_t k, uint
 }
 
 /* Calls `block` with an element and its position (1-based), as AScan and AEval
- * do; `call` holds three rooted items (root_call): the two arguments, then
+ * do; `call` holds three rooted items (begin_calls): the two arguments, then
  * the result. Returns 0 when the block left a request to unwind (a BREAK, a
  * QUIT). */
 static int call_with_element(xb_ctx *ctx, const xb_item *block, xb_item *call, const xb_item *elem, size_t i) {
@@ -239,14 +239,23 @@ static int call_with_element(xb_ctx *ctx, const xb_item *block, xb_item *call, c
   return !(ctx->pending && xb_pending(ctx));
 }
 
-/* The three items of a block call from C (its two arguments and its result),
- * NIL and rooted until xb_gc_root_pop( ctx, 3 ). */
-static void root_call(xb_ctx *ctx, xb_item *call) {
+/* Block calls from C: the three items of a call (its two arguments and its
+ * result), NIL and rooted, and the function's frame on the call stack
+ * (ASCAN(0) under the block), from begin_calls to end_calls. */
+static void begin_calls(xb_ctx *ctx, xb_item *call, xb_frame *frame, const xb_proc *proc) {
   for (int k = 0; k < 3; ++k) {
     xb_set_nil(&call[k]);
     xb_gc_root_push(ctx, &call[k]);
   }
+  xb_frame_push(ctx, frame, proc);
 }
+
+static void end_calls(xb_ctx *ctx, const xb_frame *frame) {
+  xb_frame_pop(ctx, frame);
+  xb_gc_root_pop(ctx, 3);
+}
+
+static const xb_proc ascan_proc = {"ASCAN"}, aeval_proc = {"AEVAL"}, asort_proc = {"ASORT"};
 
 /* AScan( aTarget, xSearch, [nStart], [nCount] ): the position of the first
  * element in the range that is equal to xSearch (values of one comparable
@@ -262,7 +271,8 @@ void xbf_ASCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_item *search = &argv[1];
   if (search->type == XB_T_BLOCK) {
     xb_item call[3];
-    root_call(ctx, call);
+    xb_frame frame;
+    begin_calls(ctx, call, &frame, &ascan_proc);
     for (size_t i = (size_t)(start - 1), end = i + (size_t)count; i < end; ++i) {
       const xb_array *a = argv[0].v.p; /* the block may change the array */
       if (i >= a->len) break;
@@ -272,7 +282,7 @@ void xbf_ASCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
         break;
       }
     }
-    xb_gc_root_pop(ctx, 3);
+    end_calls(ctx, &frame);
     return;
   }
   const xb_array *a = argv[0].v.p;
@@ -292,7 +302,7 @@ void xbf_ASCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * comes; returns the array. */
 void xbf_AEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 2 || argv[0].type != XB_T_ARRAY || argv[1].type != XB_T_BLOCK) {
-    xb_error(ctx, NULL, EG_ARG, 2017, "AEVAL", 0, argc, argv);
+    xb_error_in(ctx, "AEVAL", NULL, EG_ARG, 2017, "AEVAL", 0, argc, argv);
     return;
   }
   *ret = argv[0];
@@ -300,12 +310,13 @@ void xbf_AEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!start) return;
   uint64_t count = range_count(argc, argv, 3, ((const xb_array *)argv[0].v.p)->len - start + 1);
   xb_item call[3];
-  root_call(ctx, call);
+  xb_frame frame;
+  begin_calls(ctx, call, &frame, &aeval_proc);
   for (size_t i = (size_t)(start - 1), end = i + (size_t)count; i < end; ++i) {
     const xb_array *a = argv[0].v.p;
     if (i >= a->len || !call_with_element(ctx, &argv[1], call, &a->items[i], i)) break;
   }
-  xb_gc_root_pop(ctx, 3);
+  end_calls(ctx, &frame);
 }
 
 /* The 1-based position argument of AIns and ADel (0 or missing is 1), as a
@@ -381,7 +392,7 @@ void xbf_ACOPY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * less) takes the value; without a value nothing changes. */
 void xbf_AFILL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_ARRAY) {
-    xb_error(ctx, NULL, EG_ARG, 6004, "AFILL", 0, argc, argv);
+    xb_error_in(ctx, "AFILL", NULL, EG_ARG, 6004, "AFILL", 0, argc, argv);
     return;
   }
   *ret = argv[0];
@@ -417,10 +428,11 @@ void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!pos) xb_gc_fatal("out of memory");
   for (size_t k = 0; k < n; ++k) pos[k] = first + k;
   xb_item call[3];
-  root_call(ctx, call);
+  xb_frame frame;
+  begin_calls(ctx, call, &frame, &asort_proc);
   sorter s = {ctx, &argv[0], argc > 3 && argv[3].type == XB_T_BLOCK ? &argv[3] : NULL, call, 0};
   merge_sort(&s, pos, pos + n, n);
-  xb_gc_root_pop(ctx, 3);
+  end_calls(ctx, &frame);
   if (!s.failed) {
     xb_array *a = argv[0].v.p;
     /* A block may have shrunk the array: the positions still in it go first. */

@@ -35,11 +35,32 @@ static int64_t wrap_int32(const xb_item *n) {
   return low < UINT32_C(0x80000000) ? (int64_t)low : (int64_t)low - (INT64_C(1) << 32);
 }
 
+/* What the call stack shows of a message while its error block runs:
+ * "CLASS:MESSAGE" for an object (MESSAGE as sent: "_NAME" to assign), else
+ * the message. Longer names are cut. */
+#define MESSAGE_FRAME_SIZE 128
+
+/* `a` then `b` in `buf` (MESSAGE_FRAME_SIZE bytes), cut to fit. */
+static const char *join(char *buf, const char *a, const char *b) {
+  size_t n = 0;
+  for (const char *s = a; *s && n + 1 < MESSAGE_FRAME_SIZE; ++s) buf[n++] = *s;
+  for (const char *s = b; *s && n + 1 < MESSAGE_FRAME_SIZE; ++s) buf[n++] = *s;
+  buf[n] = '\0';
+  return buf;
+}
+
+static const char *message_frame(char *buf, const xb_item *self, const char *message) {
+  if (self->type != XB_T_OBJECT) return message;
+  char cls[MESSAGE_FRAME_SIZE];
+  return join(buf, join(cls, ((const xb_object *)self->v.p)->cls->name, ":"), message);
+}
+
 /* Assigns variable `k` of `o`. The result (the value of the assignment
  * expression) is the value kept, with these exceptions: a string variable
  * returns its argument even when it ignores it, an ignored array or logical
  * gives NIL, and a 16-bit variable returns the number wrapped to 32 bits only. */
-static void assign_var(xb_ctx *ctx, xb_item *r, xb_object *o, uint32_t k, const xb_item *value) {
+static void assign_var(xb_ctx *ctx, xb_item *r, const xb_item *self, uint32_t k, const xb_item *value) {
+  xb_object *o = self->v.p;
   const xb_class_var *var = &o->cls->vars[k];
   xb_item kept = *value;
   switch (var->rule) {
@@ -53,7 +74,9 @@ static void assign_var(xb_ctx *ctx, xb_item *r, xb_object *o, uint32_t k, const 
     case XB_VAR_INT32:
     case XB_VAR_UINT16: {
       if (!xb_is_number(value)) {
-        xb_arg_error(ctx, r, 0, var->name, 1, value);
+        char frame[MESSAGE_FRAME_SIZE], message[MESSAGE_FRAME_SIZE];
+        xb_error_in(ctx, message_frame(frame, self, join(message, "_", var->name)), r, EG_ARG, 0, var->name,
+                    XB_ERR_SUBSTITUTE, 1, value);
         return;
       }
       int64_t i = wrap_int32(value);
@@ -80,7 +103,7 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
         } else {
           xb_item nil;
           xb_set_nil(&nil);
-          assign_var(ctx, r, o, k, argc > 1 ? &argv[1] : &nil);
+          assign_var(ctx, r, &argv[0], k, argc > 1 ? &argv[1] : &nil);
         }
         return;
       }
@@ -92,6 +115,8 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
     xb_set_str(r, xb_str_new(cn, strlen(cn)));
     return;
   }
-  if (assign) xb_error(ctx, r, EG_NOVARMETHOD, 1005, name, XB_ERR_SUBSTITUTE, argc, argv);
-  else xb_error(ctx, r, EG_NOMETHOD, 1004, name, XB_ERR_SUBSTITUTE, argc, argv);
+  char frame[MESSAGE_FRAME_SIZE];
+  const char *shown = message_frame(frame, &argv[0], message);
+  if (assign) xb_error_in(ctx, shown, r, EG_NOVARMETHOD, 1005, name, XB_ERR_SUBSTITUTE, argc, argv);
+  else xb_error_in(ctx, shown, r, EG_NOMETHOD, 1004, name, XB_ERR_SUBSTITUTE, argc, argv);
 }

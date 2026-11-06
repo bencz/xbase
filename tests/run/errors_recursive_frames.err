@@ -1,0 +1,4 @@
+Unrecoverable error 9003: Too many recursive error handler calls
+Called from SUBSTR(0)
+Called from INNER(10)
+Called from (b)MAIN(4)

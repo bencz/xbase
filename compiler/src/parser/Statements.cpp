@@ -3,7 +3,22 @@
 
 namespace xb {
 
+// Every statement records where it ends: Clipper shows that line for all of
+// it, also one continued over several lines.
 StmtPtr Parser::parseStmt() {
+  uint32_t line = stmtEndLine();
+  StmtPtr s = parseStmtKind();
+  if (s) s->line = line;
+  return s;
+}
+
+uint32_t Parser::stmtEndLine() const {
+  size_t p = pos_;
+  while (p + 1 < toks_.size() && toks_[p].kind != Tok::EndOfStmt && toks_[p].kind != Tok::Eof) ++p;
+  return toks_[p].loc.line;
+}
+
+StmtPtr Parser::parseStmtKind() {
   SourceLoc loc = cur().loc;
 
   if (atExtern()) { // only nested blocks get here: a function body ends at it
@@ -160,6 +175,7 @@ StmtPtr Parser::parseIf() {
   SourceLoc openLoc = cur().loc;
   advance();
   IfStmt::Arm first;
+  first.line = stmtEndLine();
   first.cond = parseExpr();
   endOfStmt();
   first.body = parseBlock({"ELSEIF", "ELSE", "ENDIF", "END"});
@@ -167,6 +183,7 @@ StmtPtr Parser::parseIf() {
   while (atStmtKw("ELSEIF")) {
     advance();
     IfStmt::Arm arm;
+    arm.line = stmtEndLine();
     arm.cond = parseExpr();
     endOfStmt();
     arm.body = parseBlock({"ELSEIF", "ELSE", "ENDIF", "END"});
@@ -199,6 +216,7 @@ StmtPtr Parser::parseDoCase() {
   while (atStmtKw("CASE")) {
     advance();
     IfStmt::Arm arm;
+    arm.line = stmtEndLine();
     arm.cond = parseExpr();
     endOfStmt();
     arm.body = parseBlock({"CASE", "OTHERWISE", "ENDCASE", "END"});

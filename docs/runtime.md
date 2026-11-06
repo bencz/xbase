@@ -37,14 +37,27 @@ typedef struct xb_item {
 
 ## Frames
 
-Parameters, `LOCAL`s and temporaries of a compiled function live in its item frame (`xb_frame`: link, slot count,
-items), an `alloca` on the machine stack. The function links it into its context's chain (`xb_ctx.frames`) at entry,
-with the parameters copied from `argv` (`NIL` past `argc`) and the other slots `NIL`, and unlinks it at exit; every
-exit goes through one block, and errors return normally (the pending flag), so the chain is always right. The
-collector scans the frames of every context's chain. A frame dies with its function: nothing keeps a pointer to a slot
-(a variable that outlives it moves into a heap cell first). The program runs on a thread whose stack is reserved at
-256 MB (`XB_PROGRAM_STACK_SIZE` in `core/main.c`; pages are committed as used), so deep recursion has room; running
-past it is not detected yet and ends the process.
+Parameters, `LOCAL`s and temporaries of a compiled function live in its item frame (`xb_frame`: link, what the call
+stack shows, slot count, current line, items), an `alloca` on the machine stack. The function links it into its
+context's chain (`xb_ctx.frames`) at entry, with the parameters copied from `argv` (`NIL` past `argc`) and the other
+slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors return normally (the pending flag),
+so the chain is always right. The collector scans the frames of every context's chain. A frame dies with its function:
+nothing keeps a pointer to a slot (a variable that outlives it moves into a heap cell first). The program runs on a
+thread whose stack is reserved at 256 MB (`XB_PROGRAM_STACK_SIZE` in `core/main.c`; pages are committed as used), so
+deep recursion has room; running past it is not detected yet and ends the process.
+
+The frames also make the call stack. A frame's `proc` (an `xb_proc` constant the compiler emits per function: its name,
+`(b)NAME` for a codeblock written in the function NAME, also inside another codeblock, where Harbour names one run by
+`Eval` from a codeblock `(b)EVAL`) says what it shows, and `line` the line where the statement running ends (a statement
+continued over several lines shows its last one, a codeblock the line of the statement defining it), which compiled code
+stores right before each call that can see the stack (see [compiler.md](compiler.md#xir-to-llvm)). Frames without `proc`
+(the command-line arguments, a module initialization, the body of a function versioned for references while the other
+body runs) are not shown. A runtime function shows only while what it does can be seen, with a frame without slots on
+the C stack and line 0 (`xb_frame_push`, `xb_frame_pop` in `core/context.h`): `AEval`, `AScan` and `ASort` while they
+call blocks, and a function or message whose error raises the error block (`xb_error_in` names it: `SUBSTR`, `ERROR:FOO`
+for a message to an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block). Operators and statements show
+nothing of their own. `ProcName( [nLevel] )` and `ProcLine( [nLevel] )` read it: level 0 is the function calling them, a
+non-numeric level is 0, a negative one gives `PROCNAME` and line 0, a level past the end `""` and 0.
 
 ## Garbage collector
 
@@ -219,8 +232,10 @@ error 9003: Too many recursive error handler calls`). In a `FOR` test, a substit
 
 The default error block, set up with the context, gives 0 for a division by zero (as Clipper's default handler does);
 for any other error it prints `Error <subsystem>/<subcode>  <description>: <operation>` (the file name instead of the
-operation when there is one; `Warning` for a severity below `ES_ERROR`) to standard error and quits with exit code 1.
-It does not show the calling functions yet.
+operation when there is one; `Warning` for a severity below `ES_ERROR`), then a line `Called from NAME(line)  ` for
+each level of the call stack (see [Frames](#frames)), to standard error, and quits with exit code 1. An unrecoverable
+error lists the levels as `Called from NAME(line)`; the reference adds the source file name, which frames do not hold
+yet.
 
 `Break( [xValue] )` (and the `BREAK [value]` command, `__Break`) stores the value in the context and raises
 `XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only request pending,

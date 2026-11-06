@@ -1,0 +1,4 @@
+Error BASE/1110  Argument error: SUBSTR
+Called from SUBSTR(0)  
+Called from F(8)  
+Called from MAIN(4)  

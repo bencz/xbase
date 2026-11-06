@@ -63,6 +63,8 @@ private:
 
   // Statements.cpp
   StmtPtr parseStmt();
+  StmtPtr parseStmtKind();
+  uint32_t stmtEndLine() const;
   StmtPtr parseDecl(StmtKind kind);
   StmtPtr parseDoCase();
   StmtPtr parseSwitch();

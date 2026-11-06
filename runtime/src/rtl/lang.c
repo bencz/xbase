@@ -21,7 +21,7 @@ void xbf_LEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_set_int(ret, (int64_t)((const xb_array *)argv[0].v.p)->len);
     return;
   }
-  xb_arg_error(ctx, ret, 1111, "LEN", argc, argv);
+  xb_fn_arg_error(ctx, ret, 1111, "LEN", argc, argv);
 }
 
 /* QUIT / CANCEL: unwinds every active function and ends the program. */
@@ -35,7 +35,7 @@ void xbf___QUIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* Eval( bBlock [, xArgs...] ) */
 void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1) {
-    xb_error(ctx, ret, EG_NOMETHOD, 1004, "EVAL", XB_ERR_SUBSTITUTE, 0, argv);
+    xb_error_in(ctx, "(b)EVAL", ret, EG_NOMETHOD, 1004, "EVAL", XB_ERR_SUBSTITUTE, 0, argv);
     return;
   }
   xb_block_call(ctx, ret, &argv[0], argc - 1, argv + 1);
@@ -48,4 +48,31 @@ void xbf___GCCOLLECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc > 0 && argv[0].type == XB_T_LOGICAL && argv[0].v.l) xb_gc_collect_young();
   else xb_gc_collect();
   xb_set_int(ret, (int64_t)xb_gc_live_objects());
+}
+
+/* The call stack level `n` (0: the function calling, 1: its caller, ...)
+ * from argument 0; a level below 0 is the asking function itself. */
+static const xb_frame *stack_level(const xb_ctx *ctx, uint32_t argc, const xb_item *argv, int64_t *n) {
+  *n = argc && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 0;
+  int64_t k = *n;
+  for (const xb_frame *f = ctx->frames; f; f = f->prev)
+    if (f->proc && k-- == 0) return f;
+  return NULL;
+}
+
+/* ProcName( [nLevel] ): the name of the function at that level of the call
+ * stack ("(b)NAME" for a codeblock of NAME), "" past its end. */
+void xbf_PROCNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  int64_t n;
+  const xb_frame *f = stack_level(ctx, argc, argv, &n);
+  const char *name = n < 0 ? "PROCNAME" : f ? f->proc->name : "";
+  xb_set_str(ret, xb_str_new(name, strlen(name)));
+}
+
+/* ProcLine( [nLevel] ): the source line running at that level, 0 past the
+ * end of the stack or in a runtime function. */
+void xbf_PROCLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  int64_t n;
+  const xb_frame *f = stack_level(ctx, argc, argv, &n);
+  xb_set_int(ret, n >= 0 && f ? f->line : 0);
 }

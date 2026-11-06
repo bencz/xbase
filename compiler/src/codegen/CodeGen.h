@@ -42,7 +42,7 @@ private:
   // Fields of xb_item, xb_frame and the head of xb_ctx, in the LLVM structs
   // that mirror them.
   enum ItemField : unsigned { FType = 0, FWidth = 1, FDec = 2, FValue = 3 };
-  enum FrameField : unsigned { FramePrev = 0, FrameCount = 1, FrameSlots = 2 };
+  enum FrameField : unsigned { FramePrev = 0, FrameProc = 1, FrameCount = 2, FrameLine = 3, FrameSlots = 4 };
   enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2, CtxDecimals = 3 };
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
   // Classes of memory compiled code reaches, which never overlap (TBAA):
@@ -56,7 +56,10 @@ private:
   // their frames, item and basic block helpers.
   void initTypes();
   llvm::StructType *frameType(uint32_t nslots);
-  void pushFrame(uint32_t nslots, uint32_t nparams, llvm::Value *argc, llvm::Value *argv);
+  void pushFrame(uint32_t nslots, uint32_t nparams, llvm::Value *argc, llvm::Value *argv, llvm::Constant *proc);
+  llvm::Constant *procOf(const xir::Function &f);
+  void markLine(llvm::Instruction *i) const;
+  void placeLines();
   void popFrame();
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
   void addAbiAttributes(llvm::Function *f);
@@ -159,7 +162,10 @@ private:
   llvm::Module &mod_;
   const llvm::DataLayout &dl_;
   Diagnostics &diag_;
-  llvm::IRBuilder<> b_;
+  // Every call it creates is marked with the source line of the xIR
+  // instruction being lowered (lineKind_), for placeLines.
+  llvm::IRBuilder<llvm::ConstantFolder, llvm::IRBuilderCallbackInserter> b_;
+  unsigned lineKind_ = 0;
 
   llvm::MDNode *tbaa_[(size_t)Mem::Count_] = {}; // access tags, by class (none for Unknown)
 
@@ -202,6 +208,8 @@ private:
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
   llvm::BasicBlock *fnExit_ = nullptr;
   llvm::BasicBlock *unwind_ = nullptr; // where an operation of the current block that fails goes (xir unwind)
+  uint32_t line_ = 0;                  // the source line of the xIR instruction being lowered (0: none)
+  std::unordered_set<const llvm::Value *> quietCalls_; // runtime functions that never show the call stack
   const FramePlan *plan_ = nullptr;
   std::unordered_map<const xir::BasicBlock *, llvm::BasicBlock *> blocks_;
   std::unordered_map<const xir::Value *, llvm::Value *> values_; // machine values; addresses of Place homes

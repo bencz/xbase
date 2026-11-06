@@ -228,6 +228,8 @@ public:
 
   Kind kind;
   std::string name;               // Program: upper-cased xBase name; others: a symbol suffix
+  std::string stackName;          // what ProcName() and "Called from" show: the xBase name, "(b)NAME" for a
+                                  // codeblock of NAME; empty for the module initialization
   bool internal = false;          // STATIC FUNCTION, codeblocks, module initialization
   uint32_t numParams = 0;
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures

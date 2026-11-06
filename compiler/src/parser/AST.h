@@ -197,6 +197,7 @@ enum class StmtKind : uint8_t { Expr, Local, Static, Return, If, While, For, For
 struct Stmt {
   StmtKind kind;
   SourceLoc loc;
+  uint32_t line = 0;             // where it (its first line, for a construct) ends: the line the call stack shows
   Stmt(StmtKind k, SourceLoc l) : kind(k), loc(l) {}
   virtual ~Stmt() = default;
 };
@@ -229,6 +230,7 @@ struct IfStmt : Stmt {
   struct Arm {
     ExprPtr cond;
     Block body;
+    uint32_t line = 0;           // where the IF, ELSEIF or CASE line ends (see Stmt::line)
   };
   std::vector<Arm> arms;         // IF + ELSEIFs
   Block elseBody;

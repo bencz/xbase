@@ -10,7 +10,7 @@ static int64_t date_arg(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item 
     return argv[0].v.i;
   }
   *ok = 0;
-  xb_arg_error(ctx, ret, code, fn, argc, argv);
+  xb_fn_arg_error(ctx, ret, code, fn, argc, argv);
   return 0;
 }
 
@@ -59,7 +59,7 @@ void xbf_ELAPSEDMS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_CTOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_STRING) {
-    xb_arg_error(ctx, ret, 1119, "CTOD", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1119, "CTOD", argc, argv);
     return;
   }
   xb_set_date(ret, xb_date_parse(argv[0].v.s->data, argv[0].v.s->len, ctx->date_format, ctx->epoch));

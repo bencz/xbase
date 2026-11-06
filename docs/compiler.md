@@ -310,6 +310,13 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   module's function to `xbp_NAME`, one to a function of the module straight to it. A public function is `xbp_NAME`
   (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under names nothing
   looks up, so modules sharing the object never clash.
+- Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
+  `xir::Function::stackName`) in the frame. While an xIR instruction is lowered, every call the builder creates is
+  marked with the instruction's source line (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is
+  complete, `placeLines` stores that line in the frame right before each marked call that can see the call stack (any
+  call but intrinsics and the runtime entry points that never raise an error or run code, `quietCalls_`), once per
+  LLVM block and line. The fast paths of operations thus store nothing; their slow paths and calls do. Before
+  `call.forward`, the function versioned for references clears its own `proc`: the other body shows instead.
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
   calls `xb_pending` and, if that asks to unwind, goes to the LLVM block of the xIR block's unwind block, or leaves
   through the function's exit. A runtime operator may also return a value the error block substituted, of any type:

@@ -61,7 +61,7 @@ static xb_str *str_of(uint32_t argc, const xb_item *argv) {
  * the decimals); without it, the number's own field is used. */
 void xbf_STR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!str_args_ok(argc, argv)) {
-    xb_arg_error(ctx, ret, 1099, "STR", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1099, "STR", argc, argv);
     return;
   }
   xb_set_str(ret, str_of(argc, argv));
@@ -70,7 +70,7 @@ void xbf_STR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* StrZero(): Str() with the leading blanks (after a sign) turned into zeros. */
 void xbf_STRZERO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!str_args_ok(argc, argv)) {
-    xb_arg_error(ctx, ret, 6003, "STRZERO", argc, argv);
+    xb_fn_arg_error(ctx, ret, 6003, "STRZERO", argc, argv);
     return;
   }
   xb_str *s = str_of(argc, argv);
@@ -89,7 +89,7 @@ void xbf_STRZERO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * decimals count every character after it (Clipper rules). */
 void xbf_VAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || argv[0].type != XB_T_STRING) {
-    xb_arg_error(ctx, ret, 1098, "VAL", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1098, "VAL", argc, argv);
     return;
   }
   const char *s = argv[0].v.s->data;
@@ -141,7 +141,7 @@ void xbf_VAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_INT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || !xb_is_number(&argv[0])) {
-    xb_arg_error(ctx, ret, 1090, "INT", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1090, "INT", argc, argv);
     return;
   }
   if (argv[0].type == XB_T_INT) {
@@ -155,7 +155,7 @@ void xbf_INT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_ABS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || !xb_is_number(&argv[0])) {
-    xb_arg_error(ctx, ret, 1089, "ABS", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1089, "ABS", argc, argv);
     return;
   }
   if (argv[0].type == XB_T_INT && argv[0].v.i != INT64_MIN)
@@ -168,7 +168,7 @@ void xbf_ABS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * divided back, which is how Clipper gets its results in the last bit. */
 void xbf_ROUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 2 || !xb_is_number(&argv[0]) || !xb_is_number(&argv[1])) {
-    xb_arg_error(ctx, ret, 1094, "ROUND", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1094, "ROUND", argc, argv);
     return;
   }
   int64_t d = xb_num_to_i64(&argv[1]);
@@ -190,7 +190,7 @@ void xbf_ROUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void minmax(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int wantMax, const char *fn) {
   if (argc < 2 || !((xb_is_number(&argv[0]) && xb_is_number(&argv[1])) ||
                     (argv[0].type == XB_T_DATE && argv[1].type == XB_T_DATE))) {
-    xb_arg_error(ctx, ret, wantMax ? 1093 : 1092, fn, argc, argv);
+    xb_fn_arg_error(ctx, ret, wantMax ? 1093 : 1092, fn, argc, argv);
     return;
   }
   double a = argv[0].type == XB_T_DATE ? (double)argv[0].v.i : xb_num_value(&argv[0]);
@@ -214,7 +214,7 @@ static double math_log(double x) { return x < 0 ? -HUGE_VAL : log(x); }
 static void math1(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, double (*f)(double), int code,
                   const char *fn) {
   if (argc < 1 || !xb_is_number(&argv[0])) {
-    xb_arg_error(ctx, ret, code, fn, argc, argv);
+    xb_fn_arg_error(ctx, ret, code, fn, argc, argv);
     return;
   }
   xb_set_double(ret, f(xb_num_value(&argv[0])), xb_decimals(ctx));
@@ -238,7 +238,7 @@ static void bit_function(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item
   int64_t v[2] = {0, 0};
   for (uint32_t k = 0; k < f->arity; ++k) {
     if (k >= argc || !xb_is_number(&argv[k])) {
-      xb_arg_error(ctx, ret, f->code, f->name, argc, argv);
+      xb_fn_arg_error(ctx, ret, f->code, f->name, argc, argv);
       return;
     }
     v[k] = xb_num_to_i64(&argv[k]);

@@ -23,7 +23,7 @@ static void ret_part(xb_item *ret, const xb_item *whole, size_t from, size_t n) 
 void xbf_SUBSTR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s || argc < 2 || !xb_is_number(&argv[1]) || (argc > 2 && !xb_is_number(&argv[2]))) {
-    xb_arg_error(ctx, ret, 1110, "SUBSTR", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1110, "SUBSTR", argc, argv);
     return;
   }
   int64_t len = (int64_t)s->len;
@@ -44,7 +44,7 @@ static void left_right(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, 
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s || argc < 2 || !xb_is_number(&argv[1])) {
     if (right) ret_str(ret, "", 0);
-    else xb_arg_error(ctx, ret, code, fn, argc, argv);
+    else xb_fn_arg_error(ctx, ret, code, fn, argc, argv);
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
@@ -66,7 +66,7 @@ void xbf_RIGHT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void change_case(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int upper, const char *fn) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s) {
-    xb_arg_error(ctx, ret, upper ? 1102 : 1103, fn, argc, argv);
+    xb_fn_arg_error(ctx, ret, upper ? 1102 : 1103, fn, argc, argv);
     return;
   }
   xb_str *r = xb_str_alloc(s->len);
@@ -85,7 +85,7 @@ void xbf_LOWER(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void trim(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int which, int code, const char *fn) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s) {
-    xb_arg_error(ctx, ret, code, fn, argc, argv);
+    xb_fn_arg_error(ctx, ret, code, fn, argc, argv);
     return;
   }
   size_t from = 0, to = s->len;
@@ -107,7 +107,7 @@ void xbf_ALLTRIM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_SPACE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || !xb_is_number(&argv[0])) {
-    xb_arg_error(ctx, ret, 1105, "SPACE", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1105, "SPACE", argc, argv);
     return;
   }
   int64_t n = xb_num_to_i64(&argv[0]);
@@ -121,14 +121,14 @@ void xbf_SPACE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static int result_fits(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item *argv, uint64_t len,
                        const char *function) {
   if (len <= XB_STR_MAX_LEN) return 1;
-  xb_error(ctx, ret, EG_STROVERFLOW, 1234, function, XB_ERR_SUBSTITUTE, argc, argv);
+  xb_error_in(ctx, function, ret, EG_STROVERFLOW, 1234, function, XB_ERR_SUBSTITUTE, argc, argv);
   return 0;
 }
 
 void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s || argc < 2 || !xb_is_number(&argv[1])) {
-    xb_arg_error(ctx, ret, 1106, "REPLICATE", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1106, "REPLICATE", argc, argv);
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
@@ -157,7 +157,7 @@ static size_t find(const xb_str *needle, const xb_str *hay, int last) {
 void xbf_AT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *needle = str_arg(argv, argc, 0), *hay = str_arg(argv, argc, 1);
   if (!needle || !hay) {
-    xb_arg_error(ctx, ret, 1108, "AT", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1108, "AT", argc, argv);
     return;
   }
   xb_set_int(ret, (int64_t)find(needle, hay, 0));
@@ -171,7 +171,7 @@ void xbf_RAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_CHR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || !xb_is_number(&argv[0])) {
-    xb_arg_error(ctx, ret, 1104, "CHR", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1104, "CHR", argc, argv);
     return;
   }
   char c = (char)(unsigned char)(xb_num_to_i64(&argv[0]) & 0xFF);
@@ -181,7 +181,7 @@ void xbf_CHR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_ASC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s) {
-    xb_arg_error(ctx, ret, 1107, "ASC", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1107, "ASC", argc, argv);
     return;
   }
   xb_set_int(ret, s->len ? (unsigned char)s->data[0] : 0);
@@ -192,7 +192,7 @@ void xbf_ASC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_STRTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *s = str_arg(argv, argc, 0), *search = str_arg(argv, argc, 1);
   if (!s || !search) {
-    xb_arg_error(ctx, ret, 1126, "STRTRAN", argc, argv);
+    xb_fn_arg_error(ctx, ret, 1126, "STRTRAN", argc, argv);
     return;
   }
   const xb_str *repl = str_arg(argv, argc, 2);

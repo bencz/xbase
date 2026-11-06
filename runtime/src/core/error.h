@@ -23,13 +23,31 @@
  * (NULL without XB_ERR_SUBSTITUTE) may be one of `args`. */
 int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *operation, uint32_t flags,
              uint32_t argc, const xb_item *args);
+/* The same, raised inside the runtime function (or method, "CLASS:NAME")
+ * `frame` names, which the call stack shows while the error block runs. */
+int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
+                const char *operation, uint32_t flags, uint32_t argc, const xb_item *args);
 
-/* The argument error of a runtime function or an operator (EG_ARG, may be
- * substituted), with its arguments or operands. */
+/* The argument error of an operator (EG_ARG, may be substituted), with its
+ * operands. */
 static inline int xb_arg_error(xb_ctx *ctx, xb_item *result, int32_t subcode, const char *operation, uint32_t argc,
                                const xb_item *args) {
   return xb_error(ctx, result, EG_ARG, subcode, operation, XB_ERR_SUBSTITUTE, argc, args);
 }
+
+/* The argument error of the runtime function `fn` (EG_ARG, may be
+ * substituted), with its arguments; `fn` is the operation and shows on the
+ * call stack. */
+static inline int xb_fn_arg_error(xb_ctx *ctx, xb_item *result, int32_t subcode, const char *fn, uint32_t argc,
+                                  const xb_item *args) {
+  return xb_error_in(ctx, fn, result, EG_ARG, subcode, fn, XB_ERR_SUBSTITUTE, argc, args);
+}
+
+/* The lines of the call stack, from the innermost frame it shows, to standard
+ * error: `format` takes the name and the line, as XB_CALLED_FROM (the default
+ * error block's lines) does. */
+#define XB_CALLED_FROM "\nCalled from %s(%u)  "
+void xb_print_call_stack(const xb_ctx *ctx, const char *format);
 
 /* The context's error block (the default one) and BREAK value, set up by
  * xb_ctx_new. */

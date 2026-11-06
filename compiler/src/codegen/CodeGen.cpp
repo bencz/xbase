@@ -15,7 +15,9 @@ using namespace llvm;
 namespace xb {
 
 CodeGen::CodeGen(LLVMContext &ctx, llvm::Module &mod, Diagnostics &diag)
-    : ctx_(ctx), mod_(mod), dl_(mod.getDataLayout()), diag_(diag), b_(ctx) {
+    : ctx_(ctx), mod_(mod), dl_(mod.getDataLayout()), diag_(diag),
+      b_(ctx, ConstantFolder(), IRBuilderCallbackInserter([this](Instruction *i) { markLine(i); })),
+      lineKind_(ctx.getMDKindID("xb.line")) {
   initTypes();
 }
 
@@ -98,6 +100,10 @@ void CodeGen::initTypes() {
   rtSwitchMatch_ = rt("xb_switch_match", i32_, {ptrTy_, ptrTy_});
   rtModuleRegister_ = rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_});
   rtModulesInit_ = rt("xb_modules_init", voidTy, {ptrTy_});
+  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtArrayNew_,
+                           rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
+                           rtSeqCatch_, rtSeqValue_, rtAbiCheck_, rtModuleRegister_, rtModulesInit_})
+    quietCalls_.insert(c.getCallee());
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},
       {BinOp::Div, "xb_op_div"}, {BinOp::Mod, "xb_op_mod"},       {BinOp::Pow, "xb_op_pow"},
@@ -220,7 +226,7 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnSelf_ = fn_->getArg(4);
     fnSelf_->setName("self");
   }
-  pushFrame(plan.frameSize(), f.numParams, argc, argv);
+  pushFrame(plan.frameSize(), f.numParams, argc, argv, procOf(f));
   fnExit_ = BasicBlock::Create(ctx_, "exit", fn_);
 
   // Blocks in reverse postorder; machine-value block parameters become PHIs.
@@ -238,11 +244,16 @@ void CodeGen::genFunction(const xir::Function &f) {
     b_.SetInsertPoint(blocks_.at(xb));
     unwind_ = xb->unwind ? blocks_.at(xb->unwind) : fnExit_;
     findFusedComparisons(*xb);
-    for (auto &i : xb->insts) emit(*i);
+    for (auto &i : xb->insts) {
+      line_ = i->loc.line;
+      emit(*i);
+    }
   }
+  line_ = 0;
   b_.SetInsertPoint(fnExit_);
   popFrame();
   b_.CreateRetVoid();
+  placeLines();
   plan_ = nullptr;
 }
 
@@ -250,10 +261,54 @@ void CodeGen::genFunction(const xir::Function &f) {
 // the context's chain. Parameters come from argv (NIL past argc), the other
 // slots start as NIL; all of them are valid before anything can allocate.
 StructType *CodeGen::frameType(uint32_t nslots) {
-  return StructType::get(ctx_, {ptrTy_, i32_, ArrayType::get(itemTy_, nslots)});
+  return StructType::get(ctx_, {ptrTy_, ptrTy_, i32_, i32_, ArrayType::get(itemTy_, nslots)});
 }
 
-void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *argv) {
+// The function's xb_proc, or null when the call stack does not show it.
+Constant *CodeGen::procOf(const xir::Function &f) {
+  if (f.stackName.empty()) return ConstantPointerNull::get(ptrTy_);
+  Constant *name = b_.CreateGlobalString(f.stackName, ".xb.procname", 0, &mod_);
+  auto *ty = StructType::get(ctx_, ArrayRef<Type *>{ptrTy_});
+  auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage, ConstantStruct::get(ty, {name}),
+                                  ".xb.proc");
+  proc->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+  return proc;
+}
+
+void CodeGen::markLine(Instruction *i) const {
+  if (line_ && isa<CallInst>(i))
+    i->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
+}
+
+// The frame's line, stored right before each call that can see the call stack
+// (a function of the program, a send, a runtime function or operator, which
+// may raise an error): only there can it be read, so the fast paths of
+// operations store nothing, and their slow paths, which are cold, do. A block
+// stores a line once until another one is needed.
+void CodeGen::placeLines() {
+  for (BasicBlock &bb : *fn_) {
+    uint32_t stored = 0;
+    for (Instruction &inst : bb) {
+      auto *call = dyn_cast<CallInst>(&inst);
+      if (!call) continue;
+      MDNode *md = call->getMetadata(lineKind_);
+      if (!md) continue;
+      call->setMetadata(lineKind_, nullptr);
+      const Function *callee = call->getCalledFunction();
+      if (callee && (callee->isIntrinsic() || quietCalls_.count(callee))) continue;
+      auto line = (uint32_t)mdconst::extract<ConstantInt>(md->getOperand(0))->getZExtValue();
+      if (line == stored) continue;
+      Value *at = GetElementPtrInst::CreateInBounds(frameType(0), fnFrame_,
+                                                    {ConstantInt::get(i32_, 0), ConstantInt::get(i32_, FrameLine)},
+                                                    "line", call->getIterator());
+      auto *store = new StoreInst(ConstantInt::get(i32_, line), at, call->getIterator());
+      tag(store, Mem::FrameLink);
+      stored = line;
+    }
+  }
+}
+
+void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *argv, Constant *proc) {
   StructType *ty = frameType(nslots);
   BasicBlock &entry = fn_->getEntryBlock(); // a static alloca, whatever block the frame is linked in
   AllocaInst *frame = IRBuilder<>(&entry, entry.getFirstInsertionPt()).CreateAlloca(ty, nullptr, "frame");
@@ -266,6 +321,8 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
   if (nslots > nparams)
     b_.CreateMemSet(slot(nparams), b_.getInt8(0), (uint64_t)(nslots - nparams) * itemSize_, itemAlign_);
   tag(b_.CreateStore(ConstantInt::get(i32_, nslots), b_.CreateStructGEP(ty, frame, FrameCount)), Mem::FrameLink);
+  tag(b_.CreateStore(proc, b_.CreateStructGEP(ty, frame, FrameProc)), Mem::FrameLink);
+  tag(b_.CreateStore(ConstantInt::get(i32_, 0), b_.CreateStructGEP(ty, frame, FrameLine)), Mem::FrameLink);
   Value *frames = b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames);
   tag(b_.CreateStore(loadFrom(ptrTy_, frames, Mem::Ctx, "prev"), b_.CreateStructGEP(ty, frame, FramePrev)),
       Mem::FrameLink);
@@ -320,7 +377,7 @@ void CodeGen::genEntry(const xir::Function &start) {
   fnExit_ = BasicBlock::Create(ctx_, "done", fn);
   b_.CreateCall(rtModulesInit_, {ctx});
   checkPending(fnExit_); // an error in a module initialization ends the program
-  pushFrame(1, 0, nullptr, nullptr); // the start function's result slot, a root
+  pushFrame(1, 0, nullptr, nullptr, ConstantPointerNull::get(ptrTy_)); // the start function's result slot, a root
   b_.CreateCall(xbFuncTy_, functions_.at(&start), {ctx, slot(0), fn->getArg(1), fn->getArg(2)});
   popFrame();
   b_.CreateBr(fnExit_);

@@ -60,6 +60,8 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   cur_.fn = fn;
   cur_.b = std::make_unique<Builder>(fn);
   cur_.scope = f.name;
+  cur_.function = f.name;
+  fn->stackName = f.name;
   fn->numParams = (uint32_t)f.params.size();
   for (uint32_t s = 0; s < f.numLocals; ++s) {
     Var *v = fn->addVar(Var::Kind::Frame, s, s < f.params.size() ? f.params[s].name : "");
@@ -128,7 +130,10 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   cur_.fn = fn;
   cur_.b = std::make_unique<Builder>(fn);
   cur_.scope = name;
+  cur_.function = outer.function;
+  fn->stackName = "(b)" + outer.function;
   Builder &b = *cur_.b;
+  b.setLine(outer.b->line()); // the line of the statement defining the block
   b.setBlock(fn->addBlock("entry"));
   b.setLoc(blk.loc);
   Value *result = nullptr;

@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 67 of 551 done. Commands (`std.ch` families): 17 of 155 done.
+Functions: 69 of 551 done. Commands (`std.ch` families): 17 of 155 done.
 
 ## Statements (grammar)
 
@@ -130,7 +130,7 @@ at link time, never by an environment variable.
 **RAt**, **Replicate**, **Right**, **RTrim**, *SoundEx*, **Space**, **StrTran**, **StrZero**, **Stuff**, **Upper**,
 *Word*
 
-### Language, settings and runtime (6 of 94 done)
+### Language, settings and runtime (8 of 94 done)
 
 *AltD*, *AMPM*, **Break**, *cftsAdd*, *cftsClose*, *cftsCrea*, *cftsDelete*, *cftsIfDel*, *cftsNext*, *cftsOpen*,
 *cftsRecN*, *cftsReplac*, *cftsSet*, *cftsUndel*, *cftsVeri*, *cftsVers*, *CLIPPER520*, *CLIPPER530*, *Days*, *dbDrop*,
@@ -138,7 +138,7 @@ at link time, never by an environment variable.
 **Empty**, *ErrorInHandler*, *ErrorLevel*, **Eval**, *FieldBlock*, *FieldDec*, *FieldLen*, *FieldType*, *FieldWBlock*,
 *FKLabel*, *FKMax*, *Get*, *GetE*, *IOUSR_Register*, *IOUSR_SetError*, *IsAffirm*, *IsColor*, *IsDefColor*,
 *IsNegative*, *MakeDir*, *Memory*, *MemVarBlock*, *MMiddleDown*, *NationMsg*, *NetName*, *NoSnow*, *OS*, *Pad*,
-*PCount*, *ProcFile*, *ProcLine*, *ProcName*, *PValue*, *rddInfo*, *ReadKey*, *RestScreen*, *SaveScreen*, *Secs*,
+*PCount*, *ProcFile*, **ProcLine**, **ProcName**, *PValue*, *rddInfo*, *ReadKey*, *RestScreen*, *SaveScreen*, *Secs*,
 **Set**, *SetCancel*, *SetMode*, *SetTypeahead*, *SIXCDX*, *sx_ClearOrder*, *sx_FindRec*, *SYMBOL*, *SYSINIT*,
 *TBColumn*, *TBrowse*, *TBrowseDB*, *Tone*, *TopBar*, **Trim**, *TString*, *Type*, **ValType**, *Version*, *_eInstVar*,
 *_GetNumCol*, *_IsGraphic*, *_NatMsgVer*, *_NatSortVer*, *_SetVideoMode*

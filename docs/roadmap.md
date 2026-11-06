@@ -51,13 +51,15 @@ Done: objects of runtime classes, messages (`o:x`, `o:x := v`, `o:m( args )`), r
 xIR unwind edges ([runtime.md](runtime.md#errors-and-pending-requests),
 [xir.md](xir.md#control-flow-for-errors-and-exceptions)). Missing:
 
-- `ErrorSys()` and a default handler written in xBase that prints the `Called from` lines (needs the call stack).
+- `ErrorSys()` and a default handler written in xBase (the call stack and `ProcName()`/`ProcLine()` exist); the
+  source file in frames (`ProcFile()`, the file in the lines of an unrecoverable error).
 - Retrying (`canRetry`, `tries`) and defaults (`canDefault`) once file and database errors exist; `ErrorLevel()`.
+- `x++`, `x--` and the step of a `FOR` without `STEP` fail as the operators `++` and `--` (subcodes 1086, 1087) in
+  the reference; xbase computes them with `+` and `-` and reports those (1081, 1082).
 
 ### Procedures, parameters and the call stack
 
-`PCount()`, `ProcName()`, `ProcLine()`, `ProcFile()`, `PValue()`; skipped arguments and `PARAMETERS`; `DO <proc>
-WITH` by name at run time.
+`PCount()`, `ProcFile()`, `PValue()`; skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 
 ### Commands, statements and headers
 
@@ -74,7 +76,7 @@ WITH` by name at run time.
 
 1. Strings and numbers: `PadL`/`PadR`/`PadC`, `Transform`, `SoundEx`, the memo-line functions; `Mod`, `Descend`,
    `Bin2I` and the other binary conversions.
-2. Errors and the call stack (above).
+2. Errors (above): `ErrorSys` and the source file in the call stack.
 3. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
    `GetEnv`.
 4. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the
@@ -225,8 +227,7 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ### Runtime
 
-- The call stack: a frame descriptor (function name, file) and the current line in each frame, for `ProcName()`,
-  `ProcLine()` and the `Called from` lines of the default error handler.
+- The source file in the frame descriptor (`xb_proc`), for `ProcFile()`.
 - A stack limit checked in function prologues (deep recursion is a crash today).
 - The ABI check for every module, not only the start module.
 - One table of type properties (heap object, `ValType` letter, sort order, `Empty`, display), with an abort on an
@@ -241,8 +242,8 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 ## Order of the work
 
 1. The dynamic symbol table; `INIT`/`EXIT PROCEDURE`.
-2. Errors: the call stack and `ErrorSys` (`BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind
-   edges and typed continuations are done).
+2. Errors: `ErrorSys` (`BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind edges, typed
+   continuations and the call stack are done).
 3. Memory variables and Clipper's rule for undeclared names; `Type()`.
 4. The macro operator.
 5. The rest of the array, string and number functions; the call-stack functions.

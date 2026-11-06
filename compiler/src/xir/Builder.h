@@ -23,6 +23,10 @@ public:
   BasicBlock *unwindBlock() const { return unwind_; }
   bool terminated() const { return bb_->terminator() != nullptr; }
   void setLoc(SourceLoc l) { loc_ = l; }
+  // The line every instruction made from here on carries (the statement's,
+  // Stmt::line), whatever setLoc says; 0: setLoc's.
+  void setLine(uint32_t line) { line_ = line; }
+  uint32_t line() const { return line_; }
 
   // Constants
   Constant *nil();
@@ -85,6 +89,7 @@ private:
 
   Function *fn_;
   BasicBlock *bb_ = nullptr;
+  uint32_t line_ = 0;
   BasicBlock *unwind_ = nullptr;
   bool assignUnwind_ = false;
   SourceLoc loc_;

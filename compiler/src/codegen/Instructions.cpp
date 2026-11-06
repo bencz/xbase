@@ -258,6 +258,9 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::CallForward: {
     Value *d = dest(i);
     setNil(d);
+    // The other body shows on the call stack as this function: this frame no longer does.
+    tag(b_.CreateStore(ConstantPointerNull::get(ptrTy_), b_.CreateStructGEP(frameType(0), fnFrame_, FrameProc)),
+        Mem::FrameLink);
     // LLVM inlines the other body (this is its only call): its frame then adds
     // to every call's stack, but the common path's prologue does not prepare
     // a call, which measured faster (fib: 261 ms against 299 ms).

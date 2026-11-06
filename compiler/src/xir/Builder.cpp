@@ -7,6 +7,7 @@ Instruction *Builder::make(Op op, Type t, std::initializer_list<Value *> ops) {
   bb_->insts.push_back(std::make_unique<Instruction>(op, t, bb_));
   Instruction *i = bb_->insts.back().get();
   i->loc = loc_;
+  if (line_) i->loc.line = line_;
   for (Value *v : ops) i->addOperand(v);
   return i;
 }

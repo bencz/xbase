@@ -82,6 +82,7 @@ private:
     std::vector<Loop> loops;
     std::vector<EachVar> eachVars;
     std::string scope;             // name prefix for codeblock functions
+    std::string function;          // the xBase function being generated (its codeblocks' too)
     std::unordered_map<uint32_t, Var *> paramLocals; // parameter slot -> the LOCAL standing for it
   };
   FnState cur_;

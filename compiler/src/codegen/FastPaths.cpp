@@ -133,7 +133,7 @@ Value *CodeGen::numberAsDouble(Value *item, Value *type) {
 
 // A comparison of two numbers that are not both integers, as xb_compare makes
 // it: c = (x > y) - (x < y), so NaN compares as equal to anything.
-static Value *doubleCompare(IRBuilder<> &b, xir::IntPred pred, Value *x, Value *y) {
+static Value *doubleCompare(IRBuilderBase &b, xir::IntPred pred, Value *x, Value *y) {
   Value *gt = b.CreateFCmpOGT(x, y), *lt = b.CreateFCmpOLT(x, y);
   switch (pred) {
   case xir::IntPred::Eq: return b.CreateNot(b.CreateOr(gt, lt));

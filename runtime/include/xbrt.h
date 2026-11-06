@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 11u
+#define XB_ABI_VERSION 12u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -119,15 +119,28 @@ struct xb_array {
 };
 #endif
 
+/* [ABI] What the call stack shows of a function (ProcName(), the "Called
+ * from" lines): its name, "(b)NAME" for a codeblock of NAME. Compiled code
+ * emits one constant per function. */
+typedef struct xb_proc {
+  const char *name;
+} xb_proc;
+
 /* [ABI] A compiled function's item frame (parameters, LOCALs, temporaries):
  * on the machine stack, linked into its context's chain while the function
  * runs. The collector scans the frames of every chain; slots are NIL or valid
- * items whenever something can allocate. */
+ * items whenever something can allocate. `proc` (NULL: a frame the call stack
+ * does not show) and `line`, the source line of the statement running, set
+ * before each call and before an operation can raise an error, make the call
+ * stack. The runtime links frames without slots for its own functions while
+ * what they do can be seen: an error block they run, a codeblock they call. */
 typedef struct xb_frame xb_frame;
 #ifndef __cplusplus
 struct xb_frame {
   xb_frame *prev;
+  const xb_proc *proc;
   uint32_t nslots;
+  uint32_t line;
   xb_item slots[];
 };
 #endif

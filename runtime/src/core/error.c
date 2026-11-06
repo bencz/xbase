@@ -50,15 +50,31 @@ static void set_text(xb_item *it, const char *s) { xb_set_str(it, xb_str_new(s, 
  * with exit code 1. */
 static void unrecoverable(xb_ctx *ctx, int code, const char *text) {
   fflush(stdout);
-  fprintf(stderr, "\nUnrecoverable error %d: %s\n", code, text);
+  fprintf(stderr, "\nUnrecoverable error %d: %s", code, text);
+  xb_print_call_stack(ctx, "\nCalled from %s(%u)");
+  fputc('\n', stderr);
   ctx->exitcode = 1;
   ctx->pending |= XB_PENDING_QUIT;
 }
 
+void xb_print_call_stack(const xb_ctx *ctx, const char *format) {
+  for (const xb_frame *f = ctx->frames; f; f = f->prev)
+    if (f->proc) fprintf(stderr, format, f->proc->name, (unsigned)f->line);
+}
+
 int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *operation, uint32_t flags,
              uint32_t argc, const xb_item *args) {
+  return xb_error_in(ctx, NULL, result, gencode, subcode, operation, flags, argc, args);
+}
+
+int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
+                const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
+  xb_proc proc = {frame};
+  xb_frame inside;
+  if (frame) xb_frame_push(ctx, &inside, &proc);
   if (ctx->error_depth >= XB_ERROR_MAX_DEPTH) {
     unrecoverable(ctx, 9003, "Too many recursive error handler calls");
+    if (frame) xb_frame_pop(ctx, &inside);
     return 0;
   }
   /* The arguments may be the only references to their values (a substituted
@@ -94,6 +110,7 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
   ++ctx->error_depth;
   xb_block_call(ctx, &call[1], &call[2], 1, &call[0]);
   --ctx->error_depth;
+  if (frame) xb_frame_pop(ctx, &inside);
   int substituted = 0;
   if (!(ctx->pending & XB_PENDING_UNWIND)) {
     if (flags & XB_ERR_SUBSTITUTE) {
@@ -110,7 +127,8 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
 /* The error block a program starts with: a division by zero gives 0, as in
  * Clipper's default handler; any other error is reported ("Error
  * <subsystem>/<subcode>  <description>: <operation>", or the file name instead
- * of the operation when there is one) and ends the program with exit code 1. */
+ * of the operation when there is one, then the call stack) and ends the
+ * program with exit code 1. */
 static void default_handler(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self) {
   XB_UNUSED(self);
   if (argc < 1 || argv[0].type != XB_T_OBJECT) return;
@@ -126,7 +144,7 @@ static void default_handler(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *a
           v[ERR_SUBSYSTEM].v.s->data, (long long)v[ERR_SUBCODE].v.i, v[ERR_DESCRIPTION].v.s->data);
   const xb_str *where = v[ERR_FILENAME].v.s->len ? v[ERR_FILENAME].v.s : v[ERR_OPERATION].v.s;
   if (where->len) fprintf(stderr, ": %s", where->data);
-  fputc('\n', stderr);
+  xb_print_call_stack(ctx, XB_CALLED_FROM);
   ctx->exitcode = 1;
   ctx->pending |= XB_PENDING_QUIT;
 }

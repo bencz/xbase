@@ -1,0 +1,21 @@
+
+main: MAIN(7)
+f: F(45) MAIN(8)
+block: (b)MAIN(6) MAIN(9)
+aeval: (b)MAIN(10) AEVAL(0) MAIN(10)
+ascan: (b)MAIN(11) ASCAN(0) MAIN(11)
+asort: (b)MAIN(12) ASORT(0) MAIN(12)
+asort: (b)MAIN(12) ASORT(0) MAIN(12)
+asort: (b)MAIN(12) ASORT(0) MAIN(12)
+byref: BYREF(50) MAIN(13)
+byref: BYREF(50) MAIN(14)
++: (b)MAIN(15) MAIN(17)
+SUBSTR: (b)MAIN(15) SUBSTR(0) MAIN(20)
+FOO: (b)MAIN(15) ERROR:FOO(0) MAIN(23)
+FOO: (b)MAIN(15) FOO(0) MAIN(26)
+TRIES: (b)MAIN(15) ERROR:_TRIES(0) MAIN(29)
+EVAL: (b)MAIN(15) (b)EVAL(0) MAIN(32)
+ASIZE: (b)MAIN(15) ASIZE(0) MAIN(35)
++: (b)MAIN(15) (b)MAIN(38) AEVAL(0) MAIN(38)
+MAIN         40           0 []          0
+PROCNAME          0 MAIN         41 MAIN
