@@ -258,10 +258,12 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   value used only there (a block parameter too) is computed straight into its slot; a branch argument used only there
   shares the slot of its block parameter (on a loop's back edge, when the jump is the block's only way out and nothing
   after the argument reads the parameter); a `load` whose single use follows with nothing in between that can write the
-  variable uses the variable's own item (no copy); a value used only by the `store` right after it is computed into the
+  variable (for a variable others can reach: nothing that writes, runs code, or goes on after an error block ran)
+  uses the variable's own item (no copy); a value used only by the `store` right after it is computed into the
   variable, and one used only by `ret` into the caller's result slot. A call's result is never computed straight into a
   heap object (a cell, an element) and only into a plain frame variable, and an operation that can fail is not computed
-  in place through a reference (finding the element can fail too, and the operation's error comes first). Two edges from
+  in place through a reference (finding the element can fail too, and the operation's error comes first) or in a block
+  that unwinds (the handler may read the variable, and a call clears its result first). Two edges from
   one block to the same block do not share their arguments' slots. A value that never refers to a heap object
   (`xir::TypeInfo`, [xir.md](xir.md#types)) and is not computed in a slot as above is `Local`: an item of its own
   outside the frame (an `alloca` reached only by loads and stores, which LLVM keeps in registers). Block parameters are
@@ -311,8 +313,9 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
   calls `xb_pending` and, if that asks to unwind, goes to the LLVM block of the xIR block's unwind block, or leaves
   through the function's exit. A runtime operator may also return a value the error block substituted, of any type:
-  the code after it reads the result's type instead of assuming one, and a comparison that feeds a condition tests
-  the truth of what its slow path returned.
+  the code after it reads the result's type instead of assuming one, unless `subst.check` follows the operation (its
+  types then hold; the check reads the item's own tag and leaves for the generic copy on an unlikely edge, see
+  [xir.md](xir.md#passes)), and a comparison that feeds a condition tests the truth of what its slow path returned.
   `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
 - Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
   target `DataLayout`); a `FOR EACH` variable goes through `xb_ref_target`; a `STATIC`, a shared or captured

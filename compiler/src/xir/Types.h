@@ -23,8 +23,8 @@ constexpr TypeSet kHeapTypes = ((TypeSet(1) << (XB_T_HEAP_LAST + 1)) - 1) & ~((T
 // that is an error adds nothing.
 TypeSet binaryResult(BinOp op, TypeSet a, TypeSet b);
 // Whether such operands can make it fail: an operand pair it does not take,
-// or a divisor that may be zero.
-bool binaryMayFail(BinOp op, TypeSet a, TypeSet b);
+// or a divisor that may be zero (not when it is a non-zero constant).
+bool binaryMayFail(BinOp op, TypeSet a, TypeSet b, bool divisorMayBeZero);
 
 // Type inference over a function's SSA values: the set of types each item
 // value may hold. An optimistic fixpoint: block parameters start empty and
@@ -32,17 +32,26 @@ bool binaryMayFail(BinOp op, TypeSet a, TypeSet b);
 // (binaryResult), and anything read from memory (a variable, an element, a
 // call's result) may hold any type. The handler of an operation's error may
 // substitute a value of any type for its result, so an operation that may fail
-// that way may produce any type: the lowering keeps values it finds without
-// heap references out of the collector's sight.
+// that way may produce any type, unless subst.check follows it; the lowering
+// keeps values it finds without heap references out of the collector's sight.
+enum class Substitution : uint8_t {
+  Any,  // as the program runs
+  None, // as if no error block substituted anything: what checking every operation would give (the analysis of
+        // passes/TypedContinuations.cpp)
+};
+
 class TypeInfo {
 public:
-  explicit TypeInfo(const CFG &cfg); // the function the CFG was built for
+  explicit TypeInfo(const CFG &cfg, Substitution s = Substitution::Any); // the function the CFG was built for
   TypeSet of(const Value *v) const;
+  // The operation may fail with an error whose block may substitute its result.
+  bool maySubstitute(const Instruction &i) const;
   // Never refers to a heap object: the collector need not see it.
   bool noHeap(const Value *v) const { return (of(v) & kHeapTypes) == 0; }
 
 private:
   TypeSet compute(const Instruction &i) const;
+  Substitution substitution_;
   std::unordered_map<const Value *, TypeSet> types_;
 };
 

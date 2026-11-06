@@ -200,10 +200,10 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 - A call writes its destination only once it succeeds (today the destination is cleared first, so under a
   `BEGIN SEQUENCE` handler its result is not computed into a variable); a pass that moves or merges operations must
   respect that an operation that fails runs the error block; a store and its write barrier move together.
-- Typed continuations: since the error block may substitute a value of any type, an operation that may fail gives
-  any type, which costs the values that follow it their registers and constant tags (`float` 30 to 49 ms when this
-  came). Planned: the type the operation would give, checked after its slow path, with a generic copy of the rest
-  of the function taking over when the substituted value has another type.
+- Typed continuations ([xir.md](xir.md#passes)) check operations in loops of functions of at most 500 instructions;
+  elsewhere, and in functions with `BEGIN SEQUENCE` or `FOR EACH` cleanups, an operation that may fail still gives
+  any type. A copy per checked loop nest instead of per function, compiled for size (outlined as a cold function),
+  would lift the limit.
 - `promote-variables` in functions with `BEGIN SEQUENCE`: the variables the handlers do not read.
 - Verifier: no parameters on the entry block and no branches to it, the access kind of a variable, the captures of a
   `block`; linear cost.
@@ -241,8 +241,8 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 ## Order of the work
 
 1. The dynamic symbol table; `INIT`/`EXIT PROCEDURE`.
-2. Errors: the call stack and `ErrorSys`; typed continuations (`BEGIN SEQUENCE`, `Break`, the `Error` object,
-   `ErrorBlock` and the unwind edges are done).
+2. Errors: the call stack and `ErrorSys` (`BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind
+   edges and typed continuations are done).
 3. Memory variables and Clipper's rule for undeclared names; `Type()`.
 4. The macro operator.
 5. The rest of the array, string and number functions; the call-stack functions.

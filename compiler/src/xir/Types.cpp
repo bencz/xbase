@@ -82,8 +82,8 @@ bool pairWorks(BinOp op, TypeSet a, TypeSet b) {
 
 } // namespace
 
-bool binaryMayFail(BinOp op, TypeSet a, TypeSet b) {
-  if ((op == BinOp::Div || op == BinOp::Mod) && (b & kNumberTypes)) return true; // a zero divisor
+bool binaryMayFail(BinOp op, TypeSet a, TypeSet b, bool divisorMayBeZero) {
+  if ((op == BinOp::Div || op == BinOp::Mod) && (b & kNumberTypes) && divisorMayBeZero) return true;
   for (unsigned ta = 0; ta < XB_T_COUNT_; ++ta)
     for (unsigned tb = 0; tb < XB_T_COUNT_; ++tb)
       if ((a & typeBit(xb_type(ta))) && (b & typeBit(xb_type(tb))) &&
@@ -106,7 +106,7 @@ TypeSet binaryResult(BinOp op, TypeSet a, TypeSet b) {
   return r;
 }
 
-TypeInfo::TypeInfo(const CFG &cfg) {
+TypeInfo::TypeInfo(const CFG &cfg, Substitution substitution) : substitution_(substitution) {
   // Reverse postorder sees definitions before their uses except along back
   // edges, which the repetition settles; sets only grow, so it ends.
   for (bool changed = true; changed;) {
@@ -143,29 +143,58 @@ TypeSet TypeInfo::of(const Value *v) const {
   return it == types_.end() ? 0 : it->second; // not reached yet (or never: unreachable code)
 }
 
-TypeSet TypeInfo::compute(const Instruction &i) const {
+namespace {
+
+// The types an operation gives itself, and whether it may fail with an error
+// whose block may substitute its result.
+struct OwnResult {
+  TypeSet types;
+  bool substitutable;
+};
+
+OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
+  constexpr TypeSet kSwitchTypes = kInt | kString;
   switch (i.op) {
-  case Op::NumDefaultDec: return kDouble;
+  case Op::NumDefaultDec: return {kDouble, false};
   case Op::Binary: {
-    TypeSet a = of(i.operand(0)), b = of(i.operand(1));
-    return binaryResult(i.binop, a, b) | (binaryMayFail(i.binop, a, b) ? kAnyType : 0);
+    TypeSet a = t.of(i.operand(0)), b = t.of(i.operand(1));
+    const Constant *c = asConstant(i.operand(1));
+    bool nonZero = c && ((c->lit == Constant::Lit::Integer && c->ival != 0) ||
+                         (c->lit == Constant::Lit::Double && c->dval != 0.0));
+    return {binaryResult(i.binop, a, b), binaryMayFail(i.binop, a, b, !nonZero)};
   }
   case Op::Unary: {
-    TypeSet a = of(i.operand(0));
-    if (i.unop == UnOp::Not) return kLogical | (a & ~kLogical ? kAnyType : 0);
-    // -INT64_MIN is a double
-    return (a & kInt ? kNumberTypes : 0) | (a & kDouble) | (a & ~kNumberTypes ? kAnyType : 0);
+    TypeSet a = t.of(i.operand(0));
+    if (i.unop == UnOp::Not) return {kLogical, (a & ~kLogical) != 0};
+    return {(a & kInt ? kNumberTypes : 0) | (a & kDouble), (a & ~kNumberTypes) != 0}; // -INT64_MIN is a double
   }
   case Op::SwitchCheck: {
-    constexpr TypeSet kSwitchTypes = kInt | kString;
-    TypeSet a = of(i.operand(0));
-    return (a & kSwitchTypes) | (a & ~kSwitchTypes ? kAnyType : 0);
+    TypeSet a = t.of(i.operand(0));
+    return {a & kSwitchTypes, (a & ~kSwitchTypes) != 0};
   }
-  case Op::FromBool: return kLogical;
-  case Op::ArrayLit: return typeBit(XB_T_ARRAY);
-  case Op::MakeBlock: return typeBit(XB_T_BLOCK);
-  default: return kAnyType; // read from memory, or made by the runtime
+  case Op::FromBool: return {kLogical, false};
+  case Op::ArrayLit: return {typeBit(XB_T_ARRAY), false};
+  case Op::MakeBlock: return {typeBit(XB_T_BLOCK), false};
+  default: return {kAnyType, false}; // read from memory, or made by the runtime
   }
+}
+
+// Checked by subst.check: a substituted value of another type leaves the
+// function's typed code there (passes/TypedContinuations.cpp).
+bool checked(const Instruction &i) {
+  for (const Instruction *u : i.users())
+    if (u->op == Op::SubstCheck) return true;
+  return false;
+}
+
+} // namespace
+
+bool TypeInfo::maySubstitute(const Instruction &i) const { return ownResult(i, *this).substitutable; }
+
+TypeSet TypeInfo::compute(const Instruction &i) const {
+  OwnResult r = ownResult(i, *this);
+  bool any = r.substitutable && substitution_ == Substitution::Any && !checked(i);
+  return r.types | (any ? kAnyType : 0);
 }
 
 } // namespace xb::xir

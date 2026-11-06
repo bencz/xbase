@@ -53,7 +53,8 @@ void FramePlan::number() {
 // A plain frame variable changes only by its own stores; one in a cell, a
 // STATIC, or one reached through a reference can also change through anything
 // that writes a variable or the heap or runs code (see Effect in Ops.h), which
-// includes an operation that may fail: its error runs the error block.
+// includes an operation whose error may substitute its result: the code goes
+// on after the error block ran.
 // One pass per block: the position of the last write of each variable and of
 // the last instruction that may write any variable indirectly.
 void FramePlan::elideLoads(const BasicBlock &b) {
@@ -79,7 +80,7 @@ void FramePlan::elideLoads(const BasicBlock &b) {
       if (u.var) lastWrite[u.var] = p;
       for (const Var *c : u.captures) lastWrite[c] = p;
     }
-    if ((e & (WritesVar | WritesHeap | RunsCode)) || u.mayFail()) lastIndirect = p;
+    if (e & (WritesVar | WritesHeap | RunsCode | Substitutes)) lastIndirect = p;
   }
 }
 

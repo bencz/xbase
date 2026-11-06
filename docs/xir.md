@@ -86,7 +86,9 @@ result) may hold any type. The lowering uses it to keep values that never refer 
 constant instead of reading it. The error block may substitute a value of any type for the result of an operation
 that fails ([Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that
 may fail may produce any type: `binaryMayFail` tells when operands can make a `binary` fail (an operand type pair it
-does not take, a divisor that may be zero), `unary` and `switch.check` fail for types they do not take.
+does not take, a divisor that may be zero: not a non-zero constant), `unary` and `switch.check` fail for types they
+do not take. An operation that `subst.check` follows gives only its own types (see `typed-continuations` in
+[Passes](#passes)). `Substitution::None` types every operation as if no error block substituted anything.
 
 ## Passes
 
@@ -109,6 +111,20 @@ xIR is an internal error naming the pass. `--dump-xir` writes the result. Implem
   whose single predecessor jumps to it joins it; unreachable blocks go. The steps repeat until nothing changes.
 - `remove-dead-code`: instructions whose result is unused and that cannot fail and write nothing (the effects in
   `Ops.*`), and unused block parameters with their arguments, by a worklist.
+- `typed-continuations`, once after the others (then `simplify-cfg` and `remove-dead-code` again): an operation in a
+  loop whose error may substitute its result, whose own types hold no heap reference (numbers, logicals, dates) or
+  are a single type (a string concatenation: a constant tag), and that another operation computes with (an index
+  too) or a branch passes on, ends its block with `subst.check` (its result is not of its own types: only a
+  substituted value can be) and a `cond_br` to a block that takes the value with `subst.value` and enters a generic
+  copy of the function right after the copy of the operation. The copy is made once per function, of at most 500
+  instructions (a larger one doubles code that LLVM unrolls and splits again), with at most 16 checks, those of the
+  most nested loops (`loopDepths` in `Analysis`); not in a function with unwind blocks, which take no parameters. The
+  values that reach the copy are joined to its own by block parameters, built on demand from the uses (Braun et
+  al.), and parameters that receive one value only are removed. The copy's operations keep giving any type, so a
+  substituted value of any type runs correctly, while the original code keeps registers and constant type tags. The
+  lowering reads the item's real tag for `subst.check` and weights its branch unlikely; between the operation and
+  `subst.value` the result may sit in a home the collector does not see, which holds while the pending test after
+  the operation (`xb_pending`) never collects (one mutator).
 
 They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
 with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor
@@ -118,7 +134,7 @@ each use of a literal may be its own constant. The lowering then elides copies (
 Still to build for the passes that follow:
 
 - Mutation: moving instructions, splitting blocks, cloning blocks and functions (inlining, unrolling,
-  unswitching).
+  unswitching) as shared utilities; `typed-continuations` splits blocks and copies a function on its own for now.
 - Attributes of external functions in their declarations (pure, no allocation, reads its arguments only), next to
   `FOLD`, so calls such as `Len` can be moved, merged and removed.
 - Cached analyses with invalidation: natural loops and their nesting, post-dominators and dominance frontiers
@@ -146,9 +162,11 @@ LLVM then does instruction selection, register allocation and its own vectorizat
 
 `compiler/src/xir/`: the IR (`IR.h`: functions, blocks, values, instructions, variables), the catalog of operations
 (`Ops.*`: one row per operation with its name and effects: whether it may fail, reads or writes its variable or the
-heap, depends on SET values, runs xBase code, allocates, ends a block, is commutative; `mayFail` and the copy elision
-of the frame plan consult it), `Builder`, `Verifier`, `Printer`, control flow analyses (`Analysis`: reverse
-postorder, dominators and the dominator tree, dominance frontiers, the predecessor terminators of every block,
+heap, depends on SET values, runs xBase code, allocates, ends a block, is commutative, may go on after its error's
+block substituted the result, changes the context's state; `mayFail` and the copy elision of the frame plan consult
+it), `Builder`, `Verifier`, `Printer`, control flow analyses (`Analysis`: reverse
+postorder, dominators and the dominator tree, dominance frontiers, loops and their depths, the predecessor
+terminators of every block,
 removal of unreachable blocks), and the lowering
 from the syntax tree (`Gen*.cpp`). Block names are unique in a function (`while.body.2`).
 `PassManager.*` and `passes/` optimize it (see [Passes](#passes)). `compiler/src/codegen/` lowers xIR to LLVM
@@ -172,7 +190,9 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   declared externals), `send` (a message to the first operand, with the others as arguments), array literals, element
   read and write, codeblock creation with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations
   (`each.in_cell`, `each.enter`, `each.move`, `each.leave`), the `SWITCH` check (whose result is the value the `CASE`s
-  match: a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, and for
+  match: a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `subst.check`
+  and `subst.value` for typed continuations (the verifier keeps the check right after its operation and the value
+  first in the block only the check leads to), and for
   parameter versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a
   call with the function's own arguments, as received).
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,

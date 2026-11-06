@@ -110,6 +110,28 @@ Frontiers dominanceFrontiers(const CFG &cfg) {
   return df;
 }
 
+LoopDepths loopDepths(const CFG &cfg) {
+  std::unordered_map<const BasicBlock *, std::unordered_set<const BasicBlock *>> bodies; // by loop header
+  for (BasicBlock *b : cfg.order())
+    for (size_t k = 0; k < b->numSuccessors(); ++k) {
+      BasicBlock *head = b->successor(k);
+      if (!cfg.dominates(head, b)) continue;
+      std::unordered_set<const BasicBlock *> &body = bodies[head];
+      body.insert(head);
+      std::vector<const BasicBlock *> work{b};
+      while (!work.empty()) {
+        const BasicBlock *x = work.back();
+        work.pop_back();
+        if (!body.insert(x).second) continue;
+        for (const BasicBlock *p : cfg.preds(x)) work.push_back(p);
+      }
+    }
+  LoopDepths depth;
+  for (auto &[head, body] : bodies)
+    for (const BasicBlock *b : body) ++depth[b];
+  return depth;
+}
+
 bool CFG::dominates(const BasicBlock *a, const BasicBlock *b) const {
   uint32_t ia = index_.at(a), ib = index_.at(b);
   return enter_[ia] <= enter_[ib] && leave_[ib] <= leave_[ia];

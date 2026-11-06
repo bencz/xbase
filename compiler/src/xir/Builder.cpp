@@ -141,6 +141,8 @@ Instruction *Builder::paramsRef(std::vector<Var *> params) {
 
 Instruction *Builder::seqCatch() { return make(Op::SeqCatch, Type::Bool); }
 Instruction *Builder::seqValue() { return make(Op::SeqValue, Type::Item); }
+Instruction *Builder::substCheck(Value *checked) { return make(Op::SubstCheck, Type::Bool, {checked}); }
+Instruction *Builder::substValue(Value *checked) { return make(Op::SubstValue, Type::Item, {checked}); }
 
 Instruction *Builder::callForward(Function *callee) {
   Instruction *i = make(Op::CallForward, Type::Item);

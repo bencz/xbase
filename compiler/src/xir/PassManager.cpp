@@ -26,19 +26,35 @@ constexpr Pass kPipeline[] = {
 // something changes, at most this many times.
 constexpr unsigned kMaxRounds = 4;
 
+// Once the pipeline is done, on the code it settled: typed continuations copy
+// the function, and the cleanup passes tidy what the copy joined.
+constexpr Pass kFinal[] = {
+    {"typed-continuations", typedContinuations},
+    {"simplify-cfg", simplifyCFG},
+    {"remove-dead-code", removeDeadCode},
+};
+
 } // namespace
 
 std::string optimize(Module &m) {
   for (auto &f : m.functions) {
-    for (unsigned round = 0; round < kMaxRounds; ++round) {
+    std::string bad;
+    // Runs a pass; true when it changed the function (`bad` reports invalid xIR).
+    auto run = [&](const Pass &p) {
+      if (!p.run(*f)) return false;
+      if (std::string report = verify(m, *f); !report.empty() && bad.empty())
+        bad = std::string("after ") + p.name + ": " + report;
+      return true;
+    };
+    for (unsigned round = 0; round < kMaxRounds && bad.empty(); ++round) {
       bool changed = false;
-      for (const Pass &p : kPipeline) {
-        if (!p.run(*f)) continue;
-        changed = true;
-        if (std::string bad = verify(m, *f); !bad.empty()) return std::string("after ") + p.name + ": " + bad;
-      }
+      for (const Pass &p : kPipeline)
+        if (bad.empty()) changed |= run(p);
       if (!changed) break;
     }
+    for (const Pass &p : kFinal)
+      if (bad.empty()) run(p);
+    if (!bad.empty()) return bad;
   }
   return {};
 }

@@ -186,6 +186,23 @@ private:
       }
       break;
     case Op::SeqCatch: case Op::SeqValue: expect(i, 0, {}); break;
+    case Op::SubstCheck: { // nothing between the operation, its check and the subst.value its branch leads to
+      expect(i, 1, {Type::Item});
+      const auto &insts = i.parent->insts;
+      if (pos == 0 || i.operand(0) != insts[pos - 1].get()) fail("subst.check does not follow its operation");
+      const Instruction *br = pos + 1 < insts.size() ? insts[pos + 1].get() : nullptr;
+      const BasicBlock *to = br && br->op == Op::CondBr && br->operand(0) == &i ? br->targets[0].block : nullptr;
+      if (!to || !br->targets[0].args.empty() || to->insts.empty() || to->insts[0]->op != Op::SubstValue ||
+          to->insts[0]->operand(0) != i.operand(0))
+        fail("subst.check is not followed by the branch to its subst.value");
+      break;
+    }
+    case Op::SubstValue: // first in a block reached only from the operation's check
+      expect(i, 1, {Type::Item});
+      if (pos != 0 || (cfg_.reachable(i.parent) && (cfg_.preds(i.parent).size() != 1 ||
+                                                     cfg_.preds(i.parent)[0] != definingBlock(i.operand(0)))))
+        fail("subst.value is not where the check of its operation leads");
+      break;
     case Op::CallForward:
       expect(i, 0, {});
       if (!i.callee.function || i.callee.function->kind != Function::Kind::Program ||

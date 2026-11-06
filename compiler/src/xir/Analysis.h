@@ -35,6 +35,12 @@ private:
 using Frontiers = std::unordered_map<const BasicBlock *, std::vector<BasicBlock *>>;
 Frontiers dominanceFrontiers(const CFG &cfg);
 
+// The blocks of loops, with the number of loops each is in (1 for the body of
+// an outermost loop): a loop is a block that dominates the source of an edge
+// to it, with the blocks from which that source is reached without passing it.
+using LoopDepths = std::unordered_map<const BasicBlock *, unsigned>;
+LoopDepths loopDepths(const CFG &cfg);
+
 // Removes the blocks the entry cannot reach (code after RETURN, EXIT, LOOP).
 bool removeUnreachableBlocks(Function &f); // true when it removed some
 

@@ -37,6 +37,9 @@ enum class Op : uint8_t {
   CallForward,    // callee -> Item: calls it with this function's own arguments, as received [may fail]
   SeqCatch,       // -> Bool: in an unwind block of BEGIN SEQUENCE, the request is a BREAK alone (then taken)
   SeqValue,       // -> Item: the BREAK value (RECOVER USING), moved out of the context
+  SubstCheck,     // operation -> Bool: right after it, its result is not of the types it gives itself (an error's
+                  // block substituted it)
+  SubstValue,     // operation -> Item: that result, at the start of the block the check leads to
   IntAdd,         // I64, I64 -> I64
   IntSub,         // I64, I64 -> I64
   IntCmp,         // pred; I64, I64 -> Bool
@@ -65,6 +68,8 @@ enum Effect : uint16_t {
   Terminator  = 1u << 9,
   Commutative = 1u << 10, // the two operands may be swapped
   WritesState = 1u << 11, // changes the context's state (the pending requests, the BREAK value)
+  Substitutes = 1u << 12, // may fail with an error whose block substitutes the result: the code goes on after running
+                          // xBase code (other errors unwind, or end the program)
 };
 
 struct OpInfo {

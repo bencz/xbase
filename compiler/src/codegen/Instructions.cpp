@@ -315,6 +315,13 @@ void CodeGen::emit(const xir::Instruction &i) {
     values_[&i] = b_.CreateICmpNE(b_.CreateCall(rtSeqCatch_, {fnCtx_}), ConstantInt::get(i32_, 0));
     break;
   case Op::SeqValue: callItemOp(rtSeqValue_, dest(i), {}); break;
+  case Op::SubstCheck: { // the tag as the item holds it: a substituted value may have any type
+    Value *bit = b_.CreateShl(ConstantInt::get(i32_, 1), itemType(addr(ops[0])));
+    Value *own = ConstantInt::get(i32_, plan_->types().of(ops[0]));
+    values_[&i] = b_.CreateICmpEQ(b_.CreateAnd(bit, own), ConstantInt::get(i32_, 0));
+    break;
+  }
+  case Op::SubstValue: copyItem(dest(i), addr(ops[0])); break;
   case Op::SwitchCheck:
     callItemOp(rtSwitchCheck_, dest(i), {addr(ops[0])});
     checkPending(unwind_);
@@ -338,7 +345,12 @@ void CodeGen::emit(const xir::Instruction &i) {
     BasicBlock *dests[2];
     for (size_t k = 0; k < 2; ++k)
       dests[k] = i.targets[k].args.empty() ? blocks_.at(i.targets[k].block) : newBlock("edge");
-    b_.CreateCondBr(value(ops[0]), dests[0], dests[1]);
+    const auto *cond = ops[0]->kind() == xir::Value::Kind::Instruction ? static_cast<const xir::Instruction *>(ops[0])
+                                                                       : nullptr;
+    if (cond && cond->op == xir::Op::SubstCheck) // a substituted value of another type: rare
+      branchLikely(b_.CreateNot(value(ops[0])), dests[1], dests[0]);
+    else
+      b_.CreateCondBr(value(ops[0]), dests[0], dests[1]);
     for (size_t k = 0; k < 2; ++k) {
       if (i.targets[k].args.empty()) continue;
       b_.SetInsertPoint(dests[k]);

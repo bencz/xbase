@@ -27,6 +27,7 @@ add_executable(xbc
   src/xir/passes/PromoteVariables.cpp
   src/xir/passes/RemoveDeadCode.cpp
   src/xir/passes/SimplifyCFG.cpp
+  src/xir/passes/TypedContinuations.cpp
   src/xir/Printer.cpp
   src/xir/Types.cpp
   src/xir/Verifier.cpp

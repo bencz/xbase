@@ -26,4 +26,10 @@ bool simplifyCFG(Function &f);
 // Effect), and block parameters nothing uses.
 bool removeDeadCode(Function &f);
 
+// Checks the result of an operation whose error may substitute it, where the
+// types it gives itself hold no heap reference: a substituted value of another
+// type continues in a generic copy of the rest of the function
+// (TypedContinuations.cpp).
+bool typedContinuations(Function &f);
+
 } // namespace xb::xir

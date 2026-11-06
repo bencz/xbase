@@ -52,6 +52,8 @@ public:
   Instruction *callForward(Function *callee);
   Instruction *seqCatch();
   Instruction *seqValue();
+  Instruction *substCheck(Value *checked);
+  Instruction *substValue(Value *checked);
   Instruction *forTest(Value *counter, Value *limit, Value *step);
   Instruction *enumLen(Value *coll);
   Instruction *eachInCell(Var *v);

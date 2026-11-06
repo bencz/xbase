@@ -1,6 +1,8 @@
 // Loops whose cold paths leave for a generic copy (see LoopSplit.h).
 #include "codegen/LoopSplit.h"
 
+#include <llvm/Analysis/BlockFrequencyInfo.h>
+#include <llvm/Analysis/BranchProbabilityInfo.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
@@ -130,9 +132,17 @@ constexpr size_t kMaxColdEdges = 64;
 bool splitColdLoopPaths(Function &f) {
   DominatorTree dt(f);
   LoopInfo li(dt);
+  // A loop that itself runs on a cold path (its header less frequent than
+  // 1/64 of the function's entry: the generic copy of typed continuations,
+  // error handling) is not worth its copy.
+  BranchProbabilityInfo bpi(f, li);
+  BlockFrequencyInfo bfi(f, bpi, li);
+  uint64_t entryFreq = bfi.getEntryFreq().getFrequency();
   std::vector<Loop *> loops;
   for (Loop *l : li.getLoopsInPreorder())
-    if (l->isInnermost() && l->isSafeToClone() && !coldEdges(*l).empty()) loops.push_back(l);
+    if (l->isInnermost() && l->isSafeToClone() && !coldEdges(*l).empty() &&
+        bfi.getBlockFreq(l->getHeader()).getFrequency() * 64 >= entryFreq)
+      loops.push_back(l);
   if (loops.empty()) return false;
   // Every candidate is put in shape while the analyses still describe the
   // function; the splits below change it but leave the other candidates' own

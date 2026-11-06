@@ -39,7 +39,10 @@ uint32_t xb_ctx_pending(const xb_ctx *ctx) { return ctx->pending; }
 
 /* Slow path of the pending test in compiled code. A safepoint request only
  * pauses the task (all mutators stopped for a collection); with one mutator
- * thread there is nothing to wait for, so it is simply acknowledged. */
+ * thread there is nothing to wait for, so it is simply acknowledged. Once a
+ * collection can run here, the lowering of typed continuations must change:
+ * a result the error block substituted waits for its check in a home the
+ * collector does not see, across this test (docs/xir.md, Passes). */
 int32_t xb_pending(xb_ctx *ctx) {
   ctx->pending &= ~(uint32_t)XB_PENDING_SAFEPOINT;
   return (ctx->pending & XB_PENDING_UNWIND) != 0;
