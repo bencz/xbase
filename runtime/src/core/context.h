@@ -10,8 +10,8 @@ struct xb_ctx {
   xb_frame *frames;         /* innermost frame of compiled code; frames are GC roots */
   int32_t   set_decimals;   /* SET DECIMALS: compiled code reads it for / and % */
   xb_ctx  *gcNext, *gcPrev; /* registered root sets */
-  xb_item *roots[XB_GC_MAX_ROOTS];
-  unsigned rootLen;
+  xb_item **roots;          /* temporary C roots (xb_gc_root_push) */
+  unsigned rootLen, rootCap;
   /* Later: memvar (PRIVATE) stack, current work area, SETs, ErrorBlock -
    * all per task, so they travel with a Task across threads like .NET's
    * ExecutionContext. */

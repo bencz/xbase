@@ -39,8 +39,6 @@ _Static_assert(sizeof(xb_gc_hdr) - offsetof(xb_gc_hdr, state) == XB_GC_STATE_BAC
 
 static inline xb_gc_hdr *xb_gc_header(const void *obj) { return (xb_gc_hdr *)obj - 1; }
 
-#define XB_GC_MAX_ROOTS 64  /* temporary C roots per context */
-
 /* Items outside frames that stay alive for the whole run (module STATICs). */
 void  xb_gc_add_root(xb_item *items, size_t count); /* may run before the first context */
 
@@ -52,6 +50,8 @@ void  xb_gc_collect(void);                 /* a full collection */
 void  xb_gc_collect_young(void);           /* a young collection */
 void  xb_gc_register(xb_ctx *ctx);
 void  xb_gc_unregister(xb_ctx *ctx);
+/* Temporary C roots of a context, as many as nested C calls need (a vector
+ * that grows; growing it is the only allocation, and never a collection). */
 void  xb_gc_root_push(xb_ctx *ctx, xb_item *it);
 void  xb_gc_root_pop(xb_ctx *ctx, unsigned n);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */

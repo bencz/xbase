@@ -20,6 +20,7 @@ xb_ctx *xb_ctx_new(void) {
 void xb_ctx_free(xb_ctx *ctx) {
   if (!ctx) return;
   xb_gc_unregister(ctx);
+  free(ctx->roots);
   free(ctx->date_format);
   free(ctx);
 }

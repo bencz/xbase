@@ -91,12 +91,18 @@ add_test(NAME pp.sources_pattern
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pp)
 
 # Code generation checks on cross targets: the IR xbc emits for <triple> must
-# match a regular expression (tests/codegen_test.cmake).
+# match a regular expression (tests/codegen_test.cmake). The source is
+# tests/run/funcs.prg, or the run test named by an optional fourth argument.
 function(xb_add_codegen_test name triple regex)
+  set(source funcs)
+  if(ARGC GREATER 3)
+    set(source ${ARGV3})
+  endif()
   add_test(NAME codegen.${name}
     COMMAND ${CMAKE_COMMAND}
       -DXBC=$<TARGET_FILE:xbc>
-      -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/run/funcs.prg
+      -DNAME=${name}
+      -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/run/${source}.prg
       -DTRIPLE=${triple}
       -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}
       "-DREGEX=${regex}"
@@ -107,6 +113,9 @@ endfunction()
 xb_add_codegen_test(s390x_i32_zeroext s390x-linux-gnu "@xb_abi_check\\(i32 zeroext, i32 zeroext,")
 xb_add_codegen_test(riscv64_i32_signext riscv64-linux-gnu "@xb_abi_check\\(i32 signext, i32 signext,")
 xb_add_codegen_test(x86_64_i32_plain x86_64-linux-gnu "@xb_abi_check\\(i32, i32,")
+# Accesses carry their memory class (TBAA): an element store, and the class's
+# type node.
+xb_add_codegen_test(tbaa_heap_items x86_64-linux-gnu "store [^\n]*!tbaa .*!\"heap item\"" aliasing)
 
 # xIR tests: the xIR of tests/xir/<name>.prg (--dump-xir) must equal <name>.xir.
 file(GLOB XB_XIR_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/xir ${CMAKE_CURRENT_SOURCE_DIR}/xir/*.prg)

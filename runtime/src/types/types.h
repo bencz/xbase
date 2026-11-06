@@ -32,6 +32,11 @@ static inline uint8_t *xb_array_cards(const xb_array *a) {
 /* Longest string: its size with the header must not wrap. */
 #define XB_STR_MAX_LEN (SIZE_MAX / 2)
 
+/* The 0-based index of the 1-based position `n` in `a`, or -1 outside it. */
+static inline int64_t xb_array_index(const xb_array *a, int64_t n) {
+  return n >= 1 && (uint64_t)n <= a->len ? n - 1 : -1;
+}
+
 /* Lengths are 64-bit so that a length past XB_ARRAY_MAX_LEN is caught before
  * it is narrowed to size_t (on 32-bit hosts). */
 xb_array *xb_array_alloc(uint64_t len);              /* `len` NIL items */

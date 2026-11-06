@@ -45,6 +45,12 @@ private:
   enum FrameField : unsigned { FramePrev = 0, FrameCount = 1, FrameSlots = 2 };
   enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2, CtxDecimals = 3 };
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
+  // Classes of memory compiled code reaches, which never overlap (TBAA):
+  // items outside the heap (frames, Local and scratch items, STATIC storage,
+  // literals), items in the heap (elements, cells, reference targets), array
+  // headers, codeblocks' cell pointers, the context's head, frame links, and
+  // the collector's state bytes. Unknown memory is not tagged.
+  enum class Mem : uint8_t { Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, Count_ };
 
   // CodeGen.cpp: types, runtime declarations, the module, functions and
   // their frames, item and basic block helpers.
@@ -63,6 +69,14 @@ private:
   unsigned headerShift(ItemField f);
   unsigned valueShift(unsigned bits);
   llvm::Constant *headerWord(uint32_t tag, uint16_t width, uint16_t dec);
+  llvm::Value *heapItem(llvm::Value *addr);
+  Mem itemMemory(llvm::Value *addr);
+  // The alias information of a load or store of memory class `m`.
+  template <class Access> Access *tag(Access *access, Mem m) {
+    if (llvm::MDNode *t = tbaa_[(size_t)m]) access->setMetadata(llvm::LLVMContext::MD_tbaa, t);
+    return access;
+  }
+  llvm::LoadInst *loadFrom(llvm::Type *t, llvm::Value *addr, Mem m, const llvm::Twine &name = "");
   llvm::Value *loadHeader(llvm::Value *item);
   llvm::Value *itemType(llvm::Value *item);
   llvm::Value *typeOf(const xir::Value *v, llvm::Value *item);
@@ -146,6 +160,8 @@ private:
   Diagnostics &diag_;
   llvm::IRBuilder<> b_;
 
+  llvm::MDNode *tbaa_[(size_t)Mem::Count_] = {}; // access tags, by class (none for Unknown)
+
   // types
   llvm::StructType *itemTy_ = nullptr;
   llvm::IntegerType *i8_, *i16_, *i32_, *i64_, *intPtrTy_;
@@ -188,6 +204,7 @@ private:
   std::unordered_map<const xir::Instruction *, llvm::Value *> fusedTruth_; // truth tests a comparison answered
   std::unordered_map<const xir::Value *, llvm::AllocaInst *> locals_;       // Local homes
   std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
+  std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
   std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
 };

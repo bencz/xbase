@@ -52,6 +52,18 @@ void CodeGen::initTypes() {
   initFnTy_ = FunctionType::get(voidTy, {ptrTy_}, false);
   blockTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(ptrTy_, 0)}, "xb_block");
   arrayTy_ = StructType::create(ctx_, {intPtrTy_, intPtrTy_, ptrTy_}, "xb_array"); // size_t is pointer-sized
+  MDBuilder md(ctx_);
+  MDNode *root = md.createTBAARoot("xbase");
+  static const std::pair<Mem, const char *> kMemNames[] = {
+      {Mem::Item, "item"},           {Mem::HeapItem, "heap item"}, {Mem::ArrayHeader, "array header"},
+      {Mem::BlockCells, "block cells"}, {Mem::Ctx, "context"},     {Mem::FrameLink, "frame link"},
+      {Mem::GcState, "gc state"},
+  };
+  static_assert(std::size(kMemNames) + 1 == (size_t)Mem::Count_, "one name per memory class but Unknown");
+  for (auto [m, name] : kMemNames) {
+    MDNode *type = md.createTBAAScalarTypeNode(name, root);
+    tbaa_[(size_t)m] = md.createTBAAStructTagNode(type, type, 0);
+  }
   ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, i32_}, "xb_ctx_head"); // the [ABI] fields of xb_ctx
   nilItem_ = new GlobalVariable(mod_, itemTy_, true, GlobalValue::InternalLinkage, Constant::getNullValue(itemTy_),
                                 "xb.nil");
@@ -183,6 +195,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   fusedTruth_.clear();
   locals_.clear();
   localItems_.clear();
+  heapItems_.clear();
   scratch_.clear();
 
   BasicBlock *entry = BasicBlock::Create(ctx_, "entry", fn_);
@@ -248,16 +261,17 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
   }
   if (nslots > nparams)
     b_.CreateMemSet(slot(nparams), b_.getInt8(0), (uint64_t)(nslots - nparams) * itemSize_, itemAlign_);
-  b_.CreateStore(ConstantInt::get(i32_, nslots), b_.CreateStructGEP(ty, frame, FrameCount));
+  tag(b_.CreateStore(ConstantInt::get(i32_, nslots), b_.CreateStructGEP(ty, frame, FrameCount)), Mem::FrameLink);
   Value *frames = b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames);
-  b_.CreateStore(b_.CreateLoad(ptrTy_, frames, "prev"), b_.CreateStructGEP(ty, frame, FramePrev));
-  b_.CreateStore(frame, frames);
+  tag(b_.CreateStore(loadFrom(ptrTy_, frames, Mem::Ctx, "prev"), b_.CreateStructGEP(ty, frame, FramePrev)),
+      Mem::FrameLink);
+  tag(b_.CreateStore(frame, frames), Mem::Ctx);
   fnFrame_ = frame;
 }
 
 void CodeGen::popFrame() {
-  Value *prev = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(frameType(0), fnFrame_, FramePrev), "prev");
-  b_.CreateStore(prev, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames));
+  Value *prev = loadFrom(ptrTy_, b_.CreateStructGEP(frameType(0), fnFrame_, FramePrev), Mem::FrameLink, "prev");
+  tag(b_.CreateStore(prev, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
 }
 
 // The module's STATICs: a global constructor registers them as GC roots, with
@@ -336,10 +350,42 @@ Constant *CodeGen::headerWord(uint32_t tag, uint16_t width, uint16_t dec) {
   return ConstantInt::get(i64_, w);
 }
 
+// An address of an item in the heap (an element, a cell, a reference's
+// target), for the alias information of the accesses through it. The set is
+// keyed by the address value and lives as long as the function being
+// lowered, during which no instruction is erased: a new value can never take
+// the place of a registered one.
+Value *CodeGen::heapItem(Value *addr) {
+  heapItems_.insert(addr);
+  return addr;
+}
+
+// The memory class of an item address: a heap item, as heapItem marked it
+// (also through field offsets), an item outside the heap (a stack or global
+// item of the module), or unknown (a pointer that may be either, an argument).
+CodeGen::Mem CodeGen::itemMemory(Value *addr) {
+  Value *v = addr;
+  for (;;) {
+    if (heapItems_.count(v)) return Mem::HeapItem;
+    auto *gep = dyn_cast<GEPOperator>(v);
+    if (!gep) break;
+    v = gep->getPointerOperand();
+  }
+  if (isa<AllocaInst>(v)) return Mem::Item;
+  if (auto *g = dyn_cast<GlobalVariable>(v); g && g->hasLocalLinkage()) return Mem::Item;
+  return Mem::Unknown;
+}
+
+LoadInst *CodeGen::loadFrom(Type *t, Value *addr, Mem m, const Twine &name) {
+  return tag(b_.CreateLoad(t, addr, name), m);
+}
+
 // An item's fields are read out of its header word, loaded whole: an item in
 // registers is then one word (no field-sized pieces put back together), and a
 // load is served by the 8-byte store that wrote the header.
-Value *CodeGen::loadHeader(Value *item) { return b_.CreateAlignedLoad(i64_, item, itemAlign_, "header"); }
+Value *CodeGen::loadHeader(Value *item) {
+  return tag(b_.CreateAlignedLoad(i64_, item, itemAlign_, "header"), itemMemory(item));
+}
 
 Value *CodeGen::itemType(Value *item) {
   return b_.CreateTrunc(b_.CreateLShr(loadHeader(item), headerShift(FType)), i32_, "type");
@@ -366,8 +412,9 @@ Value *CodeGen::payloadWord(Value *v) {
 }
 
 void CodeGen::storeWords(Value *dst, Value *header, Value *payload) {
-  b_.CreateAlignedStore(header, dst, itemAlign_);
-  b_.CreateAlignedStore(payload, b_.CreateStructGEP(itemTy_, dst, FValue), itemAlign_);
+  Mem m = itemMemory(dst);
+  tag(b_.CreateAlignedStore(header, dst, itemAlign_), m);
+  tag(b_.CreateAlignedStore(payload, b_.CreateStructGEP(itemTy_, dst, FValue), itemAlign_), m);
 }
 
 // Between items in memory the value word moves as a vector of two 32-bit
@@ -379,8 +426,9 @@ void CodeGen::copyItem(Value *dst, Value *src) {
   if (dst == src) return;
   bool registers = localItems_.count(dst) || localItems_.count(src);
   Type *word = registers ? static_cast<Type *>(i64_) : FixedVectorType::get(i32_, 2);
-  Value *header = b_.CreateAlignedLoad(i64_, src, itemAlign_);
-  Value *payload = b_.CreateAlignedLoad(word, b_.CreateStructGEP(itemTy_, src, FValue), itemAlign_);
+  Mem m = itemMemory(src);
+  Value *header = tag(b_.CreateAlignedLoad(i64_, src, itemAlign_), m);
+  Value *payload = tag(b_.CreateAlignedLoad(word, b_.CreateStructGEP(itemTy_, src, FValue), itemAlign_), m);
   storeWords(dst, header, payload);
 }
 
@@ -396,7 +444,7 @@ void CodeGen::storeLogical(Value *dst, Value *bit) { storeTagged(dst, XB_T_LOGIC
 // One load + one well-predicted branch per fallible call; when something is
 // pending, xb_pending() serves pauses (GC safepoints) and says whether to unwind.
 void CodeGen::checkPending(BasicBlock *unwind) {
-  Value *pending = b_.CreateLoad(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxPending), "pending");
+  Value *pending = loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxPending), Mem::Ctx, "pending");
   Value *isSet = b_.CreateICmpNE(pending, ConstantInt::get(i32_, 0));
   BasicBlock *slow = newBlock("pending");
   BasicBlock *cont = newBlock("ok");

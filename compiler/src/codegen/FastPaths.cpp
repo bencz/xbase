@@ -23,7 +23,9 @@ Value *CodeGen::isInt(Value *item) {
   return b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_INT));
 }
 
-Value *CodeGen::intValue(Value *item) { return b_.CreateLoad(i64_, b_.CreateStructGEP(itemTy_, item, FValue), "int"); }
+Value *CodeGen::intValue(Value *item) {
+  return loadFrom(i64_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), "int");
+}
 
 // A computed integer: no display width or decimals of its own (they come
 // from the value when it is shown), as xb_set_int makes it.
@@ -284,7 +286,7 @@ void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *
                                 b_.CreateSIToFP(b_.CreateSRem(xi, safe), b_.getDoubleTy()));
     r = b_.CreateSelect(bothInts(ta, tb), ir, b_.CreateFRem(fx, fy));
   }
-  Value *dec = b_.CreateTrunc(b_.CreateLoad(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxDecimals)), i16_);
+  Value *dec = b_.CreateTrunc(loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxDecimals), Mem::Ctx), i16_);
   branchLikely(b_.CreateFCmpUNE(fy, ConstantFP::get(b_.getDoubleTy(), 0.0)), done, slow);
   b_.SetInsertPoint(done);
   storeDouble(d, r, dec);
@@ -338,8 +340,9 @@ Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx
   b_.SetInsertPoint(notInt);
   branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
   auto arrayAndLen = [&](Value *&arr) {
-    arr = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(itemTy_, base, FValue), "arr");
-    return b_.CreateZExtOrTrunc(b_.CreateLoad(intPtrTy_, b_.CreateStructGEP(arrayTy_, arr, ArrayLen)), i64_);
+    arr = loadFrom(ptrTy_, b_.CreateStructGEP(itemTy_, base, FValue), itemMemory(base), "arr");
+    return b_.CreateZExtOrTrunc(loadFrom(intPtrTy_, b_.CreateStructGEP(arrayTy_, arr, ArrayLen), Mem::ArrayHeader),
+                                i64_);
   };
   Value *one = ConstantInt::get(i64_, 1);
 
@@ -371,8 +374,8 @@ Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx
   p->addIncoming(dblPos, dblEnd);
   array = arr;
   pos = p;
-  Value *items = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayItems), "items");
-  return b_.CreateInBoundsGEP(itemTy_, items, b_.CreateZExtOrTrunc(pos, intPtrTy_), "elem");
+  Value *items = loadFrom(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayItems), Mem::ArrayHeader, "items");
+  return heapItem(b_.CreateInBoundsGEP(itemTy_, items, b_.CreateZExtOrTrunc(pos, intPtrTy_), "elem"));
 }
 
 void CodeGen::emitIndex(const xir::Instruction &i) {

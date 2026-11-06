@@ -344,8 +344,14 @@ void xb_gc_add_root(xb_item *items, size_t count) {
 }
 
 void xb_gc_root_push(xb_ctx *ctx, xb_item *it) {
-  if (ctx->rootLen == XB_GC_MAX_ROOTS) {
-    xb_gc_fatal("too many temporary GC roots");
+  if (ctx->rootLen == ctx->rootCap) {
+    /* Each root belongs to a C call in progress: the program's stack ends
+     * the nesting long before the vector's size could overflow. */
+    unsigned cap = ctx->rootCap ? ctx->rootCap * 2 : 64;
+    xb_item **roots = cap > ctx->rootCap ? realloc(ctx->roots, (size_t)cap * sizeof *roots) : NULL;
+    if (!roots) xb_gc_fatal("out of memory");
+    ctx->roots = roots;
+    ctx->rootCap = cap;
   }
   ctx->roots[ctx->rootLen++] = it;
 }

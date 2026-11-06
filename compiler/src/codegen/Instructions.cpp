@@ -268,7 +268,8 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     Value *block = b_.CreateCall(rtBlockNew_, {fnCtx_, d, functions_.at(i.blockFn),
                                                ConstantInt::get(i32_, i.captures.size())}, "block");
-    for (uint32_t k = 0; k < cells.size(); ++k) b_.CreateStore(cells[k], capturedCellAddress(block, k));
+    for (uint32_t k = 0; k < cells.size(); ++k)
+      tag(b_.CreateStore(cells[k], capturedCellAddress(block, k)), Mem::BlockCells);
     break;
   }
   case Op::ForTest: emitForTest(i); break;

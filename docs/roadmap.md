@@ -72,10 +72,10 @@ WITH` by name at run time.
 
 ### Runtime library
 
-58 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
+64 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
 
-1. Arrays, strings and numbers: `AScan`, `AEval`, `AIns`, `ADel`, `AFill`, `ACopy`; `PadL`/`PadR`/`PadC`,
-   `Transform`, `SoundEx`, the memo-line functions; `Mod`, `Descend`, `Bin2I` and the other binary conversions.
+1. Strings and numbers: `PadL`/`PadR`/`PadC`, `Transform`, `SoundEx`, the memo-line functions; `Mod`, `Descend`,
+   `Bin2I` and the other binary conversions.
 2. Errors and the call stack (above).
 3. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
    `GetEnv`.
@@ -210,10 +210,11 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
   double index; inline double and mixed `+`, `-`, `*`, `/`, `%` and comparisons; type sets, with values that hold no
   heap pointer kept in registers; parameter versioning). Next, in order:
   1. Loops without slow paths: done at the LLVM level for innermost loops (`codegen/LoopSplit.*`,
-     [compiler.md](compiler.md#object-emission)). Still to do: outer loops; alias information (TBAA: frame items,
-     heap items, array headers and the context are distinct memory), so that loads also move past the stores that
-     remain in a fast loop; typed operations in xIR with sparse conditional propagation over the type sets, so that
-     xIR passes see the fast cases too.
+     [compiler.md](compiler.md#object-emission)), with alias information (TBAA) on the accesses whose memory is known.
+     Still to do: outer loops; loads of array headers moved out of fast loops (they follow a test that can leave the
+     loop: loop rotation or dereferenceability facts); frame slot stores of values only an inline operation uses (they
+     are there for the collector: statepoints); typed operations in xIR with sparse conditional propagation over the
+     type sets, so that xIR passes see the fast cases too.
   2. Value numbering, loop-invariant code motion, range analysis and bounds-check elimination on the typed
      operations.
   3. Runtime functions as xIR operations, inlining of xBase functions, string appends in place, direct calls with

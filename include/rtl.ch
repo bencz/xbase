@@ -22,8 +22,13 @@
 // Arrays
 EXTERN FUNCTION AAdd( aTarget, xValue ) NATIVE RESERVED CHECKED
 EXTERN FUNCTION AClone( aSource ) NATIVE
+EXTERN FUNCTION ACopy( aSource, aTarget, [nStart], [nCount], [nTargetPos] ) NATIVE
+EXTERN FUNCTION ADel( aTarget, [nPosition] ) NATIVE
+EXTERN FUNCTION AEval( aArray, bBlock, [nStart], [nCount] ) NATIVE
 EXTERN FUNCTION AFill( aTarget, [xValue], [nStart], [nCount] ) NATIVE
+EXTERN FUNCTION AIns( aTarget, [nPosition] ) NATIVE
 EXTERN FUNCTION Array( nElements, ... ) NATIVE
+EXTERN FUNCTION AScan( aTarget, xSearch, [nStart], [nCount] ) NATIVE
 EXTERN FUNCTION ASize( aTarget, nLength ) NATIVE
 EXTERN FUNCTION ASort( aTarget, [nStart], [nCount], [bOrder] ) NATIVE
 EXTERN FUNCTION ATail( aArray ) NATIVE

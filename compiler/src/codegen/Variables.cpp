@@ -23,7 +23,7 @@ Value *CodeGen::capturedCellAddress(Value *block, uint32_t index) {
 // The cell of a codeblock's capture. A cell's value is at offset 0, so the
 // cell pointer is the item pointer.
 Value *CodeGen::capturedCell(const xir::Var &v) {
-  return b_.CreateLoad(ptrTy_, capturedCellAddress(fnSelf_, v.index), "cell");
+  return heapItem(loadFrom(ptrTy_, capturedCellAddress(fnSelf_, v.index), Mem::BlockCells, "cell"));
 }
 
 // The variable's own item: its frame slot or STATIC storage (which holds its
@@ -50,7 +50,7 @@ Value *CodeGen::varAddress(const xir::Var &v, xir::Access a, BasicBlock *unwind)
 
 // The element an XB_T_REF item designates.
 Value *CodeGen::refTarget(Value *ref, BasicBlock *unwind) {
-  Value *target = b_.CreateCall(rtRefTarget_, {fnCtx_, ref}, "elem");
+  Value *target = heapItem(b_.CreateCall(rtRefTarget_, {fnCtx_, ref}, "elem"));
   checkPending(unwind);
   return target;
 }
@@ -91,7 +91,7 @@ Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind) {
   b_.CreateCondBr(holdsRef(item), then, join);
   b_.SetInsertPoint(then);
   Value *type = itemType(item);
-  Value *cell = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), "cell");
+  Value *cell = heapItem(loadFrom(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), "cell"));
   Value *inner = b_.CreateSelect(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), cell, item, "inner");
   Value *innerType = itemType(inner);
   BasicBlock *innerFrom = b_.GetInsertBlock();
@@ -126,7 +126,7 @@ void CodeGen::refWritten(Value *item) {
   b_.CreateCall(rtRefWritten_, {item});
   b_.CreateBr(join);
   b_.SetInsertPoint(inCell);
-  Value *cell = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), "cell");
+  Value *cell = heapItem(loadFrom(ptrTy_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), "cell"));
   Value *cellType = itemType(cell);
   BasicBlock *throughCell = beginUnlikely(b_.CreateICmpEQ(cellType, ConstantInt::get(i32_, XB_T_REF)), "elem");
   b_.CreateCall(rtRefWritten_, {cell});
@@ -139,7 +139,7 @@ void CodeGen::refWritten(Value *item) {
 // After a store into a cell: the inline test of xb_gc_write (xbrt.h).
 void CodeGen::cellWritten(Value *cell) {
   Value *back = ConstantInt::getSigned(i64_, -static_cast<int64_t>(XB_GC_STATE_BACK));
-  Value *state = b_.CreateLoad(i8_, b_.CreateGEP(i8_, cell, back), "gc.state");
+  Value *state = loadFrom(i8_, b_.CreateGEP(i8_, cell, back), Mem::GcState, "gc.state");
   Value *bits = b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
   BasicBlock *join = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gc.old");
   b_.CreateCall(rtGcRemember_, {cell});

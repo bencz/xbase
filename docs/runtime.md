@@ -55,7 +55,8 @@ each one, so object pointers are what the rest of the runtime and compiled code 
 - Allocation: objects up to 2048 bytes (header included) come from 64 KB pages of 27 size classes. Every thread has a
   local heap with one page per class and allocates from its free list without locking. Larger objects are allocated
   individually.
-- Roots: the frames and temporary C roots (`xb_gc_root_push`) of every registered context, and global item arrays
+- Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest) of
+  every registered context, and global item arrays
   registered with `xb_gc_add_root` (the modules' `STATIC`s).
 - Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young.
   A young collection marks from the roots and the remembered set, stops at old objects instead of traversing them,
@@ -94,7 +95,7 @@ each one, so object pointers are what the rest of the runtime and compiled code 
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
 - Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, an object above half the address space,
-  memory exhausted), more temporary roots than `XB_GC_MAX_ROOTS`, a lock that cannot be created and an ABI mismatch
+  memory exhausted), a lock that cannot be created and an ABI mismatch
   end the program through `xb_gc_fatal`, the runtime's single fatal exit, with a message on standard error and exit
   code 1.
 - Rules for C code: a collection can run inside any allocation, so every object still needed must be reachable from
@@ -268,6 +269,21 @@ Conventions:
   off otherwise. `__SetCentury( [lOn] )` rewrites that run as `YYYY` or `YY` (or puts it in front when the picture
   has no `Y`) and the picture in upper case. Other values change nothing.
 - `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector).
+- `AScan( a, xSearch, [nStart], [nCount] )` returns the position of the first element of the range equal to `xSearch`
+  (values of one comparable kind, compared like the operators, strings with SET EXACT; two `NIL`s; arrays and blocks
+  never), or for which a block `xSearch( element, position )` returns `.T.`, else 0 (also for anything but an array, and
+  without `xSearch`). `AEval( a, bBlock, [nStart], [nCount] )` calls `bBlock( element, position )` for each element of
+  the range that still exists when its turn comes and returns the array (anything else: `BASE/2017`). In both, and in
+  `ACopy`, `AFill` and `ASort`, `nStart` missing, not a number or 0 is 1, and negative or past the end gives no range
+  (`range_start` in `rtl/arrays.c`); in `AScan`, `AEval` and `ACopy`, `nCount` 0 is nothing and a negative or missing
+  one the rest (`range_count`). The block's arguments are roots, and the array is read again after each call; blocks may
+  run these functions again to any depth.
+- `AIns( a, nPos )` moves the elements from `nPos` one place up, losing the last, and stores `NIL` at `nPos`;
+  `ADel( a, nPos )` moves those after `nPos` one place down and stores `NIL` in the last. Both keep the length, take
+  0 as 1, do nothing outside the array and return it (`NIL` for anything else).
+- `ACopy( aSource, aTarget, [nStart], [nCount], [nTargetPos] )` copies the range into `aTarget` from `nTargetPos`
+  (missing or 0: 1; past the end or negative: the last position), as many elements as fit, and returns `aTarget`
+  (`NIL` unless both are arrays). Every store into an array goes through the write barrier.
 - `AFill( a, xValue, [nStart], [nCount] )` stores `xValue` in `nCount` elements from `nStart` and returns the array;
   `nStart` follows `ASort`'s rule, `nCount` missing or reaching past the end means the rest, and 0 or negative fills
   nothing, as does a missing `xValue`. Anything but an array is an argument error (`BASE/6004`). Each store goes

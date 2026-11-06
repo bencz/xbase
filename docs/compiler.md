@@ -253,6 +253,14 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   type inference finds a single possible type for an operand (`typeOf`), the fast paths take its tag as a constant, and
   LLVM removes the tests and the paths of other types: arithmetic on values known to be doubles is plain floating-point
   code.
+- Alias information (TBAA): every load and store of generated code whose memory is known is tagged with its class,
+  classes that never overlap (`CodeGen::Mem`): items outside the heap (an `alloca` or a global of the module: frames,
+  `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements,
+  cells, reference targets), array headers, codeblocks' cell pointers, the context's head, frame links and the
+  collector's state bytes. An address that may be either kind (a variable reached through a possible reference, an
+  argument such as `argv` or the result pointer) is not tagged. LLVM then knows that a store into an element changes
+  no frame slot and no array header; by itself this changes little in the code today, and it is the ground for moving
+  array headers out of fast loops.
 - Items are stored and copied as two 8-byte words, the header (type, width, decimals; `headerWord`, in the target's byte
   order, as `xb_header_word` in `xbrt.h`) and the value, and fields are read out of the header word (their bit positions
   come from the target's layout, `headerShift`): a load is served by the store that wrote it (store forwarding) only

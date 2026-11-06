@@ -47,9 +47,7 @@ void xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems) {
 
 /* Index of a 1-based numeric position in `a`, or -1. */
 static int64_t position(const xb_array *a, const xb_item *idx) {
-  if (!xb_is_number(idx)) return -1;
-  int64_t i = xb_num_to_i64(idx);
-  return i >= 1 && (uint64_t)i <= a->len ? i - 1 : -1;
+  return xb_is_number(idx) ? xb_array_index(a, xb_num_to_i64(idx)) : -1;
 }
 
 /* The 0-based position base[idx] reads, or -1 after raising the error. */
