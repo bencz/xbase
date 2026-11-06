@@ -7,6 +7,10 @@ namespace xb::xir {
 // The optimization passes on xIR (docs/xir.md, Passes). Each one transforms a
 // function in place and returns whether it changed anything.
 
+// `x := x + y` on a LOCAL only the function sees and that holds strings
+// becomes one `append`, whose string grows in place (AppendInPlace.cpp).
+bool appendInPlace(Function &f);
+
 // mem2reg: LOCALs reached only by direct loads and stores (not shared, not
 // parameters, not FOR EACH variables) become SSA values, with block
 // parameters where their definitions meet; they leave the frame.

@@ -14,6 +14,7 @@ constexpr OpInfo kOps[] = {
     {Op::Load, "load", ReadsVar | FailsByRef | ReadsHeap},
     {Op::Store, "store", WritesVar | FailsByRef | WritesHeap},
     {Op::Barrier, "barrier", WritesHeap},
+    {Op::Append, "append", ReadsVar | WritesVar | WritesHeap | Fails | Substitutes | ReadsState | Allocates},
     {Op::Unary, "unary", Fails | Substitutes},
     {Op::Binary, "binary", Fails | Substitutes | ReadsState | Allocates},
     {Op::Truth, "truth", Fails},

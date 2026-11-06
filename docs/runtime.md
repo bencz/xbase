@@ -31,7 +31,14 @@ typedef struct xb_item {
   and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects, nor are
   the empty string and the 256 strings of one byte (`xb_str_bytes` in `xbrt.h`): `xb_str_new` and `xb_str_concat` return
   those for results of up to one byte (`Chr()`, `SubStr( c, n, 1 )`, ...), so making one allocates nothing, and compiled
-  code takes them from the table too.
+  code takes them from the table too. One exception to immutability is invisible to programs: `xb_op_append( ctx, var, b
+  )`, which compiled code calls for `x := x + y` on a `LOCAL` only its function sees (`append-in-place` in
+  [xir.md](xir.md#passes)), makes a string result with room to grow (twice its length, at least 32 bytes, none past what
+  a GC header can record) and the flag `XB_STR_APPEND`, and while the variable still holds it with the flag, a later
+  append copies the bytes into the room instead of making a new string (`xb_str_room` reads the room from the object's
+  size in its header). Compiled code clears the flag whenever it reads such a variable otherwise, before the value goes
+  anywhere, so a string seen by anything but its variable never changes. Other types are `+`, and the variable changes
+  only when `+` gives a value.
 - Arrays (`xb_array` in `xbrt.h`: `len`, `cap`, `items`; `types/array.c`, functions in `rtl/arrays.c`) are 1-based.
   Their items start in the array's own allocation and move to a separate heap object when the array grows past it.
   Compiled code reads `len` and `items` to access elements in place.

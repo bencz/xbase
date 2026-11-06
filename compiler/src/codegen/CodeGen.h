@@ -50,8 +50,8 @@ private:
   // items outside the heap (frames, Local and scratch items, STATIC storage,
   // literals), items in the heap (elements, cells, reference targets), array
   // headers, codeblocks' cell pointers, the context's head, frame links, the
-  // collector's state bytes, and strings (their lengths and bytes, which
-  // compiled code only reads). Unknown memory is not tagged.
+  // collector's state bytes, and strings (compiled code reads their lengths
+  // and bytes and clears XB_STR_APPEND). Unknown memory is not tagged.
   enum class Mem : uint8_t {
     Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, String, Count_
   };
@@ -145,6 +145,7 @@ private:
   llvm::Value *strLength(llvm::Value *str);
   llvm::Value *strByte(llvm::Value *str, llvm::Value *pos);
   llvm::Value *byteString(llvm::Value *c);
+  void shareString(llvm::Value *item);
   void emitBitOp(xb_bit_op op, llvm::Value *x, llvm::Value *tx, llvm::Value *y, llvm::Value *ty, llvm::Value *d,
                  llvm::function_ref<void()> slow);
   void emitBitOperator(const xir::Instruction &i, const xb_bit_function &f);
@@ -205,7 +206,7 @@ private:
 
   // runtime entry points
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
-  llvm::FunctionCallee rtNeg_, rtNot_, rtBitNot_, rtNumDefaultDec_, rtPending_;
+  llvm::FunctionCallee rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_;
   llvm::FunctionCallee rtSend_, rtSeqCatch_, rtSeqValue_, rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
@@ -237,6 +238,7 @@ private:
   std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
   std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
+  std::unordered_set<const xir::Var *> appendVars_;                       // variables an `append` grows
   std::unordered_set<const xir::Instruction *> fusedCalls_;                // Asc() calls lowered with their SubStr()
   std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
 };

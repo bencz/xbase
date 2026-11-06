@@ -165,4 +165,23 @@ bool removeUnreachableBlocks(Function &f) {
   return true;
 }
 
+std::vector<Var *> directLocals(const Function &f) {
+  std::unordered_map<const Var *, bool> ok;
+  for (auto &v : f.vars)
+    if (v->kind == Var::Kind::Frame && !v->shared && !v->param) ok[v.get()] = true;
+  std::unordered_set<const Var *> used;
+  for (auto &b : f.blocks)
+    for (auto &i : b->insts) {
+      for (const Var *c : i->captures) ok[c] = false;
+      if (!i->var) continue;
+      used.insert(i->var);
+      bool direct = (i->op == Op::Load || i->op == Op::Store) && i->access == Access::Direct;
+      if (!direct) ok[i->var] = false;
+    }
+  std::vector<Var *> out;
+  for (auto &v : f.vars)
+    if (ok[v.get()] && used.count(v.get())) out.push_back(v.get());
+  return out;
+}
+
 } // namespace xb::xir

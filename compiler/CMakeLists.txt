@@ -23,6 +23,7 @@ add_executable(xbc
   src/xir/IR.cpp
   src/xir/Ops.cpp
   src/xir/PassManager.cpp
+  src/xir/passes/AppendInPlace.cpp
   src/xir/passes/FoldConstants.cpp
   src/xir/passes/PromoteVariables.cpp
   src/xir/passes/RemoveDeadCode.cpp

@@ -147,6 +147,10 @@ private:
       needsVar(i);
       expect(i, 0, {});
       break;
+    case Op::Append:
+      if (i.var && (i.var->kind != Var::Kind::Frame || i.access != Access::Direct))
+        fail("append on a variable other than a direct frame LOCAL");
+      [[fallthrough]];
     case Op::Store:
       needsVar(i);
       expect(i, 1, {Type::Item});

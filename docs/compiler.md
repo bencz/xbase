@@ -287,10 +287,10 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   classes that never overlap (`CodeGen::Mem`): items outside the heap (an `alloca` or a global of the module: frames,
   `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements, cells,
   reference targets), array headers, codeblocks' cell pointers, the context's head, frame links, the collector's state
-  bytes and strings (lengths and bytes, which compiled code only reads). An address that may be either kind (a variable
-  reached through a possible reference, an argument such as `argv` or the result pointer) is not tagged. LLVM then knows
-  that a store into an element changes no frame slot and no array header; by itself this changes little in the code
-  today, and it is the ground for moving array headers out of fast loops.
+  bytes and strings (lengths and bytes, which compiled code reads, and the flags, where it clears `XB_STR_APPEND`). An
+  address that may be either kind (a variable reached through a possible reference, an argument such as `argv` or the
+  result pointer) is not tagged. LLVM then knows that a store into an element changes no frame slot and no array header;
+  by itself this changes little in the code today, and it is the ground for moving array headers out of fast loops.
 - Items are stored and copied as two 8-byte words, the header (type, width, decimals; `headerWord`, in the target's byte
   order, as `xb_header_word` in `xbrt.h`) and the value, and fields are read out of the header word (their bit positions
   come from the target's layout, `headerShift`): a load is served by the store that wrote it (store forwarding) only
@@ -323,11 +323,12 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   allow it, with their rules: `Len()` of a string or an array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n,
   1 )` with `n` within `c` (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()` whose argument
   is the `SubStr()` right before it, used nowhere else, reads the byte itself; anything else calls the function, which
-  raises the errors. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call
-  to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another module's function to
-  `xbp_NAME`, one to a function of the module straight to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a
-  `STATIC` function, a codeblock and a module initialization are internal, under names nothing looks up, so modules
-  sharing the object never clash.
+  raises the errors. `append` calls `xb_op_append` on the variable, and every other `load` of a variable an `append`
+  grows clears the string's `XB_STR_APPEND` in place before the value goes on (`shareString`). Calls set the result slot
+  to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME`
+  or `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module
+  straight to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
+  initialization are internal, under names nothing looks up, so modules sharing the object never clash.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`) in the frame. While an xIR instruction is lowered, every call the builder creates is
   marked with the instruction's source line (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is

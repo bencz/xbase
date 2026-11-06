@@ -29,6 +29,24 @@ xb_str *xb_str_alloc(uint64_t newLen) {
   return s;
 }
 
+/* The most room a string can have and still be known: its object's size in
+ * the header must stay below the saturated UINT32_MAX (xb_str_room). */
+#define XB_STR_ROOM_MAX ((uint64_t)UINT32_MAX - 1 - offsetof(xb_str, data) - 1)
+
+xb_str *xb_str_alloc_room(uint64_t len, uint64_t room) {
+  if (room > XB_STR_ROOM_MAX || room > XB_STR_MAX_LEN) room = len; /* room that cannot be had or seen: exact size */
+  xb_str *s = xb_str_alloc(room > len ? room : len);
+  s->len = (size_t)len;
+  s->data[len] = '\0';
+  return s;
+}
+
+size_t xb_str_room(const xb_str *s) {
+  uint32_t size = xb_gc_header(s)->size; /* saturated at UINT32_MAX: no room known */
+  size_t header = offsetof(xb_str, data) + 1;
+  return size == UINT32_MAX || size < header ? s->len : size - header;
+}
+
 xb_str *xb_str_new(const char *p, size_t len) {
   if (len <= 1) return len ? xb_str_byte((unsigned char)p[0]) : xb_str_empty();
   xb_str *s = xb_str_alloc(len);

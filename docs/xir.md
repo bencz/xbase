@@ -97,6 +97,11 @@ manager (`PassManager.*`, `optimize`) runs a table of passes on every function, 
 while something changes (at most four rounds), and verifies the function after every pass that changed it; invalid
 xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
 
+- `append-in-place`, before `promote-variables`: `store x (binary add (load x) y)`, with the load and the add in the
+  store's block, used only there, and no other write of `x` between the load and the store, becomes `append x, y` when
+  `x` is a `LOCAL` only the function sees (`directLocals` in `Analysis`) and holds strings (a string constant is stored
+  into it or appended to it, and no number, logical or date constant is). The variable then stays in the frame, where
+  `xb_op_append` grows its string in place; a numeric accumulator, which promotion keeps in registers, is left alone.
 - `promote-variables` (mem2reg): `LOCAL`s reached only by direct `load` and `store` (not shared, not parameters, not
   `FOR EACH` variables) become SSA values, except in a function with `BEGIN SEQUENCE`. Block parameters go where
   definitions meet, in the iterated dominance frontiers of the blocks that store (the entry defines the variable as
@@ -151,10 +156,9 @@ Planned, in layers, each pass with its own tests:
   date, `NIL`), inline fast paths where a type is proven or likely, unboxed numbers.
 - Loops: loop-invariant code motion, unswitching of type tests, strength reduction, bounds-check elimination for
   loops over arrays (1-based), unrolling and runtime unrolling when trip counts are known.
-- Calls: inlining of xBase functions and of runtime intrinsics (`Len`, `SubStr`, `AScan`, ...), tail recursion
-  elimination, call ordering for argument evaluation.
-- Objects: escape analysis with scalar replacement of arrays and codeblocks that do not escape, regions, in-place
-  append for `s := s + x` on a string nothing else references.
+- Calls: inlining of xBase functions and of more runtime intrinsics (`AScan`, `At`, ...; `Len`, `Asc`, `Chr` and
+  one-byte `SubStr` are done), tail recursion elimination, call ordering for argument evaluation.
+- Objects: escape analysis with scalar replacement of arrays and codeblocks that do not escape, regions.
 
 LLVM then does instruction selection, register allocation and its own vectorization.
 
@@ -191,10 +195,11 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   literals (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its
   captured variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`, `each.move`,
   `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose result is the value the `CASE`s match:
-  a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `subst.check` and
-  `subst.value` for typed continuations (the verifier keeps the check right after its operation and the value first in
-  the block only the check leads to), and for parameter versioning `params.ref` (whether parameters hold references
-  their caller passed) and `call.forward` (a call with the function's own arguments, as received).
+  a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `append` (`var := var +
+  value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right
+  after its operation and the value first in the block only the check leads to), and for parameter versioning
+  `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the function's
+  own arguments, as received).
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `ret`.

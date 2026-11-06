@@ -76,6 +76,7 @@ void CodeGen::initTypes() {
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtBitNot_ = rt("xb_op_bitnot", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtAppend_ = rt("xb_op_append", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
   rtPending_ = rt("xb_pending", i32_, {ptrTy_});
   rtSend_ = rt("xb_op_send", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
@@ -207,6 +208,10 @@ void CodeGen::genFunction(const xir::Function &f) {
   blocks_.clear();
   values_.clear();
   fusedTruth_.clear();
+  appendVars_.clear();
+  for (const auto &xb : f.blocks)
+    for (const auto &ins : xb->insts)
+      if (ins->op == xir::Op::Append) appendVars_.insert(ins->var);
   locals_.clear();
   localItems_.clear();
   heapItems_.clear();

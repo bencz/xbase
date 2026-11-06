@@ -41,6 +41,11 @@ Frontiers dominanceFrontiers(const CFG &cfg);
 using LoopDepths = std::unordered_map<const BasicBlock *, unsigned>;
 LoopDepths loopDepths(const CFG &cfg);
 
+// The LOCALs that are not shared, not parameters, and only loaded and stored
+// directly (a FOR EACH variable is not: it holds the loop's reference): what
+// only the function sees, through its own loads and stores.
+std::vector<Var *> directLocals(const Function &f);
+
 // Removes the blocks the entry cannot reach (code after RETURN, EXIT, LOOP).
 bool removeUnreachableBlocks(Function &f); // true when it removed some
 

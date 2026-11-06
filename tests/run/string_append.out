@@ -1,0 +1,15 @@
+
+grow ABCDEFGHIJ         10
+copies ABCDEFGHIJ ABCDEFGHIJ-1 ABCDEFGHIJ-1-2 ABCDEFGHIJ-1-2-3
+self abababab
+assign inside qz
+returned qz?!
+walked          3 abc...
+error       1081 + st          5 st
+after stu
+substituted SUB
+then SUB!
+large      40001    2449991 B-C--DE- -G--
+block bc bcd
+numbers          8.5
+then ab

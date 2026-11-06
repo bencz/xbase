@@ -196,6 +196,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::Load: {
     Value *p = varAddress(*i.var, i.access, unwind_);
+    if (appendVars_.count(i.var)) shareString(p); // the value leaves the variable: its string stops growing
     const Home &h = plan_->home(&i);
     if (h.kind == Home::Kind::Place && h.place == &i) values_[&i] = p; // the variable's own item serves the use
     else copyItem(addr(&i), p);
@@ -207,6 +208,12 @@ void CodeGen::emit(const xir::Instruction &i) {
       copyItem(varAddress(*i.var, i.access, unwind_), src);
     }
     break;
+  case Op::Append: {
+    Value *src = addr(ops[0]);
+    b_.CreateCall(rtAppend_, {fnCtx_, varAddress(*i.var, i.access, unwind_), src});
+    checkPending(unwind_);
+    break;
+  }
   case Op::Barrier: writeBarrier(*i.var, i.access); break;
   case Op::Unary: {
     if (const xb_bit_function *f = bitOperator(i.unop)) {

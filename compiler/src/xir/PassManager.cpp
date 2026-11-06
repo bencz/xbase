@@ -15,6 +15,7 @@ struct Pass {
 };
 
 constexpr Pass kPipeline[] = {
+    {"append-in-place", appendInPlace}, // before promote-variables, which takes the other LOCALs
     {"promote-variables", promoteVariables},
     {"fold-constants", foldConstants},
     {"simplify-cfg", simplifyCFG},

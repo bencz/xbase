@@ -3,7 +3,8 @@
 // string or an array, Asc() of a string, Chr() of a number and SubStr( c, n, 1 )
 // with n within c (both give the shared one-byte string, xb_str_bytes), and
 // Asc( SubStr( c, n, 1 ) ) right after each other (the byte itself, without a
-// string). Anything else calls the function, which raises the errors.
+// string). Anything else calls the function, which raises the errors. Also
+// shareString, which ends the in-place growth of a string an `append` made.
 #include "codegen/CodeGen.h"
 
 #include "xbrt.h" // type tags, xb_str_bytes
@@ -65,6 +66,24 @@ Value *CodeGen::byteString(Value *c) {
   if (!strBytes_)
     strBytes_ = new GlobalVariable(mod_, table, true, GlobalValue::ExternalLinkage, nullptr, "xb_str_bytes");
   return b_.CreateInBoundsGEP(table, strBytes_, {ConstantInt::get(i64_, 0), c});
+}
+
+// A string an `append` made may grow in place only while its variable is
+// the one holding it: when the item is such a string (XB_STR_APPEND), the
+// flag goes, and the string is immutable from then on.
+void CodeGen::shareString(Value *item) {
+  BasicBlock *str = newBlock("share.str"), *clear = newBlock("share"), *done = newBlock("share.done");
+  b_.CreateCondBr(b_.CreateICmpEQ(itemType(item), ConstantInt::get(i32_, XB_T_STRING)), str, done);
+  b_.SetInsertPoint(str);
+  Value *flagsAt = b_.CreateStructGEP(strType(ArrayType::get(i8_, 0)), itemPointer(item, "str"), StrFlags);
+  Value *flags = loadFrom(i32_, flagsAt, Mem::String, "flags");
+  Value *growing =
+      b_.CreateICmpNE(b_.CreateAnd(flags, ConstantInt::get(i32_, XB_STR_APPEND)), ConstantInt::get(i32_, 0));
+  b_.CreateCondBr(growing, clear, done);
+  b_.SetInsertPoint(clear);
+  tag(b_.CreateStore(b_.CreateAnd(flags, ConstantInt::get(i32_, ~XB_STR_APPEND)), flagsAt), Mem::String);
+  b_.CreateBr(done);
+  b_.SetInsertPoint(done);
 }
 
 bool CodeGen::emitInlineCall(const xir::Instruction &i) {

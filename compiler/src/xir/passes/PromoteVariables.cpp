@@ -14,27 +14,6 @@ namespace xb::xir {
 
 namespace {
 
-// LOCALs that are not shared, not parameters, and only loaded and stored
-// directly (a FOR EACH variable is not: it holds the loop's reference).
-std::vector<Var *> promotable(const Function &f) {
-  std::unordered_map<const Var *, bool> ok;
-  for (auto &v : f.vars)
-    if (v->kind == Var::Kind::Frame && !v->shared && !v->param) ok[v.get()] = true;
-  std::unordered_set<const Var *> used;
-  for (auto &b : f.blocks)
-    for (auto &i : b->insts) {
-      for (const Var *c : i->captures) ok[c] = false;
-      if (!i->var) continue;
-      used.insert(i->var);
-      bool direct = (i->op == Op::Load || i->op == Op::Store) && i->access == Access::Direct;
-      if (!direct) ok[i->var] = false;
-    }
-  std::vector<Var *> out;
-  for (auto &v : f.vars)
-    if (ok[v.get()] && used.count(v.get())) out.push_back(v.get());
-  return out;
-}
-
 class Promoter {
 public:
   Promoter(Function &f, const std::vector<Var *> &vars) : f_(f), cfg_(f), vars_(vars) {
@@ -180,7 +159,7 @@ bool promoteVariables(Function &f) {
   for (auto &b : f.blocks)
     for (auto &i : b->insts)
       if (i->op == Op::SeqCatch) return false;
-  std::vector<Var *> vars = promotable(f);
+  std::vector<Var *> vars = directLocals(f);
   if (vars.empty()) return false;
   Promoter(f, vars).run();
   return true;

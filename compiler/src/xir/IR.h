@@ -184,6 +184,13 @@ private:
   std::vector<Value *> operands_;
 };
 
+// The value as an instruction of operation `op`; null when it is something else.
+inline const Instruction *asInstruction(const Value *v, Op op) {
+  if (v->kind() != Value::Kind::Instruction) return nullptr;
+  const auto *i = static_cast<const Instruction *>(v);
+  return i->op == op ? i : nullptr;
+}
+
 class BasicBlock {
 public:
   BasicBlock(Function *in, std::string label) : parent(in), name(std::move(label)) {}

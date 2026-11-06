@@ -44,6 +44,38 @@ void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   }
 }
 
+void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
+  if (var->type != XB_T_STRING || b->type != XB_T_STRING) {
+    if (var->type == XB_T_STRING && (var->v.s->flags & XB_STR_APPEND))
+      var->v.s->flags &= ~XB_STR_APPEND; /* the error's arguments see it */
+    xb_item sum; /* the variable changes only if the + gives a value: an error that unwinds leaves it */
+    xb_set_nil(&sum);
+    xb_gc_root_push(ctx, &sum);
+    xb_op_add(ctx, &sum, var, b);
+    if (!(ctx->pending && xb_pending(ctx))) *var = sum;
+    xb_gc_root_pop(ctx, 1);
+    return;
+  }
+  xb_str *s = var->v.s;
+  const xb_str *t = b->v.s;
+  if ((s->flags & XB_STR_APPEND) && t->len <= xb_str_room(s) - s->len) {
+    memcpy(s->data + s->len, t->data, t->len);
+    s->len += t->len;
+    s->data[s->len] = '\0';
+    return;
+  }
+  uint64_t len = (uint64_t)s->len + t->len;
+  if (len <= 1) { /* a shared string */
+    xb_set_str(var, xb_str_concat(s, t));
+    return;
+  }
+  xb_str *r = xb_str_alloc_room(len, len < 16 ? 32 : 2 * len); /* doubling: appends cost O(1) amortized */
+  memcpy(r->data, s->data, s->len);
+  memcpy(r->data + s->len, t->data, t->len);
+  r->flags = XB_STR_APPEND;
+  xb_set_str(var, r);
+}
+
 void xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_INT && b->type == XB_T_INT) {
     int64_t v;

@@ -12,6 +12,7 @@ enum class Op : uint8_t {
   Load,           // var, access -> Item
   Store,          // var, access; value
   Barrier,        // var, access: write barrier after a store
+  Append,         // var, access; value: var := var + value, a string growing in place [may fail]
   Unary,          // unop; a -> Item                        [may fail]
   Binary,         // binop; a, b -> Item                    [may fail]
   Truth,          // a -> Bool: .T./.F., anything else fails [may fail]
