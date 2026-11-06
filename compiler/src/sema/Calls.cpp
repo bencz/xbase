@@ -125,6 +125,14 @@ void CallResolver::expr(Expr &e) {
   case ExprKind::ArrayLit:
     for (auto &el : static_cast<ArrayLitExpr &>(e).elems) expr(*el);
     break;
+  case ExprKind::HashLit: {
+    auto &h = static_cast<HashLitExpr &>(e);
+    for (size_t k = 0; k < h.keys.size(); ++k) {
+      expr(*h.keys[k]);
+      expr(*h.values[k]);
+    }
+    break;
+  }
   case ExprKind::Index: {
     auto &ix = static_cast<IndexExpr &>(e);
     expr(*ix.base);

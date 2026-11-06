@@ -7,11 +7,6 @@
 
 #define XB_STR_MAX_WIDTH 90 /* widest field Str() takes from an item */
 
-/* Round() raises the value by one unit in the last place before truncating
- * (Clipper does the same), so that a decimal half stored just below it, like
- * 2.675, still rounds up. Int() truncates the value as it is. */
-#define XB_ROUND_NUDGE (1.0 + DBL_EPSILON)
-
 /* Default field of a number: its own width, or the default for its value. */
 static void item_field(const xb_item *it, int *width, int *dec) {
   if (it->type == XB_T_INT) {
@@ -165,7 +160,10 @@ void xbf_ABS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* Round( n, nDec ): half away from zero; a negative nDec rounds to tens,
  * hundreds, ... The half is added to ten times the scaled value and the sum
- * divided back, which is how Clipper gets its results in the last bit. */
+ * divided back, which is how Clipper gets its results in the last bit, then
+ * raised by about one unit in the last place (times 1 + DBL_EPSILON) before
+ * truncating, so that a decimal half stored just below it, like 2.675, still
+ * rounds up. Int() truncates the value as it is. */
 void xbf_ROUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 2 || !xb_is_number(&argv[0]) || !xb_is_number(&argv[1])) {
     xb_fn_arg_error(ctx, ret, 1094, "ROUND", argc, argv);
@@ -180,7 +178,11 @@ void xbf_ROUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   } else {
     double tenfold = (d >= 0 ? v * p : v / p) * 10.0;
     tenfold += tenfold < 0 ? -5.0 : 5.0;
-    r = trunc(tenfold / 10.0 * XB_ROUND_NUDGE);
+    double back = tenfold / 10.0;
+    /* back * (1 + DBL_EPSILON) rounded once (fma): a unit that computes with
+     * more bits (x87) would round that product twice, and it often falls on
+     * the midpoint between two doubles there */
+    r = trunc(fma(back, DBL_EPSILON, back));
     r = d >= 0 ? r / p : r * p; /* not finite when the scaling overflows, like Clipper */
   }
   if (d <= 0 && xb_dbl_fits_i64(r)) xb_set_int(ret, (int64_t)r);

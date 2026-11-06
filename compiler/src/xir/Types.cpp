@@ -58,7 +58,7 @@ namespace {
 // Whether one operand type pair of `op` gives a result instead of an error
 // (core/ops.c): the comparisons take two numbers, strings, logicals or dates
 // (xb_compare), = <> and == also NIL against anything, == also the same array,
-// block or object type; $ takes strings; the arithmetic follows kBinaryRules.
+// block, object or hash type; $ takes strings, or a key and a hash; the arithmetic follows kBinaryRules.
 bool pairWorks(BinOp op, TypeSet a, TypeSet b) {
   const TypeSet comparable[] = {kNumberTypes, kString, kLogical, kDate};
   auto compares = [&] {
@@ -67,12 +67,13 @@ bool pairWorks(BinOp op, TypeSet a, TypeSet b) {
     return false;
   };
   constexpr TypeSet kNil = typeBit(XB_T_NIL);
-  constexpr TypeSet kIdentity = typeBit(XB_T_ARRAY) | typeBit(XB_T_BLOCK) | typeBit(XB_T_OBJECT);
+  constexpr TypeSet kHash = typeBit(XB_T_HASH);
+  constexpr TypeSet kIdentity = typeBit(XB_T_ARRAY) | typeBit(XB_T_BLOCK) | typeBit(XB_T_OBJECT) | kHash;
   switch (op) {
   case BinOp::Eq: case BinOp::NotEq: return ((a | b) & kNil) || compares();
   case BinOp::ExactEq: return ((a | b) & kNil) || (a == b && (a & kIdentity)) || compares();
   case BinOp::Lt: case BinOp::Le: case BinOp::Gt: case BinOp::Ge: return compares();
-  case BinOp::In: return a == kString && b == kString;
+  case BinOp::In: return (a == kString && b == kString) || (b == kHash && (a & (kString | kNumberTypes | kDate)));
   default:
     for (const BinaryRule &rule : kBinaryRules)
       if (rule.op == op && (a & rule.a) && (b & rule.b)) return true;
@@ -174,6 +175,7 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   }
   case Op::FromBool: return {kLogical, false};
   case Op::ArrayLit: return {typeBit(XB_T_ARRAY), false};
+  case Op::HashLit: return {typeBit(XB_T_HASH), false};
   case Op::MakeBlock: return {typeBit(XB_T_BLOCK), false};
   default: return {kAnyType, false}; // read from memory, or made by the runtime
   }

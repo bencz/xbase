@@ -1,0 +1,53 @@
+
+H          4          1 three three x .F. .T. H
+         1 upper leap          6 .T. .F. .T. .T.
+.T. .F.
+ C:b C:a N:3 N:1.5 C:A D:20240229
+JOAO A        123
+         2          5 y          3
+       133          3          6        200
+S          9
+         3 deep
+total         54
+         2         26          1
+MARIA
+MARIA A          0
+ANA B          5
+.F. .T. .T. .T. .F.
+.T.
+.T. .F. .T. .T.
+.T.
+        20 def         10 .T. .F.
+.T.          4          3          0 y         40
+        44         44 x         10
+         3          0          2          4
+.T.          4 .T.          3 z         30
+.T.          2 z z=30@1 w=44@2
+ C:a C:b C:c
+         0          0
+         0 .F.
+         2          2
+.T.
+         1          1 Abc .F.
+      2300       2300    2956850 k2 k2999 k3000        300
+      3300 k2998          2          0       -300
+ N:3.00 N:1.00 N:6.00 N:4.00 N:2.00
+read C       1132 Bound error array access .F.
+set C ok
+read L       1068 Argument error array access .T.
+set L       1069 Argument error array assign
+read A       1068 Argument error array access .T.
+set A       1069 Argument error array assign
+read U       1068 Argument error array access .T.
+set U       1069 Argument error array assign
+literal          2       1133 Bound error array assign          3 H L N
+hget       1123 Argument error
+fn          2       1187 Bound error          2
+fn          2       1187 Bound error          2
+fn          2       1187 Bound error          2
+fn          2       1131 Bound error          3
+fn          1       1123 Argument error          2
+fn          1       1123 Argument error          2
+hash()          2       1131 Bound error array dimension          3 C
+hash()          2       1133 Bound error array assign          3 N
+substituted         42

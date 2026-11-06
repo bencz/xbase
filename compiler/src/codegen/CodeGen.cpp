@@ -80,6 +80,8 @@ void CodeGen::initTypes() {
   rtSend_ = rt("xb_op_send", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
   rtSeqCatch_ = rt("xb_seq_catch", i32_, {ptrTy_});
   rtSeqValue_ = rt("xb_seq_value", voidTy, {ptrTy_, ptrTy_});
+  rtHashNew_ = rt("xb_hash_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtEachKey_ = rt("xb_each_key", voidTy, {ptrTy_, ptrTy_, ptrTy_, i64_});
   rtArrayNew_ = rt("xb_array_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtIndex_ = rt("xb_op_index", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});

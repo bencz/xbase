@@ -19,7 +19,8 @@ xb_str *xb_item_display(const xb_ctx *ctx, const xb_item *it) {
     }
     case XB_T_ARRAY:
     case XB_T_BLOCK:
-    case XB_T_OBJECT: /* shown as nothing, as in Clipper */
+    case XB_T_OBJECT:
+    case XB_T_HASH: /* shown as nothing, as in Clipper */
       return xb_str_empty();
     default:
       return xb_str_new("<?>", 3);

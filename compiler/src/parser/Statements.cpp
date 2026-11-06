@@ -261,17 +261,32 @@ StmtPtr Parser::parseForEach() {
   auto st = std::make_unique<ForEachStmt>(openLoc);
   advance(); // FOR
   advance(); // EACH
-  do {
+  bool ok = true;
+  auto loopVar = [&] {
     if (!at(Tok::Ident)) {
       expect(Tok::Ident, "loop variable");
-      skipToEndOfStmt();
-      return nullptr;
+      ok = false;
+      return;
     }
     st->vars.push_back(std::make_unique<VarExpr>(cur().loc, cur().upper));
     advance();
-  } while (accept(Tok::Comma));
-  bool hasIn = atKw("IN");
-  if (hasIn) {
+  };
+  loopVar();
+  if (ok && accept(Tok::FatArrow)) { // FOR EACH k => v: the first is the key
+    st->key = std::move(st->vars.back());
+    st->vars.clear();
+    loopVar();
+    const auto &key = static_cast<const VarExpr &>(*st->key);
+    if (ok && key.name == static_cast<const VarExpr &>(*st->vars[0]).name)
+      diag_.error(key.loc, "FOR EACH k => v needs two different variables");
+    if (ok && at(Tok::Comma)) {
+      diag_.error(cur().loc, "FOR EACH k => v walks one collection");
+      ok = false;
+    }
+  } else {
+    while (ok && accept(Tok::Comma)) loopVar();
+  }
+  if (ok && atKw("IN")) {
     advance();
     do {
       st->collections.push_back(parseExpr());
@@ -280,17 +295,20 @@ StmtPtr Parser::parseForEach() {
       advance();
       st->descend = true;
     }
-    if (st->vars.size() != st->collections.size())
+    if (st->key && st->collections.size() != 1)
+      diag_.error(openLoc, "FOR EACH k => v walks one collection");
+    else if (st->vars.size() != st->collections.size())
       diag_.error(openLoc, "FOR EACH needs one collection per loop variable");
     endOfStmt();
   } else {
-    diag_.error(cur().loc, "expected IN, " + found());
+    if (ok) diag_.error(cur().loc, "expected IN, " + found());
+    ok = false;
     skipToEndOfStmt();
     endOfStmt();
   }
   st->body = parseBlock({"NEXT", "END"});
   closeBlock({"NEXT", "END"}, "FOR EACH", openLoc);
-  if (!hasIn) return nullptr;
+  if (!ok) return nullptr;
   return st;
 }
 

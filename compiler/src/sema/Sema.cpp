@@ -47,6 +47,12 @@ bool Sema::constantInit(const Expr &e, unsigned blockDepth) const {
     for (auto &el : static_cast<const ArrayLitExpr &>(e).elems)
       if (!constantInit(*el, blockDepth)) return false;
     return true;
+  case ExprKind::HashLit: {
+    auto &h = static_cast<const HashLitExpr &>(e);
+    for (size_t k = 0; k < h.keys.size(); ++k)
+      if (!constantInit(*h.keys[k], blockDepth) || !constantInit(*h.values[k], blockDepth)) return false;
+    return true;
+  }
   case ExprKind::Block:
     for (auto &b : static_cast<const BlockExpr &>(e).body)
       if (!constantInit(*b, blockDepth + 1)) return false;
@@ -183,6 +189,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::ForEach: {
     auto &f = static_cast<ForEachStmt &>(st);
+    if (f.key) expr(*f.key, s);
     for (auto &v : f.vars) expr(*v, s);
     for (auto &c : f.collections) expr(*c, s);
     ++s.loopDepth;
@@ -289,6 +296,14 @@ void Sema::expr(Expr &e, Scope &s) {
   case ExprKind::ArrayLit:
     for (auto &el : static_cast<ArrayLitExpr &>(e).elems) expr(*el, s);
     break;
+  case ExprKind::HashLit: {
+    auto &h = static_cast<HashLitExpr &>(e);
+    for (size_t k = 0; k < h.keys.size(); ++k) {
+      expr(*h.keys[k], s);
+      expr(*h.values[k], s);
+    }
+    break;
+  }
   case ExprKind::Index: {
     auto &ix = static_cast<IndexExpr &>(e);
     expr(*ix.base, s);

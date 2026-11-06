@@ -1,0 +1,40 @@
+
+         3 um ponto zero zero          1          0.0 a=1 b=2 c=3
+mudou antes         10         20         30          3 c b
+b antes 1x 2y 1x 2y 3z
+
+aninhado        407
+cresceu          4          4
+encolheu 124          3
+.T.
+ z=0 b=2 c=3
+ z=0 b=2 c=3 d=4
+ a=1 b=2 d=4
+ a=1 b=2 d=4
+ Nome=4 x=5 y=6
+         4          3 .T.
+ Nome=4 x=5 y=6 NOVO=8
+         8 .F. .T.
+.T. .F.
+heval abd          3
+ 3=c 1=a
+ 3=c 2=b 1=a
+         0          0
+profundo     100000 fundo
+largo 2668667000        100 .T. .F.
+coletor      13334  267033351  20241230
+ref        103          2 b c
+loop ref         13         13          1
+spelling          2          1 .T.
+gone       1132 Bound error          0
+outer q q
+outer key q q
+.T. .T.          0
+front         10      29991      60000          5          0
+walk      15000      15000 k3 k29999      15000
+static          1          1          2          3
+in .T. .T. .F. .F. .T.
+delat          0          2       1187 Bound error HDELAT          3
+delat          4          2       1187 Bound error HDELAT          3
+in error       1109 Argument error
+model      16020         0

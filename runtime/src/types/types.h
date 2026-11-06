@@ -46,12 +46,15 @@ void      xb_array_bound_error(xb_ctx *ctx, const xb_item *base, const xb_item *
 
 /* What an XB_T_REF item designates: element `index` of `coll`. For a string,
  * `value` holds the one-character element (assigning it leaves the string
- * unchanged). `loop`: the reference of a FOR EACH loop, else an element passed
- * by reference (@a[i]). */
+ * unchanged). For a hash, the entry of `key` when it is not NIL (@h[k], the
+ * current element of a loop taken by a block or a reference), else the entry
+ * at position `index` (a FOR EACH loop). `loop`: the reference of a FOR EACH
+ * loop, else an element passed by reference (@a[i]). */
 typedef struct xb_ref {
   xb_item coll;
   int64_t index;
   xb_item value;
+  xb_item key;
   uint32_t loop;
 } xb_ref;
 
@@ -105,6 +108,71 @@ typedef struct xb_object {
 
 xb_object *xb_object_new(const xb_class *cls);
 void       xb_set_object(xb_item *it, xb_object *o);
+
+/* Hashes: keys (strings, numbers, dates) to values, in insertion order. The
+ * entries sit in one array, in the order they came, with a hash of each key;
+ * an index of open addressing (linear probing, at most half full, entry + 1
+ * per slot, 0 when free) finds them. A deleted entry leaves a hole (its key
+ * NIL) until the array is compacted, when it fills up with enough holes.
+ * Positions count live entries: without holes a position is an entry; with
+ * holes a Fenwick tree of the live entries (`tree`, built when a position is
+ * first needed, kept up to date until the next compaction) finds one in
+ * O(log cap). Entries, hashes, index and tree are one XB_GC_HSTORE object,
+ * which the hash's tracing marks; `cap` is a power of two. A number key that
+ * equals an integer is that integer (1 and 1.0 are one key); strings compare
+ * by bytes, or letter case aside. */
+#define XB_HASH_IGNORECASE 0x1u
+#define XB_HASH_MAX_LEN (UINT32_C(1) << 30) /* entries; the index has twice as many slots */
+typedef struct xb_hentry {
+  xb_item key;
+  xb_item value;
+} xb_hentry;
+
+typedef struct xb_hash {
+  uint32_t len;       /* live entries */
+  uint32_t used;      /* entries taken, holes included */
+  uint32_t cap;       /* entries that fit */
+  uint32_t flags;
+  uint32_t imask;     /* index slots - 1 */
+  xb_hentry *entries; /* the store; NULL while cap is 0 */
+  uint32_t *hashes;   /* in the store, after the entries */
+  uint32_t *index;    /* in the store, after the hashes */
+  uint32_t *tree;     /* in the store, after the index; NULL while not in use */
+} xb_hash;
+
+xb_hash *xb_hash_alloc(void); /* empty, without a store */
+void     xb_set_hash(xb_item *it, xb_hash *h);
+/* Whether `key` can be a key (a string, a number or a date). */
+int      xb_hash_key_ok(const xb_item *key);
+/* The entry of `key` (a valid key), or -1. */
+int64_t  xb_hash_find(const xb_hash *h, const xb_item *key);
+/* Sets `key` (a valid key) to `value`, adding it last when new; `h` must be
+ * reachable, `key` and `value` too (rooted). */
+void     xb_hash_set(xb_hash *h, const xb_item *key, const xb_item *value);
+/* Removes the entry of `key`; 0 when there is none. */
+int      xb_hash_del(xb_hash *h, const xb_item *key);
+/* The entry at 1-based position `pos` (1 .. len), through the tree when
+ * there are holes; NULL outside. */
+xb_hentry *xb_hash_at(xb_hash *h, int64_t pos);
+/* The 1-based position of `key` (a valid key), or 0. */
+int64_t  xb_hash_pos(xb_hash *h, const xb_item *key);
+void     xb_hash_del_at(xb_hash *h, int64_t pos);
+void     xb_hash_clear(xb_hash *h);
+/* Moves the live entries over the holes, keeping their order (positions stay
+ * the same), so that position k is entries[k - 1]. */
+void     xb_hash_compact(xb_hash *h);
+/* Room for `n` entries without growing. */
+void     xb_hash_reserve(xb_hash *h, uint32_t n);
+/* Fills the empty `dst` (reachable) with the entries of `src`, in order,
+ * and its flags; the values themselves are not copied. */
+void     xb_hash_copy(xb_hash *dst, const xb_hash *src);
+/* Switches letter case aside (XB_HASH_IGNORECASE) on or off; the index is
+ * rebuilt. Keys that become equal merge into the first of them, which keeps
+ * its spelling and position and takes the value of the last. */
+void     xb_hash_set_flags(xb_hash *h, uint32_t flags);
+/* Rehashes the keys and rebuilds the index after the caller reordered the
+ * entries of a hash without holes (xb_hash_compact first). */
+void     xb_hash_reindex(xb_hash *h);
 
 /* The empty string, never collected. */
 xb_str *xb_str_empty(void);

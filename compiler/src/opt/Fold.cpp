@@ -217,6 +217,14 @@ void Folder::fold(ExprPtr &e) {
   case ExprKind::ArrayLit:
     for (auto &el : static_cast<ArrayLitExpr &>(*e).elems) fold(el);
     break;
+  case ExprKind::HashLit: {
+    auto &h = static_cast<HashLitExpr &>(*e);
+    for (size_t k = 0; k < h.keys.size(); ++k) {
+      fold(h.keys[k]);
+      fold(h.values[k]);
+    }
+    break;
+  }
   case ExprKind::Index: {
     auto &ix = static_cast<IndexExpr &>(*e);
     fold(ix.base);

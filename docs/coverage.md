@@ -149,3 +149,7 @@ at link time, never by an environment variable.
 Functions of xbase's own runtime, beyond Clipper's: **ElapsedMs** (milliseconds since the program started, from a
 monotonic clock, for timing), the bit functions **BitAnd**, **BitOr**, **BitXor**, **BitNor**, **BitNot**,
 **BitShl**, **BitShr** (see [runtime.md](runtime.md#functions)).
+
+Hashes ([runtime.md](runtime.md#hashes)): **Hash**, **HAllocate**, **HCaseMatch**, **HClear**, **HClone**, **HCopy**,
+**HDel**, **HDelAt**, **HEval**, **HFill**, **HGet**, **HGetDef**, **HHasKey**, **HKeyAt**, **HKeys**, **HMerge**,
+**HPairAt**, **HPos**, **HScan**, **HSet**, **HSort**, **HValueAt**, **HValues**.

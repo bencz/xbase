@@ -74,7 +74,9 @@ Constant *CodeGen::stringLiteral(const std::string &s) {
   if (c) return c;
   auto *data = ConstantDataArray::getString(ctx_, s, /*AddNull=*/true);
   StructType *st = strType(data->getType());
-  auto *init = ConstantStruct::get(st, {ConstantInt::get(i32_, XB_STR_STATIC), ConstantInt::get(i32_, 0),
+  // The hash is computed here, as the runtime does (it cannot store it in a constant).
+  auto *init = ConstantStruct::get(st, {ConstantInt::get(i32_, XB_STR_STATIC),
+                                        ConstantInt::get(i32_, xb_hash_bytes(s.data(), s.size())),
                                         ConstantInt::get(intPtrTy_, s.size()), data});
   auto *str = new GlobalVariable(mod_, st, true, GlobalValue::PrivateLinkage, init, ".xb.str");
   str->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);

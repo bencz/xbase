@@ -12,7 +12,9 @@ namespace {
 
 bool isItemResult(const Value *v) { return v->kind() == Value::Kind::Instruction && v->type() == Type::Item; }
 
-bool isGroupUser(const Instruction &i) { return i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit; }
+bool isGroupUser(const Instruction &i) {
+  return i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit || i.op == Op::HashLit;
+}
 
 } // namespace
 

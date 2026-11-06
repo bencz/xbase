@@ -95,8 +95,9 @@ some of its own. Their names and syntax are xbase's own: other dialects' library
 function names below are proposals, settled when each feature is designed in detail. Behavior is checked against the
 reference implementation where it has the feature.
 
-Already done: `FOR EACH`, `SWITCH`, `++`/`--` and the compound assignments, references to array elements (`@a[i]`),
-the bit functions, `ElapsedMs()`.
+Already done: `FOR EACH` (also `FOR EACH k => v`), `SWITCH`, `++`/`--` and the compound assignments, references to
+array elements (`@a[i]`), the bit functions, `ElapsedMs()`, hashes (literals, the `H*` functions, see
+[runtime.md](runtime.md#hashes)).
 
 ### Classes
 
@@ -115,15 +116,6 @@ the bit functions, `ElapsedMs()`.
 - Compiled natively: dispatch by interned selector with inline caches, devirtualization when the class is known,
   object layouts from the target `DataLayout` ([xir.md](xir.md#classes)).
 - Reflection with xbase names (for example `ObjIsKindOf( o, "Name" )`, `ObjHasVar( o, "name" )`; `ClassName` exists).
-
-### Hashes
-
-- Literals `{ "a" => 1, "b" => 2 }` and `{ => }`; `h[ key ]` reads and assigns; keys are strings, numbers, dates or
-  logicals; insertion order is kept; `Len( h )` counts the pairs; `FOR EACH` walks the values in order.
-- Functions: `HSet( h, key, value )`, `HGet( h, key [, default] )`, `HHas( h, key )`, `HDel( h, key )`,
-  `HKeys( h )`, `HValues( h )`, `HEval( h, bBlock )`, `HClone( h )`. Reading a missing key without a default is an
-  error.
-- Runtime: an open-addressing table with insertion order, a GC object like arrays.
 
 ### Exceptions
 
@@ -146,6 +138,15 @@ the bit functions, `ElapsedMs()`.
   strings with escapes.
 - Function references `@Name()` and symbol values; `Do()` and `Eval()` on them.
 - Strings indexed like arrays (`s[ i ]`) and negative indexes counting from the end, if they fit Clipper's rules.
+
+### Enumeration
+
+Collections follow one enumerator model, like the .NET enumerable and enumerator interfaces: `FOR EACH` asks a
+collection for an enumerator and moves it until it ends, and the collection functions walk collections the same way.
+Arrays, strings and hashes keep their inline paths by position (what `FOR EACH` compiles to today); objects take part
+by providing an enumerator (method names settled when classes are designed), and generators produce enumerators.
+Positions, keys and values come from the loop itself (`FOR EACH k => v`), never from messages sent to the loop
+variable.
 
 ### Generators
 
@@ -249,8 +250,8 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 3. Memory variables and Clipper's rule for undeclared names; `Type()`.
 4. The macro operator.
 5. The rest of the array, string and number functions; the call-stack functions.
-6. Hashes; classes (multiple inheritance, scopes); `BEGIN SEQUENCE WITH`, `ALWAYS`, `TRY`/`CATCH`/`FINALLY`;
-   `WITH OBJECT`, extended codeblocks, variadic functions.
+6. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
+   `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks, variadic functions.
 7. Files and directories; the terminal layer; GET/READ and TBrowse.
 8. The RDD layer.
 9. Generators, async/await and threads, sockets and the other libraries.

@@ -116,6 +116,12 @@ xb_add_codegen_test(x86_64_i32_plain x86_64-linux-gnu "@xb_abi_check\\(i32, i32,
 # Accesses carry their memory class (TBAA): an element store, and the class's
 # type node.
 xb_add_codegen_test(tbaa_heap_items x86_64-linux-gnu "store [^\n]*!tbaa .*!\"heap item\"" aliasing)
+# String literals carry the hash of their bytes, the same value on every
+# target (the runtime computes it alike for other strings), in the header laid
+# out for the target.
+xb_add_codegen_test(x86_64_string_hash x86_64-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
+xb_add_codegen_test(s390x_string_hash s390x-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
+xb_add_codegen_test(ppc32_string_hash powerpc-linux-gnu "i32 239963683, i32 7, \\[8 x i8\\] c\"cliente" hashes)
 
 # xIR tests: the xIR of tests/xir/<name>.prg (--dump-xir) must equal <name>.xir.
 file(GLOB XB_XIR_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/xir ${CMAKE_CURRENT_SOURCE_DIR}/xir/*.prg)

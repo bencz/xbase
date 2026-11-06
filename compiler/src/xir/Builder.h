@@ -49,6 +49,7 @@ public:
   Instruction *call(Callee c, const std::vector<Value *> &args);
   Instruction *send(std::string message, Value *object, const std::vector<Value *> &args);
   Instruction *arrayLit(const std::vector<Value *> &elems);
+  Instruction *hashLit(const std::vector<Value *> &pairs);
   Instruction *index(Value *base, Value *idx);
   Instruction *indexSet(Value *base, Value *idx, Value *value);
   Instruction *makeBlock(Function *blockFn, std::vector<Var *> captures);
@@ -64,6 +65,7 @@ public:
   Instruction *eachEnter(Var *v, Value *inCell, Value *coll);
   Instruction *eachMove(Var *v, Value *inCell, Value *idx);
   Instruction *eachLeave(Var *v, Value *inCell, Value *saved);
+  Instruction *eachKey(Value *coll, Value *idx);
   Instruction *refVar(Var *v);
   Instruction *refIndex(Value *base, Value *idx);
   Instruction *switchCheck(Value *v);

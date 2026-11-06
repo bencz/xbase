@@ -19,6 +19,7 @@ enum class Op : uint8_t {
   Call,           // callee; args... -> Item                [may fail]
   Send,           // message; object, args... -> Item       [may fail]
   ArrayLit,       // elems... -> Item
+  HashLit,        // key, value, key, value... -> Item       [may fail]
   Index,          // base, index -> Item                    [may fail]
   IndexSet,       // base, index, value                     [may fail]
   MakeBlock,      // block function, captured vars (moved into cells) -> Item
@@ -29,6 +30,7 @@ enum class Op : uint8_t {
   EachEnter,      // var; Bool in_cell, collection -> Item: saves the variable, installs the loop's reference
   EachMove,       // var; Bool in_cell, I64 index: the loop's reference at an element         [may fail]
   EachLeave,      // var; Bool in_cell, saved value: restores the variable
+  EachKey,        // collection, I64 index -> Item: the key of a hash's entry, else the index      [may fail]
   RefVar,         // var -> Item: a reference to the variable, for an argument passed by reference
   RefIndex,       // base, index -> Item: a reference to an element (an argument @a[i]) [may fail]
   SwitchCheck,    // value -> Item: the value the CASEs match [may fail]

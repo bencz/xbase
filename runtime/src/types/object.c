@@ -25,6 +25,7 @@ void xb_set_object(xb_item *it, xb_object *o) { xb_set_ptr(it, XB_T_OBJECT, o); 
 static const char *const type_class_names[XB_T_COUNT_] = {
   [XB_T_NIL] = "NIL",      [XB_T_LOGICAL] = "LOGICAL", [XB_T_INT] = "NUMERIC", [XB_T_DOUBLE] = "NUMERIC",
   [XB_T_STRING] = "CHARACTER", [XB_T_ARRAY] = "ARRAY", [XB_T_BLOCK] = "BLOCK",  [XB_T_DATE] = "DATE",
+  [XB_T_HASH] = "HASH",
 };
 
 /* What the call stack shows of a message while its error block runs:

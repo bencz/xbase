@@ -172,7 +172,8 @@ void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 }
 
 void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
-  if ((a->type == XB_T_ARRAY || a->type == XB_T_BLOCK || a->type == XB_T_OBJECT) && a->type == b->type) { /* identity */
+  int identity = a->type == XB_T_ARRAY || a->type == XB_T_BLOCK || a->type == XB_T_OBJECT || a->type == XB_T_HASH;
+  if (identity && a->type == b->type) {
     xb_set_logical(r, a->v.p == b->v.p);
     return;
   }
@@ -199,7 +200,12 @@ XB_REL_OP(xb_op_le, 1074, "<=", c <= 0)
 XB_REL_OP(xb_op_gt, 1075, ">", c > 0)
 XB_REL_OP(xb_op_ge, 1076, ">=", c >= 0)
 
+/* `$`: a substring of a string, or a key of a hash. */
 void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (b->type == XB_T_HASH && xb_hash_key_ok(a)) {
+    xb_set_logical(r, xb_hash_find(b->v.p, a) >= 0);
+    return;
+  }
   if (a->type != XB_T_STRING || b->type != XB_T_STRING) { arg_error2(ctx, r, 1109, "$", a, b); return; }
   const xb_str *x = a->v.s, *y = b->v.s;
   int found = 0;

@@ -242,6 +242,12 @@ void CodeGen::emit(const xir::Instruction &i) {
     checkPending(unwind_);
     break;
   }
+  case Op::HashLit: {
+    Value *pairs = operandGroup(i);
+    b_.CreateCall(rtHashNew_, {fnCtx_, dest(i), ConstantInt::get(i32_, ops.size() / 2), pairs});
+    checkPending(unwind_);
+    break;
+  }
   case Op::ArrayLit: {
     Value *elems = operandGroup(i);
     b_.CreateCall(rtArrayNew_, {fnCtx_, dest(i), ConstantInt::get(i32_, ops.size()), elems});
@@ -307,6 +313,13 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::EachLeave: {
     Value *inCell = b_.CreateZExt(value(ops[0]), i32_);
     b_.CreateCall(rtEachLeave_, {rawAddress(*i.var), inCell, callArg(addr(ops[1]), 0)});
+    break;
+  }
+  case Op::EachKey: {
+    CallResult r = callResult(dest(i), 0);
+    b_.CreateCall(rtEachKey_, {fnCtx_, r.arg, callArg(addr(ops[0]), 1), value(ops[1])});
+    callDone(r);
+    checkPending(unwind_);
     break;
   }
   case Op::RefVar: refOf(*i.var, dest(i)); break;

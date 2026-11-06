@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 13u
+#define XB_ABI_VERSION 14u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -45,7 +45,8 @@ typedef enum xb_type {
   XB_T_REF     = 8,   /* v.p: a reference to an element (the variable of a
                          FOR EACH loop, an argument @a[i]) */
   XB_T_OBJECT  = 9,   /* v.p: an object (an instance of a class)   */
-  XB_T_DATE    = 10,  /* v.i: Julian day number, 0 for the empty date  */
+  XB_T_HASH    = 10,  /* v.p: a hash (keys to values, in insertion order) */
+  XB_T_DATE    = 11,  /* v.i: Julian day number, 0 for the empty date  */
   XB_T_COUNT_
 } xb_type;
 
@@ -53,7 +54,7 @@ typedef enum xb_type {
  * unsigned comparison tells whether storing an item can make an old object
  * refer to a young one (the write barrier is needed only then). */
 #define XB_T_HEAP_FIRST XB_T_STRING
-#define XB_T_HEAP_LAST  XB_T_OBJECT
+#define XB_T_HEAP_LAST  XB_T_HASH
 static inline int xb_type_is_heap(uint32_t type) {
   return type - (uint32_t)XB_T_HEAP_FIRST <= (uint32_t)(XB_T_HEAP_LAST - XB_T_HEAP_FIRST);
 }
@@ -220,6 +221,10 @@ int32_t  xb_cond_error(xb_ctx *ctx, const xb_item *a);
 void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems);
 void     xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
 void     xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value);
+/* A hash literal: `n` keys and values alternating in `kv` (2n consecutive
+ * frame slots); a key that is not a string, a number or a date is an error. */
+void     xb_hash_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *kv);
+
 /* Sends `message` (upper-cased; "_NAME" assigns the variable NAME) to argv[0]
  * with the arguments argv[1 .. argc-1]; argc is at least 1. */
 void     xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
@@ -266,6 +271,9 @@ uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var);
 void     xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, const xb_item *coll);
 void     xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx);
 void     xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved);
+/* FOR EACH k => v: the key of the hash entry at `idx` (1-based), the index
+ * itself for an array or a string. */
+void     xb_each_key(xb_ctx *ctx, xb_item *r, const xb_item *coll, int64_t idx);
 
 /* SWITCH: the value must be an integer or a string (else an error, whose
  * handler may substitute another value); xb_switch_check stores in `r` the
@@ -384,6 +392,46 @@ static inline void xb_gc_write(void *obj) {
 /* Whether a double converts to int64_t without overflow (false for NaN and
  * infinities). 2^63 is exact in a double; INT64_MAX is not. */
 static inline int xb_dbl_fits_i64(double d) { return d >= -9223372036854775808.0 && d < 9223372036854775808.0; }
+
+/* ASCII letter case: other bytes pass unchanged (keywords, letter case aside
+ * in hash keys; the compiler hashes literal keys with the same rule). */
+static inline char xb_ascii_upper(char c) { return (char)(c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c); }
+static inline char xb_ascii_lower(char c) { return (char)(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c); }
+
+/* [ABI] Hashing (hash keys). xb_hash_mix64 scrambles 64 bits (the finalizer
+ * of MurmurHash3). xb_hash_bytes is the hash of a string's bytes, read in a
+ * fixed byte order so that every target computes the same value: the
+ * compiler stores it in the `hash` field of the strings it emits, the
+ * runtime computes it on demand for the others. It is never 0, which marks
+ * a hash not computed yet. xb_hash_bytes_as hashes the bytes as given, or
+ * with ASCII letters upper-cased (`upper`: keys compared letter case aside). */
+static inline uint64_t xb_hash_mix64(uint64_t x) {
+  x ^= x >> 33;
+  x *= UINT64_C(0xff51afd7ed558ccd);
+  x ^= x >> 33;
+  x *= UINT64_C(0xc4ceb9fe1a85ec53);
+  x ^= x >> 33;
+  return x;
+}
+static inline uint32_t xb_hash_bytes_as(const char *p, size_t n, int upper) {
+  uint64_t h = UINT64_C(0x9e3779b97f4a7c15) ^ (uint64_t)n;
+  while (n > 0) {
+    size_t take = n < 8 ? n : 8;
+    uint64_t w = 0;
+    for (size_t i = 0; i < take; ++i) {
+      unsigned char c = (unsigned char)(upper ? xb_ascii_upper(p[i]) : p[i]);
+      w |= (uint64_t)c << (8 * i);
+    }
+    h = (h ^ (w * UINT64_C(0x87c37b91114253d5))) * UINT64_C(0x4cf5ad432745937f);
+    h = (h << 31) | (h >> 33);
+    p += take;
+    n -= take;
+  }
+  h = xb_hash_mix64(h);
+  uint32_t r = (uint32_t)(h ^ (h >> 32));
+  return r ? r : 1u;
+}
+static inline uint32_t xb_hash_bytes(const char *p, size_t n) { return xb_hash_bytes_as(p, n, 0); }
 
 /* Default display width of the integer part of a number (Clipper rule):
  * 10 columns, 20 when the value does not fit in 10. Shared by the compiler

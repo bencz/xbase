@@ -34,6 +34,31 @@ EXTERN FUNCTION ASort( aTarget, [nStart], [nCount], [bOrder] ) NATIVE
 EXTERN FUNCTION ATail( aArray ) NATIVE
 EXTERN FUNCTION Len( xValue ) NATIVE RESERVED CHECKED FOLD
 
+// Hashes (xbase names)
+EXTERN FUNCTION HAllocate( hHash, nCount ) NATIVE
+EXTERN FUNCTION HCaseMatch( hHash, [lMatch] ) NATIVE
+EXTERN FUNCTION HClear( hHash ) NATIVE
+EXTERN FUNCTION HClone( hHash ) NATIVE
+EXTERN FUNCTION HCopy( hSource, hDest, [nStart], [nCount] ) NATIVE
+EXTERN FUNCTION HDel( hHash, xKey ) NATIVE
+EXTERN FUNCTION HDelAt( hHash, nPos ) NATIVE
+EXTERN FUNCTION HEval( hHash, bBlock, [nStart], [nCount] ) NATIVE
+EXTERN FUNCTION HFill( hHash, xValue ) NATIVE
+EXTERN FUNCTION HGet( hHash, xKey ) NATIVE
+EXTERN FUNCTION HGetDef( hHash, xKey, [xDefault] ) NATIVE
+EXTERN FUNCTION HHasKey( hHash, xKey ) NATIVE
+EXTERN FUNCTION HKeyAt( hHash, nPos ) NATIVE
+EXTERN FUNCTION HKeys( hHash ) NATIVE
+EXTERN FUNCTION HMerge( hDest, hSource, [bFilter] ) NATIVE
+EXTERN FUNCTION HPairAt( hHash, nPos ) NATIVE
+EXTERN FUNCTION HPos( hHash, xKey ) NATIVE
+EXTERN FUNCTION HScan( hHash, xSearch, [nStart], [nCount] ) NATIVE
+EXTERN FUNCTION HSet( hHash, xKey, xValue ) NATIVE
+EXTERN FUNCTION HSort( hHash, [bOrder] ) NATIVE
+EXTERN FUNCTION HValueAt( hHash, nPos, [xNew] ) NATIVE
+EXTERN FUNCTION HValues( hHash ) NATIVE
+EXTERN FUNCTION Hash( ... ) NATIVE
+
 // Strings
 EXTERN FUNCTION AllTrim( cString ) NATIVE
 EXTERN FUNCTION Asc( cExp ) NATIVE RESERVED CHECKED

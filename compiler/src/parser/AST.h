@@ -25,6 +25,7 @@ enum class ExprKind : uint8_t {
   Index,      // base[ index ]
   Block,      // {| params | exprs }
   Send,       // object:message, object:message( args )
+  HashLit,    // { k => v, ... }, {=>}
 };
 
 enum class BinOp : uint8_t { Add, Sub, Mul, Div, Mod, Pow, Eq, ExactEq, NotEq, Lt, Le, Gt, Ge, In };
@@ -134,6 +135,11 @@ struct IncDecExpr : Expr {
 struct ArrayLitExpr : Expr {
   std::vector<ExprPtr> elems;
   explicit ArrayLitExpr(SourceLoc l) : Expr(ExprKind::ArrayLit, l) {}
+};
+
+struct HashLitExpr : Expr {     // evaluated key, value, key, value, ...
+  std::vector<ExprPtr> keys, values;
+  explicit HashLitExpr(SourceLoc l) : Expr(ExprKind::HashLit, l) {}
 };
 
 struct IndexExpr : Expr { // a[i, j] is Index( Index( a, i ), j )
@@ -252,7 +258,9 @@ struct ForStmt : Stmt {
 
 // FOR EACH v1 [, v2...] IN e1 [, e2...] [DESCEND]: each variable takes the
 // elements of its collection in turn; the loop ends with the shortest one.
+// FOR EACH k => v IN e: k also takes each element's key (a hash's) or position.
 struct ForEachStmt : Stmt {
+  ExprPtr key;                   // a VarExpr, or null
   std::vector<ExprPtr> vars;     // VarExprs
   std::vector<ExprPtr> collections;
   bool descend = false;

@@ -220,8 +220,35 @@ ExprPtr Parser::parseBraced() {
     expect(Tok::RBrace, "'}'");
     return blk;
   }
+  if (accept(Tok::FatArrow)) { // {=>}: an empty hash
+    expect(Tok::RBrace, "'}'");
+    return std::make_unique<HashLitExpr>(loc);
+  }
   auto arr = std::make_unique<ArrayLitExpr>(loc);
-  arr->elems = parseArgs(Tok::RBrace, false);
+  if (at(Tok::Comma) || at(Tok::RBrace) || at(Tok::At)) {
+    arr->elems = parseArgs(Tok::RBrace, false);
+    expect(Tok::RBrace, "'}'");
+    return arr;
+  }
+  ExprPtr first = parseExpr();
+  if (accept(Tok::FatArrow)) { // { k => v, ... }
+    auto hash = std::make_unique<HashLitExpr>(loc);
+    hash->keys.push_back(std::move(first));
+    hash->values.push_back(parseExpr());
+    while (accept(Tok::Comma)) {
+      hash->keys.push_back(parseExpr());
+      expect(Tok::FatArrow, "'=>'");
+      hash->values.push_back(parseExpr());
+    }
+    expect(Tok::RBrace, "'}'");
+    return hash;
+  }
+  arr->elems.push_back(std::move(first));
+  if (accept(Tok::Comma)) { // the rest as arguments: { a, } has a NIL last
+    std::vector<ExprPtr> rest = parseArgs(Tok::RBrace, false);
+    if (rest.empty()) rest.push_back(std::make_unique<NilExpr>(cur().loc));
+    for (ExprPtr &e : rest) arr->elems.push_back(std::move(e));
+  }
   expect(Tok::RBrace, "'}'");
   return arr;
 }

@@ -44,6 +44,15 @@ Value *Generator::genExpr(const Expr &e) {
     for (auto &el : static_cast<const ArrayLitExpr &>(e).elems) elems.push_back(genExpr(*el));
     return b.arrayLit(elems);
   }
+  case ExprKind::HashLit: {
+    auto &h = static_cast<const HashLitExpr &>(e);
+    std::vector<Value *> pairs;
+    for (size_t k = 0; k < h.keys.size(); ++k) {
+      pairs.push_back(genExpr(*h.keys[k]));
+      pairs.push_back(genExpr(*h.values[k]));
+    }
+    return b.hashLit(pairs);
+  }
   case ExprKind::Index: {
     auto &ix = static_cast<const IndexExpr &>(e);
     Value *base = genExpr(*ix.base);

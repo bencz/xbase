@@ -14,6 +14,8 @@ typedef enum xb_gc_kind {
   XB_GC_ITEMS,              /* the items of an array that outgrew its own storage */
   XB_GC_REF,                /* xb_ref, the target of an XB_T_REF item */
   XB_GC_OBJECT,             /* xb_object */
+  XB_GC_HASH,               /* xb_hash */
+  XB_GC_HSTORE,             /* the entries, hashes, index and tree of a hash */
 } xb_gc_kind;
 
 typedef struct xb_gc_hdr {

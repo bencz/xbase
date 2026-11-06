@@ -64,15 +64,45 @@ static int64_t read_position(xb_ctx *ctx, xb_item *r, const xb_item *base, const
   return i;
 }
 
+/* The value of `idx` in the hash `base`, or NULL after raising the error:
+ * for a key that cannot be one, the error of an index that is not a number
+ * (whose handler may substitute the value, into `r` when given). */
+static xb_item *hash_value(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
+  xb_hash *h = base->v.p;
+  if (!xb_hash_key_ok(idx)) {
+    xb_item args[2] = {*base, *idx};
+    xb_error(ctx, r, EG_ARG, 1068, "array access", r ? XB_ERR_SUBSTITUTE : 0, 2, args);
+    return NULL;
+  }
+  int64_t e = xb_hash_find(h, idx);
+  if (e < 0) {
+    xb_array_bound_error(ctx, base, idx);
+    return NULL;
+  }
+  return &h->entries[e].value;
+}
+
 /* Compiled code reads and stores elements in place for an array and a number
  * index within it (compiler/src/codegen/FastPaths.cpp, inlineElement) and calls
  * these for every other case. */
 void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
+  if (base->type == XB_T_HASH) {
+    const xb_item *v = hash_value(ctx, r, base, idx);
+    if (v) *r = *v;
+    return;
+  }
   int64_t i = read_position(ctx, r, base, idx);
   if (i >= 0) *r = ((const xb_array *)base->v.p)->items[i];
 }
 
 void xb_ref_elem(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
+  if (base->type == XB_T_HASH) { /* the reference designates the key's entry */
+    if (!hash_value(ctx, NULL, base, idx)) return;
+    xb_ref_init(r, base, 0, 0); /* `base` and `idx` are frame slots other than `r`'s */
+    xb_hash *h = base->v.p;
+    ((xb_ref *)r->v.p)->key = h->entries[xb_hash_find(h, idx)].key; /* the entry's own key, as it is spelled */
+    return;
+  }
   int64_t i = read_position(ctx, NULL, base, idx);
   if (i >= 0) xb_ref_init(r, base, i + 1, 0);
 }
@@ -83,6 +113,10 @@ void xb_array_bound_error(xb_ctx *ctx, const xb_item *base, const xb_item *idx) 
 }
 
 void xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value) {
+  if (base->type == XB_T_HASH && xb_hash_key_ok(idx)) {
+    xb_hash_set(base->v.p, idx, value);
+    return;
+  }
   if (base->type != XB_T_ARRAY || !xb_is_number(idx)) {
     xb_error(ctx, NULL, EG_ARG, 1069, "array assign", 0, 1, idx);
     return;

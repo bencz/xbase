@@ -168,6 +168,10 @@ private:
       if (i.message.empty()) fail("send without a message");
       break;
     case Op::ArrayLit: allItems(i); break;
+    case Op::HashLit:
+      allItems(i);
+      if (i.operands().size() % 2) fail("hash with a key without a value");
+      break;
     case Op::MakeBlock:
       expect(i, 0, {});
       if (!i.blockFn || i.blockFn->kind != Function::Kind::Block) fail("block without a block function");
@@ -186,6 +190,7 @@ private:
       }
       break;
     case Op::SeqCatch: case Op::SeqValue: expect(i, 0, {}); break;
+    case Op::EachKey: expect(i, 2, {Type::Item, Type::I64}); break;
     case Op::SubstCheck: { // nothing between the operation, its check and the subst.value its branch leads to
       expect(i, 1, {Type::Item});
       const auto &insts = i.parent->insts;

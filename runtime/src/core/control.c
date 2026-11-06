@@ -8,6 +8,7 @@
 int64_t xb_enum_len(xb_ctx *ctx, const xb_item *coll) {
   if (coll->type == XB_T_ARRAY) return (int64_t)((const xb_array *)coll->v.p)->len;
   if (coll->type == XB_T_STRING) return (int64_t)coll->v.s->len;
+  if (coll->type == XB_T_HASH) return (int64_t)((const xb_hash *)coll->v.p)->len;
   xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, coll);
   return -1;
 }
@@ -56,6 +57,21 @@ void xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx) {
 void xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved) {
   *each_base(var, in_cell) = *saved;
   each_written(var, in_cell);
+}
+
+void xb_each_key(xb_ctx *ctx, xb_item *r, const xb_item *coll, int64_t idx) {
+  if (coll->type != XB_T_HASH) {
+    xb_set_int(r, idx);
+    return;
+  }
+  const xb_hentry *e = xb_hash_at(coll->v.p, idx);
+  if (e) {
+    *r = e->key;
+    return;
+  }
+  xb_item i;
+  xb_set_int(&i, idx);
+  xb_array_bound_error(ctx, coll, &i); /* the hash shrank under the loop */
 }
 
 /* SWITCH compares integers and strings only. */

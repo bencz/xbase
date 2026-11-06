@@ -115,6 +115,12 @@ Instruction *Builder::send(std::string message, Value *object, const std::vector
   return i;
 }
 
+Instruction *Builder::hashLit(const std::vector<Value *> &pairs) {
+  Instruction *i = make(Op::HashLit, Type::Item);
+  for (Value *v : pairs) i->addOperand(v);
+  return i;
+}
+
 Instruction *Builder::arrayLit(const std::vector<Value *> &elems) {
   Instruction *i = make(Op::ArrayLit, Type::Item);
   for (Value *e : elems) i->addOperand(e);
@@ -186,6 +192,8 @@ Instruction *Builder::refVar(Var *v) {
   i->var = v;
   return i;
 }
+
+Instruction *Builder::eachKey(Value *coll, Value *idx) { return make(Op::EachKey, Type::Item, {coll, idx}); }
 
 Instruction *Builder::refIndex(Value *base, Value *idx) { return make(Op::RefIndex, Type::Item, {base, idx}); }
 Instruction *Builder::switchCheck(Value *v) { return make(Op::SwitchCheck, Type::Item, {v}); }

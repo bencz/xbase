@@ -314,6 +314,7 @@ void xbf_EMPTY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
         for (size_t i = 0; i < it->v.s->len && empty; ++i) empty = xb_is_blank(it->v.s->data[i]);
         break;
       case XB_T_ARRAY: empty = ((const xb_array *)it->v.p)->len == 0; break;
+      case XB_T_HASH: empty = ((const xb_hash *)it->v.p)->len == 0; break;
       case XB_T_DATE: empty = it->v.i == 0; break;
       default: empty = 0; break;
     }

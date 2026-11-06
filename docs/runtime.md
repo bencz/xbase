@@ -17,21 +17,22 @@ typedef struct xb_item {
 } xb_item;
 ```
 
-- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `OBJECT`, `DATE`, and two kinds the
-  language never shows, which designate another item (see [References](#references)): `CELL`, a variable in a cell,
+- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `OBJECT`, `HASH`, `DATE`, and two kinds
+  the language never shows, which designate another item (see [References](#references)): `CELL`, a variable in a cell,
   and `REF`, an element. An all-zero item is `NIL`.
 - Copying an item is a plain memory copy; there is no reference counting. Items are written as two 8-byte words, the
   header and the value (`xb_put` with `xb_header_word` and the value word in `xbrt.h`), by the runtime's setters
   (`xb_set_int`, ...) and by compiled code alike, never field by field: compiled code reads an item by words, and a
   load is served by the store that wrote it only when that store covers it. The value bytes a member does not use are
   zero.
-- The heap types (`STRING` to `OBJECT`) are one range of tags (`XB_T_HEAP_FIRST`, `XB_T_HEAP_LAST`, `xb_type_is_heap`):
+- The heap types (`STRING` to `HASH`) are one range of tags (`XB_T_HEAP_FIRST`, `XB_T_HEAP_LAST`, `xb_type_is_heap`):
   an item of another type refers to no object, so the collector need not see it.
 - Strings (`xb_str`: flags, hash, length, bytes) are immutable and NUL-terminated, so they can be shared between items
   and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects.
 - Arrays (`xb_array` in `xbrt.h`: `len`, `cap`, `items`; `types/array.c`, functions in `rtl/arrays.c`) are 1-based.
   Their items start in the array's own allocation and move to a separate heap object when the array grows past it.
   Compiled code reads `len` and `items` to access elements in place.
+- Hashes (`xb_hash` in `types/types.h`) map keys to values in insertion order; see [Hashes](#hashes).
 - Codeblocks (`xb_block`: function, captured cells) and cells (`xb_cell`: one item at offset 0) are described in
   [Codeblocks](#codeblocks), objects in [Objects and messages](#objects-and-messages).
 
@@ -62,8 +63,9 @@ non-numeric level is 0, a negative one gives `PROCNAME` and line 0, a level past
 ## Garbage collector
 
 `runtime/src/gc/gc.c` is a precise, non-moving, generational mark and lazy-sweep collector. Strings, arrays, array item
-storage, codeblocks, cells, reference targets and objects (instances of classes) are its objects; an 8-byte header
-(size, kind, state) precedes each one, so object pointers are what the rest of the runtime and compiled code use.
+storage, hashes, hash entry stores, codeblocks, cells, reference targets and objects (instances of classes) are its
+objects; an 8-byte header (size, kind, state) precedes each one, so object pointers are what the rest of the runtime and
+compiled code use.
 
 - Allocation: objects up to 2048 bytes (header included) come from 64 KB pages of 27 size classes. Every thread has a
   local heap with one page per class and allocates from its free list without locking. Larger objects are allocated
@@ -121,6 +123,61 @@ storage, codeblocks, cells, reference targets and objects (instances of classes)
 `__GcCollect( [lYoung] )` runs a full collection (a young one with `.T.`) and returns the number of live objects the
 last full collection found (tests use it).
 
+## Hashes
+
+`types/hash.c` holds the hash itself, `rtl/hashes.c` the `H*` functions, and `rtl/collections.c` what they share with
+the array functions: argument ranges, block calls from C, the order of values, the stable merge sort and deep copies.
+
+- Keys are strings, numbers and dates; values are anything. A number that equals an integer is that integer as a key,
+  so `1`, `1.0` and `-0.0` against `0` are each one key, also in a literal (`{ 1 => "a", 1.0 => "b" }` has one entry,
+  `"b"`); other doubles are equal when their bits are. Strings compare byte for byte, or with ASCII letter case aside
+  when the hash ignores case. A date never equals a number.
+- Layout: one store (`XB_GC_HSTORE`) holds the entries (key and value items) in insertion order, then their 32-bit key
+  hashes, then an index of twice as many slots holding entry numbers plus one (0 is free), then a Fenwick tree with a
+  counter per entry. Lookups probe the index linearly from the key hash; the index is at most half full. Deleting an
+  entry frees its index slot by moving back the slots after it that probing would no longer reach (no tombstones) and
+  leaves a hole (a `NIL` key) in the store. A full store whose holes are a quarter of it is compacted (the live
+  entries move down in order); otherwise it doubles. A new hash has no store; the first holds 8 entries, the largest
+  `XB_HASH_MAX_LEN` (2^30), and a larger one is the fatal error of a size that cannot be allocated.
+- Positions (`xb_hash_at`, `xb_hash_pos`: `HKeyAt`, `HPos`, `FOR EACH`, ...) count live entries in order. Without
+  holes position k is entry k. With holes the Fenwick tree, built over the entries when a position is first needed
+  and updated by every insertion and deletion until the next compaction, finds the entry of a position, or the
+  position of an entry, in O(log n); so deleting from the front, or while walking the hash, stays cheap. The functions
+  that go over every entry (`HKeys`, `HValues`, `HFill`, `HSort`, `HScan` with a value, `HCopy`) compact first
+  (`xb_hash_compact`), which keeps positions as they were.
+- Key hashes: a string's is `xb_hash_bytes` (`xbrt.h`), which reads its bytes one at a time, so every target, little
+  or big endian, 32 or 64 bits, computes the same value. The compiler stores it in the `hash` field of the strings it
+  emits, and the runtime caches it there for heap strings (0 means not computed). A hash that ignores case hashes the
+  upper-cased letters. Numbers and dates are scrambled by `xb_hash_mix64`.
+- `HCaseMatch( h, .F. )` rebuilds the index ignoring case. Keys that then become equal merge into the first of them,
+  which keeps its spelling and position and takes the value of the last, so a key always names one entry.
+- Elements: `h[k]` reads the value; a missing key is `Bound error: array access` (1132), a value that cannot be a key
+  `Argument error: array access` (1068, whose handler may substitute the value). `h[k] := v` replaces the value in place
+  or adds the key last; a value that cannot be a key is `Argument error: array assign` (1069). A reference to `h[k]`
+  (`@h[k]`) designates the entry of key `k` (`xb_ref.key`, the entry's own key as it is spelled): it finds it again at
+  every use, wherever deletions move it, and using it once the key is gone is the bound error (1132). The `FOR EACH`
+  reference designates a position; a codeblock or a reference that takes the loop's current element gets the entry's key
+  instead. A literal `{ k => v, ... }` is built by `xb_hash_new` from frame slots; a value that cannot be a key raises
+  `Bound error: array assign` (1133) with the hash built so far, the key and the value as arguments.
+- The `H*` functions raise `Argument error` (1123) for a first argument that is not a hash or a key that cannot be one,
+  and `Bound error` (1187, named after the function, `HDelAt` included, where the reference implementation gives 1133)
+  for a position outside `1 .. Len( h )`. `Hash( k1, v1, ... )` with a key and no value is `Bound error: array
+  dimension` (1131), and a value that cannot be a key the error of a literal with one (1133). `HCopy( hSource, hDest,
+  [nStart], [nCount] )` takes the source first and returns `hDest`; `HMerge( hDest, hSource, [bFilter] )` takes the
+  destination first. `HAllocate` returns the hash.
+- Walking a hash that changes: every walk reads the entry at a position when its turn comes, so the entries after a
+  deleted one move down a position. `FOR EACH` and `HMerge` check each position against the current length, so they
+  reach the entries a block adds; `HEval` and `HScan` walk the range fixed when they start, and stop at a position
+  that no longer exists. `HSort` sorts positions and puts the entries back only when its block left the number of
+  entries alone (otherwise the hash stays as the block left it). No change made by a block leaves the hash
+  inconsistent.
+- Copies: `HClone` and `AClone` copy the arrays and hashes inside too (`xb_clone_deep`), each once, so shared and
+  cyclic parts stay shared and cyclic in the copy; objects and codeblocks are shared. The copy works through a list
+  of copies to visit, not recursion, so the depth of the structure has no limit. `HCopy` and `HMerge` copy entries
+  only.
+- Collector: a hash (`XB_GC_HASH`) is traced by marking its store and the keys and values of its entries; the store
+  holds no pointers of its own to trace. C code calls `xb_gc_write(hash)` after storing into an entry.
+
 ## Codeblocks
 
 A variable that a codeblock captures, or that is passed by reference, moves into a cell when that first happens: its
@@ -164,7 +221,8 @@ The `Error` class (`core/error.c`, `ErrorNew()`) has the variables `args` (an ar
 ## References
 
 An item that designates another item is an `XB_T_CELL` (a variable in a cell: `v.p` is the `xb_cell`) or an `XB_T_REF`
-(an element: `v.p` is an `xb_ref` holding the collection, the 1-based index, and for a string the current character).
+(an element: `v.p` is an `xb_ref` holding the collection, the 1-based index, for a string the current character, and
+for a hash element taken by `@h[k]` or from a loop the entry's key, see [Hashes](#hashes)).
 The two tags are consecutive, so compiled code tests for both with one unsigned comparison. A cell may hold an
 `XB_T_REF` (a `FOR EACH` variable); an element never holds either.
 
@@ -177,7 +235,7 @@ The two tags are consecutive, so compiled code tests for both with one unsigned 
 - `xb_ref_target` returns the item a reference designates in the end (through a cell, then an element); an element
   is found again at every use, so it follows the array when it grows, and an index outside the array, after the array
   shrank, raises `Bound error: array access` (1132). `xb_ref_written` is the write barrier after a store there: the
-  cell, the array, or the reference itself for a string's character.
+  cell, the array, the hash, or the reference itself for a string's character (or after an error left no element).
 
 ## Calling convention
 
@@ -259,12 +317,12 @@ function, and the program ends quietly with exit code 0.
 | `=` on strings | with `SET EXACT OFF`, compares only the right operand's length (`"abc" = "ab"` is true) |
 | `==` | exact comparison; on strings byte-for-byte |
 | `<` `<=` `>` `>=` `!=` | numbers, strings (same rule as `=`), logicals (`.F.` < `.T.`) |
-| `$` | substring test; an empty left operand is false |
+| `$` | substring test; an empty left operand is false; with a hash on the right, whether the left is one of its keys |
 | `.NOT.` | logicals only |
 
 Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors (whose error block
 may substitute the result, see [Errors and pending requests](#errors-and-pending-requests)). `==` on two arrays,
-two codeblocks or two objects tests identity; other comparisons of them are argument errors.
+two codeblocks, two objects or two hashes tests identity; other comparisons of them are argument errors.
 
 Element access `a[i]` (`xb_op_index`) and assignment (`xb_op_index_set`) raise `Argument error: array access` (1068)
 or `array assign` (1069) when the base is not an array or the index not a number, and `Bound error` (1132/1133)
@@ -273,16 +331,18 @@ outside `1 .. Len( a )`.
 `xb_num_default_dec(ctx, r, value)` makes a double with SET DECIMALS decimals; the compiler uses it for folded
 expressions whose decimals are decided at run time. Items keep 16 bits of SET DECIMALS, as in Clipper.
 
-`FOR EACH` (`core/control.c`) enumerates arrays (their items) and strings (their characters as one-character strings);
-`xb_enum_len` raises `Argument error: array access` (1068) for any other collection. Indexes are 1-based. The loop
-variable holds an `XB_T_REF` item (see [References](#references)); for a string the reference holds a copy of the
-character, so assigning it leaves the string unchanged. The loop works on a base item: the variable's cell when it is
-shared at entry (`xb_each_shared`; a parameter holding an element passed by reference moves into a cell then), else
-the variable's own item. `xb_each_enter` saves the base's value and puts the loop's reference there, `xb_each_move`
-points it at the next element (taking the variable copies the reference, so the base keeps it), and `xb_each_leave`
-restores the saved value; for a `STATIC` the compiled code tests for a cell at each call, since a reference taken
-during the loop designates the `STATIC` itself. `SWITCH` uses `xb_switch_check`, which raises
-`Argument error: SWITCH` (3104) for a value that is not an integer or a string, and `xb_switch_match`.
+`FOR EACH` (`core/control.c`) enumerates arrays (their items), hashes (their values, by position) and strings (their
+characters as one-character strings); `xb_enum_len` raises `Argument error: array access` (1068) for any other
+collection. Indexes are 1-based. The loop variable holds an `XB_T_REF` item (see [References](#references)); for a
+string the reference holds a copy of the character, so assigning it leaves the string unchanged. `xb_each_key` gives the
+key of `FOR EACH k => v`: the entry's key for a hash, the index for an array or a string; a hash that shrank below the
+position raises the bound error. The loop works on a base item: the variable's cell when it is shared at entry
+(`xb_each_shared`; a parameter holding an element passed by reference moves into a cell then), else the variable's own
+item. `xb_each_enter` saves the base's value and puts the loop's reference there, `xb_each_move` points it at the next
+element (taking the variable copies the reference, so the base keeps it), and `xb_each_leave` restores the saved value;
+for a `STATIC` the compiled code tests for a cell at each call, since a reference taken during the loop designates the
+`STATIC` itself. `SWITCH` uses `xb_switch_check`, which raises `Argument error: SWITCH` (3104) for a value that is not
+an integer or a string, and `xb_switch_match`.
 
 `FOR` uses `xb_for_test`: a non-negative step loops while the counter is not greater than the limit, a negative step
 while it is not less; operands that cannot be compared raise the `>` or `<` argument error, a non-numeric step the
@@ -294,7 +354,7 @@ above 2^53.
 ## Display
 
 `xb_item_display` formats values the way `?`/`QOut()` print them: `NIL`, `.T.`/`.F.`, strings as they are, arrays,
-codeblocks and objects as nothing, and
+codeblocks, objects and hashes as nothing, and
 numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`):
 
 - the field has the item's width (or `xb_num_int_width`/`xb_num_dbl_width`) for the sign and integer digits, then a
@@ -326,9 +386,11 @@ Conventions:
   columns), and a `nWidth` below 1 means 10 columns. A field with no room for its decimals (`nDec >= nWidth`, or no
   integer column left) is all `*`. `StrZero` is `Str` with leading blanks as zeros.
 - `Round` rounds half away from zero; a negative number of decimals rounds to tens, hundreds, ... As in Clipper, the
-  half is added to ten times the scaled value and the result raised by one unit in the last place before truncating,
-  so decimal halves stored just below `.5` (`2.675`) round up while `0.4999999999` rounds down. A scaling that
-  overflows gives a non-finite result (shown as stars). `Int` truncates without that adjustment.
+  half is added to ten times the scaled value and the result, divided back, is multiplied by `1 + DBL_EPSILON`
+  (about one unit in the last place) before truncating, so decimal halves stored just below `.5` (`2.675`) round up
+  while `0.4999999999` rounds down. That product is rounded once (`fma`), so a floating-point unit that computes with
+  more bits (x87) gets the same result. A scaling that overflows gives a non-finite result (shown as stars). `Int`
+  truncates without that adjustment.
 - `Sqrt` of a negative number and an `Exp` that overflows give 0; `Log` of a negative number gives minus infinity, like
   `Log( 0 )`.
 - `Replicate` raises `String overflow` (1234) when the result size overflows.
@@ -350,9 +412,9 @@ Conventions:
   without `xSearch`). `AEval( a, bBlock, [nStart], [nCount] )` calls `bBlock( element, position )` for each element of
   the range that still exists when its turn comes and returns the array (anything else: `BASE/2017`). In both, and in
   `ACopy`, `AFill` and `ASort`, `nStart` missing, not a number or 0 is 1, and negative or past the end gives no range
-  (`range_start` in `rtl/arrays.c`); in `AScan`, `AEval` and `ACopy`, `nCount` 0 is nothing and a negative or missing
-  one the rest (`range_count`). The block's arguments are roots, and the array is read again after each call; blocks may
-  run these functions again to any depth.
+  (`xb_range_start` in `rtl/collections.c`); in `AScan`, `AEval` and `ACopy`, `nCount` 0 is nothing and a negative or
+  missing one the rest (`xb_range_count`). The block's arguments are roots, and the array is read again after each call;
+  blocks may run these functions again to any depth.
 - `AIns( a, nPos )` moves the elements from `nPos` one place up, losing the last, and stores `NIL` at `nPos`;
   `ADel( a, nPos )` moves those after `nPos` one place down and stores `NIL` in the last. Both keep the length, take
   0 as 1, do nothing outside the array and return it (`NIL` for anything else).
@@ -363,14 +425,14 @@ Conventions:
   `nStart` follows `ASort`'s rule, `nCount` missing or reaching past the end means the rest, and 0 or negative fills
   nothing, as does a missing `xValue`. Anything but an array is an argument error (`BASE/6004`). Each store goes
   through the write barrier.
-- `ASort( a, [nStart], [nCount], [bOrder] )` sorts in place and returns the array (`NIL` for anything else). `nStart`
-  0, missing or not a number is 1, one past the end or negative sorts nothing (`range_start` in `rtl/arrays.c`, which
-  `AFill` shares); `nCount` missing, 0, negative or reaching past the
-  end means the rest. The sort is stable (a merge sort of positions: equal elements keep their order).
-  `bOrder( x, y )` says whether `x` goes first (a number: whether it is not 0; any other value: yes); without it,
-  values of one kind compare like the operators (strings follow SET EXACT, integers exactly, dates by day, `.F.`
-  before `.T.`) and other pairs by kind: array, block, string, logical, date, number, `NIL`. The block's arguments are
-  kept as roots while it runs, and moving the elements goes through the write barrier.
+- `ASort( a, [nStart], [nCount], [bOrder] )` sorts in place and returns the array (`NIL` for anything else). `nStart` 0,
+  missing or not a number is 1, one past the end or negative sorts nothing (`xb_range_start`, which `AFill` shares);
+  `nCount` missing, 0, negative or reaching past the end means the rest. The sort is stable (a merge sort of positions:
+  equal elements keep their order). `bOrder( x, y )` says whether `x` goes first (a number: whether it is not 0; any
+  other value: yes); without it, values of one kind compare like the operators (strings follow SET EXACT, integers
+  exactly, dates by day, `.F.` before `.T.`) and other pairs by kind: array, object or hash, block, string, logical,
+  date, number, `NIL`. The block's arguments are kept as roots while it runs, and moving the elements goes through the
+  write barrier.
 - The bit functions, xbase's own: `BitAnd`, `BitOr`, `BitXor`, `BitNor` (two numbers), `BitNot` (one), `BitShl` and
   `BitShr` (a number and a shift count) work on the 64-bit two's complement form of integers (`xb_bit_apply` in
   `xbrt.h`): numbers are truncated to integers (saturated; NaN is 0), `BitShr` is a logical shift and a count
@@ -410,8 +472,8 @@ go further.
 Before `main`, the global constructor of every module calls `xb_module_register` (`core/module.c`) with the
 initialization of its `STATIC`s (which become a GC root), its `INIT` and `EXIT` procedures, and its public functions by
 name. These go into the symbol table (`core/symbols.c`): an open-addressing hash of upper-cased names that the runtime's
-own functions join when the program starts (`xb_program_run`), from a table generated from `include/rtl.ch` at build time
-(`runtime/symbols.cmake`, with which parameters take references, read from the declarations by
+own functions join when the program starts (`xb_program_run`), from a table generated from `include/rtl.ch` at build
+time (`runtime/symbols.cmake`, with which parameters take references, read from the declarations by
 `runtime/rtl_declarations.cmake`); a program function hides a runtime function of its name. The table refers to every
 runtime function, so every program links them all in. `Do( cName | bBlock, [args] )` calls a function found there
 (letter case aside; spaces are part of the name, which ends at a NUL) or a codeblock, with its arguments: a reference

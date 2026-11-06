@@ -80,7 +80,8 @@ Statements:
   from one arm into the next until `EXIT`, which leaves the `SWITCH`; `LOOP` continues the enclosing loop.
 - `WHILE ... ENDDO | END`
 - `FOR v := start TO limit [STEP step] ... NEXT | END`; the limit and step are re-evaluated on every iteration
-- `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`
+- `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`, and `FOR EACH k => v IN coll ...` (one
+  collection), whose `k` gets the key of each hash entry or the index of each array element or character
 - `EXIT` (leaves the innermost loop or `SWITCH`), `LOOP`
 - `BEGIN SEQUENCE ... [RECOVER [USING v] ...] END` (`std.ch` makes `END SEQUENCE` and `ENDSEQUENCE` an `END`); a
   `BREAK` in the body, or in what it calls, continues after `RECOVER` (or `END`). `RETURN`, and `EXIT` or `LOOP` for
@@ -97,17 +98,15 @@ Statements:
 
 Expression precedence, lowest first: `:=` and compound assignments (right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`,
 `=` `==` `!=` `<>` `#`, `<` `<=` `>` `>=` `$`, `+` `-`, `*` `/` `%`, `^`/`**`, unary `-` `+`, prefix and postfix
-`++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`) and messages `o:name`, `o:name( args )` (in any
-order: `a[1]:cargo[2]`), primaries (literals, `NIL`, variables, calls,
-`IIF(c, a, b)`/`IF(c, a, b)`, parentheses, expression lists `( a, b, ... )` evaluated in order with the value of the
-last, array literals `{ a, b }`, codeblocks `{| params | expr, ... }`). Empty
-call arguments (`f(a, , b)`) and empty array elements pass `NIL`; a codeblock body has at least one expression. A
-call argument `@name` or `@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is
-an error (references in array literals are not supported yet), and so are function
-references `@name()`.
-Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`) and instance variables (`o:x := v`, a message without
-arguments) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
-declares `a := Array( n1, n2 )`.
+`++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`) and messages `o:name`, `o:name( args )` (in any order:
+`a[1]:cargo[2]`), primaries (literals, `NIL`, variables, calls, `IIF(c, a, b)`/`IF(c, a, b)`, parentheses, expression
+lists `( a, b, ... )` evaluated in order with the value of the last, array literals `{ a, b }`, hash literals `{ k => v,
+... }` and `{=>}`, codeblocks `{| params | expr, ... }`). Empty call arguments (`f(a, , b)`) and empty array elements
+pass `NIL`; a codeblock body has at least one expression. A call argument `@name` or `@name[i]...` passes a variable or
+an element by reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not supported yet),
+and so are function references `@name()`. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`) and instance
+variables (`o:x := v`, a message without arguments) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a :=
+Array( n1, n2 )`.
 
 Nesting is limited, so that a deep source is reported instead of exhausting the compiler's stack: 1024 levels of
 nested expressions (parentheses, calls, arrays, codeblocks, prefix operators; `Parser::kMaxExprNesting`) and 1024 of
@@ -168,11 +167,11 @@ or a reference is taken, at run time.
 
 `STATIC`s get slots in the module's static storage (`Module::statics`, `VarWhere::Static`). File-wide statics are
 visible in every function; a function's statics are visible in that function only. They are never captured: codeblocks
-use the storage directly. A `STATIC` initializer must be a constant after folding: a number, string, logical, `NIL`,
-an array literal of constants, or a codeblock whose variables are its own parameters and `STATIC`s (anything may be
-called inside it). Anything else, a plain variable included, is "illegal initializer for STATIC". A `STATIC` is
-visible in its own initializer, so a codeblock stored in it can call itself; a `LOCAL`'s initializer is resolved
-before the `LOCAL` exists.
+use the storage directly. A `STATIC` initializer must be a constant after folding: a number, string, logical, `NIL`, an
+array or hash literal of constants, or a codeblock whose variables are its own parameters and `STATIC`s (anything may be
+called inside it). Anything else, a plain variable included, is "illegal initializer for STATIC". A `STATIC` is visible
+in its own initializer, so a codeblock stored in it can call itself; a `LOCAL`'s initializer is resolved before the
+`LOCAL` exists.
 
 Sema reports: undeclared variables, duplicate functions, parameters or locals, `EXIT` outside a loop or `SWITCH`, `LOOP`
 outside a loop, a `LOCAL` or `STATIC` that follows an executable statement or appears inside a nested block, a
@@ -237,7 +236,11 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   `LOCAL` or parameter while it holds a loop's reference gets the current element instead of the variable, which
   stays the loop's: later iterations, inner loops on the same variable (here or in a callee) and the restore do not
   change what it designates. A `STATIC` is one variable for everyone: a reference to it designates it, and the loop
-  follows its cell from the moment one is made.
+  follows its cell from the moment one is made. In `FOR EACH k => v`, `k` is an ordinary variable, other than
+  `v` (the parser rejects `FOR EACH x => x`): before each iteration `each.key` stores into it the key of the current
+  hash entry, or the index for an array or a string, so assigning it changes nothing else, and after the loop it
+  keeps the last key stored (the one `EXIT` left). A `k` that is the variable of an enclosing `FOR EACH` receives the
+  keys as any assignment would: in that loop's element.
 - `BEGIN SEQUENCE` gives the blocks of its body an unwind block, the handler: a `BREAK` (pending after an operation
   of the body, or a call) is taken there and `RECOVER` follows, with the `BREAK` value stored in the `USING`
   variable; other requests go on unwinding (see [xir.md](xir.md#control-flow-for-errors-and-exceptions)).
@@ -379,9 +382,10 @@ operand, which keeps its side effects; Harbour drops it.
 ### Literals
 
 Literals are constant globals in the object, so using one costs nothing at run time. A string literal is a static
-`xb_str` (header, bytes, terminating NUL) flagged `XB_STR_STATIC`. An item literal is a structure whose value field has
-the type of the member it represents, padded to the union size; the generator checks that its size and value offset
-match `xb_item` for the target.
+`xb_str` (header, bytes, terminating NUL) flagged `XB_STR_STATIC`, whose `hash` field already holds `xb_hash_bytes` of
+its bytes, so using it as a hash key computes nothing. An item literal is a structure whose value field has the type of
+the member it represents, padded to the union size; the generator checks that its size and value offset match `xb_item`
+for the target.
 
 ### Numeric literals
 
