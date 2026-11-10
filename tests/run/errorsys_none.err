@@ -1,0 +1,3 @@
+Unrecoverable error 9002: No ERRORBLOCK() for error
+Called from SUBSTR(0)
+Called from MAIN(4)

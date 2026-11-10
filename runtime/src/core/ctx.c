@@ -14,7 +14,8 @@ xb_ctx *xb_ctx_new(void) {
   ctx->epoch = 1900;
   ctx->century = 0;
   xb_gc_register(ctx);
-  xb_error_init(ctx);
+  xb_set_nil(&ctx->error_block); /* until ErrorSys() sets one (xb_program_run) */
+  xb_set_nil(&ctx->break_value);
   return ctx;
 }
 

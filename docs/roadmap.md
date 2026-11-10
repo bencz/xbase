@@ -48,13 +48,13 @@ variables.
 ### Errors
 
 Done: objects of runtime classes, messages (`o:x`, `o:x := v`, `o:m( args )`), runtime errors as `Error` objects,
-`ErrorBlock()`, substitution, the default error block, `BREAK`/`Break()`, `BEGIN SEQUENCE` / `RECOVER [USING x]` on
-xIR unwind edges ([runtime.md](runtime.md#errors-and-pending-requests),
+`ErrorBlock()`, substitution, `ErrorSys()` and the default handler in xBase, `BREAK`/`Break()`, `BEGIN SEQUENCE` /
+`RECOVER [USING x]` on xIR unwind edges ([runtime.md](runtime.md#errors-and-pending-requests),
 [xir.md](xir.md#control-flow-for-errors-and-exceptions)). Missing:
 
-- `ErrorSys()` and a default handler written in xBase (the call stack and `ProcName()`/`ProcLine()` exist); the
-  source file in frames (`ProcFile()`, the file in the lines of an unrecoverable error).
-- Retrying (`canRetry`, `tries`) and defaults (`canDefault`) once file and database errors exist; `ErrorLevel()`.
+- The source file in frames (`ProcFile()`, the file in the lines of an unrecoverable error).
+- Retrying (`canRetry`, `tries`) and defaults (`canDefault`) once file and database errors exist, with the default
+  handler's choice between them (`Alert()`, the terminal layer).
 - `x++`, `x--` and the step of a `FOR` without `STEP` fail as the operators `++` and `--` (subcodes 1086, 1087) in
   the reference; xbase computes them with `+` and `-` and reports those (1081, 1082).
 
@@ -73,11 +73,11 @@ xIR unwind edges ([runtime.md](runtime.md#errors-and-pending-requests),
 
 ### Runtime library
 
-64 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
+76 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
 
 1. Strings and numbers: `PadL`/`PadR`/`PadC`, `Transform`, `SoundEx`, the memo-line functions; `Mod`, `Descend`,
    `Bin2I` and the other binary conversions.
-2. Errors (above): `ErrorSys` and the source file in the call stack.
+2. Errors (above): the source file in the call stack.
 3. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
    `GetEnv`.
 4. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the
@@ -248,8 +248,8 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. Errors: `ErrorSys` (`BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind edges, typed
-   continuations and the call stack are done).
+1. Errors: the source file in the call stack, `ProcFile()` (`ErrorSys`, `BEGIN SEQUENCE`, `Break`, the `Error`
+   object, `ErrorBlock`, the unwind edges, typed continuations and the call stack are done).
 2. Memory variables and Clipper's rule for undeclared names; `Type()`.
 3. The macro operator.
 4. The rest of the array, string and number functions; the call-stack functions.

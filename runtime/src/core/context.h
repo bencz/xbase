@@ -12,7 +12,8 @@ struct xb_ctx {
   xb_ctx  *gcNext, *gcPrev; /* registered root sets */
   xb_item **roots;          /* temporary C roots (xb_gc_root_push) */
   unsigned rootLen, rootCap;
-  xb_item  error_block;     /* ErrorBlock(): a codeblock (roots of the collector, like the next one) */
+  /* ErrorBlock(): a codeblock, NIL until ErrorSys() runs (a root of the collector, like the next one) */
+  xb_item  error_block;
   xb_item  break_value;     /* the value of a pending BREAK */
   uint32_t error_depth;     /* error blocks running */
   /* Later: memvar (PRIVATE) stack, current work area, SETs - all per task, so

@@ -320,7 +320,8 @@ A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`
 with xBase code like `set.ch`) and its description, the operation, severity `ES_ERROR`, `canSubstitute`, and in
 `args` the operands of an operator or the arguments of a function. Then it evaluates the context's error block with
 it (`ErrorBlock( [bNew] )` returns the block and replaces it with a codeblock argument; the block and the `BREAK`
-value are roots of the collector). After the block:
+value are roots of the collector). With no error block (a program's `ErrorSys()` set none) the error is unrecoverable:
+`Unrecoverable error 9002: No ERRORBLOCK() for error`. After the block:
 
 - a request to unwind is pending (the block called `Break()`, or quit): the operation fails with it;
 - the error allows substitution (`XB_ERR_SUBSTITUTE`: operators, `SWITCH`, a non-numeric index, messages, `Eval` and
@@ -336,12 +337,16 @@ error 9003: Too many recursive error handler calls`). In a `FOR` test, a substit
 `counter > limit` (`<` stepping back): a logical, else the error of a condition. Retrying (`canRetry`) and defaults
 (`canDefault`) are not used by any error yet.
 
-The default error block, set up with the context, gives 0 for a division by zero (as Clipper's default handler does);
-for any other error it prints `Error <subsystem>/<subcode>  <description>: <operation>` (the file name instead of the
-operation when there is one; `Warning` for a severity below `ES_ERROR`), then a line `Called from NAME(line)  ` for
-each level of the call stack (see [Frames](#frames)), to standard error, and quits with exit code 1. An unrecoverable
-error lists the levels as `Called from NAME(line)`; the reference adds the source file name, which frames do not hold
-yet.
+A context starts with no error block. The program's startup calls `ErrorSys()` by name after the `STATIC`
+initializations and before the `INIT` procedures ([Program startup](#program-startup)): the runtime's, in xBase
+(`rtl/errorsys.prg`), unless the program defines its own. It installs `{| oError | DefError( oError ) }`: a division
+by zero gives 0 (as Clipper's default handler does); any other error prints
+`Error <subsystem>/<subcode>  <description>: <operation>` (the file name instead of the operation when there is one;
+`Warning` for a severity below `ES_ERROR`), then a line `Called from NAME(line)  ` for each level of the call
+stack (see [Frames](#frames); the handler's own frames are hidden, so level 0 is where the error happened), to
+standard error (`OutErr()`), and ends the program with `ErrorLevel( 1 )` and `QUIT`. The choice between quitting,
+retrying and the default (Clipper's `Alert()`) waits for the terminal layer. An unrecoverable error lists the levels
+as `Called from NAME(line)`; the reference adds the source file name, which frames do not hold yet.
 
 `Break( [xValue] )` (and the `BREAK [value]` command, `__Break`) stores the value in the context and raises
 `XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only request pending,
@@ -517,12 +522,15 @@ Each one moved from C is measured against its C version (callgrind).
 - On the call stack they show with line 0, as the C functions do; their `STATIC` functions and codeblocks do not show
   (`XB_PROC_HIDDEN`), though `PCount()` and `PValue()` still read their frames.
 - Primitives for them: `__ConsoleWrite( xValue )` writes the display form of a value ([Display](#display)) to the
-  console (standard output until the terminal layer exists); `__ArgError( nSubCode )` raises the calling function's
-  argument error (`EG_ARG`, its name as the operation, the arguments it received; not substitutable), as its C
-  counterparts do.
-- Written in xBase: `QOut` and `QQOut` (`rtl/console.prg`), `AEval` (`rtl/arrays.prg`). Measured against their C
-  versions (callgrind, x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to
-  `/dev/null`); `AEval` over a million elements with `{| x | n += x }`, 121M (116M).
+  console (standard output until the terminal layer exists), `__StdWrite( nHandle, xValue )` to the standard output
+  (1) or error (2), flushing the output before writing to the error; `__ArgError( nSubCode )` raises the calling
+  function's argument error (`EG_ARG`, its name as the operation, the arguments it received; not substitutable), as
+  its C counterparts do.
+- Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` (`rtl/arrays.prg`),
+  `ErrorSys` and the default error handler (`rtl/errorsys.prg`). Measured against their C versions (callgrind,
+  x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval`
+  over a million elements with `{| x | n += x }`, 121M (116M). `QQOut` keeps its own loop instead of sharing
+  `OutStd`'s: passing the values on through one more call costs `QOut` 13% more cycles.
 
 ## Dates
 
@@ -568,15 +576,17 @@ program's name strings in a frame of its own linked into the context's chain (so
 `xb_app_main` checks the ABI and calls `xb_program_run`, which runs, in this order:
 
 1. the modules' `STATIC` initializations, in registration order;
-2. the `INIT` procedures, module by module in registration order and, within a module, from the last one written to
+2. `ErrorSys()`, found by name (the program's own, else the runtime's), which installs the error block
+   ([Errors and pending requests](#errors-and-pending-requests));
+3. the `INIT` procedures, module by module in registration order and, within a module, from the last one written to
    the first (as the reference does), each with the command-line arguments;
-3. the start function, with the arguments, as Clipper passes them: strings, `NIL` for a parameter without one, and
+4. the start function, with the arguments, as Clipper passes them: strings, `NIL` for a parameter without one, and
    arguments past the parameters passed too;
-4. the `EXIT` procedures, module by module, each module's in the order written, without arguments.
+5. the `EXIT` procedures, module by module, each module's in the order written, without arguments.
 
-A request to unwind (a `QUIT`, a `BREAK` with no sequence, an error that ended the program) stops steps 1 to 3; the
-request is then dropped (with a `BREAK` value) and step 4 runs, a new request stopping it. The exit code is kept
+A request to unwind (a `QUIT`, a `BREAK` with no sequence, an error that ended the program) stops steps 1 to 4; the
+request is then dropped (with a `BREAK` value) and step 5 runs, a new request stopping it. The exit code is kept
 throughout: `ErrorLevel( [nNew] )` returns it and sets it from an argument, a number wrapped to 32 bits, anything else
-0 (the default error block sets 1). Registration order follows the global constructors,
+0 (the default error handler sets 1). Registration order follows the global constructors,
 which is the link order on the usual toolchains. Inside an `EXIT` procedure the call stack starts with it (the
 reference shows the function that ended the program, such as `__QUIT`, under it).

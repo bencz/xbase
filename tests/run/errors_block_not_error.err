@@ -1,0 +1,3 @@
+Error BASE/1004  No exported method: GENCODE
+Called from GENCODE(0)  
+Called from MAIN(5)  

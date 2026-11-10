@@ -348,14 +348,15 @@ int32_t  xb_args_rest(xb_ctx *ctx, xb_item *dst, xb_item *rest, uint32_t n, uint
  * initializes its STATICs (which become GC roots) and its INIT and EXIT
  * procedures: `procs` holds `ninit` INIT procedures, then `nexit` EXIT ones,
  * each in source order. xb_program_run (called by the start module's
- * xb_app_main) runs the STATICs' initializations, the INIT procedures (module
- * by module in registration order, each module's from its last; they receive
+ * xb_app_main) runs the STATICs' initializations, ErrorSys() (found by name:
+ * the program's own, else the runtime's), the INIT procedures (module by
+ * module in registration order, each module's from its last; they receive
  * the command-line arguments), the start function, then the EXIT procedures
  * (module by module, each module's in order), also after a QUIT, a BREAK or
  * an error that ended the program. A request to unwind stops the
- * initializations and INIT procedures (the start function does not run) and
- * the EXIT procedures. `symbols` are the module's public functions, by
- * upper-cased name, for lookups by name at run time (Do()). */
+ * initializations, ErrorSys() and the INIT procedures (the start function does
+ * not run) and the EXIT procedures. `symbols` are the module's public
+ * functions, by upper-cased name, for lookups by name at run time (Do()). */
 typedef void (*xb_module_init)(xb_ctx *ctx);
 typedef struct xb_symbol {
   const char *name;

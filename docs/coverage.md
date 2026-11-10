@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 73 of 551 done. Commands (`std.ch` families): 18 of 155 done.
+Functions: 76 of 551 done. Commands (`std.ch` families): 18 of 155 done.
 
 ## Statements (grammar)
 
@@ -107,7 +107,7 @@ at link time, never by an environment variable.
 *GUIPostValidate*, *GUIPreValidate*, *GUIReader*, *HitTest*, *Inkey*, *IsQuick*, *IsShortcut*, *LastKey*, *ListBDefCo*,
 *ListBox*, *MaxCol*, *MaxRow*, *MCol*, *MDblClk*, *MemoEdit*, *MenuDefCol*, *MenuItem*, *MenuModal*, *MHide*,
 *MLeftDown*, *MPresent*, *MRestState*, *MRightDown*, *MRow*, *MSaveState*, *MSetBounds*, *MSetCursor*, *MSetPos*,
-*MShow*, *NextKey*, *OutErr*, *OutStd*, *PCol*, *Popup*, *PRow*, *PushButton*, **QOut**, **QQOut**, *RadGrDefCo*,
+*MShow*, *NextKey*, **OutErr**, **OutStd**, *PCol*, *Popup*, *PRow*, *PushButton*, **QOut**, **QQOut**, *RadGrDefCo*,
 *RadioButton*, *RadioGroup*, *RadItDefCo*, *RangeCheck*, *ReadExit*, *ReadFormat*, *ReadInsert*, *ReadKill*,
 *ReadModal*, *ReadStats*, *ReadUpdated*, *ReadVar*, *Row*, *Scroll*, *ScrollBar*, *SetBlink*, *SetClrPair*, *SetColor*,
 *SetCursor*, *SetKey*, *SetPos*, *SetPosBS*, *SetPRC*, *ShowGetMsg*, *ShowMsg*, *TApplyKey*, *TBAddCol*, *TBApplyKey*,
@@ -117,7 +117,7 @@ at link time, never by an environment variable.
 
 ### Errors (2 of 4 done)
 
-*DosError*, **ErrorBlock**, **ErrorNew**, *ErrorSys*
+*DosError*, **ErrorBlock**, **ErrorNew**, **ErrorSys**
 
 ### Numbers and math (11 of 21 done)
 

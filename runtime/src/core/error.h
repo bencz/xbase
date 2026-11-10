@@ -43,14 +43,4 @@ static inline int xb_fn_arg_error(xb_ctx *ctx, xb_item *result, int32_t subcode,
   return xb_error_in(ctx, fn, result, EG_ARG, subcode, fn, XB_ERR_SUBSTITUTE, argc, args);
 }
 
-/* The lines of the call stack, from the innermost frame it shows, to standard
- * error: `format` takes the name and the line, as XB_CALLED_FROM (the default
- * error block's lines) does. */
-#define XB_CALLED_FROM "\nCalled from %s(%u)  "
-void xb_print_call_stack(const xb_ctx *ctx, const char *format);
-
-/* The context's error block (the default one) and BREAK value, set up by
- * xb_ctx_new. */
-void xb_error_init(xb_ctx *ctx);
-
 #endif
