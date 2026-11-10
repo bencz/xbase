@@ -10,6 +10,7 @@ using namespace llvm;
 
 namespace xb {
 
+// A new address at every call: wordsAt_ keys on it (one read of one value).
 Value *CodeGen::slot(uint32_t idx) { return b_.CreateConstInBoundsGEP1_32(itemTy_, fnBase_, idx); }
 
 Value *CodeGen::staticAddress(uint32_t idx) {

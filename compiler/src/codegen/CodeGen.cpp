@@ -185,7 +185,10 @@ void CodeGen::run(const xir::Module &m) {
     statics_ = gv;
   }
   for (auto &f : m.functions) functions_[f.get()] = declare(*f);
+  directEntries(m);
   for (auto &f : m.functions) genFunction(*f);
+  for (auto &f : m.functions)
+    if (direct_.count(f.get())) genThunk(*f);
   genModuleRegistration(m); // its public functions go into the symbol table
 }
 
@@ -200,10 +203,55 @@ bool CodeGen::finish(const xir::Function *start) {
   return diag_.errorCount() == 0;
 }
 
+// A function of the program gets a direct entry unless it reads its arguments
+// as received (PCount(), PValue(), `...`) or is the body versioned for
+// references (reached with the arguments as received, call.forward): calls
+// of the module pass it the parameters' items in registers, without argc,
+// argv or argument slots.
+void CodeGen::directEntries(const xir::Module &m) {
+  std::unordered_set<const xir::Function *> forwarded;
+  std::unordered_set<const xir::Function *> rest;
+  for (auto &f : m.functions)
+    for (auto &b : f->blocks)
+      for (auto &i : b->insts) {
+        if (i->op == xir::Op::CallForward) forwarded.insert(i->callee.function);
+        if (i->op == xir::Op::ArgsRest) rest.insert(f.get());
+      }
+  for (auto &f : m.functions) {
+    if (f->kind != xir::Function::Kind::Program || f->readsArgs || forwarded.count(f.get()) || rest.count(f.get()))
+      continue;
+    std::vector<Type *> params{ptrTy_, ptrTy_};
+    for (uint32_t k = 0; k < f->numParams; ++k) params.insert(params.end(), {i64_, i64_});
+    Function *fn = Function::Create(FunctionType::get(Type::getVoidTy(ctx_), params, false),
+                                    GlobalValue::InternalLinkage, "xb.direct." + f->name, mod_);
+    addAbiAttributes(fn);
+    direct_[f.get()] = fn;
+  }
+}
+
+// The dynamic entry of a function with a direct one: the parameters' items
+// from argv (NIL past argc), passed in registers.
+void CodeGen::genThunk(const xir::Function &f) {
+  Function *thunk = functions_.at(&f);
+  Function *body = direct_.at(&f);
+  thunk->setUWTableKind(UWTableKind::Async);
+  b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", thunk));
+  Value *argc = thunk->getArg(2), *argv = thunk->getArg(3);
+  std::vector<Value *> args{thunk->getArg(0), thunk->getArg(1)};
+  for (uint32_t k = 0; k < f.numParams; ++k) {
+    Words w = loadWords(argItem(argc, argv, k));
+    args.insert(args.end(), {w.header, w.payload});
+  }
+  b_.CreateCall(body, args)->setTailCall();
+  b_.CreateRetVoid();
+}
+
 // Prologue: the item frame (sized by the frame plan), the parameters copied
 // into it; the body; the exit block, where every path ends, unlinks the frame.
 void CodeGen::genFunction(const xir::Function &f) {
-  fn_ = functions_.at(&f);
+  auto direct = direct_.find(&f);
+  fnDirect_ = direct != direct_.end();
+  fn_ = fnDirect_ ? direct->second : functions_.at(&f);
   fn_->setUWTableKind(UWTableKind::Async); // backtraces / profilers
   FramePlan plan(f);
   plan_ = &plan;
@@ -211,6 +259,8 @@ void CodeGen::genFunction(const xir::Function &f) {
   values_.clear();
   fusedTruth_.clear();
   findSharingLoads(f, plan.cfg());
+  words_.clear();
+  wordsAt_.clear();
   locals_.clear();
   localItems_.clear();
   heapItems_.clear();
@@ -236,9 +286,11 @@ void CodeGen::genFunction(const xir::Function &f) {
   Value *argc = nullptr, *argv = nullptr;
   if (f.kind != xir::Function::Kind::ModuleInit) {
     fnRet_ = fn_->getArg(1);
+    fnRet_->setName("ret");
+  }
+  if (f.kind != xir::Function::Kind::ModuleInit && !fnDirect_) {
     argc = fn_->getArg(2);
     argv = fn_->getArg(3);
-    fnRet_->setName("ret");
     argc->setName("argc");
     argv->setName("argv");
   }
@@ -265,9 +317,11 @@ void CodeGen::genFunction(const xir::Function &f) {
     unwind_ = xb->unwind ? blocks_.at(xb->unwind) : fnExit_;
     findFusedComparisons(*xb);
     findFusedCalls(*xb);
+    for (auto &p : xb->params) cacheWords(p.get());
     for (auto &i : xb->insts) {
       line_ = i->loc.line;
       emit(*i);
+      if (!xir::isTerminator(i->op)) cacheWords(i.get());
     }
   }
   line_ = 0;
@@ -337,9 +391,8 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
   AllocaInst *frame = IRBuilder<>(&entry, entry.getFirstInsertionPt()).CreateAlloca(ty, nullptr, "frame");
   fnBase_ = b_.CreateConstInBoundsGEP2_32(ty, frame, 0, FrameSlots, "slots");
   for (uint32_t k = 0; k < nparams; ++k) {
-    Value *given = b_.CreateICmpULT(ConstantInt::get(i32_, k), argc);
-    Value *src = b_.CreateSelect(given, b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k), nilItem_);
-    copyItem(slot(k), src);
+    if (fnDirect_) storeWords(slot(k), fn_->getArg(2 + 2 * k), fn_->getArg(3 + 2 * k)); // the items in registers
+    else copyItem(slot(k), argItem(argc, argv, k));
   }
   if (nslots > nparams)
     b_.CreateMemSet(slot(nparams), b_.getInt8(0), (uint64_t)(nslots - nparams) * itemSize_, itemAlign_);
@@ -495,7 +548,30 @@ LoadInst *CodeGen::loadFrom(Type *t, Value *addr, Mem m, const Twine &name) {
 // registers is then one word (no field-sized pieces put back together), and a
 // load is served by the 8-byte store that wrote the header.
 Value *CodeGen::loadHeader(Value *item) {
+  if (auto w = wordsAt_.find(item); w != wordsAt_.end()) return w->second.header;
   return tag(b_.CreateAlignedLoad(i64_, item, itemAlign_, "header"), itemMemory(item));
+}
+
+// Right after the definition of `v` (or at the start of the block of a
+// parameter): the words of its slot, for the reads of it (Words in CodeGen.h).
+// Unused ones go away in LLVM.
+void CodeGen::cacheWords(const xir::Value *v) {
+  if (v->type() != xir::Type::Item || plan_->home(v).kind != Home::Kind::Slot) return;
+  words_[v] = loadWords(slot(plan_->home(v).slot));
+}
+
+// The two words of an item in memory, as they are there.
+CodeGen::Words CodeGen::loadWords(Value *item) {
+  Mem m = itemMemory(item);
+  Value *header = tag(b_.CreateAlignedLoad(i64_, item, itemAlign_, "header"), m);
+  Value *payload = tag(b_.CreateAlignedLoad(i64_, b_.CreateStructGEP(itemTy_, item, FValue), itemAlign_, "int"), m);
+  return {header, payload};
+}
+
+// Argument `k` as received: argv[k], or a NIL item past argc.
+Value *CodeGen::argItem(Value *argc, Value *argv, uint32_t k) {
+  Value *given = b_.CreateICmpULT(ConstantInt::get(i32_, k), argc);
+  return b_.CreateSelect(given, b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k), nilItem_);
 }
 
 Value *CodeGen::itemType(Value *item) {

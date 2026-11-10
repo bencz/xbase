@@ -74,6 +74,10 @@ private:
   llvm::StructType *frameType(uint32_t nslots);
   void pushFrame(uint32_t nslots, uint32_t nparams, llvm::Value *argc, llvm::Value *argv, llvm::Constant *proc,
                  bool keepArgs);
+  void directEntries(const xir::Module &m);
+  void genThunk(const xir::Function &f);
+  void cacheWords(const xir::Value *v);
+  llvm::Value *argItem(llvm::Value *argc, llvm::Value *argv, uint32_t k);
   llvm::Constant *procOf(const xir::Function &f);
   void markLine(llvm::Instruction *i) const;
   void placeLines();
@@ -103,6 +107,10 @@ private:
   llvm::Value *typeOf(const xir::Value *v, llvm::Value *item);
   llvm::Value *payloadWord(llvm::Value *v);
   void storeWords(llvm::Value *dst, llvm::Value *header, llvm::Value *payload);
+  struct Words {
+    llvm::Value *header, *payload; // the two words of an item
+  };
+  Words loadWords(llvm::Value *item);
   void copyItem(llvm::Value *dst, llvm::Value *src);
   void setNil(llvm::Value *dst);
   void storeTagged(llvm::Value *dst, uint32_t tag, llvm::Value *v);
@@ -178,6 +186,7 @@ private:
 
   // Instructions.cpp
   void emit(const xir::Instruction &i);
+  void emitDirectCall(const xir::Instruction &i, llvm::Value *d);
   void emitBranch(const xir::Target &t);
   llvm::Value *addr(const xir::Value *v);
   llvm::AllocaInst *entryAlloca(const char *name);
@@ -238,6 +247,10 @@ private:
 
   // state of the object (every module added)
   std::unordered_map<const xir::Function *, llvm::Function *> functions_;
+  // Functions with a direct entry (directEntries): their body, which takes the parameters as items in registers
+  // (header and value word of each); functions_ holds their dynamic entry, a thunk (genThunk).
+  std::unordered_map<const xir::Function *, llvm::Function *> direct_;
+
   llvm::GlobalVariable *statics_ = nullptr;   // the STATICs of the module being added
   std::unordered_map<std::string, llvm::Constant *> strLits_;
   std::unordered_map<std::string, llvm::Constant *> numLits_;
@@ -252,6 +265,7 @@ private:
   // `...` passes its arguments on in place (no copy): the function's one args.rest, outside loops, in a call that
   // takes references, in a function that reads its arguments nowhere else (PCount(), PValue()).
   bool forwardInPlace_ = false;
+  bool fnDirect_ = false; // the function being generated is a direct body: no argc and argv
   bool runtimeLibrary_ = false;
   llvm::BasicBlock *fnExit_ = nullptr;
   llvm::BasicBlock *unwind_ = nullptr; // where an operation of the current block that fails goes (xir unwind)
@@ -270,6 +284,13 @@ private:
       shareOnEdge_; // and the edges (from, to) that do it instead of the loads after them
   std::unordered_set<const xir::Instruction *> fusedCalls_;                // Asc() calls lowered with their SubStr()
   std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
+  // The words of the values held in frame slots, read once right after their definition (cacheWords): a slot holds
+  // its value unchanged while the value lives, so its header (which the collector never changes) and its integer
+  // payload are served from these instead of the frame, which LLVM must reload after every call (the frame is
+  // linked into the context). Pointers are still read from the slot. `wordsAt_` maps the addresses addr() returned
+  // for them: slot() makes a new address at every call, so an address stands for one read of one value.
+  std::unordered_map<const xir::Value *, Words> words_;
+  std::unordered_map<const llvm::Value *, Words> wordsAt_;
 };
 
 } // namespace xb

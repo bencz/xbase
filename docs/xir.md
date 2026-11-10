@@ -217,7 +217,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 
 1. The core, lowering from the syntax tree and to LLVM, reproducing the previous behavior (done).
 2. Native frames: item frames on the machine stack, linked per context (done; each frame is the anchor the stack
-   maps of phase 4 are relative to). Direct calls with fixed arity (planned).
+   maps of phase 4 are relative to). Calls within a module pass the parameters' items in registers to a direct entry
+   ([compiler.md](compiler.md#xir-to-llvm)).
 3. The pass manager and the passes (see [Passes](#passes)): the manager, mem2reg and the cleanup passes are done,
    and type inference ([Types](#types)) keeps values without heap references in registers and removes the type
    tests of the lowering's fast paths (`codegen/FastPaths.cpp`) for values with a single possible type; next value

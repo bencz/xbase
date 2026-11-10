@@ -274,9 +274,10 @@ the result before it goes further (an invalid xIR is an internal error). From `-
 ### xIR to LLVM
 
 `codegen/` lowers each xIR function to an LLVM function with the dynamic calling convention described in
-[runtime.md](runtime.md#calling-convention): `CodeGen.cpp` (types, runtime declarations, the module, functions and
-frames), `FramePlan.*` (where each item lives), `Instructions.cpp`, `Variables.cpp` (variable addresses, references,
-write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
+[runtime.md](runtime.md#calling-convention), which is, for a function with a direct entry (below), a thunk in front of
+it: `CodeGen.cpp` (types, runtime declarations, the module, functions and frames), `FramePlan.*` (where each item
+lives), `Instructions.cpp`, `Variables.cpp` (variable addresses, references, write barriers), `Literals.cpp`; `Emit.cpp`
+emits the object file.
 
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
   from its uses back to its definition, slots are assigned by linear scan and reused once free. The parameters take
@@ -314,11 +315,12 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   type different from the header's, so that code generation does not merge the pair into one 16-byte access spanning two
   stores.
 - The entry block allocates the frame of the planned size on the stack (`pushFrame`: an `alloca` of `xb_frame`, see
-  [runtime.md](runtime.md#frames)), copies the parameters branch-free (a selected source: `argv[k]` or a `NIL`
-  constant), clears the other slots, stores the arguments as received (`argv`, `argc`) when the function reads them
-  (`readsArgs`) and links the frame into the context; the caller has already set the result to `NIL`. The exit block
-  unlinks the frame and returns. Blocks are laid out in reverse postorder visiting successors last first, so a block's
-  first successor (a loop body, a THEN branch) follows it and exits come later.
+  [runtime.md](runtime.md#frames)), copies the parameters into the first slots (in a direct entry, from the words in
+  registers; otherwise branch-free from a selected source, `argv[k]` or a `NIL` constant: `argItem`), clears the other
+  slots, stores the arguments as received (`argv`, `argc`) when the function reads them (`readsArgs`) and links the
+  frame into the context; the caller has already set the result to `NIL`. The exit block unlinks the frame and returns.
+  Blocks are laid out in reverse postorder visiting successors last first, so a block's first successor (a loop body, a
+  THEN branch) follows it and exits come later.
 - Operations call the runtime (`xb_op_*` and the others); the result may alias an operand. `FastPaths.cpp` inlines the
   common cases first: `/` and `%` of two numbers with a divisor other than 0 (a double with SET DECIMALS decimals, read
   from the context's head; `%` of two integers is their remainder, 0 for a divisor of -1); `+`, `-` and `*` of two
@@ -353,11 +355,29 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   instructions and convert doubles on a path of their own, and the fast paths of calls read their operands in place: the
   argument group is built only for the call. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at
   the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another
-  module's function to `xbp_NAME`, one to a function of the module straight to it. A public function is `xbp_NAME`
+  module's function to `xbp_NAME`, one to a function of the module to its direct entry when it has one (below), else
+  to it. A public function is `xbp_NAME`
   (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under names nothing
   looks up, so modules sharing the object never clash. A call, a send or an array literal with `...` (`withRest`) passes
   the count and the items of a frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline
   calls and the bit functions leave such calls alone.
+- Direct entries (`directEntries`): a function of the program that does not read its arguments as received (its
+  frame keeps none, `readsArgs`, and it has no `...`) and is not the body versioned for references gets its body in an
+  internal function, `xb.direct.NAME`, taking the context, the result slot and each parameter's item as two words
+  (header and value) in registers. Calls of the module go there (`emitDirectCall`) with no `argc` or `argv`: the
+  operands, still computed into the call's argument slots of the frame plan, are passed as words; a parameter not
+  passed gets `NIL`, and arguments past the parameters are evaluated and left out, since nothing reads them. The
+  function's symbol is a thunk (`genThunk`) that reads the items from `argv` (`argItem`) and calls the direct entry:
+  the runtime, `Do()` and other modules call it. The body still tests its parameters for references, and its
+  `call.forward` passes its parameters' slots as the arguments. Measured against calls through `argv` (callgrind,
+  x86-64): `fib` 8% fewer instructions.
+- Values held in frame slots (`Home::Kind::Slot`) keep their header and value words in registers, read once right
+  after their definition (`cacheWords`; for a block parameter, at the start of its block): the frame is linked into
+  the context, so LLVM must reload a slot after every call, though a slot keeps its value unchanged while the value
+  lives. Type tests and integer reads use these words (`loadHeader`, `intValue`); pointers, which a moving collector
+  may change, are still read from the slot. With the direct entries, against neither (callgrind, x86-64): `fib` 10%
+  fewer instructions, `qsort` 17%, `AEval` 15%; `matmul` 2% more (its inner loop has no calls, and the words of the
+  outer loops' counters take registers there).
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`, its number of parameters, `XB_PROC_ARGS` when it keeps its arguments and `XB_PROC_HIDDEN`
   when it is hidden) in the frame. While an xIR instruction is lowered, every call the builder creates is marked with

@@ -52,12 +52,13 @@ typedef struct xb_item {
 
 Parameters, `LOCAL`s and temporaries of a compiled function live in its item frame (`xb_frame`: link, what the call
 stack shows, slot count, current line, the arguments as received, items), an `alloca` on the machine stack. The function
-links it into its context's chain (`xb_ctx.frames`) at entry, with the parameters copied from `argv` (`NIL` past `argc`)
-into the first slots and the other slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors
-return normally (the pending flag), so the chain is always right. The collector scans the frames of every context's
-chain. A frame dies with its function: nothing keeps a pointer to a slot (a variable that outlives it moves into a heap
-cell first). The program runs on a thread whose stack is reserved at 256 MB (`XB_PROGRAM_STACK_SIZE` in `core/main.c`;
-pages are committed as used), so deep recursion has room; running past it is not detected yet and ends the process.
+links it into its context's chain (`xb_ctx.frames`) at entry, with the parameters copied into the first slots (from
+`argv`, `NIL` past `argc`, or from registers in a direct entry, [compiler.md](compiler.md#xir-to-llvm)) and the other
+slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors return normally (the pending flag),
+so the chain is always right. The collector scans the frames of every context's chain. A frame dies with its function:
+nothing keeps a pointer to a slot (a variable that outlives it moves into a heap cell first). The program runs on a
+thread whose stack is reserved at 256 MB (`XB_PROGRAM_STACK_SIZE` in `core/main.c`; pages are committed as used), so
+deep recursion has room; running past it is not detected yet and ends the process.
 
 The frames also make the call stack. A frame's `proc` (an `xb_proc` constant the compiler emits per function: its name,
 `(b)NAME` for a codeblock written in the function NAME, also inside another codeblock, where Harbour names one run by
@@ -278,6 +279,9 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   that is not `RESERVED` without a clash at link time.
 - Every runtime function is declared in `include/rtl.ch` (`EXTERN FUNCTION`, see [compiler.md](compiler.md#calls));
   the `runtime.declarations` test checks that the declarations and the `xbf_` definitions match.
+- This is the convention of every function's symbol: the runtime, `Do()`, codeblocks and other modules call through
+  it. Within a module, compiled code calls a function's direct entry, passing the parameters' items in registers
+  ([compiler.md](compiler.md#xir-to-llvm)).
 - The caller evaluates the arguments into consecutive slots of its own frame and sets `ret` to `NIL`; a callee that
   returns nothing leaves it untouched. The callee copies its parameters into its frame; missing arguments are
   `NIL`. An argument passed by reference is an `XB_T_CELL` or `XB_T_REF` item (see
@@ -507,8 +511,7 @@ Each one moved from C is measured against its C version (callgrind).
   counterparts do.
 - Written in xBase: `QOut` and `QQOut` (`rtl/console.prg`), `AEval` (`rtl/arrays.prg`). Measured against their C
   versions (callgrind, x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to
-  `/dev/null`); `AEval` over a million elements with `{| x | n += x }`, 142M (116M): its loop reloads its variables
-  from the frame after every call until the compiler keeps them in registers ([xir.md](xir.md#phases)).
+  `/dev/null`); `AEval` over a million elements with `{| x | n += x }`, 121M (116M).
 
 ## Dates
 

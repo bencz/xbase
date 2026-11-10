@@ -18,7 +18,11 @@ Value *CodeGen::addr(const xir::Value *v) {
   const Home &h = plan_->home(v);
   switch (h.kind) {
   case Home::Kind::Constant: return literal(static_cast<const xir::Constant &>(*v));
-  case Home::Kind::Slot: return slot(h.slot);
+  case Home::Kind::Slot: {
+    Value *a = slot(h.slot);
+    if (auto w = words_.find(v); w != words_.end()) wordsAt_[a] = w->second;
+    return a;
+  }
   case Home::Kind::Place: return values_.at(v);
   case Home::Kind::Ret: return fnRet_;
   case Home::Kind::Local: {
@@ -178,6 +182,26 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
   b_.SetInsertPoint(done);
 }
 
+// A call to a function of the module with a direct entry: each parameter's
+// item as two words in registers (NIL for one not passed; arguments past the
+// parameters are evaluated and left out, as nothing reads them).
+void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
+  const xir::Function &callee = *i.callee.function;
+  std::vector<Value *> args{fnCtx_, d};
+  for (uint32_t k = 0; k < callee.numParams; ++k) {
+    if (k >= i.operands().size()) {
+      args.insert(args.end(), {headerWord(XB_T_NIL, 0, 0), ConstantInt::get(i64_, 0)});
+      continue;
+    }
+    Value *item = addr(i.operand(k));
+    args.push_back(loadHeader(item));        // the cached header when there is one
+    args.push_back(loadWords(item).payload); // a pointer is read where it is
+  }
+  setNil(d);
+  b_.CreateCall(direct_.at(&callee), args);
+  checkPending(unwind_);
+}
+
 // .T. or .F.; any other value is an error (the function leaves). `type` is
 // the item's type (a constant when it is known).
 Value *CodeGen::testTruth(Value *item, BasicBlock *unwind, Value *type) {
@@ -300,6 +324,10 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::ArgsRest: break; // read by the list that uses it (withRest)
   case Op::Call: {
     if (emitBitCall(i) || emitInlineCall(i)) break;
+    if (i.callee.function && direct_.count(i.callee.function) && !i.hasRest()) {
+      emitDirectCall(i, dest(i));
+      break;
+    }
     Value *argv = operandGroup(i);
     Function *callee = i.callee.function ? functions_.at(i.callee.function) : externFunction(i.callee);
     Value *d = dest(i);
@@ -353,7 +381,11 @@ void CodeGen::emit(const xir::Instruction &i) {
     // LLVM inlines the other body (this is its only call): its frame then adds
     // to every call's stack, but the common path's prologue does not prepare
     // a call, which measured faster (fib: 261 ms against 299 ms).
-    b_.CreateCall(xbFuncTy_, functions_.at(i.callee.function), {fnCtx_, d, fn_->getArg(2), fn_->getArg(3)});
+    // A direct body passes its parameters' slots: the arguments as received, those past the parameters left out
+    // (neither body reads them: they read no arguments as received).
+    Value *argc = fnDirect_ ? static_cast<Value *>(ConstantInt::get(i32_, fnParams_)) : fn_->getArg(2);
+    Value *argv = fnDirect_ ? fnBase_ : fn_->getArg(3);
+    b_.CreateCall(xbFuncTy_, functions_.at(i.callee.function), {fnCtx_, d, argc, argv});
     checkPending(unwind_);
     break;
   }

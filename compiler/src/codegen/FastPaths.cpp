@@ -34,6 +34,7 @@ Value *CodeGen::arrayLength(Value *array) {
 }
 
 Value *CodeGen::intValue(Value *item) {
+  if (auto w = wordsAt_.find(item); w != wordsAt_.end()) return w->second.payload;
   return loadFrom(i64_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), "int");
 }
 
