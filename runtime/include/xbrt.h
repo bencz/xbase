@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 20u
+#define XB_ABI_VERSION 21u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -318,14 +318,13 @@ int32_t  xb_switch_match(const xb_item *value, const xb_item *c);
  * after); the others receive values. */
 static inline int xb_refs_take(uint32_t refs, uint32_t k) { return (int)((refs >> (k < 31 ? k : 31)) & 1u); }
 
-/* `...` in a call, a send or an array literal: fills `dst` with list[0 ..
- * at-1], the `nrest` items of `rest` (the arguments the function received past
- * its parameters), then list[at .. n-1]. An item of `rest` that is a reference
- * goes as it is to a position in `refs` (xb_refs_take) and as its value
- * elsewhere. `dst` may be `rest` itself (at 0, n 0). Returns 0 when a
- * reference's target is gone and the error asks to unwind. */
-int32_t  xb_args_spread(xb_ctx *ctx, xb_item *dst, const xb_item *list, uint32_t n, uint32_t at, xb_item *rest,
-                        uint32_t nrest, uint32_t refs);
+/* `...` in a call, a send or an array literal: copies the `n` items of `rest`
+ * (the arguments the function received past its parameters) to `dst`, where
+ * they are the list's positions `at` and on. A reference goes as it is to a
+ * position in `refs` (xb_refs_take) and as its value elsewhere. `dst` may be
+ * `rest` itself. Returns 0 when a reference's target is gone and the error
+ * asks to unwind. */
+int32_t  xb_args_rest(xb_ctx *ctx, xb_item *dst, xb_item *rest, uint32_t n, uint32_t at, uint32_t refs);
 
 /* Modules. A compiled module registers, before main(), the function that
  * initializes its STATICs (which become GC roots) and its INIT and EXIT

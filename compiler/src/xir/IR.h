@@ -15,7 +15,9 @@
 // types are machine values (conditions, counters).
 namespace xb::xir {
 
-enum class Type : uint8_t { Void, Bool, I64, Item };
+// Args: a list of items of a length known at run time (args.rest), only an operand of a call, a send or an array
+// literal.
+enum class Type : uint8_t { Void, Bool, I64, Item, Args };
 
 const char *typeName(Type t);
 
@@ -153,6 +155,8 @@ public:
   BasicBlock *parent;
   SourceLoc loc;
 
+  // An operand is an args.rest: a list with `...`.
+  bool hasRest() const;
   // The operation's effects (Effect in Ops.h): its op's, and for a list with
   // `...`, those of reading references (an error, the error block's code).
   uint16_t effects() const;
@@ -180,11 +184,10 @@ public:
   Access access = Access::Direct;     // Load, Store, Barrier
   Callee callee;                      // Call
   std::string message;                // Send: upper-cased, "_NAME" to assign NAME
-  // Call, Send, ArrayLit with `...`: the operand position where the function's arguments past its parameters go,
-  // else -1; and which positions of a call receive those arguments as passed, references included (bit k: argument
-  // k, bit 31: argument 31 and after), the others receiving their values.
-  int32_t spread = -1;
-  uint32_t spreadRefs = 0;
+  // Call with `...` (an args.rest operand): the argument positions that receive the arguments passed on as they are,
+  // references included (bit k: argument k, bit 31: argument 31 and after; xb_refs_take); the others, and those of
+  // a send or an array literal, receive their values.
+  uint32_t restRefs = 0;
   Function *blockFn = nullptr;        // MakeBlock
   std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
   std::vector<Target> targets;        // Br: one; CondBr: then, else (operand 0 is the condition)

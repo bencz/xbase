@@ -180,15 +180,7 @@ private:
     }
     if (i.var) out_ += " " + varName(*i.var) + accessName(i.access);
     const auto &ops = i.operands();
-    bool first = !i.var;
-    auto item = [&](const std::string &text) {
-      out_ += (first ? " " : ", ") + text;
-      first = false;
-    };
-    for (size_t k = 0; k <= ops.size(); ++k) {
-      if (i.spread == (int32_t)k) item("...");
-      if (k < ops.size()) item(value(ops[k]));
-    }
+    for (size_t k = 0; k < ops.size(); ++k) out_ += (k || i.var ? ", " : " ") + value(ops[k]);
     if (i.op == Op::Br) out_ += " " + target(i.targets[0]);
     if (i.op == Op::CondBr) out_ += ", " + target(i.targets[0]) + ", " + target(i.targets[1]);
     out_ += "\n";

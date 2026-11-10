@@ -87,18 +87,15 @@ int32_t xb_switch_match(const xb_item *value, const xb_item *c) {
   return a->len == b->len && memcmp(a->data, b->data, a->len) == 0;
 }
 
-int32_t xb_args_spread(xb_ctx *ctx, xb_item *dst, const xb_item *list, uint32_t n, uint32_t at, xb_item *rest,
-                       uint32_t nrest, uint32_t refs) {
-  for (uint32_t k = 0; k < at; ++k) *dst++ = list[k];
-  for (uint32_t k = 0; k < nrest; ++k, ++dst) {
+int32_t xb_args_rest(xb_ctx *ctx, xb_item *dst, xb_item *rest, uint32_t n, uint32_t at, uint32_t refs) {
+  for (uint32_t k = 0; k < n; ++k) {
     if (xb_refs_take(refs, at + k) || (rest[k].type != XB_T_CELL && rest[k].type != XB_T_REF)) {
-      *dst = rest[k];
+      dst[k] = rest[k];
       continue;
     }
     const xb_item *v = xb_ref_target(ctx, &rest[k]);
     if (ctx->pending && xb_pending(ctx)) return 0;
-    *dst = *v;
+    dst[k] = *v;
   }
-  for (uint32_t k = at; k < n; ++k) *dst++ = list[k];
   return 1;
 }

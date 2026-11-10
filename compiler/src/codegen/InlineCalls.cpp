@@ -22,7 +22,7 @@ namespace {
 enum class Inline { None, Len, Asc, Chr, SubStr };
 
 Inline inlineKind(const xir::Instruction &i) {
-  if (i.op != xir::Op::Call || i.callee.function || !i.callee.native || i.spread >= 0) return Inline::None;
+  if (i.op != xir::Op::Call || i.callee.function || !i.callee.native || i.hasRest()) return Inline::None;
   static const struct {
     const char *name;
     size_t argc;

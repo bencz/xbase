@@ -244,7 +244,6 @@ ExprPtr Parser::parseBraced() {
 // parameters (a call, a send, an array literal).
 std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
   std::vector<ExprPtr> args;
-  bool spreadSeen = false;
   if (at(close)) return args;
   while (true) {
     if (at(Tok::Comma) || at(close)) {
@@ -254,8 +253,6 @@ std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
       args.push_back(parseRef());
     } else if (at(Tok::Ellipsis)) {
       if (!spread) diag_.error(cur().loc, "'...' is supported only in the arguments of a call or in an array");
-      else if (spreadSeen) diag_.error(cur().loc, "'...' may appear once in a list");
-      spreadSeen = true;
       args.push_back(std::make_unique<SpreadExpr>(cur().loc));
       advance();
     } else {

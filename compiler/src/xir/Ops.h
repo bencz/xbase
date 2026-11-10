@@ -38,6 +38,9 @@ enum class Op : uint8_t {
   SwitchMatch,    // value, case constant -> Bool
   ParamsRef,      // parameters (captures) -> Bool: one of them holds a reference its caller passed
   CallForward,    // callee -> Item: calls it with this function's own arguments, as received [may fail]
+  ArgsRest,       // -> Args: the arguments the function received past its parameters (`...`), right before the
+                  // call, send or array literal that is its one use; read there, they may have changed before
+                  // (PValue()), so it is never merged or moved
   SeqCatch,       // -> Bool: in an unwind block of BEGIN SEQUENCE, the request is a BREAK alone (then taken)
   SeqValue,       // -> Item: the BREAK value (RECOVER USING), moved out of the context
   SubstCheck,     // operation -> Bool: right after it, its result is not of the types it gives itself (an error's

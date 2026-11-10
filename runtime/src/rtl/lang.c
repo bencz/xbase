@@ -154,7 +154,7 @@ void xbf_DO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_error_in(ctx, "DO", NULL, EG_NOFUNC, 1001, name, 0, argc, argv);
       return;
     }
-    if (!xb_args_spread(ctx, argv + 1, NULL, 0, 0, argv + 1, argc - 1, xb_symbol_refs(e))) return;
+    if (!xb_args_rest(ctx, argv + 1, argv + 1, argc - 1, 0, xb_symbol_refs(e))) return;
     do_frame_push(ctx, &frame, argc, argv);
     e->fn(ctx, ret, argc - 1, argv + 1);
     xb_frame_pop(ctx, &frame);

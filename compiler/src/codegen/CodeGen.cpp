@@ -85,7 +85,7 @@ void CodeGen::initTypes() {
   rtHashNew_ = rt("xb_hash_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtEachKey_ = rt("xb_each_key", voidTy, {ptrTy_, ptrTy_, ptrTy_, i64_});
   rtArrayNew_ = rt("xb_array_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
-  rtArgsSpread_ = rt("xb_args_spread", i32_, {ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_, i32_, i32_});
+  rtArgsRest_ = rt("xb_args_rest", i32_, {ptrTy_, ptrTy_, ptrTy_, i32_, i32_, i32_});
   rtIndex_ = rt("xb_op_index", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtWriteItem_ = rt("xb_gc_write_item", voidTy, {ptrTy_, intPtrTy_});

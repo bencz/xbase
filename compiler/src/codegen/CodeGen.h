@@ -192,8 +192,8 @@ private:
   llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind, llvm::Value *type);
   llvm::Value *logicalValue(llvm::Value *item);
   llvm::Value *operandGroup(const xir::Instruction &i);
-  void withSpread(const xir::Instruction &i, llvm::Value *group,
-                  llvm::function_ref<void(llvm::Value *argc, llvm::Value *argv)> emit);
+  void withRest(const xir::Instruction &i, llvm::Value *group,
+                llvm::function_ref<void(llvm::Value *argc, llvm::Value *argv)> emit);
 
   llvm::LLVMContext &ctx_;
   llvm::Module &mod_;
@@ -226,7 +226,7 @@ private:
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
   llvm::FunctionCallee rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_;
   llvm::FunctionCallee rtSend_, rtSeqCatch_, rtSeqValue_, rtHashNew_, rtEachKey_;
-  llvm::FunctionCallee rtArgsSpread_;
+  llvm::FunctionCallee rtArgsRest_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;

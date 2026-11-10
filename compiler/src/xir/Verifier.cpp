@@ -133,20 +133,28 @@ private:
     if (!own) fail(std::string(opName(i.op)) + " uses a variable of another function");
   }
 
+  // Items, and in a call, a send or an array literal also args (checked in inst).
   void allItems(const Instruction &i) {
+    bool lists = i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit;
     for (Value *v : i.operands())
-      if (v->type() != Type::Item) fail(std::string(opName(i.op)) + " takes items only");
+      if (v->type() != Type::Item && !(lists && v->type() == Type::Args))
+        fail(std::string(opName(i.op)) + " takes items only");
   }
 
   void inst(const Instruction &i, size_t pos) {
     const BasicBlock *at = i.parent;
     for (Value *v : i.operands()) use(v, at, pos);
     bool lists = i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit;
-    if (i.spread != -1 && (!lists || i.spread < (i.op == Op::Send ? 1 : 0) || i.spread > (int32_t)i.operands().size()))
-      fail("'...' outside the arguments of a call, a send or an array literal");
-    if (i.spread != -1 && f_.kind != Function::Kind::Program) fail("'...' outside a function");
+    for (size_t k = 0; k < i.operands().size(); ++k)
+      if (i.operand(k)->type() == Type::Args && (!lists || (i.op == Op::Send && k == 0)))
+        fail("args outside the arguments of a call, a send or an array literal");
+    if (i.op == Op::ArgsRest) {
+      if (f_.kind != Function::Kind::Program) fail("args.rest outside a function");
+      // Its one use comes right after the operands it was generated among: nothing joins it at a block parameter.
+      if (!i.hasOneUse() || i.users().front()->parent != at) fail("args.rest not used once in its block");
+    }
     switch (i.op) {
-    case Op::NumDefaultDec: expect(i, 0, {}); break;
+    case Op::NumDefaultDec: case Op::ArgsRest: expect(i, 0, {}); break;
     case Op::Load: case Op::Barrier: case Op::RefVar:
       needsVar(i);
       expect(i, 0, {});
@@ -249,6 +257,7 @@ private:
         for (size_t k = 0; k < t.args.size() && k < t.block->params.size(); ++k) {
           if (t.args[k]->type() != t.block->params[k]->type())
             fail(at->name + " passes a wrong type to " + t.block->name);
+          if (t.args[k]->type() == Type::Args) fail(at->name + " passes args to a block");
           use(t.args[k], at, pos);
         }
       }

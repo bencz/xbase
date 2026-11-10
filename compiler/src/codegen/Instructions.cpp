@@ -110,54 +110,66 @@ Value *CodeGen::operandGroup(const xir::Instruction &i) {
   if (ops.empty()) return ConstantPointerNull::get(ptrTy_);
   uint32_t base = plan_->groupBase(&i);
   for (size_t k = 0; k < ops.size(); ++k)
-    if (!plan_->inGroup(&i, k)) {
+    if (ops[k]->type() == xir::Type::Item && !plan_->inGroup(&i, k)) { // args.rest: filled by withRest
       Value *src = addr(ops[k]);
       copyItem(slot(base + (uint32_t)k), src);
     }
   return slot(base);
 }
 
-// A list with `...` (xir::Instruction::spread), for `emit` to use as its count
-// and items: the operands before that position (`group` holds them all), the
-// arguments the function received past its parameters, then the other
-// operands. xb_args_spread copies them into a frame of their own on the stack,
-// sized at run time and linked into the chain while `emit` runs, so the
-// collector sees them (a callee may replace them, PValue()); an argument whose
-// reference is gone unwinds instead.
-void CodeGen::withSpread(const xir::Instruction &i, Value *group, function_ref<void(Value *, Value *)> emit) {
-  uint32_t n = (uint32_t)i.operands().size();
+// A list with `...` (args.rest operands), for `emit` to use as its count and
+// items: the operands, with the arguments the function received past its
+// parameters in the place of each args.rest. They go into a frame of their own
+// on the stack, sized at run time and linked into the chain while `emit` runs,
+// so the collector sees them (a callee may replace them, PValue()).
+// xb_args_rest copies the arguments passed on; one whose reference is gone
+// unwinds instead.
+void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<void(Value *, Value *)> emit) {
+  const auto &ops = i.operands();
+  uint32_t rests = 0;
+  for (const xir::Value *v : ops) rests += v->type() == xir::Type::Args;
   Value *argc = fn_->getArg(2), *argv = fn_->getArg(3);
   Value *params = ConstantInt::get(i32_, fnParams_);
   Value *rest = b_.CreateSelect(b_.CreateICmpUGT(argc, params), b_.CreateSub(argc, params), ConstantInt::get(i32_, 0),
                                 "rest");
-  Value *total = b_.CreateAdd(rest, ConstantInt::get(i32_, n), "total");
+  Value *total = b_.CreateAdd(b_.CreateMul(rest, ConstantInt::get(i32_, rests)),
+                              ConstantInt::get(i32_, (uint32_t)ops.size() - rests), "total");
   Value *save = b_.CreateStackSave();
   StructType *ty = frameType(0);
   uint64_t header = dl_.getStructLayout(ty)->getElementOffset(FrameSlots);
   Value *itemBytes = b_.CreateMul(b_.CreateZExt(total, intPtrTy_), ConstantInt::get(intPtrTy_, itemSize_));
-  AllocaInst *frame =
-      b_.CreateAlloca(i8_, b_.CreateAdd(itemBytes, ConstantInt::get(intPtrTy_, header)), "spread.frame");
+  AllocaInst *frame = b_.CreateAlloca(i8_, b_.CreateAdd(itemBytes, ConstantInt::get(intPtrTy_, header)), "list.frame");
   frame->setAlignment(std::max(itemAlign_, dl_.getPointerABIAlignment(0)));
-  Value *items = b_.CreateStructGEP(ty, frame, FrameSlots, "spread.items");
+  Value *items = b_.CreateStructGEP(ty, frame, FrameSlots, "list.items");
   b_.CreateMemSet(items, b_.getInt8(0), itemBytes, itemAlign_); // NIL until filled
   linkFrame(frame, total, ConstantPointerNull::get(ptrTy_));
   auto unlink = [&] {
     unlinkFrame(frame);
     b_.CreateStackRestore(save);
   };
+  BasicBlock *failed = newBlock("list.failed");
   Value *restItems = b_.CreateGEP(itemTy_, argv, params, "rest.items"); // not dereferenced when there are none
-  Value *ok = b_.CreateCall(rtArgsSpread_, {fnCtx_, items, group, ConstantInt::get(i32_, n),
-                                            ConstantInt::get(i32_, (uint32_t)i.spread), restItems, rest,
-                                            ConstantInt::get(i32_, i.spreadRefs)});
-  BasicBlock *filled = newBlock("spread.filled");
-  BasicBlock *failed = newBlock("spread.failed");
-  b_.CreateCondBr(b_.CreateICmpNE(ok, ConstantInt::get(i32_, 0)), filled, failed);
+  Value *pos = ConstantInt::get(i32_, 0);
+  for (size_t k = 0; k < ops.size(); ++k) {
+    Value *at = b_.CreateInBoundsGEP(itemTy_, items, pos);
+    if (ops[k]->type() != xir::Type::Args) {
+      copyItem(at, b_.CreateConstInBoundsGEP1_32(itemTy_, group, (uint32_t)k));
+      pos = b_.CreateAdd(pos, ConstantInt::get(i32_, 1));
+      continue;
+    }
+    Value *ok = b_.CreateCall(rtArgsRest_, {fnCtx_, at, restItems, rest, pos, ConstantInt::get(i32_, i.restRefs)});
+    BasicBlock *next = newBlock("list.rest");
+    b_.CreateCondBr(b_.CreateICmpNE(ok, ConstantInt::get(i32_, 0)), next, failed);
+    b_.SetInsertPoint(next);
+    pos = b_.CreateAdd(pos, rest);
+  }
+  emit(total, items);
+  unlink();
+  BasicBlock *done = b_.GetInsertBlock();
   b_.SetInsertPoint(failed);
   unlink();
   b_.CreateBr(unwind_);
-  b_.SetInsertPoint(filled);
-  emit(total, items);
-  unlink();
+  b_.SetInsertPoint(done);
 }
 
 // .T. or .F.; any other value is an error (the function leaves). `type` is
@@ -279,6 +291,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::FromBool: storeLogical(dest(i), value(ops[0])); break;
+  case Op::ArgsRest: break; // read by the list that uses it (withRest)
   case Op::Call: {
     if (emitBitCall(i) || emitInlineCall(i)) break;
     Value *argv = operandGroup(i);
@@ -286,7 +299,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     setNil(d); // the caller clears the result, so callees that return nothing need not
     auto call = [&](Value *n, Value *items) { b_.CreateCall(xbFuncTy_, callee, {fnCtx_, d, n, items}); };
-    if (i.spread >= 0) withSpread(i, argv, call);
+    if (i.hasRest()) withRest(i, argv, call);
     else call(ConstantInt::get(i32_, ops.size()), argv);
     checkPending(unwind_);
     break;
@@ -298,7 +311,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     auto send = [&](Value *n, Value *items) {
       b_.CreateCall(rtSend_, {fnCtx_, d, messageName(i.message), n, items});
     };
-    if (i.spread >= 0) withSpread(i, argv, send);
+    if (i.hasRest()) withRest(i, argv, send);
     else send(ConstantInt::get(i32_, ops.size()), argv);
     checkPending(unwind_);
     break;
@@ -313,7 +326,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *elems = operandGroup(i);
     Value *d = dest(i);
     auto make = [&](Value *n, Value *items) { b_.CreateCall(rtArrayNew_, {fnCtx_, d, n, items}); };
-    if (i.spread >= 0) withSpread(i, elems, make);
+    if (i.hasRest()) withRest(i, elems, make);
     else make(ConstantInt::get(i32_, ops.size()), elems);
     break;
   }

@@ -38,13 +38,18 @@ const char *typeName(Type t) {
   case Type::Bool: return "bool";
   case Type::I64: return "i64";
   case Type::Item: return "item";
+  case Type::Args: return "args";
   }
   return "?";
 }
 
+bool Instruction::hasRest() const {
+  return std::any_of(operands_.begin(), operands_.end(), [](const Value *v) { return v->type() == Type::Args; });
+}
+
 uint16_t Instruction::effects() const {
   uint16_t e = opInfo(op).effects;
-  if (spread >= 0) e |= Fails | RunsCode | ReadsHeap | WritesHeap | Allocates; // xb_args_spread
+  if (hasRest()) e |= Fails | RunsCode | ReadsHeap | WritesHeap | Allocates; // xb_args_rest
   return e;
 }
 
@@ -62,8 +67,7 @@ void Instruction::copyData(const Instruction &from) {
   access = from.access;
   callee = from.callee;
   message = from.message;
-  spread = from.spread;
-  spreadRefs = from.spreadRefs;
+  restRefs = from.restRefs;
   blockFn = from.blockFn;
   captures = from.captures;
 }

@@ -179,7 +179,8 @@ and the lowering from the syntax tree (`Gen*.cpp`). Block names are unique in a 
 
 Phase 1 replaced the code generator without changing behavior or speed; the later phases optimize on top of it.
 
-- Types: `item` (an xBase value), `bool`, `i64` (counters), `void`. Phase 3 adds the unboxed numeric types.
+- Types: `item` (an xBase value), `bool`, `i64` (counters), `args` (a list of items whose length is known at run
+  time: `...`), `void`. Phase 3 adds the unboxed numeric types.
 - Values: instruction results, block parameters, and constants (`nil`, logicals, numbers with their display width and
   decimals, strings), which lower to static items. A number whose decimals are SET DECIMALS at run time is an
   instruction, since it needs the context.
@@ -190,17 +191,17 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   parameter is tested for a cell or reference at run time. `ref` and `ref.index` make the reference an argument `@x`
   or `@a[i]` passes.
 - Operations mirror the runtime: unary and binary operators, the truth test, calls (to the module's functions or to
-  declared externals), `send` (a message to the first operand, with the others as arguments), array literals (in a call,
-  a send or an array literal, `Instruction::spread` is the operand position where `...` puts the function's arguments
-  past its parameters, shown as `...` in the listing; `spreadRefs` the positions that receive references), hash literals
-  (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its captured
-  variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`, `each.move`, `each.leave`, and
-  `each.key`, the key at a position), the `SWITCH` check (whose result is the value the `CASE`s match: a substituted one
-  after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `append` (`var := var + value`,
-  `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right after its
-  operation and the value first in the block only the check leads to), and for parameter versioning `params.ref`
-  (whether parameters hold references their caller passed) and `call.forward` (a call with the function's own arguments,
-  as received).
+  declared externals), `send` (a message to the first operand, with the others as arguments), array literals (`...` in a
+  call, a send or an array literal is an operand of type `args`, `args.rest`: the function's arguments past its
+  parameters, made right before its list, which is its one use in the block; `restRefs` the positions of a call that
+  receive references), hash literals (`hash`, keys and values alternating), element read and write, codeblock creation
+  with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`,
+  `each.move`, `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose result is the value the
+  `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `append`
+  (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps
+  the check right after its operation and the value first in the block only the check leads to), and for parameter
+  versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the
+  function's own arguments, as received).
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `ret`.

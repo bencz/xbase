@@ -40,11 +40,7 @@ Value *Generator::genExpr(const Expr &e) {
     return genExpr(*l.exprs.back());
   }
   case ExprKind::ArrayLit: {
-    std::vector<Value *> elems;
-    int32_t spread = genArgs(static_cast<const ArrayLitExpr &>(e).elems, elems);
-    Instruction *arr = b.arrayLit(elems);
-    arr->spread = spread; // elements are values
-    return arr;
+    return b.arrayLit(genArgs(static_cast<const ArrayLitExpr &>(e).elems));
   }
   case ExprKind::HashLit: {
     auto &h = static_cast<const HashLitExpr &>(e);
@@ -65,12 +61,9 @@ Value *Generator::genExpr(const Expr &e) {
   case ExprKind::Send: {
     auto &m = static_cast<const SendExpr &>(e);
     Value *object = genExpr(*m.object);
-    std::vector<Value *> args;
-    int32_t spread = genArgs(m.args, args);
+    std::vector<Value *> args = genArgs(m.args);
     b.setLoc(m.loc);
-    Instruction *send = b.send(m.message, object, args);
-    send->spread = spread < 0 ? -1 : spread + 1; // after the object; a method receives values (spreadRefs 0)
-    return send;
+    return b.send(m.message, object, args); // a method receives values (restRefs 0)
   }
   case ExprKind::Ref: { // a call argument passed by reference
     const Expr &target = *static_cast<const RefExpr &>(e).target;
@@ -80,7 +73,7 @@ Value *Generator::genExpr(const Expr &e) {
     Value *idx = genExpr(*ix.index);
     return b.refIndex(base, idx);
   }
-  case ExprKind::Spread: break; // an element of a list (genArgs)
+  case ExprKind::Spread: break; // only an element of a list (genArgs)
   }
   return b.nil();
 }
@@ -122,20 +115,19 @@ Value *Generator::genCond(const Expr &e) {
   return b.truth(genExpr(e));
 }
 
-// The values of a list of arguments or elements, in order; `...` among them
-// adds none: its position in `values` is returned, -1 without one.
-int32_t Generator::genArgs(const std::vector<ExprPtr> &exprs, std::vector<Value *> &values) {
-  int32_t spread = -1;
-  for (auto &e : exprs) {
-    if (e->kind == ExprKind::Spread) spread = (int32_t)values.size();
-    else values.push_back(genExpr(*e));
-  }
-  return spread;
+// The values of a list of arguments or elements, in order. `...` is an
+// args.rest made after the others, right before the list's operation, which is
+// then its one use in the same block.
+std::vector<Value *> Generator::genArgs(const std::vector<ExprPtr> &exprs) {
+  std::vector<Value *> values;
+  for (auto &e : exprs) values.push_back(e->kind == ExprKind::Spread ? nullptr : genExpr(*e));
+  for (Value *&v : values)
+    if (!v) v = cur_.b->argsRest();
+  return values;
 }
 
 Value *Generator::genCall(const CallExpr &c) {
-  std::vector<Value *> args;
-  int32_t spread = genArgs(c.args, args);
+  std::vector<Value *> args = genArgs(c.args);
   Callee callee;
   if (c.callee || c.external) { // an EXTERN FUNCTION, or another module's function (sema/Calls)
     callee.name = c.name;
@@ -145,11 +137,8 @@ Value *Generator::genCall(const CallExpr &c) {
   }
   cur_.b->setLoc(c.loc);
   Instruction *call = cur_.b->call(std::move(callee), args);
-  if (spread >= 0) {
-    call->spread = spread;
-    // A native function receives references only where it takes them; an xBase one always.
-    call->spreadRefs = c.callee ? c.callee->refMask() : UINT32_MAX;
-  }
+  // A native function receives references only where it takes them; an xBase one always.
+  if (call->hasRest()) call->restRefs = c.callee ? c.callee->refMask() : UINT32_MAX;
   return call;
 }
 

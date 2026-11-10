@@ -1,9 +1,9 @@
 // `...` after a function's parameters, and `...` among the arguments of a call or a send or the elements of an array
 // literal: the arguments the function received past its parameters, in place (none, one or many; with other arguments
-// before and after it). A compiled function receives references as passed; a runtime function (but where it takes
-// references), a method and an array element the values, and a reference whose element is gone is an error, also for
-// an array nothing reads. The items stay rooted while the call runs (PValue() may replace them); a loop of such calls
-// does not grow the stack.
+// before and after it; more than once). A compiled function receives references as passed; a runtime function (but
+// where it takes references), a method and an array element the values, and a reference whose element is gone is an
+// error, also for an array nothing reads. The items stay rooted while the call runs (PValue() may replace them); a loop
+// of such calls does not grow the stack.
 PROCEDURE Main()
    LOCAL x := 1, y := 2
    ? "vari:", Vari( "a", "b", "c" )
@@ -94,7 +94,26 @@ STATIC PROCEDURE Rest()
       ? "unread:", e:subCode
    END
    ? "after:", EvalAfter( {|| "ran" } )
+   ? "twice:", Twice( "a", 1, 2 ), Len( Both( 1, 2, 3 ) ), Both( 1, 2, 3 )[ 4 ], Len( Both() )
+   ? "refs after two:", RefTwice( {| a | a := 9 } ), ValueTwice( {|| "ran" } )
 RETURN
+
+// After two `...`, an argument of Eval lands among its `@...`: the reference stays; where Eval may take its block,
+// the value goes.
+FUNCTION RefTwice( b, ... )
+   LOCAL x := 1
+   Eval( b, ..., ..., @x )
+RETURN x
+
+FUNCTION ValueTwice( b, ... )
+RETURN Eval( ..., ..., @b )
+
+// `...` more than once in a list passes the arguments on each time.
+FUNCTION Twice( a, ... )
+RETURN Cnt( ..., a, ... )
+
+FUNCTION Both( ... )
+RETURN { ..., ... }
 
 // A function copied for the typed continuation of a loop keeps its `...` in both copies.
 FUNCTION Continued( s, ... )
@@ -121,9 +140,11 @@ FUNCTION Unread( a, ... )
    x := { ... }
 RETURN NIL
 
-// An argument written after `...` lands where Eval takes a block: it receives the value.
+// An argument written after `...` lands where Eval takes a block: it receives the value; so does one written far
+// after it, for a function that takes no references.
 FUNCTION EvalAfter( b, ... )
-RETURN Eval( ..., @b )
+   LOCAL s := "x"
+RETURN Eval( ..., @b ) + ValType( Hash( "k", ..., @s )[ "k" ] )
 
 FUNCTION SendFwd( o, ... )
    o:_subCode( ... )

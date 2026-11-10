@@ -339,7 +339,7 @@ void CodeGen::emitBitOperator(const xir::Instruction &i, const xb_bit_function &
 // arguments are the machine operation; others call the runtime function.
 // Returns false for any other call.
 bool CodeGen::emitBitCall(const xir::Instruction &i) {
-  if (i.callee.function || !i.callee.native || i.spread >= 0) return false;
+  if (i.callee.function || !i.callee.native || i.hasRest()) return false;
   const xb_bit_function *f = findBitFunction(i.callee.name);
   if (!f || i.operands().size() != f->arity) return false;
   Value *d = dest(i);

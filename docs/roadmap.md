@@ -132,9 +132,9 @@ hashes (literals, the `H*` functions, see [runtime.md](runtime.md#hashes)).
 - `WITH OBJECT o ... END`: `:name` inside means `o:name`.
 - Extended codeblocks: a block with statements, `{| a, b | <statements> RETURN x }`, compiled as a nested function
   with its own declarations.
-- `...` as the indexes of an element (`a[ ... ]`), in codeblocks (`{| a, ... | ... }`), and more than once in a list
-  (`f( ..., x, ... )`, which the reference accepts); variadic functions and one `...` in calls, sends and array
-  literals are done ([compiler.md](compiler.md#grammar)).
+- `...` as the indexes of an element (`a[ ... ]`) and in codeblocks (`{| a, ... | ... }`); `...` read in its place
+  among the arguments, before those written after it (today when the call is made); variadic functions and `...` in
+  calls, sends and array literals are done ([compiler.md](compiler.md#grammar)).
 - Timestamps (date and time in one value) with their arithmetic and comparisons, date and timestamp literals,
   strings with escapes.
 - Function references `@Name()` and symbol values; `Do()` and `Eval()` on them.

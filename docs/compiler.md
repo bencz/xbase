@@ -108,7 +108,7 @@ expression lists `( a, b, ... )` evaluated in order with the value of the last, 
 elements pass `NIL`; a codeblock body has at least one expression. A call argument `@name` or `@name[i]...` passes a
 variable or an element by reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not
 supported yet), and so are function references `@name()`. `...` among the arguments of a call or a send or the elements
-of an array literal (`SpreadExpr`; anywhere in the list, once) stands for the arguments the function received
+of an array literal (`SpreadExpr`; anywhere in the list, once or more) stands for the arguments the function received
 past its parameters, as many as there are: `f( a, ..., b )`, `o:m( ... )`, `{ ... }`. Sema accepts it only in a function
 declared with `...`, outside its codeblocks (which have arguments of their own); a `CHECKED` function's count includes
 the other arguments only, so only too many of them is an error. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`)
@@ -210,7 +210,9 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   new value (the expression's value is what `_X` returns, the old value for `o:x++` and `o:x--`); every operand is
   evaluated once. A `load` is the variable's value at that point, so `x + (x := 5)`, `x := x + (x := 5)` and
   `x += (x := 5)` are 6, as in Clipper, and `x := x++` leaves `x` unchanged; the lowering to LLVM decides where a copy
-  is actually needed.
+  is actually needed. `...` is read when the call is made (`args.rest` right before it), after the arguments written
+  after it: one of those that changes the function's own arguments (`PValue( n, x )`) or the element a reference
+  among them designates shows its change there, where the reference reads them in place (planned: in order).
 - Messages: `o:name` and `o:name( args )` (`SendExpr`; postfix like `[`, so `a[1]:cargo[2]` chains) are `send`, the
   object first and then the arguments, all by value (`@` is not accepted there). A message written without arguments
   is an lvalue (`isLvalue`): it can be assigned, incremented and be the target of a statement `o:x = v`, but not
@@ -345,7 +347,7 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module straight
   to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
   initialization are internal, under names nothing looks up, so modules sharing the object never clash. A call, a send
-  or an array literal with `...` (`withSpread`) passes the count and the items of a frame built for it on the stack
+  or an array literal with `...` (`withRest`) passes the count and the items of a frame built for it on the stack
   ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions leave such calls alone.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`, its number of parameters and `XB_PROC_ARGS` when it keeps its arguments) in the frame.
