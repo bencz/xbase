@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 18u
+#define XB_ABI_VERSION 19u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -123,11 +123,19 @@ struct xb_array {
 #endif
 
 /* [ABI] What the call stack shows of a function (ProcName(), the "Called
- * from" lines): its name, "(b)NAME" for a codeblock of NAME. Compiled code
- * emits one constant per function. */
+ * from" lines): its name, "(b)NAME" for a codeblock of NAME; its number of
+ * parameters, the first slots of its frame; and its flags. Compiled code emits
+ * one constant per function. */
 typedef struct xb_proc {
   const char *name;
+  uint32_t nparams;
+  uint32_t flags;
 } xb_proc;
+
+/* xb_proc.flags: the frame's `argc` and `argv` hold the arguments received.
+ * Only a function or codeblock that calls PCount() or PValue() stores them;
+ * nothing else can read them. */
+#define XB_PROC_ARGS 1u
 
 /* [ABI] A compiled function's item frame (parameters, LOCALs, temporaries):
  * on the machine stack, linked into its context's chain while the function
@@ -135,8 +143,13 @@ typedef struct xb_proc {
  * items whenever something can allocate. `proc` (NULL: a frame the call stack
  * does not show) and `line`, the source line of the statement running, set
  * before each call and before an operation can raise an error, make the call
- * stack. The runtime links frames without slots for its own functions while
- * what they do can be seen: an error block they run, a codeblock they call. */
+ * stack. `argc` and `argv` (with XB_PROC_ARGS) are the arguments as the
+ * function received them (PCount(), PValue(), the arguments past its
+ * parameters), owned by its caller, which keeps them alive and rooted during
+ * the call; the callee may replace them, so the caller does not read them
+ * again after the call. The runtime links frames without slots or arguments
+ * for its own functions while what they do can be seen: an error block they
+ * run, a codeblock they call. */
 typedef struct xb_frame xb_frame;
 #ifndef __cplusplus
 struct xb_frame {
@@ -144,6 +157,8 @@ struct xb_frame {
   const xb_proc *proc;
   uint32_t nslots;
   uint32_t line;
+  xb_item *argv;
+  uint32_t argc;
   xb_item slots[];
 };
 #endif

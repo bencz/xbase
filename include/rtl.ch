@@ -1,6 +1,6 @@
 // Declarations of the runtime's xBase-callable functions, included by std.ch (a program compiled with -u or a custom
 // std file includes it itself). A call to a function that is neither defined in the program nor declared here (or in
-// another EXTERN FUNCTION) is a compile error.
+// another EXTERN FUNCTION) goes to another module's function, found when the program is linked.
 //
 //   EXTERN FUNCTION Name( param, [optionalParam], ... ) [attributes]
 //
@@ -15,6 +15,8 @@
 //             unlimited with `...`)
 //   ABBREV n  calls may abbreviate the name to its first n or more letters
 //   FOLD      calls with constant arguments are evaluated at compile time
+//   ARGS      reads the arguments the function calling it received: that function keeps them in its frame
+//   PARAMS    ARGS, and reads and writes that function's parameters: it keeps them in its frame slots
 //
 // Every function here exists in the runtime, and every xBase-callable runtime function is declared here (the
 // runtime.declarations test checks both).
@@ -130,8 +132,10 @@ EXTERN FUNCTION ErrorNew() NATIVE
 EXTERN FUNCTION Do( xFunction, @... ) NATIVE
 EXTERN FUNCTION Empty( xValue ) NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION Eval( bBlock, @... ) NATIVE CHECKED
+EXTERN FUNCTION PCount() NATIVE RESERVED CHECKED ARGS ABBREV 4
 EXTERN FUNCTION ProcLine( [nLevel] ) NATIVE
 EXTERN FUNCTION ProcName( [nLevel] ) NATIVE
+EXTERN FUNCTION PValue( nArg, [xNew] ) NATIVE PARAMS
 EXTERN FUNCTION Set( nSetting, ... ) NATIVE
 EXTERN FUNCTION ValType( xValue ) NATIVE RESERVED CHECKED ABBREV 4
 

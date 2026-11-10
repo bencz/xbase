@@ -161,8 +161,8 @@ void xbf_HVALUES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   hash_column(ctx, ret, argc, argv, "HVALUES", 1);
 }
 
-static const xb_proc hscan_proc = {"HSCAN"}, heval_proc = {"HEVAL"}, hmerge_proc = {"HMERGE"},
-                     hsort_proc = {"HSORT"};
+static const xb_proc hscan_proc = {"HSCAN", 0, 0}, heval_proc = {"HEVAL", 0, 0}, hmerge_proc = {"HMERGE", 0, 0},
+                     hsort_proc = {"HSORT", 0, 0};
 
 /* Calls `block` with the entry at `pos` (key, value, position) in call[0..2],
  * its result in call[3]; 0 when the entry is gone or the block unwinds. */
@@ -274,14 +274,20 @@ void xbf_HMERGE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     copy_entries(dest, src, 1, src->len);
     return;
   }
-  xb_item call[4];
+  /* The block's arguments and result, then the entry as it was before the block ran: the block may replace its
+   * arguments (PValue()), and the entry it was given is the one merged. */
+  xb_item call[6];
   xb_frame frame;
-  xb_calls_begin(ctx, call, 4, &frame, &hmerge_proc);
+  xb_calls_begin(ctx, call, 6, &frame, &hmerge_proc);
   for (int64_t pos = 1; pos <= (int64_t)src->len; ++pos) {
+    const xb_hentry *e = xb_hash_at(src, pos);
+    if (!e) break;
+    call[4] = e->key;
+    call[5] = e->value;
     if (!call_with_entry(ctx, &argv[2], call, src, pos)) break;
-    if (call[3].type == XB_T_LOGICAL && call[3].v.l) xb_hash_set(dest, &call[0], &call[1]);
+    if (call[3].type == XB_T_LOGICAL && call[3].v.l) xb_hash_set(dest, &call[4], &call[5]);
   }
-  xb_calls_end(ctx, &frame, 4);
+  xb_calls_end(ctx, &frame, 6);
 }
 
 typedef struct {

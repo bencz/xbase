@@ -149,6 +149,8 @@ function always receives the reference, so `@` in a declaration without `NATIVE`
 | `NATIVE` | written in C to the xBase calling convention: the call goes to `xbf_NAME`; without it the declaration names an xBase function of another module (`xbp_NAME`) |
 | `ABBREV n` | calls may abbreviate the name to its first `n` or more letters (the keyword rule, `keywordMatches`) |
 | `FOLD` | calls with constant arguments are evaluated at compile time (see [Constant folding](#constant-folding)) |
+| `ARGS` | the function reads the arguments the function calling it received (`PCount()`): that function (or codeblock) keeps them in its frame (`FuncDecl::readsArgs`, `BlockExpr::readsArgs`, `xir::Function::readsArgs`; `args` in the xIR listing) |
+| `PARAMS` | `ARGS`, and the function reads and writes the parameters of the function calling it (`PValue()`): that function keeps them in its frame slots, as written (no parameter versioning, no SSA values) |
 
 `sema/Calls.*` resolves every call before the other passes. A function the module defines comes first (a name that is
 not `RESERVED` may be redefined); otherwise the call goes to the declaration with that name, or that it abbreviates; a
@@ -168,8 +170,9 @@ function used inside a codeblock is *captured*: it is marked shared ("boxed") in
 and each codeblock between the use and the function gets a capture (`BlockExpr::captures`) that passes the cell
 along; the reference resolves to `VarWhere::Capture` with the capture index. Parameters of an enclosing codeblock
 cannot be captured ("outer codeblock variable is out of reach", as in Clipper). A function's `LOCAL` or parameter
-passed by reference (`@x`) is marked shared too. A shared variable moves into a cell only when a codeblock captures it
-or a reference is taken, at run time.
+passed by reference (`@x`) is marked shared too, and so are all the parameters of a function that calls a `PARAMS`
+function (`PValue()`), which reads and writes them in the frame. A shared variable moves into a cell only when a
+codeblock captures it or a reference is taken, at run time.
 
 `STATIC`s get slots in the module's static storage (`Module::statics`, `VarWhere::Static`). File-wide statics are
 visible in every function; a function's statics are visible in that function only. They are never captured: codeblocks
@@ -299,10 +302,10 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   stores.
 - The entry block allocates the frame of the planned size on the stack (`pushFrame`: an `alloca` of `xb_frame`, see
   [runtime.md](runtime.md#frames)), copies the parameters branch-free (a selected source: `argv[k]` or a `NIL`
-  constant), clears the other slots and links the frame into the context; the caller has already set the result to
-  `NIL`. The exit block unlinks the frame and returns. Blocks
-  are laid out in reverse postorder visiting successors last first, so a block's first successor (a loop body, a
-  THEN branch) follows it and exits come later.
+  constant), clears the other slots, stores the arguments as received (`argv`, `argc`) when the function reads them
+  (`readsArgs`) and links the frame into the context; the caller has already set the result to `NIL`. The exit block
+  unlinks the frame and returns. Blocks are laid out in reverse postorder visiting successors last first, so a block's
+  first successor (a loop body, a THEN branch) follows it and exits come later.
 - Operations call the runtime (`xb_op_*` and the others); the result may alias an operand. `FastPaths.cpp` inlines the
   common cases first: `/` and `%` of two numbers with a divisor other than 0 (a double with SET DECIMALS decimals, read
   from the context's head; `%` of two integers is their remainder, 0 for a divisor of -1); `+`, `-` and `*` of two
@@ -337,12 +340,13 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
   initialization are internal, under names nothing looks up, so modules sharing the object never clash.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
-  `xir::Function::stackName`) in the frame. While an xIR instruction is lowered, every call the builder creates is
-  marked with the instruction's source line (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is
-  complete, `placeLines` stores that line in the frame right before each marked call that can see the call stack (any
-  call but intrinsics and the runtime entry points that never raise an error or run code, `quietCalls_`), once per
-  LLVM block and line. The fast paths of operations thus store nothing; their slow paths and calls do. Before
-  `call.forward`, the function versioned for references clears its own `proc`: the other body shows instead.
+  `xir::Function::stackName`, its number of parameters and `XB_PROC_ARGS` when it keeps its arguments) in the frame.
+  While an xIR instruction is lowered, every call the builder creates is marked with the instruction's source line
+  (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is complete, `placeLines` stores that line in the
+  frame right before each marked call that can see the call stack (any call but intrinsics and the runtime entry points
+  that never raise an error or run code, `quietCalls_`), once per LLVM block and line. The fast paths of operations thus
+  store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for references clears its
+  own `proc`: the other body shows instead.
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
   calls `xb_pending` and, if that asks to unwind, goes to the LLVM block of the xIR block's unwind block, or leaves
   through the function's exit. A runtime operator may also return a value the error block substituted, of any type:

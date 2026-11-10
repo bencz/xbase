@@ -234,7 +234,7 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
   return fn;
 }
 
-// EXTERN FUNCTION name( p1, [p2], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ABBREV n]
+// EXTERN FUNCTION name( p1, [p2], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ARGS] [PARAMS] [ABBREV n]
 // Required parameters come first; `...` ends the list and lifts the maximum.
 // `@` before a parameter (or `...`) of a NATIVE function: it receives
 // references passed to it. A malformed declaration is reported once and skipped.
@@ -294,6 +294,8 @@ std::optional<ExternDecl> Parser::parseExtern() {
     else if (attr == "RESERVED") d.reserved = true;
     else if (attr == "CHECKED") d.checked = true;
     else if (attr == "FOLD") d.fold = true;
+    else if (attr == "ARGS") d.args = true;
+    else if (attr == "PARAMS") d.args = d.params = true;
     else if (attr == "ABBREV") {
       advance();
       if (!at(Tok::Number) || !cur().isInt || cur().ival < 1 || (size_t)cur().ival > d.name.size())
@@ -308,6 +310,11 @@ std::optional<ExternDecl> Parser::parseExtern() {
   bool anyByRef = d.restByRef || std::find(d.byRef.begin(), d.byRef.end(), true) != d.byRef.end();
   if (anyByRef && !d.native) {
     diag_.error(d.loc, "'@' parameters are for NATIVE functions (an xBase function always receives references)");
+    endOfStmt();
+    return std::nullopt;
+  }
+  if (d.args && !d.native) {
+    diag_.error(d.loc, "ARGS and PARAMS are for NATIVE functions (an xBase function cannot reach its caller's frame)");
     endOfStmt();
     return std::nullopt;
   }

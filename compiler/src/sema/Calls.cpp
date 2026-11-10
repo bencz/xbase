@@ -11,8 +11,8 @@ void CallResolver::run(Module &m) {
     if (!fresh) {
       const ExternDecl &p = *it->second;
       if (p.minArgs != d.minArgs || p.maxArgs != d.maxArgs || p.native != d.native || p.reserved != d.reserved ||
-          p.checked != d.checked || p.fold != d.fold || p.abbrev != d.abbrev || p.byRef != d.byRef ||
-          p.restByRef != d.restByRef) {
+          p.checked != d.checked || p.fold != d.fold || p.args != d.args || p.params != d.params ||
+          p.abbrev != d.abbrev || p.byRef != d.byRef || p.restByRef != d.restByRef) {
         diag_.error(d.loc, "EXTERN FUNCTION '" + d.name + "' conflicts with an earlier declaration");
         diag_.note(p.loc, "previous declaration is here");
       }

@@ -240,6 +240,7 @@ public:
   bool internal = false;          // STATIC FUNCTION, codeblocks, module initialization, INIT and EXIT procedures
   bool startup = false;           // an INIT or EXIT procedure: the runtime runs it, nothing calls it
   uint32_t numParams = 0;
+  bool readsArgs = false;         // its frame keeps the arguments received (PCount(), PValue())
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   std::vector<std::unique_ptr<Constant>> constants;

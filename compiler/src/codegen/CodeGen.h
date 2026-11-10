@@ -42,7 +42,15 @@ private:
   // Fields of xb_item, xb_frame and the head of xb_ctx, in the LLVM structs
   // that mirror them.
   enum ItemField : unsigned { FType = 0, FWidth = 1, FDec = 2, FValue = 3 };
-  enum FrameField : unsigned { FramePrev = 0, FrameProc = 1, FrameCount = 2, FrameLine = 3, FrameSlots = 4 };
+  enum FrameField : unsigned {
+    FramePrev = 0,
+    FrameProc = 1,
+    FrameCount = 2,
+    FrameLine = 3,
+    FrameArgv = 4,
+    FrameArgc = 5,
+    FrameSlots = 6
+  };
   enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2, CtxDecimals = 3 };
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
   enum StrField : unsigned { StrFlags = 0, StrHash = 1, StrLen = 2, StrData = 3 }; // xb_str
@@ -61,7 +69,8 @@ private:
   // their frames, item and basic block helpers.
   void initTypes();
   llvm::StructType *frameType(uint32_t nslots);
-  void pushFrame(uint32_t nslots, uint32_t nparams, llvm::Value *argc, llvm::Value *argv, llvm::Constant *proc);
+  void pushFrame(uint32_t nslots, uint32_t nparams, llvm::Value *argc, llvm::Value *argv, llvm::Constant *proc,
+                 bool keepArgs);
   llvm::Constant *procOf(const xir::Function &f);
   void markLine(llvm::Instruction *i) const;
   void placeLines();

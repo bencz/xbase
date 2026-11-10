@@ -61,7 +61,7 @@ xIR unwind edges ([runtime.md](runtime.md#errors-and-pending-requests),
 
 ### Procedures, parameters and the call stack
 
-`PCount()`, `ProcFile()`, `PValue()`; skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
+`ProcFile()`; skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 
 ### Commands, statements and headers
 
@@ -172,8 +172,12 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 - Separate compilation: a declaration file generated per module, so modules check each other's calls.
 - Runtime entry points with LLVM attributes (`nounwind`, `willreturn`, memory effects, `nocapture`), so that LLVM's
   own passes see through them.
-- FFI: `EXTERN C FUNCTION` with types and structures ([architecture.md](architecture.md#runtime-declarations)), and
-  runtime parts written in xBase.
+- FFI: `EXTERN C FUNCTION` with types and structures, functions of libraries loaded at run time (`LIBRARY`, `NAME`,
+  calling conventions; [architecture.md](architecture.md#where-a-c-function-comes-from)), and runtime parts written in
+  xBase.
+- Libraries written in xBase ([architecture.md](architecture.md#libraries-written-in-xbase)): `xbc --library` (a
+  static library and its generated header), a link step in `xbc` through the system's linker, the ABI checked by every
+  module; then shared libraries and project files.
 - GC: pages returned to the operating system; statepoints and a moving collector ([xir.md](xir.md#phases)).
 
 ### Diagnostics

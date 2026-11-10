@@ -313,9 +313,21 @@ void Sema::expr(Expr &e, Scope &s) {
   case ExprKind::Block:
     codeblock(static_cast<BlockExpr &>(e), s);
     break;
-  case ExprKind::Call:
-    for (auto &a : static_cast<CallExpr &>(e).args) expr(*a, s);
+  case ExprKind::Call: {
+    auto &c = static_cast<CallExpr &>(e);
+    for (auto &a : c.args) expr(*a, s);
+    if (!c.callee || !c.callee->args) break;
+    // The callee reads the arguments this function or codeblock received, in its frame; one whose parameters it
+    // also reads and writes keeps them there, as written (a codeblock's own parameters always stay there).
+    if (Frame &f = frames_.back(); f.block) {
+      f.block->readsArgs = true;
+    } else if (f.boxed) {
+      curFunc_->readsArgs = true;
+      if (c.callee->params)
+        for (uint32_t k = 0; k < curFunc_->params.size(); ++k) markBoxed(f, k);
+    }
     break;
+  }
   case ExprKind::Send: {
     auto &m = static_cast<SendExpr &>(e);
     expr(*m.object, s);

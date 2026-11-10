@@ -233,7 +233,7 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnSelf_ = fn_->getArg(4);
     fnSelf_->setName("self");
   }
-  pushFrame(plan.frameSize(), f.numParams, argc, argv, procOf(f));
+  pushFrame(plan.frameSize(), f.numParams, argc, argv, procOf(f), f.readsArgs && argc);
   fnExit_ = BasicBlock::Create(ctx_, "exit", fn_);
 
   // Blocks in reverse postorder; machine-value block parameters become PHIs.
@@ -269,16 +269,18 @@ void CodeGen::genFunction(const xir::Function &f) {
 // the context's chain. Parameters come from argv (NIL past argc), the other
 // slots start as NIL; all of them are valid before anything can allocate.
 StructType *CodeGen::frameType(uint32_t nslots) {
-  return StructType::get(ctx_, {ptrTy_, ptrTy_, i32_, i32_, ArrayType::get(itemTy_, nslots)});
+  return StructType::get(ctx_, {ptrTy_, ptrTy_, i32_, i32_, ptrTy_, i32_, ArrayType::get(itemTy_, nslots)});
 }
 
 // The function's xb_proc, or null when the call stack does not show it.
 Constant *CodeGen::procOf(const xir::Function &f) {
   if (f.stackName.empty()) return ConstantPointerNull::get(ptrTy_);
   Constant *name = b_.CreateGlobalString(f.stackName, ".xb.procname", 0, &mod_);
-  auto *ty = StructType::get(ctx_, ArrayRef<Type *>{ptrTy_});
-  auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage, ConstantStruct::get(ty, {name}),
-                                  ".xb.proc");
+  auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_});
+  Constant *nparams = ConstantInt::get(i32_, f.numParams);
+  Constant *flags = ConstantInt::get(i32_, f.readsArgs ? XB_PROC_ARGS : 0);
+  auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage,
+                                  ConstantStruct::get(ty, {name, nparams, flags}), ".xb.proc");
   proc->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   return proc;
 }
@@ -316,7 +318,7 @@ void CodeGen::placeLines() {
   }
 }
 
-void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *argv, Constant *proc) {
+void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *argv, Constant *proc, bool keepArgs) {
   StructType *ty = frameType(nslots);
   BasicBlock &entry = fn_->getEntryBlock(); // a static alloca, whatever block the frame is linked in
   AllocaInst *frame = IRBuilder<>(&entry, entry.getFirstInsertionPt()).CreateAlloca(ty, nullptr, "frame");
@@ -331,6 +333,10 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
   tag(b_.CreateStore(ConstantInt::get(i32_, nslots), b_.CreateStructGEP(ty, frame, FrameCount)), Mem::FrameLink);
   tag(b_.CreateStore(proc, b_.CreateStructGEP(ty, frame, FrameProc)), Mem::FrameLink);
   tag(b_.CreateStore(ConstantInt::get(i32_, 0), b_.CreateStructGEP(ty, frame, FrameLine)), Mem::FrameLink);
+  if (keepArgs) { // only what PCount() and PValue() read; other frames leave the two fields unset
+    tag(b_.CreateStore(argv, b_.CreateStructGEP(ty, frame, FrameArgv)), Mem::FrameLink);
+    tag(b_.CreateStore(argc, b_.CreateStructGEP(ty, frame, FrameArgc)), Mem::FrameLink);
+  }
   Value *frames = b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames);
   tag(b_.CreateStore(loadFrom(ptrTy_, frames, Mem::Ctx, "prev"), b_.CreateStructGEP(ty, frame, FramePrev)),
       Mem::FrameLink);

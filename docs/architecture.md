@@ -68,6 +68,62 @@ ENDSTRUCTURE
 - For dynamic calls (`&cFunc`, `Do()`), each module emits a name-to-thunk table; thunks for C functions are generated
   from the declarations as well.
 
+#### Where a C function comes from
+
+```xbase
+#ifdef __PLATFORM__WINDOWS
+EXTERN C FUNCTION MessageBox( hWnd AS POINTER, cText AS WSTRING, cTitle AS WSTRING, nType AS UINT ) AS INT ;
+   LIBRARY "user32.dll" NAME "MessageBoxW" STDCALL
+#else
+EXTERN C FUNCTION crc32( nCrc AS ULONG, pBuf AS POINTER, nLen AS UINT ) AS ULONG LIBRARY "libz.so.1"
+#endif
+
+LIBRARY "user32.dll"
+   EXTERN C FUNCTION ...
+ENDLIBRARY
+```
+
+- Without `LIBRARY`, the linker resolves the symbol (the C library, the runtime, libraries given to the link): a direct
+  call.
+- `LIBRARY "file"` loads the library at run time: the first call loads it and finds the symbol (through the platform
+  layer, `runtime/src/platform/<platform>/`: load a library, find a symbol, free a library), and the compiler keeps the
+  address in a global of the function for the next calls. A library or symbol that is missing is an xBase error (the
+  library and symbol named) that `BEGIN SEQUENCE` can catch, not a program that fails to start. The block form
+  `LIBRARY ... ENDLIBRARY` gives the library to every declaration inside it.
+- `NAME "symbol"`: the C symbol, when it differs from the xBase name (the `A`/`W` variants of the Windows API,
+  decorated names).
+- A calling convention (`CDECL`, `STDCALL`, ...) is applied by LLVM; it matters on 32-bit Windows (the Windows API is
+  `STDCALL`) and is the target's C convention everywhere else.
+- The library file differs per platform: the predefined target names (`__PLATFORM__WINDOWS`, ...,
+  [preprocessor.md](preprocessor.md#predefined-names)) choose it.
+- A link dependency of a module (`#pragma link "ws2_32"`) goes into the object where the format has a directive for
+  it (COFF), and otherwise to the linker through the driver.
+
+### Libraries written in xBase
+
+A library is written in xBase and distributed compiled, so that programs include its header and link it:
+
+- `xbc --library <name> <sources> -o <file>` compiles the modules (no start function) into a static library (`.a`,
+  `.lib`), written in-process by LLVM's archive writer, and generates `<name>.ch`: the library's public functions with
+  their parameters (classes once they exist) and its link dependencies (`#pragma link`). A description file beside it
+  gives the library's version, the runtime ABI it was compiled for, its include directories, its system libraries per
+  platform and the xbase libraries it needs.
+- A program uses it with `#include "<name>.ch"` and `--lib=<name>`; directories to search come from `-I`, `-L` and a
+  configuration file beside the executable (never environment variables).
+- Symbols: a library's public function is `xbl_<library>_<NAME>`, so libraries never clash when linked. In source, a
+  name declared by one library is called as written; a name two included libraries declare must be qualified,
+  `<library>::Name()`.
+- Every module checks `XB_ABI_VERSION` when it registers (not only the program): a library compiled for another ABI is
+  a clear error, not a crash. Until the ABI is stable, a library is recompiled with the compiler that uses it.
+- Linking: `xbc` gets a link step (`-L<dir>`, `-l<lib>`, `--lib=<name>`, the runtime added by itself), run through the
+  system's linker driver (`cc`/`clang`, `link.exe` or `lld-link`) with the dependencies the objects and the description
+  files name. An embedded LLD (self-contained, linking for other targets) may replace it later.
+- Shared libraries (`.so`, `.dll`, `.dylib`) come after the static ones: they need the runtime as a shared library too
+  (one collector, context and symbol table per process), the public functions exported (Windows), and modules that
+  register when a library is loaded after the program started.
+- A project file (sources, include directories, libraries) lets `xbc <project>` compile and link a program in one
+  step.
+
 ### Classes
 
 `CLASS`, `INHERIT`, `DATA`/`VAR`, `METHOD`, `ACCESS`/`ASSIGN`, `Super` and constructors are compiled natively. Since the

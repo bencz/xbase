@@ -81,6 +81,43 @@ void xbf_PROCLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_int(ret, n >= 0 && f ? f->line : 0);
 }
 
+/* The frame of the function calling: the innermost one the call stack shows
+ * (a codeblock's own; Do's while Do runs); NULL when it keeps no arguments
+ * (only a function that calls PCount() or PValue() itself does). */
+static xb_frame *caller_frame(const xb_ctx *ctx) {
+  xb_frame *f = ctx->frames;
+  while (f && !f->proc) f = f->prev;
+  return f && (f->proc->flags & XB_PROC_ARGS) ? f : NULL;
+}
+
+/* PCount(): the number of arguments the calling function (or codeblock)
+ * received, parameters or not. */
+void xbf_PCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  const xb_frame *f = caller_frame(ctx);
+  xb_set_int(ret, f ? f->argc : 0);
+}
+
+/* PValue( nArg, [xNew] ): argument nArg (1-based, a fraction truncated) of the
+ * calling function: a parameter's current value, or the argument as passed past
+ * the parameters; NIL outside 1 .. PCount(). With xNew, that argument becomes
+ * xNew (through the reference when one was passed) and xNew is returned. */
+void xbf_PVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_frame *f = caller_frame(ctx);
+  int64_t n = argc && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 0;
+  if (!f || n < 1 || n > f->argc) return;
+  xb_item *arg = (uint64_t)n <= f->proc->nparams ? &f->slots[n - 1] : &f->argv[n - 1];
+  int ref = arg->type == XB_T_CELL || arg->type == XB_T_REF;
+  xb_item *target = ref ? xb_ref_target(ctx, arg) : arg;
+  if (ctx->pending && xb_pending(ctx)) return;
+  if (argc > 1) {
+    *target = argv[1];
+    if (ref) xb_ref_written(arg);
+  }
+  *ret = *target;
+}
+
 /* ErrorLevel( [nNew] ): the program's exit code; an argument replaces it: a
  * number wrapped to 32 bits, anything else 0. */
 void xbf_ERRORLEVEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -92,10 +129,17 @@ void xbf_ERRORLEVEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * (letter case aside; the name ends at a NUL) or of the block, called with the
  * arguments; references go on as passed where the function takes them, a
  * runtime function receives the value elsewhere. Do shows on the call stack
- * while it runs. */
+ * while it runs, with its own arguments (PCount() and PValue() called through
+ * Do see them). */
 #define DO_NAME_MAX 256
+static void do_frame_push(xb_ctx *ctx, xb_frame *frame, uint32_t argc, xb_item *argv) {
+  static const xb_proc proc = {"DO", 0, XB_PROC_ARGS};
+  xb_frame_push(ctx, frame, &proc);
+  frame->argc = argc;
+  frame->argv = argv;
+}
+
 void xbf_DO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  static const xb_proc proc = {"DO"};
   xb_frame frame;
   if (argc && argv[0].type == XB_T_STRING) {
     const char *name = argv[0].v.s->data;
@@ -116,11 +160,11 @@ void xbf_DO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
         if (ctx->pending && xb_pending(ctx)) return;
         argv[k] = *v;
       }
-    xb_frame_push(ctx, &frame, &proc);
+    do_frame_push(ctx, &frame, argc, argv);
     e->fn(ctx, ret, argc - 1, argv + 1);
     xb_frame_pop(ctx, &frame);
   } else if (argc && argv[0].type == XB_T_BLOCK) {
-    xb_frame_push(ctx, &frame, &proc);
+    do_frame_push(ctx, &frame, argc, argv);
     xb_block_call(ctx, ret, &argv[0], argc - 1, argv + 1);
     xb_frame_pop(ctx, &frame);
   } else {

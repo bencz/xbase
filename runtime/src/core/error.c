@@ -69,7 +69,7 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
 
 int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
-  xb_proc proc = {frame};
+  xb_proc proc = {frame, 0, 0};
   xb_frame inside;
   if (frame) xb_frame_push(ctx, &inside, &proc);
   if (ctx->error_depth >= XB_ERROR_MAX_DEPTH) {

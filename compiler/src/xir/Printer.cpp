@@ -76,7 +76,7 @@ public:
     f.renumber();
     static const char *const kinds[] = {"function", "block", "module_init"};
     out_ += std::string(kinds[(int)f.kind]) + " " + f.name + (f.internal ? " internal" : "") +
-            " params " + std::to_string(f.numParams) + " {\n";
+            " params " + std::to_string(f.numParams) + (f.readsArgs ? " args" : "") + " {\n";
     for (auto &v : f.vars) out_ += "  " + varName(*v) + " = " + varDesc(*v) + "\n";
     for (auto &b : f.blocks) block(*b);
     out_ += "}\n";

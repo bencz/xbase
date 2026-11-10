@@ -33,6 +33,8 @@ static inline void xb_frame_push(xb_ctx *ctx, xb_frame *f, const xb_proc *proc) 
   f->proc = proc;
   f->nslots = 0;
   f->line = 0;
+  f->argv = NULL;
+  f->argc = 0;
   ctx->frames = f;
 }
 static inline void xb_frame_pop(xb_ctx *ctx, const xb_frame *f) { ctx->frames = f->prev; }

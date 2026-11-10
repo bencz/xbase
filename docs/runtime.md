@@ -51,26 +51,39 @@ typedef struct xb_item {
 ## Frames
 
 Parameters, `LOCAL`s and temporaries of a compiled function live in its item frame (`xb_frame`: link, what the call
-stack shows, slot count, current line, items), an `alloca` on the machine stack. The function links it into its
-context's chain (`xb_ctx.frames`) at entry, with the parameters copied from `argv` (`NIL` past `argc`) and the other
-slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors return normally (the pending flag),
-so the chain is always right. The collector scans the frames of every context's chain. A frame dies with its function:
-nothing keeps a pointer to a slot (a variable that outlives it moves into a heap cell first). The program runs on a
-thread whose stack is reserved at 256 MB (`XB_PROGRAM_STACK_SIZE` in `core/main.c`; pages are committed as used), so
-deep recursion has room; running past it is not detected yet and ends the process.
+stack shows, slot count, current line, the arguments as received, items), an `alloca` on the machine stack. The function
+links it into its context's chain (`xb_ctx.frames`) at entry, with the parameters copied from `argv` (`NIL` past `argc`)
+into the first slots and the other slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors
+return normally (the pending flag), so the chain is always right. The collector scans the frames of every context's
+chain. A frame dies with its function: nothing keeps a pointer to a slot (a variable that outlives it moves into a heap
+cell first). The program runs on a thread whose stack is reserved at 256 MB (`XB_PROGRAM_STACK_SIZE` in `core/main.c`;
+pages are committed as used), so deep recursion has room; running past it is not detected yet and ends the process.
 
 The frames also make the call stack. A frame's `proc` (an `xb_proc` constant the compiler emits per function: its name,
 `(b)NAME` for a codeblock written in the function NAME, also inside another codeblock, where Harbour names one run by
-`Eval` from a codeblock `(b)EVAL`) says what it shows, and `line` the line where the statement running ends (a statement
-continued over several lines shows its last one, a codeblock the line of the statement defining it), which compiled code
-stores right before each call that can see the stack (see [compiler.md](compiler.md#xir-to-llvm)). Frames without `proc`
-(the command-line arguments, a module initialization, the body of a function versioned for references while the other
-body runs) are not shown. A runtime function shows only while what it does can be seen, with a frame without slots on
-the C stack and line 0 (`xb_frame_push`, `xb_frame_pop` in `core/context.h`): `AEval`, `AScan` and `ASort` while they
-call blocks, and a function or message whose error raises the error block (`xb_error_in` names it: `SUBSTR`, `ERROR:FOO`
-for a message to an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block). Operators and statements show
-nothing of their own. `ProcName( [nLevel] )` and `ProcLine( [nLevel] )` read it: level 0 is the function calling them, a
-non-numeric level is 0, a negative one gives `PROCNAME` and line 0, a level past the end `""` and 0.
+`Eval` from a codeblock `(b)EVAL`, and its number of parameters) says what it shows, and `line` the line where the
+statement running ends (a statement continued over several lines shows its last one, a codeblock the line of the
+statement defining it), which compiled code stores right before each call that can see the stack (see
+[compiler.md](compiler.md#xir-to-llvm)). Frames without `proc` (the command-line arguments, a module initialization, the
+body of a function versioned for references while the other body runs) are not shown. A runtime function shows only
+while what it does can be seen, with a frame without slots on the C stack and line 0 (`xb_frame_push`, `xb_frame_pop` in
+`core/context.h`): `AEval`, `AScan` and `ASort` while they call blocks, and a function or message whose error raises the
+error block (`xb_error_in` names it: `SUBSTR`, `ERROR:FOO` for a message to an object, `FOO` without an object,
+`(b)EVAL` for `Eval` of a non-block). Operators and statements show nothing of their own. `ProcName( [nLevel] )` and
+`ProcLine( [nLevel] )` read it: level 0 is the function calling them, a non-numeric level is 0, a negative one gives
+`PROCNAME` and line 0, a level past the end `""` and 0.
+
+`argc` and `argv` in the frame are the arguments as the function received them, stored only by a function or codeblock
+that calls `PCount()` or `PValue()` itself (`XB_PROC_ARGS` in its `xb_proc`; nothing else can read them, and the other
+calls cost nothing more); they belong to its caller (slots of the caller's frame, or items the runtime keeps rooted),
+which keeps them during the call. The function may replace them (`PValue()`), so a caller does not read an argument
+again after the call: `HMerge` merges the entry as it was before its filter ran, and each `INIT` procedure receives its
+own copy of the command-line arguments. `PCount()` and `PValue( nArg, [xNew] )` (`rtl/lang.c`) read the innermost frame
+the call stack shows (a codeblock's own; `Do`'s, with `Do`'s own arguments, while `Do` runs; a frame without
+`XB_PROC_ARGS` counts no arguments): `PCount()` is `argc`; `PValue()` gives argument `nArg` (a fraction truncated) for
+`1 <= nArg <= argc`, `NIL` otherwise: a parameter's current value (the first `xb_proc.nparams` slots; a function calling
+`PValue()` keeps its parameters there, see [compiler.md](compiler.md#calls)), or past the parameters the argument as
+passed. With `xNew` it stores `xNew` there, through the reference when one was passed, and returns it.
 
 ## Garbage collector
 

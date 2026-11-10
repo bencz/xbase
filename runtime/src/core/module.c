@@ -41,6 +41,20 @@ static void call(xb_ctx *ctx, xb_func fn, uint32_t argc, xb_item *argv) {
   xb_gc_root_pop(ctx, 1);
 }
 
+/* Calls `fn` with a rooted copy of the arguments: a function may replace the
+ * arguments it received (PValue()), and the next one receives them as given. */
+static void call_with_copy(xb_ctx *ctx, xb_func fn, uint32_t argc, const xb_item *argv) {
+  xb_item *copy = argc ? malloc(argc * sizeof *copy) : NULL;
+  if (argc && !copy) xb_gc_fatal("out of memory");
+  for (uint32_t i = 0; i < argc; ++i) {
+    copy[i] = argv[i];
+    xb_gc_root_push(ctx, &copy[i]);
+  }
+  call(ctx, fn, argc, copy);
+  xb_gc_root_pop(ctx, argc);
+  free(copy);
+}
+
 /* Up to the start function; 0 when a request to unwind stopped it. */
 static int start_up(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
   for (const xb_module *m = modules; m; m = m->next) {
@@ -49,7 +63,7 @@ static int start_up(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
   }
   for (const xb_module *m = modules; m; m = m->next)
     for (uint32_t k = m->ninit; k-- > 0;) {
-      call(ctx, m->procs[k], argc, argv);
+      call_with_copy(ctx, m->procs[k], argc, argv);
       if (unwinding(ctx)) return 0;
     }
   return 1;

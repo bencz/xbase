@@ -68,6 +68,7 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   cur_.function = f.name;
   fn->stackName = f.name;
   fn->numParams = (uint32_t)f.params.size();
+  fn->readsArgs = f.readsArgs;
   for (uint32_t s = 0; s < f.numLocals; ++s) {
     Var *v = fn->addVar(Var::Kind::Frame, s, s < f.params.size() ? f.params[s].name : "");
     v->shared = s < f.boxed.size() && f.boxed[s];
@@ -127,6 +128,7 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   Function *fn = mod_->functions.back().get();
   fn->internal = true;
   fn->numParams = blk.numLocals;
+  fn->readsArgs = blk.readsArgs;
   for (uint32_t s = 0; s < blk.numLocals; ++s) fn->addVar(Var::Kind::Frame, s, blk.params[s].name)->param = true;
   for (uint32_t k = 0; k < blk.captures.size(); ++k) fn->addVar(Var::Kind::Capture, k, "");
 
