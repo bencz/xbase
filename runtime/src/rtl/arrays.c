@@ -133,7 +133,7 @@ static int call_with_element(xb_ctx *ctx, const xb_item *block, xb_item *call, c
   return xb_calls_run(ctx, block, call, 2);
 }
 
-static const xb_proc ascan_proc = {"ASCAN", 0, 0}, asort_proc = {"ASORT", 0, 0};
+static const xb_proc ascan_proc = XB_RUNTIME_PROC("ASCAN", 0), asort_proc = XB_RUNTIME_PROC("ASORT", 0);
 
 /* AScan( aTarget, xSearch, [nStart], [nCount] ): the position of the first
  * element in the range that is equal to xSearch (values of one comparable

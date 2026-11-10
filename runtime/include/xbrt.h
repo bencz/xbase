@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 22u
+#define XB_ABI_VERSION 23u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -124,12 +124,14 @@ struct xb_array {
 
 /* [ABI] What the call stack shows of a function (ProcName(), the "Called
  * from" lines): its name, "(b)NAME" for a codeblock of NAME; its number of
- * parameters, the first slots of its frame; and its flags. Compiled code emits
- * one constant per function. */
+ * parameters, the first slots of its frame; its flags; and the name of its
+ * source file, without directories (ProcFile(); NULL for the runtime's
+ * functions). Compiled code emits one constant per function. */
 typedef struct xb_proc {
   const char *name;
   uint32_t nparams;
   uint32_t flags;
+  const char *file;
 } xb_proc;
 
 /* xb_proc.flags. XB_PROC_ARGS: the frame's `argc` and `argv` hold the

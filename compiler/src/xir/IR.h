@@ -279,6 +279,7 @@ private:
 class Module {
 public:
   std::string name;
+  std::string file;                                 // the source's file name, without directories
   std::vector<std::unique_ptr<Function>> functions; // program functions first, in source order
   std::vector<std::unique_ptr<Var>> statics;        // index = static slot
   Function *init = nullptr;                         // initializes the STATICs (null: none have initializers)

@@ -392,8 +392,9 @@ emits the object file.
   fewer instructions, `qsort` 17%, `AEval` 15%; `matmul` 2% more (its inner loop has no calls, and the words of the
   outer loops' counters take registers there).
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
-  `xir::Function::stackName`, its number of parameters, `XB_PROC_ARGS` when it keeps its arguments and `XB_PROC_HIDDEN`
-  when it is hidden) in the frame. While an xIR instruction is lowered, every call the builder creates is marked with
+  `xir::Function::stackName`, its number of parameters, `XB_PROC_ARGS` when it keeps its arguments, `XB_PROC_HIDDEN`
+  when it is hidden, and its source file name without directories, one string per module, none for a module of the
+  runtime) in the frame. While an xIR instruction is lowered, every call the builder creates is marked with
   the instruction's source line (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is complete,
   `placeLines` stores that line in the frame right before each marked call that can see the call stack (any call but
   intrinsics and the runtime entry points that never raise an error or run code, `quietCalls_`), once per LLVM block and

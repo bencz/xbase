@@ -9,6 +9,7 @@ namespace xb::xir {
 std::unique_ptr<Module> Generator::run(const xb::Module &ast) {
   mod_ = std::make_unique<Module>();
   mod_->name = ast.name;
+  mod_->file = ast.file;
   for (const Request &r : ast.requests) mod_->requests.push_back(r.name);
   for (size_t i = 0; i < ast.statics.size(); ++i) {
     auto v = std::make_unique<Var>(Var{Var::Kind::Static, (uint32_t)i, false, false, ast.statics[i]->name});

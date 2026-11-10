@@ -72,9 +72,11 @@ shown. A runtime function shows only while what it does can be seen, with a fram
 xBase, such as `AEval`, shows its own frame, also with line 0: [Functions written in
 xBase](#functions-written-in-xbase)), and a function or message whose error raises the error block (`xb_error_in` names
 it: `SUBSTR`, `ERROR:FOO` for a message to an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block).
-Operators and statements show nothing of their own. `ProcName( [nLevel] )` and `ProcLine( [nLevel] )` read it: level 0
-is the function calling them, a non-numeric level is 0, a negative one gives `PROCNAME` and line 0, a level past the end
-`""` and 0.
+Operators and statements show nothing of their own. `ProcName( [nLevel] )`, `ProcLine( [nLevel] )` and
+`ProcFile( [nLevel] )` read it: level 0 is the function calling them, a non-numeric level is 0, a negative one gives
+`PROCNAME`, line 0 and `""`, a level past the end `""`, 0 and `""`. `ProcFile` gives the name of the function's source
+file (`xb_proc.file`; a codeblock's is its function's), without the directories: the reference keeps the path given to
+the compiler, which would put build directories into programs; a runtime function, in C or in xBase, has none (`""`).
 
 `argc` and `argv` in the frame are the arguments as the function received them, stored only by a function or codeblock
 that calls `PCount()` or `PValue()` itself (`XB_PROC_ARGS` in its `xb_proc`; nothing else can read them, and the other
@@ -346,7 +348,7 @@ by zero gives 0 (as Clipper's default handler does); any other error prints
 stack (see [Frames](#frames); the handler's own frames are hidden, so level 0 is where the error happened), to
 standard error (`OutErr()`), and ends the program with `ErrorLevel( 1 )` and `QUIT`. The choice between quitting,
 retrying and the default (Clipper's `Alert()`) waits for the terminal layer. An unrecoverable error lists the levels
-as `Called from NAME(line)`; the reference adds the source file name, which frames do not hold yet.
+as `Called from NAME(line) in FILE` (without ` in FILE` for a runtime function).
 
 `Break( [xValue] )` (and the `BREAK [value]` command, `__Break`) stores the value in the context and raises
 `XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only request pending,

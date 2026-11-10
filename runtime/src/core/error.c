@@ -51,8 +51,11 @@ static void set_text(xb_item *it, const char *s) { xb_set_str(it, xb_str_new(s, 
 static void unrecoverable(xb_ctx *ctx, int code, const char *text) {
   fflush(stdout);
   fprintf(stderr, "\nUnrecoverable error %d: %s", code, text);
-  for (const xb_frame *f = ctx->frames; f; f = f->prev)
-    if (xb_frame_shown(f)) fprintf(stderr, "\nCalled from %s(%u)", f->proc->name, (unsigned)f->line);
+  for (const xb_frame *f = ctx->frames; f; f = f->prev) {
+    if (!xb_frame_shown(f)) continue;
+    fprintf(stderr, "\nCalled from %s(%u)", f->proc->name, (unsigned)f->line);
+    if (f->proc->file) fprintf(stderr, " in %s", f->proc->file);
+  }
   fputc('\n', stderr);
   ctx->exitcode = 1;
   ctx->pending |= XB_PENDING_QUIT;
@@ -65,7 +68,7 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
 
 int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
-  xb_proc proc = {frame, 0, 0};
+  xb_proc proc = XB_RUNTIME_PROC(frame, 0);
   xb_frame inside;
   if (frame) xb_frame_push(ctx, &inside, &proc);
   if (ctx->error_block.type != XB_T_BLOCK || ctx->error_depth >= XB_ERROR_MAX_DEPTH) {

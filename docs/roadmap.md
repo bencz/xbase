@@ -52,7 +52,6 @@ Done: objects of runtime classes, messages (`o:x`, `o:x := v`, `o:m( args )`), r
 `RECOVER [USING x]` on xIR unwind edges ([runtime.md](runtime.md#errors-and-pending-requests),
 [xir.md](xir.md#control-flow-for-errors-and-exceptions)). Missing:
 
-- The source file in frames (`ProcFile()`, the file in the lines of an unrecoverable error).
 - Retrying (`canRetry`, `tries`) and defaults (`canDefault`) once file and database errors exist, with the default
   handler's choice between them (`Alert()`, the terminal layer).
 - `x++`, `x--` and the step of a `FOR` without `STEP` fail as the operators `++` and `--` (subcodes 1086, 1087) in
@@ -60,7 +59,7 @@ Done: objects of runtime classes, messages (`o:x`, `o:x := v`, `o:m( args )`), r
 
 ### Procedures, parameters and the call stack
 
-`ProcFile()`; skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
+Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 
 ### Commands, statements and headers
 
@@ -73,16 +72,15 @@ Done: objects of runtime classes, messages (`o:x`, `o:x := v`, `o:m( args )`), r
 
 ### Runtime library
 
-76 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
+77 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
 
 1. Strings and numbers: `PadL`/`PadR`/`PadC`, `Transform`, `SoundEx`, the memo-line functions; `Mod`, `Descend`,
    `Bin2I` and the other binary conversions.
-2. Errors (above): the source file in the call stack.
-3. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
+2. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
    `GetEnv`.
-4. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the
+3. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the
    Windows console; then `@ ... SAY/GET`, `READ`, `AChoice`, `MemoEdit`, `TBrowse`, `dbEdit`, menus.
-5. The RDD layer and the database functions and commands.
+4. The RDD layer and the database functions and commands.
 
 The SIx Driver and HiPer-SEEK functions (`sx_*`, `hs_*`, `cfts*`) belong to add-on database drivers; whether xbase
 provides them is decided when the RDD layer exists.
@@ -234,7 +232,6 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ### Runtime
 
-- The source file in the frame descriptor (`xb_proc`), for `ProcFile()`.
 - A stack limit checked in function prologues (deep recursion is a crash today).
 - The ABI check for every module, not only the start module.
 - One table of type properties (heap object, `ValType` letter, sort order, `Empty`, display), with an abort on an
@@ -248,8 +245,9 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. Errors: the source file in the call stack, `ProcFile()` (`ErrorSys`, `BEGIN SEQUENCE`, `Break`, the `Error`
-   object, `ErrorBlock`, the unwind edges, typed continuations and the call stack are done).
+1. Errors: `++`, `--` and the step of a `FOR` without `STEP` reported as the reference's operators (`ErrorSys`,
+   `BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind edges, typed continuations and the call
+   stack with its source files are done; retrying and defaults come with the file functions).
 2. Memory variables and Clipper's rule for undeclared names; `Type()`.
 3. The macro operator.
 4. The rest of the array, string and number functions; the call-stack functions.

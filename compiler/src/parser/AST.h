@@ -360,6 +360,7 @@ struct Request {
 
 struct Module {
   std::string name;              // upper-cased source stem
+  std::string file;              // the source's file name, without directories (ProcFile())
   std::vector<std::unique_ptr<FuncDecl>> funcs;
   std::vector<LocalDecl> fileStatics; // STATICs before the first function: visible in the whole file
   std::vector<LocalDecl *> statics;   // every STATIC of the module, in slot order (set by Sema)

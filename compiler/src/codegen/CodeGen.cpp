@@ -176,6 +176,9 @@ Function *CodeGen::externFunction(const xir::Callee &c) {
 }
 
 void CodeGen::run(const xir::Module &m) {
+  // The runtime's own xBase functions show no file, as its C functions do (and no line).
+  file_ = ConstantPointerNull::get(ptrTy_);
+  if (!runtimeLibrary_ && !m.file.empty()) file_ = b_.CreateGlobalString(m.file, ".xb.file", 0, &mod_);
   statics_ = nullptr;
   if (!m.statics.empty()) {
     auto *ty = ArrayType::get(itemTy_, m.statics.size());
@@ -347,11 +350,11 @@ StructType *CodeGen::frameType(uint32_t nslots) {
 Constant *CodeGen::procOf(const xir::Function &f) {
   if (f.stackName.empty()) return ConstantPointerNull::get(ptrTy_);
   Constant *name = b_.CreateGlobalString(f.stackName, ".xb.procname", 0, &mod_);
-  auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_});
+  auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_, ptrTy_});
   Constant *nparams = ConstantInt::get(i32_, f.numParams);
   Constant *flags = ConstantInt::get(i32_, (f.readsArgs ? XB_PROC_ARGS : 0) | (f.hidden ? XB_PROC_HIDDEN : 0));
   auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage,
-                                  ConstantStruct::get(ty, {name, nparams, flags}), ".xb.proc");
+                                  ConstantStruct::get(ty, {name, nparams, flags, file_}), ".xb.proc");
   proc->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   return proc;
 }

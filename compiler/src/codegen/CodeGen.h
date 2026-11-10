@@ -255,6 +255,7 @@ private:
   std::unordered_map<const xir::Function *, llvm::Function *> direct_;
 
   llvm::GlobalVariable *statics_ = nullptr;   // the STATICs of the module being added
+  llvm::Constant *file_ = nullptr;            // its source file name (xb_proc.file), or null
   std::unordered_map<std::string, llvm::Constant *> strLits_;
   std::unordered_map<std::string, llvm::Constant *> numLits_;
   std::unordered_map<std::string, llvm::Constant *> messages_;

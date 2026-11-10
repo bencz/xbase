@@ -161,8 +161,8 @@ void xbf_HVALUES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   hash_column(ctx, ret, argc, argv, "HVALUES", 1);
 }
 
-static const xb_proc hscan_proc = {"HSCAN", 0, 0}, heval_proc = {"HEVAL", 0, 0}, hmerge_proc = {"HMERGE", 0, 0},
-                     hsort_proc = {"HSORT", 0, 0};
+static const xb_proc hscan_proc = XB_RUNTIME_PROC("HSCAN", 0), heval_proc = XB_RUNTIME_PROC("HEVAL", 0),
+                     hmerge_proc = XB_RUNTIME_PROC("HMERGE", 0), hsort_proc = XB_RUNTIME_PROC("HSORT", 0);
 
 /* Calls `block` with the entry at `pos` (key, value, position) in call[0..2],
  * its result in call[3]; 0 when the entry is gone or the block unwinds. */

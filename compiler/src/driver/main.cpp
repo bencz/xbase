@@ -339,6 +339,7 @@ static int compile(int argc, char **argv) {
 
     xb::Parser parser(std::move(tokens), diag);
     auto ast = parser.parseModule(moduleNameFor(input));
+    ast->file = llvm::sys::path::filename(input).str();
     if (diag.errorCount() != errors) continue;
     xb::CallResolver(diag, xb::Folder::canEvaluate, runtimeLibrary).run(*ast);
     if (diag.errorCount() != errors) continue;

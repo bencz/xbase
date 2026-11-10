@@ -1,0 +1,4 @@
+
+[procfile.prg] [procfile.prg] [] []
+procfile.prg|procfile.prg
+with_module.prg/procfile.prg own_module.prg/procfile.prg [] C <:ASCAN> <:AEVAL>

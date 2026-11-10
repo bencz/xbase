@@ -40,6 +40,10 @@ static inline void xb_frame_push(xb_ctx *ctx, xb_frame *f, const xb_proc *proc) 
 }
 static inline void xb_frame_pop(xb_ctx *ctx, const xb_frame *f) { ctx->frames = f->prev; }
 
+/* The xb_proc of a runtime function that shows on the call stack: its name,
+ * no parameters in its frame, `flags`, no source file. */
+#define XB_RUNTIME_PROC(name, flags) {name, 0, flags, NULL}
+
 /* Whether the call stack (ProcName(), the "Called from" lines) shows a frame. */
 static inline int xb_frame_shown(const xb_frame *f) { return f->proc && !(f->proc->flags & XB_PROC_HIDDEN); }
 

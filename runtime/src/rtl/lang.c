@@ -73,6 +73,16 @@ void xbf_PROCNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_str(ret, xb_str_new(name, strlen(name)));
 }
 
+/* ProcFile( [nLevel] ): the name of the source file (without directories) of
+ * the function at that level, "" past the end of the stack, below level 0 or
+ * for a runtime function. */
+void xbf_PROCFILE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  int64_t n;
+  const xb_frame *f = stack_level(ctx, argc, argv, &n);
+  const char *file = n >= 0 && f && f->proc->file ? f->proc->file : "";
+  xb_set_str(ret, xb_str_new(file, strlen(file)));
+}
+
 /* ProcLine( [nLevel] ): the source line running at that level, 0 past the
  * end of the stack or in a runtime function. */
 void xbf_PROCLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -144,7 +154,7 @@ void xbf_ERRORLEVEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * Do see them). */
 #define DO_NAME_MAX 256
 static void do_frame_push(xb_ctx *ctx, xb_frame *frame, uint32_t argc, xb_item *argv) {
-  static const xb_proc proc = {"DO", 0, XB_PROC_ARGS};
+  static const xb_proc proc = XB_RUNTIME_PROC("DO", XB_PROC_ARGS);
   xb_frame_push(ctx, frame, &proc);
   frame->argc = argc;
   frame->argv = argv;
