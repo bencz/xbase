@@ -19,7 +19,7 @@ namespace xb {
 
 namespace {
 
-enum class Inline { None, Len, Asc, Chr, SubStr, PCount, PValue };
+enum class Inline { None, Len, Asc, Chr, SubStr, PCount, PValue, Int };
 
 Inline inlineKind(const xir::Instruction &i) {
   if (i.op != xir::Op::Call || i.callee.function || !i.callee.native || i.hasRest()) return Inline::None;
@@ -30,6 +30,7 @@ Inline inlineKind(const xir::Instruction &i) {
   } table[] = {
       {"LEN", 1, Inline::Len},       {"ASC", 1, Inline::Asc},          {"CHR", 1, Inline::Chr},
       {"SUBSTR", 3, Inline::SubStr}, {"PCOUNT", 0, Inline::PCount}, {"PVALUE", 1, Inline::PValue},
+      {"INT", 1, Inline::Int},
   };
   for (const auto &e : table)
     if (i.callee.name == e.name && i.operands().size() == e.argc) return e.kind;
@@ -349,6 +350,26 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
                  copy, slow); // through a reference: the runtime reads it
     b_.SetInsertPoint(copy);
     copyItem(d, src);
+    break;
+  }
+  case Inline::Int: { // an integer as it is; a double truncated, an integer when it fits 64 bits (xb_dbl_fits_i64)
+    BasicBlock *isInt = newBlock("int.int"), *other = newBlock("int.other"), *dbl = newBlock("int.double");
+    BasicBlock *fits = newBlock("int.fits");
+    Value *t = argType(0);
+    branchLikely(isType(t, XB_T_INT), isInt, other);
+    b_.SetInsertPoint(isInt);
+    storeInt(d, intValue(arg(0)));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(other);
+    branchLikely(isType(t, XB_T_DOUBLE), dbl, slow);
+    b_.SetInsertPoint(dbl);
+    Type *f64 = b_.getDoubleTy();
+    Value *tr = b_.CreateUnaryIntrinsic(Intrinsic::trunc, b_.CreateBitCast(intValue(arg(0)), f64));
+    Value *inRange = b_.CreateAnd(b_.CreateFCmpOGE(tr, ConstantFP::get(f64, -9223372036854775808.0)),
+                                  b_.CreateFCmpOLT(tr, ConstantFP::get(f64, 9223372036854775808.0)));
+    branchLikely(inRange, fits, slow); // NaN and the rest: the runtime keeps them doubles
+    b_.SetInsertPoint(fits);
+    storeInt(d, b_.CreateFPToSI(tr, i64_));
     break;
   }
   case Inline::None: break;

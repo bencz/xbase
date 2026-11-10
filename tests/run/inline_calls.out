@@ -14,4 +14,5 @@ error       1110 Argument error SUBSTR
 error       1110 Argument error SUBSTR
 error       1110 Argument error SUBSTR
 recovered          7       1110
-substituted         63 ? ?         63
+int          7          2         -2          0 ********************  4611686018427387904 **********         10         10
+substituted         63 ? ? ?         63

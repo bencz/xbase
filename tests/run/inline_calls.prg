@@ -1,7 +1,7 @@
-// Len(), Asc(), Chr() and SubStr( c, n, 1 ) are done in place by compiled code when their arguments allow it, and
-// Asc( SubStr( c, n, 1 ) ) reads the byte itself: the results must be the functions' own, on the fast paths and off
-// them (other types, positions outside the string, counts other than 1), errors included. One-byte strings are
-// shared, whatever made them.
+// Len(), Asc(), Chr(), SubStr( c, n, 1 ) and Int() are done in place by compiled code when their arguments allow
+// it, and Asc( SubStr( c, n, 1 ) ) reads the byte itself: the results must be the functions' own, on the fast paths
+// and off them (other types, positions outside the string, counts other than 1, a double beyond 64 bits or NaN for
+// Int()), errors included. One-byte strings are shared, whatever made them.
 PROCEDURE Main()
    LOCAL s := "abc", e := "", a := { 1, 2, 3 }, h := { "x" => 1 }, n := 2, d := 2.0, one := 1, two := 2, i, k, t
 
@@ -45,8 +45,11 @@ PROCEDURE Main()
    RECOVER USING e
       ? "recovered", i, e:subCode
    END
+   k := { 7, 2.9, -2.9, -0.5, 10 ^ 25, 2 ^ 62, Log( 0.0 ) - Log( 0.0 ), 9.0 }
+   ? "int", Int( k[ 1 ] ), Int( k[ 2 ] ), Int( k[ 3 ] ), Int( k[ 4 ] ), Int( k[ 5 ] ), Int( k[ 6 ] ), Int( k[ 7 ] ), ;
+     Int( k[ 8 ] ) + 1, Len( Str( Int( k[ 2 ] ) ) )
    ErrorBlock( {| err | "?" } )
-   ? "substituted", Asc( SubStr( 5, 1, 1 ) ), Len( 5 ), Chr( .T. )
+   ? "substituted", Asc( SubStr( 5, 1, 1 ) ), Len( 5 ), Chr( .T. ), Int( "x" )
    i := Asc( SubStr( s, "x", 1 ) )
    ?? "", i
 RETURN

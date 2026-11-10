@@ -162,7 +162,7 @@ private:
   void emitDivMod(const xir::Instruction &i, llvm::Value *a, llvm::Value *b, llvm::Value *d);
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);
-  // InlineCalls.cpp: Len, Asc, Chr and SubStr( c, n, 1 ) in place.
+  // InlineCalls.cpp: Len, Asc, Chr, SubStr( c, n, 1 ), Int, PCount and PValue( n ) in place.
   void findFusedCalls(const xir::BasicBlock &b);
   bool emitInlineCall(const xir::Instruction &i);
   llvm::Value *strLength(llvm::Value *str);
