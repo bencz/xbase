@@ -21,6 +21,7 @@ bool isGroupUser(const Instruction &i) {
 
 FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {
   placeVariables();
+  findUnwritten();
   number();
   chooseHomes();
   computeLiveness();
@@ -38,6 +39,21 @@ void FramePlan::placeVariables() {
     }
   for (auto &v : f_.vars)
     if (v->kind == Var::Kind::Frame && (v->param || used.count(v.get()))) varSlot_[v.get()] = numVarSlots_++;
+}
+
+// The frame variables nothing changes once the function runs (a parameter the
+// body versioned for references leaves to the other body, a LOCAL never
+// assigned): not shared, reached directly only, never written.
+void FramePlan::findUnwritten() {
+  for (auto &v : f_.vars)
+    if (v->kind == Var::Kind::Frame && !v->shared) unwritten_.insert(v.get());
+  for (auto &b : f_.blocks)
+    for (auto &i : b->insts) {
+      bool writes = (i->effects() & WritesVar) != 0;
+      if (i->var && (writes || i->access != Access::Direct)) unwritten_.erase(i->var);
+      if (writes)
+        for (const Var *c : i->captures) unwritten_.erase(c);
+    }
 }
 
 void FramePlan::number() {
@@ -121,6 +137,9 @@ uint32_t FramePlan::unitOf(const Value *v) {
 void FramePlan::chooseHomes() {
   for (BasicBlock *b : cfg_.order()) {
     elideLoads(*b);
+    for (auto &i : b->insts) // a variable nothing writes serves every use of a load of it
+      if (i->op == Op::Load && i->access == Access::Direct && unwritten_.count(i->var) && !homes_.count(i.get()))
+        homes_[i.get()] = {Home::Kind::Place, 0, i.get()};
     for (size_t k = 0; k < b->insts.size(); ++k) {
       const Instruction &i = *b->insts[k];
       if (i.op == Op::Store && k > 0 && canForward(*b->insts[k - 1], i)) {

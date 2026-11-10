@@ -287,7 +287,9 @@ emits the object file.
   shares the slot of its block parameter (on a loop's back edge, when the jump is the block's only way out and nothing
   after the argument reads the parameter); a `load` whose single use follows with nothing in between that can write the
   variable (for a variable others can reach: nothing that writes, runs code, or goes on after an error block ran)
-  uses the variable's own item (no copy); a value used only by the `store` right after it is computed into the
+  uses the variable's own item (no copy), and so does every load of a frame variable nothing writes once the function
+  runs (`FramePlan::findUnwritten`: a parameter the body versioned for references leaves to the other body, a `LOCAL`
+  never assigned); a value used only by the `store` right after it is computed into the
   variable, and one used only by `ret` into the caller's result slot. A call's result is never computed straight into a
   heap object (a cell, an element) and only into a plain frame variable, and an operation that can fail is not computed
   in place through a reference (finding the element can fail too, and the operation's error comes first) or in a block

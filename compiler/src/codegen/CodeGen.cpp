@@ -544,8 +544,10 @@ Value *CodeGen::loadHeader(Value *item) {
 // parameter): the words of its slot, for the reads of it (Words in CodeGen.h).
 // Unused ones go away in LLVM.
 void CodeGen::cacheWords(const xir::Value *v) {
-  if (v->type() != xir::Type::Item || plan_->home(v).kind != Home::Kind::Slot) return;
-  words_[v] = loadWords(slot(plan_->home(v).slot));
+  if (v->type() != xir::Type::Item) return;
+  const Home &h = plan_->home(v);
+  if (h.kind == Home::Kind::Slot) words_[v] = loadWords(slot(h.slot));
+  else if (h.kind == Home::Kind::Place && h.place == v) words_[v] = loadWords(values_.at(v)); // a load served in place
 }
 
 // The two words of an item in memory, as they are there.

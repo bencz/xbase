@@ -23,7 +23,11 @@ Value *CodeGen::addr(const xir::Value *v) {
     if (auto w = words_.find(v); w != words_.end()) wordsAt_[a] = w->second;
     return a;
   }
-  case Home::Kind::Place: return values_.at(v);
+  case Home::Kind::Place: {
+    Value *a = values_.at(v);
+    if (auto w = words_.find(v); w != words_.end()) wordsAt_[a] = w->second;
+    return a;
+  }
   case Home::Kind::Ret: return fnRet_;
   case Home::Kind::Local: {
     AllocaInst *&a = locals_[v];

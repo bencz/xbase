@@ -66,6 +66,7 @@ private:
   void chooseHomes();
   void elideLoads(const xir::BasicBlock &b);
   bool canForward(const xir::Instruction &value, const xir::Instruction &store) const;
+  void findUnwritten();
   void computeLiveness();
   void allocate();
   uint32_t unitOf(const xir::Value *v);
@@ -76,6 +77,7 @@ private:
   uint32_t frameSize_ = 0;
   uint32_t numVarSlots_ = 0;
   std::unordered_map<const xir::Var *, uint32_t> varSlot_;
+  std::unordered_set<const xir::Var *> unwritten_; // frame variables nothing writes: a load of one is its item
   std::unordered_map<const xir::Value *, uint32_t> pos_;          // definition position
   std::unordered_map<const xir::BasicBlock *, uint32_t> start_, end_, blockIndex_;
   std::unordered_map<const xir::Value *, Home> homes_;
