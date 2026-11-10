@@ -203,23 +203,11 @@ bool CodeGen::finish(const xir::Function *start) {
   return diag_.errorCount() == 0;
 }
 
-// A function of the program gets a direct entry unless it reads its arguments
-// as received (PCount(), PValue(), `...`) or is the body versioned for
-// references (reached with the arguments as received, call.forward): calls
-// of the module pass it the parameters' items in registers, without argc,
-// argv or argument slots.
+// The direct entries (xir::hasDirectEntry): calls of the module pass them the
+// parameters' items in registers, without argc, argv or argument slots.
 void CodeGen::directEntries(const xir::Module &m) {
-  std::unordered_set<const xir::Function *> forwarded;
-  std::unordered_set<const xir::Function *> rest;
-  for (auto &f : m.functions)
-    for (auto &b : f->blocks)
-      for (auto &i : b->insts) {
-        if (i->op == xir::Op::CallForward) forwarded.insert(i->callee.function);
-        if (i->op == xir::Op::ArgsRest) rest.insert(f.get());
-      }
   for (auto &f : m.functions) {
-    if (f->kind != xir::Function::Kind::Program || f->readsArgs || forwarded.count(f.get()) || rest.count(f.get()))
-      continue;
+    if (!xir::hasDirectEntry(*f)) continue;
     std::vector<Type *> params{ptrTy_, ptrTy_};
     for (uint32_t k = 0; k < f->numParams; ++k) params.insert(params.end(), {i64_, i64_});
     Function *fn = Function::Create(FunctionType::get(Type::getVoidTy(ctx_), params, false),

@@ -93,6 +93,12 @@ inline const BlockParam *asParam(const Value *v) {
 // The block that defines the value (null for a constant).
 const BasicBlock *definingBlock(const Value *v);
 
+// A function of the program that reads no arguments as received (readsArgs, `...`) and is not the body versioned for
+// references: calls of its module pass the parameters' items in registers to its direct entry (codegen).
+bool hasDirectEntry(const Function &f);
+// A call that goes to a direct entry: to such a function, without `...` (it then needs no argument slots).
+bool isDirectCall(const Instruction &i);
+
 // Whether two values are always the same: the same value, or equal constants
 // (each use of a literal may be its own Constant).
 bool sameValue(const Value *a, const Value *b);
@@ -255,6 +261,8 @@ public:
   uint32_t numParams = 0;
   bool readsArgs = false;         // its frame keeps the arguments received (PCount(), PValue())
   bool hidden = false;            // the call stack does not show it (a STATIC function or codeblock of the runtime)
+  bool byRefBody = false;         // the body versioned for references (NAME.byref), reached by call.forward
+  bool usesRest = false;          // has an args.rest (`...`)
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   std::vector<std::unique_ptr<Constant>> constants;

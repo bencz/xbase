@@ -17,6 +17,14 @@ const BasicBlock *definingBlock(const Value *v) {
   return nullptr;
 }
 
+bool hasDirectEntry(const Function &f) {
+  return f.kind == Function::Kind::Program && !f.readsArgs && !f.byRefBody && !f.usesRest;
+}
+
+bool isDirectCall(const Instruction &i) {
+  return i.op == Op::Call && i.callee.function && hasDirectEntry(*i.callee.function) && !i.hasRest();
+}
+
 bool sameValue(const Value *a, const Value *b) {
   if (a == b) return true;
   const Constant *x = asConstant(a), *y = asConstant(b);

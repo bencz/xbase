@@ -324,7 +324,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::ArgsRest: break; // read by the list that uses it (withRest)
   case Op::Call: {
     if (emitBitCall(i) || emitInlineCall(i)) break;
-    if (i.callee.function && direct_.count(i.callee.function) && !i.hasRest()) {
+    if (xir::isDirectCall(i)) {
       emitDirectCall(i, dest(i));
       break;
     }

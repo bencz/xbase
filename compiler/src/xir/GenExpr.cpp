@@ -122,7 +122,10 @@ std::vector<Value *> Generator::genArgs(const std::vector<ExprPtr> &exprs) {
   std::vector<Value *> values;
   for (auto &e : exprs) values.push_back(e->kind == ExprKind::Spread ? nullptr : genExpr(*e));
   for (Value *&v : values)
-    if (!v) v = cur_.b->argsRest();
+    if (!v) {
+      v = cur_.b->argsRest();
+      cur_.fn->usesRest = true;
+    }
   return values;
 }
 

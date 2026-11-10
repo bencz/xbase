@@ -53,6 +53,7 @@ void Generator::genFunction(const FuncDecl &f, Function *fn) {
   mod_->functions.push_back(std::make_unique<Function>(Function::Kind::Program, f.name + ".byref"));
   Function *byRef = mod_->functions.back().get();
   byRef->internal = true;
+  byRef->byRefBody = true;
   genBody(f, byRef, nullptr, {});
   genBody(f, fn, byRef, plain);
 }
