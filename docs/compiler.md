@@ -89,7 +89,8 @@ Statements:
 - `SWITCH expr`, then `CASE constant` arms, an optional `OTHERWISE`, and `ENDSWITCH | END`. Control falls through
   from one arm into the next until `EXIT`, which leaves the `SWITCH`; `LOOP` continues the enclosing loop.
 - `WHILE ... ENDDO | END`
-- `FOR v := start TO limit [STEP step] ... NEXT | END`; the limit and step are re-evaluated on every iteration
+- `FOR v := start TO limit [STEP step] ... NEXT | END`; the limit and step are re-evaluated on every iteration;
+  without `STEP` the counter steps as `++` does (an error is `++`'s)
 - `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`, and `FOR EACH k => v IN coll ...` (one
   collection), whose `k` gets the key of each hash entry or the index of each array element or character
 - `EXIT` (leaves the innermost loop or `SWITCH`), `LOOP`

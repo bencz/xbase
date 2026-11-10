@@ -184,6 +184,8 @@ public:
   // Operation-specific data.
   UnOp unop = UnOp::Neg;
   BinOp binop = BinOp::Add;
+  // Binary add or sub of 1 from ++, -- or the step of a FOR without STEP: an error is theirs (xb_op_inc, xb_op_dec).
+  bool byOne = false;
   IntPred pred = IntPred::Eq;
   double imm = 0.0;                   // NumDefaultDec
   Var *var = nullptr;                 // Load, Store, Barrier, Each*, RefVar

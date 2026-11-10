@@ -170,7 +170,7 @@ Value *Generator::genIncDec(const IncDecExpr &e) {
   if (e.target->kind == ExprKind::Send) return genSendAssign(static_cast<const SendExpr &>(*e.target), nullptr, &e);
   auto &target = static_cast<const VarExpr &>(*e.target);
   Value *old = load(target);
-  Value *now = cur_.b->binary(e.increment ? BinOp::Add : BinOp::Sub, old, cur_.b->integer(1, 0));
+  Value *now = cur_.b->stepByOne(e.increment, old);
   store(target, now);
   return e.prefix ? now : old;
 }
@@ -190,9 +190,7 @@ Value *Generator::genIndexAssign(const IndexExpr &target, const AssignExpr *assi
   Value *base = genExpr(*target.base);
   Value *idx = genExpr(*target.index);
   Value *elem = b.index(base, idx);
-  Value *rhs = assign ? genExpr(*assign->value) : b.integer(1, 0);
-  BinOp op = assign ? assign->op : incdec->increment ? BinOp::Add : BinOp::Sub;
-  Value *now = b.binary(op, elem, rhs);
+  Value *now = assign ? b.binary(assign->op, elem, genExpr(*assign->value)) : b.stepByOne(incdec->increment, elem);
   b.indexSet(base, idx, now);
   return incdec && !incdec->prefix ? elem : now;
 }
@@ -213,9 +211,7 @@ Value *Generator::genSendAssign(const SendExpr &target, const AssignExpr *assign
   }
   b.setLoc(target.loc);
   Value *old = b.send(target.message, object, {});
-  Value *rhs = assign ? genExpr(*assign->value) : b.integer(1, 0);
-  BinOp op = assign ? assign->op : incdec->increment ? BinOp::Add : BinOp::Sub;
-  Value *now = b.binary(op, old, rhs);
+  Value *now = assign ? b.binary(assign->op, old, genExpr(*assign->value)) : b.stepByOne(incdec->increment, old);
   b.setLoc(target.loc);
   Value *result = b.send(setter, object, {now});
   return incdec && !incdec->prefix ? old : result;

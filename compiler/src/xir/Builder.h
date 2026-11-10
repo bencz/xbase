@@ -44,6 +44,7 @@ public:
   Instruction *barrier(Var *v, Access a);
   Instruction *unary(UnOp op, Value *a);
   Instruction *binary(BinOp op, Value *a, Value *b);
+  Instruction *stepByOne(bool up, Value *a); // ++ (up) or --: a binary add or sub of 1, byOne
   Instruction *truth(Value *a);
   Instruction *fromBool(Value *b);
   Instruction *call(Callee c, const std::vector<Value *> &args);

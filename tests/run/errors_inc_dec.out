@@ -1,0 +1,20 @@
+
+err       1086 ++ Argument error          1  C:a .T.
+x z
+err       1086 ++ Argument error          1  C:a .T.
+pre z
+err       1087 -- Argument error          1  U:NIL .T.
+dec z
+date 03/01/24 03/01/24 02/29/24
+n          6          5
+err       1086 ++ Argument error          1  C:a .T.
+elem z
+err       1087 -- Argument error          1  C:c .T.
+send z
+err       1081 + Argument error          2  C:s N:1 .T.
+add z
+loop a
+err       1086 ++ Argument error          1  C:a .T.
+loopstep a
+err       1081 + Argument error          2  C:a N:1 .T.
+big .F. N

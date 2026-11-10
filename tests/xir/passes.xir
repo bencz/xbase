@@ -6,7 +6,7 @@ function MAIN params 0 {
 entry:
   br while.cond(0:w10)
 while.cond(%1: item):
-  %2 = binary add %1, 1:w0
+  %2 = binary add.one %1, 1:w0
   %3 = binary gt %2, 3:w10
   %4 = truth %3
   cond_br %4, while.cond.2(%2), while.cond(%2)
@@ -15,7 +15,7 @@ while.cond.2(%6: item):
   %8 = truth %7
   cond_br %8, while.body.2, while.end.2
 while.body.2:
-  %10 = binary add %6, 1:w0
+  %10 = binary add.one %6, 1:w0
   br while.cond.2(%10)
 while.end.2:
   %12 = call QOUT native %6

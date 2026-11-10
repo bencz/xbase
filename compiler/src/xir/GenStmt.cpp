@@ -122,8 +122,8 @@ void Generator::genFor(const ForStmt &st) {
 
   b.setBlock(incr);
   b.setLine(st.line); // the step comes after the body, from the FOR line
-  step = st.step ? genExpr(*st.step) : b.integer(1, 0);
-  store(var, b.binary(BinOp::Add, load(var), step));
+  // Without STEP the counter steps as ++ does (its error is ++'s), as in the reference.
+  store(var, st.step ? b.binary(BinOp::Add, load(var), genExpr(*st.step)) : b.stepByOne(true, load(var)));
   b.br(test);
   b.setBlock(end);
 }

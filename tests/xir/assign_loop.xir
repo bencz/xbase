@@ -16,7 +16,7 @@ for.body:
   br for.test(%6, %7)
 for.end:
   %9 = index %0, 1:w10
-  %10 = binary add %9, 1:w0
+  %10 = binary add.one %9, 1:w0
   index.set %0, 1:w10, %10
   %12 = binary gt %2, 2:w10
   %13 = truth %12

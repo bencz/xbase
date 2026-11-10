@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 23u
+#define XB_ABI_VERSION 24u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -217,6 +217,11 @@ void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_siz
 
 void     xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+/* ++ and -- (also the step of a FOR without STEP): a + 1 and a - 1 for a
+ * number or a date; anything else is their own argument error (1086, 1087),
+ * with the operand as its only argument. */
+void     xb_op_inc(xb_ctx *ctx, xb_item *r, const xb_item *a);
+void     xb_op_dec(xb_ctx *ctx, xb_item *r, const xb_item *a);
 void     xb_op_mul(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_div(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_mod(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);

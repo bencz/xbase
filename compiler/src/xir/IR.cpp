@@ -67,6 +67,7 @@ bool Instruction::mayFail() const {
 void Instruction::copyData(const Instruction &from) {
   unop = from.unop;
   binop = from.binop;
+  byOne = from.byOne;
   pred = from.pred;
   imm = from.imm;
   var = from.var;

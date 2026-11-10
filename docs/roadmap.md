@@ -54,8 +54,6 @@ Done: objects of runtime classes, messages (`o:x`, `o:x := v`, `o:m( args )`), r
 
 - Retrying (`canRetry`, `tries`) and defaults (`canDefault`) once file and database errors exist, with the default
   handler's choice between them (`Alert()`, the terminal layer).
-- `x++`, `x--` and the step of a `FOR` without `STEP` fail as the operators `++` and `--` (subcodes 1086, 1087) in
-  the reference; xbase computes them with `+` and `-` and reports those (1081, 1082).
 
 ### Procedures, parameters and the call stack
 
@@ -245,17 +243,14 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. Errors: `++`, `--` and the step of a `FOR` without `STEP` reported as the reference's operators (`ErrorSys`,
-   `BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind edges, typed continuations and the call
-   stack with its source files are done; retrying and defaults come with the file functions).
-2. Memory variables and Clipper's rule for undeclared names; `Type()`.
-3. The macro operator.
-4. The rest of the array, string and number functions; the call-stack functions.
-5. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
+1. Memory variables and Clipper's rule for undeclared names; `Type()`.
+2. The macro operator.
+3. The rest of the array, string and number functions; the call-stack functions.
+4. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
    `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks.
-6. Files and directories; the terminal layer; GET/READ and TBrowse.
-7. The RDD layer.
-8. Generators, async/await and threads, sockets and the other libraries.
+5. Files and directories; the terminal layer; GET/READ and TBrowse.
+6. The RDD layer.
+7. Generators, async/await and threads, sockets and the other libraries.
 
 Alongside, the compiler's own track ([xir.md](xir.md#phases)): type inference and unboxed numbers, value numbering,
 statepoints and a moving collector, inlining, loop optimizations, measured with the benchmarks

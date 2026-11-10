@@ -98,6 +98,12 @@ Instruction *Builder::binary(BinOp op, Value *a, Value *b) {
   return i;
 }
 
+Instruction *Builder::stepByOne(bool up, Value *a) {
+  Instruction *i = binary(up ? BinOp::Add : BinOp::Sub, a, integer(1, 0));
+  i->byOne = true;
+  return i;
+}
+
 Instruction *Builder::truth(Value *a) { return make(Op::Truth, Type::Bool, {a}); }
 Instruction *Builder::fromBool(Value *b) { return make(Op::FromBool, Type::Item, {b}); }
 

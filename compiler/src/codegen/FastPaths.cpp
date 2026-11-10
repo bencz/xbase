@@ -230,7 +230,8 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   doubles(numberAsDouble(a, ta), numberAsDouble(bv, tb), numberDec(a, ta), numberDec(bv, tb));
 
   b_.SetInsertPoint(slow);
-  callItemOp(rtBin_.at(i.binop), d, {a, bv});
+  if (i.byOne) callItemOp(i.binop == BinOp::Add ? rtInc_ : rtDec_, d, {a}); // ++ or --: their own error
+  else callItemOp(rtBin_.at(i.binop), d, {a, bv});
   checkPending(unwind_);
   if (fused) { // a logical, unless an error's handler substituted something else
     Value *r = testTruth(d, unwind_, itemType(d));

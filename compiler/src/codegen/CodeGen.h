@@ -239,7 +239,7 @@ private:
 
   // runtime entry points
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
-  llvm::FunctionCallee rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_;
+  llvm::FunctionCallee rtInc_, rtDec_, rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_;
   llvm::FunctionCallee rtSend_, rtSeqCatch_, rtSeqValue_, rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArgsRest_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;

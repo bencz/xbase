@@ -362,6 +362,7 @@ function, and the program ends quietly with exit code 0.
 | Operation | Behavior |
 |---|---|
 | `+` `-` on integers | 64-bit; on overflow a double with 0 decimals |
+| `++` `--` (`xb_op_inc`, `xb_op_dec`; also the step of a `FOR` without `STEP`) | `+ 1`, `- 1` on a number or a date; anything else is their own argument error (1086, 1087) with the operand as its only argument, as in the reference; `+= 1` and a `FOR` with a `STEP` are `+` (1081, both operands) |
 | `*` on integers | 64-bit, exact; on overflow a double with `SET DECIMALS` decimals |
 | `+` `-` `*` on numbers | double; decimals: the larger of both for `+`/`-`, the sum for `*` |
 | `/` | always a double with `SET DECIMALS` (2) decimals; zero divisor is an error |

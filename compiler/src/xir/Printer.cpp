@@ -155,7 +155,7 @@ private:
     out_ += opName(i.op);
     switch (i.op) {
     case Op::Unary: out_ += i.unop == UnOp::Neg ? " neg" : i.unop == UnOp::BitNot ? " bitnot" : " not"; break;
-    case Op::Binary: out_ += std::string(" ") + binopName(i.binop); break;
+    case Op::Binary: out_ += std::string(" ") + binopName(i.binop) + (i.byOne ? ".one" : ""); break;
     case Op::IntCmp: out_ += std::string(" ") + predName(i.pred); break;
     case Op::NumDefaultDec: {
       char buf[48];

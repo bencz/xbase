@@ -76,6 +76,8 @@ void CodeGen::initTypes() {
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtBitNot_ = rt("xb_op_bitnot", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtInc_ = rt("xb_op_inc", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtDec_ = rt("xb_op_dec", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtAppend_ = rt("xb_op_append", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
   rtPending_ = rt("xb_pending", i32_, {ptrTy_});

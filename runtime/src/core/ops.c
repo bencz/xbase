@@ -97,6 +97,22 @@ void xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   }
 }
 
+/* ++ and --: + and - with 1 where they apply, else their own error. */
+static void step_by_one(xb_ctx *ctx, xb_item *r, const xb_item *a, int up) {
+  if (!xb_is_number(a) && a->type != XB_T_DATE) {
+    xb_item args[1] = {*a};
+    xb_arg_error(ctx, r, up ? 1086 : 1087, up ? "++" : "--", 1, args);
+    return;
+  }
+  xb_item one;
+  xb_set_int(&one, 1);
+  if (up) xb_op_add(ctx, r, a, &one);
+  else xb_op_sub(ctx, r, a, &one);
+}
+
+void xb_op_inc(xb_ctx *ctx, xb_item *r, const xb_item *a) { step_by_one(ctx, r, a, 1); }
+void xb_op_dec(xb_ctx *ctx, xb_item *r, const xb_item *a) { step_by_one(ctx, r, a, 0); }
+
 void xb_op_mul(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_INT && b->type == XB_T_INT) {
     int64_t v;
