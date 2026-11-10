@@ -354,7 +354,7 @@ function, and the program ends quietly with exit code 0.
 | `-` on strings | concatenation moving the left operand's trailing blanks to the end |
 | `=` on strings | with `SET EXACT OFF`, compares only the right operand's length (`"abc" = "ab"` is true) |
 | `==` | exact comparison; on strings byte-for-byte |
-| `<` `<=` `>` `>=` `!=` | numbers, strings (same rule as `=`), logicals (`.F.` < `.T.`) |
+| `<` `<=` `>` `>=` `!=` | numbers, strings (same rule as `=`), logicals (`.F.` < `.T.`); NaN is ordered with nothing (IEEE 754, `xb_order_is` in `xbrt.h`): every comparison with it is false but `!=`, so a `FOR` loop ends at one, where the reference loops forever |
 | `$` | substring test; an empty left operand is false; with a hash on the right, whether the left is one of its keys |
 | `.NOT.` | logicals only |
 | `&` `\|` `^^` `<<` `>>` `~` | xbase's bit operators (`xb_op_bitand`, ..., `xb_op_bitnot`): numbers taken as integers (`xb_dbl_to_i64`: truncated, saturated, NaN 0), an integer result; `>>` is arithmetic; anything else is an argument error with the operator and the code of its operation (`xb_bit_function`) |

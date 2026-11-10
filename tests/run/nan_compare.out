@@ -1,0 +1,9 @@
+
+ops .F. .F. .T. .F. .F. .F. .F.
+self .F. .F. .T. .F. .F. .F.
+int .F. .T. .F. .F.
+runtime .F. .T. .F.
+for          1
+ascan          0          3          0
+asort          5
+max          1          1

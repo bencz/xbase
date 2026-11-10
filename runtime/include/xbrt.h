@@ -236,6 +236,21 @@ void     xb_op_not(xb_ctx *ctx, xb_item *r, const xb_item *a);
  * place, and clears XB_STR_APPEND (and `hash`, the room) when it reads the
  * variable otherwise, so a string that escapes is immutable. */
 void     xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b);
+/* The order of two compared values: -1 (less), 0 (equal), 1 (greater), or
+ * XB_ORDER_UNORDERED when a number is NaN, which IEEE 754 orders with
+ * nothing. xb_order_is tells whether an order satisfies a comparison that
+ * holds for the orders it names: `<` is (1, 0, 0), `<=` (1, 1, 0), `=` and
+ * `==` (0, 1, 0), `>=` (0, 1, 1), `>` (0, 0, 1); `!=` is not `=`. So every
+ * comparison with NaN is false but `!=`. Shared by the runtime's operators
+ * and the compiler's constant folding. */
+#define XB_ORDER_UNORDERED 3
+static inline int xb_order_double(double x, double y) {
+  return x < y ? -1 : x > y ? 1 : x == y ? 0 : XB_ORDER_UNORDERED;
+}
+static inline int xb_order_is(int order, int less, int equal, int greater) {
+  return (order == -1 && less) || (order == 0 && equal) || (order == 1 && greater);
+}
+
 /* The bit operators & | ^^ << >> and ~ (xb_bit_apply's rules; numbers are
  * taken as integers like the bit functions take them). */
 void     xb_op_bitand(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);

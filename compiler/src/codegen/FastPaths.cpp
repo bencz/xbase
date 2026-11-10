@@ -139,17 +139,16 @@ Value *CodeGen::numberAsDouble(Value *item, Value *type) {
                          b_.CreateSIToFP(bits, b_.getDoubleTy()), b_.CreateBitCast(bits, b_.getDoubleTy()));
 }
 
-// A comparison of two numbers that are not both integers, as xb_compare makes
-// it: c = (x > y) - (x < y), so NaN compares as equal to anything.
+// A comparison of two numbers that are not both integers, as xb_compare and
+// xb_order_is make it: IEEE 754's, every comparison with NaN false but `!=`.
 static Value *doubleCompare(IRBuilderBase &b, xir::IntPred pred, Value *x, Value *y) {
-  Value *gt = b.CreateFCmpOGT(x, y), *lt = b.CreateFCmpOLT(x, y);
   switch (pred) {
-  case xir::IntPred::Eq: return b.CreateNot(b.CreateOr(gt, lt));
-  case xir::IntPred::Ne: return b.CreateOr(gt, lt);
-  case xir::IntPred::Lt: return lt;
-  case xir::IntPred::Le: return b.CreateNot(gt);
-  case xir::IntPred::Gt: return gt;
-  case xir::IntPred::Ge: return b.CreateNot(lt);
+  case xir::IntPred::Eq: return b.CreateFCmpOEQ(x, y);
+  case xir::IntPred::Ne: return b.CreateFCmpUNE(x, y);
+  case xir::IntPred::Lt: return b.CreateFCmpOLT(x, y);
+  case xir::IntPred::Le: return b.CreateFCmpOLE(x, y);
+  case xir::IntPred::Gt: return b.CreateFCmpOGT(x, y);
+  case xir::IntPred::Ge: return b.CreateFCmpOGE(x, y);
   }
   return nullptr;
 }

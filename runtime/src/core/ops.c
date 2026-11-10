@@ -195,10 +195,7 @@ static int str_cmp(const xb_str *a, const xb_str *b, int exact) {
 int xb_compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_INT && b->type == XB_T_INT)
     return (a->v.i > b->v.i) - (a->v.i < b->v.i);
-  if (xb_is_number(a) && xb_is_number(b)) {
-    double x = xb_num_value(a), y = xb_num_value(b);
-    return (x > y) - (x < y);
-  }
+  if (xb_is_number(a) && xb_is_number(b)) return xb_order_double(xb_num_value(a), xb_num_value(b));
   if (a->type == XB_T_STRING && b->type == XB_T_STRING)
     return str_cmp(a->v.s, b->v.s, ctx->set_exact);
   if (a->type == XB_T_LOGICAL && b->type == XB_T_LOGICAL)
@@ -212,14 +209,14 @@ void xb_op_eq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
   int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error2(ctx, r, 1071, "=", a, b);
-  else xb_set_logical(r, c == 0);
+  else xb_set_logical(r, xb_order_is(c, 0, 1, 0));
 }
 
 void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type != b->type); return; }
   int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error2(ctx, r, 1072, "<>", a, b);
-  else xb_set_logical(r, c != 0);
+  else xb_set_logical(r, !xb_order_is(c, 0, 1, 0));
 }
 
 void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
@@ -236,20 +233,20 @@ void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) 
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
   int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error2(ctx, r, 1070, "==", a, b);
-  else xb_set_logical(r, c == 0);
+  else xb_set_logical(r, xb_order_is(c, 0, 1, 0));
 }
 
-#define XB_REL_OP(name, code, sym, test)                                         \
+#define XB_REL_OP(name, code, sym, less, equal, greater)                          \
   void name(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {       \
     int c = xb_compare(ctx, a, b);                                               \
     if (c == 2) arg_error2(ctx, r, code, sym, a, b);                             \
-    else xb_set_logical(r, test);                                                \
+    else xb_set_logical(r, xb_order_is(c, less, equal, greater));                \
   }
 
-XB_REL_OP(xb_op_lt, 1073, "<", c < 0)
-XB_REL_OP(xb_op_le, 1074, "<=", c <= 0)
-XB_REL_OP(xb_op_gt, 1075, ">", c > 0)
-XB_REL_OP(xb_op_ge, 1076, ">=", c >= 0)
+XB_REL_OP(xb_op_lt, 1073, "<", 1, 0, 0)
+XB_REL_OP(xb_op_le, 1074, "<=", 1, 1, 0)
+XB_REL_OP(xb_op_gt, 1075, ">", 0, 0, 1)
+XB_REL_OP(xb_op_ge, 1076, ">=", 0, 1, 1)
 
 /* `$`: a substring of a string, or a key of a hash. */
 void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
@@ -299,7 +296,7 @@ int32_t xb_for_test(xb_ctx *ctx, const xb_item *counter, const xb_item *limit, c
     if (ctx->pending & XB_PENDING_UNWIND) return 0;
   }
   int c = xb_compare(ctx, counter, limit);
-  if (c != 2) return back ? c >= 0 : c <= 0;
+  if (c != 2) return back ? xb_order_is(c, 0, 1, 1) : xb_order_is(c, 1, 1, 0); /* a NaN ends the loop */
   arg_error2(ctx, &r, back ? 1073 : 1075, back ? "<" : ">", counter, limit);
   if (ctx->pending & XB_PENDING_UNWIND) return 0;
   int32_t past = substituted_truth(ctx, &r);

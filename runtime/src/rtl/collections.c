@@ -58,12 +58,12 @@ static int value_kind(const xb_item *it) {
 
 int xb_value_less(const xb_ctx *ctx, const xb_item *x, const xb_item *y) {
   int c = xb_compare(ctx, x, y);
-  return c == 2 ? value_kind(x) < value_kind(y) : c < 0;
+  return c == 2 ? value_kind(x) < value_kind(y) : xb_order_is(c, 1, 0, 0);
 }
 
 int xb_value_matches(const xb_ctx *ctx, const xb_item *x, const xb_item *search) {
   if (x->type == XB_T_NIL || search->type == XB_T_NIL) return x->type == search->type;
-  return xb_compare(ctx, x, search) == 0;
+  return xb_order_is(xb_compare(ctx, x, search), 0, 1, 0);
 }
 
 void xb_merge_sort(size_t *pos, size_t *tmp, size_t n, xb_less_fn less, void *arg) {

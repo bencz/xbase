@@ -85,23 +85,22 @@ ExprPtr foldArithmetic(SourceLoc loc, BinOp op, const NumberExpr &a, const Numbe
   }
 }
 
-// Result of a comparison operator given the operands' order c (-1, 0, 1).
+// Result of a comparison operator given the operands' order c (xb_order_is).
 bool comparisonResult(BinOp op, int c, bool &result) {
   switch (op) {
-  case BinOp::Eq: case BinOp::ExactEq: result = c == 0; return true;
-  case BinOp::NotEq: result = c != 0; return true;
-  case BinOp::Lt: result = c < 0; return true;
-  case BinOp::Le: result = c <= 0; return true;
-  case BinOp::Gt: result = c > 0; return true;
-  case BinOp::Ge: result = c >= 0; return true;
+  case BinOp::Eq: case BinOp::ExactEq: result = xb_order_is(c, 0, 1, 0); return true;
+  case BinOp::NotEq: result = !xb_order_is(c, 0, 1, 0); return true;
+  case BinOp::Lt: result = xb_order_is(c, 1, 0, 0); return true;
+  case BinOp::Le: result = xb_order_is(c, 1, 1, 0); return true;
+  case BinOp::Gt: result = xb_order_is(c, 0, 0, 1); return true;
+  case BinOp::Ge: result = xb_order_is(c, 0, 1, 1); return true;
   default: return false;
   }
 }
 
 int order(const NumberExpr &a, const NumberExpr &b) {
   if (a.isInt && b.isInt) return (a.ival > b.ival) - (a.ival < b.ival);
-  double x = asDouble(a), y = asDouble(b);
-  return (x > y) - (x < y);
+  return xb_order_double(asDouble(a), asDouble(b));
 }
 
 } // namespace
