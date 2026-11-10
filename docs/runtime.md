@@ -468,11 +468,12 @@ Conventions:
 - `ASort( a, [nStart], [nCount], [bOrder] )` sorts in place and returns the array (`NIL` for anything else). `nStart` 0,
   missing or not a number is 1, one past the end or negative sorts nothing (`xb_range_start`, which `AFill` shares);
   `nCount` missing, 0, negative or reaching past the end means the rest. The sort is stable (a merge sort of positions:
-  equal elements keep their order). `bOrder( x, y )` says whether `x` goes first (a number: whether it is not 0; any
-  other value: yes); without it, values of one kind compare like the operators (strings follow SET EXACT, integers
-  exactly, dates by day, `.F.` before `.T.`) and other pairs by kind: array, object or hash, block, string, logical,
-  date, number, `NIL`. The block's arguments are kept as roots while it runs, and moving the elements goes through the
-  write barrier.
+  equal elements keep their order; one algorithm, `XB_DEFINE_MERGE_SORT` in `rtl/collections.h`, compiled once per
+  comparison: without `bOrder`, a range of integers only or of doubles only is sorted comparing them in place). `bOrder(
+  x, y )` says whether `x` goes first (a number: whether it is not 0; any other value: yes); without it, values of one
+  kind compare like the operators (strings follow SET EXACT, integers exactly, dates by day, `.F.` before `.T.`) and
+  other pairs by kind: array, object or hash, block, string, logical, date, number, `NIL`. The block's arguments are
+  kept as roots while it runs, and moving the elements goes through the write barrier.
 - The bit functions, xbase's own: `BitAnd`, `BitOr`, `BitXor`, `BitNor` (two numbers), `BitNot` (one), `BitShl` and
   `BitShr` (a number and a shift count) work on the 64-bit two's complement form of integers (`xb_bit_apply` in
   `xbrt.h`): numbers are truncated to integers (saturated; NaN is 0), `BitShr` is a logical shift and a count outside

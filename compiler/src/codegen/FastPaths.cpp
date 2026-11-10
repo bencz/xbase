@@ -367,6 +367,36 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
 // double with SET DECIMALS decimals, as xb_op_div and xb_op_mod make it; `%`
 // of two integers is their remainder (0 for a divisor of -1). Anything else
 // calls the operator, which raises the errors.
+// fmod( x, y ) (y not 0, else anything): for two integers below 2^53 in
+// magnitude (doubles that hold integers exactly), their integer remainder with
+// x's sign, which is fmod's exactly, without calling it; fmod otherwise.
+Value *CodeGen::doubleRemainder(Value *x, Value *y) {
+  Type *f64 = b_.getDoubleTy();
+  auto integral = [&](Value *v) {
+    Value *whole = b_.CreateFCmpOEQ(v, b_.CreateUnaryIntrinsic(Intrinsic::trunc, v));
+    return b_.CreateAnd(whole, b_.CreateFCmpOLT(b_.CreateUnaryIntrinsic(Intrinsic::fabs, v),
+                                                ConstantFP::get(f64, 9007199254740992.0)));
+  };
+  BasicBlock *ints = newBlock("fmod.int"), *call = newBlock("fmod"), *done = newBlock("fmod.done");
+  branchLikely(b_.CreateAnd(integral(x), integral(y)), ints, call);
+  b_.SetInsertPoint(ints);
+  Value *yi = b_.CreateFPToSI(y, i64_);
+  Value *safe = b_.CreateSelect(b_.CreateICmpEQ(yi, ConstantInt::get(i64_, 0)), ConstantInt::get(i64_, 1), yi);
+  Value *ir = b_.CreateSIToFP(b_.CreateSRem(b_.CreateFPToSI(x, i64_), safe), f64);
+  Value *exact = b_.CreateBinaryIntrinsic(Intrinsic::copysign, ir, x); // fmod's zero has x's sign too
+  BasicBlock *intsEnd = b_.GetInsertBlock();
+  b_.CreateBr(done);
+  b_.SetInsertPoint(call);
+  Value *f = b_.CreateFRem(x, y);
+  BasicBlock *callEnd = b_.GetInsertBlock();
+  b_.CreateBr(done);
+  b_.SetInsertPoint(done);
+  PHINode *phi = b_.CreatePHI(f64, 2, "fmod");
+  phi->addIncoming(exact, intsEnd);
+  phi->addIncoming(f, callEnd);
+  return phi;
+}
+
 void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *d) {
   BasicBlock *dblBB = newBlock("double"), *other = newBlock("other"), *numBB = newBlock("num");
   BasicBlock *slow = newBlock("op"), *join = newBlock("join");
@@ -386,20 +416,33 @@ void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *
   };
   b_.SetInsertPoint(dblBB); // two doubles: their bits as they are
   Value *gx = b_.CreateBitCast(intValue(a), b_.getDoubleTy()), *gy = b_.CreateBitCast(intValue(bv), b_.getDoubleTy());
-  finish(i.binop == BinOp::Div ? b_.CreateFDiv(gx, gy) : b_.CreateFRem(gx, gy), gy);
+  finish(i.binop == BinOp::Div ? b_.CreateFDiv(gx, gy) : doubleRemainder(gx, gy), gy);
   b_.SetInsertPoint(numBB);
   Value *fx = numberAsDouble(a, ta), *fy = numberAsDouble(bv, tb);
   Value *r;
   if (i.binop == BinOp::Div) {
     r = b_.CreateFDiv(fx, fy);
-  } else {
+  } else { // two integers' remainder (0 for a divisor of -1), else the doubles'
+    BasicBlock *ints = newBlock("rem.int"), *dbls = newBlock("rem.double"), *rem = newBlock("rem");
+    b_.CreateCondBr(bothInts(ta, tb), ints, dbls);
+    b_.SetInsertPoint(ints);
     Value *xi = intValue(a), *yi = intValue(bv);
     Value *minus1 = b_.CreateICmpEQ(yi, ConstantInt::getSigned(i64_, -1));
     Value *safe = b_.CreateSelect(b_.CreateOr(minus1, b_.CreateICmpEQ(yi, ConstantInt::get(i64_, 0))),
                                   ConstantInt::get(i64_, 1), yi); // srem must not trap where it is not used
     Value *ir = b_.CreateSelect(minus1, ConstantFP::get(b_.getDoubleTy(), 0.0),
                                 b_.CreateSIToFP(b_.CreateSRem(xi, safe), b_.getDoubleTy()));
-    r = b_.CreateSelect(bothInts(ta, tb), ir, b_.CreateFRem(fx, fy));
+    BasicBlock *intsEnd = b_.GetInsertBlock();
+    b_.CreateBr(rem);
+    b_.SetInsertPoint(dbls);
+    Value *dr = doubleRemainder(fx, fy);
+    BasicBlock *dblsEnd = b_.GetInsertBlock();
+    b_.CreateBr(rem);
+    b_.SetInsertPoint(rem);
+    PHINode *phi = b_.CreatePHI(b_.getDoubleTy(), 2, "rem");
+    phi->addIncoming(ir, intsEnd);
+    phi->addIncoming(dr, dblsEnd);
+    r = phi;
   }
   finish(r, fy);
   b_.SetInsertPoint(slow);

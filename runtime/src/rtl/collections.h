@@ -5,6 +5,8 @@
 
 #include "xbrt_int.h"
 
+#include <string.h>
+
 /* The first position (from 1) of the range `[nStart], [nCount]` taken from
  * argument `k`: 1 when it is absent, not a number or 0; 0, no range, when it
  * is negative or past the end of `len` elements. */
@@ -35,9 +37,26 @@ int  xb_value_less(const xb_ctx *ctx, const xb_item *x, const xb_item *y);
  * kind (SET EXACT for strings) that are equal, or two NILs. */
 int  xb_value_matches(const xb_ctx *ctx, const xb_item *x, const xb_item *search);
 
-/* Sorts the `n` positions of `pos` (with `tmp` as large) by `less`, stably: a
- * top-down merge sort whose left half has n/2 of them and whose right element
- * goes first only when it is less. */
+/* Defines `static void name(size_t *pos, size_t *tmp, size_t n, Arg arg)`,
+ * which sorts the `n` positions of `pos` (with `tmp` as large) stably by
+ * less(arg, i, j): a top-down merge sort whose left half has n/2 of them and
+ * whose right element goes first only when it is less. One algorithm, so its
+ * order of comparisons (which a comparison block may see) is the same for every
+ * comparison; each one is compiled with its comparison inline. */
+#define XB_DEFINE_MERGE_SORT(name, Arg, less)                                            \
+  static void name(size_t *pos, size_t *tmp, size_t n, Arg arg) {                       \
+    if (n < 2) return;                                                                  \
+    size_t left = n / 2;                                                                \
+    name(pos, tmp, left, arg);                                                          \
+    name(pos + left, tmp, n - left, arg);                                               \
+    size_t i = 0, j = left, k = 0;                                                      \
+    while (i < left && j < n) tmp[k++] = less(arg, pos[j], pos[i]) ? pos[j++] : pos[i++]; \
+    while (i < left) tmp[k++] = pos[i++];                                               \
+    while (j < n) tmp[k++] = pos[j++];                                                  \
+    memcpy(pos, tmp, n * sizeof *pos);                                                  \
+  }
+
+/* The merge sort with a comparison function. */
 typedef int (*xb_less_fn)(void *arg, size_t i, size_t j);
 void xb_merge_sort(size_t *pos, size_t *tmp, size_t n, xb_less_fn less, void *arg);
 

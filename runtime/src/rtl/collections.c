@@ -66,16 +66,16 @@ int xb_value_matches(const xb_ctx *ctx, const xb_item *x, const xb_item *search)
   return xb_order_is(xb_compare(ctx, x, search), 0, 1, 0);
 }
 
+typedef struct {
+  xb_less_fn less;
+  void *arg;
+} given_less;
+static int call_less(const given_less *g, size_t i, size_t j) { return g->less(g->arg, i, j); }
+XB_DEFINE_MERGE_SORT(merge_sort_given, const given_less *, call_less)
+
 void xb_merge_sort(size_t *pos, size_t *tmp, size_t n, xb_less_fn less, void *arg) {
-  if (n < 2) return;
-  size_t left = n / 2;
-  xb_merge_sort(pos, tmp, left, less, arg);
-  xb_merge_sort(pos + left, tmp, n - left, less, arg);
-  size_t i = 0, j = left, k = 0;
-  while (i < left && j < n) tmp[k++] = less(arg, pos[j], pos[i]) ? pos[j++] : pos[i++];
-  while (i < left) tmp[k++] = pos[i++];
-  while (j < n) tmp[k++] = pos[j++];
-  memcpy(pos, tmp, n * sizeof *pos);
+  given_less g = {less, arg};
+  merge_sort_given(pos, tmp, n, &g);
 }
 
 typedef struct clone_entry {

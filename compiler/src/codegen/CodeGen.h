@@ -161,6 +161,7 @@ private:
   static llvm::CmpInst::Predicate llvmPredicate(xir::IntPred p);
   void emitBinary(const xir::Instruction &i);
   void emitDivMod(const xir::Instruction &i, llvm::Value *a, llvm::Value *b, llvm::Value *d);
+  llvm::Value *doubleRemainder(llvm::Value *x, llvm::Value *y);
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);
   // InlineCalls.cpp: Len, Asc, Chr, SubStr( c, n, 1 ), Int, PCount and PValue( n ) in place.

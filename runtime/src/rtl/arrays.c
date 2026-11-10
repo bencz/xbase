@@ -107,6 +107,23 @@ static int sort_less(void *arg, size_t i, size_t j) {
   return xb_value_less(s->ctx, &a->items[i], &a->items[j]);
 }
 
+/* The order xb_value_less gives two integers, or two doubles (NaN before
+ * nothing), for a range whose elements are all of that type. */
+static int int_less(const xb_item *items, size_t i, size_t j) { return items[i].v.i < items[j].v.i; }
+static int double_less(const xb_item *items, size_t i, size_t j) {
+  return xb_order_double(items[i].v.d, items[j].v.d) == -1;
+}
+XB_DEFINE_MERGE_SORT(sort_ints, const xb_item *, int_less)
+XB_DEFINE_MERGE_SORT(sort_doubles, const xb_item *, double_less)
+
+/* The type every element of items[first .. first+n-1] has, else XB_T_NIL. */
+static uint32_t common_type(const xb_item *items, size_t first, size_t n) {
+  uint32_t t = items[first].type;
+  for (size_t k = 1; k < n; ++k)
+    if (items[first + k].type != t) return XB_T_NIL;
+  return t;
+}
+
 /* Calls `block` with an element and its position (1-based), as AScan and AEval
  * do; `call` holds three rooted items: the two arguments, then the result.
  * Returns 0 when the block left a request to unwind. */
@@ -284,7 +301,11 @@ void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_frame frame;
   xb_calls_begin(ctx, call, 3, &frame, &asort_proc);
   sorter s = {ctx, &argv[0], argc > 3 && argv[3].type == XB_T_BLOCK ? &argv[3] : NULL, call, 0};
-  xb_merge_sort(pos, pos + n, n, sort_less, &s);
+  const xb_item *items = ((const xb_array *)argv[0].v.p)->items;
+  uint32_t same = s.block ? XB_T_NIL : common_type(items, first, n); /* without a block nothing runs: no change */
+  if (same == XB_T_INT) sort_ints(pos, pos + n, n, items);
+  else if (same == XB_T_DOUBLE) sort_doubles(pos, pos + n, n, items);
+  else xb_merge_sort(pos, pos + n, n, sort_less, &s);
   xb_calls_end(ctx, &frame, 3);
   if (!s.failed) {
     xb_array *a = argv[0].v.p;
