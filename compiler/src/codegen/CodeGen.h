@@ -90,6 +90,7 @@ private:
   llvm::Function *externFunction(const xir::Callee &c);
   void genFunction(const xir::Function &f);
   void genModuleRegistration(const xir::Module &m);
+  void genRequests(const xir::Module &m);
   void genEntry(const xir::Function &start);
   llvm::BasicBlock *newBlock(const char *name);
   unsigned headerShift(ItemField f);

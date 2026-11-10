@@ -157,6 +157,7 @@ lists only commands whose runtime support exists and grows with the runtime:
 | `END <x>`, `ENDDO <*x*>`, `ENDIF <*x*>`, `ENDCASE <*x*>` | `end`, `enddo`, `endif`, `endcase` |
 | `ENDFOR [<*x*>]`, `NEXT <v> [TO <x>] [STEP <s>]` | `next` |
 | `STORE <v> TO <v1> [, <vN>]` | `<v1> := [ <vN> := ] <v>` |
+| `REQUEST <vars,...>` | `EXTERNAL <vars>` |
 | `? [<list,...>]`, `?? [<list,...>]` | `QOut( <list> )`, `QQOut( <list> )` |
 | `SET DECIMALS TO [<x>]` | `Set( _SET_DECIMALS, <x> )` (0 without a value) |
 | `SET EXACT ON \| OFF \| &var`, `SET EXACT (<x>)` | `Set( _SET_EXACT, ... )` |

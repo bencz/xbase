@@ -351,12 +351,22 @@ struct ExternDecl {
   }
 };
 
+// EXTERNAL name (REQUEST in std.ch): a function the program must link in
+// though nothing may call it by name in the source (Do(), the symbol table).
+struct Request {
+  SourceLoc loc;
+  std::string name;              // upper-cased
+};
+
 struct Module {
   std::string name;              // upper-cased source stem
   std::vector<std::unique_ptr<FuncDecl>> funcs;
   std::vector<LocalDecl> fileStatics; // STATICs before the first function: visible in the whole file
   std::vector<LocalDecl *> statics;   // every STATIC of the module, in slot order (set by Sema)
   std::vector<ExternDecl> externs;
+  // The EXTERNAL names; after CallResolver, only those of another module of the program (the runtime's functions
+  // are all linked in, and the module's own are here).
+  std::vector<Request> requests;
 };
 
 } // namespace xb

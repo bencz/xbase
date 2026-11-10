@@ -190,6 +190,19 @@ void CodeGen::run(const xir::Module &m) {
   for (auto &f : m.functions)
     if (direct_.count(f.get())) genThunk(*f);
   genModuleRegistration(m); // its public functions go into the symbol table
+  genRequests(m);
+}
+
+// EXTERNAL: a table of the functions, kept in the object file, so the linker brings in the modules that define them
+// (from a library) or reports them missing.
+void CodeGen::genRequests(const xir::Module &m) {
+  if (m.requests.empty()) return;
+  std::vector<Constant *> fns;
+  for (const std::string &name : m.requests) fns.push_back(externFunction(xir::Callee{nullptr, name, false}));
+  auto *ty = ArrayType::get(ptrTy_, fns.size());
+  auto *table = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage, ConstantArray::get(ty, fns),
+                                   "xb.module.requests");
+  appendToCompilerUsed(mod_, {table});
 }
 
 bool CodeGen::finish(const xir::Function *start) {

@@ -30,6 +30,18 @@ void CallResolver::run(Module &m) {
       diag_.error(f->loc, "redefinition of predefined function " + d->name + " as '" + f->name + "'");
     if (f->startup == FuncDecl::Startup::None) funcs_.insert(f->name); // INIT and EXIT names are their own
   }
+  // EXTERNAL names: the module's own functions and the runtime's (all of them are linked in) need nothing; a name
+  // given twice is kept once.
+  std::vector<Request> requests;
+  std::unordered_set<std::string> requested;
+  for (Request &r : m.requests) {
+    if (funcs_.count(r.name)) continue;
+    const ExternDecl *d = findExtern(r.name, r.loc);
+    if (d && d->native) continue;
+    if (d) r.name = d->name;
+    if (requested.insert(r.name).second) requests.push_back(std::move(r));
+  }
+  m.requests = std::move(requests);
   for (LocalDecl &d : m.fileStatics)
     if (d.init) expr(*d.init);
   for (auto &f : m.funcs) block(f->body);

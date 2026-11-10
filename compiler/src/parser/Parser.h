@@ -54,10 +54,13 @@ private:
   bool atInlineIf() const;
   bool atBlockEnd(std::initializer_list<const char *> enders) const;
   bool atExtern() const;
+  bool atLinkDecl() const;
 
   // Parser.cpp: functions, declarations and blocks
   std::unique_ptr<FuncDecl> parseFunc();
   std::optional<ExternDecl> parseExtern();
+  void parseLinkDecl();
+  void finishModule(Module &mod);
   Block parseBlock(std::initializer_list<const char *> enders);
   void closeBlock(std::initializer_list<const char *> closers, const char *opener, SourceLoc openLoc);
 
@@ -101,6 +104,9 @@ private:
   // are not reported one by one.
   bool quietStmt_ = false;
   bool stopped_ = false;
+  // ANNOUNCE and EXTERNAL anywhere in the module, given to it at its end.
+  std::optional<Request> announce_;
+  std::vector<Request> requests_;
   bool quiet() const { return quietStmt_ || stopped_; }
 };
 

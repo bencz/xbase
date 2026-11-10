@@ -27,6 +27,10 @@ StmtPtr Parser::parseStmtKind() {
     endOfStmt();
     return nullptr;
   }
+  if (atLinkDecl()) {
+    parseLinkDecl();
+    return nullptr;
+  }
   if (atStmtKw("LOCAL")) return parseDecl(StmtKind::Local);
   if (atStmtKw("STATIC")) return parseDecl(StmtKind::Static);
   if (atStmtKw("DO") && isKw(ahead(), "CASE")) return parseDoCase();

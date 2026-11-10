@@ -84,6 +84,7 @@ public:
 
   void module(const Module &m) {
     out_ += "module " + m.name + "\n";
+    for (const std::string &r : m.requests) out_ += "  request " + r + "\n";
     for (auto &s : m.statics) out_ += "  " + varName(*s) + " = " + varDesc(*s) + "\n";
     for (auto &f : m.functions) {
       out_ += "\n";

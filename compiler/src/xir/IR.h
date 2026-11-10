@@ -283,6 +283,7 @@ public:
   std::vector<std::unique_ptr<Var>> statics;        // index = static slot
   Function *init = nullptr;                         // initializes the STATICs (null: none have initializers)
   std::vector<Function *> initProcs, exitProcs;     // INIT and EXIT procedures, in source order
+  std::vector<std::string> requests;                // functions of other modules to link in (EXTERNAL)
 };
 
 } // namespace xb::xir

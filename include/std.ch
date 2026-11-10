@@ -26,6 +26,8 @@
 
 #command STORE <v> TO <v1> [, <vN>]    => <v1> := [ <vN> := ] <v>
 
+#command REQUEST <vars,...>            => EXTERNAL <vars>
+
 #command ?  [<explist,...>]            => QOut( <explist> )
 #command ?? [<explist,...>]            => QQOut( <explist> )
 

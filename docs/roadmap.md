@@ -18,9 +18,8 @@ design of the larger parts.
   `STATIC` has one value per module.
 - Done: `INIT PROCEDURE` and `EXIT PROCEDURE`, the symbol table of public and runtime functions by name, `Do()`
   ([runtime.md](runtime.md#program-startup)).
-- Missing: `ANNOUNCE`, `REQUEST`/`EXTERNAL` (every public function is in the symbol table already: they would only
-  name what must be linked in), the macro operator's use of the table, and Clipper's 10 significant characters of
-  names.
+- Done: `ANNOUNCE`, `REQUEST`/`EXTERNAL` ([compiler.md](compiler.md#grammar)).
+- Missing: the macro operator's use of the table, and Clipper's 10 significant characters of names.
 
 ### Variables
 
@@ -193,8 +192,7 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
   inner ones with one error; an error node in the tree, so the semantic checks run after a syntax error; an undeclared
   name reported once per function.
 - A statement that is an expression without effect (`x == 3`) is an error in Clipper; xbase warns.
-- Messages show names as written and the text of tokens; Clipper's `EXTERNAL name` and `REQUEST name`, aliases,
-  macros and `BEGIN SEQUENCE` give one "not supported yet" error each.
+- Messages show names as written and the text of tokens; aliases and macros give one "not supported yet" error each.
 
 ### Front end
 
@@ -250,17 +248,16 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. `ANNOUNCE`, `REQUEST`/`EXTERNAL` (the symbol table and `INIT`/`EXIT PROCEDURE` are done).
-2. Errors: `ErrorSys` (`BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind edges, typed
+1. Errors: `ErrorSys` (`BEGIN SEQUENCE`, `Break`, the `Error` object, `ErrorBlock`, the unwind edges, typed
    continuations and the call stack are done).
-3. Memory variables and Clipper's rule for undeclared names; `Type()`.
-4. The macro operator.
-5. The rest of the array, string and number functions; the call-stack functions.
-6. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
+2. Memory variables and Clipper's rule for undeclared names; `Type()`.
+3. The macro operator.
+4. The rest of the array, string and number functions; the call-stack functions.
+5. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
    `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks.
-7. Files and directories; the terminal layer; GET/READ and TBrowse.
-8. The RDD layer.
-9. Generators, async/await and threads, sockets and the other libraries.
+6. Files and directories; the terminal layer; GET/READ and TBrowse.
+7. The RDD layer.
+8. Generators, async/await and threads, sockets and the other libraries.
 
 Alongside, the compiler's own track ([xir.md](xir.md#phases)): type inference and unboxed numbers, value numbering,
 statepoints and a moving collector, inlining, loop optimizations, measured with the benchmarks

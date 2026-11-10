@@ -47,20 +47,20 @@ Keywords may be abbreviated down to a minimum length:
 
 | Keyword | Min | Keyword | Min | Keyword | Min |
 |---|---|---|---|---|---|
-| `BEGIN` | 4 | `FIELD` | 4 | `PROCEDURE` | 4 |
-| `CASE` | 4 | `FOR` | 3 | `PUBLIC` | 4 |
-| `DESCEND` | 7 | `FUNCTION` | 4 | `RECOVER` | 4 |
-| `DO` | 2 | `IF` | 2 | `RETURN` | 4 |
-| `EACH` | 4 | `IIF` | 3 | `SEQUENCE` | 4 |
-| `ELSE` | 4 | `IN` | 2 | `STATIC` | 4 |
-| `ELSEIF` | 5 | `LOCAL` | 4 | `STEP` | 4 |
-| `END` | 3 | `LOOP` | 4 | `SWITCH` | 4 |
-| `ENDCASE` | 4 | `MEMVAR` | 4 | `TO` | 2 |
-| `ENDDO` | 4 | `NEXT` | 4 | `USING` | 4 |
-| `ENDIF` | 4 | `NIL` | 3 | `WHILE` | 4 |
-| `ENDSWITCH` | 5 | `OTHERWISE` | 4 | `WITH` | 4 |
-| `EXIT` | 4 | `PARAMETERS` | 4 |  |  |
-| `EXTERNAL` | 4 | `PRIVATE` | 4 |  |  |
+| `ANNOUNCE` | 4 | `EXTERNAL` | 4 | `PARAMETERS` | 4 |
+| `BEGIN` | 4 | `FIELD` | 4 | `PRIVATE` | 4 |
+| `CASE` | 4 | `FOR` | 3 | `PROCEDURE` | 4 |
+| `DESCEND` | 7 | `FUNCTION` | 4 | `PUBLIC` | 4 |
+| `DO` | 2 | `IF` | 2 | `RECOVER` | 4 |
+| `EACH` | 4 | `IIF` | 3 | `RETURN` | 4 |
+| `ELSE` | 4 | `IN` | 2 | `SEQUENCE` | 4 |
+| `ELSEIF` | 5 | `INIT` | 4 | `STATIC` | 4 |
+| `END` | 3 | `LOCAL` | 4 | `STEP` | 4 |
+| `ENDCASE` | 4 | `LOOP` | 4 | `SWITCH` | 4 |
+| `ENDDO` | 4 | `MEMVAR` | 4 | `TO` | 2 |
+| `ENDIF` | 4 | `NEXT` | 4 | `USING` | 4 |
+| `ENDSWITCH` | 5 | `NIL` | 3 | `WHILE` | 4 |
+| `EXIT` | 4 | `OTHERWISE` | 4 | `WITH` | 4 |
 
 Statements:
 
@@ -72,6 +72,14 @@ Statements:
   (`FuncDecl::variadic`) also lets its body pass them on (below).
 - `STATIC name [:= expr], ...` before the first function declares file-wide statics, visible in every function of the
   source file.
+- `EXTERNAL name, ...` (`REQUEST` in `std.ch`), anywhere in the module, names functions the program must link in though
+  the source may never call them (they are reached by name, `Do()`): a function of another module is referenced from
+  the object (a table kept with `llvm.compiler.used`, `xb.module.requests`), so the linker brings in the library member
+  that defines it or reports it missing; the module's own functions and the runtime's (which are always linked in)
+  need nothing. `EXTERNAL FUNCTION` is the declaration of [Calls](#calls).
+- `ANNOUNCE name`, anywhere in the module, makes `name` a public procedure of the module, so that `REQUEST name`
+  elsewhere links the module in: an empty procedure (it returns `NIL`) unless the module defines a public function of
+  that name; a `STATIC` one is an error, and a second `ANNOUNCE` in the module is ignored with a warning.
 - `LOCAL name [:= expr], ...` and `STATIC name [:= expr], ...` at the start of a function, in any order. A function
   `STATIC` keeps its value between calls.
 - `RETURN [expr]` (a `PROCEDURE` cannot return a value)

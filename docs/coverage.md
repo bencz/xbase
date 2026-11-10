@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 73 of 551 done. Commands (`std.ch` families): 17 of 155 done.
+Functions: 73 of 551 done. Commands (`std.ch` families): 18 of 155 done.
 
 ## Statements (grammar)
 
@@ -13,7 +13,7 @@ Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar
 **FUNCTION**, **PROCEDURE**, **LOCAL**, **STATIC**, **RETURN**, **IF**, **DO CASE**, **SWITCH**, **WHILE**,
 **FOR**, **FOR EACH**, **EXIT**, **LOOP**, **DO ... WITH**, *PRIVATE*, *PUBLIC*, *MEMVAR*, *FIELD*, *PARAMETERS*,
 **INIT PROCEDURE**, **EXIT PROCEDURE**, **EXTERN FUNCTION** (an xbase declaration), **BEGIN SEQUENCE**, *DECLARE*,
-*EXTERNAL* (Clipper's name list), *ANNOUNCE*
+**EXTERNAL** (Clipper's name list), **ANNOUNCE**
 
 ## Commands (std.ch)
 
@@ -25,7 +25,7 @@ GETS*, *CLEAR MEMORY*, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, *CLOSE*, *CLOSE ALL*, 
 *DELETE*, *DELETE FILE*, *DELETE TAG*, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**, **ENDCASE**, **ENDDO**, **ENDFOR**,
 **ENDIF**, **ENDSEQUENCE**, *ERASE*, *FIND*, *GO*, *GOTO*, *INDEX ON*, *INPUT*, *JOIN*, *KEYBOARD*, *LABEL FORM*,
 *LIST*, *LOCATE*, *MENU*, **NEXT**, *PACK*, **QUIT**, *READ*, *READ SAVE*, *RECALL*, *REINDEX*, *RELEASE*, *RELEASE
-ALL*, *RENAME*, *REPLACE*, *REPORT FORM*, *REQUEST*, *RESTORE*, *RESTORE SCREEN*, *RUN*, *SAVE*, *SAVE ALL*, *SAVE
+ALL*, *RENAME*, *REPLACE*, *REPORT FORM*, **REQUEST**, *RESTORE*, *RESTORE SCREEN*, *RUN*, *SAVE*, *SAVE ALL*, *SAVE
 SCREEN*, *SAVE TO*, *SEEK*, *SELECT*, *SET ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET
 CENTURY**, *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*,
 **SET DECIMALS**, *SET DEFAULT*, *SET DELETED*, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET

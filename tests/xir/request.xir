@@ -1,0 +1,13 @@
+module REQUEST
+  request ELSEWHERE
+  request OTHER
+
+function MAIN params 0 {
+entry:
+  ret
+}
+
+function OWN params 0 {
+entry:
+  ret 1:w10
+}

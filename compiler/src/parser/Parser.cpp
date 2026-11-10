@@ -74,7 +74,7 @@ bool Parser::isKw(const Token &t, const char *kw) const {
       {"STEP", 4},   {"TO", 2},    {"WHILE", 4},  {"WITH", 4},    {"MEMVAR", 4}, {"FIELD", 4},
       {"PRIVATE", 4}, {"PUBLIC", 4}, {"PARAMETERS", 4}, {"EXTERNAL", 4}, {"CASE", 4}, {"OTHERWISE", 4}, {"ENDCASE", 4},
       {"SWITCH", 4}, {"ENDSWITCH", 5}, {"EACH", 4}, {"IN", 2}, {"DESCEND", 7},
-      {"BEGIN", 4},  {"SEQUENCE", 4}, {"RECOVER", 4}, {"USING", 4}, {"INIT", 4},
+      {"BEGIN", 4},  {"SEQUENCE", 4}, {"RECOVER", 4}, {"USING", 4}, {"INIT", 4}, {"ANNOUNCE", 4},
   };
   if (t.kind != Tok::Ident) return false;
   size_t minLen = std::strlen(kw);
@@ -148,6 +148,50 @@ bool Parser::atFuncStart() const {
 // EXTERN[AL] FUNCTION: a declaration, at file level like FUNCTION.
 bool Parser::atExtern() const { return atStmtKw("EXTERNAL") && isKw(ahead(), "FUNCTION"); }
 
+// ANNOUNCE name, or EXTERNAL name, ...: anywhere in the module, at file level or in a function.
+bool Parser::atLinkDecl() const {
+  return (atStmtKw("ANNOUNCE") || (atStmtKw("EXTERNAL") && !isKw(ahead(), "FUNCTION"))) && ahead().kind == Tok::Ident;
+}
+
+void Parser::parseLinkDecl() {
+  bool announces = atKw("ANNOUNCE");
+  advance();
+  do {
+    if (!at(Tok::Ident)) {
+      expect(Tok::Ident, "a function name");
+      skipToEndOfStmt();
+      break;
+    }
+    Request r{cur().loc, cur().upper};
+    advance();
+    if (!announces)
+      requests_.push_back(std::move(r));
+    else if (announce_)
+      diag_.warning(r.loc, "ANNOUNCE " + r.name + " ignored: the module announces " + announce_->name + " already");
+    else
+      announce_ = std::move(r);
+  } while (!announces && accept(Tok::Comma));
+  endOfStmt();
+}
+
+// The module's EXTERNAL names, and its ANNOUNCE name: a public procedure of the module, which an EXTERNAL name in
+// another module links in; an empty one (it returns NIL) unless the module defines it.
+void Parser::finishModule(Module &mod) {
+  mod.requests = std::move(requests_);
+  if (!announce_) return;
+  for (auto &f : mod.funcs)
+    if (f->name == announce_->name && f->startup == FuncDecl::Startup::None) {
+      if (f->isStatic)
+        diag_.error(announce_->loc, "ANNOUNCE " + f->name + " names a STATIC function: it must be public");
+      return;
+    }
+  auto fn = std::make_unique<FuncDecl>();
+  fn->loc = announce_->loc;
+  fn->name = announce_->name;
+  fn->isProcedure = true;
+  mod.funcs.push_back(std::move(fn));
+}
+
 bool Parser::atBlockEnd(std::initializer_list<const char *> enders) const {
   for (const char *e : enders)
     if (atStmtKw(e)) return true;
@@ -159,8 +203,10 @@ std::unique_ptr<Module> Parser::parseModule(const std::string &moduleName) {
   mod->name = moduleName;
   skipBlankStmts();
   // STATICs before any other statement or function are visible in the whole file.
-  while ((atStmtKw("STATIC") && !atFuncStart()) || atExtern()) {
-    if (atExtern()) {
+  while ((atStmtKw("STATIC") && !atFuncStart()) || atExtern() || atLinkDecl()) {
+    if (atLinkDecl()) {
+      parseLinkDecl();
+    } else if (atExtern()) {
       if (auto d = parseExtern()) mod->externs.push_back(std::move(*d));
     } else {
       StmtPtr decl = parseDecl(StmtKind::Static);
@@ -193,6 +239,7 @@ std::unique_ptr<Module> Parser::parseModule(const std::string &moduleName) {
     }
     mod->funcs.push_back(parseFunc());
   }
+  finishModule(*mod);
   return mod;
 }
 
