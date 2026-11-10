@@ -1,4 +1,5 @@
-# include/rtl.ch must declare exactly the runtime's xBase-callable functions (xbf_NAME in runtime/src).
+# include/rtl.ch must declare exactly the runtime's xBase-callable functions: xbf_NAME in runtime/src, the C ones, and
+# the public functions of its xBase modules (runtime/src/**/*.prg).
 include(${RUNTIME_SRC}/../rtl_declarations.cmake)
 xb_rtl_functions(${RTL} names masks)
 file(GLOB_RECURSE sources ${RUNTIME_SRC}/*.c)
@@ -8,6 +9,21 @@ foreach(src ${sources})
   string(REGEX MATCHALL "void[ \t\r\n]+xbf_[A-Z0-9_]+[ \t]*\\(" found "${text}")
   foreach(f ${found})
     string(REGEX REPLACE ".*xbf_([A-Z0-9_]+).*" "\\1" n "${f}")
+    list(APPEND defined ${n})
+  endforeach()
+endforeach()
+# FUNCTION or PROCEDURE (any letter case, abbreviated to four letters or more) starting a line; STATIC ones are not
+# the runtime's.
+set(function "[Ff][Uu][Nn][Cc]([Tt]|[Tt][Ii]|[Tt][Ii][Oo]|[Tt][Ii][Oo][Nn])?")
+set(procedure "[Pp][Rr][Oo][Cc]([Ee]|[Ee][Dd]|[Ee][Dd][Uu]|[Ee][Dd][Uu][Rr]|[Ee][Dd][Uu][Rr][Ee])?")
+set(kw "(${function}|${procedure})")
+file(GLOB_RECURSE modules ${RUNTIME_SRC}/*.prg)
+foreach(src ${modules})
+  file(READ ${src} text)
+  string(REGEX MATCHALL "\n[ \t]*${kw}[ \t]+[A-Za-z_][A-Za-z0-9_]*" found "\n${text}")
+  foreach(f ${found})
+    string(REGEX REPLACE ".*[ \t]([A-Za-z_][A-Za-z0-9_]*)$" "\\1" n "${f}")
+    string(TOUPPER "${n}" n)
     list(APPEND defined ${n})
   endforeach()
 endforeach()

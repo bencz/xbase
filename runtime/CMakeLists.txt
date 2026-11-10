@@ -36,6 +36,16 @@ else()
   target_link_libraries(xbrt PUBLIC m Threads::Threads)
 endif()
 
+# The runtime's functions written in xBase, compiled by the xbc of this build as modules of the runtime
+# (xbc --runtime) for XB_TARGET (top-level CMakeLists.txt).
+set(XB_RUNTIME_PRG src/rtl/arrays.prg src/rtl/console.prg)
+foreach(prg ${XB_RUNTIME_PRG})
+  get_filename_component(stem ${prg} NAME_WE)
+  set(obj ${CMAKE_CURRENT_BINARY_DIR}/${stem}_prg.o)
+  xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/${prg} ${obj} --runtime)
+  target_sources(xbrt PRIVATE ${obj})
+endforeach()
+
 # The runtime's functions by name (runtime/symbols.cmake), from include/rtl.ch.
 set(XB_RUNTIME_SYMBOLS ${CMAKE_CURRENT_BINARY_DIR}/rtl_symbols.c)
 add_custom_command(OUTPUT ${XB_RUNTIME_SYMBOLS}

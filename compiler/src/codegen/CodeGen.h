@@ -30,6 +30,9 @@ namespace xb {
 class CodeGen {
 public:
   CodeGen(llvm::LLVMContext &ctx, llvm::Module &mod, Diagnostics &diag);
+  // Modules of the runtime (xbc --runtime): public functions are runtime functions (xbf_NAME, in the runtime's
+  // symbol table already, so not registered), and their frames keep line 0, as the runtime's C functions show.
+  void setRuntimeLibrary(bool on) { runtimeLibrary_ = on; }
   // Adds one module of the program to the LLVM module; several modules may
   // share it (one object for several sources), each adding its own functions,
   // STATICs and registration.
@@ -246,6 +249,10 @@ private:
   llvm::Function *fn_ = nullptr;
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
   uint32_t fnParams_ = 0; // the function's parameters: the arguments past them are what `...` passes on
+  // `...` passes its arguments on in place (no copy): the function's one args.rest, outside loops, in a call that
+  // takes references, in a function that reads its arguments nowhere else (PCount(), PValue()).
+  bool forwardInPlace_ = false;
+  bool runtimeLibrary_ = false;
   llvm::BasicBlock *fnExit_ = nullptr;
   llvm::BasicBlock *unwind_ = nullptr; // where an operation of the current block that fails goes (xir unwind)
   uint32_t line_ = 0;                  // the source line of the xIR instruction being lowered (0: none)

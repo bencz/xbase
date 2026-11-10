@@ -4,7 +4,8 @@
 # command-line arguments, one per line. The modules in an optional
 # directory <name>.with/ are compiled in the same xbc run (one object); those
 # in an optional directory <name>.d/ are compiled on their own with --no-entry
-# and linked into the program.
+# and linked into the program, and those in <name>.rt/ likewise as modules of
+# the runtime (--runtime).
 function(xb_add_run_test name)
   set(obj ${CMAKE_CURRENT_BINARY_DIR}/${name}.o)
   file(GLOB with ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.with/*.prg)
@@ -15,6 +16,13 @@ function(xb_add_run_test name)
     get_filename_component(stem ${module} NAME_WE)
     set(mobj ${CMAKE_CURRENT_BINARY_DIR}/${name}.d.${stem}.o)
     xb_compile_prg(${module} ${mobj} --no-entry)
+    list(APPEND objs ${mobj})
+  endforeach()
+  file(GLOB modules ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.rt/*.prg)
+  foreach(module ${modules})
+    get_filename_component(stem ${module} NAME_WE)
+    set(mobj ${CMAKE_CURRENT_BINARY_DIR}/${name}.rt.${stem}.o)
+    xb_compile_prg(${module} ${mobj} --runtime)
     list(APPEND objs ${mobj})
   endforeach()
   add_executable(t_${name} ${objs})

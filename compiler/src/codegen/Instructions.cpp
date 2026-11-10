@@ -123,7 +123,8 @@ Value *CodeGen::operandGroup(const xir::Instruction &i) {
 // on the stack, sized at run time and linked into the chain while `emit` runs,
 // so the collector sees them (a callee may replace them, PValue()).
 // xb_args_rest copies the arguments passed on; one whose reference is gone
-// unwinds instead.
+// unwinds instead. A call of only `...` may pass them in place
+// (forwardInPlace_).
 void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<void(Value *, Value *)> emit) {
   const auto &ops = i.operands();
   uint32_t rests = 0;
@@ -132,6 +133,12 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
   Value *params = ConstantInt::get(i32_, fnParams_);
   Value *rest = b_.CreateSelect(b_.CreateICmpUGT(argc, params), b_.CreateSub(argc, params), ConstantInt::get(i32_, 0),
                                 "rest");
+  Value *restItems = b_.CreateGEP(itemTy_, argv, params, "rest.items"); // not dereferenced when there are none
+  if (forwardInPlace_ && i.op == xir::Op::Call && ops.size() == 1 && i.restRefs == UINT32_MAX) {
+    // f( ... ): the callee receives the arguments where they are, which nothing here reads again
+    emit(rest, restItems);
+    return;
+  }
   Value *total = b_.CreateAdd(b_.CreateMul(rest, ConstantInt::get(i32_, rests)),
                               ConstantInt::get(i32_, (uint32_t)ops.size() - rests), "total");
   Value *save = b_.CreateStackSave();
@@ -148,7 +155,6 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
     b_.CreateStackRestore(save);
   };
   BasicBlock *failed = newBlock("list.failed");
-  Value *restItems = b_.CreateGEP(itemTy_, argv, params, "rest.items"); // not dereferenced when there are none
   Value *pos = ConstantInt::get(i32_, 0);
   for (size_t k = 0; k < ops.size(); ++k) {
     Value *at = b_.CreateInBoundsGEP(itemTy_, items, pos);

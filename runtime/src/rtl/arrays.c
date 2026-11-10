@@ -116,7 +116,7 @@ static int call_with_element(xb_ctx *ctx, const xb_item *block, xb_item *call, c
   return xb_calls_run(ctx, block, call, 2);
 }
 
-static const xb_proc ascan_proc = {"ASCAN", 0, 0}, aeval_proc = {"AEVAL", 0, 0}, asort_proc = {"ASORT", 0, 0};
+static const xb_proc ascan_proc = {"ASCAN", 0, 0}, asort_proc = {"ASORT", 0, 0};
 
 /* AScan( aTarget, xSearch, [nStart], [nCount] ): the position of the first
  * element in the range that is equal to xSearch (values of one comparable
@@ -155,26 +155,21 @@ void xbf_ASCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
 }
 
-/* AEval( aArray, bBlock, [nStart], [nCount] ): calls bBlock( element,
- * position ) for each element of the range that still exists when its turn
- * comes; returns the array. */
-void xbf_AEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  if (argc < 2 || argv[0].type != XB_T_ARRAY || argv[1].type != XB_T_BLOCK) {
-    xb_error_in(ctx, "AEVAL", NULL, EG_ARG, 2017, "AEVAL", 0, argc, argv);
-    return;
-  }
-  *ret = argv[0];
-  uint64_t start = xb_range_start(argc, argv, 2, ((const xb_array *)argv[0].v.p)->len);
-  if (!start) return;
-  uint64_t count = xb_range_count(argc, argv, 3, ((const xb_array *)argv[0].v.p)->len - start + 1);
-  xb_item call[3];
-  xb_frame frame;
-  xb_calls_begin(ctx, call, 3, &frame, &aeval_proc);
-  for (size_t i = (size_t)(start - 1), end = i + (size_t)count; i < end; ++i) {
-    const xb_array *a = argv[0].v.p;
-    if (i >= a->len || !call_with_element(ctx, &argv[1], call, &a->items[i], i)) break;
-  }
-  xb_calls_end(ctx, &frame, 3);
+/* __RangeStart( nLen, [nStart] ): where the range of a collection of nLen
+ * items starts, as the collection functions take nStart (xb_range_start): 1
+ * by default, 0 when the range is empty. For the runtime's xBase code. */
+void xbf___RANGESTART(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  int64_t len = argc && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 0;
+  xb_set_int(ret, (int64_t)xb_range_start(argc, argv, 1, len > 0 ? (size_t)len : 0));
+}
+
+/* __RangeCount( nRest, [nCount] ): how many items of the nRest from the
+ * start the range takes (xb_range_count): all of them by default. */
+void xbf___RANGECOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  int64_t rest = argc && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 0;
+  xb_set_int(ret, (int64_t)xb_range_count(argc, argv, 1, rest > 0 ? (uint64_t)rest : 0));
 }
 
 /* The 1-based position argument of AIns and ADel (0 or missing is 1), as a

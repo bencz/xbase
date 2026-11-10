@@ -16,6 +16,9 @@ namespace xb::xir {
 // that point) and are made only where needed when lowering to LLVM.
 class Generator {
 public:
+  // `runtimeLibrary`: a module of the runtime (xbc --runtime), whose STATIC
+  // functions and codeblocks the call stack does not show.
+  explicit Generator(bool runtimeLibrary = false) : runtimeLibrary_(runtimeLibrary) {}
   std::unique_ptr<Module> run(const xb::Module &ast);
 
 private:
@@ -63,6 +66,7 @@ private:
   Value *genIIf(const IIfExpr &e);
   Value *genCodeblock(const BlockExpr &b);
 
+  bool runtimeLibrary_;
   std::unique_ptr<Module> mod_;
   std::unordered_map<std::string, Function *> funcs_; // the module's program functions
   unsigned blockCount_ = 0;

@@ -254,6 +254,7 @@ public:
   bool startup = false;           // an INIT or EXIT procedure: the runtime runs it, nothing calls it
   uint32_t numParams = 0;
   bool readsArgs = false;         // its frame keeps the arguments received (PCount(), PValue())
+  bool hidden = false;            // the call stack does not show it (a STATIC function or codeblock of the runtime)
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   std::vector<std::unique_ptr<Constant>> constants;

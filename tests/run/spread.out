@@ -21,3 +21,4 @@ unread:       1132
 after: ranC
 twice:          5          6          1          0
 refs after two:          9 ran
+loop: ababab

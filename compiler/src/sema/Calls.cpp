@@ -26,7 +26,7 @@ void CallResolver::run(Module &m) {
   }
   for (auto &f : m.funcs) {
     const ExternDecl *d = findExtern(f->name, f->loc);
-    if (d && d->reserved)
+    if (d && d->reserved && !runtimeLibrary_)
       diag_.error(f->loc, "redefinition of predefined function " + d->name + " as '" + f->name + "'");
     if (f->startup == FuncDecl::Startup::None) funcs_.insert(f->name); // INIT and EXIT names are their own
   }

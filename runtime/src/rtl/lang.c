@@ -60,7 +60,7 @@ static const xb_frame *stack_level(const xb_ctx *ctx, uint32_t argc, const xb_it
   *n = argc && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 0;
   int64_t k = *n;
   for (const xb_frame *f = ctx->frames; f; f = f->prev)
-    if (f->proc && k-- == 0) return f;
+    if (xb_frame_shown(f) && k-- == 0) return f;
   return NULL;
 }
 
@@ -116,6 +116,17 @@ void xbf_PVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     if (ref) xb_ref_written(arg);
   }
   *ret = *target;
+}
+
+/* __ArgError( nSubCode ): the argument error (EG_ARG, nSubCode) of the
+ * runtime function written in xBase that calls it, as its C counterparts raise
+ * one: the operation is its name and the arguments are those it received. It
+ * cannot be substituted; returns NIL. */
+void xbf___ARGERROR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  const xb_frame *f = caller_frame(ctx);
+  int32_t subcode = argc && xb_is_number(&argv[0]) ? xb_num_wrap_int32(&argv[0]) : 0;
+  xb_error(ctx, NULL, EG_ARG, subcode, f ? f->proc->name : "", 0, f ? f->argc : 0, f ? f->argv : NULL);
 }
 
 /* ErrorLevel( [nNew] ): the program's exit code; an argument replaces it: a

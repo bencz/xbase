@@ -60,6 +60,9 @@ PROCEDURE Main()
    n := 0
    AEval( a, {| x | n += x, AAdd( a, x * 10 ) } )
    ? n, Len( a )
+   n := ""
+   AEval( { "a", "b" }, {| x | n += x }, 1, Log( 0 ) - Log( 0 ) ) // a NaN count takes nothing
+   ? "nan [" + n + "]"
    AEval( { 1 }, "x" )
    RETURN
 

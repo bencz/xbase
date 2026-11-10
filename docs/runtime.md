@@ -67,11 +67,13 @@ statement defining it), which compiled code stores right before each call that c
 [compiler.md](compiler.md#xir-to-llvm)). Frames without `proc` (the command-line arguments, a module initialization, the
 body of a function versioned for references while the other body runs, the arguments of a list with `...`) are not
 shown. A runtime function shows only while what it does can be seen, with a frame without slots on the C stack and line
-0 (`xb_frame_push`, `xb_frame_pop` in `core/context.h`): `AEval`, `AScan` and `ASort` while they call blocks, and a
-function or message whose error raises the error block (`xb_error_in` names it: `SUBSTR`, `ERROR:FOO` for a message to
-an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block). Operators and statements show nothing of their
-own. `ProcName( [nLevel] )` and `ProcLine( [nLevel] )` read it: level 0 is the function calling them, a non-numeric
-level is 0, a negative one gives `PROCNAME` and line 0, a level past the end `""` and 0.
+0 (`xb_frame_push`, `xb_frame_pop` in `core/context.h`): `AScan` and `ASort` while they call blocks (one written in
+xBase, such as `AEval`, shows its own frame, also with line 0: [Functions written in
+xBase](#functions-written-in-xbase)), and a function or message whose error raises the error block (`xb_error_in` names
+it: `SUBSTR`, `ERROR:FOO` for a message to an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block).
+Operators and statements show nothing of their own. `ProcName( [nLevel] )` and `ProcLine( [nLevel] )` read it: level 0
+is the function calling them, a non-numeric level is 0, a negative one gives `PROCNAME` and line 0, a level past the end
+`""` and 0.
 
 `argc` and `argv` in the frame are the arguments as the function received them, stored only by a function or codeblock
 that calls `PCount()` or `PValue()` itself (`XB_PROC_ARGS` in its `xb_proc`; nothing else can read them, and the other
@@ -79,11 +81,12 @@ calls cost nothing more); they belong to its caller (slots of the caller's frame
 which keeps them during the call. The function may replace them (`PValue()`), so a caller does not read an argument
 again after the call: `HMerge` merges the entry as it was before its filter ran, and each `INIT` procedure receives its
 own copy of the command-line arguments. `PCount()` and `PValue( nArg, [xNew] )` (`rtl/lang.c`) read the innermost frame
-the call stack shows (a codeblock's own; `Do`'s, with `Do`'s own arguments, while `Do` runs; a frame without
-`XB_PROC_ARGS` counts no arguments): `PCount()` is `argc`; `PValue()` gives argument `nArg` (a fraction truncated) for
-`1 <= nArg <= argc`, `NIL` otherwise: a parameter's current value (the first `xb_proc.nparams` slots; a function calling
-`PValue()` keeps its parameters there, see [compiler.md](compiler.md#calls)), or past the parameters the argument as
-passed. With `xNew` it stores `xNew` there, through the reference when one was passed, and returns it.
+with a `proc` (a codeblock's own, also a hidden one of the runtime's xBase code; `Do`'s, with `Do`'s own arguments,
+while `Do` runs; a frame without `XB_PROC_ARGS` counts no arguments): `PCount()` is `argc`; `PValue()` gives argument
+`nArg` (a fraction truncated) for `1 <= nArg <= argc`, `NIL` otherwise: a parameter's current value (the first
+`xb_proc.nparams` slots; a function calling `PValue()` keeps its parameters there, see
+[compiler.md](compiler.md#calls)), or past the parameters the argument as passed. With `xNew` it stores `xNew` there,
+through the reference when one was passed, and returns it.
 
 ## Garbage collector
 
@@ -402,6 +405,7 @@ there).
 ## Functions
 
 The functions of the language live in `runtime/src/rtl/`, by area; [coverage.md](coverage.md) lists which exist.
+They are written in C (`*.c`) or in xBase (`*.prg`, see [Functions written in xBase](#functions-written-in-xbase)).
 Conventions:
 
 - A wrong argument type raises the function's own `BASE` error code (as in Clipper: `SubStr` 1110, `Left` 1124,
@@ -479,6 +483,32 @@ Conventions:
 
 Settings live in the task context (start: `SET EXACT OFF`, `SET DECIMALS TO 2`, date format `mm/dd/yy`,
 `SET EPOCH TO 1900`, `SET CENTURY OFF`). Their numbers come from `include/set.ch`, shared with xBase code.
+
+## Functions written in xBase
+
+C keeps the primitives: values, the collector, the storage of arrays and hashes, operations on the bytes of strings,
+number formatting, date arithmetic, sorting without a block, and the operating system (files, the console). Functions
+built from other functions, and rules such as where output goes, are written in xBase: memory-safe by construction
+(the compiler roots everything), the same source on every target, and faster with every improvement of the compiler.
+Each one moved from C is measured against its C version (callgrind).
+
+- The `*.prg` files of `runtime/src/rtl/` (listed in `runtime/CMakeLists.txt`) are compiled by the `xbc` of the same
+  build with `--runtime` ([compiler.md](compiler.md#calls)) for `XB_TARGET` (the C compiler's
+  `CMAKE_C_COMPILER_TARGET`, else the host; a build that changes the target by flags, such as `gcc -m32`, names it:
+  `-DXB_TARGET=i686-pc-linux-gnu`), and their objects go into `libxbrt` with the C ones.
+- Their public functions are runtime functions: `xbf_NAME`, declared `NATIVE` in `include/rtl.ch` like the C ones
+  (they receive values where the declaration has no `@`), in the runtime's symbol table, and checked by the
+  `runtime.declarations` test (`FUNCTION`/`PROCEDURE` lines of the `.prg` files).
+- On the call stack they show with line 0, as the C functions do; their `STATIC` functions and codeblocks do not show
+  (`XB_PROC_HIDDEN`), though `PCount()` and `PValue()` still read their frames.
+- Primitives for them: `__ConsoleWrite( xValue )` writes the display form of a value ([Display](#display)) to the
+  console (standard output until the terminal layer exists); `__ArgError( nSubCode )` raises the calling function's
+  argument error (`EG_ARG`, its name as the operation, the arguments it received; not substitutable), as its C
+  counterparts do.
+- Written in xBase: `QOut` and `QQOut` (`rtl/console.prg`), `AEval` (`rtl/arrays.prg`). Measured against their C
+  versions (callgrind, x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to
+  `/dev/null`); `AEval` over a million elements with `{| x | n += x }`, 142M (116M): its loop reloads its variables
+  from the frame after every call until the compiler keeps them in registers ([xir.md](xir.md#phases)).
 
 ## Dates
 

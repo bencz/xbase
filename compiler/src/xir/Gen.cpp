@@ -67,6 +67,7 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   cur_.scope = f.name;
   cur_.function = f.name;
   fn->stackName = f.name;
+  fn->hidden = runtimeLibrary_ && f.isStatic;
   fn->numParams = (uint32_t)f.params.size();
   fn->readsArgs = f.readsArgs;
   for (uint32_t s = 0; s < f.numLocals; ++s) {
@@ -139,6 +140,7 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   cur_.scope = name;
   cur_.function = outer.function;
   fn->stackName = "(b)" + outer.function;
+  fn->hidden = runtimeLibrary_;
   Builder &b = *cur_.b;
   b.setLine(outer.b->line()); // the line of the statement defining the block
   b.setBlock(fn->addBlock("entry"));

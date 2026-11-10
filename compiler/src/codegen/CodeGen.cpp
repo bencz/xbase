@@ -142,13 +142,14 @@ FunctionCallee CodeGen::rt(const char *name, Type *ret, std::initializer_list<Ty
 }
 
 // The LLVM function of an xIR function: public program functions are
-// xbp_NAME (see the symbol prefixes in xbrt.h), declared already when another
-// module of the object called it first; STATIC functions, codeblocks and the
-// module initialization are internal, with names no other module looks up.
+// xbp_NAME (xbf_NAME in a module of the runtime; see the symbol prefixes in
+// xbrt.h), declared already when another module of the object called it
+// first; STATIC functions, codeblocks and the module initialization are
+// internal, with names no other module looks up.
 Function *CodeGen::declare(const xir::Function &f) {
   bool program = f.kind == xir::Function::Kind::Program;
   if (program && !f.internal) {
-    std::string sym = XB_PROGRAM_FUNC_PREFIX + f.name;
+    std::string sym = (runtimeLibrary_ ? XB_RUNTIME_FUNC_PREFIX : XB_PROGRAM_FUNC_PREFIX) + f.name;
     if (Function *fn = mod_.getFunction(sym)) {
       if (!fn->isDeclaration()) diag_.error({}, "internal compiler error: function " + f.name + " defined twice");
       return fn;
@@ -222,6 +223,16 @@ void CodeGen::genFunction(const xir::Function &f) {
   fnRet_ = nullptr;
   fnSelf_ = nullptr;
   fnParams_ = f.numParams;
+  size_t rests = 0;
+  const xir::BasicBlock *restBlock = nullptr;
+  for (auto &b : f.blocks)
+    for (auto &inst : b->insts)
+      if (inst->op == xir::Op::ArgsRest) {
+        ++rests;
+        restBlock = b.get();
+      }
+  // Once per call: in a loop, a callee's change (PValue()) would reach the next pass.
+  forwardInPlace_ = rests == 1 && !f.readsArgs && !xir::loopDepths(plan.cfg()).count(restBlock);
   Value *argc = nullptr, *argv = nullptr;
   if (f.kind != xir::Function::Kind::ModuleInit) {
     fnRet_ = fn_->getArg(1);
@@ -280,7 +291,7 @@ Constant *CodeGen::procOf(const xir::Function &f) {
   Constant *name = b_.CreateGlobalString(f.stackName, ".xb.procname", 0, &mod_);
   auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_});
   Constant *nparams = ConstantInt::get(i32_, f.numParams);
-  Constant *flags = ConstantInt::get(i32_, f.readsArgs ? XB_PROC_ARGS : 0);
+  Constant *flags = ConstantInt::get(i32_, (f.readsArgs ? XB_PROC_ARGS : 0) | (f.hidden ? XB_PROC_HIDDEN : 0));
   auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage,
                                   ConstantStruct::get(ty, {name, nparams, flags}), ".xb.proc");
   proc->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
@@ -288,7 +299,7 @@ Constant *CodeGen::procOf(const xir::Function &f) {
 }
 
 void CodeGen::markLine(Instruction *i) const {
-  if (line_ && isa<CallInst>(i))
+  if (line_ && !runtimeLibrary_ && isa<CallInst>(i))
     i->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
 }
 
@@ -385,7 +396,7 @@ void CodeGen::genModuleRegistration(const xir::Module &m) {
   auto *symTy = StructType::get(ctx_, {ptrTy_, ptrTy_});
   std::vector<Constant *> symbols;
   for (auto &f : m.functions)
-    if (f->kind == xir::Function::Kind::Program && !f->internal)
+    if (f->kind == xir::Function::Kind::Program && !f->internal && !runtimeLibrary_)
       symbols.push_back(ConstantStruct::get(
           symTy, {b_.CreateGlobalString(f->name, ".xb.symname", 0, &mod_), functions_.at(f.get())}));
   Constant *symbolTable = ConstantPointerNull::get(ptrTy_);

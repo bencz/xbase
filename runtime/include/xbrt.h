@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 21u
+#define XB_ABI_VERSION 22u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -132,10 +132,13 @@ typedef struct xb_proc {
   uint32_t flags;
 } xb_proc;
 
-/* xb_proc.flags: the frame's `argc` and `argv` hold the arguments received.
- * Only a function or codeblock that calls PCount() or PValue() stores them;
- * nothing else can read them. */
+/* xb_proc.flags. XB_PROC_ARGS: the frame's `argc` and `argv` hold the
+ * arguments received; only a function or codeblock that calls PCount() or
+ * PValue() stores them, nothing else can read them. XB_PROC_HIDDEN: a STATIC
+ * function or a codeblock of the runtime's own xBase code, which the call
+ * stack does not show (PCount() and PValue() still read its frame). */
 #define XB_PROC_ARGS 1u
+#define XB_PROC_HIDDEN 2u
 
 /* [ABI] A compiled function's item frame (parameters, LOCALs, temporaries):
  * on the machine stack, linked into its context's chain while the function

@@ -19,7 +19,7 @@ namespace xb {
 
 namespace {
 
-enum class Inline { None, Len, Asc, Chr, SubStr };
+enum class Inline { None, Len, Asc, Chr, SubStr, PCount, PValue };
 
 Inline inlineKind(const xir::Instruction &i) {
   if (i.op != xir::Op::Call || i.callee.function || !i.callee.native || i.hasRest()) return Inline::None;
@@ -28,7 +28,8 @@ Inline inlineKind(const xir::Instruction &i) {
     size_t argc;
     Inline kind;
   } table[] = {
-      {"LEN", 1, Inline::Len}, {"ASC", 1, Inline::Asc}, {"CHR", 1, Inline::Chr}, {"SUBSTR", 3, Inline::SubStr},
+      {"LEN", 1, Inline::Len},       {"ASC", 1, Inline::Asc},          {"CHR", 1, Inline::Chr},
+      {"SUBSTR", 3, Inline::SubStr}, {"PCOUNT", 0, Inline::PCount}, {"PVALUE", 1, Inline::PValue},
   };
   for (const auto &e : table)
     if (i.callee.name == e.name && i.operands().size() == e.argc) return e.kind;
@@ -322,6 +323,32 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     Value *byte = strByte(s, pos);
     if (asc) storeInt(ascDest, byte);
     else storeTagged(d, XB_T_STRING, byteString(byte));
+    break;
+  }
+  case Inline::PCount: { // the function's own count (the slow path is never taken)
+    storeInt(d, b_.CreateZExt(fn_->getArg(2), i64_));
+    break;
+  }
+  case Inline::PValue: { // PValue( n ), n an integer: the parameter's slot or the argument as passed, NIL outside
+    BasicBlock *check = newBlock("pvalue.check"), *in = newBlock("pvalue.in"), *nil = newBlock("pvalue.nil");
+    BasicBlock *copy = newBlock("pvalue.copy");
+    branchLikely(isType(argType(0), XB_T_INT), check, slow);
+    b_.SetInsertPoint(check);
+    Value *k = b_.CreateSub(intValue(arg(0)), ConstantInt::get(i64_, 1));
+    branchLikely(b_.CreateICmpULT(k, b_.CreateZExt(fn_->getArg(2), i64_)), in, nil);
+    b_.SetInsertPoint(nil);
+    setNil(d);
+    b_.CreateBr(join);
+    b_.SetInsertPoint(in);
+    Value *param = b_.CreateICmpULT(k, ConstantInt::get(i64_, fnParams_));
+    Value *src = b_.CreateSelect(param, b_.CreateInBoundsGEP(itemTy_, fnBase_, k),
+                                 b_.CreateInBoundsGEP(itemTy_, fn_->getArg(3), k), "pvalue.src");
+    Value *t = itemType(src);
+    branchLikely(b_.CreateAnd(b_.CreateICmpNE(t, ConstantInt::get(i32_, XB_T_CELL)),
+                              b_.CreateICmpNE(t, ConstantInt::get(i32_, XB_T_REF))),
+                 copy, slow); // through a reference: the runtime reads it
+    b_.SetInsertPoint(copy);
+    copyItem(d, src);
     break;
   }
   case Inline::None: break;

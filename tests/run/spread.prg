@@ -96,7 +96,21 @@ STATIC PROCEDURE Rest()
    ? "after:", EvalAfter( {|| "ran" } )
    ? "twice:", Twice( "a", 1, 2 ), Len( Both( 1, 2, 3 ) ), Both( 1, 2, 3 )[ 4 ], Len( Both() )
    ? "refs after two:", RefTwice( {| a | a := 9 } ), ValueTwice( {|| "ran" } )
+   ? "loop:", Repeat( "a", "b" )
 RETURN
+
+// `...` in a loop passes the same arguments every time: what a callee replaces (PValue()) does not reach the next.
+FUNCTION Repeat( ... )
+   LOCAL i, s := ""
+   FOR i := 1 TO 3
+      s += Changes( ... )
+   NEXT
+RETURN s
+
+FUNCTION Changes( ... )
+   LOCAL s := PValue( 1 ) + PValue( 2 )
+   PValue( 1, "z" )
+RETURN s
 
 // After two `...`, an argument of Eval lands among its `@...`: the reference stays; where Eval may take its block,
 // the value goes.

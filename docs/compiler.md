@@ -168,6 +168,11 @@ reports a wrong argument count, a definition of a `RESERVED` name (also through 
 fits several declarations, conflicting declarations of one name (identical ones are accepted), a `FOLD` function the
 compiler has no evaluator for, and a declaration inside a function.
 
+`xbc --runtime` compiles modules of the runtime library ([runtime.md](runtime.md#functions-written-in-xbase)): a module
+may define `RESERVED` functions, its public functions are runtime functions (`xbf_NAME`, not registered: the runtime's
+symbol table has them), their frames keep line 0 (no line is stored before calls), and its `STATIC` functions and
+codeblocks are hidden from the call stack (`xir::Function::hidden`, `XB_PROC_HIDDEN`). No program entry is emitted.
+
 ## Semantic checks
 
 `sema/Sema.*` assigns frame slots to parameters and `LOCAL`s (in declaration order; a `LOCAL`'s initializer is resolved
@@ -333,30 +338,34 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   or of a double is done in place too. `InlineCalls.cpp` does a few runtime functions in place when their arguments
   allow it, with their rules: `Len()` of a string or an array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n,
   1 )` with `n` within `c` (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()` whose argument
-  is the `SubStr()` right before it, used nowhere else, reads the byte itself; anything else calls the function, which
-  raises the errors. `append` copies a string's bytes into the room of the variable's growing string in place (one store
-  for one byte) when they fit, and calls `xb_op_append` otherwise. A `load` that an `append` of its variable reaches
-  with no other load in between ends the growth before the value goes on (`shareString`), unless only `Len()` and
-  `Asc()` read its value, in place; a forward data flow finds them (`findSharingLoads`), where a block entered by
-  unwinding (a `BEGIN SEQUENCE` handler, a `FOR EACH` cleanup) starts with every such variable growing, and a block
-  reached growing along some edges only, from which every path ends the growth before any append (a loop that reads what
-  a loop before it built), ends it on those edges instead, so the loop does not test it again. The bit operators and
-  functions take two integers in two instructions and convert doubles on a path of their own, and the fast paths of
-  calls read their operands in place: the argument group is built only for the call. Calls set the result slot to `NIL`,
-  then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or
-  `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module straight
-  to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
-  initialization are internal, under names nothing looks up, so modules sharing the object never clash. A call, a send
-  or an array literal with `...` (`withRest`) passes the count and the items of a frame built for it on the stack
-  ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions leave such calls alone.
+  is the `SubStr()` right before it, used nowhere else, reads the byte itself; `PCount()` is the function's own `argc`,
+  and `PValue( n )` with an integer `n` copies the parameter's slot or the argument as passed (`NIL` outside 1 ..
+  `argc`); anything else calls the function, which raises the errors, and so does a `PValue()` of an argument that is a
+  reference. A call whose only argument is `...`, to a function that takes references, in a function with no other `...`
+  and no `PCount()`/`PValue()`, passes the arguments where they are instead of copying them (`forwardInPlace_`).
+  `append` copies a string's bytes into the room of the variable's growing string in place (one store for one byte) when
+  they fit, and calls `xb_op_append` otherwise. A `load` that an `append` of its variable reaches with no other load in
+  between ends the growth before the value goes on (`shareString`), unless only `Len()` and `Asc()` read its value, in
+  place; a forward data flow finds them (`findSharingLoads`), where a block entered by unwinding (a `BEGIN SEQUENCE`
+  handler, a `FOR EACH` cleanup) starts with every such variable growing, and a block reached growing along some edges
+  only, from which every path ends the growth before any append (a loop that reads what a loop before it built), ends it
+  on those edges instead, so the loop does not test it again. The bit operators and functions take two integers in two
+  instructions and convert doubles on a path of their own, and the fast paths of calls read their operands in place: the
+  argument group is built only for the call. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at
+  the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another
+  module's function to `xbp_NAME`, one to a function of the module straight to it. A public function is `xbp_NAME`
+  (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under names nothing
+  looks up, so modules sharing the object never clash. A call, a send or an array literal with `...` (`withRest`) passes
+  the count and the items of a frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline
+  calls and the bit functions leave such calls alone.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
-  `xir::Function::stackName`, its number of parameters and `XB_PROC_ARGS` when it keeps its arguments) in the frame.
-  While an xIR instruction is lowered, every call the builder creates is marked with the instruction's source line
-  (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is complete, `placeLines` stores that line in the
-  frame right before each marked call that can see the call stack (any call but intrinsics and the runtime entry points
-  that never raise an error or run code, `quietCalls_`), once per LLVM block and line. The fast paths of operations thus
-  store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for references clears its
-  own `proc`: the other body shows instead.
+  `xir::Function::stackName`, its number of parameters, `XB_PROC_ARGS` when it keeps its arguments and `XB_PROC_HIDDEN`
+  when it is hidden) in the frame. While an xIR instruction is lowered, every call the builder creates is marked with
+  the instruction's source line (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is complete,
+  `placeLines` stores that line in the frame right before each marked call that can see the call stack (any call but
+  intrinsics and the runtime entry points that never raise an error or run code, `quietCalls_`), once per LLVM block and
+  line. The fast paths of operations thus store nothing; their slow paths and calls do. Before `call.forward`, the
+  function versioned for references clears its own `proc`: the other body shows instead.
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
   calls `xb_pending` and, if that asks to unwind, goes to the LLVM block of the xIR block's unwind block, or leaves
   through the function's exit. A runtime operator may also return a value the error block substituted, of any type:

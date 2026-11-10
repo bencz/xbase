@@ -19,6 +19,11 @@ cmake --build build
 The build is warning-free on GCC and Clang (`-Wall -Wextra -Wpedantic -Wshadow -Wconversion`); warnings are errors by
 default (`-DXB_WARNINGS_AS_ERRORS=OFF` exists for local experiments only).
 
+Part of the runtime is written in xBase and compiled by the `xbc` the build makes, as are the tests and benchmarks,
+for the C compiler's target. A build whose C compiler targets another machine through its flags names it, e.g. a
+32-bit build with GCC: `-DCMAKE_C_FLAGS=-m32 -DXB_TARGET=i686-pc-linux-gnu`. The `xbc` of the build runs during the
+build, so a cross build whose toolchain builds `xbc` for another machine cannot build the runtime yet.
+
 ## Test
 
 ```sh

@@ -59,7 +59,7 @@ static void unrecoverable(xb_ctx *ctx, int code, const char *text) {
 
 void xb_print_call_stack(const xb_ctx *ctx, const char *format) {
   for (const xb_frame *f = ctx->frames; f; f = f->prev)
-    if (f->proc) fprintf(stderr, format, f->proc->name, (unsigned)f->line);
+    if (xb_frame_shown(f)) fprintf(stderr, format, f->proc->name, (unsigned)f->line);
 }
 
 int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *operation, uint32_t flags,

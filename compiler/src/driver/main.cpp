@@ -57,6 +57,8 @@ const char *kUsage =
     "                     machine's CPU and features (the program may not run on other machines)\n"
     "  --features=<list>  target features, e.g. +sse4.2,-avx\n"
     "  --static           non-PIC code\n"
+    "  --runtime          compile modules of the runtime library: their public functions are the\n"
+    "                     runtime's (xbf_NAME, declared NATIVE in rtl.ch); implies --no-entry\n"
     "  --no-entry         do not emit the program entry (xb_app_main): the modules are linked into\n"
     "                     a program whose entry another object has\n"
     "  --depfile=<file>   write a Make-style dependency file for the object\n"
@@ -240,7 +242,7 @@ static int compile(int argc, char **argv) {
   xb::TargetConfig tcfg;
   std::string output, irDump, xirDump, depFile, stdFile = "std.ch";
   std::vector<std::string> inputs, includeDirs, defines;
-  bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false;
+  bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false, runtimeLibrary = false;
 
   for (int i = 1; i < argc; ++i) {
     const char *a = argv[i];
@@ -261,6 +263,10 @@ static int compile(int argc, char **argv) {
     else if (startsWith(a, "--features=")) tcfg.features = a + 11;
     else if (!std::strcmp(a, "--static")) tcfg.pic = false;
     else if (!std::strcmp(a, "--no-entry")) emitEntry = false;
+    else if (!std::strcmp(a, "--runtime")) {
+      runtimeLibrary = true;
+      emitEntry = false;
+    }
     else if (startsWith(a, "--dump-ir=")) irDump = a + 10;
     else if (startsWith(a, "--dump-xir=")) xirDump = a + 11;
     else if (startsWith(a, "--depfile=")) depFile = a + 10;
@@ -334,7 +340,7 @@ static int compile(int argc, char **argv) {
     xb::Parser parser(std::move(tokens), diag);
     auto ast = parser.parseModule(moduleNameFor(input));
     if (diag.errorCount() != errors) continue;
-    xb::CallResolver(diag, xb::Folder::canEvaluate).run(*ast);
+    xb::CallResolver(diag, xb::Folder::canEvaluate, runtimeLibrary).run(*ast);
     if (diag.errorCount() != errors) continue;
     xb::Folder().run(*ast); // before Sema: STATIC initializers are checked once folded
     xb::Sema(diag).run(*ast);
@@ -347,7 +353,7 @@ static int compile(int argc, char **argv) {
 
   std::string xirText;
   for (Source &s : sources) {
-    s.xir = xb::xir::Generator().run(*s.ast);
+    s.xir = xb::xir::Generator(runtimeLibrary).run(*s.ast);
     if (std::string bad = xb::xir::verify(*s.xir); !bad.empty()) {
       std::fprintf(stderr, "xbc: internal error: invalid xIR: %s\n", bad.c_str());
       return 1;
@@ -383,6 +389,7 @@ static int compile(int argc, char **argv) {
   mod.setSourceFileName(sources.front().path);
 
   xb::CodeGen cg(llctx, mod, diag);
+  cg.setRuntimeLibrary(runtimeLibrary);
   for (const Source &s : sources) cg.run(*s.xir);
   if (!cg.finish(emitEntry ? startFunction(sources) : nullptr)) return 1;
 

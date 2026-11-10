@@ -20,8 +20,9 @@ namespace xb {
 class CallResolver {
 public:
   // `foldable` tells whether the compiler can evaluate a FOLD function.
-  CallResolver(Diagnostics &diag, std::function<bool(const std::string &)> foldable)
-      : diag_(diag), foldable_(std::move(foldable)) {}
+  // `runtimeLibrary`: a module of the runtime (xbc --runtime), which defines RESERVED functions.
+  CallResolver(Diagnostics &diag, std::function<bool(const std::string &)> foldable, bool runtimeLibrary = false)
+      : diag_(diag), foldable_(std::move(foldable)), runtimeLibrary_(runtimeLibrary) {}
   void run(Module &m);
 
 private:
@@ -33,6 +34,7 @@ private:
 
   Diagnostics &diag_;
   std::function<bool(const std::string &)> foldable_;
+  bool runtimeLibrary_;
   std::unordered_set<std::string> funcs_;     // the module's functions
   std::unordered_map<std::string, const ExternDecl *> externs_;
   std::vector<const ExternDecl *> abbreviable_;

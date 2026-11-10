@@ -39,6 +39,9 @@ static inline void xb_frame_push(xb_ctx *ctx, xb_frame *f, const xb_proc *proc) 
 }
 static inline void xb_frame_pop(xb_ctx *ctx, const xb_frame *f) { ctx->frames = f->prev; }
 
+/* Whether the call stack (ProcName(), the "Called from" lines) shows a frame. */
+static inline int xb_frame_shown(const xb_frame *f) { return f->proc && !(f->proc->flags & XB_PROC_HIDDEN); }
+
 /* SET DECIMALS as an item's decimal count (items keep 16 bits, as in Clipper). */
 static inline uint16_t xb_decimals(const xb_ctx *ctx) { return (uint16_t)ctx->set_decimals; }
 

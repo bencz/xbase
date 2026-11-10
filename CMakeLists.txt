@@ -26,13 +26,21 @@ function(xb_target_warnings target)
   endif()
 endfunction()
 
-# Compiles an xBase source with xbc into an object file (extra xbc options in
-# ARGN); used by the tests and the benchmarks.
+# The target of the xBase code the build compiles (the runtime's, the tests', the benchmarks'): the C compiler's
+# target when it names one, else the host. A build whose C compiler targets something else through its flags names it
+# (gcc -m32: -DXB_TARGET=i686-pc-linux-gnu); a 32-bit C build on a 64-bit host without it stops here.
+set(XB_TARGET "${CMAKE_C_COMPILER_TARGET}" CACHE STRING "target triple of the xBase code the build compiles")
+if(NOT XB_TARGET AND CMAKE_C_SIZEOF_DATA_PTR EQUAL 4 AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "64")
+  message(FATAL_ERROR "the C compiler builds 32-bit code on a 64-bit host: name the target with -DXB_TARGET=<triple>")
+endif()
+
+# Compiles an xBase source with xbc into an object file for XB_TARGET (extra
+# xbc options in ARGN); used by the runtime, the tests and the benchmarks.
 function(xb_compile_prg src obj)
   get_filename_component(file ${src} NAME)
   add_custom_command(
     OUTPUT ${obj}
-    COMMAND xbc ${src} -o ${obj} --depfile=${obj}.d ${ARGN}
+    COMMAND xbc ${src} -o ${obj} --depfile=${obj}.d $<$<BOOL:${XB_TARGET}>:--target=${XB_TARGET}> ${ARGN}
     DEPENDS xbc ${src}
     DEPFILE ${obj}.d
     COMMENT "xbc ${file}")
