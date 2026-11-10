@@ -125,30 +125,27 @@ Value *CodeGen::operandGroup(const xir::Instruction &i) {
   return slot(base);
 }
 
-// A list with `...` (args.rest operands), for `emit` to use as its count and
-// items: the operands, with the arguments the function received past its
-// parameters in the place of each args.rest. They go into a frame of their own
-// on the stack, sized at run time and linked into the chain while `emit` runs,
-// so the collector sees them (a callee may replace them, PValue()).
-// xb_args_rest copies the arguments passed on; one whose reference is gone
-// unwinds instead. A call of only `...` may pass them in place
-// (forwardInPlace_).
+// A list ending in `...` (an args.rest operand), for `emit` to use as its
+// count and items: the other operands, then the arguments the function
+// received past its parameters. They go into a frame of their own on the
+// stack, sized at run time and linked into the chain while `emit` runs, so the
+// collector sees them (a callee may replace them, PValue()). xb_args_rest
+// copies the arguments passed on; one whose reference is gone unwinds instead.
+// A call of only `...` may pass them in place (forwardInPlace_).
 void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<void(Value *, Value *)> emit) {
   const auto &ops = i.operands();
-  uint32_t rests = 0;
-  for (const xir::Value *v : ops) rests += v->type() == xir::Type::Args;
+  const auto fixed = (uint32_t)ops.size() - 1;
   Value *argc = fn_->getArg(2), *argv = fn_->getArg(3);
   Value *params = ConstantInt::get(i32_, fnParams_);
   Value *rest = b_.CreateSelect(b_.CreateICmpUGT(argc, params), b_.CreateSub(argc, params), ConstantInt::get(i32_, 0),
                                 "rest");
   Value *restItems = b_.CreateGEP(itemTy_, argv, params, "rest.items"); // not dereferenced when there are none
-  if (forwardInPlace_ && i.op == xir::Op::Call && ops.size() == 1 && i.restRefs == UINT32_MAX) {
+  if (forwardInPlace_ && i.op == xir::Op::Call && fixed == 0 && i.restRefs == UINT32_MAX) {
     // f( ... ): the callee receives the arguments where they are, which nothing here reads again
     emit(rest, restItems);
     return;
   }
-  Value *total = b_.CreateAdd(b_.CreateMul(rest, ConstantInt::get(i32_, rests)),
-                              ConstantInt::get(i32_, (uint32_t)ops.size() - rests), "total");
+  Value *total = b_.CreateAdd(rest, ConstantInt::get(i32_, fixed), "total");
   Value *save = b_.CreateStackSave();
   StructType *ty = frameType(0);
   uint64_t header = dl_.getStructLayout(ty)->getElementOffset(FrameSlots);
@@ -162,21 +159,15 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
     unlinkFrame(frame);
     b_.CreateStackRestore(save);
   };
+  for (uint32_t k = 0; k < fixed; ++k)
+    copyItem(b_.CreateConstInBoundsGEP1_32(itemTy_, items, k), b_.CreateConstInBoundsGEP1_32(itemTy_, group, k));
+  Value *at = b_.CreateConstInBoundsGEP1_32(itemTy_, items, fixed);
+  Value *ok = b_.CreateCall(rtArgsRest_, {fnCtx_, at, restItems, rest, ConstantInt::get(i32_, fixed),
+                                          ConstantInt::get(i32_, i.restRefs)});
   BasicBlock *failed = newBlock("list.failed");
-  Value *pos = ConstantInt::get(i32_, 0);
-  for (size_t k = 0; k < ops.size(); ++k) {
-    Value *at = b_.CreateInBoundsGEP(itemTy_, items, pos);
-    if (ops[k]->type() != xir::Type::Args) {
-      copyItem(at, b_.CreateConstInBoundsGEP1_32(itemTy_, group, (uint32_t)k));
-      pos = b_.CreateAdd(pos, ConstantInt::get(i32_, 1));
-      continue;
-    }
-    Value *ok = b_.CreateCall(rtArgsRest_, {fnCtx_, at, restItems, rest, pos, ConstantInt::get(i32_, i.restRefs)});
-    BasicBlock *next = newBlock("list.rest");
-    b_.CreateCondBr(b_.CreateICmpNE(ok, ConstantInt::get(i32_, 0)), next, failed);
-    b_.SetInsertPoint(next);
-    pos = b_.CreateAdd(pos, rest);
-  }
+  BasicBlock *next = newBlock("list.rest");
+  b_.CreateCondBr(b_.CreateICmpNE(ok, ConstantInt::get(i32_, 0)), next, failed);
+  b_.SetInsertPoint(next);
   emit(total, items);
   unlink();
   BasicBlock *done = b_.GetInsertBlock();

@@ -3,7 +3,7 @@
 
 #include "common/Text.h"
 
-#include <algorithm>
+#include <utility>
 
 namespace xb {
 
@@ -67,32 +67,21 @@ void CallResolver::call(CallExpr &c) {
   c.callee = d;
   checkArgs(c, *d);
   // A native function that does not take a reference at that position
-  // receives the value. After `...`, an argument's position is known at run
-  // time only (its place in the list less the `...` before it, or later): the
-  // reference stays only when every one of those positions takes references.
-  auto takesRef = [&](size_t k, size_t spreads) {
-    if (!spreads) return d->takesRef(k);
-    for (size_t j = k - spreads;; ++j) { // from the declared parameters on, all positions are alike (`@...` or not)
-      if (!d->takesRef(j)) return false;
-      if (j >= d->byRef.size()) return true;
-    }
-  };
-  size_t spreads = 0;
+  // receives the value (`...` comes last: every other argument's position is
+  // known).
   for (size_t k = 0; k < c.args.size(); ++k) {
-    if (c.args[k]->kind == ExprKind::Spread) ++spreads;
-    if (c.args[k]->kind != ExprKind::Ref || takesRef(k, spreads)) continue;
+    if (c.args[k]->kind != ExprKind::Ref || d->takesRef(k)) continue;
     ExprPtr target = std::move(static_cast<RefExpr &>(*c.args[k]).target);
     c.args[k] = std::move(target);
   }
 }
 
-// With `...` among the arguments, only the others are known: too many of them
+// With `...` as the last argument, only the others are known: too many of them
 // is an error, too few may not be.
 void CallResolver::checkArgs(const CallExpr &c, const ExternDecl &d) {
-  auto spreads = (size_t)std::count_if(c.args.begin(), c.args.end(),
-                                      [](const ExprPtr &a) { return a->kind == ExprKind::Spread; });
-  size_t n = c.args.size() - spreads;
-  if (d.checked && ((!spreads && n < d.minArgs) || (d.maxArgs != ExternDecl::kUnlimited && n > d.maxArgs))) {
+  bool spread = !c.args.empty() && c.args.back()->kind == ExprKind::Spread;
+  size_t n = c.args.size() - (spread ? 1 : 0);
+  if (d.checked && ((!spread && n < d.minArgs) || (d.maxArgs != ExternDecl::kUnlimited && n > d.maxArgs))) {
     std::string expected = d.minArgs == d.maxArgs ? std::to_string(d.minArgs)
                            : d.maxArgs == ExternDecl::kUnlimited
                                ? "at least " + std::to_string(d.minArgs)

@@ -161,7 +161,7 @@ public:
   BasicBlock *parent;
   SourceLoc loc;
 
-  // An operand is an args.rest: a list with `...`.
+  // The last operand is an args.rest: a list with `...` (the only place an args value may be).
   bool hasRest() const;
   // The operation's effects (Effect in Ops.h): its op's, and for a list with
   // `...`, those of reading references (an error, the error block's code).

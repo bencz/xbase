@@ -298,7 +298,7 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   [References](#references)); a C function receives one only where its declaration says `@`.
 - A list with `...` (a call, a send or an array literal) has a length known at run time: compiled code reserves a frame
   of that size on the stack (`llvm.stacksave`/`stackrestore` around it), linked into the chain while the call runs, and
-  fills it with the other items and, in the place of each `...`, the function's own arguments past its parameters
+  fills it with the other items and, after them, the function's own arguments past its parameters
   (`xb_args_rest`); a reference among those goes on as it is where the callee takes references (a compiled function, a
   runtime function's `@` parameters: `xb_refs_take`) and as its value elsewhere (a method, an array element; its target
   gone: an error). `Do` passes its arguments on by the same rule.

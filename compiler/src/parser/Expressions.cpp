@@ -241,7 +241,7 @@ ExprPtr Parser::parseBraced() {
 // Empty arguments - f( a, , b ) - are passed as NIL. `refs`: the arguments of
 // a function call, where `@` passes a variable or element by reference.
 // `spread`: `...` may stand for the arguments of the function past its
-// parameters (a call, a send, an array literal).
+// parameters (a call, a send, an array literal), as the last of the list.
 std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
   std::vector<ExprPtr> args;
   if (at(close)) return args;
@@ -255,6 +255,7 @@ std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
       if (!spread) diag_.error(cur().loc, "'...' is supported only in the arguments of a call or in an array");
       args.push_back(std::make_unique<SpreadExpr>(cur().loc));
       advance();
+      if (spread && at(Tok::Comma)) diag_.error(cur().loc, "'...' must be the last argument or element of its list");
     } else {
       args.push_back(parseExpr());
     }

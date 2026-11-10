@@ -1,9 +1,8 @@
-// `...` after a function's parameters, and `...` among the arguments of a call or a send or the elements of an array
-// literal: the arguments the function received past its parameters, in place (none, one or many; with other arguments
-// before and after it; more than once). A compiled function receives references as passed; a runtime function (but
-// where it takes references), a method and an array element the values, and a reference whose element is gone is an
-// error, also for an array nothing reads. The items stay rooted while the call runs (PValue() may replace them); a loop
-// of such calls does not grow the stack.
+// `...` after a function's parameters, and `...` as the last argument of a call or a send or the last element of an
+// array literal: the arguments the function received past its parameters (none, one or many; after other arguments).
+// A compiled function receives references as passed; a runtime function (but where it takes references), a method and
+// an array element the values, and a reference whose element is gone is an error, also for an array nothing reads. The
+// items stay rooted while the call runs (PValue() may replace them); a loop of such calls does not grow the stack.
 PROCEDURE Main()
    LOCAL x := 1, y := 2
    ? "vari:", Vari( "a", "b", "c" )
@@ -13,7 +12,7 @@ PROCEDURE Main()
    ? "arr:", Len( Arr( 1, 2, 3 ) ), Arr( 1, 2, 3 )[ 2 ], Arr( 1, 2, 3 )[ 4 ], Len( Arr( 1 ) )
    Refs( 0, @x, @y )
    ? "refs:", x, y
-   ? "native:", Natives( 0, "A", 3 ), Biggest( 0, 3, 9 )
+   ? "native:", Natives( 0, 3 ), Biggest( 0, 3, 9 )
    ? "eval:", EvalFwd( {| a, b | a + b }, 4, 5 )
    ? "qout:"
    OutAll( "one", 2, .T. )
@@ -33,10 +32,10 @@ FUNCTION Fwd( a, ... )
 RETURN Vari( ... )
 
 FUNCTION Mid( a, ... )
-RETURN Vari( "x", ..., "y" )
+RETURN Vari( "x", "y", ... )
 
 FUNCTION Arr( ... )
-RETURN { 0, ..., 99 }
+RETURN { 0, 99, ... }
 
 FUNCTION Refs( a, ... )
    SetRefs( ... )
@@ -48,7 +47,7 @@ FUNCTION SetRefs( p, q )
 RETURN NIL
 
 FUNCTION Natives( a, ... )
-RETURN Left( ... ) + Replicate( ..., 2 )
+RETURN Left( "abcdef", ... ) + Replicate( "z", ... )
 
 FUNCTION Biggest( a, ... )
 RETURN Max( ... )
@@ -94,8 +93,8 @@ STATIC PROCEDURE Rest()
       ? "unread:", e:subCode
    END
    ? "after:", EvalAfter( {|| "ran" } )
-   ? "twice:", Twice( "a", 1, 2 ), Len( Both( 1, 2, 3 ) ), Both( 1, 2, 3 )[ 4 ], Len( Both() )
-   ? "refs after two:", RefTwice( {| a | a := 9 } ), ValueTwice( {|| "ran" } )
+   ? "fixed:", Fixed( "a", 1, 2 )
+   ? "first:", RefFirst( {| a | a := 9 } ), ValueFirst( {|| "ran" } )
    ? "loop:", Repeat( "a", "b" )
 RETURN
 
@@ -112,22 +111,19 @@ FUNCTION Changes( ... )
    PValue( 1, "z" )
 RETURN s
 
-// After two `...`, an argument of Eval lands among its `@...`: the reference stays; where Eval may take its block,
-// the value goes.
-FUNCTION RefTwice( b, ... )
+// An argument of Eval before `...` lands among its `@...`: the reference stays; where Eval takes its block, the
+// value goes.
+FUNCTION RefFirst( b, ... )
    LOCAL x := 1
-   Eval( b, ..., ..., @x )
+   Eval( b, @x, ... )
 RETURN x
 
-FUNCTION ValueTwice( b, ... )
-RETURN Eval( ..., ..., @b )
+FUNCTION ValueFirst( b, ... )
+RETURN Eval( @b, ... )
 
-// `...` more than once in a list passes the arguments on each time.
-FUNCTION Twice( a, ... )
-RETURN Cnt( ..., a, ... )
-
-FUNCTION Both( ... )
-RETURN { ..., ... }
+// The arguments before `...` are counted with those it passes on.
+FUNCTION Fixed( a, ... )
+RETURN Cnt( a, a, ... )
 
 // A function copied for the typed continuation of a loop keeps its `...` in both copies.
 FUNCTION Continued( s, ... )
@@ -154,11 +150,10 @@ FUNCTION Unread( a, ... )
    x := { ... }
 RETURN NIL
 
-// An argument written after `...` lands where Eval takes a block: it receives the value; so does one written far
-// after it, for a function that takes no references.
+// A reference passed where the function takes none (Eval's block, Hash() everywhere) is its value.
 FUNCTION EvalAfter( b, ... )
    LOCAL s := "x"
-RETURN Eval( ..., @b ) + ValType( Hash( "k", ..., @s )[ "k" ] )
+RETURN Eval( @b, ... ) + ValType( Hash( "k", @s, ... )[ "k" ] )
 
 FUNCTION SendFwd( o, ... )
    o:_subCode( ... )
@@ -172,7 +167,7 @@ FUNCTION Gone( a, ... )
 RETURN Len( { ... } )
 
 FUNCTION Count( a, ... )
-RETURN Len( { ..., a } )
+RETURN Len( { a, ... } )
 
 FUNCTION Many()
    LOCAL a := Array( 2000 ), i

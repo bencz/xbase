@@ -145,9 +145,11 @@ private:
     const BasicBlock *at = i.parent;
     for (Value *v : i.operands()) use(v, at, pos);
     bool lists = i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit;
-    for (size_t k = 0; k < i.operands().size(); ++k)
-      if (i.operand(k)->type() == Type::Args && (!lists || (i.op == Op::Send && k == 0)))
-        fail("args outside the arguments of a call, a send or an array literal");
+    for (size_t k = 0; k < i.operands().size(); ++k) {
+      bool last = k + 1 == i.operands().size();
+      if (i.operand(k)->type() == Type::Args && (!lists || !last || (i.op == Op::Send && k == 0)))
+        fail("args other than the last argument of a call, a send or an array literal");
+    }
     if (i.op == Op::ArgsRest) {
       if (f_.kind != Function::Kind::Program) fail("args.rest outside a function");
       // Its one use comes right after the operands it was generated among: nothing joins it at a block parameter.

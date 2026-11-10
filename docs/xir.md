@@ -192,7 +192,7 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   or `@a[i]` passes.
 - Operations mirror the runtime: unary and binary operators, the truth test, calls (to the module's functions or to
   declared externals), `send` (a message to the first operand, with the others as arguments), array literals (`...` in a
-  call, a send or an array literal is an operand of type `args`, `args.rest`: the function's arguments past its
+  call, a send or an array literal is its last operand, of type `args`, `args.rest`: the function's arguments past its
   parameters, made right before its list, which is its one use in the block; `restRefs` the positions of a call that
   receive references), hash literals (`hash`, keys and values alternating), element read and write, codeblock creation
   with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`,

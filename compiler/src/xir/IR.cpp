@@ -51,9 +51,7 @@ const char *typeName(Type t) {
   return "?";
 }
 
-bool Instruction::hasRest() const {
-  return std::any_of(operands_.begin(), operands_.end(), [](const Value *v) { return v->type() == Type::Args; });
-}
+bool Instruction::hasRest() const { return !operands_.empty() && operands_.back()->type() == Type::Args; }
 
 uint16_t Instruction::effects() const {
   uint16_t e = opInfo(op).effects;

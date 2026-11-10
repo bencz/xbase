@@ -115,17 +115,19 @@ Value *Generator::genCond(const Expr &e) {
   return b.truth(genExpr(e));
 }
 
-// The values of a list of arguments or elements, in order. `...` is an
-// args.rest made after the others, right before the list's operation, which is
-// then its one use in the same block.
+// The values of a list of arguments or elements, in order. `...`, the last, is
+// an args.rest made right before the list's operation, which is then its one
+// use in the same block.
 std::vector<Value *> Generator::genArgs(const std::vector<ExprPtr> &exprs) {
   std::vector<Value *> values;
-  for (auto &e : exprs) values.push_back(e->kind == ExprKind::Spread ? nullptr : genExpr(*e));
-  for (Value *&v : values)
-    if (!v) {
-      v = cur_.b->argsRest();
-      cur_.fn->usesRest = true;
+  for (auto &e : exprs) {
+    if (e->kind != ExprKind::Spread) {
+      values.push_back(genExpr(*e));
+      continue;
     }
+    values.push_back(cur_.b->argsRest());
+    cur_.fn->usesRest = true;
+  }
   return values;
 }
 
