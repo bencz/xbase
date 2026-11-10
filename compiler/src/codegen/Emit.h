@@ -2,6 +2,7 @@
 
 #include <llvm/IR/Module.h>
 #include <llvm/Target/TargetMachine.h>
+#include <llvm/TargetParser/Triple.h>
 
 #include <memory>
 #include <string>
@@ -17,6 +18,8 @@ struct TargetConfig {
 };
 
 void initializeTargets();
+// The normalized target triple of `cfg` (the host when none is given).
+llvm::Triple targetTriple(const TargetConfig &cfg);
 void printTargets();
 std::unique_ptr<llvm::TargetMachine> createTargetMachine(const TargetConfig &cfg, std::string &err);
 void optimizeModule(llvm::Module &m, llvm::TargetMachine &tm, unsigned optLevel);

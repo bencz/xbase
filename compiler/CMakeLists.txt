@@ -49,6 +49,8 @@ target_include_directories(xbc PRIVATE src ${PROJECT_SOURCE_DIR}/runtime/include
 # Third-party headers must never turn into warnings of ours.
 target_include_directories(xbc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(xbc PRIVATE XB_DEFAULT_INCLUDE_DIR="${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(xbc PRIVATE XB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  XB_VERSION_MINOR=${PROJECT_VERSION_MINOR} XB_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 separate_arguments(XB_LLVM_DEFS NATIVE_COMMAND ${LLVM_DEFINITIONS})
 target_compile_definitions(xbc PRIVATE ${XB_LLVM_DEFS})
 

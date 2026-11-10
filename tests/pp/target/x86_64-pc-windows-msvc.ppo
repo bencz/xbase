@@ -1,0 +1,6 @@
+QOut( "xbase" )
+QOut( "windows", 1 )
+QOut( "64-bit", 1 )
+QOut( "little-endian" )
+QOut( "cpu", "x86_64" )
+QOut( "undefined", __XBASE_CPU__ )

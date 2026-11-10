@@ -59,6 +59,24 @@ nested operators make the expression invalid.
 
 Include files nest up to 64 levels.
 
+### Predefined names
+
+Every source starts with these names defined from the target (`--target`, or the host), before `-D` options; a `-D`
+option replaces one, and `#undef` removes it (`compiler/src/driver/main.cpp`, `targetDefines`). Tests:
+`tests/pp/target`.
+
+| Name | Value |
+|---|---|
+| `__XBASE__` | the compiler's version, major * 10000 + minor * 100 + patch (`100` for 0.1.0) |
+| `__PLATFORM__WINDOWS` | `1` on Windows |
+| `__PLATFORM__LINUX` | `1` on Linux (Android included) |
+| `__PLATFORM__DARWIN` | `1` on macOS and the other Apple systems |
+| `__PLATFORM__BSD` | `1` on FreeBSD, NetBSD, OpenBSD and DragonFly |
+| `__PLATFORM__UNIX` | `1` on Linux, the Apple systems, the BSDs, Solaris and AIX |
+| `__ARCH64BIT__` or `__ARCH32BIT__` | `1`, from the target's pointer width (neither on a 16-bit target) |
+| `__LITTLE_ENDIAN__` or `__BIG_ENDIAN__` | `1`, from the target's byte order |
+| `__XBASE_CPU__` | the CPU family as a string, LLVM's name for it: `"x86_64"`, `"i386"`, `"aarch64"`, `"arm"`, `"powerpc"`, `"ppc64"`, `"s390x"`, `"riscv64"`, ... |
+
 ## Rules
 
 A rule is `#command <pattern> => <result>`; the pattern must start with a literal token.

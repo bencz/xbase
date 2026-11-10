@@ -59,8 +59,12 @@ static bool resolveCpu(const TargetConfig &cfg, const Triple &triple, std::strin
   return true;
 }
 
+Triple targetTriple(const TargetConfig &cfg) {
+  return Triple(cfg.triple.empty() ? sys::getDefaultTargetTriple() : Triple::normalize(cfg.triple));
+}
+
 std::unique_ptr<TargetMachine> createTargetMachine(const TargetConfig &cfg, std::string &err) {
-  Triple triple(cfg.triple.empty() ? sys::getDefaultTargetTriple() : Triple::normalize(cfg.triple));
+  Triple triple = targetTriple(cfg);
   const Target *target = TargetRegistry::lookupTarget(triple, err);
   if (!target) return nullptr;
   std::string cpu, features;

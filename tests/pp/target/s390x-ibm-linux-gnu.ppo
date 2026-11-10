@@ -1,0 +1,7 @@
+QOut( "xbase" )
+QOut( "linux", 1 )
+QOut( "unix", 1 )
+QOut( "64-bit", 1 )
+QOut( "big-endian" )
+QOut( "cpu", "s390x" )
+QOut( "undefined", __XBASE_CPU__ )

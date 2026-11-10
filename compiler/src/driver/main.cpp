@@ -18,6 +18,7 @@
 #include <llvm/Support/GlobPattern.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/thread.h>
+#include <llvm/TargetParser/Triple.h>
 
 #include <cctype>
 #include <cstdio>
@@ -200,6 +201,26 @@ std::vector<std::string> distinctFiles(const std::vector<std::string> &inputs) {
   return out;
 }
 
+// The compiler's version as one number, major * 10000 + minor * 100 + patch (0.1.0 is 100).
+constexpr unsigned kVersionNumber = XB_VERSION_MAJOR * 10000 + XB_VERSION_MINOR * 100 + XB_VERSION_PATCH;
+
+// The names every source starts with defined, from the target: the compiler, the operating system family, the word
+// size, the byte order and the CPU family. A -D option given for one of them replaces it; #undef removes it.
+std::vector<std::string> targetDefines(const llvm::Triple &t) {
+  std::vector<std::string> d{"__XBASE__=" + std::to_string(kVersionNumber)};
+  if (t.isOSWindows()) d.push_back("__PLATFORM__WINDOWS=1");
+  if (t.isOSLinux()) d.push_back("__PLATFORM__LINUX=1");
+  if (t.isOSDarwin()) d.push_back("__PLATFORM__DARWIN=1");
+  bool bsd = t.isOSFreeBSD() || t.isOSNetBSD() || t.isOSOpenBSD() || t.isOSDragonFly();
+  if (bsd) d.push_back("__PLATFORM__BSD=1");
+  if (t.isOSLinux() || t.isOSDarwin() || bsd || t.isOSSolaris() || t.isOSAIX()) d.push_back("__PLATFORM__UNIX=1");
+  if (t.isArch64Bit()) d.push_back("__ARCH64BIT__=1");
+  else if (t.isArch32Bit()) d.push_back("__ARCH32BIT__=1");
+  d.push_back(t.isLittleEndian() ? "__LITTLE_ENDIAN__=1" : "__BIG_ENDIAN__=1");
+  d.push_back("__XBASE_CPU__=\"" + llvm::Triple::getArchTypeName(t.getArch()).str() + "\"");
+  return d;
+}
+
 // Two modules cannot both define a public function of one name.
 void checkDuplicates(const std::vector<Source> &sources, xb::Diagnostics &diag) {
   std::unordered_map<std::string, const xb::FuncDecl *> seen;
@@ -248,7 +269,7 @@ static int compile(int argc, char **argv) {
       xb::printTargets();
       return 0;
     } else if (!std::strcmp(a, "--version")) {
-      std::puts("xbc 0.1.0 (xbase compiler)");
+      std::printf("xbc %d.%d.%d (xbase compiler)\n", XB_VERSION_MAJOR, XB_VERSION_MINOR, XB_VERSION_PATCH);
       return 0;
     } else if (!std::strcmp(a, "-h") || !std::strcmp(a, "--help")) {
       std::fputs(kUsage, stdout);
@@ -267,6 +288,7 @@ static int compile(int argc, char **argv) {
   }
   if (output.empty()) output = withExtension(inputs.front(), ".o");
 
+  std::vector<std::string> predefined = targetDefines(xb::targetTriple(tcfg));
   xb::Diagnostics diag;
   std::string stdPath;
   std::vector<std::string> filesRead;
@@ -277,6 +299,7 @@ static int compile(int argc, char **argv) {
     xb::Preprocessor pp(diag);
     for (const std::string &d : includeDirs) pp.addIncludeDir(d);
     for (const std::string &d : defaultIncludeDirs(argv[0])) pp.addIncludeDir(d);
+    for (const std::string &d : predefined) pp.defineFromCommandLine(d);
     for (const std::string &d : defines) pp.defineFromCommandLine(d);
     if (useStd) {
       // An explicit -u<file> is a path like any other file argument.

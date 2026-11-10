@@ -50,7 +50,7 @@ Useful options (`xbc --help` lists all of them):
 |---|---|
 | `-E` | print the preprocessed source and stop |
 | `-p` | also write each preprocessed source to `<file>.ppo` |
-| `-I<dir>`, `-D<name>[=<value>]` | include directory, `#define` |
+| `-I<dir>`, `-D<name>[=<value>]` | include directory, `#define` (the target defines a few names itself: [preprocessor.md](docs/preprocessor.md#predefined-names)) |
 | `-u`, `-u<file>` | compile without `std.ch`, or with another standard header |
 | `--target=<triple>` | cross-compile, e.g. `--target=s390x-linux-gnu` |
 | `--print-targets` | list the targets this build of `xbc` supports |

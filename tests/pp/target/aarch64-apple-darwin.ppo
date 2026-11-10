@@ -1,0 +1,7 @@
+QOut( "xbase" )
+QOut( "darwin", 1 )
+QOut( "unix", 1 )
+QOut( "64-bit", 1 )
+QOut( "little-endian" )
+QOut( "cpu", "aarch64" )
+QOut( "undefined", __XBASE_CPU__ )

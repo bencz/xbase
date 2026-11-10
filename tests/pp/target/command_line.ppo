@@ -1,0 +1,7 @@
+QOut( "xbase" )
+QOut( "linux", 1 )
+QOut( "unix", 1 )
+QOut( "32-bit", 7 )
+QOut( "little-endian" )
+QOut( "cpu", "x86" )
+QOut( "undefined", __XBASE_CPU__ )

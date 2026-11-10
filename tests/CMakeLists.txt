@@ -56,6 +56,23 @@ foreach(t ${XB_PP_TESTS})
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
 endforeach()
 
+# The names the compiler defines from the target (tests/pp/target/defines.prg): expected in target/<triple>.ppo, or
+# target/<name>.ppo for a run that also gives -D options.
+function(xb_add_target_pp_test name triple)
+  set(cmd $<TARGET_FILE:xbc> -E --target=${triple} ${ARGN} ${CMAKE_CURRENT_SOURCE_DIR}/pp/target/defines.prg)
+  add_test(NAME pp.target_${name}
+    COMMAND ${CMAKE_COMMAND}
+      "-DEXE=${cmd}"
+      -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/pp/target/${name}.ppo
+      -DEXPECTED_RC=0
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
+endfunction()
+foreach(triple powerpc-linux-gnu s390x-ibm-linux-gnu x86_64-pc-windows-msvc aarch64-apple-darwin
+               armv7-unknown-freebsd riscv64-unknown-linux-gnu)
+  xb_add_target_pp_test(${triple} ${triple})
+endforeach()
+xb_add_target_pp_test(command_line i686-pc-linux-gnu -D__ARCH32BIT__=7 -D__XBASE_CPU__="x86")
+
 # Compile-failure tests: compiling tests/fail/<name>.prg (with the modules of
 # an optional directory <name>.with/) must fail with the message in <name>.err.
 file(GLOB XB_FAIL_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/fail ${CMAKE_CURRENT_SOURCE_DIR}/fail/*.prg)
