@@ -74,6 +74,7 @@ void Instruction::copyData(const Instruction &from) {
   access = from.access;
   callee = from.callee;
   message = from.message;
+  index = from.index;
   restRefs = from.restRefs;
   blockFn = from.blockFn;
   captures = from.captures;

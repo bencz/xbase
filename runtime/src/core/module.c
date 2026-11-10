@@ -15,9 +15,11 @@ typedef struct xb_module {
 static xb_module *modules, **modulesTail = &modules;
 
 void xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics, const xb_func *procs,
-                        uint32_t ninit, uint32_t nexit, const xb_symbol *symbols, uint32_t nsymbols) {
+                        uint32_t ninit, uint32_t nexit, const xb_symbol *symbols, uint32_t nsymbols,
+                        xb_memvar *memvars, uint32_t nmemvars) {
   if (nstatics) xb_gc_add_root(statics, nstatics);
   xb_symbols_add(symbols, nsymbols);
+  xb_memvars_add(memvars, nmemvars);
   xb_module *m = malloc(sizeof *m);
   if (!m) xb_gc_fatal("out of memory");
   m->next = NULL;

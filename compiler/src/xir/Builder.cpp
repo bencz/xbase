@@ -104,6 +104,19 @@ Instruction *Builder::stepByOne(bool up, Value *a) {
   return i;
 }
 
+Instruction *Builder::memvar(Op op, const std::string &name, Value *value) {
+  Type t = op == Op::MvGet || op == Op::MvRef ? Type::Item : Type::Void;
+  Instruction *i = value ? make(op, t, {value}) : make(op, t, {});
+  i->message = name;
+  return i;
+}
+
+Instruction *Builder::memvarParam(const std::string &name, uint32_t index) {
+  Instruction *i = memvar(Op::MvParam, name);
+  i->index = index;
+  return i;
+}
+
 Instruction *Builder::truth(Value *a) { return make(Op::Truth, Type::Bool, {a}); }
 Instruction *Builder::fromBool(Value *b) { return make(Op::FromBool, Type::Item, {b}); }
 

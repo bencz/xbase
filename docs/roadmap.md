@@ -23,14 +23,12 @@ design of the larger parts.
 
 ### Variables
 
-- `MEMVAR`, `PRIVATE`, `PUBLIC`, `PARAMETERS`, `M->name`, `RELEASE`, `CLEAR MEMORY`, `SAVE`/`RESTORE` (`.mem`
-  files), `Type()`. Memory variables are dynamically scoped across modules: a `PRIVATE` created in `Main` is seen and
-  changed by a function of another module it calls, and is released when the function that created it returns;
-  `PUBLIC`s live until the program ends.
-- An undeclared name is an error in xbase today. In Clipper it is a field or a memory variable, looked up at run time
-  (a field first): reading one that does not exist is error `BASE/1003` ("Variable does not exist"), and assigning
-  one creates a `PRIVATE` of the current function. The compiler warns about the ambiguity only when warnings are on.
-  Planned: Clipper's behavior, with a warning; an option makes it an error.
+- Done: `MEMVAR`, `PRIVATE`, `PUBLIC`, `PARAMETERS`, `M->name`, and Clipper's rule for undeclared names (a memory
+  variable at run time, with a warning; `-Wno-undeclared`, `-Werror=undeclared`)
+  ([runtime.md](runtime.md#memory-variables), [compiler.md](compiler.md#semantic-checks)).
+- Missing: `RELEASE` (`ALL`, `LIKE`, `EXCEPT`), `CLEAR MEMORY`, `SAVE`/`RESTORE` (`.mem` files), `Type()` (with the
+  macro operator), a memory variable as the variable of `FOR EACH`, and the field first in the lookup of an undeclared
+  name once work areas exist.
 - `DECLARE` (a synonym of `PRIVATE` with array dimensions).
 
 ### Fields and work areas
@@ -243,7 +241,7 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. Memory variables and Clipper's rule for undeclared names; `Type()`.
+1. Memory variables: `RELEASE`, `CLEAR MEMORY`, `SAVE`/`RESTORE`, `DECLARE`.
 2. The macro operator.
 3. The rest of the array, string and number functions; the call-stack functions.
 4. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,

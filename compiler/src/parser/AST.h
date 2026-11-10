@@ -86,12 +86,14 @@ enum class VarWhere : uint8_t {
   Frame,     // slot of the current function's or codeblock's frame
   Capture,   // captured cell `slot` of the current codeblock
   Static,    // item `slot` of the module's STATICs
+  Memvar,    // a memory variable (PRIVATE or PUBLIC), found by name at run time
 };
 
 struct VarExpr : Expr {
   std::string name;              // upper-cased
   VarWhere where = VarWhere::Frame;
   uint32_t slot = 0;
+  bool memvarAlias = false;      // written M->name (or MEMVAR->name): a memory variable whatever is declared
   VarExpr(SourceLoc l, std::string n) : Expr(ExprKind::Var, l), name(std::move(n)) {}
 };
 
@@ -208,7 +210,10 @@ struct IIfExpr : Expr {
       : Expr(ExprKind::IIf, l), cond(std::move(c)), then(std::move(a)), otherwise(std::move(b)) {}
 };
 
-enum class StmtKind : uint8_t { Expr, Local, Static, Return, If, While, For, ForEach, Switch, Sequence, Exit, Loop };
+enum class StmtKind : uint8_t {
+  Expr, Local, Static, Private, Public, Parameters, Memvar, Return, If, While, For, ForEach, Switch, Sequence, Exit,
+  Loop
+};
 
 struct Stmt {
   StmtKind kind;
@@ -232,7 +237,9 @@ struct LocalDecl {
   uint32_t slot = 0;             // set by Sema
 };
 
-struct LocalStmt : Stmt {      // LOCAL, or STATIC (kind Static: `slot` indexes the module's statics)
+// LOCAL, or STATIC (kind Static: `slot` indexes the module's statics); PRIVATE and PUBLIC (an initializer each, which
+// runs before the variable is created), PARAMETERS and MEMVAR (names only) declare memory variables.
+struct LocalStmt : Stmt {
   std::vector<LocalDecl> decls;
   explicit LocalStmt(SourceLoc l, StmtKind k = StmtKind::Local) : Stmt(k, l) {}
 };
@@ -363,6 +370,7 @@ struct Module {
   std::string file;              // the source's file name, without directories (ProcFile())
   std::vector<std::unique_ptr<FuncDecl>> funcs;
   std::vector<LocalDecl> fileStatics; // STATICs before the first function: visible in the whole file
+  std::vector<LocalDecl> fileMemvars; // MEMVARs before the first function: declared in the whole file
   std::vector<LocalDecl *> statics;   // every STATIC of the module, in slot order (set by Sema)
   std::vector<ExternDecl> externs;
   // The EXTERNAL names; after CallResolver, only those of another module of the program (the runtime's functions

@@ -16,8 +16,14 @@ struct xb_ctx {
   xb_item  error_block;
   xb_item  break_value;     /* the value of a pending BREAK */
   uint32_t error_depth;     /* error blocks running */
-  /* Later: memvar (PRIVATE) stack, current work area, SETs - all per task, so
-   * they travel with a Task across threads like .NET's ExecutionContext. */
+  /* Memory variables (core/memvar.c): by number, the binding visible (an
+   * XB_T_CELL item, NIL for none); the PRIVATEs alive, each with the binding
+   * it hid, in creation order. Roots of the collector. Per task, like the
+   * SETs, so they travel with a task across threads. */
+  xb_item  *memvars;
+  uint32_t  memvarCap;
+  struct xb_private *privates;
+  uint32_t  privateLen, privateCap;
   int      set_exact;
   char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
   int32_t  epoch;           /* SET EPOCH */
@@ -25,6 +31,14 @@ struct xb_ctx {
 };
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
+
+typedef struct xb_private {
+  uint32_t id;              /* the variable's number */
+  xb_item  hidden;          /* the binding it hid (NIL: none) */
+} xb_private;
+
+/* Numbers the memory variables of a registering module (core/memvar.c). */
+void xb_memvars_add(xb_memvar *memvars, uint32_t n);
 
 /* A runtime function shows on the call stack while what it does can be seen
  * (a codeblock it calls, an error block it runs): a frame without slots,

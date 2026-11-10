@@ -19,6 +19,10 @@ void Generator::genStmt(const Stmt &s) {
   case StmtKind::Expr: genDiscard(*static_cast<const ExprStmt &>(s).expr); break;
   case StmtKind::Local: genLocals(static_cast<const LocalStmt &>(s)); break;
   case StmtKind::Static: break; // initialized by the module initialization
+  case StmtKind::Memvar: break;  // a declaration only
+  case StmtKind::Private:
+  case StmtKind::Public:
+  case StmtKind::Parameters: genMemvars(static_cast<const LocalStmt &>(s)); break;
   case StmtKind::Return: genReturn(static_cast<const ReturnStmt &>(s)); break;
   case StmtKind::If: genIf(static_cast<const IfStmt &>(s)); break;
   case StmtKind::While: genWhile(static_cast<const WhileStmt &>(s)); break;
@@ -46,6 +50,33 @@ void Generator::genLocals(const LocalStmt &s) {
     Access a = accessOf(*v);
     cur_.b->store(v, a, value);
     if (!isPlain(*v, a)) cur_.b->barrier(v, a);
+  }
+}
+
+// PRIVATE and PUBLIC: the statement's initializers run first, in order (they
+// read the variables visible before it), then each variable is created and
+// gets its value (for a PUBLIC that a visible PRIVATE hides, the PRIVATE
+// does), as in the reference. PARAMETERS: a PRIVATE for each argument, in
+// order.
+void Generator::genMemvars(const LocalStmt &s) {
+  Builder &b = *cur_.b;
+  if (s.kind == StmtKind::Parameters) {
+    uint32_t k = 0;
+    for (const LocalDecl &d : s.decls) {
+      b.setLoc(d.loc);
+      b.memvarParam(d.name, k++);
+    }
+    return;
+  }
+  std::vector<Value *> values;
+  for (const LocalDecl &d : s.decls) {
+    b.setLoc(d.loc);
+    values.push_back(d.init ? genExpr(*d.init) : nullptr);
+  }
+  for (size_t k = 0; k < s.decls.size(); ++k) {
+    b.setLoc(s.decls[k].loc);
+    b.memvar(s.kind == StmtKind::Private ? Op::MvPrivate : Op::MvPublic, s.decls[k].name);
+    if (values[k]) b.memvar(Op::MvSet, s.decls[k].name, values[k]);
   }
 }
 

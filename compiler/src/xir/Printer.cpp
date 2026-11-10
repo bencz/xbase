@@ -167,7 +167,10 @@ private:
       out_ += " " + (i.callee.function ? i.callee.function->name : i.callee.name) +
               (i.callee.function ? "" : i.callee.native ? " native" : " extern");
       break;
-    case Op::Send: out_ += " " + i.message; break;
+    case Op::Send: case Op::MvGet: case Op::MvSet: case Op::MvRef: case Op::MvPrivate: case Op::MvPublic:
+      out_ += " " + i.message;
+      break;
+    case Op::MvParam: out_ += " " + i.message + " " + std::to_string(i.index); break;
     case Op::MakeBlock:
       out_ += " " + i.blockFn->name;
       for (Var *c : i.captures) out_ += " " + varName(*c);

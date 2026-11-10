@@ -202,10 +202,13 @@ std::unique_ptr<Module> Parser::parseModule(const std::string &moduleName) {
   auto mod = std::make_unique<Module>();
   mod->name = moduleName;
   skipBlankStmts();
-  // STATICs before any other statement or function are visible in the whole file.
-  while ((atStmtKw("STATIC") && !atFuncStart()) || atExtern() || atLinkDecl()) {
+  // STATICs and MEMVARs before any other statement or function apply to the whole file.
+  while ((atStmtKw("STATIC") && !atFuncStart()) || atExtern() || atLinkDecl() || atStmtKw("MEMVAR")) {
     if (atLinkDecl()) {
       parseLinkDecl();
+    } else if (atStmtKw("MEMVAR")) {
+      StmtPtr decl = parseDecl(StmtKind::Memvar);
+      for (LocalDecl &d : static_cast<LocalStmt &>(*decl).decls) mod->fileMemvars.push_back(std::move(d));
     } else if (atExtern()) {
       if (auto d = parseExtern()) mod->externs.push_back(std::move(*d));
     } else {

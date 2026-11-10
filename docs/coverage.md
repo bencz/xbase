@@ -10,10 +10,10 @@ Functions: 77 of 551 done. Commands (`std.ch` families): 18 of 155 done.
 
 Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar)), not `std.ch` rules.
 
-**FUNCTION**, **PROCEDURE**, **LOCAL**, **STATIC**, **RETURN**, **IF**, **DO CASE**, **SWITCH**, **WHILE**,
-**FOR**, **FOR EACH**, **EXIT**, **LOOP**, **DO ... WITH**, *PRIVATE*, *PUBLIC*, *MEMVAR*, *FIELD*, *PARAMETERS*,
-**INIT PROCEDURE**, **EXIT PROCEDURE**, **EXTERN FUNCTION** (an xbase declaration), **BEGIN SEQUENCE**, *DECLARE*,
-**EXTERNAL** (Clipper's name list), **ANNOUNCE**
+**FUNCTION**, **PROCEDURE**, **LOCAL**, **STATIC**, **RETURN**, **IF**, **DO CASE**, **SWITCH**, **WHILE**, **FOR**,
+**FOR EACH**, **EXIT**, **LOOP**, **DO ... WITH**, **PRIVATE**, **PUBLIC**, **MEMVAR**, *FIELD*, **PARAMETERS**, **INIT
+PROCEDURE**, **EXIT PROCEDURE**, **EXTERN FUNCTION** (an xbase declaration), **BEGIN SEQUENCE**, *DECLARE*, **EXTERNAL**
+(Clipper's name list), **ANNOUNCE**
 
 ## Commands (std.ch)
 

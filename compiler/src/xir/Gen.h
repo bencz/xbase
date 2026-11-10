@@ -40,6 +40,7 @@ private:
   void genBlock(const Block &b);
   void genStmt(const Stmt &s);
   void genLocals(const LocalStmt &s);
+  void genMemvars(const LocalStmt &s);
   void genIf(const IfStmt &s);
   void genWhile(const WhileStmt &s);
   void genFor(const ForStmt &s);

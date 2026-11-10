@@ -91,6 +91,7 @@ private:
   void genFunction(const xir::Function &f);
   void genModuleRegistration(const xir::Module &m);
   void genRequests(const xir::Module &m);
+  void collectMemvars(const xir::Module &m);
   void genEntry(const xir::Function &start);
   llvm::BasicBlock *newBlock(const char *name);
   unsigned headerShift(ItemField f);
@@ -246,6 +247,7 @@ private:
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;
   llvm::FunctionCallee rtModuleRegister_, rtProgramRun_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
+  llvm::FunctionCallee rtMvMark_, rtMvRelease_, rtMvGet_, rtMvSet_, rtMvRef_, rtMvPrivate_, rtMvPublic_, rtMvParam_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
   // state of the object (every module added)
@@ -256,6 +258,10 @@ private:
 
   llvm::GlobalVariable *statics_ = nullptr;   // the STATICs of the module being added
   llvm::Constant *file_ = nullptr;            // its source file name (xb_proc.file), or null
+  // Its memory variables: the table of their xb_memvar (numbered by the runtime when the module registers), and the
+  // address of each name's entry.
+  llvm::GlobalVariable *memvarTable_ = nullptr;
+  std::unordered_map<std::string, llvm::Constant *> memvars_;
   std::unordered_map<std::string, llvm::Constant *> strLits_;
   std::unordered_map<std::string, llvm::Constant *> numLits_;
   std::unordered_map<std::string, llvm::Constant *> messages_;
@@ -265,6 +271,7 @@ private:
   // the function being generated
   llvm::Function *fn_ = nullptr;
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
+  llvm::Value *fnMark_ = nullptr; // the PRIVATE mark of an activation that may create PRIVATEs (xb_mv_mark), or null
   uint32_t fnParams_ = 0; // the function's parameters: the arguments past them are what `...` passes on
   // `...` passes its arguments on in place (no copy): the function's one args.rest, outside loops, in a call that
   // takes references, in a function that reads its arguments nowhere else (PCount(), PValue()).

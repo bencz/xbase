@@ -191,7 +191,8 @@ public:
   Var *var = nullptr;                 // Load, Store, Barrier, Each*, RefVar
   Access access = Access::Direct;     // Load, Store, Barrier
   Callee callee;                      // Call
-  std::string message;                // Send: upper-cased, "_NAME" to assign NAME
+  std::string message;                // Send: upper-cased, "_NAME" to assign NAME; Mv*: the variable's name
+  uint32_t index = 0;                 // MvParam: the argument, from 0
   // Call with `...` (an args.rest operand): the argument positions that receive the arguments passed on as they are,
   // references included (bit k: argument k, bit 31: argument 31 and after; xb_refs_take); the others, and those of
   // a send or an array literal, receive their values.

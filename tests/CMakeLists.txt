@@ -82,12 +82,17 @@ endforeach()
 xb_add_target_pp_test(command_line i686-pc-linux-gnu -D__ARCH32BIT__=7 -D__XBASE_CPU__="x86")
 
 # Compile-failure tests: compiling tests/fail/<name>.prg (with the modules of
-# an optional directory <name>.with/) must fail with the message in <name>.err.
+# an optional directory <name>.with/, and the xbc options of an optional
+# <name>.args, one per line) must fail with the message in <name>.err.
 file(GLOB XB_FAIL_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/fail ${CMAKE_CURRENT_SOURCE_DIR}/fail/*.prg)
 foreach(t ${XB_FAIL_TESTS})
   string(REGEX REPLACE "\\.prg$" "" t ${t})
   file(GLOB with ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.with/*.prg)
-  set(cmd $<TARGET_FILE:xbc> ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.prg ${with}
+  set(options "")
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.args)
+    file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.args options)
+  endif()
+  set(cmd $<TARGET_FILE:xbc> ${options} ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.prg ${with}
       -o ${CMAKE_CURRENT_BINARY_DIR}/fail_${t}.o)
   add_test(NAME fail.${t}
     COMMAND ${CMAKE_COMMAND}

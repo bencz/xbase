@@ -1,0 +1,11 @@
+
+err       1003 NOTHERE .T.          1 U
+read missing made by the handler
+err       1003 MISSING_ONE .T.          1 U
+recovered broke
+err       1003 A .T.          1 U
+after unwind .F.
+params          2 only U          2
+elem changed
+recursion          5
+gc      20000     490000

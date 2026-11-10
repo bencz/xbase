@@ -1,0 +1,23 @@
+module MEMVARS
+
+function MAIN params 0 {
+entry:
+  mv.public PUB
+  mv.set PUB 1:w10
+  %2 = mv.get PUB
+  %3 = binary add %2, 1:w10
+  mv.private P
+  mv.set P %3
+  %6 = mv.ref P
+  %7 = call SHOW %6
+  ret
+}
+
+function SHOW params 0 args {
+entry:
+  mv.param A 0
+  %1 = mv.get A
+  %2 = mv.get PUB
+  %3 = call QOUT native %1, %2
+  ret
+}

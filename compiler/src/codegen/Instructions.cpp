@@ -316,6 +316,23 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::FromBool: storeLogical(dest(i), value(ops[0])); break;
+  case Op::MvGet:
+  case Op::MvRef: {
+    CallResult r = callResult(dest(i), 0);
+    b_.CreateCall(i.op == Op::MvGet ? rtMvGet_ : rtMvRef_, {fnCtx_, r.arg, memvars_.at(i.message)});
+    callDone(r);
+    checkPending(unwind_);
+    break;
+  }
+  case Op::MvSet:
+    b_.CreateCall(rtMvSet_, {fnCtx_, memvars_.at(i.message), callArg(addr(ops[0]), 1)});
+    checkPending(unwind_);
+    break;
+  case Op::MvPrivate: b_.CreateCall(rtMvPrivate_, {fnCtx_, memvars_.at(i.message), fnMark_}); break;
+  case Op::MvPublic: b_.CreateCall(rtMvPublic_, {fnCtx_, memvars_.at(i.message)}); break;
+  case Op::MvParam: // argument `index` of those received, NIL past them
+    b_.CreateCall(rtMvParam_, {fnCtx_, memvars_.at(i.message), argItem(fn_->getArg(2), fn_->getArg(3), i.index)});
+    break;
   case Op::ArgsRest: break; // read by the list that uses it (withRest)
   case Op::Call: {
     if (emitBitCall(i) || emitInlineCall(i)) break;

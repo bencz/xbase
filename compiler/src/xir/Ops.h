@@ -38,6 +38,14 @@ enum class Op : uint8_t {
   SwitchMatch,    // value, case constant -> Bool
   ParamsRef,      // parameters (captures) -> Bool: one of them holds a reference its caller passed
   CallForward,    // callee -> Item: calls it with this function's own arguments, as received [may fail]
+  // Memory variables, by name (`message`): what the name designates is decided at run time, and any call may
+  // create, change or end one, so they are read and written like the heap.
+  MvGet,          // -> Item: the value of the variable visible; none is error 1003, retried or fatal [may fail]
+  MvSet,          // value: assigns it; with none, a PRIVATE of the activation is created [may fail]
+  MvRef,          // -> Item: a reference to it (an argument @name) [may fail]
+  MvPrivate,      // PRIVATE name: a new variable, unless the activation has one
+  MvPublic,       // PUBLIC name: a new variable, unless one is visible
+  MvParam,        // PARAMETERS: a PRIVATE holding argument `index` of the function
   ArgsRest,       // -> Args: the arguments the function received past its parameters (`...`), right before the
                   // call, send or array literal that is its one use; read there, they may have changed before
                   // (PValue()), so it is never merged or moved
@@ -56,6 +64,11 @@ enum class Op : uint8_t {
   CondBr,         // Bool; then(args), else(args)
   Ret,            // [Item]
 };
+
+// Operations on memory variables, by name; those that may create a PRIVATE of
+// the activation running.
+inline bool isMemvarOp(Op op) { return op >= Op::MvGet && op <= Op::MvParam; }
+inline bool createsPrivates(Op op) { return op == Op::MvSet || op == Op::MvPrivate || op == Op::MvParam; }
 
 // What an operation does besides computing its result from its operands, for
 // the passes that move, merge or remove operations (one row per operation in

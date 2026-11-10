@@ -50,6 +50,8 @@ const char *kUsage =
     "  -u<file>           use <file> instead of std.ch\n"
     "  -E                 preprocess only, write the result to stdout\n"
     "  -p                 also write each preprocessed source to <file>.ppo\n"
+    "  -Wno-undeclared    no warning for a name nothing declares (a memory variable at run time)\n"
+    "  -Werror=undeclared such a name is an error\n"
     "  -O0 | -O1 | -O2 | -O3\n"
     "                     optimization level (default -O2)\n"
     "  --target=<triple>  cross-compile for <triple> (default: host)\n"
@@ -243,6 +245,7 @@ static int compile(int argc, char **argv) {
   std::string output, irDump, xirDump, depFile, stdFile = "std.ch";
   std::vector<std::string> inputs, includeDirs, defines;
   bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false, runtimeLibrary = false;
+  xb::Sema::Undeclared undeclared = xb::Sema::Undeclared::Warn;
 
   for (int i = 1; i < argc; ++i) {
     const char *a = argv[i];
@@ -263,6 +266,8 @@ static int compile(int argc, char **argv) {
     else if (startsWith(a, "--features=")) tcfg.features = a + 11;
     else if (!std::strcmp(a, "--static")) tcfg.pic = false;
     else if (!std::strcmp(a, "--no-entry")) emitEntry = false;
+    else if (!std::strcmp(a, "-Wno-undeclared")) undeclared = xb::Sema::Undeclared::Ignore;
+    else if (!std::strcmp(a, "-Werror=undeclared")) undeclared = xb::Sema::Undeclared::Error;
     else if (!std::strcmp(a, "--runtime")) {
       runtimeLibrary = true;
       emitEntry = false;
@@ -344,7 +349,7 @@ static int compile(int argc, char **argv) {
     xb::CallResolver(diag, xb::Folder::canEvaluate, runtimeLibrary).run(*ast);
     if (diag.errorCount() != errors) continue;
     xb::Folder().run(*ast); // before Sema: STATIC initializers are checked once folded
-    xb::Sema(diag).run(*ast);
+    xb::Sema(diag, undeclared).run(*ast);
     if (diag.errorCount() != errors) continue;
     sources.push_back({input, std::move(ast), nullptr});
   }

@@ -35,7 +35,7 @@ static const struct {
 } descriptions[] = {
   {EG_ARG, "Argument error"},          {EG_BOUND, "Bound error"},    {EG_STROVERFLOW, "String overflow"},
   {EG_ZERODIV, "Zero divisor"},        {EG_NOFUNC, "Undefined function"},  {EG_NOMETHOD, "No exported method"},
-  {EG_NOVARMETHOD, "No exported variable"},
+  {EG_NOVARMETHOD, "No exported variable"}, {EG_NOVAR, "Variable does not exist"},
 };
 
 static const char *description_of(int32_t gencode) {
@@ -66,8 +66,10 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
   return xb_error_in(ctx, NULL, result, gencode, subcode, operation, flags, argc, args);
 }
 
-int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
-                const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
+/* Raises the error (see xb_error_in); `tries`, for an error that may be
+ * retried, counts the attempts. 0: fail; 1: substituted; 2: retry. */
+static int raise(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
+                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args, uint16_t tries) {
   xb_proc proc = XB_RUNTIME_PROC(frame, 0);
   xb_frame inside;
   if (frame) xb_frame_push(ctx, &inside, &proc);
@@ -91,10 +93,12 @@ int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode
   xb_set_object(&call[0], e);
   /* Each allocation below may collect: the object is rooted, and every store
    * into it is followed by the barrier. */
-  xb_array *a = xb_array_alloc(argc);
-  for (uint32_t i = 0; i < argc; ++i) a->items[i] = args[i];
-  xb_set_array(&e->vars[ERR_ARGS], a);
-  xb_gc_write(e);
+  if (argc) { /* without arguments, `args` stays NIL, as in the reference */
+    xb_array *a = xb_array_alloc(argc);
+    for (uint32_t i = 0; i < argc; ++i) a->items[i] = args[i];
+    xb_set_array(&e->vars[ERR_ARGS], a);
+    xb_gc_write(e);
+  }
   set_text(&e->vars[ERR_DESCRIPTION], description_of(gencode));
   xb_gc_write(e);
   set_text(&e->vars[ERR_OPERATION], operation);
@@ -105,23 +109,36 @@ int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode
   xb_set_int(&e->vars[ERR_SUBCODE], subcode);
   xb_set_int(&e->vars[ERR_SEVERITY], ES_ERROR);
   xb_set_logical(&e->vars[ERR_CANSUBSTITUTE], (flags & XB_ERR_SUBSTITUTE) != 0);
+  xb_set_logical(&e->vars[ERR_CANRETRY], (flags & XB_ERR_RETRY) != 0);
+  xb_set_int(&e->vars[ERR_TRIES], tries);
 
   call[2] = ctx->error_block;
   ++ctx->error_depth;
   xb_block_call(ctx, &call[1], &call[2], 1, &call[0]);
   --ctx->error_depth;
   if (frame) xb_frame_pop(ctx, &inside);
-  int substituted = 0;
+  int outcome = 0;
   if (!(ctx->pending & XB_PENDING_UNWIND)) {
-    if (flags & XB_ERR_SUBSTITUTE) {
+    if ((flags & XB_ERR_RETRY) && call[1].type == XB_T_LOGICAL && call[1].v.l) {
+      outcome = 2;
+    } else if (flags & XB_ERR_SUBSTITUTE) {
       *result = call[1];
-      substituted = 1;
+      outcome = 1;
     } else {
       unrecoverable(ctx, 9001, "Error recovery failure");
     }
   }
   xb_gc_root_pop(ctx, 3 + argc);
-  return substituted;
+  return outcome;
+}
+
+int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
+                const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
+  return raise(ctx, frame, result, gencode, subcode, operation, flags, argc, args, 0) == 1;
+}
+
+int xb_error_retry(xb_ctx *ctx, int32_t gencode, int32_t subcode, const char *operation, uint16_t tries) {
+  return raise(ctx, NULL, NULL, gencode, subcode, operation, XB_ERR_RETRY, 0, NULL, tries) == 2;
 }
 
 /* ErrorBlock( [bNew] ): the current error block; a codeblock argument

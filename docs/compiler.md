@@ -82,6 +82,13 @@ Statements:
   that name; a `STATIC` one is an error, and a second `ANNOUNCE` in the module is ignored with a warning.
 - `LOCAL name [:= expr], ...` and `STATIC name [:= expr], ...` at the start of a function, in any order. A function
   `STATIC` keeps its value between calls.
+- Memory variables ([runtime.md](runtime.md#memory-variables)), found by name at run time: `MEMVAR name, ...`
+  declares names (before the first function, for the whole file; in a function, before its statements);
+  `PRIVATE name [:= expr], ...` and `PUBLIC name [:= expr], ...` (also `name[n1, n2]`) create them when they run, the
+  statement's initializers all running first (they read the variables visible before it); `PARAMETERS name, ...`
+  creates PRIVATEs holding the arguments received, in order (the function keeps its arguments, as for `PCount()`), and
+  may come before the `LOCAL`s. `M->name` and `MEMVAR->name`
+  are a memory variable whatever else the name is; other aliases (`alias->field`) wait for the work areas.
 - `RETURN [expr]` (a `PROCEDURE` cannot return a value)
 - `IF ... [ELSEIF ...] [ELSE ...] ENDIF | END`
 - `DO CASE`, then `CASE cond` arms, an optional `OTHERWISE`, and `ENDCASE | END`; the first true arm runs. Nothing
@@ -105,7 +112,7 @@ Statements:
   `x = y = 3` is `x := ( y = 3 )`, `a[1] = 5` assigns. The parser reports an invalid assignment target (anything but
   a variable or an element, also in parentheses) here, for `:=`, `op=`, `++`/`--` and `@`.
 
-`PRIVATE`, `PUBLIC`, `MEMVAR`, `FIELD` and `PARAMETERS` are recognized and reported as not supported yet.
+`FIELD` is recognized and reported as not supported yet.
 
 Expression precedence, lowest first: `:=` and compound assignments (`+=` `-=` `*=` `/=` `%=` `^=`, and xbase's `&=` `|=`
 `^^=` `<<=` `>>=`; right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`, xbase's bit operators `|`, `^^` and `&`, `=` `==`
@@ -202,8 +209,17 @@ called inside it). Anything else, a plain variable included, is "illegal initial
 in its own initializer, so a codeblock stored in it can call itself; a `LOCAL`'s initializer is resolved before the
 `LOCAL` exists.
 
-Sema reports: undeclared variables, duplicate functions, parameters or locals, `EXIT` outside a loop or `SWITCH`, `LOOP`
-outside a loop, a `LOCAL` or `STATIC` that follows an executable statement or appears inside a nested block, a
+A name that is not a parameter, `LOCAL`, `STATIC` or capture is a memory variable (`VarWhere::Memvar`), as in Clipper
+(which looks for a field of the current work area first; fields come with the work areas). A `MEMVAR` of a frame (the
+file or a function) makes the name a memory variable there, before a `STATIC` of an enclosing frame, and cannot name a
+`LOCAL`, parameter or `STATIC` of the same frame; a function's `LOCAL` hides a file-wide `MEMVAR`. `PRIVATE`, `PUBLIC`
+and `PARAMETERS` do not declare (as in the reference, a `STATIC` of the name stays the `STATIC`), and their names cannot
+be a `LOCAL` or parameter of the same function. A name nothing declares (no `MEMVAR`, and no `PRIVATE`, `PUBLIC` or
+`PARAMETERS` earlier in the function) gets a warning; `-Wno-undeclared` drops it and `-Werror=undeclared` makes it an
+error. A memory variable cannot be the variable of a `FOR EACH` yet.
+
+Sema reports: duplicate functions, parameters or locals, `EXIT` outside a loop or `SWITCH`, `LOOP`
+outside a loop, a `LOCAL`, `STATIC` or `MEMVAR` that follows an executable statement or appears inside a nested block, a
 non-constant `STATIC` initializer, a `SWITCH` `CASE` that is not an integer or string constant ("CASE requires either
 numeric or string constant"), and a `CASE` value repeated in a `SWITCH`.
 
@@ -392,6 +408,11 @@ emits the object file.
   may change, are still read from the slot. With the direct entries, against neither (callgrind, x86-64): `fib` 10%
   fewer instructions, `qsort` 17%, `AEval` 15%; `matmul` 2% more (its inner loop has no calls, and the words of the
   outer loops' counters take registers there).
+- Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
+  functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
+  call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,
+  `mv.param`: `xir::createsPrivates`) takes the activation's mark in its prologue (`xb_mv_mark`) and releases to it in
+  its exit block (`xb_mv_release`), the one returns and unwinding both reach; other functions do neither.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`, its number of parameters, `XB_PROC_ARGS` when it keeps its arguments, `XB_PROC_HIDDEN`
   when it is hidden, and its source file name without directories, one string per module, none for a module of the

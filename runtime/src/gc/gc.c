@@ -626,6 +626,8 @@ static void mark_roots(void) {
     for (unsigned i = 0; i < ctx->rootLen; ++i) mark_item(ctx->roots[i]);
     mark_item(&ctx->error_block);
     mark_item(&ctx->break_value);
+    for (uint32_t i = 0; i < ctx->memvarCap; ++i) mark_item(&ctx->memvars[i]);
+    for (uint32_t i = 0; i < ctx->privateLen; ++i) mark_item(&ctx->privates[i].hidden);
   }
   for (const xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);

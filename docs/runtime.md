@@ -278,6 +278,32 @@ The two tags are consecutive, so compiled code tests for both with one unsigned 
   shrank, raises `Bound error: array access` (1132). `xb_ref_written` is the write barrier after a store there: the
   cell, the array, the hash, or the reference itself for a string's character (or after an error left no element).
 
+## Memory variables
+
+`PRIVATE` and `PUBLIC` variables (`core/memvar.c`, the `xb_mv_*` entry points in `xbrt.h`) are found by name when the
+code runs, so a function sees and changes the memory variables of the functions that called it, whatever module they
+are in. Each module gives the runtime the names it uses (`xb_memvar`, numbered when it registers); each context keeps,
+by number, the binding visible now (`xb_ctx.memvars`), and the PRIVATEs alive, in creation order, each with the
+binding it hid (`xb_ctx.privates`). Both are roots of the collector.
+
+- A binding is a cell (an `XB_T_CELL` item): `@name` passes it, and a codeblock reaches the variable through the name
+  when it runs, not through a capture.
+- `PRIVATE name` creates a variable (NIL) that hides any other of its name until the activation that created it (a
+  function call or a codeblock call) ends, by `RETURN` or by unwinding; then the hidden one shows again. An activation
+  that already has a PRIVATE of that name keeps it (and its value). The compiled code of an activation that may
+  create PRIVATEs takes a mark when it starts (`xb_mv_mark`) and releases to it when it ends (`xb_mv_release`).
+- `PUBLIC name` creates a variable (`.F.`; `.T.` for `PUBLIC Clipper`, Clipper's rule) that lives until the program
+  ends, unless one of that name is visible already (a PRIVATE or a PUBLIC): then it does nothing, and its initializer
+  assigns the visible one.
+- Assigning a name with no variable visible creates a PRIVATE of the running activation, as in Clipper.
+- `PARAMETERS` creates a PRIVATE per name holding the argument at its position (NIL past the arguments received); an
+  argument passed by reference makes the PRIVATE the caller's variable itself (its cell, or a cell holding the
+  element's reference).
+- Reading (or passing `@name`) a name with no variable visible is error `BASE/1003` `Variable does not exist` (the
+  name as the operation, no `args`), which the error block may retry: returning `.T.` looks the name up again (a
+  block that created the variable fixes it), anything else ends the program (`Error recovery failure`), as in the
+  reference.
+
 ## Calling convention
 
 Every xBase-callable function, compiled or written in C, has the dynamic convention:
@@ -317,15 +343,17 @@ returns non-zero when the function must unwind: to a `BEGIN SEQUENCE` handler of
 ([xir.md](xir.md#control-flow-for-errors-and-exceptions)). The check stays valid across `AWAIT`. `QUIT` raises
 `XB_PENDING_QUIT` with exit code 0.
 
-A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`) makes an `Error` object (see
-[Objects and messages](#objects-and-messages)): subsystem `BASE`, the subcode, the generic code (`error.ch`, shared
-with xBase code like `set.ch`) and its description, the operation, severity `ES_ERROR`, `canSubstitute`, and in
-`args` the operands of an operator or the arguments of a function. Then it evaluates the context's error block with
-it (`ErrorBlock( [bNew] )` returns the block and replaces it with a codeblock argument; the block and the `BREAK`
+A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`) makes an `Error` object (see [Objects
+and messages](#objects-and-messages)): subsystem `BASE`, the subcode, the generic code (`error.ch`, shared with xBase
+code like `set.ch`) and its description, the operation, severity `ES_ERROR`, `canSubstitute`, and in `args` the operands
+of an operator or the arguments of a function (NIL when there are none). Then it evaluates the context's error block
+with it (`ErrorBlock( [bNew] )` returns the block and replaces it with a codeblock argument; the block and the `BREAK`
 value are roots of the collector). With no error block (a program's `ErrorSys()` set none) the error is unrecoverable:
 `Unrecoverable error 9002: No ERRORBLOCK() for error`. After the block:
 
 - a request to unwind is pending (the block called `Break()`, or quit): the operation fails with it;
+- the error may be retried (`XB_ERR_RETRY`, `xb_error_retry`: `canRetry`, with `tries` counting the attempts from 1;
+  a missing memory variable) and the block returned `.T.`: the operation is tried again;
 - the error allows substitution (`XB_ERR_SUBSTITUTE`: operators, `SWITCH`, a non-numeric index, messages, `Eval` and
   the runtime functions, except `ASize`, `AEval`, `AFill`, `Set` and the array dimension): the block's return value
   becomes the operation's result, and the program goes on;
@@ -336,8 +364,8 @@ value are roots of the collector). With no error block (a program's `ErrorSys()`
 Which errors allow substitution, and their `args`, follow Clipper/Harbour. An error raised while the error block runs
 is handled the same way, nested at most 8 deep (`XB_ERROR_MAX_DEPTH`); one more ends the program (`Unrecoverable
 error 9003: Too many recursive error handler calls`). In a `FOR` test, a substituted result stands for the comparison
-`counter > limit` (`<` stepping back): a logical, else the error of a condition. Retrying (`canRetry`) and defaults
-(`canDefault`) are not used by any error yet.
+`counter > limit` (`<` stepping back): a logical, else the error of a condition. Defaults (`canDefault`) are not used
+by any error yet.
 
 A context starts with no error block. The program's startup calls `ErrorSys()` by name after the `STATIC`
 initializations and before the `INIT` procedures ([Program startup](#program-startup)): the runtime's, in xBase
@@ -559,16 +587,17 @@ go further.
 ## Program startup
 
 Before `main`, the global constructor of every module calls `xb_module_register` (`core/module.c`) with the
-initialization of its `STATIC`s (which become a GC root), its `INIT` and `EXIT` procedures, and its public functions by
-name. These go into the symbol table (`core/symbols.c`): an open-addressing hash of upper-cased names that the runtime's
-own functions join when the program starts (`xb_program_run`), from a table generated from `include/rtl.ch` at build
-time (`runtime/symbols.cmake`, with which parameters take references, read from the declarations by
-`runtime/rtl_declarations.cmake`); a program function hides a runtime function of its name. The table refers to every
-runtime function, so every program links them all in. `Do( cName | bBlock, [args] )` calls a function found there
-(letter case aside; spaces are part of the name, which ends at a NUL) or a codeblock, with its arguments: a reference
-goes on as passed to a compiled function and to a runtime function's parameter declared `@`, other runtime parameters
-receive the value. Do shows as `DO` on the call stack; an unknown name is `BASE/1001` `Undefined function` (not
-substitutable), anything else as its first argument `BASE/3012`.
+initialization of its `STATIC`s (which become a GC root), its `INIT` and `EXIT` procedures, its public functions by
+name, and the names of its memory variables ([Memory variables](#memory-variables)). These go into the symbol table
+(`core/symbols.c`): upper-cased names numbered by a table of names (`core/names.c`, the one memory variables use too)
+and what each designates, which the runtime's own functions join when the program starts (`xb_program_run`), from a
+table generated from `include/rtl.ch` at build time (`runtime/symbols.cmake`, with which parameters take references,
+read from the declarations by `runtime/rtl_declarations.cmake`); a program function hides a runtime function of its
+name. The table refers to every runtime function, so every program links them all in. `Do( cName | bBlock, [args] )`
+calls a function found there (letter case aside; spaces are part of the name, which ends at a NUL) or a codeblock, with
+its arguments: a reference goes on as passed to a compiled function and to a runtime function's parameter declared `@`,
+other runtime parameters receive the value. Do shows as `DO` on the call stack; an unknown name is `BASE/1001`
+`Undefined function` (not substitutable), anything else as its first argument `BASE/3012`.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
 in binary mode so programs write the same bytes everywhere; everywhere, the start of the `ElapsedMs` clock) and takes

@@ -67,7 +67,10 @@ Value *Generator::genExpr(const Expr &e) {
   }
   case ExprKind::Ref: { // a call argument passed by reference
     const Expr &target = *static_cast<const RefExpr &>(e).target;
-    if (target.kind == ExprKind::Var) return b.refVar(varOf(static_cast<const VarExpr &>(target)));
+    if (target.kind == ExprKind::Var) {
+      auto &v = static_cast<const VarExpr &>(target);
+      return v.where == VarWhere::Memvar ? b.memvar(Op::MvRef, v.name) : b.refVar(varOf(v));
+    }
     auto &ix = static_cast<const IndexExpr &>(target);
     Value *base = genExpr(*ix.base);
     Value *idx = genExpr(*ix.index);

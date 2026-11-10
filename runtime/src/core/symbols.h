@@ -39,7 +39,6 @@ void xb_symbols_seal(void);
 /* The entry of `name` (upper-cased, `len` bytes), or NULL. */
 const xb_symbol_entry *xb_symbol_find(const char *name, size_t len);
 
-/* Whether argument `k` of a call to `e` passes a reference on as it is. */
 /* The positions that receive references as passed (xb_refs_take). */
 static inline uint32_t xb_symbol_refs(const xb_symbol_entry *e) { return e->native ? e->byref : UINT32_MAX; }
 

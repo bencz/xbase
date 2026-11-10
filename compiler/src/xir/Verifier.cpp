@@ -186,6 +186,14 @@ private:
       if (i.message.empty()) fail("send without a message");
       break;
     case Op::ArrayLit: allItems(i); break;
+    case Op::MvGet: case Op::MvRef: case Op::MvPrivate: case Op::MvPublic: case Op::MvParam:
+      expect(i, 0, {});
+      if (i.message.empty()) fail("memory variable without a name");
+      break;
+    case Op::MvSet:
+      expect(i, 1, {Type::Item});
+      if (i.message.empty()) fail("memory variable without a name");
+      break;
     case Op::HashLit:
       allItems(i);
       if (i.operands().size() % 2) fail("hash with a key without a value");

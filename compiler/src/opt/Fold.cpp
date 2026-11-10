@@ -122,6 +122,8 @@ void Folder::stmt(Stmt &s) {
     break;
   case StmtKind::Local:
   case StmtKind::Static:
+  case StmtKind::Private:
+  case StmtKind::Public:
     for (LocalDecl &d : static_cast<LocalStmt &>(s).decls)
       if (d.init) fold(d.init);
     break;
@@ -176,6 +178,8 @@ void Folder::stmt(Stmt &s) {
   }
   case StmtKind::Exit:
   case StmtKind::Loop:
+  case StmtKind::Parameters:
+  case StmtKind::Memvar:
     break;
   }
 }

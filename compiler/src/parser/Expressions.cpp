@@ -328,6 +328,21 @@ ExprPtr Parser::parsePrimary() {
     }
     advance();
     if (name == "NIL") return std::make_unique<NilExpr>(loc);
+    if (at(Tok::Arrow)) { // M->name and MEMVAR->name: a memory variable; other aliases name work areas
+      advance();
+      if (!at(Tok::Ident)) {
+        expect(Tok::Ident, "a variable name");
+        return std::make_unique<NilExpr>(loc);
+      }
+      auto v = std::make_unique<VarExpr>(cur().loc, cur().upper);
+      advance();
+      if (name == "M" || name == "MEMVAR") {
+        v->memvarAlias = true;
+        return v;
+      }
+      diag_.error(loc, "the alias '" + t.text + "->' is not supported yet (work areas)");
+      return std::make_unique<NilExpr>(loc);
+    }
     return std::make_unique<VarExpr>(loc, name);
   }
   default:

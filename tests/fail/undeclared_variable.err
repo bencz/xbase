@@ -1,1 +1,1 @@
-variable 'UNDECLARED' is not declared
+'UNDECLARED' is not declared: a memory variable found by name at run time (MEMVAR or M->UNDECLARED declares one)

@@ -105,11 +105,21 @@ void CodeGen::initTypes() {
   rtGcRemember_ = rt("xb_gc_remember", voidTy, {ptrTy_});
   rtSwitchCheck_ = rt("xb_switch_check", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtSwitchMatch_ = rt("xb_switch_match", i32_, {ptrTy_, ptrTy_});
-  rtModuleRegister_ = rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, i32_, ptrTy_, i32_});
+  rtModuleRegister_ =
+      rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, i32_, ptrTy_, i32_, ptrTy_, i32_});
+  rtMvMark_ = rt("xb_mv_mark", i32_, {ptrTy_});
+  rtMvRelease_ = rt("xb_mv_release", voidTy, {ptrTy_, i32_});
+  rtMvGet_ = rt("xb_mv_get", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtMvRef_ = rt("xb_mv_ref", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtMvSet_ = rt("xb_mv_set", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtMvPrivate_ = rt("xb_mv_private", voidTy, {ptrTy_, ptrTy_, i32_});
+  rtMvPublic_ = rt("xb_mv_public", voidTy, {ptrTy_, ptrTy_});
+  rtMvParam_ = rt("xb_mv_param", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtProgramRun_ = rt("xb_program_run", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
-                           rtSeqCatch_, rtSeqValue_, rtAbiCheck_, rtModuleRegister_})
+                           rtSeqCatch_, rtSeqValue_, rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_,
+                           rtMvPrivate_, rtMvPublic_, rtMvParam_})
     quietCalls_.insert(c.getCallee());
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},
@@ -189,6 +199,7 @@ void CodeGen::run(const xir::Module &m) {
     gv->setAlignment(itemAlign_);
     statics_ = gv;
   }
+  collectMemvars(m);
   for (auto &f : m.functions) functions_[f.get()] = declare(*f);
   directEntries(m);
   for (auto &f : m.functions) genFunction(*f);
@@ -196,6 +207,33 @@ void CodeGen::run(const xir::Module &m) {
     if (direct_.count(f.get())) genThunk(*f);
   genModuleRegistration(m); // its public functions go into the symbol table
   genRequests(m);
+}
+
+// The module's memory variables: one xb_memvar per name its functions use, in
+// a table the runtime numbers when the module registers.
+void CodeGen::collectMemvars(const xir::Module &m) {
+  memvars_.clear();
+  memvarTable_ = nullptr;
+  std::vector<std::string> names;
+  for (auto &f : m.functions)
+    for (auto &b : f->blocks)
+      for (auto &i : b->insts)
+        if (xir::isMemvarOp(i->op) && !memvars_.count(i->message)) {
+          memvars_[i->message] = nullptr;
+          names.push_back(i->message);
+        }
+  if (names.empty()) return;
+  auto *entryTy = StructType::get(ctx_, {ptrTy_, i32_});
+  std::vector<Constant *> entries;
+  for (const std::string &n : names)
+    entries.push_back(ConstantStruct::get(
+        entryTy, {b_.CreateGlobalString(n, ".xb.mvname", 0, &mod_), ConstantInt::get(i32_, 0)}));
+  auto *ty = ArrayType::get(entryTy, entries.size());
+  memvarTable_ = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, ConstantArray::get(ty, entries),
+                                    "xb.module.memvars"); // written: the runtime stores each number
+  for (size_t k = 0; k < names.size(); ++k)
+    memvars_[names[k]] = ConstantExpr::getInBoundsGetElementPtr(
+        ty, memvarTable_, ArrayRef<Constant *>{ConstantInt::get(i32_, 0), ConstantInt::get(i32_, k)});
 }
 
 // EXTERNAL: a table of the functions, kept in the object file, so the linker brings in the modules that define them
@@ -308,6 +346,10 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnSelf_->setName("self");
   }
   pushFrame(plan.frameSize(), f.numParams, argc, argv, procOf(f), f.readsArgs && argc);
+  fnMark_ = nullptr; // an activation that may create PRIVATEs ends them on its way out, also when it unwinds
+  for (auto &b : f.blocks)
+    for (auto &i : b->insts)
+      if (!fnMark_ && xir::createsPrivates(i->op)) fnMark_ = b_.CreateCall(rtMvMark_, {fnCtx_}, "mark");
   fnExit_ = BasicBlock::Create(ctx_, "exit", fn_);
 
   // Blocks in reverse postorder; machine-value block parameters become PHIs.
@@ -335,6 +377,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   }
   line_ = 0;
   b_.SetInsertPoint(fnExit_);
+  if (fnMark_) b_.CreateCall(rtMvRelease_, {fnCtx_, fnMark_});
   unlinkFrame(fnFrame_, fnPrev_);
   b_.CreateRetVoid();
   placeLines();
@@ -468,10 +511,12 @@ void CodeGen::genModuleRegistration(const xir::Module &m) {
                                      "xb.module.symbols");
   }
   Value *statics = statics_ ? static_cast<Value *>(statics_) : ConstantPointerNull::get(ptrTy_);
+  Constant *memvars = memvarTable_ ? static_cast<Constant *>(memvarTable_) : ConstantPointerNull::get(ptrTy_);
   b_.CreateCall(rtModuleRegister_, {init, statics, ConstantInt::get(i32_, m.statics.size()), table,
                                     ConstantInt::get(i32_, m.initProcs.size()),
                                     ConstantInt::get(i32_, m.exitProcs.size()), symbolTable,
-                                    ConstantInt::get(i32_, symbols.size())});
+                                    ConstantInt::get(i32_, symbols.size()), memvars,
+                                    ConstantInt::get(i32_, memvars_.size())});
   b_.CreateRetVoid();
   appendToGlobalCtors(mod_, reg, 65535);
 }

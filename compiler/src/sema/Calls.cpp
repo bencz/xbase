@@ -186,9 +186,11 @@ void CallResolver::block(Block &b) {
     case StmtKind::Expr:
       expr(*static_cast<ExprStmt &>(*st).expr);
       break;
-    case StmtKind::Local: case StmtKind::Static:
+    case StmtKind::Local: case StmtKind::Static: case StmtKind::Private: case StmtKind::Public:
       for (LocalDecl &d : static_cast<LocalStmt &>(*st).decls)
         if (d.init) expr(*d.init);
+      break;
+    case StmtKind::Parameters: case StmtKind::Memvar: // names only
       break;
     case StmtKind::Return: {
       auto &r = static_cast<ReturnStmt &>(*st);

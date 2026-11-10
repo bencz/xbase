@@ -13,6 +13,7 @@
 /* What the error block may do with an error (the Error object's can*
  * variables). */
 #define XB_ERR_SUBSTITUTE 0x1u /* canSubstitute: its return value becomes the failed operation's result */
+#define XB_ERR_RETRY      0x2u /* canRetry: when it returns .T., the operation is tried again */
 
 /* Raises an error: makes an Error object of the BASE subsystem (severity
  * ES_ERROR, `args` the `argc` items of `args`) and evaluates the error block
@@ -27,6 +28,12 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
  * `frame` names, which the call stack shows while the error block runs. */
 int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args);
+
+/* An error the operation may retry (canRetry, `tries` the attempt, from 1;
+ * no arguments): 1 when the error block returned .T. and the operation is to
+ * be tried again; else 0, with a request to unwind pending (the block
+ * returning anything else is an unrecoverable error). */
+int xb_error_retry(xb_ctx *ctx, int32_t gencode, int32_t subcode, const char *operation, uint16_t tries);
 
 /* The argument error of an operator (EG_ARG, may be substituted), with its
  * operands. */

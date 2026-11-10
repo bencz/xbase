@@ -84,8 +84,11 @@ StmtPtr Parser::parseStmtKind() {
       return nullptr;
     }
   }
-  if (atStmtKw("PRIVATE") || atStmtKw("PUBLIC") || atStmtKw("MEMVAR") ||
-      atStmtKw("FIELD") || atStmtKw("PARAMETERS")) {
+  if (atStmtKw("PRIVATE")) return parseDecl(StmtKind::Private);
+  if (atStmtKw("PUBLIC")) return parseDecl(StmtKind::Public);
+  if (atStmtKw("MEMVAR")) return parseDecl(StmtKind::Memvar);
+  if (atStmtKw("PARAMETERS")) return parseDecl(StmtKind::Parameters);
+  if (atStmtKw("FIELD")) {
     diag_.error(loc, "'" + cur().text + "' is not supported yet");
     skipToEndOfStmt();
     return nullptr;
@@ -142,8 +145,12 @@ StmtPtr Parser::parseStmtKind() {
   return std::make_unique<ExprStmt>(loc, std::move(e));
 }
 
+// LOCAL, STATIC, PRIVATE and PUBLIC: names, each with an initializer or array
+// dimensions; MEMVAR and PARAMETERS: names only.
 StmtPtr Parser::parseDecl(StmtKind kind) {
   auto st = std::make_unique<LocalStmt>(cur().loc, kind);
+  std::string keyword = cur().upper;
+  bool namesOnly = kind == StmtKind::Memvar || kind == StmtKind::Parameters;
   advance();
   do {
     if (!at(Tok::Ident)) {
@@ -168,6 +175,7 @@ StmtPtr Parser::parseDecl(StmtKind kind) {
     } else if (accept(Tok::Assign)) {
       d.init = parseExpr();
     }
+    if (namesOnly && d.init) diag_.error(d.loc, keyword + " takes names only");
     st->decls.push_back(std::move(d));
   } while (accept(Tok::Comma));
   endOfStmt();

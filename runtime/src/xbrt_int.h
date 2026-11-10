@@ -7,6 +7,7 @@
 #include "core/context.h"
 #include "core/error.h"
 #include "core/numeric.h"
+#include "core/names.h"
 #include "core/symbols.h"
 #include "core/text.h"
 #include "gc/gc.h"

@@ -4,7 +4,9 @@ add_library(xbrt STATIC
   src/core/display.c
   src/core/error.c
   src/core/main.c
+  src/core/memvar.c
   src/core/module.c
+  src/core/names.c
   src/core/symbols.c
   src/core/numfmt.c
   src/core/ops.c

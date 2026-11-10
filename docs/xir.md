@@ -192,7 +192,9 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   or `@a[i]` passes.
 - Operations mirror the runtime: unary and binary operators (`++`, `--` and the step of a `FOR` without `STEP` are a
   `binary add` or `sub` of 1 marked `byOne`, printed `add.one`: the same fast paths, and an error that is theirs,
-  `xb_op_inc`/`xb_op_dec`), the truth test, calls (to the module's functions or to
+  `xb_op_inc`/`xb_op_dec`), memory variables by name (`mv.get`, `mv.set`, `mv.ref`, `mv.private`, `mv.public`,
+  `mv.param`; read and written as the heap is, since any call may create, change or end one), the truth test, calls
+  (to the module's functions or to
   declared externals), `send` (a message to the first operand, with the others as arguments), array literals (`...` in a
   call, a send or an array literal is its last operand, of type `args`, `args.rest`: the function's arguments past its
   parameters, made right before its list, which is its one use in the block; `restRefs` the positions of a call that

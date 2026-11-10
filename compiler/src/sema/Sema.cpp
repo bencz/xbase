@@ -19,9 +19,10 @@ struct Sema::Scope {
 
 void Sema::run(Module &m) {
   module_ = &m;
-  frames_.push_back({{}, nullptr, nullptr}); // the file's STATICs
+  frames_.push_back({{}, {}, {}, nullptr, nullptr}); // the file's STATICs and MEMVARs
   Scope fileScope;
   for (LocalDecl &d : m.fileStatics) declare(d, true, fileScope);
+  for (const LocalDecl &d : m.fileMemvars) declareMemvar(d);
   std::unordered_map<std::string, SourceLoc> seen;
   for (auto &f : m.funcs) {
     // INIT and EXIT procedures have names of their own: nothing calls them.
@@ -69,7 +70,7 @@ bool Sema::constantInit(const Expr &e, unsigned blockDepth) const {
 // codeblock stored in it can call itself.
 void Sema::declare(LocalDecl &d, bool isStatic, Scope &s) {
   if (!isStatic && d.init) expr(*d.init, s);
-  bool duplicate = frames_.back().names.count(d.name) != 0;
+  bool duplicate = frames_.back().names.count(d.name) != 0 || frames_.back().memvars.count(d.name) != 0;
   if (duplicate) {
     diag_.error(d.loc, "'" + d.name + "' is already declared");
   } else if (isStatic) {
@@ -87,10 +88,31 @@ void Sema::declare(LocalDecl &d, bool isStatic, Scope &s) {
   }
 }
 
+// MEMVAR: the name is a memory variable in the frame (the file, or a
+// function); it cannot also be one of the frame's LOCALs, parameters or
+// STATICs.
+void Sema::declareMemvar(const LocalDecl &d) {
+  if (frames_.back().names.count(d.name)) diag_.error(d.loc, "'" + d.name + "' is already declared");
+  frames_.back().memvars.insert(d.name);
+}
+
+// PRIVATE, PUBLIC and PARAMETERS create memory variables: the name cannot be a
+// LOCAL or parameter of the function, and is no longer undeclared there.
+void Sema::createdMemvar(const LocalDecl &d) {
+  if (frames_.back().names.count(d.name)) diag_.error(d.loc, "'" + d.name + "' is already declared");
+  frames_.back().created.insert(d.name);
+}
+
+bool Sema::memvarCreated(const std::string &name) const {
+  for (const Frame &f : frames_)
+    if (f.created.count(name)) return true;
+  return false;
+}
+
 void Sema::func(FuncDecl &f) {
   curFunc_ = &f;
   Scope s;
-  frames_.push_back({{}, &f.boxed, nullptr});
+  frames_.push_back({{}, {}, {}, &f.boxed, nullptr});
   for (const Param &p : f.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, s.next}).second)
       diag_.error(p.loc, "duplicate parameter '" + p.name + "'");
@@ -114,9 +136,17 @@ void Sema::markBoxed(Frame &f, uint32_t slot) {
 // between there and here gets a capture that passes its cell along. Parameters
 // of an enclosing codeblock cannot be captured.
 bool Sema::resolve(VarExpr &v) {
+  if (v.memvarAlias) {
+    v.where = VarWhere::Memvar;
+    return true;
+  }
   for (size_t fi = frames_.size(); fi-- > 0;) {
     auto it = frames_[fi].names.find(v.name);
-    if (it == frames_[fi].names.end()) continue;
+    if (it == frames_[fi].names.end()) {
+      if (!frames_[fi].memvars.count(v.name)) continue;
+      v.where = VarWhere::Memvar; // MEMVAR in this frame: before a STATIC of an enclosing one
+      return true;
+    }
     uint32_t slot = it->second.index;
     if (it->second.where == VarWhere::Static) { // module storage: no capture needed
       v.where = VarWhere::Static;
@@ -149,7 +179,7 @@ bool Sema::resolve(VarExpr &v) {
 }
 
 void Sema::codeblock(BlockExpr &b, Scope &s) {
-  frames_.push_back({{}, nullptr, &b}); // parameters only: never captured, and tested for references anyway
+  frames_.push_back({{}, {}, {}, nullptr, &b}); // parameters only: never captured, and tested for references anyway
   uint32_t n = 0;
   for (const Param &p : b.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, n}).second)
@@ -163,7 +193,10 @@ void Sema::codeblock(BlockExpr &b, Scope &s) {
 
 void Sema::block(Block &b, Scope &s) {
   for (auto &st : b) {
-    if (st->kind != StmtKind::Local && st->kind != StmtKind::Static) s.seenExecutable = true;
+    // PARAMETERS may come before the LOCALs, as the reference accepts.
+    if (st->kind != StmtKind::Local && st->kind != StmtKind::Static && st->kind != StmtKind::Memvar &&
+        st->kind != StmtKind::Parameters)
+      s.seenExecutable = true;
     stmt(*st, s);
   }
 }
@@ -187,10 +220,30 @@ void Sema::stmt(Stmt &st, Scope &s) {
     for (LocalDecl &d : static_cast<LocalStmt &>(st).decls) declare(d, isStatic, s);
     break;
   }
+  case StmtKind::Memvar:
+    if (s.seenExecutable || s.blockDepth) diag_.error(st.loc, "MEMVAR declaration follows executable statement");
+    for (const LocalDecl &d : static_cast<LocalStmt &>(st).decls) declareMemvar(d);
+    break;
+  case StmtKind::Private:
+  case StmtKind::Public:
+    for (LocalDecl &d : static_cast<LocalStmt &>(st).decls) {
+      if (d.init) expr(*d.init, s); // before the variable exists: it reads the one visible
+      createdMemvar(d);
+    }
+    break;
+  case StmtKind::Parameters: // PRIVATEs holding the arguments received
+    curFunc_->readsArgs = true;
+    for (const LocalDecl &d : static_cast<LocalStmt &>(st).decls) createdMemvar(d);
+    break;
   case StmtKind::ForEach: {
     auto &f = static_cast<ForEachStmt &>(st);
-    if (f.key) expr(*f.key, s);
-    for (auto &v : f.vars) expr(*v, s);
+    auto loopVar = [&](Expr &v) {
+      expr(v, s);
+      if (v.kind == ExprKind::Var && static_cast<const VarExpr &>(v).where == VarWhere::Memvar)
+        diag_.error(v.loc, "a memory variable as the variable of FOR EACH is not supported yet");
+    };
+    if (f.key) loopVar(*f.key);
+    for (auto &v : f.vars) loopVar(*v);
     for (auto &c : f.collections) expr(*c, s);
     ++s.loopDepth;
     nestedBlock(f.body, s);
@@ -296,7 +349,13 @@ void Sema::expr(Expr &e, Scope &s) {
     break;
   case ExprKind::Var: {
     auto &v = static_cast<VarExpr &>(e);
-    if (!resolve(v)) diag_.error(v.loc, "variable '" + v.name + "' is not declared (MEMVAR/FIELD not supported yet)");
+    if (resolve(v)) break;
+    v.where = VarWhere::Memvar; // looked up by name when it runs, as in Clipper
+    if (memvarCreated(v.name) || undeclared_ == Undeclared::Ignore) break;
+    std::string text = "'" + v.name + "' is not declared: a memory variable found by name at run time (MEMVAR or M->" +
+                       v.name + " declares one)";
+    if (undeclared_ == Undeclared::Error) diag_.error(v.loc, text);
+    else diag_.warning(v.loc, text);
     break;
   }
   case ExprKind::ArrayLit:

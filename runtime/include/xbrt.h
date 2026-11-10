@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 24u
+#define XB_ABI_VERSION 25u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -369,8 +369,41 @@ typedef struct xb_symbol {
   const char *name;
   xb_func fn;
 } xb_symbol;
+/* [ABI] The name of a memory variable a module uses (PRIVATE, PUBLIC,
+ * PARAMETERS, MEMVAR, M->, an undeclared name): one per name and module,
+ * numbered by the runtime when the module registers (`memvars`). */
+typedef struct xb_memvar {
+  const char *name;         /* upper-cased */
+  uint32_t id;              /* set by xb_module_register */
+} xb_memvar;
 void     xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics, const xb_func *procs,
-                            uint32_t ninit, uint32_t nexit, const xb_symbol *symbols, uint32_t nsymbols);
+                            uint32_t ninit, uint32_t nexit, const xb_symbol *symbols, uint32_t nsymbols,
+                            xb_memvar *memvars, uint32_t nmemvars);
+
+/* Memory variables (core/memvar.c), per context. The name designates the
+ * variable visible now: the latest PRIVATE of that name still alive (one
+ * created by an activation running now), else the PUBLIC. A PRIVATE ends with
+ * the activation (function or codeblock call) that created it: one that may
+ * create some takes the mark at its start and releases to it at its end, also
+ * when it unwinds, and the variables the PRIVATEs hid show again. Errors and
+ * requests to unwind are in the pending flag, as for the operators.
+ * - get: the value; no variable is error 1003 (Variable does not exist),
+ *   which its block may retry. ref: what an argument @name passes, the same way.
+ * - set: assigns it; with none visible, a PRIVATE of the activation running
+ *   now is created first (PRIVATEs nest: the latest are its own).
+ * - private: PRIVATE name: a new variable (NIL), unless the activation, whose
+ *   mark is `mark`, has one of that name already. public: PUBLIC name: a new
+ *   variable (.F.), unless one of that name is visible.
+ * - param: PARAMETERS: a PRIVATE of the activation holding `arg`, the
+ *   variable itself when it was passed by reference. */
+uint32_t xb_mv_mark(xb_ctx *ctx);
+void     xb_mv_release(xb_ctx *ctx, uint32_t mark);
+void     xb_mv_get(xb_ctx *ctx, xb_item *r, const xb_memvar *m);
+void     xb_mv_ref(xb_ctx *ctx, xb_item *r, const xb_memvar *m);
+void     xb_mv_set(xb_ctx *ctx, const xb_memvar *m, const xb_item *v);
+void     xb_mv_private(xb_ctx *ctx, const xb_memvar *m, uint32_t mark);
+void     xb_mv_public(xb_ctx *ctx, const xb_memvar *m);
+void     xb_mv_param(xb_ctx *ctx, const xb_memvar *m, const xb_item *arg);
 void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv);
 
 /* Codeblocks. xb_block_new stores the new block in `r` and returns it; the

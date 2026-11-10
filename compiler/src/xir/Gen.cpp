@@ -181,6 +181,8 @@ Var *Generator::varOf(const VarExpr &v) {
     if (x->name.empty()) x->name = v.name;
     return x;
   }
+  case VarWhere::Memvar: // no Var: reached by name (load, store, the reference of an argument)
+    return nullptr;
   }
   return nullptr;
 }
@@ -205,13 +207,19 @@ Access Generator::accessOf(const Var &v) {
 }
 
 Value *Generator::load(const VarExpr &v) {
+  if (v.where == VarWhere::Memvar) return cur_.b->memvar(Op::MvGet, v.name);
   Access a = accessOf(v);
   return cur_.b->load(varOf(v), a);
 }
 
 // A store into a variable that may live in the heap (a cell, an element
-// through a reference) is followed by the write barrier.
+// through a reference) is followed by the write barrier (a memory variable's
+// is the runtime's).
 void Generator::store(const VarExpr &v, Value *value) {
+  if (v.where == VarWhere::Memvar) {
+    cur_.b->memvar(Op::MvSet, v.name, value);
+    return;
+  }
   Var *x = varOf(v);
   Access a = accessOf(v);
   cur_.b->store(x, a, value);

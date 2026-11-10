@@ -1,0 +1,24 @@
+
+pub init L .F.
+callee sees priv1         10
+after callee priv1         20
+undecl created in Sub: .T. .F.
+undecl here          5
+hide x inner inner
+x back outer
+params          1          2          3
+arr          3 U
+cnt          2
+byref cnt         99
+m->         99 .F.
+pub again          7
+pub from callee made
+dup          2
+public over private private
+inner pub2 hidden
+pub2 after p
+private again N
+after block .F.
+z inner          2
+z outer          1
+pv pubinit
