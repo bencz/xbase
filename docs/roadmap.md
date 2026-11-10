@@ -179,7 +179,8 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 - Libraries written in xBase ([architecture.md](architecture.md#libraries-written-in-xbase)): `xbc --library` (a
   static library and its generated header), a link step in `xbc` through the system's linker, the ABI checked by every
   module; then shared libraries and project files.
-- GC: pages returned to the operating system; statepoints and a moving collector ([xir.md](xir.md#phases)).
+- GC: free blocks returned to the operating system; statepoints and evacuation in the Immix heap
+  ([xir.md](xir.md#phases)).
 
 ### Diagnostics
 

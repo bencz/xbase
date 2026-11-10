@@ -91,14 +91,22 @@ through the reference when one was passed, and returns it.
 
 ## Garbage collector
 
-`runtime/src/gc/gc.c` is a precise, non-moving, generational mark and lazy-sweep collector. Strings, arrays, array item
-storage, hashes, hash entry stores, codeblocks, cells, reference targets and objects (instances of classes) are its
-objects; an 8-byte header (size, kind, state) precedes each one, so object pointers are what the rest of the runtime and
-compiled code use.
+`runtime/src/gc/gc.c` is a precise, non-moving, generational mark-region collector with an Immix heap layout. Strings,
+arrays, array item storage, hashes, hash entry stores, codeblocks, cells, reference targets and objects (instances of
+classes) are its objects; an 8-byte header (size, kind, state, flags) precedes each one, so object pointers are what the
+rest of the runtime and compiled code use.
 
-- Allocation: objects up to 2048 bytes (header included) come from 64 KB pages of 27 size classes. Every thread has a
-  local heap with one page per class and allocates from its free list without locking. Larger objects are allocated
-  individually.
+- Heap: objects up to 8 KB (header included) live in blocks of 32 KB, aligned to their size and divided into lines of
+  128 bytes. A block's first lines hold its metadata: per line, the epoch of the last collection that reached an
+  object covering it and whether an old object covers it, and a bit per 8 bytes where an object starts (`xb_hblock`).
+  Blocks come from chunks of 32 blocks obtained with `malloc` and aligned by hand. Larger objects are allocated
+  individually (`XB_GC_HDR_LARGE` in their header).
+- Allocation: every thread fills a hole, a run of free lines, by bumping a cursor, without locking; when the object
+  does not fit, it takes the block's next hole, then a recyclable block (free lines among live ones), then a free
+  block. An object above one line that does not fit the hole goes to an overflow run of the thread instead (holes
+  large enough for it, from the same recyclable blocks, then free ones; a recyclable block without one leaves the list
+  until the next sweep), so no hole is given up for it and the free lines of recyclable blocks serve objects of every
+  size.
 - Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest) of
   every registered context, and global item arrays
   registered with `xb_gc_add_root` (the modules' `STATIC`s).
@@ -131,11 +139,13 @@ compiled code use.
   into such an old array marks the element's card and records the array for its cards only; the young collection
   scans the marked cards (eight card bytes per step) instead of the whole array. Storage that is replaced (the array
   grew) records the whole array.
-- Collection: marking uses an explicit stack. Large objects are freed at once. After a young collection pages are
-  swept lazily when an allocation needs one (the search resumes where the previous one stopped), and only pages that
-  received objects since their last sweep need it, since old objects do not die there. A full collection sweeps
-  every page at once and gives pages whose objects all died back to a pool shared by all size classes. Pages are not
-  returned to the operating system.
+- Collection: marking uses an explicit stack. Marking an object gives the lines it covers the collection's epoch, and
+  making it old (a full collection, a promotion) makes them old lines. A line is then free when it is not old and no
+  object reached by this collection covers it: sweeping reads a block's line marks, never its objects, and makes the
+  lists of free and recyclable blocks. A young collection sweeps only the blocks that received objects or hold aged
+  ones since their last sweep; old lines stay until a full collection, which clears every line and walks the objects
+  through the start bits to clear their marks. When the epoch (8 bits) wraps, every line mark is cleared. Large
+  objects are freed at once. Memory is not returned to the operating system.
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
 - Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, an object above half the address space,

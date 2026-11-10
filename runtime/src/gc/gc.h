@@ -6,8 +6,7 @@
 
 /* Garbage-collected objects. An 8-byte header precedes every object. */
 typedef enum xb_gc_kind {
-  XB_GC_FREE = 0,           /* a free slot of a page */
-  XB_GC_STRING,
+  XB_GC_STRING = 1,
   XB_GC_ARRAY,
   XB_GC_BLOCK,
   XB_GC_CELL,
@@ -19,11 +18,14 @@ typedef enum xb_gc_kind {
 } xb_gc_kind;
 
 typedef struct xb_gc_hdr {
-  uint32_t size;            /* object bytes (statistics) */
+  uint32_t size;            /* object bytes: the lines a block object covers, statistics (saturates for large) */
   uint8_t  kind;            /* xb_gc_kind */
   uint8_t  state;           /* XB_GC_MARKED | XB_GC_REMEMBERED */
-  uint16_t reserved;
+  uint16_t flags;           /* XB_GC_HDR_LARGE */
 } xb_gc_hdr;
+
+/* xb_gc_hdr.flags: allocated on its own, not in a block. */
+#define XB_GC_HDR_LARGE 1u
 
 /* Marked by the last collection that saw it, i.e. old (marks are sticky). */
 #define XB_GC_MARKED     XB_GC_STATE_OLD

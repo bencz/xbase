@@ -31,7 +31,7 @@ textual IR is written (except with the debugging options `--dump-xir` and `--dum
 | Strings | Immutable byte strings with a codepage; UTF-8 is the default codepage. `Len()` counts bytes. |
 | Names | Compiler `xbc`, runtime `xbrt`, C symbols `xb_*`, xBase functions `xbf_<NAME>` (runtime) and `xbp_<NAME>` (program). |
 | Errors | Propagated through the task context's pending flag; no `setjmp`/`longjmp`, no unwinder. |
-| Memory | Tracing GC: precise, non-moving mark and lazy sweep, size-class pages with per-thread allocation; no reference counting; two generations (sticky marks, remembered set, write barrier). |
+| Memory | Tracing GC: precise, non-moving mark-region with an Immix heap (blocks of lines, bump allocation per thread into free lines); no reference counting; two generations (sticky marks, aging, remembered set, write barrier). |
 | Macros `&` | Evaluated by an expression interpreter in the runtime; no JIT. *(planned)* |
 | Classes | Native in the compiler, Clipper-style syntax (`CLASS`/`ENDCLASS`, `METHOD ... CLASS`). *(planned)* |
 | async/await | .NET task model on stackless coroutines and a thread pool. *(planned)* |
