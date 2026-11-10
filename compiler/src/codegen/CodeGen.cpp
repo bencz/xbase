@@ -208,7 +208,7 @@ bool CodeGen::finish(const xir::Function *start) {
 void CodeGen::directEntries(const xir::Module &m) {
   for (auto &f : m.functions) {
     if (!xir::hasDirectEntry(*f)) continue;
-    std::vector<Type *> params{ptrTy_, ptrTy_};
+    std::vector<Type *> params{ptrTy_, ptrTy_, ptrTy_};
     for (uint32_t k = 0; k < f->numParams; ++k) params.insert(params.end(), {i64_, i64_});
     Function *fn = Function::Create(FunctionType::get(Type::getVoidTy(ctx_), params, false),
                                     GlobalValue::InternalLinkage, "xb.direct." + f->name, mod_);
@@ -225,7 +225,9 @@ void CodeGen::genThunk(const xir::Function &f) {
   thunk->setUWTableKind(UWTableKind::Async);
   b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", thunk));
   Value *argc = thunk->getArg(2), *argv = thunk->getArg(3);
-  std::vector<Value *> args{thunk->getArg(0), thunk->getArg(1)};
+  fnCtx_ = thunk->getArg(0);
+  Value *frames = loadFrom(ptrTy_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames), Mem::Ctx, "frames");
+  std::vector<Value *> args{fnCtx_, thunk->getArg(1), frames};
   for (uint32_t k = 0; k < f.numParams; ++k) {
     Words w = loadWords(argItem(argc, argv, k));
     args.insert(args.end(), {w.header, w.payload});
@@ -276,6 +278,7 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnRet_ = fn_->getArg(1);
     fnRet_->setName("ret");
   }
+  fnPrev_ = fnDirect_ ? fn_->getArg(2) : nullptr; // the caller's frame, which the context's chain has at the call
   if (f.kind != xir::Function::Kind::ModuleInit && !fnDirect_) {
     argc = fn_->getArg(2);
     argv = fn_->getArg(3);
@@ -314,7 +317,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   }
   line_ = 0;
   b_.SetInsertPoint(fnExit_);
-  unlinkFrame(fnFrame_);
+  unlinkFrame(fnFrame_, fnPrev_);
   b_.CreateRetVoid();
   placeLines();
   plan_ = nullptr;
@@ -379,7 +382,7 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
   AllocaInst *frame = IRBuilder<>(&entry, entry.getFirstInsertionPt()).CreateAlloca(ty, nullptr, "frame");
   fnBase_ = b_.CreateConstInBoundsGEP2_32(ty, frame, 0, FrameSlots, "slots");
   for (uint32_t k = 0; k < nparams; ++k) {
-    if (fnDirect_) storeWords(slot(k), fn_->getArg(2 + 2 * k), fn_->getArg(3 + 2 * k)); // the items in registers
+    if (fnDirect_) storeWords(slot(k), fn_->getArg(3 + 2 * k), fn_->getArg(4 + 2 * k)); // the items in registers
     else copyItem(slot(k), argItem(argc, argv, k));
   }
   if (nslots > nparams)
@@ -388,25 +391,25 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
     tag(b_.CreateStore(argv, b_.CreateStructGEP(ty, frame, FrameArgv)), Mem::FrameLink);
     tag(b_.CreateStore(argc, b_.CreateStructGEP(ty, frame, FrameArgc)), Mem::FrameLink);
   }
-  linkFrame(frame, ConstantInt::get(i32_, nslots), proc);
+  linkFrame(frame, ConstantInt::get(i32_, nslots), proc, fnPrev_);
   fnFrame_ = frame;
 }
 
 // The header of a frame whose slots are valid (`nslots`, `proc`, line 0), and
 // the frame linked into the context's chain.
-void CodeGen::linkFrame(Value *frame, Value *nslots, Value *proc) {
+void CodeGen::linkFrame(Value *frame, Value *nslots, Value *proc, Value *prev) {
   StructType *ty = frameType(0);
   tag(b_.CreateStore(nslots, b_.CreateStructGEP(ty, frame, FrameCount)), Mem::FrameLink);
   tag(b_.CreateStore(proc, b_.CreateStructGEP(ty, frame, FrameProc)), Mem::FrameLink);
   tag(b_.CreateStore(ConstantInt::get(i32_, 0), b_.CreateStructGEP(ty, frame, FrameLine)), Mem::FrameLink);
   Value *frames = b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames);
-  tag(b_.CreateStore(loadFrom(ptrTy_, frames, Mem::Ctx, "prev"), b_.CreateStructGEP(ty, frame, FramePrev)),
-      Mem::FrameLink);
+  if (!prev) prev = loadFrom(ptrTy_, frames, Mem::Ctx, "prev");
+  tag(b_.CreateStore(prev, b_.CreateStructGEP(ty, frame, FramePrev)), Mem::FrameLink);
   tag(b_.CreateStore(frame, frames), Mem::Ctx);
 }
 
-void CodeGen::unlinkFrame(Value *frame) {
-  Value *prev = loadFrom(ptrTy_, b_.CreateStructGEP(frameType(0), frame, FramePrev), Mem::FrameLink, "prev");
+void CodeGen::unlinkFrame(Value *frame, Value *prev) {
+  if (!prev) prev = loadFrom(ptrTy_, b_.CreateStructGEP(frameType(0), frame, FramePrev), Mem::FrameLink, "prev");
   tag(b_.CreateStore(prev, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
 }
 

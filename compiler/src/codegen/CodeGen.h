@@ -81,8 +81,9 @@ private:
   llvm::Constant *procOf(const xir::Function &f);
   void markLine(llvm::Instruction *i) const;
   void placeLines();
-  void linkFrame(llvm::Value *frame, llvm::Value *nslots, llvm::Value *proc);
-  void unlinkFrame(llvm::Value *frame);
+  // `prev`: the frame the chain has now, when known (else it is read from the context).
+  void linkFrame(llvm::Value *frame, llvm::Value *nslots, llvm::Value *proc, llvm::Value *prev = nullptr);
+  void unlinkFrame(llvm::Value *frame, llvm::Value *prev = nullptr);
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
   void addAbiAttributes(llvm::Function *f);
   llvm::Function *declare(const xir::Function &f);
@@ -266,6 +267,9 @@ private:
   // takes references, in a function that reads its arguments nowhere else (PCount(), PValue()).
   bool forwardInPlace_ = false;
   bool fnDirect_ = false; // the function being generated is a direct body: no argc and argv
+  // A direct body's caller's frame (its argument): linking and unlinking the frame read no memory, which would make
+  // every call wait for the store of the call before (the chain of the context's frames). Null otherwise.
+  llvm::Value *fnPrev_ = nullptr;
   bool runtimeLibrary_ = false;
   llvm::BasicBlock *fnExit_ = nullptr;
   llvm::BasicBlock *unwind_ = nullptr; // where an operation of the current block that fails goes (xir unwind)

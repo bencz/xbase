@@ -367,14 +367,16 @@ emits the object file.
   ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions leave such calls alone.
 - Direct entries (`directEntries`, `xir::hasDirectEntry`): a function of the program that does not read its arguments as
   received (its frame keeps none, `readsArgs`, and it has no `...`, `usesRest`) and is not the body versioned for
-  references (`byRefBody`) gets its body in an internal function, `xb.direct.NAME`, taking the context, the result slot
-  and each parameter's item as two words (header and value) in registers. Calls of the module go there
-  (`emitDirectCall`, `xir::isDirectCall`) with no `argc` or `argv` and no argument slots in the frame plan: each operand
-  is read where it is and passed as words; a parameter not passed gets `NIL`, and arguments past the parameters are
-  evaluated and left out, since nothing reads them. The function's symbol is a thunk (`genThunk`) that reads the items
-  from `argv` (`argItem`) and calls the direct entry: the runtime, `Do()` and other modules call it. The body still
-  tests its parameters for references, and its `call.forward` passes its parameters' slots as the arguments. Measured
-  against calls through `argv` (callgrind, x86-64): `fib` 8% fewer instructions.
+  references (`byRefBody`) gets its body in an internal function, `xb.direct.NAME`, taking the context, the result slot,
+  the caller's frame (the context's chain has it at the call: linking and unlinking the frame then read no memory, so a
+  call does not wait for the store of the one before) and each parameter's item as two words (header and value) in
+  registers. Calls of the module go there (`emitDirectCall`, `xir::isDirectCall`) with no `argc` or `argv` and no
+  argument slots in the frame plan: each operand is read where it is and passed as words; a parameter not passed gets
+  `NIL`, and arguments past the parameters are evaluated and left out, since nothing reads them. The function's symbol
+  is a thunk (`genThunk`) that reads the items from `argv` (`argItem`) and calls the direct entry: the runtime, `Do()`
+  and other modules call it. The body still tests its parameters for references, and its `call.forward` passes its
+  parameters' slots as the arguments. Measured against calls through `argv` (callgrind, x86-64): `fib` 8% fewer
+  instructions.
 - Values held in frame slots (`Home::Kind::Slot`) keep their header and value words in registers, read once right
   after their definition (`cacheWords`; for a block parameter, at the start of its block): the frame is linked into
   the context, so LLVM must reload a slot after every call, though a slot keeps its value unchanged while the value

@@ -191,7 +191,7 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
 // parameters are evaluated and left out, as nothing reads them).
 void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
   const xir::Function &callee = *i.callee.function;
-  std::vector<Value *> args{fnCtx_, d};
+  std::vector<Value *> args{fnCtx_, d, fnFrame_}; // the chain's frame at a call is the caller's
   for (uint32_t k = 0; k < callee.numParams; ++k) {
     if (k >= i.operands().size()) {
       args.insert(args.end(), {headerWord(XB_T_NIL, 0, 0), ConstantInt::get(i64_, 0)});
