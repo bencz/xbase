@@ -179,11 +179,15 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   }
   bool fused = fusedComparisons_.count(&i) != 0;
   BasicBlock *intBB = newBlock("int"), *notInt = newBlock("not.int"), *numBB = newBlock("num");
+  BasicBlock *dblBB = newBlock("double"), *mixed = newBlock("mixed");
   BasicBlock *slow = newBlock("op"), *join = newBlock("join");
   Value *ta = typeOf(i.operand(0), a);
   Value *tb = typeOf(i.operand(1), bv);
   b_.CreateCondBr(bothInts(ta, tb), intBB, notInt); // both paths are fast: neither is cold
   b_.SetInsertPoint(notInt);
+  Value *isDouble = ConstantInt::get(i32_, XB_T_DOUBLE);
+  b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble)), dblBB, mixed);
+  b_.SetInsertPoint(mixed); // an integer with a double: converted when exact
   branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow);
 
   // Both operands are read before `d`, which may be one of them, is written.
@@ -204,22 +208,27 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   }
   b_.CreateBr(join);
 
+  // The operation on two doubles `fx`, `fy` with decimals `da`, `db`.
+  auto doubles = [&](Value *fx, Value *fy, Value *da, Value *db) {
+    if (compare) {
+      Value *r = doubleCompare(b_, pred, fx, fy);
+      if (!fused) storeLogical(d, r);
+      bools.push_back({r, b_.GetInsertBlock()});
+    } else {
+      Value *dec = i.binop == BinOp::Mul ? b_.CreateAdd(da, db) // wraps at 16 bits, as the runtime's does
+                                         : b_.CreateSelect(b_.CreateICmpUGT(da, db), da, db);
+      Value *r = i.binop == BinOp::Add   ? b_.CreateFAdd(fx, fy)
+                 : i.binop == BinOp::Sub ? b_.CreateFSub(fx, fy)
+                                         : b_.CreateFMul(fx, fy);
+      storeDouble(d, r, dec);
+    }
+    b_.CreateBr(join);
+  };
+  b_.SetInsertPoint(dblBB); // two doubles, the usual case of the double paths: their bits and decimals as they are
+  doubles(b_.CreateBitCast(intValue(a), b_.getDoubleTy()), b_.CreateBitCast(intValue(bv), b_.getDoubleTy()),
+          numberDec(a, isDouble), numberDec(bv, isDouble));
   b_.SetInsertPoint(numBB);
-  Value *fx = numberAsDouble(a, ta), *fy = numberAsDouble(bv, tb);
-  if (compare) {
-    Value *r = doubleCompare(b_, pred, fx, fy);
-    if (!fused) storeLogical(d, r);
-    bools.push_back({r, b_.GetInsertBlock()});
-  } else {
-    Value *da = numberDec(a, ta), *db = numberDec(bv, tb);
-    Value *dec = i.binop == BinOp::Mul ? b_.CreateAdd(da, db) // wraps at 16 bits, as the runtime's does
-                                       : b_.CreateSelect(b_.CreateICmpUGT(da, db), da, db);
-    Value *r = i.binop == BinOp::Add   ? b_.CreateFAdd(fx, fy)
-               : i.binop == BinOp::Sub ? b_.CreateFSub(fx, fy)
-                                       : b_.CreateFMul(fx, fy);
-    storeDouble(d, r, dec);
-  }
-  b_.CreateBr(join);
+  doubles(numberAsDouble(a, ta), numberAsDouble(bv, tb), numberDec(a, ta), numberDec(bv, tb));
 
   b_.SetInsertPoint(slow);
   callItemOp(rtBin_.at(i.binop), d, {a, bv});
@@ -360,9 +369,25 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
 // of two integers is their remainder (0 for a divisor of -1). Anything else
 // calls the operator, which raises the errors.
 void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *d) {
-  BasicBlock *numBB = newBlock("num"), *done = newBlock("num.done"), *slow = newBlock("op"), *join = newBlock("join");
+  BasicBlock *dblBB = newBlock("double"), *other = newBlock("other"), *numBB = newBlock("num");
+  BasicBlock *slow = newBlock("op"), *join = newBlock("join");
   Value *ta = typeOf(i.operand(0), a), *tb = typeOf(i.operand(1), bv);
+  Value *isDouble = ConstantInt::get(i32_, XB_T_DOUBLE);
+  b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble)), dblBB, other);
+  b_.SetInsertPoint(other);
   branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow);
+  // The quotient or remainder `r` of a non-zero divisor `fy`, with SET DECIMALS decimals.
+  auto finish = [&](Value *r, Value *fy) {
+    BasicBlock *done = newBlock("num.done");
+    Value *dec = b_.CreateTrunc(loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxDecimals), Mem::Ctx), i16_);
+    branchLikely(b_.CreateFCmpUNE(fy, ConstantFP::get(b_.getDoubleTy(), 0.0)), done, slow);
+    b_.SetInsertPoint(done);
+    storeDouble(d, r, dec);
+    b_.CreateBr(join);
+  };
+  b_.SetInsertPoint(dblBB); // two doubles: their bits as they are
+  Value *gx = b_.CreateBitCast(intValue(a), b_.getDoubleTy()), *gy = b_.CreateBitCast(intValue(bv), b_.getDoubleTy());
+  finish(i.binop == BinOp::Div ? b_.CreateFDiv(gx, gy) : b_.CreateFRem(gx, gy), gy);
   b_.SetInsertPoint(numBB);
   Value *fx = numberAsDouble(a, ta), *fy = numberAsDouble(bv, tb);
   Value *r;
@@ -377,11 +402,7 @@ void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *
                                 b_.CreateSIToFP(b_.CreateSRem(xi, safe), b_.getDoubleTy()));
     r = b_.CreateSelect(bothInts(ta, tb), ir, b_.CreateFRem(fx, fy));
   }
-  Value *dec = b_.CreateTrunc(loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxDecimals), Mem::Ctx), i16_);
-  branchLikely(b_.CreateFCmpUNE(fy, ConstantFP::get(b_.getDoubleTy(), 0.0)), done, slow);
-  b_.SetInsertPoint(done);
-  storeDouble(d, r, dec);
-  b_.CreateBr(join);
+  finish(r, fy);
   b_.SetInsertPoint(slow);
   callItemOp(rtBin_.at(i.binop), d, {a, bv});
   checkPending(unwind_);

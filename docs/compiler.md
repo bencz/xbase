@@ -329,40 +329,41 @@ emits the object file.
   integers with LLVM's overflow intrinsics (an overflow, like any other operand types, calls the operator, which makes a
   double); `+`, `-` and `*` of two numbers of which one is a double, in doubles (an integer beyond 2^53 in magnitude,
   which a double cannot hold exactly, goes to the runtime, so that every target converts it as the runtime does), with
-  the decimals the runtime gives (the larger for `+` and `-`, the sum for `*`); the comparisons of two numbers (integers
-  exactly, others as doubles with `xb_compare`'s rule, NaN comparing equal); `for.test` with an integer counter, limit
-  and step; `index` and `index.set` of an array with an index within it, an integer or a truncated double (the array's
-  `len` and `items`, `xb_array` in `xbrt.h`), where the store calls `xb_gc_write_item` only for a value of a heap type
-  (`xb_type_is_heap`), and an index out of bounds calls the runtime, which raises the error. A comparison whose only use
-  is the `truth` right after it gives that test its boolean directly, without the logical item. The bit operators (`&`
-  `|` `^^` `<<` `>>` `~`) and the calls to a bit function (`BitAnd`, ..., the table `xb_bit_function` in `xbrt.h`) with
-  number operands are the machine operation (`and`, `or`, `xor`, `shl`, `ashr`, `lshr`, a select for counts outside
-  0..63), a double taken as an integer by `llvm.fptosi.sat` (truncated, saturated, NaN 0, as `xb_dbl_to_i64`); other
-  operands call the runtime operator or function, which raises the error. Unary `-` of an integer other than INT64_MIN
-  or of a double is done in place too. `InlineCalls.cpp` does a few runtime functions in place when their arguments
-  allow it, with their rules: `Len()` of a string or an array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n,
-  1 )` with `n` within `c` (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()` whose argument
-  is the `SubStr()` right before it, used nowhere else, reads the byte itself; `PCount()` is the function's own `argc`,
-  and `PValue( n )` with an integer `n` copies the parameter's slot or the argument as passed (`NIL` outside 1 ..
-  `argc`); anything else calls the function, which raises the errors, and so does a `PValue()` of an argument that is a
-  reference. A call whose only argument is `...`, to a function that takes references, in a function with no other `...`
-  and no `PCount()`/`PValue()`, passes the arguments where they are instead of copying them (`forwardInPlace_`).
-  `append` copies a string's bytes into the room of the variable's growing string in place (one store for one byte) when
-  they fit, and calls `xb_op_append` otherwise. A `load` that an `append` of its variable reaches with no other load in
-  between ends the growth before the value goes on (`shareString`), unless only `Len()` and `Asc()` read its value, in
-  place; a forward data flow finds them (`findSharingLoads`), where a block entered by unwinding (a `BEGIN SEQUENCE`
-  handler, a `FOR EACH` cleanup) starts with every such variable growing, and a block reached growing along some edges
-  only, from which every path ends the growth before any append (a loop that reads what a loop before it built), ends it
-  on those edges instead, so the loop does not test it again. The bit operators and functions take two integers in two
-  instructions and convert doubles on a path of their own, and the fast paths of calls read their operands in place: the
-  argument group is built only for the call. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at
-  the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another
-  module's function to `xbp_NAME`, one to a function of the module to its direct entry when it has one (below), else
-  to it. A public function is `xbp_NAME`
-  (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under names nothing
-  looks up, so modules sharing the object never clash. A call, a send or an array literal with `...` (`withRest`) passes
-  the count and the items of a frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline
-  calls and the bit functions leave such calls alone.
+  the decimals the runtime gives (the larger for `+` and `-`, the sum for `*`); two doubles, the usual case of these
+  paths, take a path of their own (their bits and decimals as they are, no test of exactness); the comparisons of two
+  numbers (integers exactly, others as doubles with `xb_compare`'s rule, NaN comparing equal); `for.test` with an
+  integer counter, limit and step; `index` and `index.set` of an array with an index within it, an integer or a
+  truncated double (the array's `len` and `items`, `xb_array` in `xbrt.h`), where the store calls `xb_gc_write_item`
+  only for a value of a heap type (`xb_type_is_heap`), and an index out of bounds calls the runtime, which raises the
+  error. A comparison whose only use is the `truth` right after it gives that test its boolean directly, without the
+  logical item. The bit operators (`&` `|` `^^` `<<` `>>` `~`) and the calls to a bit function (`BitAnd`, ..., the table
+  `xb_bit_function` in `xbrt.h`) with number operands are the machine operation (`and`, `or`, `xor`, `shl`, `ashr`,
+  `lshr`, a select for counts outside 0..63), a double taken as an integer by `llvm.fptosi.sat` (truncated, saturated,
+  NaN 0, as `xb_dbl_to_i64`); other operands call the runtime operator or function, which raises the error. Unary `-` of
+  an integer other than INT64_MIN or of a double is done in place too. `InlineCalls.cpp` does a few runtime functions in
+  place when their arguments allow it, with their rules: `Len()` of a string or an array, `Asc()` of a string, `Chr()`
+  of a number, `SubStr( c, n, 1 )` with `n` within `c` (the last two give the shared one-byte string, `xb_str_bytes`),
+  and an `Asc()` whose argument is the `SubStr()` right before it, used nowhere else, reads the byte itself; `PCount()`
+  is the function's own `argc`, and `PValue( n )` with an integer `n` copies the parameter's slot or the argument as
+  passed (`NIL` outside 1 .. `argc`); anything else calls the function, which raises the errors, and so does a
+  `PValue()` of an argument that is a reference. A call whose only argument is `...`, to a function that takes
+  references, in a function with no other `...` and no `PCount()`/`PValue()`, passes the arguments where they are
+  instead of copying them (`forwardInPlace_`). `append` copies a string's bytes into the room of the variable's growing
+  string in place (one store for one byte) when they fit, and calls `xb_op_append` otherwise. A `load` that an `append`
+  of its variable reaches with no other load in between ends the growth before the value goes on (`shareString`), unless
+  only `Len()` and `Asc()` read its value, in place; a forward data flow finds them (`findSharingLoads`), where a block
+  entered by unwinding (a `BEGIN SEQUENCE` handler, a `FOR EACH` cleanup) starts with every such variable growing, and a
+  block reached growing along some edges only, from which every path ends the growth before any append (a loop that
+  reads what a loop before it built), ends it on those edges instead, so the loop does not test it again. The bit
+  operators and functions take two integers in two instructions and convert doubles on a path of their own, and the fast
+  paths of calls read their operands in place: the argument group is built only for the call. Calls set the result slot
+  to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME`
+  or `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module to
+  its direct entry when it has one (below), else to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a
+  `STATIC` function, a codeblock and a module initialization are internal, under names nothing looks up, so modules
+  sharing the object never clash. A call, a send or an array literal with `...` (`withRest`) passes the count and the
+  items of a frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit
+  functions leave such calls alone.
 - Direct entries (`directEntries`, `xir::hasDirectEntry`): a function of the program that does not read its arguments as
   received (its frame keeps none, `readsArgs`, and it has no `...`, `usesRest`) and is not the body versioned for
   references (`byRefBody`) gets its body in an internal function, `xb.direct.NAME`, taking the context, the result slot
