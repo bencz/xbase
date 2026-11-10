@@ -63,6 +63,20 @@ void xbf_RIGHT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   left_right(ctx, ret, argc, argv, 1, 1124, "RIGHT");
 }
 
+/* Eight bytes with the ASCII letters of one case changed to the other (to
+ * upper case with `upper`), as xb_ascii_upper and xb_ascii_lower change one:
+ * the high bit of each byte tells whether it is in the letters' range, and
+ * no byte carries into the next, so the byte order does not matter. */
+static uint64_t change_case8(uint64_t w, int upper) {
+  const uint64_t ones = UINT64_C(0x0101010101010101), high = UINT64_C(0x8080808080808080);
+  unsigned first = upper ? 'a' : 'A', last = upper ? 'z' : 'Z';
+  uint64_t low7 = w & ~high;                       /* each byte below 0x80: sums stay within it */
+  uint64_t atLeast = low7 + ones * (0x80u - first); /* high bit: the byte is `first` or above */
+  uint64_t above = low7 + ones * (0x7Fu - last);    /* high bit: the byte is above `last` */
+  uint64_t letters = atLeast & ~above & ~w & high;  /* ASCII bytes in first..last */
+  return upper ? w - (letters >> 2) : w + (letters >> 2); /* 0x20 in each such byte */
+}
+
 static void change_case(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int upper, const char *fn) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s) {
@@ -70,7 +84,14 @@ static void change_case(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv,
     return;
   }
   xb_str *r = xb_str_alloc(s->len);
-  for (size_t i = 0; i < s->len; ++i) r->data[i] = upper ? xb_ascii_upper(s->data[i]) : xb_ascii_lower(s->data[i]);
+  size_t i = 0;
+  for (; i + 8 <= s->len; i += 8) {
+    uint64_t w;
+    memcpy(&w, s->data + i, 8);
+    w = change_case8(w, upper);
+    memcpy(r->data + i, &w, 8);
+  }
+  for (; i < s->len; ++i) r->data[i] = upper ? xb_ascii_upper(s->data[i]) : xb_ascii_lower(s->data[i]);
   xb_set_str(ret, r);
 }
 
@@ -141,15 +162,23 @@ void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 /* 1-based position of the first (or last) occurrence, 0 if none. */
+/* The 1-based position of `needle` in `hay` (the last one with `last`), 0 if
+ * none: candidates are the places of its first byte (memchr going forward),
+ * where the rest is compared. */
 static size_t find(const xb_str *needle, const xb_str *hay, int last) {
-  if (needle->len == 0 || needle->len > hay->len) return 0;
+  size_t n = needle->len;
+  if (n == 0 || n > hay->len) return 0;
+  const char *first = needle->data, *end = hay->data + hay->len - n + 1; /* candidates are before `end` */
   if (last) {
-    for (size_t i = hay->len - needle->len + 1; i-- > 0;)
-      if (memcmp(hay->data + i, needle->data, needle->len) == 0) return i + 1;
+    for (const char *p = end; p-- > hay->data;)
+      if (*p == *first && memcmp(p + 1, first + 1, n - 1) == 0) return (size_t)(p - hay->data) + 1;
     return 0;
   }
-  for (size_t i = 0; i + needle->len <= hay->len; ++i)
-    if (memcmp(hay->data + i, needle->data, needle->len) == 0) return i + 1;
+  for (const char *p = hay->data; p < end; ++p) {
+    p = memchr(p, *first, (size_t)(end - p));
+    if (!p) return 0;
+    if (memcmp(p + 1, first + 1, n - 1) == 0) return (size_t)(p - hay->data) + 1;
+  }
   return 0;
 }
 
