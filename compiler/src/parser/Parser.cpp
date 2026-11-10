@@ -218,6 +218,14 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
   if (accept(Tok::LParen)) {
     if (!at(Tok::RParen)) {
       do {
+        if (accept(Tok::Ellipsis)) { // any number of further arguments
+          fn->variadic = true;
+          if (!at(Tok::RParen)) {
+            diag_.error(cur().loc, "'...' must come after the last parameter");
+            while (!at(Tok::RParen) && !atEndOfStmt()) advance();
+          }
+          break;
+        }
         if (at(Tok::Ident)) {
           fn->params.push_back({cur().loc, cur().upper});
           advance();

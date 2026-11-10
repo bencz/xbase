@@ -41,8 +41,10 @@ Value *Generator::genExpr(const Expr &e) {
   }
   case ExprKind::ArrayLit: {
     std::vector<Value *> elems;
-    for (auto &el : static_cast<const ArrayLitExpr &>(e).elems) elems.push_back(genExpr(*el));
-    return b.arrayLit(elems);
+    int32_t spread = genArgs(static_cast<const ArrayLitExpr &>(e).elems, elems);
+    Instruction *arr = b.arrayLit(elems);
+    arr->spread = spread; // elements are values
+    return arr;
   }
   case ExprKind::HashLit: {
     auto &h = static_cast<const HashLitExpr &>(e);
@@ -64,9 +66,11 @@ Value *Generator::genExpr(const Expr &e) {
     auto &m = static_cast<const SendExpr &>(e);
     Value *object = genExpr(*m.object);
     std::vector<Value *> args;
-    for (auto &a : m.args) args.push_back(genExpr(*a));
+    int32_t spread = genArgs(m.args, args);
     b.setLoc(m.loc);
-    return b.send(m.message, object, args);
+    Instruction *send = b.send(m.message, object, args);
+    send->spread = spread < 0 ? -1 : spread + 1; // after the object; a method receives values (spreadRefs 0)
+    return send;
   }
   case ExprKind::Ref: { // a call argument passed by reference
     const Expr &target = *static_cast<const RefExpr &>(e).target;
@@ -76,6 +80,7 @@ Value *Generator::genExpr(const Expr &e) {
     Value *idx = genExpr(*ix.index);
     return b.refIndex(base, idx);
   }
+  case ExprKind::Spread: break; // an element of a list (genArgs)
   }
   return b.nil();
 }
@@ -117,9 +122,20 @@ Value *Generator::genCond(const Expr &e) {
   return b.truth(genExpr(e));
 }
 
+// The values of a list of arguments or elements, in order; `...` among them
+// adds none: its position in `values` is returned, -1 without one.
+int32_t Generator::genArgs(const std::vector<ExprPtr> &exprs, std::vector<Value *> &values) {
+  int32_t spread = -1;
+  for (auto &e : exprs) {
+    if (e->kind == ExprKind::Spread) spread = (int32_t)values.size();
+    else values.push_back(genExpr(*e));
+  }
+  return spread;
+}
+
 Value *Generator::genCall(const CallExpr &c) {
   std::vector<Value *> args;
-  for (auto &a : c.args) args.push_back(genExpr(*a));
+  int32_t spread = genArgs(c.args, args);
   Callee callee;
   if (c.callee || c.external) { // an EXTERN FUNCTION, or another module's function (sema/Calls)
     callee.name = c.name;
@@ -128,7 +144,13 @@ Value *Generator::genCall(const CallExpr &c) {
     callee.function = funcs_.at(c.name);
   }
   cur_.b->setLoc(c.loc);
-  return cur_.b->call(std::move(callee), args);
+  Instruction *call = cur_.b->call(std::move(callee), args);
+  if (spread >= 0) {
+    call->spread = spread;
+    // A native function receives references only where it takes them; an xBase one always.
+    call->spreadRefs = c.callee ? c.callee->refMask() : UINT32_MAX;
+  }
+  return call;
 }
 
 // x := v evaluates v, then stores; x op= v reads x, then evaluates v. The

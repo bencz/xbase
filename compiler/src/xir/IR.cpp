@@ -42,9 +42,30 @@ const char *typeName(Type t) {
   return "?";
 }
 
-bool Instruction::mayFail() const {
+uint16_t Instruction::effects() const {
   uint16_t e = opInfo(op).effects;
+  if (spread >= 0) e |= Fails | RunsCode | ReadsHeap | WritesHeap | Allocates; // xb_args_spread
+  return e;
+}
+
+bool Instruction::mayFail() const {
+  uint16_t e = effects();
   return (e & Fails) || ((e & FailsByRef) && access != Access::Direct);
+}
+
+void Instruction::copyData(const Instruction &from) {
+  unop = from.unop;
+  binop = from.binop;
+  pred = from.pred;
+  imm = from.imm;
+  var = from.var;
+  access = from.access;
+  callee = from.callee;
+  message = from.message;
+  spread = from.spread;
+  spreadRefs = from.spreadRefs;
+  blockFn = from.blockFn;
+  captures = from.captures;
 }
 
 void Instruction::removeUse(Value *v, Instruction *user) {

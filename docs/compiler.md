@@ -64,10 +64,12 @@ Keywords may be abbreviated down to a minimum length:
 
 Statements:
 
-- `[STATIC | INIT | EXIT] FUNCTION | PROCEDURE name [( params )]`. An `INIT` or `EXIT` procedure runs before or after
-  the start function ([runtime.md](runtime.md#program-startup)); its name is its own: no call reaches it, a call by that
-  name goes to the function of that name (of the module or another one), and a function may share it. Statements before
-  the first function form an implicit procedure named after the source file.
+- `[STATIC | INIT | EXIT] FUNCTION | PROCEDURE name [( params [, ...] )]`. An `INIT` or `EXIT` procedure runs before or
+  after the start function ([runtime.md](runtime.md#program-startup)); its name is its own: no call reaches it, a call
+  by that name goes to the function of that name (of the module or another one), and a function may share it.
+  Statements before the first function form an implicit procedure named after the source file. Any function accepts
+  more arguments than it has parameters (`PCount()`, `PValue()` reach them); `...` after the parameters
+  (`FuncDecl::variadic`) also lets its body pass them on (below).
 - `STATIC name [:= expr], ...` before the first function declares file-wide statics, visible in every function of the
   source file.
 - `LOCAL name [:= expr], ...` and `STATIC name [:= expr], ...` at the start of a function, in any order. A function
@@ -105,8 +107,12 @@ expression lists `( a, b, ... )` evaluated in order with the value of the last, 
 `{ k => v, ... }` and `{=>}`, codeblocks `{| params | expr, ... }`). Empty call arguments (`f(a, , b)`) and empty array
 elements pass `NIL`; a codeblock body has at least one expression. A call argument `@name` or `@name[i]...` passes a
 variable or an element by reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not
-supported yet), and so are function references `@name()`. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`) and
-instance variables (`o:x := v`, a message without arguments) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
+supported yet), and so are function references `@name()`. `...` among the arguments of a call or a send or the elements
+of an array literal (`SpreadExpr`; anywhere in the list, once) stands for the arguments the function received
+past its parameters, as many as there are: `f( a, ..., b )`, `o:m( ... )`, `{ ... }`. Sema accepts it only in a function
+declared with `...`, outside its codeblocks (which have arguments of their own); a `CHECKED` function's count includes
+the other arguments only, so only too many of them is an error. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`)
+and instance variables (`o:x := v`, a message without arguments) can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`)
 declares `a := Array( n1, n2 )`.
 
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
@@ -338,7 +344,9 @@ write barriers), `Literals.cpp`; `Emit.cpp` emits the object file.
   then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or
   `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module straight
   to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
-  initialization are internal, under names nothing looks up, so modules sharing the object never clash.
+  initialization are internal, under names nothing looks up, so modules sharing the object never clash. A call, a send
+  or an array literal with `...` (`withSpread`) passes the count and the items of a frame built for it on the stack
+  ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions leave such calls alone.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`, its number of parameters and `XB_PROC_ARGS` when it keeps its arguments) in the frame.
   While an xIR instruction is lowered, every call the builder creates is marked with the instruction's source line

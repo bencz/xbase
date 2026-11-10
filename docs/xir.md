@@ -166,13 +166,12 @@ LLVM then does instruction selection, register allocation and its own vectorizat
 
 `compiler/src/xir/`: the IR (`IR.h`: functions, blocks, values, instructions, variables), the catalog of operations
 (`Ops.*`: one row per operation with its name and effects: whether it may fail, reads or writes its variable or the
-heap, depends on SET values, runs xBase code, allocates, ends a block, is commutative, may go on after its error's
-block substituted the result, changes the context's state; `mayFail` and the copy elision of the frame plan consult
-it), `Builder`, `Verifier`, `Printer`, control flow analyses (`Analysis`: reverse
-postorder, dominators and the dominator tree, dominance frontiers, loops and their depths, the predecessor
-terminators of every block,
-removal of unreachable blocks), and the lowering
-from the syntax tree (`Gen*.cpp`). Block names are unique in a function (`while.body.2`).
+heap, depends on SET values, runs xBase code, allocates, ends a block, is commutative, may go on after its error's block
+substituted the result, changes the context's state; `Instruction::effects` adds those of reading references to a list
+with `...`, which may fail and run the error block; `mayFail`, the passes and the frame plan consult it), `Builder`,
+`Verifier`, `Printer`, control flow analyses (`Analysis`: reverse postorder, dominators and the dominator tree,
+dominance frontiers, loops and their depths, the predecessor terminators of every block, removal of unreachable blocks),
+and the lowering from the syntax tree (`Gen*.cpp`). Block names are unique in a function (`while.body.2`).
 `PassManager.*` and `passes/` optimize it (see [Passes](#passes)). `compiler/src/codegen/` lowers xIR to LLVM
 (`FramePlan` assigns the frame).
 
@@ -191,15 +190,17 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   parameter is tested for a cell or reference at run time. `ref` and `ref.index` make the reference an argument `@x`
   or `@a[i]` passes.
 - Operations mirror the runtime: unary and binary operators, the truth test, calls (to the module's functions or to
-  declared externals), `send` (a message to the first operand, with the others as arguments), array literals, hash
-  literals (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its
-  captured variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`, `each.move`,
-  `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose result is the value the `CASE`s match:
-  a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `append` (`var := var +
-  value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right
-  after its operation and the value first in the block only the check leads to), and for parameter versioning
-  `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the function's
-  own arguments, as received).
+  declared externals), `send` (a message to the first operand, with the others as arguments), array literals (in a call,
+  a send or an array literal, `Instruction::spread` is the operand position where `...` puts the function's arguments
+  past its parameters, shown as `...` in the listing; `spreadRefs` the positions that receive references), hash literals
+  (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its captured
+  variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`, `each.move`, `each.leave`, and
+  `each.key`, the key at a position), the `SWITCH` check (whose result is the value the `CASE`s match: a substituted one
+  after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `append` (`var := var + value`,
+  `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right after its
+  operation and the value first in the block only the check leads to), and for parameter versioning `params.ref`
+  (whether parameters hold references their caller passed) and `call.forward` (a call with the function's own arguments,
+  as received).
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `ret`.

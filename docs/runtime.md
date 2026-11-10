@@ -65,13 +65,13 @@ The frames also make the call stack. A frame's `proc` (an `xb_proc` constant the
 statement running ends (a statement continued over several lines shows its last one, a codeblock the line of the
 statement defining it), which compiled code stores right before each call that can see the stack (see
 [compiler.md](compiler.md#xir-to-llvm)). Frames without `proc` (the command-line arguments, a module initialization, the
-body of a function versioned for references while the other body runs) are not shown. A runtime function shows only
-while what it does can be seen, with a frame without slots on the C stack and line 0 (`xb_frame_push`, `xb_frame_pop` in
-`core/context.h`): `AEval`, `AScan` and `ASort` while they call blocks, and a function or message whose error raises the
-error block (`xb_error_in` names it: `SUBSTR`, `ERROR:FOO` for a message to an object, `FOO` without an object,
-`(b)EVAL` for `Eval` of a non-block). Operators and statements show nothing of their own. `ProcName( [nLevel] )` and
-`ProcLine( [nLevel] )` read it: level 0 is the function calling them, a non-numeric level is 0, a negative one gives
-`PROCNAME` and line 0, a level past the end `""` and 0.
+body of a function versioned for references while the other body runs, the arguments of a list with `...`) are not
+shown. A runtime function shows only while what it does can be seen, with a frame without slots on the C stack and line
+0 (`xb_frame_push`, `xb_frame_pop` in `core/context.h`): `AEval`, `AScan` and `ASort` while they call blocks, and a
+function or message whose error raises the error block (`xb_error_in` names it: `SUBSTR`, `ERROR:FOO` for a message to
+an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block). Operators and statements show nothing of their
+own. `ProcName( [nLevel] )` and `ProcLine( [nLevel] )` read it: level 0 is the function calling them, a non-numeric
+level is 0, a negative one gives `PROCNAME` and line 0, a level past the end `""` and 0.
 
 `argc` and `argv` in the frame are the arguments as the function received them, stored only by a function or codeblock
 that calls `PCount()` or `PValue()` itself (`XB_PROC_ARGS` in its `xb_proc`; nothing else can read them, and the other
@@ -279,6 +279,12 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   returns nothing leaves it untouched. The callee copies its parameters into its frame; missing arguments are
   `NIL`. An argument passed by reference is an `XB_T_CELL` or `XB_T_REF` item (see
   [References](#references)); a C function receives one only where its declaration says `@`.
+- A list with `...` (a call, a send or an array literal) has a length known at run time: compiled code reserves a frame
+  of that size on the stack (`llvm.stacksave`/`stackrestore` around it), linked into the chain while the call runs, and
+  `xb_args_spread` fills it with the arguments before `...`, the function's own arguments past its parameters, then the
+  rest; a reference among those goes on as it is where the callee takes references (a compiled function, a runtime
+  function's `@` parameters: `xb_refs_take`) and as its value elsewhere (a method, an array element; its target gone: an
+  error). `Do` passes its arguments on by the same rule.
 - Every 32-bit parameter of a runtime entry point is `uint32_t` and every 32-bit result `int32_t`; the compiler
   relies on this to apply the target's argument-extension rules.
 

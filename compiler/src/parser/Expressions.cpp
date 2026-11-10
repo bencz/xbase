@@ -164,7 +164,7 @@ ExprPtr Parser::parsePostfix() {
       advance();
       if (accept(Tok::LParen)) {
         send->withArgs = true;
-        send->args = parseArgs(Tok::RParen, false);
+        send->args = parseArgs(Tok::RParen, false, true);
         expect(Tok::RParen, "')'");
       }
       e = std::move(send);
@@ -210,8 +210,8 @@ ExprPtr Parser::parseBraced() {
     return std::make_unique<HashLitExpr>(loc);
   }
   auto arr = std::make_unique<ArrayLitExpr>(loc);
-  if (at(Tok::Comma) || at(Tok::RBrace) || at(Tok::At)) {
-    arr->elems = parseArgs(Tok::RBrace, false);
+  if (at(Tok::Comma) || at(Tok::RBrace) || at(Tok::At) || at(Tok::Ellipsis)) {
+    arr->elems = parseArgs(Tok::RBrace, false, true);
     expect(Tok::RBrace, "'}'");
     return arr;
   }
@@ -230,7 +230,7 @@ ExprPtr Parser::parseBraced() {
   }
   arr->elems.push_back(std::move(first));
   if (accept(Tok::Comma)) { // the rest as arguments: { a, } has a NIL last
-    std::vector<ExprPtr> rest = parseArgs(Tok::RBrace, false);
+    std::vector<ExprPtr> rest = parseArgs(Tok::RBrace, false, true);
     if (rest.empty()) rest.push_back(std::make_unique<NilExpr>(cur().loc));
     for (ExprPtr &e : rest) arr->elems.push_back(std::move(e));
   }
@@ -240,8 +240,11 @@ ExprPtr Parser::parseBraced() {
 
 // Empty arguments - f( a, , b ) - are passed as NIL. `refs`: the arguments of
 // a function call, where `@` passes a variable or element by reference.
-std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs) {
+// `spread`: `...` may stand for the arguments of the function past its
+// parameters (a call, a send, an array literal).
+std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
   std::vector<ExprPtr> args;
+  bool spreadSeen = false;
   if (at(close)) return args;
   while (true) {
     if (at(Tok::Comma) || at(close)) {
@@ -249,6 +252,12 @@ std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs) {
     } else if (at(Tok::At)) {
       if (!refs) diag_.error(cur().loc, "'@' (by reference) is supported only in function call arguments");
       args.push_back(parseRef());
+    } else if (at(Tok::Ellipsis)) {
+      if (!spread) diag_.error(cur().loc, "'...' is supported only in the arguments of a call or in an array");
+      else if (spreadSeen) diag_.error(cur().loc, "'...' may appear once in a list");
+      spreadSeen = true;
+      args.push_back(std::make_unique<SpreadExpr>(cur().loc));
+      advance();
     } else {
       args.push_back(parseExpr());
     }
@@ -306,7 +315,7 @@ ExprPtr Parser::parsePrimary() {
       advance();
       advance();
       if (name == "IIF" || name == "IF") {
-        auto args = parseArgs(Tok::RParen, false);
+        auto args = parseArgs(Tok::RParen, false, false);
         expect(Tok::RParen, "')'");
         if (args.size() != 3) {
           diag_.error(loc, name + "() requires exactly 3 arguments");
@@ -315,7 +324,7 @@ ExprPtr Parser::parsePrimary() {
         return std::make_unique<IIfExpr>(loc, std::move(args[0]), std::move(args[1]), std::move(args[2]));
       }
       auto call = std::make_unique<CallExpr>(loc, name);
-      call->args = parseArgs(Tok::RParen, true);
+      call->args = parseArgs(Tok::RParen, true, true);
       expect(Tok::RParen, "')'");
       return call;
     }

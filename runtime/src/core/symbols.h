@@ -40,8 +40,7 @@ void xb_symbols_seal(void);
 const xb_symbol_entry *xb_symbol_find(const char *name, size_t len);
 
 /* Whether argument `k` of a call to `e` passes a reference on as it is. */
-static inline int xb_symbol_takes_ref(const xb_symbol_entry *e, uint32_t k) {
-  return !e->native || ((e->byref >> (k < 31 ? k : 31)) & 1u);
-}
+/* The positions that receive references as passed (xb_refs_take). */
+static inline uint32_t xb_symbol_refs(const xb_symbol_entry *e) { return e->native ? e->byref : UINT32_MAX; }
 
 #endif

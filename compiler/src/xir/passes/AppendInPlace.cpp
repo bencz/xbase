@@ -47,7 +47,7 @@ bool appendInPlace(Function &f) {
       if (!load || load->var != store.var || !load->hasOneUse() || load->parent != b.get()) continue;
       bool written = false; // between the load and the store, as the append reads the variable at the store
       for (size_t j = at.at(load) + 1; j < k && !written; ++j)
-        written = b->insts[j]->var == store.var && (opInfo(b->insts[j]->op).effects & WritesVar);
+        written = b->insts[j]->var == store.var && (b->insts[j]->effects() & WritesVar);
       if (written) continue;
       stores[store.var].push_back(&store);
       if (isConstant(add->operand(1), Constant::Lit::String)) holdsStrings.insert(store.var);

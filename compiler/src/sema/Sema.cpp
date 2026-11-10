@@ -288,6 +288,12 @@ void Sema::expr(Expr &e, Scope &s) {
   switch (e.kind) {
   case ExprKind::Nil: case ExprKind::Logical: case ExprKind::Number: case ExprKind::String:
     break;
+  case ExprKind::Spread: // the arguments the function received past its parameters
+    if (frames_.back().block)
+      diag_.error(e.loc, "'...' cannot be used inside a codeblock");
+    else if (!frames_.back().boxed || !curFunc_->variadic)
+      diag_.error(e.loc, "'...' is valid only in a function declared with '...' after its parameters");
+    break;
   case ExprKind::Var: {
     auto &v = static_cast<VarExpr &>(e);
     if (!resolve(v)) diag_.error(v.loc, "variable '" + v.name + "' is not declared (MEMVAR/FIELD not supported yet)");

@@ -26,6 +26,8 @@ enum class ExprKind : uint8_t {
   Block,      // {| params | exprs }
   Send,       // object:message, object:message( args )
   HashLit,    // { k => v, ... }, {=>}
+  Spread,     // ... in the arguments of a call or send, or in an array literal: the function's own arguments past
+              // its parameters
 };
 
 enum class BinOp : uint8_t {
@@ -50,6 +52,10 @@ using ExprPtr = std::unique_ptr<Expr>;
 
 struct NilExpr : Expr {
   explicit NilExpr(SourceLoc l) : Expr(ExprKind::Nil, l) {}
+};
+
+struct SpreadExpr : Expr {
+  explicit SpreadExpr(SourceLoc l) : Expr(ExprKind::Spread, l) {}
 };
 
 struct LogicalExpr : Expr {
@@ -308,6 +314,7 @@ struct FuncDecl {
   Startup startup = Startup::None; // INIT PROCEDURE: runs before the start function; EXIT: after it
   bool implicit = false;         // code before the first FUNCTION/PROCEDURE
   std::vector<Param> params;
+  bool variadic = false;         // `...` after the parameters: the body may pass on the arguments past them
   Block body;
   uint32_t numLocals = 0;        // params + LOCALs, set by Sema
   std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock or passed by reference (shared)
@@ -335,6 +342,13 @@ struct ExternDecl {
   // native function otherwise receives the value; an xBase function always
   // receives the reference.
   bool takesRef(size_t k) const { return !native || (k < byRef.size() ? byRef[k] : restByRef); }
+  // The positions that take references as a mask (xb_refs_take in xbrt.h: bit 31 is the `@...`).
+  uint32_t refMask() const {
+    uint32_t m = !native || restByRef ? 1u << 31 : 0;
+    for (uint32_t k = 0; k < 31; ++k)
+      if (takesRef(k)) m |= 1u << k;
+    return m;
+  }
 };
 
 struct Module {

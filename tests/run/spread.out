@@ -1,0 +1,21 @@
+
+vari:  3  2 bc
+vari0:  0  0 -
+fwd:  2  1 30
+mid:  5  4 2y
+arr:          5          1          3          3
+refs:         10         20
+native: AAAA          9
+eval:          9
+qout:
+one          2 .T.
+max:          9
+send:          7          7
+byval: ABC abc
+gone:       1132 array access
+loop:     300000
+many:         69
+continued:          3
+cargo:          5 N          5
+unread:       1132
+after: ran

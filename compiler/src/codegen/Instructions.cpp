@@ -117,6 +117,49 @@ Value *CodeGen::operandGroup(const xir::Instruction &i) {
   return slot(base);
 }
 
+// A list with `...` (xir::Instruction::spread), for `emit` to use as its count
+// and items: the operands before that position (`group` holds them all), the
+// arguments the function received past its parameters, then the other
+// operands. xb_args_spread copies them into a frame of their own on the stack,
+// sized at run time and linked into the chain while `emit` runs, so the
+// collector sees them (a callee may replace them, PValue()); an argument whose
+// reference is gone unwinds instead.
+void CodeGen::withSpread(const xir::Instruction &i, Value *group, function_ref<void(Value *, Value *)> emit) {
+  uint32_t n = (uint32_t)i.operands().size();
+  Value *argc = fn_->getArg(2), *argv = fn_->getArg(3);
+  Value *params = ConstantInt::get(i32_, fnParams_);
+  Value *rest = b_.CreateSelect(b_.CreateICmpUGT(argc, params), b_.CreateSub(argc, params), ConstantInt::get(i32_, 0),
+                                "rest");
+  Value *total = b_.CreateAdd(rest, ConstantInt::get(i32_, n), "total");
+  Value *save = b_.CreateStackSave();
+  StructType *ty = frameType(0);
+  uint64_t header = dl_.getStructLayout(ty)->getElementOffset(FrameSlots);
+  Value *itemBytes = b_.CreateMul(b_.CreateZExt(total, intPtrTy_), ConstantInt::get(intPtrTy_, itemSize_));
+  AllocaInst *frame =
+      b_.CreateAlloca(i8_, b_.CreateAdd(itemBytes, ConstantInt::get(intPtrTy_, header)), "spread.frame");
+  frame->setAlignment(std::max(itemAlign_, dl_.getPointerABIAlignment(0)));
+  Value *items = b_.CreateStructGEP(ty, frame, FrameSlots, "spread.items");
+  b_.CreateMemSet(items, b_.getInt8(0), itemBytes, itemAlign_); // NIL until filled
+  linkFrame(frame, total, ConstantPointerNull::get(ptrTy_));
+  auto unlink = [&] {
+    unlinkFrame(frame);
+    b_.CreateStackRestore(save);
+  };
+  Value *restItems = b_.CreateGEP(itemTy_, argv, params, "rest.items"); // not dereferenced when there are none
+  Value *ok = b_.CreateCall(rtArgsSpread_, {fnCtx_, items, group, ConstantInt::get(i32_, n),
+                                            ConstantInt::get(i32_, (uint32_t)i.spread), restItems, rest,
+                                            ConstantInt::get(i32_, i.spreadRefs)});
+  BasicBlock *filled = newBlock("spread.filled");
+  BasicBlock *failed = newBlock("spread.failed");
+  b_.CreateCondBr(b_.CreateICmpNE(ok, ConstantInt::get(i32_, 0)), filled, failed);
+  b_.SetInsertPoint(failed);
+  unlink();
+  b_.CreateBr(unwind_);
+  b_.SetInsertPoint(filled);
+  emit(total, items);
+  unlink();
+}
+
 // .T. or .F.; any other value is an error (the function leaves). `type` is
 // the item's type (a constant when it is known).
 Value *CodeGen::testTruth(Value *item, BasicBlock *unwind, Value *type) {
@@ -242,7 +285,9 @@ void CodeGen::emit(const xir::Instruction &i) {
     Function *callee = i.callee.function ? functions_.at(i.callee.function) : externFunction(i.callee);
     Value *d = dest(i);
     setNil(d); // the caller clears the result, so callees that return nothing need not
-    b_.CreateCall(xbFuncTy_, callee, {fnCtx_, d, ConstantInt::get(i32_, ops.size()), argv});
+    auto call = [&](Value *n, Value *items) { b_.CreateCall(xbFuncTy_, callee, {fnCtx_, d, n, items}); };
+    if (i.spread >= 0) withSpread(i, argv, call);
+    else call(ConstantInt::get(i32_, ops.size()), argv);
     checkPending(unwind_);
     break;
   }
@@ -250,7 +295,11 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *argv = operandGroup(i);
     Value *d = dest(i);
     setNil(d);
-    b_.CreateCall(rtSend_, {fnCtx_, d, messageName(i.message), ConstantInt::get(i32_, ops.size()), argv});
+    auto send = [&](Value *n, Value *items) {
+      b_.CreateCall(rtSend_, {fnCtx_, d, messageName(i.message), n, items});
+    };
+    if (i.spread >= 0) withSpread(i, argv, send);
+    else send(ConstantInt::get(i32_, ops.size()), argv);
     checkPending(unwind_);
     break;
   }
@@ -262,7 +311,10 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::ArrayLit: {
     Value *elems = operandGroup(i);
-    b_.CreateCall(rtArrayNew_, {fnCtx_, dest(i), ConstantInt::get(i32_, ops.size()), elems});
+    Value *d = dest(i);
+    auto make = [&](Value *n, Value *items) { b_.CreateCall(rtArrayNew_, {fnCtx_, d, n, items}); };
+    if (i.spread >= 0) withSpread(i, elems, make);
+    else make(ConstantInt::get(i32_, ops.size()), elems);
     break;
   }
   case Op::Index: emitIndex(i); break;

@@ -74,7 +74,8 @@ private:
   llvm::Constant *procOf(const xir::Function &f);
   void markLine(llvm::Instruction *i) const;
   void placeLines();
-  void popFrame();
+  void linkFrame(llvm::Value *frame, llvm::Value *nslots, llvm::Value *proc);
+  void unlinkFrame(llvm::Value *frame);
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
   void addAbiAttributes(llvm::Function *f);
   llvm::Function *declare(const xir::Function &f);
@@ -191,6 +192,8 @@ private:
   llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind, llvm::Value *type);
   llvm::Value *logicalValue(llvm::Value *item);
   llvm::Value *operandGroup(const xir::Instruction &i);
+  void withSpread(const xir::Instruction &i, llvm::Value *group,
+                  llvm::function_ref<void(llvm::Value *argc, llvm::Value *argv)> emit);
 
   llvm::LLVMContext &ctx_;
   llvm::Module &mod_;
@@ -223,6 +226,7 @@ private:
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
   llvm::FunctionCallee rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_;
   llvm::FunctionCallee rtSend_, rtSeqCatch_, rtSeqValue_, rtHashNew_, rtEachKey_;
+  llvm::FunctionCallee rtArgsSpread_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
   llvm::FunctionCallee rtEnumLen_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_, rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;
@@ -241,6 +245,7 @@ private:
   // the function being generated
   llvm::Function *fn_ = nullptr;
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
+  uint32_t fnParams_ = 0; // the function's parameters: the arguments past them are what `...` passes on
   llvm::BasicBlock *fnExit_ = nullptr;
   llvm::BasicBlock *unwind_ = nullptr; // where an operation of the current block that fails goes (xir unwind)
   uint32_t line_ = 0;                  // the source line of the xIR instruction being lowered (0: none)

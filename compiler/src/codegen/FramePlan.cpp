@@ -77,7 +77,7 @@ void FramePlan::elideLoads(const BasicBlock &b) {
       }
     }
     uint32_t p = pos_.at(&u);
-    uint16_t e = opInfo(u.op).effects;
+    uint16_t e = u.effects();
     if (e & WritesVar) {
       if (u.var) lastWrite[u.var] = p;
       for (const Var *c : u.captures) lastWrite[c] = p;

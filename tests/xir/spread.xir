@@ -1,0 +1,30 @@
+module SPREAD
+
+function PASS params 1 {
+  $f0 = frame 0 "A"
+  $f1 = frame 1 "A"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward PASS.byref
+  ret %2
+body:
+  %4 = load $f0
+  %5 = call OTHER extern %4, ..., 1:w10
+  ret %5
+}
+
+function ELEMENTS params 0 {
+entry:
+  %0 = array ...
+  ret %0
+}
+
+function PASS.byref internal params 1 {
+  $f0 = frame 0 "A"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = call OTHER extern %0, ..., 1:w10
+  ret %1
+}

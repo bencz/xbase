@@ -132,8 +132,9 @@ hashes (literals, the `H*` functions, see [runtime.md](runtime.md#hashes)).
 - `WITH OBJECT o ... END`: `:name` inside means `o:name`.
 - Extended codeblocks: a block with statements, `{| a, b | <statements> RETURN x }`, compiled as a nested function
   with its own declarations.
-- Variadic functions: `FUNCTION F( a, ... )`; `...` passes the unnamed arguments on to a call, an array literal or
-  an index.
+- `...` as the indexes of an element (`a[ ... ]`), in codeblocks (`{| a, ... | ... }`), and more than once in a list
+  (`f( ..., x, ... )`, which the reference accepts); variadic functions and one `...` in calls, sends and array
+  literals are done ([compiler.md](compiler.md#grammar)).
 - Timestamps (date and time in one value) with their arithmetic and comparisons, date and timestamp literals,
   strings with escapes.
 - Function references `@Name()` and symbol values; `Do()` and `Eval()` on them.
@@ -255,7 +256,7 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 4. The macro operator.
 5. The rest of the array, string and number functions; the call-stack functions.
 6. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
-   `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks, variadic functions.
+   `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks.
 7. Files and directories; the terminal layer; GET/READ and TBrowse.
 8. The RDD layer.
 9. Generators, async/await and threads, sockets and the other libraries.

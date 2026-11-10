@@ -97,16 +97,7 @@ Copy copyBlocks(Function &f, const std::vector<BasicBlock *> &originals) {
       const Instruction &i = *ip;
       auto ni = std::make_unique<Instruction>(i.op, i.type(), c.blocks[b]);
       ni->loc = i.loc;
-      ni->unop = i.unop;
-      ni->binop = i.binop;
-      ni->pred = i.pred;
-      ni->imm = i.imm;
-      ni->var = i.var;
-      ni->access = i.access;
-      ni->callee = i.callee;
-      ni->message = i.message;
-      ni->blockFn = i.blockFn;
-      ni->captures = i.captures;
+      ni->copyData(i);
       c.values[&i] = ni.get();
       c.pairs.push_back({ip.get(), ni.get()});
       c.blocks[b]->insts.push_back(std::move(ni));

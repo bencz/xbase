@@ -54,6 +54,7 @@ private:
   void genDiscard(const Expr &e);
   Value *genCond(const Expr &e);
   Value *genCall(const CallExpr &c);
+  int32_t genArgs(const std::vector<ExprPtr> &exprs, std::vector<Value *> &values);
   Value *genAssign(const AssignExpr &a);
   Value *genIncDec(const IncDecExpr &e);
   Value *genIndexAssign(const IndexExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);

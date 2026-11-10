@@ -85,6 +85,7 @@ void CodeGen::initTypes() {
   rtHashNew_ = rt("xb_hash_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtEachKey_ = rt("xb_each_key", voidTy, {ptrTy_, ptrTy_, ptrTy_, i64_});
   rtArrayNew_ = rt("xb_array_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtArgsSpread_ = rt("xb_args_spread", i32_, {ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_, i32_, i32_});
   rtIndex_ = rt("xb_op_index", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtWriteItem_ = rt("xb_gc_write_item", voidTy, {ptrTy_, intPtrTy_});
@@ -220,6 +221,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   fnCtx_->setName("ctx");
   fnRet_ = nullptr;
   fnSelf_ = nullptr;
+  fnParams_ = f.numParams;
   Value *argc = nullptr, *argv = nullptr;
   if (f.kind != xir::Function::Kind::ModuleInit) {
     fnRet_ = fn_->getArg(1);
@@ -259,7 +261,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   }
   line_ = 0;
   b_.SetInsertPoint(fnExit_);
-  popFrame();
+  unlinkFrame(fnFrame_);
   b_.CreateRetVoid();
   placeLines();
   plan_ = nullptr;
@@ -330,22 +332,29 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
   }
   if (nslots > nparams)
     b_.CreateMemSet(slot(nparams), b_.getInt8(0), (uint64_t)(nslots - nparams) * itemSize_, itemAlign_);
-  tag(b_.CreateStore(ConstantInt::get(i32_, nslots), b_.CreateStructGEP(ty, frame, FrameCount)), Mem::FrameLink);
-  tag(b_.CreateStore(proc, b_.CreateStructGEP(ty, frame, FrameProc)), Mem::FrameLink);
-  tag(b_.CreateStore(ConstantInt::get(i32_, 0), b_.CreateStructGEP(ty, frame, FrameLine)), Mem::FrameLink);
   if (keepArgs) { // only what PCount() and PValue() read; other frames leave the two fields unset
     tag(b_.CreateStore(argv, b_.CreateStructGEP(ty, frame, FrameArgv)), Mem::FrameLink);
     tag(b_.CreateStore(argc, b_.CreateStructGEP(ty, frame, FrameArgc)), Mem::FrameLink);
   }
+  linkFrame(frame, ConstantInt::get(i32_, nslots), proc);
+  fnFrame_ = frame;
+}
+
+// The header of a frame whose slots are valid (`nslots`, `proc`, line 0), and
+// the frame linked into the context's chain.
+void CodeGen::linkFrame(Value *frame, Value *nslots, Value *proc) {
+  StructType *ty = frameType(0);
+  tag(b_.CreateStore(nslots, b_.CreateStructGEP(ty, frame, FrameCount)), Mem::FrameLink);
+  tag(b_.CreateStore(proc, b_.CreateStructGEP(ty, frame, FrameProc)), Mem::FrameLink);
+  tag(b_.CreateStore(ConstantInt::get(i32_, 0), b_.CreateStructGEP(ty, frame, FrameLine)), Mem::FrameLink);
   Value *frames = b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames);
   tag(b_.CreateStore(loadFrom(ptrTy_, frames, Mem::Ctx, "prev"), b_.CreateStructGEP(ty, frame, FramePrev)),
       Mem::FrameLink);
   tag(b_.CreateStore(frame, frames), Mem::Ctx);
-  fnFrame_ = frame;
 }
 
-void CodeGen::popFrame() {
-  Value *prev = loadFrom(ptrTy_, b_.CreateStructGEP(frameType(0), fnFrame_, FramePrev), Mem::FrameLink, "prev");
+void CodeGen::unlinkFrame(Value *frame) {
+  Value *prev = loadFrom(ptrTy_, b_.CreateStructGEP(frameType(0), frame, FramePrev), Mem::FrameLink, "prev");
   tag(b_.CreateStore(prev, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
 }
 

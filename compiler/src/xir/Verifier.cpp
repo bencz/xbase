@@ -141,6 +141,10 @@ private:
   void inst(const Instruction &i, size_t pos) {
     const BasicBlock *at = i.parent;
     for (Value *v : i.operands()) use(v, at, pos);
+    bool lists = i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit;
+    if (i.spread != -1 && (!lists || i.spread < (i.op == Op::Send ? 1 : 0) || i.spread > (int32_t)i.operands().size()))
+      fail("'...' outside the arguments of a call, a send or an array literal");
+    if (i.spread != -1 && f_.kind != Function::Kind::Program) fail("'...' outside a function");
     switch (i.op) {
     case Op::NumDefaultDec: expect(i, 0, {}); break;
     case Op::Load: case Op::Barrier: case Op::RefVar:

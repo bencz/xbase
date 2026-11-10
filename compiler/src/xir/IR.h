@@ -153,9 +153,14 @@ public:
   BasicBlock *parent;
   SourceLoc loc;
 
+  // The operation's effects (Effect in Ops.h): its op's, and for a list with
+  // `...`, those of reading references (an error, the error block's code).
+  uint16_t effects() const;
   // The operation can raise an error (the function then returns: the error
   // is pending in the context).
   bool mayFail() const;
+  // Copies the operation-specific data below (not operands nor targets).
+  void copyData(const Instruction &from);
 
   const std::vector<Value *> &operands() const { return operands_; }
   Value *operand(size_t i) const { return operands_[i]; }
@@ -175,6 +180,11 @@ public:
   Access access = Access::Direct;     // Load, Store, Barrier
   Callee callee;                      // Call
   std::string message;                // Send: upper-cased, "_NAME" to assign NAME
+  // Call, Send, ArrayLit with `...`: the operand position where the function's arguments past its parameters go,
+  // else -1; and which positions of a call receive those arguments as passed, references included (bit k: argument
+  // k, bit 31: argument 31 and after), the others receiving their values.
+  int32_t spread = -1;
+  uint32_t spreadRefs = 0;
   Function *blockFn = nullptr;        // MakeBlock
   std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
   std::vector<Target> targets;        // Br: one; CondBr: then, else (operand 0 is the condition)
