@@ -158,7 +158,7 @@ private:
 bool promoteVariables(Function &f) {
   for (auto &b : f.blocks)
     for (auto &i : b->insts)
-      if (i->op == Op::SeqCatch || i->op == Op::SeqSuspend) return false;
+      if (i->op == Op::SeqCatch || i->op == Op::SeqSuspend || i->op == Op::GenYield) return false; // and generators
   std::vector<Var *> vars = directLocals(f);
   if (vars.empty()) return false;
   Promoter(f, vars).run();

@@ -280,6 +280,18 @@ With `DESCEND` the enumerator's elements are gathered into an array first. An ob
 error of any other value that is no collection (`BASE/1068`). The paths of arrays, strings and hashes come first and
 do not change.
 
+### Generators
+
+`types/generator.c`. A generator's enumerator is an object of the runtime class `GENERATOR`: `Current` (a variable) is
+the last element, `MoveNext()` runs one step (`xb_gen_move_next`), and its own variables, whose names no message can
+spell, hold the state, the resume function (its address as an integer) and the frame between steps (an array).
+`xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the enumerator, the resume
+function's argument); at each step `xb_gen_restore` copies the saved slots into the resume function's frame and
+returns the state, marking the enumerator ended until the step yields (a step that fails, or a `MoveNext` inside the
+step, ends it); `xb_gen_yield` saves the frame (one write barrier per card, `xb_gc_write_items`), the state and the
+element; `xb_gen_done` ends it and drops the frame. `FOR EACH` calls the step and reads `Current` directly. The
+`generator` benchmark (3,000,000 steps of one generator feeding another) takes about 80 ms.
+
 ## Classes
 
 Classes compiled from xBase (`types/class.c`, `xb_class_def` in `xbrt.h`) are described by their module and

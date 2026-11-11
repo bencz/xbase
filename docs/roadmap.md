@@ -149,8 +149,9 @@ objects the same way, and generators producing enumerators.
 
 ### Generators
 
-A function that contains `YIELD expr` returns an enumerator; `FOR EACH x IN Gen( ... )` runs it step by step. It is a
-resumable function ([xir.md](xir.md#resumable-functions)): its frame is a GC object, the same machinery as `ASYNC`.
+Done: a function that contains `YIELD expr` returns an enumerator; `FOR EACH x IN Gen( ... )` runs it step by step.
+It is a resumable function ([xir.md](xir.md#resumable-functions)) whose frame lives in the enumerator between steps,
+the machinery `ASYNC` will use.
 
 ### async/await and threads
 

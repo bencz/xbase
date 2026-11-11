@@ -260,7 +260,7 @@ struct IIfExpr : Expr {
 
 enum class StmtKind : uint8_t {
   Expr, Local, Static, Private, Public, Parameters, Memvar, Return, If, While, For, ForEach, Switch, Sequence, Exit,
-  Loop, WithObject
+  Loop, WithObject, Yield
 };
 
 struct Stmt {
@@ -296,6 +296,12 @@ struct LocalStmt : Stmt {
 struct ReturnStmt : Stmt {
   ExprPtr value;                 // may be null
   ReturnStmt(SourceLoc l, ExprPtr v) : Stmt(StmtKind::Return, l), value(std::move(v)) {}
+};
+
+// YIELD expr: in a generator function, the next element of the enumerator it returns (FuncDecl::generator).
+struct YieldStmt : Stmt {
+  ExprPtr value;
+  YieldStmt(SourceLoc l, ExprPtr v) : Stmt(StmtKind::Yield, l), value(std::move(v)) {}
 };
 
 struct IfStmt : Stmt {
@@ -393,6 +399,9 @@ struct FuncDecl {
   std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock or passed by reference (shared)
   bool readsArgs = false;        // set by Sema: calls an ARGS function, so its frame keeps the arguments received
   bool callsPrivates = false;    // set by Sema: calls a PRIVATES function, so it ends the PRIVATEs created
+  // A generator: its body has YIELD (set by the parser). Calling it returns an enumerator; the body runs step by step
+  // as a resumable function whose first parameter, which Sema adds, is the enumerator.
+  bool generator = false;
   // Classes. A method's implementation (METHOD, ACCESS or ASSIGN name ... CLASS cls) names its class and kind; Sema
   // makes it a STATIC function "CLS:NAME" whose first parameter is SELF.
   enum class Member : uint8_t { None, Method, Access, Assign };

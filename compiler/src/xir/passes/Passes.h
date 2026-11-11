@@ -36,4 +36,9 @@ bool removeDeadCode(Function &f);
 // (TypedContinuations.cpp).
 bool typedContinuations(Function &f);
 
+// A generator's values that live across a YIELD move into frame variables, which the enumerator saves between steps
+// (Resumable.cpp). Not an optimization: Gen runs it on every generator, and the other passes leave such functions'
+// variables in memory.
+bool makeResumable(Function &f);
+
 } // namespace xb::xir

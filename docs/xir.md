@@ -68,10 +68,12 @@ one.
 
 ## Resumable functions
 
-`await` and `yield` are suspension points. One xIR pass turns a function that contains them into a state machine
-whose frame is a GC object with a precise layout. It serves `ASYNC` functions and enumerators (`FOR EACH` over a
-function that yields). xIR does this itself instead of using LLVM's coroutine intrinsics, so that coroutine frames
-stay visible to the collector and compatible with statepoints.
+`yield` (and later `await`) is a suspension point. A generator's body becomes a resume function that runs one step
+per call (see [compiler.md](compiler.md#syntax-tree-to-xir)): its frame is saved into the enumerator, a GC object, at
+`gen.yield` and comes back at `gen.restore`, which dispatches on the state to the block after that `YIELD`. Values the
+registers would lose across a `YIELD` move into frame variables (`makeResumable`). xIR does this itself instead of
+using LLVM's coroutine intrinsics, so that suspended frames stay visible to the collector and compatible with
+statepoints. Planned: `ASYNC` functions on the same machinery.
 
 ## Classes
 
@@ -212,7 +214,10 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   literals (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its
   captured variables, the `FOR` test, the `FOR EACH` operations (`each.source`, `each.in_cell`, `each.enter`,
   `each.move`, `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose result is the value the
-  `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `append`
+  `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, the
+  generator operations (`gen.new`, `gen.restore`, `gen.done`, the
+terminator `gen.yield`, and `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame),
+`append`
   (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps
   the check right after its operation and the value first in the block only the check leads to), and for parameter
   versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the

@@ -184,7 +184,7 @@ private:
     case Op::ParamsRef:
       for (Var *c : i.captures) out_ += " " + varName(*c);
       break;
-    case Op::CallForward: out_ += " " + i.callee.function->name; break;
+    case Op::CallForward: case Op::GenNew: out_ += " " + i.callee.function->name; break;
     default:
       break;
     }
@@ -192,6 +192,7 @@ private:
     const auto &ops = i.operands();
     for (size_t k = 0; k < ops.size(); ++k) out_ += (k || i.var ? ", " : " ") + value(ops[k]);
     if (i.op == Op::Br) out_ += " " + target(i.targets[0]);
+    if (i.op == Op::GenYield) out_ += ", " + std::to_string(i.index) + ", " + target(i.targets[0]);
     if (i.op == Op::CondBr) out_ += ", " + target(i.targets[0]) + ", " + target(i.targets[1]);
     out_ += "\n";
   }

@@ -67,8 +67,16 @@ constexpr OpInfo kOps[] = {
     {Op::IntCmp, "i.cmp", 0},
     {Op::BoolAnd, "and", Commutative},
     {Op::BoolNot, "not", 0},
+    {Op::BoxI64, "box.i64", 0},
+    {Op::BoxBool, "box.bool", 0},
+    {Op::UnboxI64, "unbox.i64", 0},
+    {Op::UnboxBool, "unbox.bool", 0},
+    {Op::GenNew, "gen.new", Allocates | ReadsHeap},
+    {Op::GenRestore, "gen.restore", WritesVar | ReadsHeap | WritesState},
+    {Op::GenDone, "gen.done", WritesHeap | WritesState},
     {Op::Br, "br", Terminator},
     {Op::CondBr, "cond_br", Terminator},
+    {Op::GenYield, "gen.yield", Terminator | ReadsVar | WritesHeap | WritesState | Allocates},
     {Op::Ret, "ret", Terminator},
 };
 

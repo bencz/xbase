@@ -277,6 +277,36 @@ Instruction *Builder::condBr(Value *cond, BasicBlock *t, BasicBlock *f, const st
   return i;
 }
 
+Instruction *Builder::box(Value *v) {
+  return make(v->type() == Type::Bool ? Op::BoxBool : Op::BoxI64, Type::Item, {v});
+}
+Instruction *Builder::unbox(Value *item, Type to) {
+  return make(to == Type::Bool ? Op::UnboxBool : Op::UnboxI64, to, {item});
+}
+Instruction *Builder::genNew(Function *resume, const std::vector<Value *> &args) {
+  Instruction *i = make(Op::GenNew, Type::Item);
+  for (Value *a : args) i->addOperand(a);
+  i->callee.function = resume;
+  return i;
+}
+Instruction *Builder::genRestore(Var *gen) {
+  Instruction *i = make(Op::GenRestore, Type::I64);
+  i->var = gen;
+  return i;
+}
+Instruction *Builder::genDone(Var *gen) {
+  Instruction *i = make(Op::GenDone, Type::Void);
+  i->var = gen;
+  return i;
+}
+Instruction *Builder::genYield(Var *gen, Value *value, BasicBlock *resume, uint32_t state) {
+  Instruction *i = make(Op::GenYield, Type::Void, {value});
+  i->var = gen;
+  i->index = state;
+  i->targets.push_back({resume, {}});
+  return i;
+}
+
 Instruction *Builder::ret(Value *v) {
   Instruction *i = make(Op::Ret, Type::Void);
   if (v) i->addOperand(v);

@@ -248,6 +248,7 @@ bool typedContinuations(Function &f) {
   size_t count = 0;
   for (auto &b : f.blocks) {
     if (b->unwind) return false; // unwind blocks take no parameters: the copy could not be joined there
+    if (Instruction *t = b->terminator(); t && t->op == Op::GenYield) return false; // a generator: values in the frame
     count += b->insts.size();
   }
   if (count > kMaxInstructions) return false;

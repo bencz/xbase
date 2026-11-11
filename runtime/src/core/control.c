@@ -20,6 +20,7 @@ static int send0(xb_ctx *ctx, xb_item *r, const xb_item *obj, const char *messag
 
 /* An enumerator's next element: MoveNext() is .T.; 0 at the end or after an error. */
 static int move_next(xb_ctx *ctx, const xb_item *e) {
+  if (xb_is_generator(e)) return xb_gen_move_next(ctx, e);
   xb_item moved;
   xb_set_nil(&moved);
   xb_gc_root_push(ctx, &moved);
@@ -28,11 +29,40 @@ static int move_next(xb_ctx *ctx, const xb_item *e) {
   return ok;
 }
 
+/* The current element of an enumerator; 0 after an error. */
+static int current(xb_ctx *ctx, xb_item *r, const xb_item *e) {
+  if (xb_is_generator(e)) {
+    *r = *xb_gen_current(e);
+    return 1;
+  }
+  return send0(ctx, r, e, "CURRENT");
+}
+
+/* An enumerator's elements, in an array in `r` (which may be `e`'s own item: `e` is copied first). */
+static void gather(xb_ctx *ctx, xb_item *r, const xb_item *e) {
+  xb_item from = *e, element;
+  xb_set_nil(&element);
+  xb_gc_root_push(ctx, &from);
+  xb_gc_root_push(ctx, &element);
+  xb_set_array(r, xb_array_alloc(0));
+  while (move_next(ctx, &from) && current(ctx, &element, &from)) {
+    xb_array *a = r->v.p;
+    xb_array_resize(a, a->len + 1);
+    a->items[a->len - 1] = element;
+    xb_gc_write_item(a, a->len - 1);
+  }
+  xb_gc_root_pop(ctx, 2);
+}
+
 /* An object goes through its enumerator: GetEnumerator(), or the object itself when it is one (MoveNext; Reset()
  * first, when it has one); for DESCEND, the enumerator's elements in an array, gone through backwards. */
 void xb_each_source(xb_ctx *ctx, xb_item *r, const xb_item *coll, uint32_t descend) {
   *r = *coll;
   if (coll->type != XB_T_OBJECT) return;
+  if (xb_is_generator(coll)) {
+    if (descend) gather(ctx, r, coll);
+    return;
+  }
   if (answers(coll, "GETENUMERATOR", 0)) {
     if (!send0(ctx, r, coll, "GETENUMERATOR")) return;
   } else if (answers(coll, "MOVENEXT", 0) && answers(coll, "CURRENT", 1) && answers(coll, "RESET", 0)) {
@@ -43,28 +73,16 @@ void xb_each_source(xb_ctx *ctx, xb_item *r, const xb_item *coll, uint32_t desce
     xb_gc_root_pop(ctx, 1);
     if (!ok) return;
   }
-  if (!answers(r, "MOVENEXT", 0) || !answers(r, "CURRENT", 1)) {
+  if (!xb_is_generator(r) && (!answers(r, "MOVENEXT", 0) || !answers(r, "CURRENT", 1))) {
     xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, coll); /* no collection, as for any other value */
     return;
   }
-  if (!descend) return;
-  xb_item e = *r, current;
-  xb_set_nil(&current);
-  xb_gc_root_push(ctx, &e);
-  xb_gc_root_push(ctx, &current);
-  xb_set_array(r, xb_array_alloc(0));
-  while (move_next(ctx, &e) && send0(ctx, &current, &e, "CURRENT")) {
-    xb_array *a = r->v.p;
-    xb_array_resize(a, a->len + 1);
-    a->items[a->len - 1] = current;
-    xb_gc_write_item(a, a->len - 1);
-  }
-  xb_gc_root_pop(ctx, 2);
+  if (descend) gather(ctx, r, r);
 }
 
 /* An enumerator's length so far, or the error of a value that is no collection. */
 XB_NOINLINE static int64_t enum_len_other(xb_ctx *ctx, const xb_item *coll) {
-  if (answers(coll, "MOVENEXT", 0)) return move_next(ctx, coll) ? INT64_MAX : 0;
+  if (xb_is_generator(coll) || answers(coll, "MOVENEXT", 0)) return move_next(ctx, coll) ? INT64_MAX : 0;
   xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, coll);
   return -1;
 }
@@ -108,11 +126,11 @@ void xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, 
 /* An enumerator's Current, into the loop reference's own item. Kept apart, so
  * that the paths of arrays and strings stay without a frame of their own. */
 XB_NOINLINE static void move_current(xb_ctx *ctx, xb_ref *ref) {
-  xb_item current;
-  xb_set_nil(&current);
-  xb_gc_root_push(ctx, &current);
-  if (send0(ctx, &current, &ref->coll, "CURRENT")) {
-    ref->value = current; /* the reference is the loop's: alive, and objects do not move */
+  xb_item value;
+  xb_set_nil(&value);
+  xb_gc_root_push(ctx, &value);
+  if (current(ctx, &value, &ref->coll)) {
+    ref->value = value; /* the reference is the loop's: alive, and objects do not move */
     xb_gc_write(ref);
   }
   xb_gc_root_pop(ctx, 1);

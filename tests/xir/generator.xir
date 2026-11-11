@@ -1,0 +1,77 @@
+module GENERATOR
+
+function COUNT params 1 {
+  $f0 = frame 0 "N"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = gen.new COUNT.resume %0
+  ret %1
+}
+
+function COUNT.resume internal params 2 {
+  $f0 = frame 0 "(GENERATOR)"
+  $f1 = frame 1 "N"
+  $f2 = frame 2 "I"
+  $f3 = frame 3 "X"
+  $f4 = frame 4 ""
+  $f5 = frame 5 ""
+  $f6 = frame 6 ""
+entry:
+  %0 = gen.restore $f0
+  %1 = i.cmp eq %0, i64 1
+  cond_br %1, for.incr, gen.dispatch.2
+gen.start:
+  store $f2, 1:w10
+  br for.test
+for.test:
+  %5 = load $f1 maybe_ref
+  %6 = load $f2
+  %7 = for.test %6, %5, 1:w0
+  cond_br %7, for.body, for.end
+for.body:
+  %9 = load $f2
+  gen.yield $f0, %9, 1, for.incr
+for.incr:
+  %11 = load $f2
+  %12 = binary add.one %11, 1:w0
+  store $f2, %12
+  br for.test
+for.end:
+  %15 = array 1:w10, 2:w10
+  %16 = each.source %15, false
+  store $f4, %16
+  %18 = load $f4
+  %19 = each.enter $f3, false, %18
+  store $f5, %19
+  br each.test(i64 0)
+each.test(%22: i64):
+  %23 = box.i64 %22
+  store $f6, %23
+  %25 = load $f6
+  %26 = unbox.i64 %25
+  %27 = i.add %26, i64 1
+  %28 = load $f4
+  %29 = enum.len %28
+  %30 = i.cmp le %27, %29
+  cond_br %30, each.body, each.end
+each.body:
+  %32 = load $f6
+  %33 = unbox.i64 %32
+  %34 = i.add %33, i64 1
+  each.move $f3, false, %34
+  %36 = load $f3 ref
+  gen.yield $f0, %36, 2, each.next
+each.next:
+  %38 = load $f6
+  %39 = unbox.i64 %38
+  %40 = i.add %39, i64 1
+  br each.test(%40)
+each.end:
+  %42 = load $f5
+  each.leave $f3, false, %42
+  gen.done $f0
+  ret .F.
+gen.dispatch.2:
+  %46 = i.cmp eq %0, i64 2
+  cond_br %46, each.next, gen.start
+}

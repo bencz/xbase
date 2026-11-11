@@ -242,7 +242,9 @@ std::unique_ptr<Module> Parser::parseModule(const std::string &moduleName) {
     fn->name = moduleName;
     fn->isProcedure = true;
     fn->implicit = true;
+    parsingFunc_ = fn.get();
     fn->body = parseBlock({});
+    parsingFunc_ = nullptr;
     mod->funcs.push_back(std::move(fn));
   }
   while (!at(Tok::Eof) && !diag_.limitReached()) {
@@ -326,7 +328,9 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
     fn->memberClass = lastClass_;
   }
   endOfStmt();
+  parsingFunc_ = fn.get();
   fn->body = parseBlock({});
+  parsingFunc_ = nullptr;
   return fn;
 }
 

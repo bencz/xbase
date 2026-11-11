@@ -127,6 +127,10 @@ void CodeGen::initTypes() {
   rtMacroPublic_ = rt("xb_macro_public", voidTy, {ptrTy_, ptrTy_});
   rtMacroText_ = rt("xb_macro_text", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtProgramRun_ = rt("xb_program_run", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtGenNew_ = rt("xb_gen_new", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtGenRestore_ = rt("xb_gen_restore", i32_, {ptrTy_, ptrTy_, ptrTy_, i32_});
+  rtGenYield_ = rt("xb_gen_yield", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
+  rtGenDone_ = rt("xb_gen_done", voidTy, {ptrTy_, ptrTy_});
   rtSendFrom_ = rt("xb_op_send_from", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_});
   rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
@@ -134,7 +138,7 @@ void CodeGen::initTypes() {
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
                            rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_,
                            rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_, rtMvPrivate_, rtMvPublic_,
-                           rtMvParam_})
+                           rtMvParam_, rtGenRestore_, rtGenYield_, rtGenDone_})
     quietCalls_.insert(c.getCallee());
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},

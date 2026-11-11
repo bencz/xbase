@@ -247,6 +247,9 @@ void CallResolver::block(Block &b) {
       }
       break;
     }
+    case StmtKind::Yield:
+      expr(*static_cast<YieldStmt &>(*st).value);
+      break;
     case StmtKind::WithObject: {
       auto &w = static_cast<WithObjectStmt &>(*st);
       expr(*w.object);

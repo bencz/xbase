@@ -91,6 +91,7 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
       xb_class_send(ctx, r, message, NULL, 0, argc, argv);
       return;
     }
+    if (xb_is_generator(&argv[0]) && xb_gen_message(ctx, r, message, &argv[0])) return;
     for (uint32_t k = 0; k < cls->nvars; ++k)
       if (strcmp(cls->vars[k].name, name) == 0) {
         if (!assign) {

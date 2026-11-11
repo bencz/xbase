@@ -141,6 +141,11 @@ private:
         fail(std::string(opName(i.op)) + " takes items only");
   }
 
+  // A generator operation's variable: the enumerator, the resume function's parameter 0.
+  void enumeratorVar(const Instruction &i) {
+    if (!i.var || i.var->kind != Var::Kind::Frame || i.var->index != 0) fail("a generator's enumerator is not param 0");
+  }
+
   void inst(const Instruction &i, size_t pos) {
     const BasicBlock *at = i.parent;
     for (Value *v : i.operands()) use(v, at, pos);
@@ -226,6 +231,17 @@ private:
       break;
     case Op::SeqCatch: case Op::SeqValue: case Op::SeqSuspend: expect(i, 0, {}); break;
     case Op::SeqWith: case Op::SeqRestore: expect(i, 1, {Type::Item}); break;
+    case Op::BoxI64: expect(i, 1, {Type::I64}); break;
+    case Op::BoxBool: expect(i, 1, {Type::Bool}); break;
+    case Op::UnboxI64: case Op::UnboxBool: expect(i, 1, {Type::Item}); break;
+    case Op::GenNew:
+      allItems(i);
+      if (!i.callee.function) fail("gen.new without a resume function");
+      break;
+    case Op::GenRestore: case Op::GenDone:
+      expect(i, 0, {});
+      enumeratorVar(i);
+      break;
     case Op::SeqResume: expect(i, 2, {Type::I64, Type::Item}); break;
     case Op::EachKey: expect(i, 2, {Type::Item, Type::I64}); break;
     case Op::EachSource: expect(i, 2, {Type::Item, Type::Bool}); break;
@@ -285,6 +301,13 @@ private:
       }
       break;
     }
+    case Op::GenYield:
+      expect(i, 1, {Type::Item});
+      enumeratorVar(i);
+      if (i.targets.size() != 1 || !owned_.count(i.targets[0].block) || !i.targets[0].args.empty() ||
+          !i.targets[0].block->params.empty())
+        fail("gen.yield resumes in a block of its own without arguments");
+      break;
     case Op::Ret:
       if (i.operands().size() > 1 || (i.operands().size() == 1 && i.operand(0)->type() != Type::Item))
         fail("ret takes at most one item");

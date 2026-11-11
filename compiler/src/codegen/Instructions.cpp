@@ -529,6 +529,23 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::IntCmp: values_[&i] = b_.CreateICmp(llvmPredicate(i.pred), value(ops[0]), value(ops[1])); break;
   case Op::BoolAnd: values_[&i] = b_.CreateAnd(value(ops[0]), value(ops[1])); break;
   case Op::BoolNot: values_[&i] = b_.CreateNot(value(ops[0])); break;
+  case Op::BoxI64: storeInt(dest(i), value(ops[0])); break;
+  case Op::BoxBool: storeLogical(dest(i), value(ops[0])); break;
+  case Op::UnboxI64: values_[&i] = intValue(addr(ops[0])); break;
+  case Op::UnboxBool: values_[&i] = logicalValue(addr(ops[0])); break;
+  case Op::GenNew: {
+    Value *argv = operandGroup(i);
+    Value *d = dest(i);
+    setNil(d);
+    b_.CreateCall(rtGenNew_, {fnCtx_, d, functions_.at(i.callee.function), ConstantInt::get(i32_, ops.size()), argv});
+    break;
+  }
+  case Op::GenRestore: // the frame's slots after the enumerator's own (parameter 0)
+    values_[&i] = b_.CreateSExt(b_.CreateCall(rtGenRestore_, {fnCtx_, rawAddress(*i.var), fnBase_,
+                                                              ConstantInt::get(i32_, plan_->frameSize())}),
+                                i64_);
+    break;
+  case Op::GenDone: b_.CreateCall(rtGenDone_, {fnCtx_, rawAddress(*i.var)}); break;
   case Op::Br:
     shareOnEdge(i.parent, i.targets[0].block);
     emitBranch(i.targets[0]);
@@ -559,6 +576,12 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::Ret:
     if (!ops.empty() && plan_->home(ops[0]).kind != Home::Kind::Ret) copyItem(fnRet_, addr(ops[0]));
+    b_.CreateBr(fnExit_);
+    break;
+  case Op::GenYield: // the frame and the element into the enumerator; the step returns .T.
+    b_.CreateCall(rtGenYield_, {fnCtx_, rawAddress(*i.var), fnBase_, ConstantInt::get(i32_, plan_->frameSize()),
+                                ConstantInt::get(i32_, i.index), addr(ops[0])});
+    storeLogical(fnRet_, b_.getInt1(true));
     b_.CreateBr(fnExit_);
     break;
   }

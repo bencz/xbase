@@ -131,6 +131,16 @@ int        xb_class_associate(const xb_object *o, const char *type);
 /* The name ClassName() gives values of a type that is not an object's
  * ("NUMERIC", "CHARACTER" ...), NULL for internal types. */
 const char *xb_type_class_name(xb_type type);
+/* Generators (types/generator.c): whether `it` is a generator's enumerator;
+ * one step (MoveNext: .T. while it yields an element, its CURRENT variable);
+ * the messages it answers besides its CURRENT variable (1 when it did). */
+extern const xb_class xb_generator_class;
+static inline int xb_is_generator(const xb_item *it) {
+  return it->type == XB_T_OBJECT && ((const xb_object *)it->v.p)->cls == &xb_generator_class;
+}
+int        xb_gen_move_next(xb_ctx *ctx, const xb_item *gen);
+const xb_item *xb_gen_current(const xb_item *gen);
+int        xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, const xb_item *gen);
 /* What every value answers (ClassName), else the error of a message no
  * class has: BASE/1004, or BASE/1005 for an assignment. */
 void       xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);

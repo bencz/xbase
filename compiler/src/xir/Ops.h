@@ -74,9 +74,19 @@ enum class Op : uint8_t {
   IntCmp,         // pred; I64, I64 -> Bool
   BoolAnd,        // Bool, Bool -> Bool
   BoolNot,        // Bool -> Bool
+  BoxI64,         // I64 -> Item: the number (a value a generator keeps across YIELD, in a frame variable)
+  BoxBool,        // Bool -> Item: the logical
+  UnboxI64,       // Item -> I64: the integer such an item holds
+  UnboxBool,      // Item -> Bool: the logical such an item holds
+  GenNew,         // callee: a generator's resume function; args -> Item: the enumerator, its arguments saved
+  GenRestore,     // var: the enumerator (parameter 0) -> I64: its frame back from the enumerator; the state to resume
+                  // in (0 at the start)
+  GenDone,        // var: the generator ended: the enumerator has no more elements
   // terminators
   Br,             // target(args)
   CondBr,         // Bool; then(args), else(args)
+  GenYield,       // var, index: Item; resume: the element, the frame saved in the enumerator; the function returns .T.,
+                  // and state `index` goes on at the target
   Ret,            // [Item]
 };
 

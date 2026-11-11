@@ -19,6 +19,7 @@ struct Sema::Scope {
   const char *fence = nullptr;
   unsigned fenceLoops = 0, fenceSwitches = 0;
   bool inBlock = false;          // the statements of an extended codeblock
+  bool inSequence = false;       // any part of a BEGIN SEQUENCE or TRY (YIELD cannot suspend there)
 };
 
 void Sema::run(Module &m) {
@@ -143,6 +144,7 @@ bool Sema::memvarCreated(const std::string &name) const {
 void Sema::func(FuncDecl &f) {
   curFunc_ = &f;
   Scope s;
+  if (f.generator) f.params.insert(f.params.begin(), Param{f.loc, "(GENERATOR)"}); // the enumerator it runs for
   frames_.push_back({{}, {}, {}, &f.boxed, nullptr});
   for (const Param &p : f.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, s.next}).second)
@@ -150,6 +152,9 @@ void Sema::func(FuncDecl &f) {
     else ++s.next;
   }
   block(f.body, s);
+  if (f.generator && f.variadic) diag_.error(f.loc, "a generator cannot take '...'");
+  if (f.generator && f.readsArgs) // its frame is the resume function's, whose argument is the enumerator
+    diag_.error(f.loc, "a generator cannot read its arguments as received (PCount(), PValue(), PARAMETERS)");
   f.numLocals = s.next;
   f.boxed.resize(f.numLocals);
   frames_.pop_back();
@@ -304,6 +309,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
   case StmtKind::Private:
   case StmtKind::Public:
     if (s.inBlock) diag_.error(st.loc, "PRIVATE and PUBLIC are not allowed in a codeblock");
+    if (curFunc_->generator) diag_.error(st.loc, "PRIVATE and PUBLIC are not allowed in a generator");
     for (LocalDecl &d : static_cast<LocalStmt &>(st).decls) {
       if (d.init) expr(*d.init, s); // before the variable exists: it reads the one visible
       if (d.macro) expr(*d.macro, s);
@@ -312,6 +318,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
     break;
   case StmtKind::Parameters: // PRIVATEs holding the arguments received
     if (s.inBlock) diag_.error(st.loc, "PARAMETERS is not allowed in a codeblock");
+    if (curFunc_->generator) diag_.error(st.loc, "PARAMETERS is not allowed in a generator");
     curFunc_->readsArgs = true;
     for (const LocalDecl &d : static_cast<LocalStmt &>(st).decls) createdMemvar(d);
     break;
@@ -358,6 +365,8 @@ void Sema::stmt(Stmt &st, Scope &s) {
   case StmtKind::Return: {
     auto &r = static_cast<ReturnStmt &>(st);
     if (s.fence) diag_.error(r.loc, std::string("RETURN cannot leave ") + s.fence);
+    if (r.value && curFunc_->generator && !s.inBlock)
+      diag_.error(r.loc, "a generator cannot RETURN a value: YIELD gives its elements");
     if (r.value) {
       if (curFunc_->isProcedure && !curFunc_->implicit && !s.inBlock)
         diag_.error(r.loc, "PROCEDURE '" + curFunc_->name + "' cannot return a value");
@@ -393,6 +402,10 @@ void Sema::stmt(Stmt &st, Scope &s) {
     --s.loopDepth;
     break;
   }
+  case StmtKind::Yield:
+    expr(*static_cast<YieldStmt &>(st).value, s);
+    if (s.inSequence) diag_.error(st.loc, "YIELD cannot be inside BEGIN SEQUENCE or TRY");
+    break;
   case StmtKind::WithObject: {
     auto &w = static_cast<WithObjectStmt &>(st);
     expr(*w.object, s);
@@ -403,6 +416,8 @@ void Sema::stmt(Stmt &st, Scope &s) {
   case StmtKind::Sequence: {
     auto &q = static_cast<SequenceStmt &>(st);
     if (q.handler) expr(*q.handler, s);
+    bool wasInSequence = s.inSequence;
+    s.inSequence = true;
     auto fenced = [&](Block &b, const char *fence) { // b, which RETURN, EXIT and LOOP may not leave
       Scope inner = s;
       inner.fence = fence;
@@ -417,6 +432,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
     if (q.usingVar) expr(*q.usingVar, s);
     nestedBlock(q.recover, s);
     if (q.hasAlways) fenced(q.always, q.isTry ? "FINALLY" : "ALWAYS");
+    s.inSequence = wasInSequence;
     break;
   }
   case StmtKind::Exit: // leaves the innermost loop or SWITCH

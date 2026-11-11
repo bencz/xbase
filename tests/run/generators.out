@@ -1,0 +1,14 @@
+
+range:  1 2 3 4 5
+O GENERATOR 1 4 9 16
+after end: .F. NIL
+words: [alpha][beta][gamma]
+chained:   2  4  6  8 10
+descend:  3 2 1
+nested: x1 x2 y1 y2 
+tree:  1 2 3 4 6 7
+infinite, exited: 0 1 1 2 3 5 8 13 21 34 55 89 
+blocks:         40         40         40
+error:  1 error +
+args by value:   7 99          7
+sum:          45000150000

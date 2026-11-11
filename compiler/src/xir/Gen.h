@@ -26,6 +26,7 @@ private:
   Function *declare(const FuncDecl &f);
   void genFunction(const FuncDecl &f, Function *fn);
   void genBody(const FuncDecl &f, Function *fn, Function *byRef, const std::vector<uint32_t> &plain);
+  void genGenerator(const FuncDecl &f, Function *fn);
   void genModuleInit(const xb::Module &ast);
   Function *genCodeblockFunction(const BlockExpr &b);
   Var *frameVar(uint32_t slot);
@@ -103,6 +104,8 @@ private:
     std::string function;          // the xBase function being generated (its codeblocks' too)
     std::unordered_map<uint32_t, Var *> paramLocals; // parameter slot -> the LOCAL standing for it
     int32_t classIndex = -1;       // a method's class (Module::classes), for its codeblocks too; -1 elsewhere
+    bool generator = false;        // a generator's resume function: YIELD suspends, RETURN ends the enumeration
+    std::vector<BasicBlock *> resumes; // where each YIELD goes on (state k + 1)
   };
   // A message sent from the current function: from a method (or its codeblocks), with its class.
   Instruction *sendFrom(const std::string &message, Value *object, const std::vector<Value *> &args,

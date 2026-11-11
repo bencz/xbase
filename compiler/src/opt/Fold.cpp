@@ -170,6 +170,9 @@ void Folder::stmt(Stmt &s) {
     block(f.body);
     break;
   }
+  case StmtKind::Yield:
+    fold(static_cast<YieldStmt &>(s).value);
+    break;
   case StmtKind::WithObject: {
     auto &w = static_cast<WithObjectStmt &>(s);
     fold(w.object);

@@ -30,6 +30,14 @@ void Generator::genStmt(const Stmt &s) {
   case StmtKind::ForEach: genForEach(static_cast<const ForEachStmt &>(s)); break;
   case StmtKind::Switch: genSwitch(static_cast<const SwitchStmt &>(s)); break;
   case StmtKind::Sequence: genSequence(static_cast<const SequenceStmt &>(s)); break;
+  case StmtKind::Yield: { // the element; the next step goes on in a block of its own (state k + 1)
+    Value *value = genExpr(*static_cast<const YieldStmt &>(s).value);
+    BasicBlock *resume = cur_.fn->addBlock("gen.resume");
+    cur_.resumes.push_back(resume);
+    b.genYield(frameVar(0), value, resume, (uint32_t)cur_.resumes.size());
+    b.setBlock(resume);
+    break;
+  }
   case StmtKind::WithObject: {
     auto &w = static_cast<const WithObjectStmt &>(s);
     initLocal(w.hidden, genExpr(*w.object));
@@ -108,7 +116,12 @@ void Generator::genReturn(const ReturnStmt &r) {
   Builder &b = *cur_.b;
   Value *value = r.value ? genExpr(*r.value) : nullptr;
   exitCleanups(0, true);
-  b.ret(value);
+  if (cur_.generator) { // the end of the enumeration (Sema allows no value)
+    b.genDone(frameVar(0));
+    b.ret(b.logical(false));
+  } else {
+    b.ret(value);
+  }
   startDeadBlock();
 }
 

@@ -3,6 +3,7 @@
 #include "xir/Gen.h"
 
 #include "xir/Analysis.h"
+#include "xir/passes/Passes.h"
 
 #include "xbrt.h" // XB_BLOCK_PREFIX
 
@@ -87,6 +88,10 @@ Function *Generator::declare(const FuncDecl &f) {
 // as received, to the other body (NAME.byref), which reaches the parameters
 // through their references as written.
 void Generator::genFunction(const FuncDecl &f, Function *fn) {
+  if (f.generator) {
+    genGenerator(f, fn);
+    return;
+  }
   std::vector<uint32_t> plain;
   for (uint32_t s = 0; s < f.params.size(); ++s)
     if (!(s < f.boxed.size() && f.boxed[s])) plain.push_back(s);
@@ -102,6 +107,40 @@ void Generator::genFunction(const FuncDecl &f, Function *fn) {
   genBody(f, fn, byRef, plain);
 }
 
+// A generator: the function itself returns an enumerator holding its
+// arguments (gen.new); its body is the resume function NAME.resume, which the
+// enumerator runs at each MoveNext, with the enumerator as parameter 0 and the
+// function's parameters and LOCALs after it. The resume function starts with
+// its frame back from the enumerator (gen.restore) and goes to the start, or
+// after the YIELD the state names; YIELD saves the frame and returns .T., the
+// end and RETURN end the enumeration and return .F. (makeResumable keeps the
+// values a YIELD would lose in the frame).
+void Generator::genGenerator(const FuncDecl &f, Function *fn) {
+  mod_->functions.push_back(std::make_unique<Function>(Function::Kind::Program, f.name + ".resume"));
+  Function *resume = mod_->functions.back().get();
+  resume->internal = true;
+  genBody(f, resume, nullptr, {});
+  makeResumable(*resume);
+
+  cur_ = FnState{};
+  cur_.fn = fn;
+  cur_.b = std::make_unique<Builder>(fn);
+  fn->stackName = f.name;
+  fn->hidden = runtimeLibrary_ && f.isStatic;
+  fn->numParams = (uint32_t)f.params.size() - 1;
+  fn->method = f.ofClass != nullptr;
+  Builder &b = *cur_.b;
+  b.setBlock(fn->addBlock("entry"));
+  b.setLoc(f.loc);
+  std::vector<Value *> args;
+  for (uint32_t k = 0; k < fn->numParams; ++k) {
+    Var *p = fn->addVar(Var::Kind::Frame, k, f.params[k + 1].name);
+    p->param = true;
+    args.push_back(b.load(p, Access::MaybeRef)); // the values: references are not kept
+  }
+  b.ret(b.genNew(resume, args));
+}
+
 // The frame holds the parameters, then the LOCALs; a shared one moves into a
 // cell when a codeblock captures it or it is passed by reference. With
 // `byRef`, the parameters `plain` stand as LOCALs when none holds a reference.
@@ -112,11 +151,12 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   cur_.scope = f.name;
   cur_.function = f.name;
   cur_.classIndex = f.ofClass ? classIndex_.at(f.ofClass) : -1;
+  cur_.generator = f.generator;
   fn->stackName = f.name;
   fn->hidden = runtimeLibrary_ && f.isStatic;
   fn->numParams = (uint32_t)f.params.size();
   fn->readsArgs = f.readsArgs;
-  fn->method = f.ofClass != nullptr;
+  fn->method = f.ofClass != nullptr && !f.generator; // a resume function's arguments are its enumerator
   fn->callsPrivates = f.callsPrivates;
   for (uint32_t s = 0; s < f.numLocals; ++s) {
     Var *v = fn->addVar(Var::Kind::Frame, s, s < f.params.size() ? f.params[s].name : "");
@@ -145,8 +185,27 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
     b.ret(b.classNew(classIndex_.at(f.instantiates)));
     return;
   }
+  if (!f.generator) {
+    genBlock(f.body);
+    if (!b.terminated()) b.ret(nullptr);
+    return;
+  }
+  BasicBlock *dispatch = fn->addBlock("gen.dispatch"), *start = fn->addBlock("gen.start");
+  b.br(dispatch);
+  b.setBlock(start);
   genBlock(f.body);
-  if (!b.terminated()) b.ret(nullptr);
+  if (!b.terminated()) {
+    b.genDone(frameVar(0));
+    b.ret(b.logical(false));
+  }
+  b.setBlock(dispatch);
+  Value *state = b.genRestore(frameVar(0));
+  for (size_t k = 0; k < cur_.resumes.size(); ++k) {
+    BasicBlock *next = fn->addBlock("gen.dispatch");
+    b.condBr(b.intCmp(IntPred::Eq, state, b.i64((int64_t)k + 1)), cur_.resumes[k], next);
+    b.setBlock(next);
+  }
+  b.br(start);
 }
 
 // STATICs get their initial values once, before the program starts; a

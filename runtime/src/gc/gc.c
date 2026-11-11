@@ -467,6 +467,13 @@ void xb_gc_write_item(xb_array *a, size_t index) {
   if (!(h->state & XB_GC_CARDED)) record(h, XB_GC_CARDED);
 }
 
+void xb_gc_write_items(xb_array *a, size_t from, size_t to) {
+  xb_gc_hdr *h = xb_gc_header(a);
+  if ((h->state & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED) return; /* young, or traced whole anyway */
+  for (size_t k = from; k < to; k = (k | (((size_t)1 << XB_ARRAY_CARD_SHIFT) - 1)) + 1) /* one per card */
+    xb_gc_write_item(a, k);
+}
+
 /* Marks what an item refers to; true when that stays young (see mark_ref). */
 static int mark_item(const xb_item *it) {
   switch ((xb_type)it->type) {

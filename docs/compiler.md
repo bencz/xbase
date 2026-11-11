@@ -111,6 +111,11 @@ Statements:
   `ALWAYS` runs however the body and `RECOVER` end. `RETURN`, and `EXIT` or `LOOP` for a loop around the sequence,
   cannot leave its body (Clipper rule) nor `ALWAYS`; in `RECOVER` they can (`ALWAYS` runs first). `BREAK [value]` is
   a `std.ch` command (`__Break()`, the same as `Break()` and `Throw()`).
+- `YIELD expr` in a function or method makes it a generator: calling it returns an enumerator (see
+  [runtime.md](runtime.md#generators)) whose `MoveNext()` runs the body up to the next `YIELD`, the element in
+  `Current`; `FOR EACH` goes through it. `RETURN` (without a value) and the end of the body end it. Not in a codeblock,
+  a `BEGIN SEQUENCE` or a `TRY`; a generator takes no `...`, reads no arguments as received (`PCount()`, `PValue()`,
+  `PARAMETERS`) and creates no `PRIVATE` or `PUBLIC`.
 - `WITH OBJECT expr ... END` (`END WITH` too): inside, `:name` (also `:name( args )`, assigned, `++`) is a message to
   the object, evaluated once into a `LOCAL` of its own (`WithObjectStmt::hidden`, a name no program can write). A
   codeblock made there captures that variable, as it would any `LOCAL`: it sends to the object the statement holds,
@@ -358,6 +363,14 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   `seq.value` before it, `seq.resume` after it, then onward), and before each `RETURN`, `EXIT` or `LOOP` that leaves
   the sequence (`Generator::exitCleanups`, which also puts the error block back), in a block that unwinds where the
   sequence does. `TRY` is the parser's `SequenceStmt` with the handler block built in.
+- A generator (`FuncDecl::generator`, set by the parser; Sema adds the enumerator as parameter 0) becomes two xIR
+  functions (`Generator::genGenerator`): the function itself, which returns `gen.new` of its resume function with its
+  arguments, and `NAME.resume`, the body: it starts with `gen.restore` and a dispatch on the state it returns (0: the
+  start; k: after the k-th `YIELD`), `YIELD` is the terminator `gen.yield` (the frame and the element saved, `.T.`
+  returned) whose target is where state k goes on, and `RETURN` and the end are `gen.done` and `.F.`. Then
+  `makeResumable` (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that
+  lives across a `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a
+  `Bool` or `I64` boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone.
 - A codeblock becomes an xIR function of its own (`<function>.blockN`) whose frame holds its parameters; `block`
   creates it with the cells of the variables it captures (moving them into cells if they are not yet).
 - `STATIC` initializers form the module initialization function.

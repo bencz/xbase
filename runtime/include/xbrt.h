@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 31u
+#define XB_ABI_VERSION 32u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -529,6 +529,20 @@ typedef struct xb_send_cache {
 } xb_send_cache;
 void     xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                          xb_send_cache *cache, uint32_t argc, xb_item *argv);
+
+/* [ABI] Generators (types/generator.c): a function with YIELD returns an
+ * enumerator (xb_gen_new: `resume`, the function's resume function, and its
+ * arguments, which become slots 1 .. argc of the resume function's frame);
+ * the resume function, whose argument (frame slot 0) is the enumerator,
+ * starts with xb_gen_restore (its frame's other `nslots` - 1 slots back from
+ * the enumerator; the state to resume in: 0 at the start), saves them and the
+ * element with xb_gen_yield before it returns .T. (`state` goes on after that
+ * YIELD), and calls xb_gen_done before it returns .F. at the end. */
+void     xb_gen_new(xb_ctx *ctx, xb_item *r, xb_func resume, uint32_t argc, const xb_item *argv);
+int32_t  xb_gen_restore(xb_ctx *ctx, const xb_item *gen, xb_item *slots, uint32_t nslots);
+void     xb_gen_yield(xb_ctx *ctx, const xb_item *gen, const xb_item *slots, uint32_t nslots, uint32_t state,
+                      const xb_item *value);
+void     xb_gen_done(xb_ctx *ctx, const xb_item *gen);
 
 /* The macro operator (macro/run.c): `text` holds an expression, compiled when
  * the code runs; it sees memory variables and functions by name, never the

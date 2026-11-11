@@ -79,9 +79,14 @@ static void names(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int m
   uint32_t n = o->cls->compiled ? xb_class_names(o, methods, NULL) : methods ? 0 : o->cls->nvars;
   const char **list = malloc((n ? n : 1) * sizeof *list);
   if (!list) xb_gc_fatal("out of memory");
-  if (o->cls->compiled) xb_class_names(o, methods, list);
-  else
-    for (uint32_t k = 0; k < n; ++k) list[k] = o->cls->vars[k].name;
+  if (o->cls->compiled) {
+    xb_class_names(o, methods, list);
+  } else { /* a runtime class's own variables have names no message spells: they are left out */
+    uint32_t kept = 0;
+    for (uint32_t k = 0; k < n; ++k)
+      if (o->cls->vars[k].name[0] >= 'A' && o->cls->vars[k].name[0] <= 'Z') list[kept++] = o->cls->vars[k].name;
+    n = kept;
+  }
   xb_array *a = xb_array_alloc(n);
   xb_set_array(ret, a); /* rooted there while the names are made */
   for (uint32_t k = 0; k < n; ++k) {

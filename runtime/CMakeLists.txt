@@ -15,6 +15,7 @@ add_library(xbrt STATIC
   src/types/array.c
   src/types/block.c
   src/types/class.c
+  src/types/generator.c
   src/types/date.c
   src/types/hash.c
   src/types/object.c

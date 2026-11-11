@@ -60,6 +60,8 @@ void  xb_gc_unregister(xb_ctx *ctx);
 void  xb_gc_root_push(xb_ctx *ctx, xb_item *it);
 void  xb_gc_root_pop(xb_ctx *ctx, unsigned n);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */
+/* The barrier after storing items `from` .. `to` - 1 of an array (xb_gc_write_item for each card they cover). */
+void   xb_gc_write_items(xb_array *a, size_t from, size_t to);
 /* Finalization: an object registered with xb_gc_finalizable that a
  * collection finds unreachable is kept alive, queued, and every context gets
  * XB_PENDING_FINALIZE; xb_gc_next_finalized hands the queued objects out, in

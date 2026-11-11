@@ -41,6 +41,14 @@ StmtPtr Parser::parseStmtKind() {
   if (atStmtKw("TRY") && ahead().kind == Tok::EndOfStmt) return parseTry();
   if (atStmtKw("WITH") && isKw(ahead(), "OBJECT")) return parseWithObject();
   if (atStmtKw("FOR")) return isKw(ahead(), "EACH") && !isAssignAfterEach() ? parseForEach() : parseFor();
+  if (atStmtKw("YIELD") && ahead().kind != Tok::EndOfStmt && ahead().kind != Tok::Eof) {
+    advance();
+    ExprPtr v = parseExpr();
+    endOfStmt();
+    if (braceBlocks_ || !parsingFunc_) diag_.error(loc, "YIELD is valid only in a function or method");
+    else parsingFunc_->generator = true;
+    return std::make_unique<YieldStmt>(loc, std::move(v));
+  }
   if (atStmtKw("RETURN")) {
     advance();
     ExprPtr v;

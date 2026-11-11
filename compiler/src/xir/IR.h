@@ -192,7 +192,7 @@ public:
   Access access = Access::Direct;     // Load, Store, Barrier
   Callee callee;                      // Call
   std::string message;                // Send: upper-cased, "_NAME" to assign NAME; Mv*: the variable's name
-  uint32_t index = 0;                 // MvParam: the argument, from 0
+  uint32_t index = 0;                 // MvParam: the argument, from 0; GenYield: the state it resumes in
   // Send from a method: the index of its class in Module::classes (what the send may reach), -1 elsewhere, and
   // whether it is Super:message; ClassNew: the class.
   int32_t classIndex = -1;
