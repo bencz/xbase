@@ -350,3 +350,75 @@ void xbf_EMPTY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   xb_set_logical(ret, empty);
 }
+
+/* PadL/PadR/PadC( xValue, nLength, [cFill] ): the value's text padded with
+ * the fill's first character (a blank by default) to nLength, or its first
+ * nLength characters: a string as it is, a number as Str() gives it without
+ * its leading blanks, a date as DToC() does; "" for any other value. PadL
+ * pads on the left, PadC around (the extra half, rounded down, on the
+ * left). */
+typedef enum pad_side { PAD_RIGHT, PAD_LEFT, PAD_CENTER } pad_side;
+
+static void pad(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, pad_side side) {
+  int64_t n = argc > 1 && xb_is_number(&argv[1]) ? xb_num_to_i64(&argv[1]) : 0;
+  const xb_str *fill = str_arg(argv, argc, 2);
+  char with = fill && fill->len ? fill->data[0] : ' ';
+  if (!argc || !(argv[0].type == XB_T_STRING || xb_is_number(&argv[0]) || argv[0].type == XB_T_DATE)) {
+    xb_set_str(ret, xb_str_empty());
+    return;
+  }
+  if (argv[0].type == XB_T_STRING && n > 0 && (uint64_t)n == argv[0].v.s->len) { /* already that long */
+    *ret = argv[0];
+    return;
+  }
+  xb_item text; /* the value's text, rooted while the result is made */
+  xb_set_str(&text, xb_item_display(ctx, &argv[0]));
+  xb_gc_root_push(ctx, &text);
+  const char *p = text.v.s->data;
+  size_t len = text.v.s->len;
+  if (xb_is_number(&argv[0])) {
+    while (len && *p == ' ') {
+      ++p;
+      --len;
+    }
+  }
+  size_t width = n > 0 ? (size_t)(n < (int64_t)XB_STR_MAX_LEN ? n : (int64_t)XB_STR_MAX_LEN) : 0;
+  xb_str *r = xb_str_alloc(width);
+  if (len >= width) {
+    memcpy(r->data, p, width);
+  } else {
+    size_t extra = width - len, before = side == PAD_LEFT ? extra : side == PAD_CENTER ? extra / 2 : 0;
+    memset(r->data, with, width);
+    memcpy(r->data + before, p, len);
+  }
+  xb_gc_root_pop(ctx, 1);
+  xb_set_str(ret, r);
+}
+
+void xbf_PADR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { pad(ctx, ret, argc, argv, PAD_RIGHT); }
+void xbf_PAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { pad(ctx, ret, argc, argv, PAD_RIGHT); }
+void xbf_PADL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { pad(ctx, ret, argc, argv, PAD_LEFT); }
+void xbf_PADC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { pad(ctx, ret, argc, argv, PAD_CENTER); }
+
+/* SoundEx( cString ): the string's four-character Soundex code: its first
+ * letter, then the digits of the letters after it (B F P V 1, C G J K Q S X
+ * Z 2, D T 3, L 4, M N 5, R 6), none for A E I O U H W Y, which only part two
+ * letters of the same digit, and a digit once for letters next to each other
+ * with it; anything but a letter is skipped; zeros fill the rest. */
+void xbf_SOUNDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  static const char digits[] = "01230120022455012623010202"; /* A .. Z */
+  char code[4] = {'0', '0', '0', '0'};
+  const xb_str *s = str_arg(argv, argc, 0);
+  size_t at = 0;
+  char prev = '0';
+  for (size_t i = 0; s && i < s->len && at < sizeof code; ++i) {
+    char c = xb_ascii_upper(s->data[i]);
+    if (c < 'A' || c > 'Z') continue;
+    char d = digits[c - 'A'];
+    if (at == 0) code[at++] = c;
+    else if (d != '0' && d != prev) code[at++] = d;
+    prev = d;
+  }
+  ret_str(ret, code, sizeof code);
+}

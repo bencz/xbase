@@ -561,6 +561,20 @@ Conventions:
 - `Sqrt` of a negative number and an `Exp` that overflows give 0; `Log` of a negative number gives minus infinity, like
   `Log( 0 )`.
 - `Replicate` raises `String overflow` (1234) when the result size overflows.
+- `PadL`/`PadR`/`PadC( x, nLength, [cFill] )` (`Pad` is `PadR`) pad a string, a number (as `Str` gives it, without
+  its leading blanks) or a date (as `DToC` gives it) with the fill's first character (a blank by default, also for an
+  empty fill, where the reference pads with zero bytes), or keep its first `nLength` characters; any other value, or
+  a length that is not a positive number, gives `""`. `PadC` puts the extra half, rounded down, on the left.
+- `Mod( n, nBase )` is dBase's modulus (the remainder takes the sign of `nBase`), with SET DECIMALS decimals; a zero
+  base is error 1341 (`%`), after which the number comes back as it is. `Descend` gives each byte of a string as 256
+  minus it (0 stays 0), a number negated (SET DECIMALS decimals), a date as `5231808` minus its day number, a logical
+  negated, and NIL for anything else. `Bin2I`/`Bin2W`/`Bin2L` read a signed 16-bit, unsigned 16-bit and signed 32-bit
+  little-endian number from a string's first bytes (zeros past its end); `I2Bin`/`L2Bin` write the low 16 or 32 bits
+  of a truncated number.
+- `SoundEx` keeps the first letter, then the digits of the next letters, a digit once for neighbors with it (A E I O U
+  H W Y have none and part neighbors), skipping anything but a letter, padded with zeros to 4 characters.
+- `MemVarBlock( cName )` returns a block that reads the memory variable and, called with a value that is not NIL,
+  assigns it; NIL when no variable of that name is visible.
 - `StrTran( c, cSearch, cReplace, nStart, nCount )`: `nStart` or `nCount` of 0 gives `""`; a negative `nStart`
   replaces nothing, a negative `nCount` replaces every occurrence from `nStart`.
 - `Stuff( c, nStart, nDelete, cInsert )`: `nStart` 0 is 1; a negative `nStart` or `nDelete` counts as past the end.
@@ -639,7 +653,8 @@ Each one moved from C is measured against its C version (callgrind).
   function's argument error (`EG_ARG`, its name as the operation, the arguments it received; not substitutable), as
   its C counterparts do.
 - Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` (`rtl/arrays.prg`),
-  `ErrorSys` and the default error handler (`rtl/errorsys.prg`). Measured against their C versions (callgrind,
+  `ErrorSys` and the default error handler (`rtl/errorsys.prg`), Clipper's time sample functions `Secs`, `TString`,
+  `Days`, `ElapTime`, `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions (callgrind,
   x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval`
   over a million elements with `{| x | n += x }`, 121M (116M). `QQOut` keeps its own loop instead of sharing
   `OutStd`'s: passing the values on through one more call costs `QOut` 13% more cycles.

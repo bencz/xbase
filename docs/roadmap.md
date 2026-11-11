@@ -70,10 +70,10 @@ Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 
 ### Runtime library
 
-77 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
+97 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
 
-1. Strings and numbers: `PadL`/`PadR`/`PadC`, `Transform`, `SoundEx`, the memo-line functions; `Mod`, `Descend`,
-   `Bin2I` and the other binary conversions.
+1. Strings and numbers: `Transform`, the memo-line functions (`MemoLine`, `MLCount`, `MLPos`, `MLCToPos`,
+   `MPosToLC`, `HardCR`, `MemoTran`).
 2. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
    `GetEnv`.
 3. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the

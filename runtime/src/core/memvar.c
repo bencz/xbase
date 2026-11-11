@@ -311,3 +311,30 @@ void xbf___MEMCLEAR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argv);
   xb_memvar_clear(ctx);
 }
+
+/* The block MemVarBlock() makes: its cell holds the variable's number (an
+ * integer item). Called with an argument that is not NIL, it assigns it. */
+static void memvar_block(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self) {
+  uint32_t id = (uint32_t)self->cells[0]->value.v.i;
+  xb_memvar m = {spelled[id].name, id};
+  if (argc && argv[0].type != XB_T_NIL) {
+    xb_mv_set(ctx, &m, &argv[0]);
+    *ret = argv[0];
+    return;
+  }
+  xb_mv_get(ctx, ret, &m);
+}
+
+/* MemVarBlock( cName ): a block that reads the memory variable cName (any
+ * letter case) and, called with a value, assigns it; NIL when no variable of
+ * that name is visible. */
+void xbf_MEMVARBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  uint32_t id;
+  if (!argc || argv[0].type != XB_T_STRING) return;
+  if (!xb_names_find_upper(&names, argv[0].v.s->data, argv[0].v.s->len, &id) || !xb_memvar_exists(ctx, id)) return;
+  xb_block *b = xb_block_new(ctx, ret, memvar_block, 1);
+  xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell)); /* the block is rooted in `ret` */
+  xb_set_int(&c->value, id);
+  b->cells[0] = c;
+  xb_gc_write(b);
+}

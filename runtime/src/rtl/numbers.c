@@ -173,7 +173,7 @@ void xbf_ROUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   double v = xb_num_value(&argv[0]);
   double p = pow(10.0, d < 0 ? -(double)d : (double)d);
   double r;
-  if (v == 0.0 || (d < 0 && isinf(p))) {
+  if (v == 0.0 || (d < 0 && xb_dbl_infinite(p))) {
     r = 0.0;
   } else {
     double tenfold = (d >= 0 ? v * p : v / p) * 10.0;
@@ -209,7 +209,7 @@ void xbf_MIN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { minmax(c
 static double math_sqrt(double x) { return x < 0 ? 0.0 : sqrt(x); }
 static double math_exp(double x) {
   double r = exp(x);
-  return isinf(r) ? 0.0 : r;
+  return xb_dbl_infinite(r) ? 0.0 : r;
 }
 static double math_log(double x) { return x < 0 ? -HUGE_VAL : log(x); }
 
@@ -268,4 +268,84 @@ void xbf_BITSHL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 void xbf_BITSHR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   bit_function(ctx, ret, argc, argv, XB_BIT_SHR);
+}
+
+/* Mod( nNumber, nBase ): the remainder with the sign of nBase (dBase's
+ * modulus), a number with SET DECIMALS decimals. A zero base is error 1341,
+ * after which the number comes back as it is, whatever the block returned. */
+void xbf_MOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 2 || !xb_is_number(&argv[0]) || !xb_is_number(&argv[1])) {
+    xb_arg_error(ctx, ret, 1085, "%", argc < 2 ? argc : 2, argv);
+    return;
+  }
+  double n = xb_num_value(&argv[0]), base = xb_num_value(&argv[1]);
+  if (base == 0.0) {
+    if (xb_error(ctx, ret, EG_ZERODIV, 1341, "%", XB_ERR_SUBSTITUTE, 2, argv)) *ret = argv[0];
+    return;
+  }
+  double r = fmod(n, base);
+  if (r != 0.0 && (n > 0 ? base < 0 : base > 0)) r += base;
+  xb_set_double(ret, r, xb_decimals(ctx));
+}
+
+/* Descend( xValue ): a value that sorts the other way: each byte of a string
+ * as 256 minus it (0 stays 0), a number negated, a date as a number counting
+ * down, a logical negated; NIL for anything else. */
+void xbf_DESCEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1) return;
+  const xb_item *v = &argv[0];
+  if (v->type == XB_T_STRING) {
+    xb_str *r = xb_str_alloc(v->v.s->len);
+    for (size_t i = 0; i < r->len; ++i) r->data[i] = (char)(unsigned char)(256 - (unsigned char)v->v.s->data[i]);
+    xb_set_str(ret, r);
+  } else if (v->type == XB_T_DATE) {
+    xb_set_int(ret, 5231808 - v->v.i); /* Clipper's constant: a day number counted down */
+  } else if (xb_is_number(v)) {
+    xb_set_double(ret, -xb_num_value(v), xb_decimals(ctx));
+  } else if (v->type == XB_T_LOGICAL) {
+    xb_set_logical(ret, !v->v.l);
+  }
+}
+
+/* The first `n` bytes of a string argument, zeros past its end. */
+static void binary_arg(uint32_t argc, const xb_item *argv, unsigned char *out, size_t n) {
+  memset(out, 0, n);
+  if (argc && argv[0].type == XB_T_STRING)
+    memcpy(out, argv[0].v.s->data, argv[0].v.s->len < n ? argv[0].v.s->len : n);
+}
+
+/* Bin2I( c ), Bin2W( c ), Bin2L( c ): the number in a string's first bytes,
+ * little-endian: a signed 16-bit, an unsigned 16-bit, a signed 32-bit one. */
+void xbf_BIN2I(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  unsigned char b[2];
+  binary_arg(argc, argv, b, 2);
+  xb_set_int(ret, (int16_t)xb_get_le16(b));
+}
+void xbf_BIN2W(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  unsigned char b[2];
+  binary_arg(argc, argv, b, 2);
+  xb_set_int(ret, xb_get_le16(b));
+}
+void xbf_BIN2L(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  unsigned char b[4];
+  binary_arg(argc, argv, b, 4);
+  xb_set_int(ret, (int32_t)xb_get_le32(b));
+}
+
+/* I2Bin( n ), L2Bin( n ): the number (truncated, its low 16 or 32 bits) as
+ * two or four little-endian bytes; anything but a number is 0. */
+void xbf_I2BIN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  unsigned char b[2];
+  xb_put_le16(b, (uint16_t)(argc && xb_is_number(&argv[0]) ? (uint64_t)xb_num_to_i64(&argv[0]) : 0));
+  xb_set_str(ret, xb_str_new((const char *)b, 2));
+}
+void xbf_L2BIN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  unsigned char b[4];
+  xb_put_le32(b, (uint32_t)(argc && xb_is_number(&argv[0]) ? (uint64_t)xb_num_to_i64(&argv[0]) : 0));
+  xb_set_str(ret, xb_str_new((const char *)b, 4));
 }

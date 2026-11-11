@@ -60,7 +60,7 @@ static xb_str *format_int(int64_t v, int width, int dec) {
 
 static xb_str *format_double(double v, int width, int dec) {
   xb_str *s = field(width, dec);
-  if (!isfinite(v)) return overflow(s);
+  if (!xb_dbl_finite(v)) return overflow(s);
 
   /* Significant digits m[0..15] of |v|, where m[k] has decimal exponent e - k. */
   char sci[48];

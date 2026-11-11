@@ -10,6 +10,12 @@ xb_str *xb_num_to_str(const xb_item *it, int width, int dec);
 
 static inline int xb_is_number(const xb_item *it) { return it->type == XB_T_INT || it->type == XB_T_DOUBLE; }
 
+/* Whether a double is finite, and whether it is an infinity, by arithmetic:
+ * the classification macros of some C libraries narrow their argument to
+ * float on the way (a conversion warning). */
+static inline int xb_dbl_finite(double d) { return d - d == 0.0; }
+static inline int xb_dbl_infinite(double d) { return d == d && !xb_dbl_finite(d); }
+
 /* A number item's value as a double. */
 static inline double xb_num_value(const xb_item *it) { return it->type == XB_T_INT ? (double)it->v.i : it->v.d; }
 
