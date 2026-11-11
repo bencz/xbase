@@ -1,1 +1,1 @@
-YIELD cannot be inside BEGIN SEQUENCE or TRY
+YIELD cannot be inside a BEGIN SEQUENCE with ALWAYS or a TRY with FINALLY

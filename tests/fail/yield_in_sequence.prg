@@ -1,6 +1,8 @@
-// YIELD cannot suspend inside BEGIN SEQUENCE (its error block and handlers belong to one step).
+// YIELD cannot suspend inside a BEGIN SEQUENCE with ALWAYS: a generator left before its end would never run it.
 FUNCTION Main()
    BEGIN SEQUENCE
       YIELD 1
+   ALWAYS
+      ? "always"
    END SEQUENCE
 RETURN

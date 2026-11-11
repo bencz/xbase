@@ -115,8 +115,10 @@ Statements:
   [runtime.md](runtime.md#generators)) whose `MoveNext()` runs the body up to the next `YIELD`, the element in
   `Current`; `FOR EACH` goes through it. `YIELD` followed by `(` is a call of a function `Yield()`, as in Clipper: the
   element is never written in parentheses right after `YIELD`. `RETURN` (without a value) and the end of the body end
-  it. Not in a codeblock, a `BEGIN SEQUENCE` or a `TRY`; a generator takes no `...`, reads no arguments as received
-  (`PCount()`, `PValue()`, `PARAMETERS`) and creates no `PRIVATE` or `PUBLIC`.
+  it. Not in a codeblock, nor in any part of a `BEGIN SEQUENCE` with `ALWAYS` or a `TRY` with `FINALLY` (a generator
+  left before its end would never run that code); in another sequence an error of a later step reaches its `RECOVER` or
+  `CATCH`, and between the steps the caller runs with its own error block. A generator takes no `...`, reads no
+  arguments as received (`PCount()`, `PValue()`, `PARAMETERS`) and creates no `PRIVATE` or `PUBLIC`.
 - `WITH OBJECT expr ... END` (`END WITH` too): inside, `:name` (also `:name( args )`, assigned, `++`) is a message to
   the object, evaluated once into a `LOCAL` of its own (`WithObjectStmt::hidden`, a name no program can write). A
   codeblock made there captures that variable, as it would any `LOCAL`: it sends to the object the statement holds,
@@ -370,10 +372,14 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   functions (`Generator::genGenerator`): the function itself, which returns `gen.new` of its resume function with its
   arguments, and `NAME.resume`, the body: it starts with `gen.restore` and a dispatch on the state it returns (0: the
   start; k: after the k-th `YIELD`), `YIELD` is the terminator `gen.yield` (the frame and the element saved, `.T.`
-  returned) whose target is where state k goes on, and `RETURN` and the end are `gen.done` and `.F.`. Then
-  `makeResumable` (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that
-  lives across a `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a
-  `Bool` or `I64` boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone.
+  returned) whose target is where state k goes on, and `RETURN` and the end are `gen.done` and `.F.`. Inside a sequence
+  `WITH` a handler (also `TRY`), the error block it replaced lives in a frame variable of its own
+  (`Cleanup::oldBlockVar`, `Generator::hiddenVar`): before `gen.yield` each such handler, innermost first, is read
+  (`seq.with` of NIL) and the replaced block put back; after it, outermost first, `seq.with` puts the handler back and
+  stores the caller's block of the moment as the one to put back in the end. Then `makeResumable`
+  (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that lives across a
+  `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a `Bool` or `I64`
+  boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone.
 - A codeblock becomes an xIR function of its own (`<function>.blockN`) whose frame holds its parameters; `block`
   creates it with the cells of the variables it captures (moving them into cells if they are not yet).
 - `STATIC` initializers form the module initialization function.

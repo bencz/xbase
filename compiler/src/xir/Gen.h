@@ -30,6 +30,7 @@ private:
   void genModuleInit(const xb::Module &ast);
   Function *genCodeblockFunction(const BlockExpr &b);
   Var *frameVar(uint32_t slot);
+  Var *hiddenVar();
   Var *varOf(const VarExpr &v);
   Access accessOf(const VarExpr &v);
   static Access accessOf(const Var &v);
@@ -89,11 +90,13 @@ private:
   };
   struct Cleanup {                 // what a RETURN, EXIT or LOOP that leaves a sequence does first
     Value *oldBlock;               // the error block to put back (WITH), or null
+    Var *oldBlockVar;              // in a generator, where it is instead: a YIELD puts it back and takes it again
     const Block *always;           // else the ALWAYS code to run
     BasicBlock *unwind;            // where that code unwinds: the sequence's own unwind block
     size_t loops;                  // the loops around the sequence (FnState::loops)
     size_t eachVars;               // the FOR EACH loops around it (FnState::eachVars)
   };
+  Value *oldBlockOf(const Cleanup &c);
   struct FnState {
     Function *fn = nullptr;
     std::unique_ptr<Builder> b;

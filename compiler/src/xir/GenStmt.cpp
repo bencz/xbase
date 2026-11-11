@@ -32,10 +32,22 @@ void Generator::genStmt(const Stmt &s) {
   case StmtKind::Sequence: genSequence(static_cast<const SequenceStmt &>(s)); break;
   case StmtKind::Yield: { // the element; the next step goes on in a block of its own (state k + 1)
     Value *value = genExpr(*static_cast<const YieldStmt &>(s).value);
+    // The caller runs with its own error block until the next step: each WITH handler around (innermost first) is
+    // set aside and the block it replaced put back; the next step puts them back (outermost first), each taking the
+    // error block the caller has then as the one to put back in the end.
+    std::vector<std::pair<Var *, Value *>> setAside;
+    for (size_t k = cur_.cleanups.size(); k-- > 0;)
+      if (const Cleanup &c = cur_.cleanups[k]; c.oldBlock) {
+        Value *handler = b.seqWith(b.nil()); // NIL leaves the error block as it is
+        b.seqRestore(oldBlockOf(c));
+        setAside.emplace_back(c.oldBlockVar, handler);
+      }
     BasicBlock *resume = cur_.fn->addBlock("gen.resume");
     cur_.resumes.push_back(resume);
     b.genYield(frameVar(0), value, resume, (uint32_t)cur_.resumes.size());
     b.setBlock(resume);
+    for (auto it = setAside.rbegin(); it != setAside.rend(); ++it)
+      b.store(it->first, Access::Direct, b.seqWith(it->second));
     break;
   }
   case StmtKind::WithObject: {
@@ -318,20 +330,26 @@ void Generator::unwindOnward() {
 void Generator::genSequence(const SequenceStmt &st) {
   Builder &b = *cur_.b;
   BasicBlock *outer = b.unwindBlock();
-  Value *oldBlock = st.handler ? b.seqWith(genExpr(*st.handler)) : nullptr;
+  Cleanup with{st.handler ? b.seqWith(genExpr(*st.handler)) : nullptr, nullptr, nullptr, outer, cur_.loops.size(),
+               cur_.eachVars.size()};
+  if (with.oldBlock && cur_.generator) {
+    with.oldBlockVar = hiddenVar();
+    b.store(with.oldBlockVar, Access::Direct, with.oldBlock);
+  }
   BasicBlock *body = cur_.fn->addBlock("seq.body");
   BasicBlock *handler = cur_.fn->addBlock("seq.unwind");
   BasicBlock *always = st.hasAlways ? cur_.fn->addBlock("seq.always.unwind") : nullptr;
   BasicBlock *join = cur_.fn->addBlock("seq.join");
   BasicBlock *end = cur_.fn->addBlock("seq.end");
-  if (st.hasAlways) cur_.cleanups.push_back({nullptr, &st.always, outer, cur_.loops.size(), cur_.eachVars.size()});
-  if (oldBlock) cur_.cleanups.push_back({oldBlock, nullptr, outer, cur_.loops.size(), cur_.eachVars.size()});
+  if (st.hasAlways)
+    cur_.cleanups.push_back({nullptr, nullptr, &st.always, outer, cur_.loops.size(), cur_.eachVars.size()});
+  if (with.oldBlock) cur_.cleanups.push_back(with);
   b.br(body);
   b.setUnwind(handler);
   b.setBlock(body);
   genBlock(st.body);
-  if (oldBlock) {
-    if (!b.terminated()) b.seqRestore(oldBlock);
+  if (with.oldBlock) {
+    if (!b.terminated()) b.seqRestore(oldBlockOf(with));
     cur_.cleanups.pop_back();
   }
   if (!b.terminated()) b.br(join);
@@ -339,7 +357,7 @@ void Generator::genSequence(const SequenceStmt &st) {
   BasicBlock *afterHandler = always ? always : outer; // where RECOVER unwinds, and the handler goes on
   b.setUnwind(afterHandler);
   b.setBlock(handler);
-  if (oldBlock) b.seqRestore(oldBlock);
+  if (with.oldBlock) b.seqRestore(oldBlockOf(with));
   BasicBlock *recover = cur_.fn->addBlock("seq.recover");
   BasicBlock *onward = cur_.fn->addBlock("seq.onward");
   if (st.hasRecover || !st.hasAlways) b.condBr(b.seqCatch(), recover, onward);
@@ -401,7 +419,7 @@ void Generator::exitCleanups(size_t loops, bool leaveEach) {
     leaveDownTo(all[k].eachVars);
     cur_.cleanups.resize(k); // a RETURN in the ALWAYS code does not run it again
     if (all[k].oldBlock) {
-      b.seqRestore(all[k].oldBlock);
+      b.seqRestore(oldBlockOf(all[k]));
       continue;
     }
     BasicBlock *code = cur_.fn->addBlock("seq.always.exit");

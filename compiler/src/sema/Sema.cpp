@@ -19,7 +19,8 @@ struct Sema::Scope {
   const char *fence = nullptr;
   unsigned fenceLoops = 0, fenceSwitches = 0;
   bool inBlock = false;          // the statements of an extended codeblock
-  bool inSequence = false;       // any part of a BEGIN SEQUENCE or TRY (YIELD cannot suspend there)
+  bool inAlways = false;         // any part of a BEGIN SEQUENCE with ALWAYS or a TRY with FINALLY: YIELD cannot
+                                 // suspend there, since a generator left before its end would never run that code
 };
 
 void Sema::run(Module &m) {
@@ -399,7 +400,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::Yield:
     expr(*static_cast<YieldStmt &>(st).value, s);
-    if (s.inSequence) diag_.error(st.loc, "YIELD cannot be inside BEGIN SEQUENCE or TRY");
+    if (s.inAlways) diag_.error(st.loc, "YIELD cannot be inside a BEGIN SEQUENCE with ALWAYS or a TRY with FINALLY");
     break;
   case StmtKind::WithObject: {
     auto &w = static_cast<WithObjectStmt &>(st);
@@ -411,8 +412,8 @@ void Sema::stmt(Stmt &st, Scope &s) {
   case StmtKind::Sequence: {
     auto &q = static_cast<SequenceStmt &>(st);
     if (q.handler) expr(*q.handler, s);
-    bool wasInSequence = s.inSequence;
-    s.inSequence = true;
+    bool wasInAlways = s.inAlways;
+    s.inAlways = s.inAlways || q.hasAlways;
     auto fenced = [&](Block &b, const char *fence) { // b, which RETURN, EXIT and LOOP may not leave
       Scope inner = s;
       inner.fence = fence;
@@ -427,7 +428,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
     if (q.usingVar) expr(*q.usingVar, s);
     nestedBlock(q.recover, s);
     if (q.hasAlways) fenced(q.always, q.isTry ? "FINALLY" : "ALWAYS");
-    s.inSequence = wasInSequence;
+    s.inAlways = wasInAlways;
     break;
   }
   case StmtKind::Exit: // leaves the innermost loop or SWITCH
