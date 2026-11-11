@@ -34,7 +34,7 @@ design of the larger parts.
 ### Fields and work areas
 
 `FIELD`, `alias->field`, `FIELD->name`, `(alias)->( expr )`, `SELECT`, and the work areas themselves (the RDD
-layer: DBF, FPT/DBT, NTX, CDX, SDF, DELIM).
+layer: DBF, FPT/DBT, NTX, CDX, SDF, DELIM), as [rdd.md](rdd.md) plans them.
 
 ### Macro operator
 
@@ -76,7 +76,7 @@ Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 2. The terminal layer ([terminal.md](terminal.md)): screen, cursor, colors and keyboard, with drivers for plain
    standard output, terminals (xbase's own, not ncurses) and the Windows console; then `@ ... SAY/GET`, `READ`,
    `AChoice`, `MemoEdit`, `TBrowse`, `dbEdit`, menus.
-3. The RDD layer and the database functions and commands.
+3. The RDD layer and the database functions and commands ([rdd.md](rdd.md)).
 
 The SIx Driver and HiPer-SEEK functions (`sx_*`, `hs_*`, `cfts*`) belong to add-on database drivers; whether xbase
 provides them is decided when the RDD layer exists.
