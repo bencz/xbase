@@ -62,8 +62,9 @@ one.
   end of the body and first thing in the handler.
 - `ALWAYS` (`TRY`'s `FINALLY`): the code runs where the body and `RECOVER` join, and in an unwind block of its own,
   where `RECOVER` unwinds and the handler goes on (without `RECOVER`, every request goes on): `seq.suspend` sets the
-  requests aside, `seq.value` takes the `BREAK` value, the code runs, `seq.resume` puts them back unless the code
-  made one of its own, and unwinding goes on. A function with `seq.suspend` keeps its variables in memory too.
+  requests aside, `seq.value` takes the `BREAK` value, the code runs (its blocks unwind to the block of `seq.resume`,
+  which follows it too), `seq.resume` puts them back unless the code made one of its own (a `QUIT` set aside stays
+  then), and unwinding goes on. A function with `seq.suspend` keeps its variables in memory too.
 
 ## Resumable functions
 
@@ -202,15 +203,14 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   `binary add` or `sub` of 1 marked `byOne`, printed `add.one`: the same fast paths, and an error that is theirs,
   `xb_op_inc`/`xb_op_dec`), memory variables by name (`mv.get`, `mv.set`, `mv.ref`, `mv.private`, `mv.public`,
   `mv.param`; read and written as the heap is, since any call may create, change or end one), the macro operator
-  (`macro.get`, `macro.set`, `macro.call`, `macro.private`, `macro.public`, the text an item operand, and
-  `macro.text`, the substitution in a string literal; a macro may do anything a call does, and create a PRIVATE of the
-  function, which `createsPrivates` tells codegen), the truth test, calls
-  (to the module's functions or to
-  declared externals), `send` (a message to the first operand, with the others as arguments), array literals (`...` in a
-  call, a send or an array literal is its last operand, of type `args`, `args.rest`: the function's arguments past its
-  parameters, made right before its list, which is its one use in the block; `restRefs` the positions of a call that
-  receive references), hash literals (`hash`, keys and values alternating), element read and write, codeblock creation
-  with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations (`each.in_cell`, `each.enter`,
+  (`macro.get`, `macro.set`, `macro.call`, `macro.private`, `macro.public`, the text an item operand, and `macro.text`,
+  the substitution in a string literal; a macro may do anything a call does, and create a PRIVATE of the function, which
+  `createsPrivates` tells codegen), the truth test, calls (to the module's functions or to declared externals), `send`
+  (a message to the first operand, with the others as arguments), array literals (`...` in a call, a send or an array
+  literal is its last operand, of type `args`, `args.rest`: the function's arguments past its parameters, made right
+  before its list, which is its one use in the block; `restRefs` the positions of a call that receive references), hash
+  literals (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its
+  captured variables, the `FOR` test, the `FOR EACH` operations (`each.source`, `each.in_cell`, `each.enter`,
   `each.move`, `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose result is the value the
   `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, `append`
   (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps

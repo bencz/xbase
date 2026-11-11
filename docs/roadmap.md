@@ -141,11 +141,11 @@ every exit (normal end, error, `RETURN`, `EXIT`, `LOOP`). Built on the unwind ed
 ### Enumeration
 
 Collections follow one enumerator model, like the .NET enumerable and enumerator interfaces: `FOR EACH` asks a
-collection for an enumerator and moves it until it ends, and the collection functions walk collections the same way.
-Arrays, strings and hashes keep their inline paths by position (what `FOR EACH` compiles to today); objects take part
-by providing an enumerator (method names settled when classes are designed), and generators produce enumerators.
-Positions, keys and values come from the loop itself (`FOR EACH k => v`), never from messages sent to the loop
-variable.
+collection for an enumerator and moves it until it ends. Arrays, strings and hashes keep their paths by position;
+objects take part with `GetEnumerator()`, `MoveNext()`, `Current` and `Reset()` (done, see
+[runtime.md](runtime.md#objects-and-messages)). Positions, keys and values come from the loop itself (`FOR EACH k =>
+v`), never from messages sent to the loop variable. Missing: the collection functions (`AEval`, `AScan`, ...) walking
+objects the same way, and generators producing enumerators.
 
 ### Generators
 

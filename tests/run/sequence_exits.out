@@ -1,0 +1,12 @@
+
+finally          1
+finally          2
+error block restored: .T.
+always          1
+always          2
+finally sees orig
+restored: orig
+finally sees orig
+caught: f
+restored after a throw: orig
+always while quitting

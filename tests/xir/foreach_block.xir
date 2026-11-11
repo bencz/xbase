@@ -16,28 +16,29 @@ body:
   %4 = load $f0
   store $f2 maybe_ref, 0:w10
   barrier $f2 maybe_ref
-  %7 = each.enter $f1, false, %4
+  %7 = each.source %4, false
+  %8 = each.enter $f1, false, %7
   br each.test(i64 0)
-each.test(%9: i64):
-  %10 = i.add %9, i64 1
-  %11 = enum.len %4
-  %12 = i.cmp le %10, %11
-  cond_br %12, each.body, each.end
+each.test(%10: i64):
+  %11 = i.add %10, i64 1
+  %12 = enum.len %7
+  %13 = i.cmp le %11, %12
+  cond_br %13, each.body, each.end
 each.body:
-  %14 = i.add %9, i64 1
-  each.move $f1, false, %14
-  %16 = load $f2 maybe_ref
-  %17 = load $f1 ref
-  %18 = binary add %16, %17
-  store $f2 maybe_ref, %18
+  %15 = i.add %10, i64 1
+  each.move $f1, false, %15
+  %17 = load $f2 maybe_ref
+  %18 = load $f1 ref
+  %19 = binary add %17, %18
+  store $f2 maybe_ref, %19
   barrier $f2 maybe_ref
-  %21 = i.add %9, i64 1
-  br each.test(%21)
+  %22 = i.add %10, i64 1
+  br each.test(%22)
 each.end:
-  each.leave $f1, false, %7
-  %24 = block MAIN.block2 $f2
-  %25 = call EVAL native %24, 2:w10
-  ret %25
+  each.leave $f1, false, %8
+  %25 = block MAIN.block2 $f2
+  %26 = call EVAL native %25, 2:w10
+  ret %26
 }
 
 function MAIN.byref internal params 1 {
@@ -49,28 +50,29 @@ entry:
   store $f2 maybe_ref, 0:w10
   barrier $f2 maybe_ref
   %2 = load $f0 maybe_ref
-  %3 = each.enter $f1, false, %2
+  %3 = each.source %2, false
+  %4 = each.enter $f1, false, %3
   br each.test(i64 0)
-each.test(%5: i64):
-  %6 = i.add %5, i64 1
-  %7 = enum.len %2
-  %8 = i.cmp le %6, %7
-  cond_br %8, each.body, each.end
+each.test(%6: i64):
+  %7 = i.add %6, i64 1
+  %8 = enum.len %3
+  %9 = i.cmp le %7, %8
+  cond_br %9, each.body, each.end
 each.body:
-  %10 = i.add %5, i64 1
-  each.move $f1, false, %10
-  %12 = load $f2 maybe_ref
-  %13 = load $f1 ref
-  %14 = binary add %12, %13
-  store $f2 maybe_ref, %14
+  %11 = i.add %6, i64 1
+  each.move $f1, false, %11
+  %13 = load $f2 maybe_ref
+  %14 = load $f1 ref
+  %15 = binary add %13, %14
+  store $f2 maybe_ref, %15
   barrier $f2 maybe_ref
-  %17 = i.add %5, i64 1
-  br each.test(%17)
+  %18 = i.add %6, i64 1
+  br each.test(%18)
 each.end:
-  each.leave $f1, false, %3
-  %20 = block MAIN.block1 $f2
-  %21 = call EVAL native %20, 2:w10
-  ret %21
+  each.leave $f1, false, %4
+  %21 = block MAIN.block1 $f2
+  %22 = call EVAL native %21, 2:w10
+  ret %22
 }
 
 block MAIN.block1 internal params 1 {

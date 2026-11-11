@@ -28,24 +28,28 @@ seq.unwind unwind seq.always.unwind:
 seq.always.unwind:
   %17 = seq.suspend
   %18 = seq.value
-  %19 = load $f1
-  %20 = call QOUT native %19
-  seq.resume %17, %18
-  ret
+  br seq.always.code
 seq.join:
-  %23 = load $f1
-  %24 = call QOUT native %23
-  %25 = load $f1
-  ret %25
+  %20 = load $f1
+  %21 = call QOUT native %20
+  %22 = load $f1
+  ret %22
 seq.recover unwind seq.always.unwind:
-  %27 = seq.value
+  %24 = seq.value
   br seq.always.exit
 seq.always.exit:
-  %29 = load $f1
-  %30 = call QOUT native %29
+  %26 = load $f1
+  %27 = call QOUT native %26
   br seq.exit
 seq.exit unwind seq.always.unwind:
   ret 0:w10
+seq.always.code unwind seq.always.resume:
+  %30 = load $f1
+  %31 = call QOUT native %30
+  br seq.always.resume
+seq.always.resume:
+  seq.resume %17, %18
+  ret
 }
 
 function MAIN.byref internal params 1 {
@@ -68,24 +72,28 @@ seq.unwind unwind seq.always.unwind:
 seq.always.unwind:
   %12 = seq.suspend
   %13 = seq.value
-  %14 = load $f0 maybe_ref
-  %15 = call QOUT native %14
-  seq.resume %12, %13
-  ret
+  br seq.always.code
 seq.join:
-  %18 = load $f0 maybe_ref
-  %19 = call QOUT native %18
-  %20 = load $f0 maybe_ref
-  ret %20
+  %15 = load $f0 maybe_ref
+  %16 = call QOUT native %15
+  %17 = load $f0 maybe_ref
+  ret %17
 seq.recover unwind seq.always.unwind:
-  %22 = seq.value
+  %19 = seq.value
   br seq.always.exit
 seq.always.exit:
-  %24 = load $f0 maybe_ref
-  %25 = call QOUT native %24
+  %21 = load $f0 maybe_ref
+  %22 = call QOUT native %21
   br seq.exit
 seq.exit unwind seq.always.unwind:
   ret 0:w10
+seq.always.code unwind seq.always.resume:
+  %25 = load $f0 maybe_ref
+  %26 = call QOUT native %25
+  br seq.always.resume
+seq.always.resume:
+  seq.resume %12, %13
+  ret
 }
 
 block MAIN.block1 internal params 1 {

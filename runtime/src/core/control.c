@@ -3,14 +3,80 @@
 
 #include <string.h>
 
-/* FOR EACH iterates arrays (their items) and strings (one-character strings);
- * indexes are 1-based. */
+/* Whether the object, of a compiled class, answers `message`: with a method, or with a variable too (`orVar`). */
+static int answers(const xb_item *it, const char *message, int orVar) {
+  if (it->type != XB_T_OBJECT || !((const xb_object *)it->v.p)->cls->compiled) return 0;
+  return xb_class_has(it->v.p, message, 1) || (orVar && xb_class_has(it->v.p, message, 0));
+}
+
+/* `message` sent to `obj` with no arguments, its result in `r`; 0 after an error. */
+static int send0(xb_ctx *ctx, xb_item *r, const xb_item *obj, const char *message) {
+  xb_item self = *obj;
+  xb_gc_root_push(ctx, &self);
+  xb_op_send(ctx, r, message, 1, &self);
+  xb_gc_root_pop(ctx, 1);
+  return !(ctx->pending && xb_pending(ctx));
+}
+
+/* An enumerator's next element: MoveNext() is .T.; 0 at the end or after an error. */
+static int move_next(xb_ctx *ctx, const xb_item *e) {
+  xb_item moved;
+  xb_set_nil(&moved);
+  xb_gc_root_push(ctx, &moved);
+  int ok = send0(ctx, &moved, e, "MOVENEXT") && moved.type == XB_T_LOGICAL && moved.v.l;
+  xb_gc_root_pop(ctx, 1);
+  return ok;
+}
+
+/* An object goes through its enumerator: GetEnumerator(), or the object itself when it is one (MoveNext; Reset()
+ * first, when it has one); for DESCEND, the enumerator's elements in an array, gone through backwards. */
+void xb_each_source(xb_ctx *ctx, xb_item *r, const xb_item *coll, uint32_t descend) {
+  *r = *coll;
+  if (coll->type != XB_T_OBJECT) return;
+  if (answers(coll, "GETENUMERATOR", 0)) {
+    if (!send0(ctx, r, coll, "GETENUMERATOR")) return;
+  } else if (answers(coll, "RESET", 0)) {
+    xb_item ignored;
+    xb_set_nil(&ignored);
+    xb_gc_root_push(ctx, &ignored);
+    int ok = send0(ctx, &ignored, coll, "RESET");
+    xb_gc_root_pop(ctx, 1);
+    if (!ok) return;
+  }
+  if (!answers(r, "MOVENEXT", 0) || !answers(r, "CURRENT", 1)) {
+    xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, coll); /* no collection, as for any other value */
+    return;
+  }
+  if (!descend) return;
+  xb_item e = *r, current;
+  xb_set_nil(&current);
+  xb_gc_root_push(ctx, &e);
+  xb_gc_root_push(ctx, &current);
+  xb_set_array(r, xb_array_alloc(0));
+  while (move_next(ctx, &e) && send0(ctx, &current, &e, "CURRENT")) {
+    xb_array *a = r->v.p;
+    xb_array_resize(a, a->len + 1);
+    a->items[a->len - 1] = current;
+    xb_gc_write_item(a, a->len - 1);
+  }
+  xb_gc_root_pop(ctx, 2);
+}
+
+/* An enumerator's length so far, or the error of a value that is no collection. */
+XB_NOINLINE static int64_t enum_len_other(xb_ctx *ctx, const xb_item *coll) {
+  if (answers(coll, "MOVENEXT", 0)) return move_next(ctx, coll) ? INT64_MAX : 0;
+  xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, coll);
+  return -1;
+}
+
+/* FOR EACH iterates arrays (their items), strings (one-character strings),
+ * hashes (their values) and enumerators (each MoveNext() that is .T. one more
+ * element: a length as large as can be, else 0); indexes are 1-based. */
 int64_t xb_enum_len(xb_ctx *ctx, const xb_item *coll) {
   if (coll->type == XB_T_ARRAY) return (int64_t)((const xb_array *)coll->v.p)->len;
   if (coll->type == XB_T_STRING) return (int64_t)coll->v.s->len;
   if (coll->type == XB_T_HASH) return (int64_t)((const xb_hash *)coll->v.p)->len;
-  xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, coll);
-  return -1;
+  return enum_len_other(ctx, coll);
 }
 
 /* A variable that holds an element passed to it by reference is shared like
@@ -39,18 +105,33 @@ void xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, 
   each_written(var, in_cell);
 }
 
+/* An enumerator's Current, into the loop reference's own item. Kept apart, so
+ * that the paths of arrays and strings stay without a frame of their own. */
+XB_NOINLINE static void move_current(xb_ctx *ctx, xb_ref *ref) {
+  xb_item current;
+  xb_set_nil(&current);
+  xb_gc_root_push(ctx, &current);
+  if (send0(ctx, &current, &ref->coll, "CURRENT")) {
+    ref->value = current; /* the reference is the loop's: alive, and objects do not move */
+    xb_gc_write(ref);
+  }
+  xb_gc_root_pop(ctx, 1);
+}
+
 void xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx) {
   xb_item *base = each_base(var, in_cell); /* still holds the loop's reference: taking the variable copies it */
   xb_ref *ref = base->v.p;
   ref->index = idx;
-  if (ref->coll.type == XB_T_STRING) {
+  if (ref->coll.type == XB_T_ARRAY || ref->coll.type == XB_T_HASH) {
+    xb_ref_target(ctx, base); /* an array that shrank under the loop: bound error */
+  } else if (ref->coll.type == XB_T_STRING) {
     const xb_str *s = ref->coll.v.s;
     if (idx >= 1 && (uint64_t)idx <= s->len) {
       xb_set_str(&ref->value, xb_str_new(s->data + idx - 1, 1));
       xb_gc_write(ref);
     }
   } else {
-    xb_ref_target(ctx, base); /* an array that shrank under the loop: bound error */
+    move_current(ctx, ref);
   }
 }
 

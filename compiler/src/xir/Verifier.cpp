@@ -228,6 +228,7 @@ private:
     case Op::SeqWith: case Op::SeqRestore: expect(i, 1, {Type::Item}); break;
     case Op::SeqResume: expect(i, 2, {Type::I64, Type::Item}); break;
     case Op::EachKey: expect(i, 2, {Type::Item, Type::I64}); break;
+    case Op::EachSource: expect(i, 2, {Type::Item, Type::Bool}); break;
     case Op::SubstCheck: { // nothing between the operation, its check and the subst.value its branch leads to
       expect(i, 1, {Type::Item});
       const auto &insts = i.parent->insts;

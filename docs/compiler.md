@@ -101,7 +101,9 @@ Statements:
 - `FOR v := start TO limit [STEP step] ... NEXT | END`; the limit and step are re-evaluated on every iteration;
   without `STEP` the counter steps as `++` does (an error is `++`'s)
 - `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`, and `FOR EACH k => v IN coll ...` (one
-  collection), whose `k` gets the key of each hash entry or the index of each array element or character
+  collection), whose `k` gets the key of each hash entry or the index of each array element or character (the position
+  for an object); an object is gone through with its enumerator (`GetEnumerator()`, `MoveNext()`, `Current`, see
+  [runtime.md](runtime.md#objects-and-messages))
 - `EXIT` (leaves the innermost loop or `SWITCH`), `LOOP`
 - `BEGIN SEQUENCE [WITH expr] ... [RECOVER [USING v] ...] [ALWAYS ...] END` (`std.ch` makes `END SEQUENCE` and
   `ENDSEQUENCE` an `END`); a `BREAK` in the body, or in what it calls, continues after `RECOVER` (or `END`; with
@@ -323,27 +325,27 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   without arms accepts anything) and compares it with each `CASE` constant in order (`switch.match`); the arm bodies
   follow each other so that control falls through.
 - `FOR` re-evaluates the limit and the step at every test (the step after the limit), as Clipper does.
-- `FOR EACH` evaluates the collections once, in order, and saves the loop variables (`each.enter`). During the loop
-  each variable holds a reference (`XB_T_REF`, see [runtime.md](runtime.md#references)) to the current element, so
-  reading or assigning the variable reads or assigns the element, and changes the body makes to the array through
-  other paths are seen through the variable. An `i64` step counter (a block parameter) selects the element: index
-  `step + 1`, or with `DESCEND` the collection's length at loop entry minus the step, so each collection is walked
-  from its own end. An ascending loop checks every index against the collection's current length before each
-  iteration, so it stops at the shortest collection and sees elements added by the body; a descending one stops when
-  an index reaches 0. The variables get their saved values back at the end (`each.leave`, also through `EXIT`), and
-  on `RETURN` and when unwinding leaves the loop those others can see (a `STATIC`, a shared variable, a parameter),
-  all of them when the unwinding stops at a `BEGIN SEQUENCE` of the function. One reference per variable serves
-  the loop and is moved to each element (`each.move`). A variable shared when the loop starts (in a cell, or a
-  parameter that received an element by reference; `each.in_cell`) holds it inside its cell, so everyone sharing the
-  variable sees the current element and, after the loop, the restored value. A codeblock or reference that takes a
-  `LOCAL` or parameter while it holds a loop's reference gets the current element instead of the variable, which
-  stays the loop's: later iterations, inner loops on the same variable (here or in a callee) and the restore do not
-  change what it designates. A `STATIC` is one variable for everyone: a reference to it designates it, and the loop
-  follows its cell from the moment one is made. In `FOR EACH k => v`, `k` is an ordinary variable, other than
-  `v` (the parser rejects `FOR EACH x => x`): before each iteration `each.key` stores into it the key of the current
-  hash entry, or the index for an array or a string, so assigning it changes nothing else, and after the loop it
-  keeps the last key stored (the one `EXIT` left). A `k` that is the variable of an enclosing `FOR EACH` receives the
-  keys as any assignment would: in that loop's element.
+- `FOR EACH` evaluates the collections once, in order (`each.source`: an object's enumerator, or for `DESCEND` its
+  elements in an array; anything else as it is), and saves the loop variables (`each.enter`). During the loop each
+  variable holds a reference (`XB_T_REF`, see [runtime.md](runtime.md#references)) to the current element, so reading or
+  assigning the variable reads or assigns the element, and changes the body makes to the array through other paths are
+  seen through the variable. An `i64` step counter (a block parameter) selects the element: index `step + 1`, or with
+  `DESCEND` the collection's length at loop entry minus the step, so each collection is walked from its own end. An
+  ascending loop checks every index against the collection's current length before each iteration, so it stops at the
+  shortest collection and sees elements added by the body; a descending one stops when an index reaches 0. The variables
+  get their saved values back at the end (`each.leave`, also through `EXIT`), and on `RETURN` and when unwinding leaves
+  the loop those others can see (a `STATIC`, a shared variable, a parameter), all of them when the unwinding stops at a
+  `BEGIN SEQUENCE` of the function. One reference per variable serves the loop and is moved to each element
+  (`each.move`). A variable shared when the loop starts (in a cell, or a parameter that received an element by
+  reference; `each.in_cell`) holds it inside its cell, so everyone sharing the variable sees the current element and,
+  after the loop, the restored value. A codeblock or reference that takes a `LOCAL` or parameter while it holds a loop's
+  reference gets the current element instead of the variable, which stays the loop's: later iterations, inner loops on
+  the same variable (here or in a callee) and the restore do not change what it designates. A `STATIC` is one variable
+  for everyone: a reference to it designates it, and the loop follows its cell from the moment one is made. In `FOR EACH
+  k => v`, `k` is an ordinary variable, other than `v` (the parser rejects `FOR EACH x => x`): before each iteration
+  `each.key` stores into it the key of the current hash entry, or the index for an array or a string, so assigning it
+  changes nothing else, and after the loop it keeps the last key stored (the one `EXIT` left). A `k` that is the
+  variable of an enclosing `FOR EACH` receives the keys as any assignment would: in that loop's element.
 - `BEGIN SEQUENCE` gives the blocks of its body an unwind block, the handler: a `BREAK` (pending after an operation
   of the body, or a call) is taken there and `RECOVER` follows, with the `BREAK` value stored in the `USING`
   variable; other requests go on unwinding (see [xir.md](xir.md#control-flow-for-errors-and-exceptions)). `WITH`

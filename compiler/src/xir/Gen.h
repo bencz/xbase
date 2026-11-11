@@ -50,7 +50,7 @@ private:
   void genSwitch(const SwitchStmt &s);
   void initLocal(const LocalDecl &d, Value *value);
   void genSequence(const SequenceStmt &s);
-  void exitCleanups(size_t loops);
+  void exitCleanups(size_t loops, bool leaveEach);
   void unwindOnward();
   void genReturn(const ReturnStmt &s);
   void startDeadBlock();
@@ -79,6 +79,7 @@ private:
   struct Loop {
     BasicBlock *exitTo;
     BasicBlock *loopTo;            // null inside a SWITCH that is not in a loop
+    bool isSwitch = false;         // a SWITCH: LOOP goes to the loop around it
   };
   struct EachVar {                 // the variable of a FOR EACH loop being generated
     const VarExpr *var;
@@ -90,6 +91,7 @@ private:
     const Block *always;           // else the ALWAYS code to run
     BasicBlock *unwind;            // where that code unwinds: the sequence's own unwind block
     size_t loops;                  // the loops around the sequence (FnState::loops)
+    size_t eachVars;               // the FOR EACH loops around it (FnState::eachVars)
   };
   struct FnState {
     Function *fn = nullptr;

@@ -98,6 +98,7 @@ void CodeGen::initTypes() {
   rtCellOf_ = rt("xb_cell_of", ptrTy_, {ptrTy_, ptrTy_});
   rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtEnumLen_ = rt("xb_enum_len", i64_, {ptrTy_, ptrTy_});
+  rtEachSource_ = rt("xb_each_source", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtEachShared_ = rt("xb_each_shared", i32_, {ptrTy_, ptrTy_});
   rtEachEnter_ = rt("xb_each_enter", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
   rtEachMove_ = rt("xb_each_move", voidTy, {ptrTy_, ptrTy_, i32_, i64_});

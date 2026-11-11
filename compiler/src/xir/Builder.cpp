@@ -203,6 +203,9 @@ Instruction *Builder::forTest(Value *counter, Value *limit, Value *step) {
 }
 
 Instruction *Builder::enumLen(Value *coll) { return make(Op::EnumLen, Type::I64, {coll}); }
+Instruction *Builder::eachSource(Value *coll, Value *descend) {
+  return make(Op::EachSource, Type::Item, {coll, descend});
+}
 Instruction *Builder::eachInCell(Var *v) {
   Instruction *i = make(Op::EachInCell, Type::Bool);
   i->var = v;

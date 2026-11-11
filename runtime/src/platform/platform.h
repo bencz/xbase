@@ -7,10 +7,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* XB_NOINLINE keeps a rare path out of a hot function, which then needs no
+ * frame of its own. */
 #if defined(_MSC_VER)
 #define XB_THREAD_LOCAL __declspec(thread)
+#define XB_NOINLINE __declspec(noinline)
 #else
 #define XB_THREAD_LOCAL _Thread_local
+#define XB_NOINLINE __attribute__((noinline))
 #endif
 
 /* Locks. */

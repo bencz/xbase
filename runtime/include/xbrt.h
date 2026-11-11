@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 30u
+#define XB_ABI_VERSION 31u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -342,6 +342,11 @@ void     xb_ref_elem(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item
  * xb_each_move points it at element `idx` (1-based); xb_each_leave restores
  * the saved value. */
 int64_t  xb_enum_len(xb_ctx *ctx, const xb_item *coll);
+/* What a FOR EACH loop goes through, in `r`, once before it starts: the
+ * collection itself, or for an object its enumerator (GetEnumerator(), else
+ * the object when it answers MoveNext and Current, after Reset() when it has
+ * one); with `descend`, that enumerator's elements in an array. */
+void     xb_each_source(xb_ctx *ctx, xb_item *r, const xb_item *coll, uint32_t descend);
 uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var);
 void     xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, const xb_item *coll);
 void     xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx);
@@ -565,7 +570,7 @@ void     xb_seq_value(xb_ctx *ctx, xb_item *r);
  * of an unwinding: xb_seq_suspend sets the requests to unwind aside (returned;
  * the BREAK value is taken with xb_seq_value), and xb_seq_resume makes them
  * pending again with that value, unless the ALWAYS code made a request of its
- * own, which replaces them. */
+ * own, which replaces them (a QUIT set aside stays). */
 void     xb_seq_with(xb_ctx *ctx, xb_item *r, const xb_item *handler);
 void     xb_seq_restore(xb_ctx *ctx, const xb_item *old);
 uint32_t xb_seq_suspend(xb_ctx *ctx);

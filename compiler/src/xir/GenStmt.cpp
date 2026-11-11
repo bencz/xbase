@@ -37,11 +37,15 @@ void Generator::genStmt(const Stmt &s) {
     break;
   }
   case StmtKind::Exit:
-  case StmtKind::Loop:
-    exitCleanups(cur_.loops.size());
+  case StmtKind::Loop: {
+    size_t target = cur_.loops.size(); // EXIT: the innermost loop or SWITCH; LOOP: the innermost loop
+    if (s.kind == StmtKind::Loop)
+      while (target > 1 && cur_.loops[target - 1].isSwitch) --target;
+    exitCleanups(target, false);
     b.br(s.kind == StmtKind::Exit ? cur_.loops.back().exitTo : cur_.loops.back().loopTo);
     startDeadBlock();
     break;
+  }
   }
 }
 
@@ -103,11 +107,7 @@ void Generator::genMemvars(const LocalStmt &s) {
 void Generator::genReturn(const ReturnStmt &r) {
   Builder &b = *cur_.b;
   Value *value = r.value ? genExpr(*r.value) : nullptr;
-  exitCleanups(0);
-  for (auto it = cur_.eachVars.rbegin(); it != cur_.eachVars.rend(); ++it) {
-    Var *x = varOf(*it->var);
-    if (mayBeInCell(*x)) b.eachLeave(x, eachInCell(*it), it->saved);
-  }
+  exitCleanups(0, true);
   b.ret(value);
   startDeadBlock();
 }
@@ -199,7 +199,7 @@ void Generator::genForEach(const ForEachStmt &st) {
   Builder &b = *cur_.b;
   size_t n = st.vars.size();
   std::vector<Value *> colls(n);
-  for (size_t k = 0; k < n; ++k) colls[k] = genExpr(*st.collections[k]);
+  for (size_t k = 0; k < n; ++k) colls[k] = b.eachSource(genExpr(*st.collections[k]), b.boolean(st.descend));
   std::vector<EachVar> vars;
   for (size_t k = 0; k < n; ++k) {
     auto &v = static_cast<const VarExpr &>(*st.vars[k]);
@@ -304,8 +304,8 @@ void Generator::genSequence(const SequenceStmt &st) {
   BasicBlock *always = st.hasAlways ? cur_.fn->addBlock("seq.always.unwind") : nullptr;
   BasicBlock *join = cur_.fn->addBlock("seq.join");
   BasicBlock *end = cur_.fn->addBlock("seq.end");
-  if (st.hasAlways) cur_.cleanups.push_back({nullptr, &st.always, outer, cur_.loops.size()});
-  if (oldBlock) cur_.cleanups.push_back({oldBlock, nullptr, outer, cur_.loops.size()});
+  if (st.hasAlways) cur_.cleanups.push_back({nullptr, &st.always, outer, cur_.loops.size(), cur_.eachVars.size()});
+  if (oldBlock) cur_.cleanups.push_back({oldBlock, nullptr, outer, cur_.loops.size(), cur_.eachVars.size()});
   b.br(body);
   b.setUnwind(handler);
   b.setBlock(body);
@@ -335,15 +335,21 @@ void Generator::genSequence(const SequenceStmt &st) {
 
   if (st.hasAlways) cur_.cleanups.pop_back();
   b.setUnwind(outer);
-  if (always) {
+  if (always) { // the requests set aside come back after the code, also when it unwinds itself (QUIT wins then)
     b.setBlock(always);
     Value *requests = b.seqSuspend();
     Value *breakValue = b.seqValue();
+    BasicBlock *code = cur_.fn->addBlock("seq.always.code");
+    BasicBlock *resume = cur_.fn->addBlock("seq.always.resume");
+    b.br(code);
+    b.setUnwind(resume);
+    b.setBlock(code);
     genBlock(st.always);
-    if (!b.terminated()) {
-      b.seqResume(requests, breakValue);
-      unwindOnward();
-    }
+    if (!b.terminated()) b.br(resume);
+    b.setUnwind(outer);
+    b.setBlock(resume);
+    b.seqResume(requests, breakValue);
+    unwindOnward();
   }
   b.setBlock(join);
   if (st.hasAlways) genBlock(st.always);
@@ -353,12 +359,22 @@ void Generator::genSequence(const SequenceStmt &st) {
 
 // Before a RETURN (all of them) or an EXIT or LOOP (those inside its loop, from `loops` on): the error blocks of the
 // WITH handlers it leaves go back and the ALWAYS code it leaves runs, innermost first, each in a block that unwinds
-// where its sequence does.
-void Generator::exitCleanups(size_t loops) {
+// where its sequence does. With `leaveEach` (RETURN), the FOR EACH variables others may see get their values back
+// too, each before the sequences around its loop, as when an error unwinds.
+void Generator::exitCleanups(size_t loops, bool leaveEach) {
   Builder &b = *cur_.b;
   BasicBlock *unwind = b.unwindBlock();
   std::vector<Cleanup> all = cur_.cleanups;
+  size_t each = cur_.eachVars.size();
+  auto leaveDownTo = [&](size_t depth) {
+    for (; leaveEach && each > depth; --each) {
+      const EachVar &v = cur_.eachVars[each - 1];
+      Var *x = varOf(*v.var);
+      if (mayBeInCell(*x)) b.eachLeave(x, eachInCell(v), v.saved);
+    }
+  };
   for (size_t k = all.size(); k-- > 0 && all[k].loops >= loops;) {
+    leaveDownTo(all[k].eachVars);
     cur_.cleanups.resize(k); // a RETURN in the ALWAYS code does not run it again
     if (all[k].oldBlock) {
       b.seqRestore(all[k].oldBlock);
@@ -372,6 +388,7 @@ void Generator::exitCleanups(size_t loops) {
     if (b.terminated()) break;
   }
   cur_.cleanups = all;
+  if (!b.terminated()) leaveDownTo(0);
   if (!b.terminated()) { // the exit goes on from a block of the right unwind
     BasicBlock *rest = cur_.fn->addBlock("seq.exit");
     b.br(rest);
@@ -403,7 +420,7 @@ void Generator::genSwitch(const SwitchStmt &st) {
   b.br(otherwise);
   for (size_t i = 0; i < st.cases.size(); ++i) {
     b.setBlock(bodies[i]);
-    cur_.loops.push_back({end, cur_.loops.empty() ? nullptr : cur_.loops.back().loopTo});
+    cur_.loops.push_back({end, cur_.loops.empty() ? nullptr : cur_.loops.back().loopTo, true});
     genBlock(st.cases[i].body);
     cur_.loops.pop_back();
     if (!b.terminated()) b.br(i + 1 < bodies.size() ? bodies[i + 1] : end);

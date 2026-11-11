@@ -71,6 +71,7 @@ public:
   Instruction *substValue(Value *checked);
   Instruction *forTest(Value *counter, Value *limit, Value *step);
   Instruction *enumLen(Value *coll);
+  Instruction *eachSource(Value *coll, Value *descend);
   Instruction *eachInCell(Var *v);
   Instruction *eachEnter(Var *v, Value *inCell, Value *coll);
   Instruction *eachMove(Var *v, Value *inCell, Value *idx);

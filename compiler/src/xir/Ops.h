@@ -26,6 +26,8 @@ enum class Op : uint8_t {
   MakeBlock,      // block function, captured vars (moved into cells) -> Item
   ForTest,        // counter, limit, step -> Bool           [may fail]
   EnumLen,        // collection -> I64                      [may fail]
+  EachSource,     // collection, Bool descend -> Item: what the loop goes through: an object's enumerator (for
+                  // DESCEND, its elements in an array), else the collection                       [may fail]
   EachInCell,     // var -> Bool: it is shared, in a cell the loop works inside (moved into one if it holds an
                   // element passed to it by reference)
   EachEnter,      // var; Bool in_cell, collection -> Item: saves the variable, installs the loop's reference

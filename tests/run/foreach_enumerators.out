@@ -1,0 +1,11 @@
+
+range:  1 2 3 4 before
+enumerator:  1 2 3 4
+keys:  1:10 2:11 3:12
+descend:  4 3 2 1
+nested:  11 21 22 31 32 33
+two: 1a 2b 
+unchanged:  1 2 3 4
+words: [one][two][three]
+error:       1081 Argument error +
+error:       1068 Argument error array access

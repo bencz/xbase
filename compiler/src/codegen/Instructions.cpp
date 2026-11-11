@@ -461,6 +461,10 @@ void CodeGen::emit(const xir::Instruction &i) {
     values_[&i] = b_.CreateCall(rtEnumLen_, {fnCtx_, callArg(addr(ops[0]), 0)});
     checkPending(unwind_);
     break;
+  case Op::EachSource:
+    b_.CreateCall(rtEachSource_, {fnCtx_, dest(i), callArg(addr(ops[0]), 0), b_.CreateZExt(value(ops[1]), i32_)});
+    checkPending(unwind_);
+    break;
   case Op::EachInCell: {
     Value *shared = b_.CreateCall(rtEachShared_, {fnCtx_, rawAddress(*i.var)}, "shared");
     values_[&i] = b_.CreateICmpNE(shared, ConstantInt::get(i32_, 0));

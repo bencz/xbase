@@ -268,6 +268,18 @@ The `Error` class (`core/error.c`, `ErrorNew()`) has the variables `args` (an ar
 `canSubstitute` (logicals), `cargo` (any value), `description`, `filename`, `operation`, `subSystem` (strings),
 `genCode`, `osCode`, `subCode` (32-bit numbers), and `severity` and `tries` (16-bit numbers).
 
+### Enumerators
+
+`FOR EACH x IN o`, for an object of a compiled class, goes through an enumerator (`core/control.c`): once before the
+loop, `xb_each_source` takes `o:GetEnumerator()`, or `o` itself when it answers `MoveNext` (calling its `Reset()`
+first when it has one); the enumerator answers `MoveNext()` (`.T.` while there is an element) and `Current` (a method,
+an `ACCESS` or a variable). Each iteration's length test (`xb_enum_len`) sends `MoveNext()` (a length as large as can
+be while it gives `.T.`, else 0), and `xb_each_move` puts `Current` in the loop reference's own item: the variable
+reads it, and assigning the variable changes nothing in the collection. `k` in `FOR EACH k => x` is the position.
+With `DESCEND` the enumerator's elements are gathered into an array first. An object without an enumerator is the
+error of any other value that is no collection (`BASE/1068`). The paths of arrays, strings and hashes come first and
+do not change.
+
 ## Classes
 
 Classes compiled from xBase (`types/class.c`, `xb_class_def` in `xbrt.h`) are described by their module and
@@ -563,8 +575,8 @@ the start function, and the program ends quietly with exit code 0. `BEGIN SEQUEN
 `xb_seq_with`, which makes its block the error block (`ErrorBlock()` gives it meanwhile) and returns the one it
 replaces, and `xb_seq_restore` puts that back. On the way out of an unwinding through `ALWAYS`, `xb_seq_suspend` sets
 the pending requests aside and `xb_seq_resume` raises them again with the `BREAK` value, unless the `ALWAYS` code raised
-one of its own, which replaces them. An error in the `WITH` block itself goes to that block again, as in the reference,
-until the limit of nested handler calls (error 9003).
+one of its own, which replaces them (a `QUIT` set aside stays, as in the reference). An error in the `WITH` block itself
+goes to that block again, as in the reference, until the limit of nested handler calls (error 9003).
 
 ## Operators
 

@@ -247,7 +247,10 @@ uint32_t xb_seq_suspend(xb_ctx *ctx) {
 }
 
 void xb_seq_resume(xb_ctx *ctx, uint32_t requests, const xb_item *value) {
-  if (ctx->pending & XB_PENDING_UNWIND) return; /* ALWAYS made its own: it replaces them */
+  if (ctx->pending & XB_PENDING_UNWIND) { /* ALWAYS made its own: it replaces them, but a QUIT stays */
+    ctx->pending |= requests & XB_PENDING_QUIT;
+    return;
+  }
   ctx->pending |= requests;
   ctx->break_value = *value;
 }
