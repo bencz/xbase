@@ -40,6 +40,7 @@ void Generator::declareClasses(const xb::Module &ast) {
     Module::Class cls;
     cls.name = c->name;
     cls.isStatic = c->isStatic;
+    cls.scalar = c->scalar;
     for (const std::string &p : c->parents) {
       auto it = local.find(p);
       cls.parents.push_back({p, it == local.end() ? -1 : it->second});

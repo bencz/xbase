@@ -275,7 +275,8 @@ void CodeGen::genClasses(const xir::Module &m) {
                 table(varTy, classVars, "xb.class.classvars"), ConstantInt::get(i32_, classVars.size()),
                 table(ptrTy_, friendClasses, "xb.class.friends"), ConstantInt::get(i32_, friendClasses.size()),
                 table(ptrTy_, friendFunctions, "xb.class.friends"), ConstantInt::get(i32_, friendFunctions.size()),
-                fnOrNull(c.init), fnOrNull(c.destructor), ConstantInt::get(i32_, c.isStatic ? XB_CLASS_STATIC : 0u),
+                fnOrNull(c.init), fnOrNull(c.destructor),
+                ConstantInt::get(i32_, (c.isStatic ? XB_CLASS_STATIC : 0u) | (c.scalar ? XB_CLASS_SCALAR : 0u)),
                 ConstantPointerNull::get(ptrTy_)}));
   }
   classTable_->setInitializer(ConstantArray::get(ty, defs));

@@ -457,6 +457,16 @@ void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv
 #define XB_MEMBER_READONLY  4u
 #define XB_MEMBER_SHARED    8u  /* a class variable whose subclasses share it */
 #define XB_CLASS_STATIC     1u  /* xb_class_def flags: STATIC CLASS */
+#define XB_CLASS_SCALAR     2u  /* SCALAR CLASS: the class of the values of a type, named as ClassName() names it */
+/* What ClassName() gives for values that are not objects: the names of the types' classes (SCALAR CLASS). */
+#define XB_TYPE_NAME_NIL       "NIL"
+#define XB_TYPE_NAME_LOGICAL   "LOGICAL"
+#define XB_TYPE_NAME_NUMERIC   "NUMERIC"
+#define XB_TYPE_NAME_CHARACTER "CHARACTER"
+#define XB_TYPE_NAME_ARRAY     "ARRAY"
+#define XB_TYPE_NAME_BLOCK     "BLOCK"
+#define XB_TYPE_NAME_DATE      "DATE"
+#define XB_TYPE_NAME_HASH      "HASH"
 typedef struct xb_class_var_def {
   const char *name;         /* upper-cased */
   uint32_t flags;

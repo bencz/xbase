@@ -149,10 +149,10 @@ bool Parser::atFuncStart() const {
   return qualified && (isKw(ahead(), "FUNCTION") || isKw(ahead(), "PROCEDURE"));
 }
 
-// CLASS name, CREATE CLASS name or STATIC CLASS name.
+// CLASS name, CREATE CLASS name, STATIC CLASS name or SCALAR CLASS name.
 bool Parser::atClassStart() const {
   if (atStmtKw("CLASS")) return ahead().kind == Tok::Ident;
-  if (!atStmtKw("CREATE") && !atStmtKw("STATIC")) return false;
+  if (!atStmtKw("CREATE") && !atStmtKw("STATIC") && !atStmtKw("SCALAR")) return false;
   return ahead().kind == Tok::Ident && isKw(ahead(), "CLASS") && ahead(2).kind == Tok::Ident;
 }
 
@@ -355,7 +355,8 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
   auto cls = std::make_unique<ClassDecl>();
   cls->loc = cur().loc;
   if (atKw("STATIC")) cls->isStatic = true;
-  if (!atKw("CLASS")) advance(); // STATIC or CREATE
+  if (atKw("SCALAR")) cls->scalar = true;
+  if (!atKw("CLASS")) advance(); // STATIC, CREATE or SCALAR
   advance();
   cls->name = cur().upper;
   lastClass_ = cls->name;

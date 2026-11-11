@@ -286,11 +286,12 @@ do not change.
 the last element, `MoveNext()` runs one step (`xb_gen_move_next`), and its own variables, whose names no message can
 spell, hold the state, the resume function (its address as an integer) and the frame between steps (an array).
 `xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the enumerator, the resume
-function's argument); at each step `xb_gen_restore` copies the saved slots into the resume function's frame and
-returns the state, marking the enumerator ended until the step yields (a step that fails, or a `MoveNext` inside the
-step, ends it); `xb_gen_yield` saves the frame (one write barrier per card, `xb_gc_write_items`), the state and the
-element; `xb_gen_done` ends it and drops the frame. `FOR EACH` calls the step and reads `Current` directly. The
-`generator` benchmark (3,000,000 steps of one generator feeding another) takes about 80 ms.
+function's argument); at each step `xb_gen_restore` copies the saved slots into the resume function's frame and returns
+the state, marking the enumerator ended until the step yields (a step that fails, or a `MoveNext` inside the step, ends
+it); `xb_gen_yield` saves the frame (one write barrier per card, `xb_gc_write_items`), the state and the element;
+`xb_gen_done` ends it and drops the frame. `FOR EACH` calls the step and reads `Current` directly; its other messages
+are `Enumerable`'s (`g:Where( ... )`). The `generator` benchmark (3,000,000 steps of one generator feeding another)
+takes about 80 ms.
 
 ## Classes
 
@@ -353,6 +354,18 @@ first time it is used (its class function, or a subclass):
   paths never see objects, so they are unchanged. As in the reference, the right operand's class is not asked, and
   `.AND.`, `.OR.` and unary minus cannot be overloaded (the compiler rejects `.AND.` and `.OR.`, which the reference
   accepts and never calls).
+- Built-in types as classes: a `SCALAR CLASS type` (`XB_CLASS_SCALAR`, named as `ClassName()` names the type:
+  `ARRAY`, `CHARACTER`, `HASH`, `NUMERIC`, `DATE`, `BLOCK`, ...; it has no class function and no instance variables)
+  is the class of the type's values when no class is associated with the type: a message to such a value reaches its
+  methods, the value as `Self`, and one the class does not answer keeps Clipper's error (`No exported method`). The
+  runtime's (`rtl/collections.prg`) give the type's functions as messages (`a:Len()`, `a:Add( x )`, `a:Sort()`,
+  `"x":Upper()`, `s:Split( "," )`, `h:Keys()`, `n:Round( 2 )`, `d:Year()`, `b:Eval( ... )`); `ARRAY`, `CHARACTER` and
+  `HASH` inherit `Enumerable`, whose methods work on any collection through `FOR EACH` over `Self`: `Select( bMap )`,
+  `Where( bTest )`, `Take( n )` and `Skip( n )` are generators (the sequence is made as it is gone through, so they
+  chain), and `ToArray()`, `Count( [bTest] )`, `Any( [bTest] )`, `All( bTest )`, `First( [bTest] )`, `Contains( x )`,
+  `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )` and `ForEach( bBlock )` go through it at once. A class that
+  inherits `Enumerable` only needs `GetEnumerator()`; a generator's enumerator answers `Enumerable`'s messages too
+  (`xb_class_send_as`). `ClassName()` and `ValType()` of the values stay Clipper's.
 - Scalar classes: `ASSOCIATE CLASS name WITH TYPE type` (`std.ch`, `ClassAssociate( name(), "type" )`; a type as
   `ClassName()` names it: `ARRAY`, `BLOCK`, `CHARACTER`, `DATE`, `HASH`, `LOGICAL`, `NIL`, `NUMERIC`) makes values of
   the type answer the class's methods and class variables, the value as `Self`; `ClassName()` is the class's, and its
@@ -795,11 +808,13 @@ Each one moved from C is measured against its C version (callgrind).
   (1) or error (2), flushing the output before writing to the error; `__ArgError( nSubCode )` raises the calling
   function's argument error (`EG_ARG`, its name as the operation, the arguments it received; not substitutable), as
   its C counterparts do.
-- Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` (`rtl/arrays.prg`),
-  `ErrorSys` and the default error handler (`rtl/errorsys.prg`), Clipper's time sample functions `Secs`, `TString`,
-  `Days`, `ElapTime`, `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions (callgrind,
-  x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval`
-  over a million elements with `{| x | n += x }`, 121M (116M). `QQOut` keeps its own loop instead of sharing
+- Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` (`rtl/collections.prg`, which
+  also goes through collection objects: an `Enumerable`, a generator's enumerator, from position `nStart`, `nCount`
+  elements), the `Enumerable` class and the classes of the built-in types (`rtl/collections.prg`, see
+  [Classes](#classes)), `ErrorSys` and the default error handler (`rtl/errorsys.prg`), Clipper's time sample functions
+  `Secs`, `TString`, `Days`, `ElapTime`, `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions
+  (callgrind, x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`);
+  `AEval` over a million elements with `{| x | n += x }`, 121M (116M). `QQOut` keeps its own loop instead of sharing
   `OutStd`'s: passing the values on through one more call costs `QOut` 13% more cycles.
 
 ## Dates

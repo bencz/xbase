@@ -1,7 +1,10 @@
 // Classes to functions (see Classes.h).
 #include "sema/Classes.h"
 
+#include "xbrt.h" // XB_TYPE_NAME_*
+
 #include <algorithm>
+#include <iterator>
 #include <set>
 #include <unordered_map>
 
@@ -45,7 +48,16 @@ void ClassResolver::run(Module &m) {
     if (f->member == FuncDecl::Member::None && f->startup == FuncDecl::Startup::None) functions.insert(f->name);
   for (auto &c : m.classes) {
     if (!byName.emplace(c->name, c.get()).second) diag_.error(c->loc, "class " + c->name + " is already defined");
-    if (functions.count(c->name)) diag_.error(c->loc, "class " + c->name + " has the name of a function");
+    if (c->scalar) {
+      static const char *const types[] = {XB_TYPE_NAME_NIL,   XB_TYPE_NAME_LOGICAL, XB_TYPE_NAME_NUMERIC,
+                                          XB_TYPE_NAME_CHARACTER, XB_TYPE_NAME_ARRAY, XB_TYPE_NAME_BLOCK,
+                                          XB_TYPE_NAME_DATE,  XB_TYPE_NAME_HASH};
+      if (std::none_of(std::begin(types), std::end(types), [&](const char *t) { return c->name == t; }))
+        diag_.error(c->loc, "SCALAR CLASS " + c->name + ": not the name of a type as ClassName() gives it");
+      if (!c->vars.empty()) diag_.error(c->vars[0].loc, "a SCALAR CLASS has no instance variables");
+    } else if (functions.count(c->name)) {
+      diag_.error(c->loc, "class " + c->name + " has the name of a function");
+    }
     std::set<std::string> messages; // a variable answers NAME and _NAME
     for (const auto *vars : {&c->vars, &c->classVars})
       for (const ClassVarDecl &v : *vars) {
@@ -112,12 +124,14 @@ void ClassResolver::run(Module &m) {
         diag_.error(d.loc, "'" + d.name + "' of class " + c->name + " is declared but not implemented");
       }
     }
-    auto classFn = std::make_unique<FuncDecl>(); // NAME(): a new object
-    classFn->loc = c->loc;
-    classFn->name = c->name;
-    classFn->isStatic = c->isStatic;
-    classFn->instantiates = c.get();
-    made.push_back(std::move(classFn));
+    if (!c->scalar) {
+      auto classFn = std::make_unique<FuncDecl>(); // NAME(): a new object
+      classFn->loc = c->loc;
+      classFn->name = c->name;
+      classFn->isStatic = c->isStatic;
+      classFn->instantiates = c.get();
+      made.push_back(std::move(classFn));
+    }
     bool inits = false;
     for (const auto *vars : {&c->vars, &c->classVars})
       for (const ClassVarDecl &v : *vars) inits = inits || v.init;

@@ -128,6 +128,10 @@ void       xb_classes_finalize(xb_ctx *ctx);
 int        xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                                 uint32_t argc, xb_item *argv);
 int        xb_class_associate(const xb_object *o, const char *type);
+/* A message to argv[0] as if it were an object of the class registered as `className` (its methods, Self being
+ * argv[0]); 0 when no such class is registered. */
+int        xb_class_send_as(xb_ctx *ctx, xb_item *r, const char *className, const char *message, uint32_t argc,
+                            xb_item *argv);
 /* The name ClassName() gives values of a type that is not an object's
  * ("NUMERIC", "CHARACTER" ...), NULL for internal types. */
 const char *xb_type_class_name(xb_type type);
@@ -140,7 +144,7 @@ static inline int xb_is_generator(const xb_item *it) {
 }
 int        xb_gen_move_next(xb_ctx *ctx, const xb_item *gen);
 const xb_item *xb_gen_current(const xb_item *gen);
-int        xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, const xb_item *gen);
+int        xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
 /* What every value answers (ClassName), else the error of a message no
  * class has: BASE/1004, or BASE/1005 for an assignment. */
 void       xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);

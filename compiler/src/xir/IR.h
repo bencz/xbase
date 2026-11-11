@@ -298,6 +298,7 @@ public:
   struct Class {
     std::string name;
     bool isStatic = false;                          // STATIC CLASS: not registered by name
+    bool scalar = false;                            // SCALAR CLASS: the class of a type's values
     struct Parent {
       std::string name;
       int32_t local = -1;                           // the module's class of the name, or -1: found by name

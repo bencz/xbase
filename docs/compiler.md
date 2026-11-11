@@ -125,8 +125,8 @@ Statements:
   so an error reaches `CATCH` as its `Error` object and a `Throw( x )` as `x`; `FINALLY` is its `ALWAYS`. `RETURN`,
   `EXIT` and `LOOP` may leave its body and `CATCH` (`FINALLY` runs first), not `FINALLY`.
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
-- Classes ([runtime.md](runtime.md#classes)), at file level: `[STATIC | CREATE] CLASS name [INHERIT | FROM parent,
-  ...]`, then members, then `ENDCLASS` (or `END [CLASS]`): `EXPORTED:` (`EXPORT:`, `VISIBLE:`), `PROTECTED:` and
+- Classes ([runtime.md](runtime.md#classes)), at file level: `[STATIC | CREATE | SCALAR] CLASS name [INHERIT | FROM
+  parent, ...]`, then members, then `ENDCLASS` (or `END [CLASS]`): `EXPORTED:` (`EXPORT:`, `VISIBLE:`), `PROTECTED:` and
   `HIDDEN:` set the scope of the members after them; `VAR | DATA name, ... [AS | TYPE type] [INIT | ASSIGN expr] [scope]
   [READONLY | RO]` (the type is accepted and ignored; each name gets the INIT expression; `scope` is `EXPORTED`,
   `VISIBLE`, `PROTECTED` or `HIDDEN`); `CLASSVAR`, `CLASSDATA`, `CLASS VAR` or `CLASS DATA`, as `VAR` with `SHARED` too,
@@ -139,7 +139,9 @@ Statements:
   params )] [CLASS name]` (also `ACCESS name CLASS ...` and `ASSIGN name( param ) CLASS ...`; without `CLASS`, the last
   class declared before it in the preprocessed source, an included file's too) and a body, like a function. In a method,
   `Self` is the object, `::name` is `Self:name`, and `Super:name` (when no variable named `Super` is declared there) or
-  `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super` are ordinary names.
+  `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super` are ordinary names. `SCALAR CLASS
+  type` declares the class of a built-in type's values (its name is the type's as `ClassName()` gives it; no class
+  function, no instance variables).
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
   other arguments (an element, a variable in parentheses, an expression) by value
 - expression statements; a statement `operand = expr` is an assignment, and `=` inside `expr` compares:

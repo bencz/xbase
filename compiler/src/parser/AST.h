@@ -440,6 +440,7 @@ struct ClassDecl {
   SourceLoc loc;
   std::string name;              // upper-cased
   bool isStatic = false;         // STATIC CLASS: its class function is the module's own
+  bool scalar = false;           // SCALAR CLASS type: the class of the values of a type; no class function
   std::vector<std::string> parents;
   std::vector<ClassVarDecl> vars;
   std::vector<ClassVarDecl> classVars;   // CLASSVAR: one value for the class (and its subclasses when SHARED)

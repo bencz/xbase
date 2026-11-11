@@ -2,7 +2,8 @@
  * function's resume function, the state to resume in, the resume function's frame between steps, and the element
  * the last step yielded (its Current). MoveNext runs one step: the resume function takes its frame back
  * (xb_gen_restore), goes on after the YIELD of the state, and either yields again (xb_gen_yield: the frame and the
- * element saved, .T.) or ends (xb_gen_done, .F.). */
+ * element saved, .T.) or ends (xb_gen_done, .F.). Its other messages are the Enumerable class's
+ * (runtime/src/rtl/collections.prg). */
 #include "xbrt_int.h"
 
 #include <string.h>
@@ -74,8 +75,11 @@ int xb_gen_move_next(xb_ctx *ctx, const xb_item *gen) {
 
 const xb_item *xb_gen_current(const xb_item *gen) { return &((const xb_object *)gen->v.p)->vars[GEN_CURRENT]; }
 
-int xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, const xb_item *gen) {
-  if (strcmp(message, "MOVENEXT") != 0) return 0;
-  xb_set_logical(r, xb_gen_move_next(ctx, gen));
-  return 1;
+int xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
+  if (strcmp(message, "MOVENEXT") == 0) {
+    xb_set_logical(r, xb_gen_move_next(ctx, &argv[0]));
+    return 1;
+  }
+  if (strcmp(message, "CLASSNAME") == 0) return 0; /* its own: GENERATOR */
+  return xb_class_send_as(ctx, r, "ENUMERABLE", message, argc, argv); /* Select, Where, ToArray ... */
 }

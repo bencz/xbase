@@ -1,5 +1,5 @@
 # include/rtl.ch must declare exactly the runtime's xBase-callable functions: xbf_NAME in runtime/src, the C ones, and
-# the public functions of its xBase modules (runtime/src/**/*.prg).
+# the public functions of its xBase modules (runtime/src/**/*.prg), class functions of their classes included.
 include(${RUNTIME_SRC}/../rtl_declarations.cmake)
 xb_rtl_functions(${RTL} names masks)
 file(GLOB_RECURSE sources ${RUNTIME_SRC}/*.c)
@@ -21,6 +21,10 @@ file(GLOB_RECURSE modules ${RUNTIME_SRC}/*.prg)
 foreach(src ${modules})
   file(READ ${src} text)
   string(REGEX MATCHALL "\n[ \t]*${kw}[ \t]+[A-Za-z_][A-Za-z0-9_]*" found "\n${text}")
+  # CLASS name (also CREATE CLASS name) starting a line: its class function; not STATIC or SCALAR ones.
+  string(REGEX MATCHALL "\n[ \t]*([Cc][Rr][Ee][Aa][Tt][Ee][ \t]+)?[Cc][Ll][Aa][Ss][Ss][ \t]+[A-Za-z_][A-Za-z0-9_]*"
+         classes "\n${text}")
+  list(APPEND found ${classes})
   foreach(f ${found})
     string(REGEX REPLACE ".*[ \t]([A-Za-z_][A-Za-z0-9_]*)$" "\\1" n "${f}")
     string(TOUPPER "${n}" n)

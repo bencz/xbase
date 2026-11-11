@@ -49,7 +49,7 @@ endif()
 
 # The runtime's functions written in xBase, compiled by the xbc of this build as modules of the runtime
 # (xbc --runtime) for XB_TARGET (top-level CMakeLists.txt).
-set(XB_RUNTIME_PRG src/rtl/arrays.prg src/rtl/console.prg src/rtl/errorsys.prg src/rtl/time.prg)
+set(XB_RUNTIME_PRG src/rtl/collections.prg src/rtl/console.prg src/rtl/errorsys.prg src/rtl/time.prg)
 foreach(prg ${XB_RUNTIME_PRG})
   get_filename_component(stem ${prg} NAME_WE)
   set(obj ${CMAKE_CURRENT_BINARY_DIR}/${stem}_prg.o)

@@ -62,7 +62,8 @@ EXTERN FUNCTION HValueAt( hHash, nPos, [xNew] ) NATIVE
 EXTERN FUNCTION HValues( hHash ) NATIVE
 EXTERN FUNCTION Hash( ... ) NATIVE
 
-// Objects: reflection and scalar classes (xbase names)
+// Objects: reflection and scalar classes (xbase names); Enumerable() is the class every collection inherits
+EXTERN FUNCTION Enumerable() NATIVE
 EXTERN FUNCTION ClassAssociate( oObject, cType ) NATIVE
 EXTERN FUNCTION ObjHasMethod( oObject, cName ) NATIVE
 EXTERN FUNCTION ObjHasVar( oObject, cName ) NATIVE

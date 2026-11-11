@@ -24,9 +24,9 @@ void xb_set_object(xb_item *it, xb_object *o) { xb_set_ptr(it, XB_T_OBJECT, o); 
 
 /* What ClassName() returns for a value that is not an object. */
 static const char *const type_class_names[XB_T_COUNT_] = {
-  [XB_T_NIL] = "NIL",      [XB_T_LOGICAL] = "LOGICAL", [XB_T_INT] = "NUMERIC", [XB_T_DOUBLE] = "NUMERIC",
-  [XB_T_STRING] = "CHARACTER", [XB_T_ARRAY] = "ARRAY", [XB_T_BLOCK] = "BLOCK",  [XB_T_DATE] = "DATE",
-  [XB_T_HASH] = "HASH",
+  [XB_T_NIL] = XB_TYPE_NAME_NIL,         [XB_T_LOGICAL] = XB_TYPE_NAME_LOGICAL, [XB_T_INT] = XB_TYPE_NAME_NUMERIC,
+  [XB_T_DOUBLE] = XB_TYPE_NAME_NUMERIC,  [XB_T_STRING] = XB_TYPE_NAME_CHARACTER, [XB_T_ARRAY] = XB_TYPE_NAME_ARRAY,
+  [XB_T_BLOCK] = XB_TYPE_NAME_BLOCK,     [XB_T_DATE] = XB_TYPE_NAME_DATE,       [XB_T_HASH] = XB_TYPE_NAME_HASH,
 };
 
 const char *xb_message_text(char buf[XB_MESSAGE_TEXT_SIZE], const char *cls, const char *message) {
@@ -91,7 +91,6 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
       xb_class_send(ctx, r, message, NULL, 0, argc, argv);
       return;
     }
-    if (xb_is_generator(&argv[0]) && xb_gen_message(ctx, r, message, &argv[0])) return;
     for (uint32_t k = 0; k < cls->nvars; ++k)
       if (strcmp(cls->vars[k].name, name) == 0) {
         if (!assign) {
@@ -103,6 +102,7 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
         }
         return;
       }
+    if (xb_is_generator(&argv[0]) && xb_gen_message(ctx, r, message, argc, argv)) return; /* after its variables */
   }
   if (!xb_class_scalar_send(ctx, r, message, NULL, 0, argc, argv)) xb_object_message(ctx, r, message, argc, argv);
 }

@@ -78,9 +78,18 @@ static xb_names names;
 static xb_class_def **byId;
 static uint32_t capById;
 
+/* The SCALAR CLASSes of the types, as modules register them (the first of a type stays); used until a class is
+ * associated with the type (ClassAssociate). */
+static xb_class_def *typeClasses[XB_T_COUNT_];
+
 void xb_classes_register(xb_class_def *defs, uint32_t n) {
   for (uint32_t k = 0; k < n; ++k) {
     if (defs[k].flags & XB_CLASS_STATIC) continue;
+    if (defs[k].flags & XB_CLASS_SCALAR)
+      for (uint32_t t = 0; t < XB_T_COUNT_; ++t) {
+        const char *name = xb_type_class_name((xb_type)t);
+        if (name && !typeClasses[t] && strcmp(name, defs[k].name) == 0) typeClasses[t] = &defs[k];
+      }
     uint32_t before = names.count, id = xb_names_add(&names, defs[k].name, strlen(defs[k].name));
     if (names.count == before) continue;
     if (id == capById) {
@@ -491,9 +500,27 @@ static cls *scalars[XB_T_COUNT_];
 
 int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                          uint32_t argc, xb_item *argv) {
-  cls *c = argv[0].type < XB_T_COUNT_ ? scalars[argv[0].type] : NULL;
+  uint32_t t = argv[0].type;
+  if (t >= XB_T_COUNT_) return 0;
+  cls *c = scalars[t];
+  if (!c && typeClasses[t]) { /* the type's own class: what it does not answer keeps Clipper's error */
+    c = runtime_of(typeClasses[t]);
+    if (!c || c->state != C_READY) c = prepare(ctx, typeClasses[t]);
+    if (!c) return 1; /* the error is pending */
+    if (!lookup(c, message)) return 0;
+  }
   if (!c) return 0;
   dispatch(ctx, r, c, message, from, super, NULL, argc, argv);
+  return 1;
+}
+
+int xb_class_send_as(xb_ctx *ctx, xb_item *r, const char *className, const char *message, uint32_t argc,
+                     xb_item *argv) {
+  uint32_t id;
+  if (!xb_names_find(&names, className, strlen(className), &id)) return 0;
+  cls *c = prepare(ctx, byId[id]);
+  if (!c) return 1; /* the error is pending */
+  dispatch(ctx, r, c, message, NULL, 0, NULL, argc, argv);
   return 1;
 }
 

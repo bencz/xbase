@@ -69,7 +69,7 @@ MEMVAR->arr          A =>
 1 .AND. 2            UE error       1066
 IIF(.T.,1)           UE error       1449
 Len(arr)             N =>          3
-arr:Len              UE error       1004
+arr:Len              N =>          3
 1 = 1                L => .T.
 1 <> 2               L => .T.
 1 # 2                L => .T.
