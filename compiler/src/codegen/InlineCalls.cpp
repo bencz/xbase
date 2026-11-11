@@ -19,7 +19,7 @@ namespace xb {
 
 namespace {
 
-enum class Inline { None, Len, Asc, Chr, SubStr, PCount, PValue, Int };
+enum class Inline { None, Len, Asc, Chr, SubStr, PCount, PValue, Int, ValType };
 
 Inline inlineKind(const xir::Instruction &i) {
   if (i.op != xir::Op::Call || i.callee.function || !i.callee.native || i.hasRest()) return Inline::None;
@@ -30,7 +30,7 @@ Inline inlineKind(const xir::Instruction &i) {
   } table[] = {
       {"LEN", 1, Inline::Len},       {"ASC", 1, Inline::Asc},          {"CHR", 1, Inline::Chr},
       {"SUBSTR", 3, Inline::SubStr}, {"PCOUNT", 0, Inline::PCount}, {"PVALUE", 1, Inline::PValue},
-      {"INT", 1, Inline::Int},
+      {"INT", 1, Inline::Int},       {"VALTYPE", 1, Inline::ValType},
   };
   for (const auto &e : table)
     if (i.callee.name == e.name && i.operands().size() == e.argc) return e.kind;
@@ -293,6 +293,22 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     branchLikely(isType(t, XB_T_ARRAY), arr, slow);
     b_.SetInsertPoint(arr);
     storeInt(d, arrayLength(itemPointer(arg(0), "arr")));
+    break;
+  }
+  case Inline::ValType: { // the shared one-byte string of the tag's letter (XB_TYPE_LETTERS); a reference: the runtime
+    BasicBlock *fast = newBlock("valtype");
+    Value *t = argType(0);
+    Value *known = b_.CreateICmpULT(t, ConstantInt::get(i32_, XB_T_COUNT_));
+    branchLikely(b_.CreateAnd(known, b_.CreateNot(holdsRef(arg(0)))), fast, slow);
+    b_.SetInsertPoint(fast);
+    auto *letters = ConstantDataArray::getString(ctx_, XB_TYPE_LETTERS, false);
+    GlobalVariable *table = mod_.getNamedGlobal("xb.type.letters");
+    if (!table)
+      table = new GlobalVariable(mod_, letters->getType(), true, GlobalValue::PrivateLinkage, letters,
+                                 "xb.type.letters");
+    Value *letter = b_.CreateLoad(i8_, b_.CreateInBoundsGEP(letters->getType(), table,
+                                                            {ConstantInt::get(i64_, 0), b_.CreateZExt(t, i64_)}));
+    storeTagged(d, XB_T_STRING, byteString(b_.CreateZExt(letter, i64_)));
     break;
   }
   case Inline::Asc: { // an empty string reads its terminating NUL: 0

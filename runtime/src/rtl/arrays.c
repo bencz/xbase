@@ -124,52 +124,30 @@ static uint32_t common_type(const xb_item *items, size_t first, size_t n) {
   return t;
 }
 
-/* Calls `block` with an element and its position (1-based), as AScan and AEval
- * do; `call` holds three rooted items: the two arguments, then the result.
- * Returns 0 when the block left a request to unwind. */
-static int call_with_element(xb_ctx *ctx, const xb_item *block, xb_item *call, const xb_item *elem, size_t i) {
-  call[0] = *elem;
-  xb_set_int(&call[1], (int64_t)i + 1);
-  return xb_calls_run(ctx, block, call, 2);
-}
+static const xb_proc asort_proc = XB_RUNTIME_PROC("ASORT", 0);
 
-static const xb_proc ascan_proc = XB_RUNTIME_PROC("ASCAN", 0), asort_proc = XB_RUNTIME_PROC("ASORT", 0);
-
-/* AScan( aTarget, xSearch, [nStart], [nCount] ): the position of the first
- * element in the range that is equal to xSearch (values of one comparable
- * kind, with SET EXACT for strings, or two NILs; arrays, blocks and objects
- * never match), or for which the block xSearch( element, position ) returns
- * .T.; 0 when none is (or aTarget is not an array). */
-void xbf_ASCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+/* __AScanValue( aTarget, xSearch, nStart, nCount ): the position of the first
+ * of the nCount elements from nStart (1-based, within the array) that matches
+ * xSearch as AScan matches (xb_value_matches: values of one comparable kind,
+ * with SET EXACT for strings, or two NILs; arrays, blocks and objects never
+ * match); 0 when none does. For AScan (rtl/collections.prg). */
+void xbf___ASCANVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_int(ret, 0);
-  if (argc < 2 || argv[0].type != XB_T_ARRAY) return; /* without xSearch (even NIL) nothing matches */
-  uint64_t start = xb_range_start(argc, argv, 2, ((const xb_array *)argv[0].v.p)->len);
-  if (!start) return;
-  uint64_t count = xb_range_count(argc, argv, 3, ((const xb_array *)argv[0].v.p)->len - start + 1);
-  const xb_item *search = &argv[1];
-  if (search->type == XB_T_BLOCK) {
-    xb_item call[3];
-    xb_frame frame;
-    xb_calls_begin(ctx, call, 3, &frame, &ascan_proc);
-    for (size_t i = (size_t)(start - 1), end = i + (size_t)count; i < end; ++i) {
-      const xb_array *a = argv[0].v.p; /* the block may change the array */
-      if (i >= a->len) break;
-      if (!call_with_element(ctx, search, call, &a->items[i], i)) break;
-      if (call[2].type == XB_T_LOGICAL && call[2].v.l) {
-        xb_set_int(ret, (int64_t)i + 1);
-        break;
-      }
-    }
-    xb_calls_end(ctx, &frame, 3);
-    return;
-  }
+  if (argc < 4 || argv[0].type != XB_T_ARRAY || !xb_is_number(&argv[2]) || !xb_is_number(&argv[3])) return;
   const xb_array *a = argv[0].v.p;
-  for (size_t i = (size_t)(start - 1), end = i + (size_t)count; i < end; ++i) {
-    if (xb_value_matches(ctx, &a->items[i], search)) {
+  int64_t start = xb_num_to_i64(&argv[2]), count = xb_num_to_i64(&argv[3]);
+  if (start < 1 || count < 1) return;
+  for (size_t i = (size_t)start - 1; i < a->len && i < (size_t)(start - 1 + count); ++i)
+    if (xb_value_matches(ctx, &a->items[i], &argv[1])) {
       xb_set_int(ret, (int64_t)i + 1);
       return;
     }
-  }
+}
+
+/* __ValueMatches( xValue, xSearch ): whether xValue matches xSearch as AScan
+ * matches (xb_value_matches). */
+void xbf___VALUEMATCHES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_logical(ret, argc > 1 && xb_value_matches(ctx, &argv[0], &argv[1]));
 }
 
 /* __RangeStart( nLen, [nStart] ): where the range of a collection of nLen
@@ -228,57 +206,6 @@ void xbf_ADEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_gc_write_item(a, i);
   }
   xb_set_nil(&a->items[a->len - 1]);
-}
-
-/* ACopy( aSource, aTarget, [nStart], [nCount], [nTargetPos] ): copies the
- * range of aSource into aTarget from nTargetPos (missing or 0: 1; past the
- * end or negative: the last position), as many elements as fit. Returns
- * aTarget (NIL unless both are arrays). */
-void xbf_ACOPY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
-  if (argc < 2 || argv[0].type != XB_T_ARRAY || argv[1].type != XB_T_ARRAY) return;
-  *ret = argv[1];
-  const xb_array *src = argv[0].v.p;
-  xb_array *dst = argv[1].v.p;
-  uint64_t start = xb_range_start(argc, argv, 2, src->len);
-  if (!start || dst->len == 0) return;
-  uint64_t count = xb_range_count(argc, argv, 3, src->len - start + 1);
-  uint64_t target = 1;
-  if (argc > 4 && xb_is_number(&argv[4])) {
-    int64_t v = xb_num_to_i64(&argv[4]);
-    if (v < 0 || (uint64_t)v > dst->len) target = dst->len;
-    else if (v > 0) target = (uint64_t)v;
-  }
-  if (count > dst->len - target + 1) count = dst->len - target + 1;
-  for (uint64_t k = 0; k < count; ++k) {
-    size_t to = (size_t)(target - 1 + k);
-    dst->items[to] = src->items[start - 1 + k];
-    xb_gc_write_item(dst, to);
-  }
-}
-
-/* AFill( aTarget, xValue, [nStart], [nCount] ): the range from nStart, up to
- * nCount elements (the rest of the array without it; none when it is 0 or
- * less) takes the value; without a value nothing changes. */
-void xbf_AFILL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  if (argc < 1 || argv[0].type != XB_T_ARRAY) {
-    xb_error_in(ctx, "AFILL", NULL, EG_ARG, 6004, "AFILL", 0, argc, argv);
-    return;
-  }
-  *ret = argv[0];
-  xb_array *a = argv[0].v.p;
-  uint64_t start = argc > 1 ? xb_range_start(argc, argv, 2, a->len) : 0;
-  if (!start) return;
-  uint64_t count = a->len - start + 1;
-  if (argc > 3 && xb_is_number(&argv[3])) {
-    int64_t v = xb_num_to_i64(&argv[3]);
-    if (v <= 0) return;
-    if ((uint64_t)v < count) count = (uint64_t)v;
-  }
-  for (size_t k = (size_t)(start - 1), end = k + (size_t)count; k < end; ++k) {
-    a->items[k] = argv[1];
-    xb_gc_write_item(a, k);
-  }
 }
 
 void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

@@ -186,11 +186,29 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   b_.SetInsertPoint(notInt);
   Value *isDouble = ConstantInt::get(i32_, XB_T_DOUBLE);
   b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble)), dblBB, mixed);
-  b_.SetInsertPoint(mixed); // an integer with a double: converted when exact
-  branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow);
-
   // Both operands are read before `d`, which may be one of them, is written.
   std::vector<std::pair<Value *, BasicBlock *>> bools; // the comparison's result on each fast path
+  b_.SetInsertPoint(mixed);
+  bool equality = i.binop == BinOp::Eq || i.binop == BinOp::ExactEq || i.binop == BinOp::NotEq;
+  if (equality) { // two one-character strings (ValType( x ) == "C"): their bytes, for = and == alike
+    BasicBlock *strBB = newBlock("str1"), *notStr = newBlock("not.str1");
+    Value *isStr = ConstantInt::get(i32_, XB_T_STRING);
+    BasicBlock *strings = newBlock("strings");
+    b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(ta, isStr), b_.CreateICmpEQ(tb, isStr)), strings, notStr);
+    b_.SetInsertPoint(strings);
+    Value *sa = itemPointer(a, "sa"), *sb = itemPointer(bv, "sb");
+    Value *one = ConstantInt::get(i64_, 1);
+    b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(strLength(sa), one), b_.CreateICmpEQ(strLength(sb), one)), strBB,
+                    slow);
+    b_.SetInsertPoint(strBB);
+    Value *same = b_.CreateICmpEQ(strByte(sa, ConstantInt::get(i64_, 0)), strByte(sb, ConstantInt::get(i64_, 0)));
+    Value *r = i.binop == BinOp::NotEq ? b_.CreateNot(same) : same;
+    if (!fused) storeLogical(d, r);
+    bools.push_back({r, b_.GetInsertBlock()});
+    b_.CreateBr(join);
+    b_.SetInsertPoint(notStr);
+  }
+  branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow); // an integer with a double: converted when exact
   b_.SetInsertPoint(intBB);
   Value *x = intValue(a), *y = intValue(bv);
   if (compare) {

@@ -3,7 +3,8 @@
 // ForEach), and every type's SCALAR CLASS gives its functions as messages (a:Len(), "x":Upper(), h:Keys(), n:Round(),
 // d:Year(), b:Eval()), while ClassName(), ValType() and the functions stay Clipper's, and a message the type's class
 // does not answer keeps Clipper's error. A generator's enumerator answers Enumerable's messages, a class that inherits
-// Enumerable needs only GetEnumerator(), and AEval goes through such collections too.
+// Enumerable needs only GetEnumerator(), and AEval and AScan go through such collections too (AScan, AFill, ACopy and
+// HEval are written in xBase now; the other tests check them against the reference).
 PROCEDURE Main()
    LOCAL a := { 5, 3, 8, 1 }, h := { "a" => 1, "b" => 2 }, x, c := ""
    ? a:Len(), a:ClassName(), "abc":ClassName(), ValType( a ), Len( a )
@@ -21,6 +22,9 @@ PROCEDURE Main()
    ? "aeval gen:", AEval( a:Select( {| x | x } ), {| x, i | QQOut( Str( x, 2 ) ) } ):ClassName()
    ? "user:", TBag():New():Where( {| x | x > 1 } ):ToArray()[ 1 ]
    ? "generator msgs:", Gen():ToArray()[ 3 ], Gen():Count()
+   ? "ascan objects:", AScan( Gen(), 2 ), AScan( Gen(), {| x | x > 2 } ), AScan( TBag():New(), 3, 2 ), ;
+      AScan( Gen(), 1, 2 ), AScan( Gen(), 3, 1, 2 ), AScan( Gen(), "1" )
+   ? "valtype:", ValType( a ) == "A", ValType( "x" ) = "C", ValType( 1 ) != "N", "a" == "a", "a" = "b"
    ErrorBlock( {| e | QOut( "error:", e:description, e:operation ), Break( e ) } )
    BEGIN SEQUENCE
       ? a:Nope()

@@ -808,14 +808,18 @@ Each one moved from C is measured against its C version (callgrind).
   (1) or error (2), flushing the output before writing to the error; `__ArgError( nSubCode )` raises the calling
   function's argument error (`EG_ARG`, its name as the operation, the arguments it received; not substitutable), as
   its C counterparts do.
-- Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` (`rtl/collections.prg`, which
-  also goes through collection objects: an `Enumerable`, a generator's enumerator, from position `nStart`, `nCount`
-  elements), the `Enumerable` class and the classes of the built-in types (`rtl/collections.prg`, see
-  [Classes](#classes)), `ErrorSys` and the default error handler (`rtl/errorsys.prg`), Clipper's time sample functions
-  `Secs`, `TString`, `Days`, `ElapTime`, `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions
-  (callgrind, x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`);
-  `AEval` over a million elements with `{| x | n += x }`, 121M (116M). `QQOut` keeps its own loop instead of sharing
-  `OutStd`'s: passing the values on through one more call costs `QOut` 13% more cycles.
+- Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` and `AScan`
+  (`rtl/collections.prg`; they also go through collection objects: an `Enumerable`, a generator's enumerator, from
+  position `nStart`, `nCount` elements; `AScan` finds a value in an array with the primitive `__AScanValue`, and in a
+  collection with `__ValueMatches`, both `xb_value_matches`), `AFill`, `ACopy` and `HEval` (`rtl/collections.prg`), the
+  `Enumerable` class and the classes of the built-in types (`rtl/collections.prg`, see [Classes](#classes)), `ErrorSys`
+  and the default error handler (`rtl/errorsys.prg`), Clipper's time sample functions `Secs`, `TString`, `Days`,
+  `ElapTime`, `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions (callgrind, x86-64): 200 000 `?
+  i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval` over a million elements
+  with `{| x | n += x }`, 121M (116M). Timed against the C versions they replaced (100,000 elements, 300 rounds):
+  `AScan` of a value and with a block 225 ms (170 ms in C), `AFill` with `ACopy` 108 ms (76 ms), `HEval` 145 ms (92 ms).
+  `QQOut` keeps its own loop instead of sharing `OutStd`'s: passing the values on through one more call costs `QOut` 13%
+  more cycles.
 
 ## Dates
 

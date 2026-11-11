@@ -161,8 +161,8 @@ void xbf_HVALUES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   hash_column(ctx, ret, argc, argv, "HVALUES", 1);
 }
 
-static const xb_proc hscan_proc = XB_RUNTIME_PROC("HSCAN", 0), heval_proc = XB_RUNTIME_PROC("HEVAL", 0),
-                     hmerge_proc = XB_RUNTIME_PROC("HMERGE", 0), hsort_proc = XB_RUNTIME_PROC("HSORT", 0);
+static const xb_proc hscan_proc = XB_RUNTIME_PROC("HSCAN", 0), hmerge_proc = XB_RUNTIME_PROC("HMERGE", 0),
+                     hsort_proc = XB_RUNTIME_PROC("HSORT", 0);
 
 /* Calls `block` with the entry at `pos` (key, value, position) in call[0..2],
  * its result in call[3]; 0 when the entry is gone or the block unwinds. */
@@ -205,28 +205,6 @@ void xbf_HSCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_set_int(ret, (int64_t)pos);
       return;
     }
-}
-
-/* HEval( hHash, bBlock, [nStart], [nCount] ): calls bBlock( key, value,
- * position ) for each entry of the range still there when its turn comes;
- * returns hHash. */
-void xbf_HEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  xb_hash *h = hash_arg(ctx, "HEVAL", argc, argv, 0);
-  if (!h) return;
-  if (argc < 2 || argv[1].type != XB_T_BLOCK) {
-    xb_error_in(ctx, "HEVAL", NULL, EG_ARG, 1123, "HEVAL", 0, argc, argv);
-    return;
-  }
-  *ret = argv[0];
-  uint64_t start = xb_range_start(argc, argv, 2, h->len);
-  if (!start) return;
-  uint64_t count = xb_range_count(argc, argv, 3, h->len - start + 1);
-  xb_item call[4];
-  xb_frame frame;
-  xb_calls_begin(ctx, call, 4, &frame, &heval_proc);
-  for (uint64_t pos = start; pos < start + count; ++pos)
-    if (!call_with_entry(ctx, &argv[1], call, h, (int64_t)pos)) break;
-  xb_calls_end(ctx, &frame, 4);
 }
 
 /* Room for `n` entries; past the largest hash, the fatal error of a size

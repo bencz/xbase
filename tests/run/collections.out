@@ -11,4 +11,6 @@ aggregate:       1080          8 .T. .F. 5 3 8 1 9
 aeval gen: GENERATOR
 user:          2
 generator msgs:          3          3
+ascan objects:          2          3          3          0          0          0
+valtype: .T. .T. .F. .T. .F.
 error: No exported method NOPE

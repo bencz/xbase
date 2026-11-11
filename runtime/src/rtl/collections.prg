@@ -281,3 +281,130 @@ FUNCTION AEval( aArray, bBlock, nStart, nCount )
       Eval( bBlock, aArray[ i ], i )
    NEXT
 RETURN aArray
+
+// AScan( aTarget, xSearch, [nStart], [nCount] ): the position of the first element in the range that matches xSearch
+// (__ValueMatches: values of one comparable kind, with SET EXACT for strings, or two NILs; arrays, blocks and objects
+// never match), or for which the block xSearch( element, position ) returns .T.; 0 when none does, or aTarget is not
+// a collection (without xSearch, even NIL, nothing matches). A collection object's elements are counted from 1.
+FUNCTION AScan( aTarget, xSearch, nStart, nCount )
+   LOCAL i, x, lBlock := ValType( xSearch ) == "B"
+   IF PCount() < 2
+      RETURN 0
+   ENDIF
+   IF ValType( aTarget ) == "O"
+      nStart := IIF( ValType( nStart ) != "N" .OR. nStart < 1, 1, Int( nStart ) )
+      i := 0
+      FOR EACH x IN aTarget
+         IF ++i >= nStart
+            IF ValType( nCount ) == "N" .AND. i - nStart >= nCount
+               EXIT
+            ENDIF
+            IF lBlock
+               x := Eval( xSearch, x, i )
+               IF ValType( x ) == "L" .AND. x
+                  RETURN i
+               ENDIF
+            ELSEIF __ValueMatches( x, xSearch )
+               RETURN i
+            ENDIF
+         ENDIF
+      NEXT
+      RETURN 0
+   ENDIF
+   IF ValType( aTarget ) != "A"
+      RETURN 0
+   ENDIF
+   nStart := __RangeStart( Len( aTarget ), nStart )
+   IF nStart == 0
+      RETURN 0
+   ENDIF
+   nCount := __RangeCount( Len( aTarget ) - nStart + 1, nCount )
+   IF ! lBlock
+      RETURN __AScanValue( aTarget, xSearch, nStart, nCount )
+   ENDIF
+   FOR i := nStart TO nStart + nCount - 1
+      IF i > Len( aTarget ) // the block may shorten the array
+         EXIT
+      ENDIF
+      x := Eval( xSearch, aTarget[ i ], i ) // only .T. finds
+      IF ValType( x ) == "L" .AND. x
+         RETURN i
+      ENDIF
+   NEXT
+RETURN 0
+
+// AFill( aTarget, xValue, [nStart], [nCount] ): the range from nStart, up to nCount elements (the rest of the array
+// without it; none when it is 0 or less) takes the value; without a value nothing changes. Returns aTarget; anything
+// but an array is BASE/6004.
+FUNCTION AFill( aTarget, xValue, nStart, nCount )
+   LOCAL i, nLast
+   IF ValType( aTarget ) != "A"
+      RETURN __ArgError( 6004 )
+   ENDIF
+   IF PCount() < 2
+      RETURN aTarget
+   ENDIF
+   nStart := __RangeStart( Len( aTarget ), nStart )
+   IF nStart == 0
+      RETURN aTarget
+   ENDIF
+   nLast := Len( aTarget )
+   IF ValType( nCount ) == "N"
+      IF Int( nCount ) <= 0
+         RETURN aTarget
+      ENDIF
+      nLast := Min( nLast, nStart + Int( nCount ) - 1 )
+   ENDIF
+   FOR i := nStart TO nLast
+      aTarget[ i ] := xValue
+   NEXT
+RETURN aTarget
+
+// ACopy( aSource, aTarget, [nStart], [nCount], [nTargetPos] ): copies the range of aSource into aTarget from
+// nTargetPos (missing or 0: 1; past the end or negative: the last position), as many elements as fit, in order.
+// Returns aTarget (NIL unless both are arrays).
+FUNCTION ACopy( aSource, aTarget, nStart, nCount, nTargetPos )
+   LOCAL nTarget := 1, i
+   IF ValType( aSource ) != "A" .OR. ValType( aTarget ) != "A"
+      RETURN NIL
+   ENDIF
+   nStart := __RangeStart( Len( aSource ), nStart )
+   IF nStart == 0 .OR. Len( aTarget ) == 0
+      RETURN aTarget
+   ENDIF
+   nCount := __RangeCount( Len( aSource ) - nStart + 1, nCount )
+   IF ValType( nTargetPos ) == "N"
+      nTargetPos := Int( nTargetPos )
+      IF nTargetPos < 0 .OR. nTargetPos > Len( aTarget )
+         nTarget := Len( aTarget )
+      ELSEIF nTargetPos > 0
+         nTarget := nTargetPos
+      ENDIF
+   ENDIF
+   nCount := Min( nCount, Len( aTarget ) - nTarget + 1 )
+   FOR i := 0 TO nCount - 1
+      aTarget[ nTarget + i ] := aSource[ nStart + i ]
+   NEXT
+RETURN aTarget
+
+// HEval( hHash, bBlock, [nStart], [nCount] ): calls bBlock( key, value, position ) for each entry of the range still
+// there when its turn comes; returns hHash. A hash and a block are required (BASE/1123).
+FUNCTION HEval( hHash, bBlock, nStart, nCount )
+   LOCAL nLast, nPos := 0, k, v
+   IF ValType( hHash ) != "H" .OR. ValType( bBlock ) != "B"
+      RETURN __ArgError( 1123 )
+   ENDIF
+   nStart := __RangeStart( Len( hHash ), nStart )
+   IF nStart == 0
+      RETURN hHash
+   ENDIF
+   nLast := nStart + __RangeCount( Len( hHash ) - nStart + 1, nCount ) - 1
+   FOR EACH k => v IN hHash // each position checked against the hash as it is: entries the block deletes end it
+      IF ++nPos > nLast
+         EXIT
+      ENDIF
+      IF nPos >= nStart
+         Eval( bBlock, k, v, nPos )
+      ENDIF
+   NEXT
+RETURN hHash

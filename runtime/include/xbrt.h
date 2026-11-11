@@ -49,6 +49,9 @@ typedef enum xb_type {
   XB_T_DATE    = 11,  /* v.i: Julian day number, 0 for the empty date  */
   XB_T_COUNT_
 } xb_type;
+/* ValType() of each tag, by tag (a cell or a reference, which ValType never
+ * sees, as NIL). */
+#define XB_TYPE_LETTERS "ULNNCABUUOHD"
 
 /* [ABI] The tags whose v.p is a heap object form one range, so that one
  * unsigned comparison tells whether storing an item can make an old object

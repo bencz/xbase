@@ -189,6 +189,7 @@ EXTERN FUNCTION QQOut( ... ) NATIVE
 
 // Internal functions used by std.ch commands, by tests and by the runtime's xBase code
 EXTERN FUNCTION __ArgError( nSubCode ) NATIVE ARGS
+EXTERN FUNCTION __AScanValue( aTarget, xSearch, nStart, nCount ) NATIVE
 EXTERN FUNCTION __Break( [xValue] ) NATIVE
 EXTERN FUNCTION __ConsoleWrite( xValue ) NATIVE
 EXTERN FUNCTION __GcCollect( [lYoung] ) NATIVE
@@ -200,5 +201,6 @@ EXTERN FUNCTION __MemSave( cFile, [cSkeleton], [lLike] ) NATIVE
 EXTERN FUNCTION __Quit() NATIVE
 EXTERN FUNCTION __RangeCount( nRest, [nCount] ) NATIVE
 EXTERN FUNCTION __RangeStart( nLen, [nStart] ) NATIVE
+EXTERN FUNCTION __ValueMatches( xValue, xSearch ) NATIVE
 EXTERN FUNCTION __SetCentury( [lOn] ) NATIVE
 EXTERN FUNCTION __StdWrite( nHandle, xValue ) NATIVE
