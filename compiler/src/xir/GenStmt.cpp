@@ -30,6 +30,12 @@ void Generator::genStmt(const Stmt &s) {
   case StmtKind::ForEach: genForEach(static_cast<const ForEachStmt &>(s)); break;
   case StmtKind::Switch: genSwitch(static_cast<const SwitchStmt &>(s)); break;
   case StmtKind::Sequence: genSequence(static_cast<const SequenceStmt &>(s)); break;
+  case StmtKind::WithObject: {
+    auto &w = static_cast<const WithObjectStmt &>(s);
+    initLocal(w.hidden, genExpr(*w.object));
+    genBlock(w.body);
+    break;
+  }
   case StmtKind::Exit:
   case StmtKind::Loop:
     exitCleanups(cur_.loops.size());
@@ -44,14 +50,17 @@ void Generator::genStmt(const Stmt &s) {
 void Generator::genLocals(const LocalStmt &s) {
   for (const LocalDecl &d : s.decls) {
     if (!d.init) continue;
-    Var *v = frameVar(d.slot);
-    if (v->name.empty()) v->name = d.name;
     cur_.b->setLoc(d.loc);
-    Value *value = genExpr(*d.init);
-    Access a = accessOf(*v);
-    cur_.b->store(v, a, value);
-    if (!isPlain(*v, a)) cur_.b->barrier(v, a);
+    initLocal(d, genExpr(*d.init));
   }
+}
+
+void Generator::initLocal(const LocalDecl &d, Value *value) {
+  Var *v = frameVar(d.slot);
+  if (v->name.empty()) v->name = d.name;
+  Access a = accessOf(*v);
+  cur_.b->store(v, a, value);
+  if (!isPlain(*v, a)) cur_.b->barrier(v, a);
 }
 
 // PRIVATE and PUBLIC: the statement's initializers run first, in order (they

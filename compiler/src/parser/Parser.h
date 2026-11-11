@@ -77,6 +77,7 @@ private:
   StmtPtr parseWhile();
   StmtPtr parseSequence();
   StmtPtr parseTry();
+  StmtPtr parseWithObject();
   void parseSequenceParts(SequenceStmt &st, const char *recoverWord, const char *alwaysWord, const char *what,
                           SourceLoc openLoc);
   StmtPtr parseFor();
@@ -118,6 +119,9 @@ private:
   bool quietStmt_ = false;
   bool stopped_ = false;
   std::string lastClass_;        // the class a METHOD implementation without CLASS belongs to
+  std::vector<std::string> withObjects_; // the hidden LOCALs of the WITH OBJECTs open, innermost last
+  unsigned withCount_ = 0;
+  unsigned braceBlocks_ = 0;     // extended codeblocks open: a statement starting with } ends their body
   // ANNOUNCE and EXTERNAL anywhere in the module, given to it at its end.
   std::optional<Request> announce_;
   std::vector<Request> requests_;

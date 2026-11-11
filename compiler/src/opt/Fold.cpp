@@ -170,6 +170,12 @@ void Folder::stmt(Stmt &s) {
     block(f.body);
     break;
   }
+  case StmtKind::WithObject: {
+    auto &w = static_cast<WithObjectStmt &>(s);
+    fold(w.object);
+    block(w.body);
+    break;
+  }
   case StmtKind::Sequence: {
     auto &q = static_cast<SequenceStmt &>(s);
     if (q.handler) fold(q.handler);
@@ -247,6 +253,7 @@ void Folder::fold(ExprPtr &e) {
   }
   case ExprKind::Block:
     for (auto &b : static_cast<BlockExpr &>(*e).body) fold(b);
+    block(static_cast<BlockExpr &>(*e).statements);
     break;
   case ExprKind::IncDec:
     fold(static_cast<IncDecExpr &>(*e).target);

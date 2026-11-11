@@ -109,6 +109,10 @@ Statements:
   `ALWAYS` runs however the body and `RECOVER` end. `RETURN`, and `EXIT` or `LOOP` for a loop around the sequence,
   cannot leave its body (Clipper rule) nor `ALWAYS`; in `RECOVER` they can (`ALWAYS` runs first). `BREAK [value]` is
   a `std.ch` command (`__Break()`, the same as `Break()` and `Throw()`).
+- `WITH OBJECT expr ... END` (`END WITH` too): inside, `:name` (also `:name( args )`, assigned, `++`) is a message to
+  the object, evaluated once into a `LOCAL` of its own (`WithObjectStmt::hidden`, a name no program can write), so a
+  codeblock made there keeps sending to that object, even after `END` (the reference sends to the `WITH OBJECT`
+  running when the block is evaluated). The innermost `WITH OBJECT` wins; `:name` outside one is an error.
 - `TRY ... [CATCH [v] ...] [FINALLY ...] END` (`END TRY` too): a sequence whose error block is `{| e | Break( e ) }`,
   so an error reaches `CATCH` as its `Error` object and a `Throw( x )` as `x`; `FINALLY` is its `ALWAYS`. `RETURN`,
   `EXIT` and `LOOP` may leave its body and `CATCH` (`FINALLY` runs first), not `FINALLY`.
@@ -143,16 +147,20 @@ and postfix `++`/`--`, element access `a[i]` (`a[i, j]` is `a[i][j]`) and messag
 order: `a[1]:cargo[2]`), primaries (literals, `NIL`, variables, calls, `IIF(c, a, b)`/`IF(c, a, b)`, parentheses,
 expression lists `( a, b, ... )` evaluated in order with the value of the last, array literals `{ a, b }`, hash literals
 `{ k => v, ... }` and `{=>}`, codeblocks `{| params | expr, ... }`). Empty call arguments (`f(a, , b)`) and empty array
-elements pass `NIL`; a codeblock body has at least one expression. A call argument `@name` or `@name[i]...` passes a
-variable or an element by reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not
-supported yet), and so are function references `@name()`. `...` as the last argument of a call or a send or the last
-element of an array literal (`SpreadExpr`; once, with nothing after it, not even an empty argument) stands for the
-arguments the function received past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`.
-Sema accepts it only in a function declared with `...`, outside its codeblocks (which have arguments of their own); a
-`CHECKED` function's count includes the other arguments only, so only too many of them is an error. Variables, elements
-(`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`, a message without arguments) and macros can be
-assigned.
-`LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
+elements pass `NIL`; a codeblock body has at least one expression. An extended codeblock, `{| params |` at the end of a
+line, then statements, then a line that starts with `}` (the expression goes on after it), has statements for a body
+(`BlockExpr::extended`, `statements`): `LOCAL`s of its own after the parameters, `RETURN` with its result (`NIL` when it
+ends without one; the procedure rule does not apply), any other statement but `STATIC`, `MEMVAR`, `PRIVATE`, `PUBLIC`
+and `PARAMETERS`; as in the reference, a codeblock inside cannot capture its `LOCAL`s or parameters. It is generated
+like any codeblock, with a frame of its own. A call argument `@name` or `@name[i]...` passes a variable or an element by
+reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not supported yet), and so are
+function references `@name()`. `...` as the last argument of a call or a send or the last element of an array literal
+(`SpreadExpr`; once, with nothing after it, not even an empty argument) stands for the arguments the function received
+past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it only in a function
+declared with `...`, outside its codeblocks (which have arguments of their own); a `CHECKED` function's count includes
+the other arguments only, so only too many of them is an error. Variables, elements (`a[i] := v`, `a[i] += v`,
+`a[i]++`), instance variables (`o:x := v`, a message without arguments) and macros can be assigned. `LOCAL a[n1, n2]`
+(or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
 
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
 C has them, so a comparison binds tighter than `&`, `^^` and `|`: `x & 1 == 0` is `x & ( 1 == 0 )`, an argument error at

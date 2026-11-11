@@ -166,6 +166,7 @@ void CallResolver::expr(Expr &e) {
   }
   case ExprKind::Block:
     for (auto &b : static_cast<BlockExpr &>(e).body) expr(*b);
+    block(static_cast<BlockExpr &>(e).statements);
     break;
   case ExprKind::List:
     for (auto &x : static_cast<ListExpr &>(e).exprs) expr(*x);
@@ -244,6 +245,12 @@ void CallResolver::block(Block &b) {
         if (c.value) expr(*c.value);
         block(c.body);
       }
+      break;
+    }
+    case StmtKind::WithObject: {
+      auto &w = static_cast<WithObjectStmt &>(*st);
+      expr(*w.object);
+      block(w.body);
       break;
     }
     case StmtKind::Sequence: {

@@ -229,9 +229,14 @@ struct ListExpr : Expr {
   explicit ListExpr(SourceLoc l) : Expr(ExprKind::List, l) {}
 };
 
+struct Stmt;
 struct BlockExpr : Expr {
   std::vector<Param> params;
   std::vector<ExprPtr> body;     // evaluated in order; the last one is the result
+  // An extended codeblock, {| params | on a line of its own, then statements, then }: its LOCALs follow the
+  // parameters in its frame, and RETURN gives its result (NIL without one).
+  bool extended = false;
+  std::vector<std::unique_ptr<Stmt>> statements;
   // Set by Sema:
   uint32_t numLocals = 0;        // frame slots (the parameters)
   struct Capture {
@@ -253,7 +258,7 @@ struct IIfExpr : Expr {
 
 enum class StmtKind : uint8_t {
   Expr, Local, Static, Private, Public, Parameters, Memvar, Return, If, While, For, ForEach, Switch, Sequence, Exit,
-  Loop
+  Loop, WithObject
 };
 
 struct Stmt {
@@ -337,6 +342,15 @@ struct SwitchStmt : Stmt {
   ExprPtr value;
   std::vector<Case> cases;       // OTHERWISE, if present, is last
   explicit SwitchStmt(SourceLoc l, ExprPtr v) : Stmt(StmtKind::Switch, l), value(std::move(v)) {}
+};
+
+// WITH OBJECT expr body END: `:name` in the body (in its codeblocks too) sends to the object, evaluated once into a
+// LOCAL of its own (`hidden`, a name no program can write), so a codeblock made there keeps sending to it.
+struct WithObjectStmt : Stmt {
+  ExprPtr object;
+  LocalDecl hidden;
+  Block body;
+  explicit WithObjectStmt(SourceLoc l) : Stmt(StmtKind::WithObject, l) {}
 };
 
 // BEGIN SEQUENCE [WITH handler] body [RECOVER [USING var] recover] [ALWAYS always] END: a BREAK in the body (in what

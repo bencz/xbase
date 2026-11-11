@@ -56,8 +56,12 @@ bool Preprocessor::processFile(const std::string &path, SourceLoc from) {
   Toks line;
   while (!diag_.limitReached() && lex.nextLine(line)) {
     if (line.empty()) continue;
-    if (line[0].kind == Tok::Hash) directive(line);
-    else if (active()) processLine(line);
+    if (line[0].kind == Tok::Hash) {
+      directive(line);
+    } else if (active()) {
+      joinBlocks(lex, line);
+      processLine(line);
+    }
   }
 
   while (conds_.size() > condBase) {
@@ -74,6 +78,58 @@ std::vector<Token> Preprocessor::takeOutput() {
   if (!out_.empty()) eof.loc = out_.back().loc;
   out_.push_back(eof);
   return std::move(out_);
+}
+
+// Whether the line ends opening an extended codeblock: {| params | and nothing after it.
+static bool opensBlock(const std::vector<Token> &line) {
+  size_t n = line.size();
+  if (n < 3 || line[n - 1].kind != Tok::Pipe) return false;
+  size_t k = n - 2;
+  bool wantName = true; // going left: a name, then a comma, ...
+  while (k > 0 && line[k].kind != Tok::Pipe) {
+    if (line[k].kind != (wantName ? Tok::Ident : Tok::Comma)) return false;
+    wantName = !wantName;
+    --k;
+  }
+  return k > 0 && line[k].kind == Tok::Pipe && line[k - 1].kind == Tok::LBrace && (!wantName || k == n - 2);
+}
+
+// A line that opens an extended codeblock takes the lines up to the one that starts with its }: they are
+// preprocessed as statements of their own, and their output goes into the line as one token (Tok::BlockBody), so a
+// rule sees the codeblock whole, as one operand; emit puts the statements back. The line that closes it goes on the
+// line, and may open another one.
+void Preprocessor::joinBlocks(Lexer &lex, Toks &line) {
+  while (opensBlock(line)) {
+    SourceLoc open = line.back().loc;
+    Toks body, next;
+    std::swap(out_, body); // what the statements emit goes to `body`
+    bool closed = false;
+    while (!diag_.limitReached() && lex.nextLine(next)) {
+      if (next.empty()) continue;
+      if (next[0].kind == Tok::RBrace) {
+        closed = true;
+        break;
+      }
+      if (next[0].kind == Tok::Hash) {
+        directive(next);
+      } else if (active()) {
+        joinBlocks(lex, next);
+        processLine(next);
+      }
+    }
+    std::swap(out_, body);
+    if (!closed) {
+      diag_.error(open, "codeblock without a line starting with '}'");
+      return;
+    }
+    Token t;
+    t.kind = Tok::BlockBody;
+    t.loc = open;
+    t.text = std::to_string(blockBodies_.size());
+    blockBodies_.push_back(std::move(body));
+    line.push_back(std::move(t));
+    line.insert(line.end(), next.begin(), next.end());
+  }
 }
 
 void Preprocessor::processLine(Toks &line) {
@@ -141,9 +197,18 @@ void Preprocessor::processStatement(Toks st, int depth, Rewrite &rw) {
 
 void Preprocessor::emit(const Toks &st) {
   if (st.empty()) return;
-  out_.insert(out_.end(), st.begin(), st.end());
   Token eos;
   eos.kind = Tok::EndOfStmt;
+  for (const Token &t : st) {
+    if (t.kind != Tok::BlockBody) {
+      out_.push_back(t);
+      continue;
+    }
+    eos.loc = t.loc; // the line that opens the codeblock ends, then its statements (each with its end)
+    out_.push_back(eos);
+    const Toks &body = blockBodies_.at(std::stoul(t.text));
+    out_.insert(out_.end(), body.begin(), body.end());
+  }
   eos.loc = st.back().loc;
   out_.push_back(eos);
 }

@@ -13,8 +13,8 @@ Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar
 **FUNCTION**, **PROCEDURE**, **LOCAL**, **STATIC**, **RETURN**, **IF**, **DO CASE**, **SWITCH**, **WHILE**, **FOR**,
 **FOR EACH**, **EXIT**, **LOOP**, **DO ... WITH**, **PRIVATE**, **PUBLIC**, **MEMVAR**, *FIELD*, **PARAMETERS**, **INIT
 PROCEDURE**, **EXIT PROCEDURE**, **EXTERN FUNCTION** (an xbase declaration), **BEGIN SEQUENCE** (with `WITH` and
-`ALWAYS`), **TRY** (an xbase statement), **DECLARE**, **EXTERNAL** (Clipper's name list), **ANNOUNCE**, **CLASS ...
-ENDCLASS** and **METHOD** (xbase's classes)
+`ALWAYS`), **TRY** (an xbase statement), **WITH OBJECT**, **DECLARE**, **EXTERNAL** (Clipper's name list), **ANNOUNCE**,
+**CLASS ... ENDCLASS** and **METHOD** (xbase's classes)
 
 ## Commands (std.ch)
 

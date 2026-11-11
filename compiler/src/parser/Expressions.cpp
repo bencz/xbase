@@ -192,6 +192,14 @@ ExprPtr Parser::parseBraced() {
       } while (accept(Tok::Comma));
     }
     expect(Tok::Pipe, "'|'");
+    if (at(Tok::EndOfStmt)) { // an extended codeblock: statements up to a line that starts with }
+      blk->extended = true;
+      ++braceBlocks_;
+      blk->statements = parseBlock({});
+      --braceBlocks_;
+      expect(Tok::RBrace, "'}'");
+      return blk;
+    }
     do { // the body has at least one expression, as in Clipper
       blk->body.push_back(parseExpr());
     } while (accept(Tok::Comma));
@@ -359,6 +367,14 @@ ExprPtr Parser::parsePrimary() {
   const Token &t = cur();
   SourceLoc loc = t.loc;
   if (atMacroName() || atMacroParen()) return parseMacro();
+  if (at(Tok::Colon) && ahead().kind == Tok::Ident) { // :message in WITH OBJECT is object:message
+    advance();
+    if (withObjects_.empty()) { // reported, and parsed as a message to NIL
+      diag_.error(loc, "':' without an object is valid only in WITH OBJECT");
+      return parseSend(loc, std::make_unique<NilExpr>(loc));
+    }
+    return parseSend(loc, std::make_unique<VarExpr>(loc, withObjects_.back()));
+  }
   if (at(Tok::DoubleColon)) { // ::message is Self:message
     advance();
     if (!at(Tok::Ident)) {

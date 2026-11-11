@@ -101,7 +101,9 @@ bool Parser::atStmtKw(const char *kw) const {
     for (const char *k : keywordBeforeIncDec)
       if (std::strcmp(k, kw) == 0) return true;
     return false;
-  case Tok::Arrow: case Tok::Colon: case Tok::LBracket: case Tok::Eq:
+  case Tok::Colon: // a message to a variable named like the keyword; in WITH OBJECT, `RETURN :name` is the keyword
+    return !withObjects_.empty() && ahead().spaceBefore && ahead(2).kind == Tok::Ident;
+  case Tok::Arrow: case Tok::LBracket: case Tok::Eq:
     return false;
   default:
     break;
@@ -671,7 +673,7 @@ Block Parser::parseBlock(std::initializer_list<const char *> enders) {
     // EXTERN FUNCTION ends a function body, like FUNCTION; inside a nested block
     // parseStmt reports it.
     if (at(Tok::Eof) || diag_.limitReached() || atFuncStart() || (enders.size() == 0 && atExtern()) ||
-        atBlockEnd(enders))
+        atBlockEnd(enders) || (braceBlocks_ && at(Tok::RBrace))) // } closes an extended codeblock
       break;
     size_t before = pos_;
     if (StmtPtr s = parseStmt()) b.push_back(std::move(s));

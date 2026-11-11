@@ -10,6 +10,8 @@
 
 namespace xb {
 
+class Lexer;
+
 // The xBase preprocessor. It owns tokenization and produces the token
 // stream the parser consumes (statements separated by Tok::EndOfStmt).
 //
@@ -96,6 +98,7 @@ private:
 
   // Preprocessor.cpp: lines and statements
   void processLine(Toks &line);
+  void joinBlocks(Lexer &lex, Toks &line);
   struct Rewrite {              // shared by everything one source statement expands into
     int budget;
     bool failed = false;
@@ -150,6 +153,7 @@ private:
   std::vector<Rule> rules_;
   std::vector<Cond> conds_;
   Toks out_;
+  std::vector<Toks> blockBodies_; // the statements of extended codeblocks (Tok::BlockBody), until emitted
 };
 
 } // namespace xb

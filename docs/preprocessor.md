@@ -133,6 +133,14 @@ The element rules apply to any marker, not only to lists: a match is split at it
 
 A result may contain `;`, which splits it into several statements.
 
+### Extended codeblocks
+
+A line that ends with `{| params |` (an extended codeblock) takes the lines that follow, up to one that starts with
+`}`: they are preprocessed as statements of their own (directives too), and what they produce goes into the line as one
+token (`Tok::BlockBody`), followed by the rest of the closing line, which may open another codeblock. A rule therefore
+sees the codeblock whole, as one operand inside its braces (`? Eval( {| a | ... }, 1 )`); the output puts the
+statements back between the end of the opening line and the `}`. A codeblock without its closing line is an error.
+
 ### Rescanning
 
 Each statement is processed in this order: expand defines, apply translates from left to right, apply a command; then

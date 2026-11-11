@@ -48,6 +48,7 @@ private:
   struct EachVar;
   Value *eachInCell(const EachVar &v);
   void genSwitch(const SwitchStmt &s);
+  void initLocal(const LocalDecl &d, Value *value);
   void genSequence(const SequenceStmt &s);
   void exitCleanups(size_t loops);
   void unwindOnward();

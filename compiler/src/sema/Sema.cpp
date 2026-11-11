@@ -18,6 +18,7 @@ struct Sema::Scope {
   // FINALLY, which run while a request may wait to go on): its name, and the loops and SWITCHes around it.
   const char *fence = nullptr;
   unsigned fenceLoops = 0, fenceSwitches = 0;
+  bool inBlock = false;          // the statements of an extended codeblock
 };
 
 void Sema::run(Module &m) {
@@ -83,6 +84,7 @@ bool Sema::constantInit(const Expr &e, unsigned blockDepth) const {
     return true;
   }
   case ExprKind::Block:
+    if (static_cast<const BlockExpr &>(e).extended) return false; // statements: they may do anything
     for (auto &b : static_cast<const BlockExpr &>(e).body)
       if (!constantInit(*b, blockDepth + 1)) return false;
     return true;
@@ -249,6 +251,13 @@ void Sema::codeblock(BlockExpr &b, Scope &s) {
     else ++n;
   }
   for (auto &e : b.body) expr(*e, s);
+  if (b.extended) { // its statements, a frame of their own after the parameters
+    Scope inner;
+    inner.next = n;
+    inner.inBlock = true;
+    block(b.statements, inner);
+    n = inner.next;
+  }
   b.numLocals = n;
   frames_.pop_back();
 }
@@ -277,17 +286,20 @@ void Sema::stmt(Stmt &st, Scope &s) {
   case StmtKind::Local:
   case StmtKind::Static: {
     bool isStatic = st.kind == StmtKind::Static;
+    if (isStatic && s.inBlock) diag_.error(st.loc, "STATIC is not allowed in a codeblock");
     if (s.seenExecutable || s.blockDepth)
       diag_.error(st.loc, std::string(isStatic ? "STATIC" : "LOCAL") + " declaration follows executable statement");
     for (LocalDecl &d : static_cast<LocalStmt &>(st).decls) declare(d, isStatic, s);
     break;
   }
   case StmtKind::Memvar:
+    if (s.inBlock) diag_.error(st.loc, "MEMVAR is not allowed in a codeblock");
     if (s.seenExecutable || s.blockDepth) diag_.error(st.loc, "MEMVAR declaration follows executable statement");
     for (const LocalDecl &d : static_cast<LocalStmt &>(st).decls) declareMemvar(d);
     break;
   case StmtKind::Private:
   case StmtKind::Public:
+    if (s.inBlock) diag_.error(st.loc, "PRIVATE and PUBLIC are not allowed in a codeblock");
     for (LocalDecl &d : static_cast<LocalStmt &>(st).decls) {
       if (d.init) expr(*d.init, s); // before the variable exists: it reads the one visible
       if (d.macro) expr(*d.macro, s);
@@ -295,6 +307,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
     }
     break;
   case StmtKind::Parameters: // PRIVATEs holding the arguments received
+    if (s.inBlock) diag_.error(st.loc, "PARAMETERS is not allowed in a codeblock");
     curFunc_->readsArgs = true;
     for (const LocalDecl &d : static_cast<LocalStmt &>(st).decls) createdMemvar(d);
     break;
@@ -342,7 +355,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
     auto &r = static_cast<ReturnStmt &>(st);
     if (s.fence) diag_.error(r.loc, std::string("RETURN cannot leave ") + s.fence);
     if (r.value) {
-      if (curFunc_->isProcedure && !curFunc_->implicit)
+      if (curFunc_->isProcedure && !curFunc_->implicit && !s.inBlock)
         diag_.error(r.loc, "PROCEDURE '" + curFunc_->name + "' cannot return a value");
       expr(*r.value, s);
     }
@@ -374,6 +387,13 @@ void Sema::stmt(Stmt &st, Scope &s) {
     ++s.loopDepth;
     nestedBlock(f.body, s);
     --s.loopDepth;
+    break;
+  }
+  case StmtKind::WithObject: {
+    auto &w = static_cast<WithObjectStmt &>(st);
+    expr(*w.object, s);
+    declare(w.hidden, false, s);
+    nestedBlock(w.body, s);
     break;
   }
   case StmtKind::Sequence: {

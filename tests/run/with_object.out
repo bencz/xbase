@@ -1,0 +1,10 @@
+
+sends:         10         20         30 TP
+block:         11
+inner:          5          5
+outer again:         10
+after reassign:         10
+compound:         11        120
+objects:          5          5
+block after END:         12
+loop:          7          7

@@ -128,9 +128,8 @@ every exit (normal end, error, `RETURN`, `EXIT`, `LOOP`). Built on the unwind ed
 
 ### Other language features
 
-- `WITH OBJECT o ... END`: `:name` inside means `o:name`.
-- Extended codeblocks: a block with statements, `{| a, b | <statements> RETURN x }`, compiled as a nested function
-  with its own declarations.
+- Done: `WITH OBJECT o ... END` (`:name` inside means `o:name`) and extended codeblocks (`{| a, b |`, statements,
+  `}`), see [compiler.md](compiler.md#grammar).
 - `...` as the indexes of an element (`a[ ... ]`) and in codeblocks (`{| a, ... | ... }`); variadic functions and `...`
   as the last argument of calls and sends and the last element of array literals are done
   ([compiler.md](compiler.md#grammar)).

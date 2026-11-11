@@ -39,6 +39,7 @@ StmtPtr Parser::parseStmtKind() {
   if (atStmtKw("WHILE")) return parseWhile();
   if (atStmtKw("BEGIN") && isKw(ahead(), "SEQUENCE")) return parseSequence();
   if (atStmtKw("TRY") && ahead().kind == Tok::EndOfStmt) return parseTry();
+  if (atStmtKw("WITH") && isKw(ahead(), "OBJECT")) return parseWithObject();
   if (atStmtKw("FOR")) return isKw(ahead(), "EACH") && !isAssignAfterEach() ? parseForEach() : parseFor();
   if (atStmtKw("RETURN")) {
     advance();
@@ -348,6 +349,23 @@ StmtPtr Parser::parseSequence() {
   }
   endOfStmt();
   parseSequenceParts(*st, "RECOVER", "ALWAYS", "BEGIN SEQUENCE", openLoc);
+  return st;
+}
+
+// WITH OBJECT expr ... END (std.ch makes END WITH an END); `:name` inside names the object (parsePrimary).
+StmtPtr Parser::parseWithObject() {
+  SourceLoc openLoc = cur().loc;
+  advance(); // WITH
+  advance(); // OBJECT
+  auto st = std::make_unique<WithObjectStmt>(openLoc);
+  st->object = parseExpr();
+  endOfStmt();
+  st->hidden.loc = openLoc;
+  st->hidden.name = "(WITH " + std::to_string(++withCount_) + ")";
+  withObjects_.push_back(st->hidden.name);
+  st->body = parseBlock({"END"});
+  withObjects_.pop_back();
+  closeBlock({"END"}, "WITH OBJECT", openLoc);
   return st;
 }
 

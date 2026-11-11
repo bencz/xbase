@@ -76,6 +76,7 @@ const char *tokName(Tok t) {
   case Tok::Hash: return "#";
   case Tok::Backslash: return "\\";
   case Tok::Other: return "character";
+  case Tok::BlockBody: return "codeblock statements";
   }
   return "?";
 }

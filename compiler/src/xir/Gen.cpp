@@ -180,10 +180,13 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   mod_->functions.push_back(std::make_unique<Function>(Function::Kind::Block, name));
   Function *fn = mod_->functions.back().get();
   fn->internal = true;
-  fn->numParams = blk.numLocals;
+  fn->numParams = (uint32_t)blk.params.size();
   fn->readsArgs = blk.readsArgs;
   fn->callsPrivates = blk.callsPrivates;
-  for (uint32_t s = 0; s < blk.numLocals; ++s) fn->addVar(Var::Kind::Frame, s, blk.params[s].name)->param = true;
+  for (uint32_t s = 0; s < blk.numLocals; ++s) { // the parameters, then an extended codeblock's LOCALs
+    Var *v = fn->addVar(Var::Kind::Frame, s, s < fn->numParams ? blk.params[s].name : "");
+    v->param = s < fn->numParams;
+  }
   for (uint32_t k = 0; k < blk.captures.size(); ++k) fn->addVar(Var::Kind::Capture, k, "");
 
   FnState outer = std::move(cur_);
@@ -204,7 +207,8 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
     if (i + 1 < blk.body.size()) genDiscard(*blk.body[i]);
     else result = genExpr(*blk.body[i]);
   }
-  b.ret(result);
+  if (blk.extended) genBlock(blk.statements); // RETURN gives the result, NIL at the end
+  if (!b.terminated()) b.ret(result);
   cur_ = std::move(outer);
   return fn;
 }

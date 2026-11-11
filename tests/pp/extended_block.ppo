@@ -1,0 +1,13 @@
+QOut( Eval( {| a |
+QOut( "inside", a )
+IF a > 1
+RETURN {||
+RETURN a * 2
+}
+ENDIF
+}, 7 ), "after" )
+b := {| x, y |
+RETURN x + y
+}, c := {||
+QOut( "second" )
+}
