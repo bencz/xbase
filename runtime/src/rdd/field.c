@@ -61,7 +61,7 @@ void xb_field_get(xb_ctx *ctx, xb_item *r, const xb_item *area, const char *alia
                   xb_field_cache *cache) {
   xb_area *a;
   uint32_t field;
-  if (find(ctx, area, alias, name, cache, &a, &field)) a->rdd->get(a, field, r);
+  if (find(ctx, area, alias, name, cache, &a, &field)) xb_area_field_get(ctx, a, field, r);
 }
 
 void xb_field_set(xb_ctx *ctx, const xb_item *area, const char *alias, const char *name, xb_field_cache *cache,
@@ -74,7 +74,7 @@ void xb_field_set(xb_ctx *ctx, const xb_item *area, const char *alias, const cha
 void xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache *cache) {
   xb_area *a = xb_area_current(ctx);
   int64_t k = a ? field_of(a, m->name, cache) : -1;
-  if (k >= 0) a->rdd->get(a, (uint32_t)k, r);
+  if (k >= 0) xb_area_field_get(ctx, a, (uint32_t)k, r);
   else xb_mv_get(ctx, r, m);
 }
 

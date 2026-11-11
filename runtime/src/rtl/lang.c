@@ -2,6 +2,7 @@
 
 char xb_type_letter(const xb_item *it) {
   _Static_assert(sizeof XB_TYPE_LETTERS == XB_T_COUNT_ + 1, "a letter per type tag");
+  if (it->type == XB_T_STRING && it->width == XB_STR_MEMO) return XB_MEMO_LETTER;
   return it->type < XB_T_COUNT_ ? XB_TYPE_LETTERS[it->type] : 'U';
 }
 

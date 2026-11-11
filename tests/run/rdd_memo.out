@@ -1,0 +1,22 @@
+
+files: .T. .T.        512
+struct: NOTE M         10          0         98         15
+blank: [] M M          0
+written:       2053
+         1 a             5 hello
+         2 b           600 xxxxx
+         3 c             1 a
+         4 d             0 
+rewritten: hi       2564
+emptied: []       2564
+types: M M C C U
+packed:          3       1027
+         1 a             5 first
+         2 c             1 a
+         3 d             0 
+reopened: after reopening       1553
+ERR DBFNTX         33       1020 Data type error []          0 .T. .F.
+zapped:          0        512
+ERR DBFNTX         39       1025 Write not allowed []          0 .F. .F.
+ERR DBFNTX         21       1002 Open error [rdd_memo.dbt]          2 .T. .T.
+no dbt: .F.

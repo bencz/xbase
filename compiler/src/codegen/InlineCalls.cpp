@@ -295,11 +295,13 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     storeInt(d, arrayLength(itemPointer(arg(0), "arr")));
     break;
   }
-  case Inline::ValType: { // the shared one-byte string of the tag's letter (XB_TYPE_LETTERS); a reference: the runtime
-    BasicBlock *fast = newBlock("valtype");
+  case Inline::ValType: { // the shared one-byte string of the tag's letter (XB_TYPE_LETTERS); a reference or a memo
+    BasicBlock *fast = newBlock("valtype"); // field's value (XB_STR_MEMO): the runtime
     Value *t = argType(0);
     Value *known = b_.CreateICmpULT(t, ConstantInt::get(i32_, XB_T_COUNT_));
-    branchLikely(b_.CreateAnd(known, b_.CreateNot(holdsRef(arg(0)))), fast, slow);
+    Value *width = b_.CreateTrunc(b_.CreateLShr(loadHeader(arg(0)), headerShift(FWidth)), i16_, "width");
+    Value *memo = b_.CreateAnd(isType(t, XB_T_STRING), b_.CreateICmpEQ(width, ConstantInt::get(i16_, XB_STR_MEMO)));
+    branchLikely(b_.CreateAnd(b_.CreateAnd(known, b_.CreateNot(memo)), b_.CreateNot(holdsRef(arg(0)))), fast, slow);
     b_.SetInsertPoint(fast);
     auto *letters = ConstantDataArray::getString(ctx_, XB_TYPE_LETTERS, false);
     GlobalVariable *table = mod_.getNamedGlobal("xb.type.letters");

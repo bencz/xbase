@@ -29,16 +29,10 @@ static xb_area *used(xb_ctx *ctx, const char *fn) {
 
 /* The alias a table gets by default: its file name without directories and extension. */
 static void default_alias(const xb_str *name, const char **p, size_t *len) {
-  size_t start = 0, end = name->len;
-  for (size_t i = 0; i < name->len; ++i)
-    if (xb_platform_path_separator(name->data[i])) start = i + 1;
-  for (size_t i = end; i-- > start;)
-    if (name->data[i] == '.') {
-      end = i;
-      break;
-    }
+  size_t start, ext;
+  xb_file_name_parts(name->data, name->len, &start, &ext);
   *p = name->data + start;
-  *len = end - start;
+  *len = ext - start;
 }
 
 static const xb_rdd *driver_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv, uint32_t k) {
@@ -217,7 +211,7 @@ static int64_t field_arg(const xb_area *a, uint32_t argc, const xb_item *argv, u
 void xbf_FIELDGET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_area *a = xb_area_current(ctx);
   int64_t f = field_arg(a, argc, argv, 0);
-  if (f >= 0) a->rdd->get(a, (uint32_t)f, ret);
+  if (f >= 0) xb_area_field_get(ctx, a, (uint32_t)f, ret);
 }
 
 /* FieldPut( nField, xValue ): the value written, NIL when nothing was (NIL itself writes nothing). */
@@ -360,6 +354,8 @@ static void shrink(xb_ctx *ctx, const char *fn, int all) {
   if (!a || !xb_area_writable(ctx, a)) return;
   int32_t err = 0;
   if (!(all ? a->rdd->zap(a, &err) : a->rdd->pack(a, &err))) {
+    a->recno = a->rdd->lastrec(a) + 1; /* where the driver is left */
+    a->bof = a->eof = 1;
     xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
     return;
   }

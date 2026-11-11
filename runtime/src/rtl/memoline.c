@@ -226,7 +226,7 @@ void xbf_HARDCR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   const xb_str *s = argv[0].v.s;
   if (!memchr(s->data, SOFT1, s->len)) {
-    *ret = argv[0];
+    xb_set_str(ret, argv[0].v.s); /* a new value, as when it changes something: a memo's is a plain string */
     return;
   }
   xb_str *r = xb_str_alloc(s->len);

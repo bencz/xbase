@@ -1,8 +1,8 @@
 # Databases
 
-The work areas and the database drivers (RDDs, Clipper's replaceable database drivers): tables, memos, indexes,
-locking, and the commands and functions over them. The first step is done: work areas, the driver interface, `DBF`
-tables without memos, the compiler's field references and the commands over them. The rest of this document marked
+The work areas and the database drivers (RDDs, Clipper's replaceable database drivers): tables, memos, indexes, locking,
+and the commands and functions over them. The first two steps are done: work areas, the driver interface, `DBF` tables
+with `DBT` memos, the compiler's field references and the commands over them. The rest of this document marked
 *(planned)* is the plan the work follows.
 
 Goals: Clipper's behavior, and files that Clipper programs and the reference read and write at the same time as xbase
@@ -36,7 +36,7 @@ touching the rest (SQL engines later), each as a library when it needs one.
   `__dbPack` and `__dbZap` are `DBFNTX/1025` `Write not allowed` (generic code `EG_READONLY`), and nothing changes.
 - `field.c`: the field references of compiled code (below) and `__AreaEval( xArea, bBlock )`, which evaluates
   `alias->( expr )`.
-- `dbf.c`: the `DBF` driver ([Files](#files)).
+- `dbf.c`: the `DBF` driver, with its memos in `dbt.c` ([Files](#files)).
 
 Names: `dbUseArea` and `dbCreate` take the table's name with `.dbf` added when it has no extension, and its alias is
 the file name without directories and extension unless one is given. Once the table is open (an `Open error` comes
@@ -52,18 +52,26 @@ which may be retried (`Select()` gives 0).
 
 Errors carry the subsystem of what raised them (`xb_error_of` in [runtime.md](runtime.md#errors-and-pending-requests)):
 `DBCMD` for the functions, the driver's name (`DBFNTX`) for the table. A table that cannot be opened is `DBFNTX/1001`
-`Open error` with the file name and its `FError()` code, which may be retried (the default leaves the area free);
-writing a value of the wrong type to a field is `DBFNTX/1020` `Data type error`, a number too wide for it
-`DBFNTX/1021` `Data width error` (the field gets stars, as the reference writes), both with the value in `args` and a
-default that leaves the field as it is; an assignment of NIL is a wrong type, while `FieldPut( n, NIL )` writes nothing.
-`dbCreate` with a structure that is not one (field names missing or repeated), or one the driver cannot make, is
-`DBCMD/1014`.
+`Open error` with the file name and its `FError()` code (its memo file, `DBFNTX/1002` with the memo file's name), which
+may be retried (the default leaves the area free); writing a value of the wrong type to a field is `DBFNTX/1020` `Data
+type error`, a number too wide for it `DBFNTX/1021` `Data width error` (the field gets stars, as the reference writes),
+both with the value in `args` and a default that leaves the field as it is; an assignment of NIL is a wrong type, while
+`FieldPut( n, NIL )` writes nothing. `dbCreate` with a structure that is not one (field names missing or repeated), or
+one the driver cannot make, is `DBCMD/1014`.
 
-Where xbase does not follow the reference (each checked by `tests/run/rdd_checks.prg`, `rdd_select.prg`,
+Where xbase does not follow the reference (each checked by `tests/run/rdd_checks.prg`, `rdd_select.prg`, `rdd_memo.prg`,
 `rdd_macro.prg` and `rdd_lifetime.prg`):
 
-- `dbCreate` takes only the types the driver writes (`C`, `N`, `D`, `L`) and at least one field; the reference
-  creates a table from an empty structure or one with a type it cannot use.
+- `dbCreate` takes only the types the driver writes (`C`, `N`, `D`, `L`, `M`) and at least one field; the reference
+  creates a table from an empty structure or one with a type it cannot use. A memo field is always 10 bytes, the
+  block number as text (the reference also makes one of 4 bytes, a binary number, when asked).
+- A memo's value stays `M` for `ValType()` in every copy ([runtime.md](runtime.md#values)); the reference makes it `C`
+  when it is stored in a variable, an element or a hash, returned, or taken by `FOR EACH`, and keeps it elsewhere.
+- PACK ends each memo it moves with two `0x1A`, as every memo is written (the reference writes one there), and a value
+  of the wrong type for a memo field names the field, as for the other types (the reference names the `.dbt`).
+- A `.dbt` shorter than its header's 4 bytes is an `Open error` (the reference opens it); one whose header gives a
+  first free block below the end of the file gets new memos after the last one (the reference writes over those
+  there); `DATA.DBT` serves `DATA.DBF` when there is no `DATA.dbt`.
 - `__dbLocate` on an area with no table is `2001`, as every other function; the reference's subcode is `35`.
 - The same table opened twice under its alias is `Alias already in use` (with locks, step 4, a table open
   exclusively will be an `Open error`, as in the reference).
@@ -99,13 +107,14 @@ opened later (each one has a different `generation`) makes it look up again. The
 
 ## Drivers
 
-A driver is a table of operations on the raw table (`xb_rdd` in `rdd.h`): check a structure (the types, lengths and
+A driver is a table of operations on the raw table (`xb_rdd` in `rdd.h`; an open failure names the file that failed,
+the table or a file of its own): check a structure (the types, lengths and
 sizes it can make; `dbCreate` checks the names), create, open, close, the record count, go
 to a record (the blank one after the last outside the table), flush (the record, and on `COMMIT` the header), append,
 read and write a field, the deletion flag, pack, zap, and the header's sizes and date. Operations that fail give the
 `FError()` code of the failure; the work area raises the error. The names `DBF` and `DBFNTX` (the default, as in
-Clipper; `RddSetDefault()` and `USE ... VIA` choose) both give the `DBF` driver, whose name is `DBFNTX` until it has
-indexes.
+Clipper; `RddSetDefault()` and `USE ... VIA` choose) both give the `DBF` driver with `DBT` memos, whose name is
+`DBFNTX` until it has indexes.
 
 *(Planned)*: the order operations and locks in the table; drivers that inherit what they do not change from the
 driver they extend; `DBFNTX` (`DBF`, `DBT` memos and `NTX` indexes), `DBFCDX` (`DBF`, `FPT` memos and `CDX` compound
@@ -127,11 +136,26 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
   `0x1A`. A table whose descriptors cannot be read (an unknown type, a field of no bytes, a date that is not 8 bytes,
   fields past the record's length) is an `Open error` with code 31 (general failure). Field types: Clipper's `C` (up to
   64 KB, a length past 255 with its high byte in the decimals), `N` (read and written as `Val()` and `Str()` do,
-  `xb_num_parse` and `xb_num_to_field`; stars when the number is too wide), `D` (`YYYYMMDD`, blanks for the empty date)
-  and `L` (`T` or `F`; `T`, `t`, `Y`, `y` read as true). The record is written when another becomes current or the table
-  closes, the header (record count, date) on `COMMIT` and at closing when the table changed. *(Planned)*: `M`; then the
-  common extended types (`I`, `B`, `Y`, `T`, `@`, `+`, `V`, `Q`) as the reference reads them.
-- **DBT** (dBASE III memos): 512-byte blocks, each memo ended by two `0x1A` bytes.
+  `xb_num_parse` and `xb_num_to_field`; stars when the number is too wide), `D` (`YYYYMMDD`, blanks for the empty date),
+  `L` (`T` or `F`; `T`, `t`, `Y`, `y` read as true) and `M` (10 bytes: the number of the memo's first block in the
+  `.dbt`, right-aligned; blanks for none). A table with memo fields has version `0x83` and a `.dbt` of the same name.
+  The record is written when another becomes current or the table closes, the header (record count, date) on `COMMIT`
+  and at closing when the table changed. *(Planned)*: the common extended types (`I`, `B`, `Y`, `T`, `@`, `+`, `V`, `Q`)
+  as the reference reads them.
+- **DBT** (`dbt.c`, dBASE III memos): 512-byte blocks; block 0 is the header, the number of the first free block in
+  its first 4 bytes and zeros after; each memo starts a block, its text followed by two `0x1A` (reading stops at the
+  first `0x1A`, so a memo cannot hold one), and the file ends after the last memo (the next one starts at the next
+  block, zeros between). A value is never rewritten in place: writing a memo field writes a new memo after the last
+  (an empty value is none), as the reference does; the first free block is never taken below the end of the file,
+  whatever the header says (the reference then writes over the memos there). PACK gives the records it keeps their
+  memos at the start, in record order, dropping the others, in steps that each leave every record on a whole memo, so
+  that a failure (a full disk) loses nothing: copies of the memos after every older one, the records moved to the
+  front with their copies' blocks, the copies moved to block 1 when they fit before themselves (else they stay), the
+  records renumbered, the older memos cut. ZAP leaves the header only, its first free block 1. The memo file is the
+  table's name with `.dbt` (also beside `DATA.DBF`, as the reference names it); opening finds `DATA.DBT` too when
+  there is no `DATA.dbt`, as tables copied from systems that write names in upper case have it. A table with memo
+  fields and another version byte (dBASE IV, FoxPro: memos of another format) is `DBFNTX/1012` `Corruption
+  detected`.
 - **FPT** (FoxPro memos): the block size in the header, each block with its type and length; big-endian.
 - **NTX**: 1024-byte pages, the key expression, size and decimals, the unique flag and the condition; keys as the
   ordering of their values demands (numbers in a form that sorts as text, dates as `DToS()`).
@@ -181,7 +205,7 @@ query (as data a driver can translate), falling back to the record-by-record way
 1. Done: work areas, the driver interface, `DBF` without memos; the compiler's field references; `USE`, navigation,
    fields, `APPEND BLANK`, `REPLACE`, `DELETE`, `RECALL`, `PACK`, `ZAP`, `dbCreate`, `dbStruct`, `SET DELETED`,
    `LOCATE`, `SET FILTER`, `COUNT`, `SUM`; `dbstruct.ch`.
-2. `DBT` memos.
+2. Done: `DBT` memos.
 3. `NTX` indexes: `INDEX ON`, `SET INDEX`, `SET ORDER`, `SEEK`, `REINDEX`, `SET SOFTSEEK`, `SET UNIQUE`, conditions,
    scopes.
 4. Sharing and locks.

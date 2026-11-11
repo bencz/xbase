@@ -41,6 +41,11 @@ typedef struct xb_item {
   whenever such a variable is read otherwise (`Len()` and `Asc()` read it in place), before the value goes anywhere, so
   a string seen by anything but its variable never changes and a hash key's hash is never the room. Other types are `+`,
   and the variable changes only when `+` gives a value.
+- A string item whose `width` is `XB_STR_MEMO` is a memo field's value ([rdd.md](rdd.md#files)): `ValType()` and
+  `Type()` give `M` for it (`xb_type_letter`), and every copy of the item keeps that (a variable, an element, an
+  argument, a return value, and a function that gives its argument back unchanged, such as `AllTrim()` of a string
+  with no blanks); any string made from it (`+`, `Upper()`, `HardCR()`, ...) is a plain `C` one. Other strings have
+  `width` 0.
 - Arrays (`xb_array` in `xbrt.h`: `len`, `cap`, `items`; `types/array.c`, functions in `rtl/arrays.c`) are 1-based.
   Their items start in the array's own allocation and move to a separate heap object when the array grows past it.
   Compiled code reads `len` and `items` to access elements in place.

@@ -1,0 +1,11 @@
+
+low header: a=alpha/5 b=beta/4 c=gamma/5 new=delta/5
+before pack: a=/0 b=zzzzz/600 c=zzzzz/600
+packed: a=/0 b=zzzzz/600 c=zzzzz/600
+dbt size:       2138
+ERR DBFNTX         21       1002 Open error [rdd_memo_damage.dbt]         31
+short dbt: .F.
+ERR DBFNTX         32       1012 Corruption detected [rdd_memo_damage.dbf]          0
+dbase iv: .F.
+upper case: .T.
+kept: M M C C C

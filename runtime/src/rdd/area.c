@@ -137,10 +137,11 @@ int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, c
   a->readonly = readonly;
   a->generation = ++generations;
   for (uint16_t tries = 1;; ++tries) {
-    int32_t err = 0;
-    if (rdd->open(a, path, readonly, &err)) break;
-    int r = xb_error_of(ctx, rdd->name, EG_OPEN, 1001, "", path, err, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries,
-                        NULL);
+    xb_open_failure why = {0, EG_OPEN, 1001, NULL};
+    if (rdd->open(a, path, readonly, &why)) break;
+    int r = xb_error_of(ctx, rdd->name, why.gencode, why.subcode, "", why.file ? why.file : path, why.oscode,
+                        XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries, NULL);
+    free(why.file);
     if (r != 2) {
       free(a);
       return 0;
@@ -306,10 +307,23 @@ int64_t xb_area_field_index(const xb_area *a, const char *name, size_t len) {
   return -1;
 }
 
+int xb_area_field_get(xb_ctx *ctx, xb_area *a, uint32_t field, xb_item *r) {
+  int32_t err = 0;
+  if (a->rdd->get(a, field, r, &err)) return 1;
+  xb_set_nil(r);
+  xb_area_error(ctx, a, EG_READ, 1010, "", err);
+  return 0;
+}
+
 int xb_area_field_put(xb_ctx *ctx, xb_area *a, uint32_t field, const xb_item *v) {
   if (!xb_area_writable(ctx, a)) return 0;
-  int r = a->rdd->put(a, field, v);
+  int32_t err = 0;
+  int r = a->rdd->put(a, field, v, &err);
   if (r == XB_PUT_OK) return 1;
+  if (r == XB_PUT_FAILED) {
+    xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
+    return 0;
+  }
   int32_t subcode = r == XB_PUT_TYPE ? 1020 : 1021;
   return xb_error_of(ctx, a->rdd->name, r == XB_PUT_TYPE ? EG_DATATYPE : EG_DATAWIDTH, subcode, a->fields[field].name,
                      NULL, 0, XB_ERR_DEFAULT, 1, v, 0, NULL) == 1;

@@ -1,5 +1,5 @@
 // What xbase checks where the reference does not (docs/rdd.md): dbCreate of a structure with a type the driver does
-// not write or with no fields (DBCMD/1014, nothing created), the same table opened twice under its alias ("Alias
+// not write (Q) or with no fields (DBCMD/1014, nothing created), the same table opened twice under its alias ("Alias
 // already in use", as for another table under an alias in use), and __dbLocate with no table ("Workarea not in use",
 // 2001 as for every other function). The tables start with "rdd_checks", deleted at the end.
 PROCEDURE Main()

@@ -12,7 +12,7 @@
 
 typedef struct xb_field_info {
   char name[XB_FIELD_NAME_SIZE]; /* upper case */
-  char type;                     /* C N D L */
+  char type;                     /* C N D L M */
   uint32_t len;                  /* bytes in the record */
   uint32_t dec;
   uint32_t offset;               /* from the start of the record, past the deletion flag */
@@ -20,8 +20,19 @@ typedef struct xb_field_info {
 
 typedef struct xb_area xb_area;
 
-/* Field writes: done, a value of the wrong type (nothing written), a number too wide (stars written). */
-enum { XB_PUT_OK, XB_PUT_TYPE, XB_PUT_WIDTH };
+/* Field writes: done, a value of the wrong type (nothing written), a number too wide (stars written), a file that
+ * could not be written (a memo; the error's code given). */
+enum { XB_PUT_OK, XB_PUT_TYPE, XB_PUT_WIDTH, XB_PUT_FAILED };
+
+/* Why a table could not be opened: the FError() code, and the file that failed with the generic code and subcode of
+ * its error (an Open error, or Corruption detected for a file the driver cannot read; `file` NULL: the table itself,
+ * 1001; else a file of the table's, malloc'ed, as its memo file, 1002). */
+typedef struct xb_open_failure {
+  int32_t oscode;
+  int32_t gencode;
+  int32_t subcode;
+  char *file;
+} xb_open_failure;
 
 /* A driver. The operations work on the raw table; those that fail give the FError() code of the failure. */
 typedef struct xb_rdd {
@@ -32,7 +43,7 @@ typedef struct xb_rdd {
   /* Creates the table (`count` fields, checked), overwriting a file of the name. */
   int (*create)(const char *path, const xb_field_info *fields, uint32_t count, int32_t *err);
   /* Opens the table into `a` (its state, fields and field count). */
-  int (*open)(xb_area *a, const char *path, int readonly, int32_t *err);
+  int (*open)(xb_area *a, const char *path, int readonly, xb_open_failure *why);
   /* Writes what is pending and frees the state. */
   int (*close)(xb_area *a, int32_t *err);
   uint32_t (*lastrec)(xb_area *a);
@@ -42,8 +53,8 @@ typedef struct xb_rdd {
   int (*flush)(xb_area *a, int header, int32_t *err);
   /* Adds a blank record after the last and makes it current. */
   int (*append)(xb_area *a, int32_t *err);
-  void (*get)(xb_area *a, uint32_t field, xb_item *r);
-  int (*put)(xb_area *a, uint32_t field, const xb_item *v);
+  int (*get)(xb_area *a, uint32_t field, xb_item *r, int32_t *err);
+  int (*put)(xb_area *a, uint32_t field, const xb_item *v, int32_t *err);
   int (*deleted)(xb_area *a);
   void (*set_deleted)(xb_area *a, int deleted);
   /* Removes the deleted records; removes every record. */
@@ -113,7 +124,9 @@ int xb_area_skip(xb_ctx *ctx, xb_area *a, int64_t n);
  * area (pinned by the caller). */
 int xb_area_visible(xb_ctx *ctx, xb_area *a);
 
-/* Writing a field, with the errors raised (READONLY, a wrong type, a number too wide). */
+/* Reading a field (a memo that cannot be read: DBFNTX/1010, NIL); writing one, with the errors raised (READONLY, a
+ * wrong type, a number too wide, a memo that cannot be written). */
+int xb_area_field_get(xb_ctx *ctx, xb_area *a, uint32_t field, xb_item *r);
 int xb_area_field_put(xb_ctx *ctx, xb_area *a, uint32_t field, const xb_item *v);
 /* The 0-based position of a field (any letter case), or -1. */
 int64_t xb_area_field_index(const xb_area *a, const char *name, size_t len);

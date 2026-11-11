@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 35u
+#define XB_ABI_VERSION 36u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -52,6 +52,10 @@ typedef enum xb_type {
 /* ValType() of each tag, by tag (a cell or a reference, which ValType never
  * sees, as NIL). */
 #define XB_TYPE_LETTERS "ULNNCABUUOHD"
+/* [ABI] The `width` of a string item that is a memo field's value: ValType()
+ * "M". Every copy of the item keeps it; a string made from it is plain. */
+#define XB_STR_MEMO 1u
+#define XB_MEMO_LETTER 'M'
 
 /* [ABI] The tags whose v.p is a heap object form one range, so that one
  * unsigned comparison tells whether storing an item can make an old object
@@ -85,7 +89,8 @@ struct xb_str {
  * managed by a tracing GC, so there is no reference counting. */
 typedef struct xb_item {
   uint32_t type;      /* xb_type                                    */
-  uint16_t width;     /* numeric display width (0 = default)        */
+  uint16_t width;     /* numeric display width (0 = default); a
+                         string's XB_STR_MEMO                       */
   uint16_t dec;       /* numeric decimals                           */
   union {
     int32_t  l;       /* XB_T_LOGICAL                               */
