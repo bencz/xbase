@@ -226,6 +226,8 @@ int64_t xb_date_encode(int year, int month, int day);   /* 0 if invalid */
 void    xb_date_decode(int64_t jd, int *year, int *month, int *day);
 void    xb_set_date(xb_item *it, int64_t jd);
 void    xb_date_to_digits(int64_t jd, char out[XB_DATE_DIGITS_SIZE]);
+/* The date of eight characters YYYYMMDD; the empty date for anything else (a blank, a date that is not one). */
+int64_t xb_date_from_digits(const char *digits);
 size_t  xb_date_format(int64_t jd, const char *fmt, char out[XB_DATE_TEXT_SIZE]);
 /* The same for the eight characters of `digits` as YYYYMMDD (Transform()
  * formats "99999999" this way for a picture's template). */

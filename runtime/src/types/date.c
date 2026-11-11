@@ -39,6 +39,15 @@ void xb_date_decode(int64_t jd, int *year, int *month, int *day) {
 
 void xb_set_date(xb_item *it, int64_t jd) { xb_put(it, xb_header_word(XB_T_DATE, 0, 0), (uint64_t)jd); }
 
+int64_t xb_date_from_digits(const char *s) {
+  int v[XB_DATE_DIGITS_SIZE - 1];
+  for (int i = 0; i < XB_DATE_DIGITS_SIZE - 1; ++i) {
+    if (s[i] < '0' || s[i] > '9') return 0;
+    v[i] = s[i] - '0';
+  }
+  return xb_date_encode(v[0] * 1000 + v[1] * 100 + v[2] * 10 + v[3], v[4] * 10 + v[5], v[6] * 10 + v[7]);
+}
+
 /* "YYYYMMDD" with the last four digits of the year: spaces for the empty
  * date and negative day numbers, zeros for other day numbers outside the
  * calendar. */

@@ -21,6 +21,15 @@ typedef struct xb_field_info {
 typedef struct xb_area xb_area;
 typedef struct xb_order xb_order;
 
+/* ordCondSet()'s settings for the next order made in an area: the condition (block and text), WHILE, the EVAL block
+ * and its interval (roots), the record to start at, NEXT, RECORD (0: none), REST, DESCENDING, ADDITIVE and
+ * USECURRENT. */
+typedef struct xb_order_conditions {
+  xb_item cond, condText, whileBlock, evalBlock;
+  int64_t every, start, next, record;
+  int rest, descend, additive, current;
+} xb_order_conditions;
+
 /* Field writes: done, a value of the wrong type (nothing written), a number too wide (stars written), a file that
  * could not be written (a memo; the error's code given). */
 enum { XB_PUT_OK, XB_PUT_TYPE, XB_PUT_WIDTH, XB_PUT_FAILED };
@@ -91,9 +100,7 @@ struct xb_area {
   uint32_t norders, order;  /* order: the controlling one, from 1; 0 for the record order */
   int hot;                  /* the current record changes: the orders keep its keys from before (xb_area_hot) */
   uint32_t hotRecno;
-  xb_item pendingCond;      /* ordCondSet(): the FOR block and its text (roots), for the next order made */
-  xb_item pendingCondText;
-  int pendingDescend, pendingAdditive;
+  xb_order_conditions pending; /* ordCondSet()'s, for the next order made */
   uint32_t keying;          /* key or condition blocks running: the orders may not change meanwhile */
 };
 
@@ -150,6 +157,15 @@ int xb_area_goto(xb_ctx *ctx, xb_area *a, uint32_t recno);
 int xb_area_top(xb_ctx *ctx, xb_area *a);
 int xb_area_bottom(xb_ctx *ctx, xb_area *a);
 int xb_area_skip(xb_ctx *ctx, xb_area *a, int64_t n);
+/* Goes to record `recno` (0: the blank record after the last), then to the first that shows from it going `dir` (1
+ * forward, -1 back: BOF on the first record when none before it shows). 0 after an error (raised). */
+int xb_area_arrive(xb_ctx *ctx, xb_area *a, uint32_t recno, int dir);
+/* Raw navigation in the controlling order (the record order without one; the scope applies), all records showing:
+ * to its first (`dir` 1) or last (-1) record, or one step (none from a record the order has no entry for). 1 on a
+ * record, 0 when there is none (the blank record after the last), -1 after an error (raised); the caller pins the
+ * area. */
+int xb_area_edge_raw(xb_ctx *ctx, xb_area *a, int dir);
+int xb_area_step_raw(xb_ctx *ctx, xb_area *a, int dir);
 /* Whether the current record shows (SET DELETED, the filter); -1 after an error in the filter, or when it closed the
  * area (pinned by the caller). */
 int xb_area_visible(xb_ctx *ctx, xb_area *a);
@@ -180,6 +196,9 @@ const xb_str *xb_db_str_arg(uint32_t argc, const xb_item *argv, uint32_t k);
 int64_t xb_db_num_arg(uint32_t argc, const xb_item *argv, uint32_t k, int64_t dflt);
 int xb_db_logical_arg(uint32_t argc, const xb_item *argv, uint32_t k);
 xb_area *xb_db_used(xb_ctx *ctx, const char *fn);
+
+/* No conditions: every record, ascending, the other orders closed. */
+void xb_order_conditions_clear(xb_order_conditions *c);
 
 /* Marks the work areas' items for the collector. */
 void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *));

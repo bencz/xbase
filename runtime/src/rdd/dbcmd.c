@@ -374,7 +374,7 @@ static void shrink(xb_ctx *ctx, const char *fn, int all) {
     return;
   }
   xb_area_pin(a);
-  xb_area_orders_rebuild(ctx, a);
+  xb_area_orders_rebuild(ctx, a, NULL, 0);
   if (!a->closed) xb_area_top(ctx, a);
   xb_area_unpin(a);
 }

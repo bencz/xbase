@@ -260,60 +260,121 @@ static int write_sorted(const char *path, const xb_ntx_info *info, collected *c,
   return ok;
 }
 
-/* Collects the key of every record (in record order; every record, deleted or filtered or not) that meets the
- * order's condition; the key's type and length come from the first record's (the blank record's when there is
- * none) when `o->type` is 0. 0 after an error (raised), or when the area closed. */
-static int collect(xb_ctx *ctx, xb_area *a, xb_order *o, collected *c) {
-  uint32_t last = a->rdd->lastrec(a);
+/* The key's type and length from the current record's key (the blank record's when there is none), and whether it
+ * is a character field's bytes. 0 after an error (raised). */
+static int key_shape(xb_ctx *ctx, xb_area *a, xb_order *o) {
+  xb_item v;
+  xb_set_nil(&v);
+  xb_gc_root_push(ctx, &v);
+  int ok = eval_in(ctx, a, &o->key, &v) && !a->closed;
+  o->type = ok ? type_of(&v) : 0;
+  if (ok && !o->type) key_type_error(ctx, a);
+  if (o->type == 'C') o->info.keyLen = v.v.s->len < XB_NTX_KEY_MAX ? (uint32_t)v.v.s->len : XB_NTX_KEY_MAX;
+  if (o->type == 'N') {
+    int width = v.width ? v.width : v.type == XB_T_INT ? xb_num_int_width(v.v.i) : xb_num_dbl_width(v.v.d);
+    o->info.keyDec = v.dec;
+    o->info.keyLen = (uint32_t)width + (v.dec ? v.dec + 1u : 0u);
+  }
+  if (o->type == 'D') o->info.keyLen = 8;
+  if (o->type == 'L') o->info.keyLen = 1;
+  xb_gc_root_pop(ctx, 1);
+  if (!o->type) return 0;
+  if (o->info.keyLen == 0 || o->info.keyLen > XB_NTX_KEY_MAX) {
+    xb_error_of(ctx, a->rdd->name, EG_DATAWIDTH, 1021, "", o->bag, 0, 0, 0, NULL, 0, NULL);
+    return 0;
+  }
+  o->field = key_field(a, o->info.key, o->info.keyLen);
+  return 1;
+}
+
+/* Adds the current record's entry when it has one; 0 after an error (raised). */
+static int collect_record(xb_ctx *ctx, xb_area *a, xb_order *o, collected *c) {
   unsigned char key[XB_NTX_KEY_MAX];
-  for (uint32_t r = last ? 1 : 0; r <= last; ++r) {
-    if (!xb_area_goto(ctx, a, r) || a->closed) return 0;
-    if (!o->type) { /* the first record: the key's type and length */
-      xb_item v;
-      xb_set_nil(&v);
-      xb_gc_root_push(ctx, &v);
-      int ok = eval_in(ctx, a, &o->key, &v) && !a->closed;
-      o->type = ok ? type_of(&v) : 0;
-      if (ok && !o->type) key_type_error(ctx, a);
-      if (o->type == 'C') o->info.keyLen = v.v.s->len < XB_NTX_KEY_MAX ? (uint32_t)v.v.s->len : XB_NTX_KEY_MAX;
-      if (o->type == 'N') {
-        int width = v.width ? v.width : v.type == XB_T_INT ? xb_num_int_width(v.v.i) : xb_num_dbl_width(v.v.d);
-        o->info.keyDec = v.dec;
-        o->info.keyLen = (uint32_t)width + (v.dec ? v.dec + 1u : 0u);
-      }
-      if (o->type == 'D') o->info.keyLen = 8;
-      if (o->type == 'L') o->info.keyLen = 1;
-      xb_gc_root_pop(ctx, 1);
-      if (!o->type) return 0;
-      if (o->info.keyLen == 0 || o->info.keyLen > XB_NTX_KEY_MAX) {
-        xb_error_of(ctx, a->rdd->name, EG_DATAWIDTH, 1021, "", o->bag, 0, 0, 0, NULL, 0, NULL);
-        return 0;
-      }
-      o->field = key_field(a, o->info.key, o->info.keyLen);
+  int in;
+  if (!record_key(ctx, a, o, key, &in)) return 0;
+  if (!in) return 1;
+  if (!c->keys || c->n == c->cap) { /* room for lastrec entries at first, more when the blocks append records */
+    uint32_t cap = c->cap;
+    if (c->keys || !cap) cap = cap < 1024 ? 1024 : cap <= UINT32_MAX / 2 ? cap * 2 : UINT32_MAX;
+    if (c->n == cap || (uint64_t)cap * (2u * o->info.keyLen + sizeof(uint32_t) * 2 + sizeof(sorting)) > SIZE_MAX)
+      xb_gc_fatal("out of memory"); /* the keys, sorted and not, and their records: more than an address reaches */
+    unsigned char *keys = realloc(c->keys, (size_t)cap * o->info.keyLen);
+    if (keys) c->keys = keys;
+    uint32_t *recnos = realloc(c->recnos, (size_t)cap * sizeof *c->recnos);
+    if (recnos) c->recnos = recnos;
+    if (!keys || !recnos) xb_gc_fatal("out of memory");
+    c->cap = cap;
+  }
+  memcpy(c->keys + (size_t)c->n * o->info.keyLen, key, o->info.keyLen);
+  c->recnos[c->n++] = a->recno;
+  return 1;
+}
+
+/* Whether a WHILE or EVAL block lets the build go on: a logical true. -1 after an error (raised). */
+static int block_true(xb_ctx *ctx, xb_area *a, const xb_item *block) {
+  xb_item r;
+  xb_set_nil(&r);
+  xb_gc_root_push(ctx, &r);
+  int ok = eval_in(ctx, a, block, &r) && !a->closed;
+  xb_gc_root_pop(ctx, 1);
+  return ok ? r.type == XB_T_LOGICAL && r.v.l : -1;
+}
+
+/* A record number from a number argument: 0 (no record) outside 1 .. 2^32-1. */
+static uint32_t recno_of(int64_t n) { return n > 0 && n <= UINT32_MAX ? (uint32_t)n : 0; }
+
+/* The records of a new order, as ordCondSet() asked (xb_order_conditions): RECORD the one record; NEXT, REST and
+ * WHILE from the start record (the current one by default); USECURRENT from the controlling order's first record in
+ * its scope; else every record in the record order. Those that start somewhere walk the controlling order (the
+ * record order without one). The walk is raw: the filter and SET DELETED do not apply. WHILE ends it at a record it
+ * rejects; the EVAL block runs after the first record and then after every `every` more (not after NEXT's last one),
+ * and ends the build, keeping what it has, when it returns anything but true. Records the blocks append are not
+ * taken; in record order, the blocks moving the record do not change which records are taken. 0 after an error
+ * (raised). */
+static int collect(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond, collected *c) {
+  uint32_t last = c->cap = a->rdd->lastrec(a);
+  int hasWhile = cond->whileBlock.type == XB_T_BLOCK;
+  int walk = cond->record > 0 || cond->next > 0 || cond->rest || hasWhile || cond->current;
+  int64_t next = cond->record > 0 ? 1 : cond->next > 0 ? cond->next : 0;
+  int ok;
+  if (cond->record > 0) ok = xb_area_goto(ctx, a, recno_of(cond->record));
+  else if (cond->next > 0 || cond->rest || hasWhile)
+    ok = cond->start <= 0 || xb_area_goto(ctx, a, recno_of(cond->start));
+  else if (cond->current) ok = xb_area_edge_raw(ctx, a, 1) >= 0;
+  else ok = xb_area_goto(ctx, a, 1); /* the blank record when there is none: it gives the key's type */
+  if (!ok || a->closed || (!o->type && !key_shape(ctx, a, o))) return 0; /* a rebuild keeps the file's shape */
+  uint32_t taken = 1; /* in record order, the records go on from the last taken, wherever the blocks move */
+  for (int64_t step = cond->every; !a->eof;) {
+    if (a->recno > last) { /* appended by the blocks while the build ran: not taken */
+      if (!walk) break;
+      if (xb_area_step_raw(ctx, a, 1) < 0 || a->closed) return 0;
+      continue;
     }
-    if (r == 0) break; /* no record: the blank one gave the type */
-    if (!c->keys) {
-      if ((uint64_t)last * (2u * o->info.keyLen + sizeof(uint32_t) * 2 + sizeof(sorting)) > SIZE_MAX)
-        xb_gc_fatal("out of memory"); /* the keys, sorted and not, and their records: more than an address reaches */
-      c->cap = last;
-      c->keys = malloc((size_t)c->cap * o->info.keyLen);
-      c->recnos = malloc((size_t)c->cap * sizeof *c->recnos);
-      if (!c->keys || !c->recnos) xb_gc_fatal("out of memory");
+    if (hasWhile) {
+      int go = block_true(ctx, a, &cond->whileBlock);
+      if (go <= 0) return go == 0;
     }
-    int in;
-    if (!record_key(ctx, a, o, key, &in)) return 0;
-    if (!in) continue;
-    memcpy(c->keys + (size_t)c->n * o->info.keyLen, key, o->info.keyLen);
-    c->recnos[c->n++] = r;
+    if (!collect_record(ctx, a, o, c)) return 0;
+    if (next > 0 && --next == 0) break;
+    if (cond->evalBlock.type == XB_T_BLOCK) {
+      if (step >= cond->every) {
+        step = 0;
+        int go = block_true(ctx, a, &cond->evalBlock);
+        if (go <= 0) return go == 0;
+      }
+      ++step;
+    }
+    ok = walk ? xb_area_step_raw(ctx, a, 1) >= 0 : xb_area_goto(ctx, a, ++taken);
+    if (!ok || a->closed) return 0;
   }
   return 1;
 }
 
-/* Builds the order's file from the records; the order is opened after. */
-static int build(xb_ctx *ctx, xb_area *a, xb_order *o) {
+/* Builds the order's file from the records `cond` selects (collect()). */
+static int build(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond) {
   collected c = {NULL, NULL, 0, 0};
   xb_area_pin(a);
-  int ok = collect(ctx, a, o, &c) && !a->closed;
+  int ok = collect(ctx, a, o, cond, &c) && !a->closed;
   int32_t err = 0;
   if (ok && !write_sorted(o->bag, &o->info, &c, &err)) {
     xb_error_of(ctx, a->rdd->name, EG_CREATE, 1004, "", o->bag, err, 0, 0, NULL, 0, NULL);
@@ -345,10 +406,10 @@ xb_order *xb_order_create(xb_ctx *ctx, xb_area *a, const char *path, const xb_st
   size_t n = keyText->len < XB_NTX_KEY_MAX ? keyText->len : XB_NTX_KEY_MAX;
   memcpy(o->info.key, keyText->data, n);
   o->info.unique = unique;
-  o->info.descend = a->pendingDescend;
-  if (a->pendingCond.type == XB_T_BLOCK) {
-    o->cond = a->pendingCond;
-    const xb_str *t = a->pendingCondText.type == XB_T_STRING ? a->pendingCondText.v.s : NULL;
+  o->info.descend = a->pending.descend;
+  if (a->pending.cond.type == XB_T_BLOCK) {
+    o->cond = a->pending.cond;
+    const xb_str *t = a->pending.condText.type == XB_T_STRING ? a->pending.condText.v.s : NULL;
     size_t m = t ? (t->len < XB_NTX_KEY_MAX ? t->len : XB_NTX_KEY_MAX) : 0;
     if (t) memcpy(o->info.cond, t->data, m);
   }
@@ -356,7 +417,7 @@ xb_order *xb_order_create(xb_ctx *ctx, xb_area *a, const char *path, const xb_st
   else block_of(ctx, o->info.key, &o->key);
   xb_gc_root_push(ctx, &o->key);
   xb_gc_root_push(ctx, &o->cond);
-  int ok = o->key.type == XB_T_BLOCK && build(ctx, a, o) && open_file(ctx, a, o);
+  int ok = o->key.type == XB_T_BLOCK && build(ctx, a, o, &a->pending) && open_file(ctx, a, o);
   xb_gc_root_pop(ctx, 2);
   if (!ok) {
     if (o->ntx) {
@@ -398,33 +459,49 @@ xb_order *xb_order_open(xb_ctx *ctx, xb_area *a, const char *path) {
 }
 
 /* Builds an order's file again from the records; 0 (the order with no file) after the error. */
-static int rebuild(xb_ctx *ctx, xb_area *a, xb_order *o) {
+static int rebuild(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond) {
   int32_t err = 0;
   int ok = xb_ntx_close(o->ntx, &err);
   o->ntx = NULL;
   if (!ok) order_error(ctx, a, o, EG_WRITE, 1011, err);
-  return ok && build(ctx, a, o) && open_file(ctx, a, o);
+  return ok && build(ctx, a, o, cond) && open_file(ctx, a, o);
 }
 
-int xb_area_orders_rebuild(xb_ctx *ctx, xb_area *a) {
+int xb_area_orders_rebuild(xb_ctx *ctx, xb_area *a, const xb_item *evalBlock, int64_t every) {
+  xb_order_conditions cond;
+  xb_order_conditions_clear(&cond);
+  if (evalBlock) cond.evalBlock = *evalBlock;
+  cond.every = every;
+  xb_gc_root_push(ctx, &cond.evalBlock);
   xb_area_pin(a);
   int ok = 1;
-  for (uint32_t k = 0; k < a->norders && !a->closed;) {
+  for (uint32_t k = 0; k < a->norders && !a->closed; ++k) {
+    /* While its file is made again the order is out of the area's list (blocks that run meanwhile see it closed),
+     * its items rooted here. */
     xb_order *o = a->orders[k];
-    if (rebuild(ctx, a, o) || a->closed) {
-      ++k;
-      continue;
-    }
-    ok = 0; /* an order whose file could not be made again is closed; the ones after it stay as they were */
+    uint32_t focus = a->order;
     memmove(&a->orders[k], &a->orders[k + 1], (a->norders - k - 1) * sizeof *a->orders);
     --a->norders;
-    if (a->order == k + 1) a->order = 0;
-    else if (a->order > k + 1) --a->order;
-    xb_order_close(ctx, a, o);
-    break;
+    a->order = focus == k + 1 ? 0 : focus > k + 1 ? focus - 1 : focus;
+    xb_gc_root_push(ctx, &o->key);
+    xb_gc_root_push(ctx, &o->cond);
+    xb_gc_root_push(ctx, &o->scope[0].value);
+    xb_gc_root_push(ctx, &o->scope[1].value);
+    int built = rebuild(ctx, a, o, &cond);
+    xb_gc_root_pop(ctx, 4);
+    if (!built || a->closed) { /* not made again: closed; the ones after it stay as they were */
+      ok = built;
+      xb_order_close(ctx, a, o);
+      break;
+    }
+    memmove(&a->orders[k + 1], &a->orders[k], (a->norders - k) * sizeof *a->orders);
+    a->orders[k] = o;
+    ++a->norders;
+    a->order = focus;
   }
   ok = ok && !a->closed;
   xb_area_unpin(a);
+  xb_gc_root_pop(ctx, 1);
   return ok;
 }
 
@@ -450,34 +527,117 @@ static int sync(xb_ctx *ctx, xb_area *a, xb_order *o, uint32_t *found) {
   return r;
 }
 
-int xb_order_edge(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno) {
+/* Where the entry the cursor is on stands against the order's scope: -1 before its top, 1 after its bottom, 0 in it.
+ * A bound compares as many bytes as it has, in the order's order. */
+static int scope_place(xb_order *o) {
+  const unsigned char *k = xb_ntx_key(o->ntx);
+  if (!k) return 0;
+  if (o->scope[0].set && xb_ntx_compare(&o->info, k, o->scope[0].key, o->scope[0].used) < 0) return -1;
+  if (o->scope[1].set && xb_ntx_compare(&o->info, k, o->scope[1].key, o->scope[1].used) > 0) return 1;
+  return 0;
+}
+
+/* A bound's key from a value (a codeblock's: from what it returns); a value of another type than the key's leaves
+ * the bound off. 0 after an error in the block (raised). */
+static int scope_key(xb_ctx *ctx, xb_area *a, xb_order *o, xb_order_scope *sc) {
+  xb_item r = sc->value;
+  xb_gc_root_push(ctx, &r);
+  int ok = r.type != XB_T_BLOCK || (eval_in(ctx, a, &sc->value, &r) && !a->closed);
+  if (ok) sc->set = r.type != XB_T_NIL && xb_order_value_key(o, &r, sc->key, &sc->used); /* else `o` may be gone */
+  xb_gc_root_pop(ctx, 1);
+  return ok;
+}
+
+int xb_order_set_scope(xb_ctx *ctx, xb_area *a, xb_order *o, int bound, const xb_item *v) {
+  xb_order_scope *sc = &o->scope[bound];
+  xb_item before = sc->value;
+  xb_gc_root_push(ctx, &before);
+  sc->value = *v;
+  int ok = scope_key(ctx, a, o, sc);
+  xb_gc_root_pop(ctx, 1);
+  if (!ok) {
+    if (!a->closed) sc->value = before; /* the block failed: the bound stays as it was */
+    return 0;
+  }
+  if (!sc->set && v->type != XB_T_BLOCK) xb_set_nil(&sc->value); /* not a value of the key's type: no bound */
+  return 1;
+}
+
+/* Bounds given as codeblocks are evaluated again before each navigation. 0 after an error (raised). */
+static int refresh_scope(xb_ctx *ctx, xb_area *a, xb_order *o) {
+  for (int k = 0; k < 2; ++k)
+    if (o->scope[k].value.type == XB_T_BLOCK && !scope_key(ctx, a, o, &o->scope[k])) return 0;
+  return 1;
+}
+
+/* A bound for the NTX searches from a scope bound: before its first match (`past`: after its last). */
+static const xb_ntx_bound *scope_bound(const xb_order_scope *sc, int past, xb_ntx_bound *b) {
+  if (!sc->set) return NULL;
+  b->key = sc->key;
+  b->len = sc->used;
+  b->recno = 0;
+  b->whole = 0;
+  b->past = past;
+  return b;
+}
+
+/* xb_order_edge with the bounds as they are. */
+static int edge(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno) {
   int32_t err = 0;
-  int r = dir > 0 ? xb_ntx_first(o->ntx, recno, &err) : xb_ntx_last(o->ntx, recno, &err);
+  const xb_order_scope *sc = &o->scope[dir > 0 ? 0 : 1];
+  int r = sc->set ? xb_ntx_seek(o->ntx, sc->key, sc->used, dir < 0, recno, &err)
+          : dir > 0 ? xb_ntx_first(o->ntx, recno, &err)
+                    : xb_ntx_last(o->ntx, recno, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
-  return r;
+  return r > 0 && scope_place(o) ? 0 : r;
+}
+
+int xb_order_edge(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno) {
+  return refresh_scope(ctx, a, o) ? edge(ctx, a, o, dir, recno) : -1;
+}
+
+/* A step that came to an entry outside the scope: from before it, its first (last) entry; past it, none. */
+static int in_scope(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno) {
+  int place = scope_place(o);
+  if (!place) return 1;
+  return place == -dir ? edge(ctx, a, o, dir, recno) : 0;
 }
 
 int xb_order_step(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno) {
+  if (!refresh_scope(ctx, a, o)) return -1;
   int32_t err = 0;
-  if (a->eof) return dir < 0 ? xb_order_edge(ctx, a, o, -1, recno) : 0;
+  if (a->eof) return dir < 0 ? edge(ctx, a, o, -1, recno) : 0;
   uint32_t found;
   int r = sync(ctx, a, o, &found);
   if (r < 0) return -1;
-  if (r == 0) return dir < 0 ? xb_order_edge(ctx, a, o, -1, recno) : 0; /* after every entry */
+  if (r == 0) return dir < 0 ? edge(ctx, a, o, -1, recno) : 0; /* after every entry */
   if (found != a->recno && dir > 0) { /* the record has no entry: the cursor is on the one after it */
     *recno = found;
-    return 1;
+    return in_scope(ctx, a, o, dir, recno);
   }
   r = dir > 0 ? xb_ntx_next(o->ntx, recno, &err) : xb_ntx_prev(o->ntx, recno, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
-  return r;
+  return r > 0 ? in_scope(ctx, a, o, dir, recno) : r;
+}
+
+int xb_order_step_raw(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno) {
+  if (!a->eof && !xb_ntx_at(o->ntx, a->recno)) {
+    uint32_t found;
+    int r = sync(ctx, a, o, &found);
+    if (r <= 0 || found != a->recno) return r < 0 ? -1 : 0;
+  }
+  return xb_order_step(ctx, a, o, dir, recno);
 }
 
 int xb_order_seek(xb_ctx *ctx, xb_area *a, xb_order *o, const unsigned char *key, size_t used, int last,
                   uint32_t *recno, int *match) {
+  *match = 0;
+  if (!refresh_scope(ctx, a, o)) return -1;
   int32_t err = 0;
   int r = xb_ntx_seek(o->ntx, key, used, last, recno, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
+  int place = r > 0 ? scope_place(o) : 0;
+  if (place) return place < 0 ? edge(ctx, a, o, 1, recno) : 0; /* before the scope: its first entry; past it: none */
   *match = r > 0 && xb_order_cursor_matches(o, key, used);
   return r;
 }
@@ -490,6 +650,112 @@ int xb_order_cursor_matches(xb_order *o, const unsigned char *key, size_t used) 
 void xb_order_mark(xb_order *o, int (*mark)(const xb_item *)) {
   mark(&o->key);
   mark(&o->cond);
+  mark(&o->scope[0].value);
+  mark(&o->scope[1].value);
+}
+
+int xb_order_count(xb_ctx *ctx, xb_area *a, xb_order *o, uint64_t *n) {
+  *n = 0;
+  if (!refresh_scope(ctx, a, o)) return 0;
+  xb_ntx_bound top, bottom;
+  int32_t err = 0;
+  if (xb_ntx_count(o->ntx, scope_bound(&o->scope[0], 0, &top), scope_bound(&o->scope[1], 1, &bottom), n, &err))
+    return 1;
+  order_error(ctx, a, o, EG_READ, 1010, err);
+  return 0;
+}
+
+int xb_order_position(xb_ctx *ctx, xb_area *a, xb_order *o, uint64_t *n) {
+  *n = 0;
+  if (a->eof) return 1;
+  if (!refresh_scope(ctx, a, o)) return 0;
+  uint32_t found;
+  int r = sync(ctx, a, o, &found);
+  if (r <= 0 || found != a->recno || scope_place(o)) return r >= 0; /* no entry, or outside the scope */
+  xb_ntx_bound top;
+  int32_t err = 0;
+  if (!xb_ntx_count_before(o->ntx, scope_bound(&o->scope[0], 0, &top), n, &err)) {
+    order_error(ctx, a, o, EG_READ, 1010, err);
+    return 0;
+  }
+  ++*n; /* the entries before it, and it */
+  return 1;
+}
+
+int xb_order_nth(xb_ctx *ctx, xb_area *a, xb_order *o, uint64_t n, uint32_t *recno) {
+  *recno = 0;
+  if (!n) return 1;
+  if (!refresh_scope(ctx, a, o)) return 0;
+  xb_ntx_bound top;
+  int32_t err = 0;
+  int r = xb_ntx_select(o->ntx, scope_bound(&o->scope[0], 0, &top), n - 1, recno, &err);
+  if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
+  if (r <= 0 || scope_place(o)) *recno = 0; /* past the scope's bottom */
+  return r >= 0;
+}
+
+int xb_order_skip_unique(xb_ctx *ctx, xb_area *a, xb_order *o, int dir) {
+  if (!refresh_scope(ctx, a, o)) return 0;
+  int32_t err = 0;
+  uint32_t recno = 0, found = 0;
+  int r = a->eof ? 0 : sync(ctx, a, o, &found), out = 0;
+  if (r < 0) return 0;
+  if (r > 0 && found == a->recno) { /* on the record's entry: past the entries of its key */
+    unsigned char key[XB_NTX_KEY_MAX];
+    const unsigned char *k = xb_ntx_key(o->ntx);
+    if (k) memcpy(key, k, o->info.keyLen);
+    while (k) {
+      r = dir > 0 ? xb_ntx_next(o->ntx, &recno, &err) : xb_ntx_prev(o->ntx, &recno, &err);
+      if (r > 0 && scope_place(o)) r = 0;
+      k = r > 0 ? xb_ntx_key(o->ntx) : NULL;
+      if (k && memcmp(k, key, o->info.keyLen) != 0) break;
+    }
+    if (r > 0 && !k) { /* the page under the cursor could not be read */
+      r = -1;
+      err = XB_FERR_FAILURE;
+    }
+    if (r < 0) {
+      order_error(ctx, a, o, EG_READ, 1010, err);
+      return 0;
+    }
+    out = r == 0;
+  } else if (dir < 0 && a->eof) { /* back from the end: the last entry */
+    r = edge(ctx, a, o, -1, &recno);
+  } else {
+    out = 1;
+  }
+  if (out) r = dir > 0 ? 0 : edge(ctx, a, o, 1, &recno); /* none: the end, or the first entry with BOF */
+  if (r < 0 || a->closed || !xb_area_arrive(ctx, a, r > 0 ? recno : 0, dir > 0 || out ? 1 : -1)) return 0;
+  if (dir < 0 && out && r > 0) a->bof = 1;
+  if (dir > 0) a->bof = 0;
+  return 1;
+}
+
+int xb_order_record_key(xb_ctx *ctx, xb_area *a, xb_order *o, unsigned char *key, int *in) {
+  return record_key(ctx, a, o, key, in);
+}
+
+void xb_order_key_value(const xb_order *o, const unsigned char *key, xb_item *r) {
+  uint32_t len = o->info.keyLen;
+  switch (o->type) {
+  case 'C': xb_set_str(r, xb_str_new((const char *)key, len)); return;
+  case 'D': xb_set_date(r, xb_date_from_digits((const char *)key)); return;
+  case 'L': xb_set_logical(r, key[0] == 'T'); return;
+  default: { /* the number's text again: a negative one (its first place, the sign's, a turned 0) turned back */
+    char text[XB_NTX_KEY_MAX + 1];
+    int neg = key[0] == NUMBER_FLIP - '0';
+    text[0] = neg ? '-' : ' ';
+    for (uint32_t i = 0; i < len; ++i) {
+      char c = (char)key[i];
+      text[i + 1] = neg && c != '.' ? (char)(NUMBER_FLIP - c) : c;
+    }
+    xb_num_parse(text, len + 1, r);
+    if (o->info.keyDec) xb_set_double(r, xb_num_value(r), (uint16_t)o->info.keyDec);
+    else if (r->type != XB_T_INT) xb_set_double(r, xb_num_value(r), 0); /* past what an integer holds */
+    r->width = (uint16_t)(o->info.keyDec ? len - o->info.keyDec - 1 : len);
+    return;
+  }
+  }
 }
 
 /* The orders' entries for a record that changes: the keys before (`fresh`: a new record, which has none), then,

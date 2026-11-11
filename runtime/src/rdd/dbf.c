@@ -372,18 +372,9 @@ static int dbf_get(xb_area *a, uint32_t field, xb_item *r, int32_t *err) {
     if (!xb_dbt_read(&d->memo, memo_block(p), r, err)) return 0;
     r->width = XB_STR_MEMO;
     return 1;
-  case 'D': {
-    int v[DBF_DATE_LEN], digits = 1;
-    for (int i = 0; i < DBF_DATE_LEN; ++i) {
-      v[i] = p[i] - '0';
-      digits &= v[i] >= 0 && v[i] <= 9;
-    }
-    int64_t jd = digits ? xb_date_encode(v[0] * 1000 + v[1] * 100 + v[2] * 10 + v[3], v[4] * 10 + v[5],
-                                         v[6] * 10 + v[7])
-                        : 0;
-    xb_set_date(r, jd);
+  case 'D':
+    xb_set_date(r, xb_date_from_digits(p));
     return 1;
-  }
   case 'L':
     xb_set_logical(r, p[0] && strchr("TtYy", p[0]));
     return 1;

@@ -1,0 +1,10 @@
+
+reindex eval changing keys:          1          5          5
+first:          2 z 
+reindex eval navigating:          1          5          5
+ERR DBCMD         30       1050 Operation not supported [ORDLISTADD]
+orders after a failed rebuild:          0 RDD_IEV_N 
+ERR BASE          1       1084 Argument error [/]
+after scope error: C          5
+scope closing the area: NIL .F.
+closed by a scope block while skipping: .F.

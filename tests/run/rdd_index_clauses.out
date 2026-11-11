@@ -1,0 +1,53 @@
+
+-- functions
+k: 2a 5a 1b 4b 6b 3c 7c 8d
+unique fwd: 2 1 3 8
+unique back: 8 7 6 5
+at bof:          2 .T.
+keyval n:  -0.50  -0.50 N
+keyval d: 20240103 D
+keyval out: NIL          0
+while from 4: 4b
+next 3 from 3: 3c
+rest from 6: 6b
+record 5: 5a
+eval calls:          3
+eval stop:          2
+stopped: 2a 1b 3c
+usecurrent: 5a 4b 6b 7c 8d
+usecurrent while from 4: 5a 4b 6b 7c
+-- walks
+while from 4: 5a 4b 6b
+next 3 from 3: 5a 4b 3c
+rest from 6: 6b 7c 8d
+record 5: 5a
+all from 6: 2a 5a 1b 4b 6b 3c 7c 8d
+next 3 from 4 with order: 4b 6b 3c
+next 3 from 4 usecurrent: 4b 6b 3c
+-- raw and eval
+while raw: 2a 5a 1b 4b 6b 7c
+eval nil:          1
+eval nil: 1b
+record 50:
+count:          0         10
+next 0: 2a 5a 10a 1b 4b 6b 7c 8d 9e
+usecurrent scoped: 5a 4b 6b 7c
+orders: RDD_ICL_NN RDD_ICL_UC           2
+scope kept: NIL NIL
+rest usecurrent from 9: 9e
+orders: RDD_ICL_R2           1
+condset start 6 next 2: 6b 7c
+eval next:          0
+every 0:         10
+every -2:         10
+eval while:          2
+eval while: 7c 8d
+-- usecurrent
+keys:    1         10
+scoped count:          5
+top:          3 .F.
+uc count:          5
+scoped 1:          1
+uc2 count:          1
+empty scope:          0          1
+uc3 count:          0         11

@@ -287,8 +287,8 @@ int xb_platform_dir_open(const char *path, xb_dir *d, int32_t *err) {
     return 0;
   }
   xb_dir out = malloc(sizeof *out);
-  size_t len = strlen(dirPath);
-  char *buf = out ? malloc(len + 2) : NULL;
+  size_t len = strlen(dirPath), cap = len + 2; /* the directory, a separator and the terminator */
+  char *buf = out ? malloc(cap) : NULL;
   if (!buf) {
     free(out);
     closedir(dir);
@@ -301,7 +301,7 @@ int xb_platform_dir_open(const char *path, xb_dir *d, int32_t *err) {
   out->dir = dir;
   out->path = buf;
   out->dirLen = len;
-  out->cap = len + 2;
+  out->cap = cap;
   *d = out;
   return 1;
 }

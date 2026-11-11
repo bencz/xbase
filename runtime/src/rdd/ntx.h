@@ -29,6 +29,15 @@ int xb_ntx_open(const char *path, int readonly, xb_ntx **out, xb_ntx_info *info,
 int xb_ntx_flush(xb_ntx *x, int32_t *err);
 int xb_ntx_close(xb_ntx *x, int32_t *err);
 
+/* A place among the entries: before the first whose key's first `len` bytes come at or after `key` (`past`: after
+ * them), or, with `whole`, before the entry (key, recno) (keyLen bytes compared). */
+typedef struct xb_ntx_bound {
+  const unsigned char *key;
+  size_t len;
+  uint32_t recno;
+  int whole, past;
+} xb_ntx_bound;
+
 /* The cursor. Each returns 1 on an entry (its record number in `recno`), 0 when there is none there (an empty
  * index, past either end), -1 after a file error (in `err`). */
 int xb_ntx_first(xb_ntx *x, uint32_t *recno, int32_t *err);
@@ -40,6 +49,13 @@ int xb_ntx_prev(xb_ntx *x, uint32_t *recno, int32_t *err);
 int xb_ntx_seek(xb_ntx *x, const unsigned char *key, size_t len, int last, uint32_t *recno, int32_t *err);
 /* The entry (key, recno), or the first after where it would be. */
 int xb_ntx_find(xb_ntx *x, const unsigned char *key, uint32_t recno, uint32_t *found, int32_t *err);
+/* The number of entries not before `lo` and before `hi` (NULL: no bound that side), from the pages' counts: only the
+ * pages that hold the bounds are searched. */
+int xb_ntx_count(xb_ntx *x, const xb_ntx_bound *lo, const xb_ntx_bound *hi, uint64_t *n, int32_t *err);
+/* The number of entries not before `lo` and before the cursor's entry (0 when the cursor is on none). */
+int xb_ntx_count_before(xb_ntx *x, const xb_ntx_bound *lo, uint64_t *n, int32_t *err);
+/* Places the cursor on entry `k` (from 0) of those not before `lo` (NULL: all): 1, 0 when there are fewer. */
+int xb_ntx_select(xb_ntx *x, const xb_ntx_bound *lo, uint64_t k, uint32_t *recno, int32_t *err);
 /* The key of the entry the cursor is on (keyLen bytes); valid until the index changes. */
 const unsigned char *xb_ntx_key(xb_ntx *x);
 /* Whether the cursor is on the entry of record `recno` (an order has one at most), with nothing changed in the index

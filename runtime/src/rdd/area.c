@@ -88,6 +88,14 @@ int xb_area_writable(xb_ctx *ctx, xb_area *a) {
   return 0;
 }
 
+void xb_order_conditions_clear(xb_order_conditions *c) {
+  memset(c, 0, sizeof *c);
+  xb_set_nil(&c->cond);
+  xb_set_nil(&c->condText);
+  xb_set_nil(&c->whileBlock);
+  xb_set_nil(&c->evalBlock);
+}
+
 void xb_area_pin(xb_area *a) { ++a->pins; }
 
 static void area_free(xb_area *a) {
@@ -159,8 +167,7 @@ int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, c
   a->rdd = rdd;
   a->readonly = readonly;
   a->generation = ++generations;
-  xb_set_nil(&a->pendingCond);
-  xb_set_nil(&a->pendingCondText);
+  xb_order_conditions_clear(&a->pending);
   for (uint16_t tries = 1;; ++tries) {
     xb_open_failure why = {0, EG_OPEN, 1001, NULL};
     if (rdd->open(a, path, readonly, &why)) break;
@@ -210,8 +217,11 @@ void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *)) {
       mark(&ctx->areas[k]->filter);
       mark(&ctx->areas[k]->filter_text);
       mark(&ctx->areas[k]->locate);
-      mark(&ctx->areas[k]->pendingCond);
-      mark(&ctx->areas[k]->pendingCondText);
+      const xb_order_conditions *c = &ctx->areas[k]->pending;
+      mark(&c->cond);
+      mark(&c->condText);
+      mark(&c->whileBlock);
+      mark(&c->evalBlock);
       for (uint32_t i = 0; i < ctx->areas[k]->norders; ++i) xb_order_mark(ctx->areas[k]->orders[i], mark);
     }
 }
@@ -290,6 +300,21 @@ static int seek_visible(xb_ctx *ctx, xb_area *a, int dir) {
   }
 }
 
+int xb_area_edge_raw(xb_ctx *ctx, xb_area *a, int dir) {
+  if (!xb_area_cold(ctx, a) || a->closed) return -1;
+  uint32_t recno;
+  int r = edge(ctx, a, dir, &recno);
+  return arrive(ctx, a, r, recno);
+}
+
+int xb_area_step_raw(xb_ctx *ctx, xb_area *a, int dir) {
+  if (!xb_area_cold(ctx, a) || a->closed) return -1;
+  uint32_t recno;
+  xb_order *o = xb_area_order(a);
+  int r = o ? xb_order_step_raw(ctx, a, o, dir, &recno) : step(ctx, a, dir, &recno);
+  return arrive(ctx, a, r, recno);
+}
+
 int xb_area_goto(xb_ctx *ctx, xb_area *a, uint32_t recno) {
   if (!go_raw(ctx, a, recno)) return 0;
   a->bof = a->eof; /* a record that is not there: both */
@@ -318,6 +343,20 @@ int xb_area_top(xb_ctx *ctx, xb_area *a) {
 int xb_area_bottom(xb_ctx *ctx, xb_area *a) {
   xb_area_pin(a);
   int ok = go_end(ctx, a, -1);
+  xb_area_unpin(a);
+  return ok;
+}
+
+int xb_area_arrive(xb_ctx *ctx, xb_area *a, uint32_t recno, int dir) {
+  xb_area_pin(a);
+  int r = go_raw(ctx, a, recno) ? seek_visible(ctx, a, dir) : -1;
+  int ok = r >= 0;
+  if (r == 0 && dir < 0 && recno) { /* none shows before it: BOF, on the first record that shows */
+    ok = go_end(ctx, a, 1);
+    a->bof = 1;
+  } else if (ok) {
+    a->bof = a->eof;
+  }
   xb_area_unpin(a);
   return ok;
 }

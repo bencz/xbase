@@ -2,8 +2,8 @@
 // (none: the end); Found() false. dbSeek() with no key is an argument error. 0 names the controlling order in the
 // functions that tell about one; ordCondSet() takes ADDITIVE as its 13th argument. An order the reference kept with
 // equal keys out of record order (its file below, in hexadecimal: keys A C D Z Z, the last two of records 5 and 2) is
-// read, walked from either record of the key and kept up to date. The files start with "rdd_index_seek", deleted at
-// the end.
+// read, walked from either record of the key, counted (ordKeyNo(), ordKeyGoto()) and kept up to date. The files start
+// with "rdd_index_seek", deleted at the end.
 FIELD K
 
 PROCEDURE Main()
@@ -86,6 +86,8 @@ PROCEDURE Main()
    Put( "rdd_index_seek_t.ntx", Bytes( cNtx ) )
    SET INDEX TO rdd_index_seek_t
    Walk( "ties:" )
+   GO 5
+   ? "positions of ties:", ordKeyNo(), ordKeyGoto( 4 ), RecNo(), ordKeyNo(), ordKeyGoto( 5 ), RecNo(), ordKeyNo()
    GO 5
    SKIP
    ? "after 5:", RecNo(), Eof()

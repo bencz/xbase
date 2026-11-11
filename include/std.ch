@@ -83,9 +83,11 @@
                                           else ; dbSetFilter( <{x}>, <(x)> ) ; end
 
 /* Orders (indexes). */
-#command INDEX ON <key> [TAG <(tag)>] TO <(file)> [FOR <for>] [<u: UNIQUE>] [<asc: ASCENDING>] ;
-            [<d: DESCENDING>] [<a: ADDITIVE>] => ;
-         ordCondSet( <"for">, <{for}>, , , , , , , , , <.d.>, , <.a.> ) ;
+#command INDEX ON <key> [TAG <(tag)>] TO <(file)> [FOR <for>] [<all: ALL>] [WHILE <while>] [NEXT <next>] ;
+            [RECORD <rec>] [<rest: REST>] [EVAL <eval>] [EVERY <every>] [<u: UNIQUE>] [<asc: ASCENDING>] ;
+            [<d: DESCENDING>] [<a: ADDITIVE>] [<cur: USECURRENT>] => ;
+         ordCondSet( <"for">, <{for}>, <.all.>, <{while}>, <{eval}>, <every>, RecNo(), <next>, <rec>, <.rest.>, ;
+                     <.d.>, , <.a.>, <.cur.> ) ;
          ; ordCreate( <(file)>, <(tag)>, <"key">, <{key}>, iif( <.u.>, .T., NIL ) )
 #command SET INDEX TO                  => ordListClear()
 #command SET INDEX TO <(index1)> [, <(indexN)>] [<a: ADDITIVE>] => ;
@@ -96,7 +98,16 @@
 #command SEEK <key> [<soft: SOFTSEEK>] [<last: LAST>] => ;
          dbSeek( <key>, iif( <.soft.>, .T., NIL ), iif( <.last.>, .T., NIL ) )
 #command FIND <*text*>                 => dbSeek( <(text)> )
+#command REINDEX [EVAL <eval>] [EVERY <every>] => ordCondSet( , , , , <{eval}>, <every> ) ; ordListRebuild()
 #command REINDEX                       => ordListRebuild()
+#command SET SCOPETOP TO               => ordScope( 0, NIL )
+#command SET SCOPETOP TO <x>           => ordScope( 0, <x> )
+#command SET SCOPEBOTTOM TO            => ordScope( 1, NIL )
+#command SET SCOPEBOTTOM TO <x>        => ordScope( 1, <x> )
+#command SET SCOPE TO                  => ordScope( 0, NIL ) ; ordScope( 1, NIL )
+#command SET SCOPE TO <x>, <y>         => ordScope( 0, <x> ) ; ordScope( 1, <y> )
+#command SET SCOPE TO <x>              => ordScope( 0, <x> ) ; ordScope( 1, <x> )
+#command SET SCOPE TO , <y>            => ordScope( 1, <y> )
 #command CLOSE INDEXES                 => ordListClear()
 
 /* Commands over a scope of records: FOR, WHILE, NEXT, RECORD, REST, ALL (dbEval). */

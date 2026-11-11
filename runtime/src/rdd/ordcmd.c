@@ -76,24 +76,30 @@ static int orders_free(xb_ctx *ctx, xb_area *a, const char *fn) {
   return 0;
 }
 
-static void clear_pending(xb_area *a) {
-  xb_set_nil(&a->pendingCond);
-  xb_set_nil(&a->pendingCondText);
-  a->pendingDescend = a->pendingAdditive = 0;
-}
+static void clear_pending(xb_area *a) { xb_order_conditions_clear(&a->pending); }
 
 /* ordCondSet( [cFor], [bFor], [lAll], [bWhile], [bEval], [nInterval], [nStart], [nNext], [nRecord], [lRest],
- * [lDescend], [lCompound], [lAdditive] ): the condition and the settings of the next order made in the current area
- * (its FOR condition, descending, kept with the open orders). */
+ * [lDescend], [lCompound], [lAdditive], [lCurrent] ): the conditions and settings of the next order made in the
+ * current area (xb_order_conditions; lAll is the default, lCompound is NTX's one order per file). */
 void xbf_ORDCONDSET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_logical(ret, 0);
   xb_area *a = xb_db_used(ctx, "ORDCONDSET");
-  if (!a) return;
+  if (!a || !orders_free(ctx, a, "ORDCONDSET")) return;
   clear_pending(a);
   const xb_str *text = xb_db_str_arg(argc, argv, 0);
-  if (text && text->len) a->pendingCondText = argv[0];
-  if (argc > 1 && argv[1].type == XB_T_BLOCK) a->pendingCond = argv[1];
-  a->pendingDescend = xb_db_logical_arg(argc, argv, 10);
-  a->pendingAdditive = xb_db_logical_arg(argc, argv, 12);
+  xb_order_conditions *c = &a->pending;
+  if (text && text->len) c->condText = argv[0];
+  if (argc > 1 && argv[1].type == XB_T_BLOCK) c->cond = argv[1];
+  if (argc > 3 && argv[3].type == XB_T_BLOCK) c->whileBlock = argv[3];
+  if (argc > 4 && argv[4].type == XB_T_BLOCK) c->evalBlock = argv[4];
+  c->every = xb_db_num_arg(argc, argv, 5, 1);
+  c->start = xb_db_num_arg(argc, argv, 6, 0);
+  c->next = xb_db_num_arg(argc, argv, 7, 0);
+  c->record = xb_db_num_arg(argc, argv, 8, 0);
+  c->rest = xb_db_logical_arg(argc, argv, 9);
+  c->descend = xb_db_logical_arg(argc, argv, 10);
+  c->additive = xb_db_logical_arg(argc, argv, 12);
+  c->current = xb_db_logical_arg(argc, argv, 13);
   xb_set_logical(ret, 1);
 }
 
@@ -110,14 +116,15 @@ static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const x
   }
   char *path = bag_path(bag);
   xb_area_pin(a);
-  int ok = a->pendingAdditive ? xb_area_cold(ctx, a) : xb_area_orders_close(ctx, a);
+  int ok = xb_area_cold(ctx, a);
   uint32_t same = ok && !a->closed ? bag_open(a, path) : 0;
   if (same) ok = close_order(ctx, a, same); /* the file is made again */
   xb_order *o = NULL;
-  if (ok && !a->closed) {
+  if (ok && !a->closed) { /* built while the other orders are open: USECURRENT, REST, ... walk the controlling one */
     int isUnique = unique && unique->type == XB_T_LOGICAL ? unique->v.l != 0 : ctx->set_unique;
     o = xb_order_create(ctx, a, path, keyText, keyBlock, isUnique);
   }
+  if (o && !a->closed && !a->pending.additive) xb_area_orders_close(ctx, a);
   if (!a->closed) clear_pending(a);
   if (o && a->closed) {
     int32_t ignored;
@@ -212,8 +219,11 @@ static void rebuild(xb_ctx *ctx, const char *fn) {
   xb_area *a = xb_db_used(ctx, fn);
   if (!a || !xb_area_writable(ctx, a) || !orders_free(ctx, a, fn)) return;
   xb_area_pin(a);
-  if (xb_area_cold(ctx, a) && !a->closed) xb_area_orders_rebuild(ctx, a);
-  if (!a->closed) xb_area_top(ctx, a);
+  if (xb_area_cold(ctx, a) && !a->closed) xb_area_orders_rebuild(ctx, a, &a->pending.evalBlock, a->pending.every);
+  if (!a->closed) {
+    clear_pending(a); /* ordCondSet()'s EVAL served the rebuild */
+    xb_area_top(ctx, a);
+  }
   xb_area_unpin(a);
 }
 
@@ -345,4 +355,106 @@ void xbf_INDEXEXT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   set_text(ret, XB_NTX_EXT);
+}
+
+/* ordScope( nScope, [xValue] ): the controlling order's scope bound before (0 top, 1 bottom; NIL for none);
+ * xValue sets it (a codeblock: evaluated again before each navigation), NIL clears it. nScope 2 sets both bounds
+ * (NIL or no xValue: clears them) and gives NIL. The record stays where it is. */
+void xbf_ORDSCOPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_area *a = xb_db_used(ctx, "ORDSCOPE");
+  xb_order *o = a ? xb_area_order(a) : NULL;
+  if (!o) return;
+  int64_t which = xb_db_num_arg(argc, argv, 0, 0);
+  xb_item nil;
+  xb_set_nil(&nil);
+  const xb_item *v = argc > 1 ? &argv[1] : &nil;
+  xb_area_pin(a); /* a codeblock may close the area */
+  if (which == 2) {
+    if (xb_order_set_scope(ctx, a, o, 0, v)) xb_order_set_scope(ctx, a, o, 1, v);
+  } else {
+    int bound = which == 0 ? 0 : 1;
+    *ret = o->scope[bound].value;
+    if (argc > 1) xb_order_set_scope(ctx, a, o, bound, v);
+  }
+  xb_area_unpin(a);
+}
+
+/* ordKeyCount( [xOrder] ): the order's entries in its scope (the filter and SET DELETED do not count); with no
+ * order, LastRec(). */
+void xbf_ORDKEYCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_int(ret, 0);
+  xb_area *a = xb_db_used(ctx, "ORDKEYCOUNT");
+  if (!a) return;
+  xb_order *o = order_at(a, order_arg(a, argc, argv, 0));
+  uint64_t n = a->rdd->lastrec(a);
+  xb_area_pin(a);
+  int ok = !o || (xb_area_cold(ctx, a) && !a->closed && xb_order_count(ctx, a, o, &n));
+  xb_area_unpin(a);
+  if (ok) xb_set_int(ret, (int64_t)n);
+}
+
+/* ordKeyNo( [xOrder] ): the current record's position among the order's entries in its scope, 0 when it has none
+ * there; with no order, RecNo(). */
+void xbf_ORDKEYNO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_int(ret, 0);
+  xb_area *a = xb_db_used(ctx, "ORDKEYNO");
+  if (!a) return;
+  xb_order *o = order_at(a, order_arg(a, argc, argv, 0));
+  uint64_t n = a->recno;
+  xb_area_pin(a);
+  int ok = !o || (xb_area_cold(ctx, a) && !a->closed && xb_order_position(ctx, a, o, &n));
+  xb_area_unpin(a);
+  if (ok) xb_set_int(ret, (int64_t)n);
+}
+
+/* ordKeyGoto( nKeyNo ): to the record of the controlling order's entry nKeyNo in its scope (past the last: the end),
+ * then forward to the first that shows; .F. for a position below 1. With no order, GO nKeyNo. */
+void xbf_ORDKEYGOTO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_logical(ret, 0);
+  xb_area *a = xb_db_used(ctx, "ORDKEYGOTO");
+  if (!a || argc == 0 || !xb_is_number(&argv[0])) return;
+  int64_t n = xb_num_to_i64(&argv[0]);
+  xb_order *o = xb_area_order(a);
+  if (!o) {
+    xb_set_logical(ret, xb_area_goto(ctx, a, n > 0 && n <= UINT32_MAX ? (uint32_t)n : 0));
+    return;
+  }
+  if (n < 1) return;
+  xb_area_pin(a);
+  uint32_t recno = 0;
+  int ok = xb_area_cold(ctx, a) && !a->closed && xb_order_nth(ctx, a, o, (uint64_t)n, &recno) && !a->closed &&
+           xb_area_arrive(ctx, a, recno, 1);
+  xb_area_unpin(a);
+  xb_set_logical(ret, ok);
+}
+
+/* ordKeyVal(): the current record's key in the controlling order (a number with the key's width and decimals), NIL
+ * when it has no entry or there is no order. */
+void xbf_ORDKEYVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_area *a = xb_db_used(ctx, "ORDKEYVAL");
+  xb_order *o = a ? xb_area_order(a) : NULL;
+  if (!o || a->eof) return;
+  unsigned char key[XB_NTX_KEY_MAX];
+  int in = 0;
+  xb_area_pin(a);
+  int ok = xb_order_record_key(ctx, a, o, key, &in) && !a->closed;
+  xb_area_unpin(a);
+  if (ok && in) xb_order_key_value(o, key, ret);
+}
+
+/* ordSkipUnique( [nDirection] ): to the next key's first record (nDirection below 0: the previous key's last) in the
+ * controlling order (xb_order_skip_unique); with no order, SKIP nDirection. .T. but after an error. */
+void xbf_ORDSKIPUNIQUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_logical(ret, 0);
+  xb_area *a = xb_db_used(ctx, "ORDSKIPUNIQUE");
+  if (!a) return;
+  int64_t n = argc > 0 && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 1;
+  xb_order *o = xb_area_order(a);
+  xb_area_pin(a);
+  int ok = o ? xb_area_cold(ctx, a) && !a->closed && xb_order_skip_unique(ctx, a, o, n < 0 ? -1 : 1)
+             : xb_area_skip(ctx, a, n);
+  xb_area_unpin(a);
+  xb_set_logical(ret, ok);
 }

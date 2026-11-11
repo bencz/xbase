@@ -235,18 +235,24 @@ EXTERN FUNCTION NetErr( [lNewError] ) NATIVE
 EXTERN FUNCTION ordBagExt() NATIVE
 EXTERN FUNCTION ordBagName( [xOrder] ) NATIVE
 EXTERN FUNCTION ordCondSet( [cFor], [bFor], [lAll], [bWhile], [bEval], [nInterval], [nStart], [nNext], [nRecord], ;
-   [lRest], [lDescend], [lCompound], [lAdditive] ) NATIVE
+   [lRest], [lDescend], [lCompound], [lAdditive], [lCurrent] ) NATIVE
 EXTERN FUNCTION ordCreate( [cBag], [cOrder], [cKey], [bKey], [lUnique] ) NATIVE
 EXTERN FUNCTION ordDescend( [xOrder] ) NATIVE
 EXTERN FUNCTION ordFor( [xOrder] ) NATIVE
 EXTERN FUNCTION ordIsUnique( [xOrder] ) NATIVE
 EXTERN FUNCTION ordKey( [xOrder] ) NATIVE
+EXTERN FUNCTION ordKeyCount( [xOrder] ) NATIVE
+EXTERN FUNCTION ordKeyGoto( nKeyNo ) NATIVE
+EXTERN FUNCTION ordKeyNo( [xOrder] ) NATIVE
+EXTERN FUNCTION ordKeyVal() NATIVE
 EXTERN FUNCTION ordListAdd( cBag ) NATIVE
 EXTERN FUNCTION ordListClear() NATIVE
 EXTERN FUNCTION ordListRebuild() NATIVE
 EXTERN FUNCTION ordName( [nOrder] ) NATIVE
 EXTERN FUNCTION ordNumber( cOrder ) NATIVE
+EXTERN FUNCTION ordScope( nScope, [xValue] ) NATIVE
 EXTERN FUNCTION ordSetFocus( [xOrder] ) NATIVE
+EXTERN FUNCTION ordSkipUnique( [nDirection] ) NATIVE
 EXTERN FUNCTION RddName() NATIVE
 EXTERN FUNCTION RddSetDefault( [cDriver] ) NATIVE
 EXTERN FUNCTION RecCount() NATIVE RESERVED CHECKED ABBREV 4

@@ -113,22 +113,52 @@ An order (an index) keeps the records in the order of a key: `order.c` makes key
 `ntx.c` is the file ([Files](#files)), `ordcmd.c` the functions. An area has a list of orders open and a controlling one
 (`xb_area.order`, 0 for the record order).
 
-- `INDEX ON <key> TO <file> [FOR <cond>] [UNIQUE] [DESCENDING] [ADDITIVE]` (`ordCondSet()` then `ordCreate()`;
-  Clipper's `dbCreateIndex()` too) evaluates the key of every record, deleted and filtered ones included, in record
-  order (the condition's records only), builds the file and opens it as the controlling order, the other orders closed
-  unless `ADDITIVE`; then the first record. The key's type and length come from the first record's value (the blank
-  record's in an empty table): a string's length (at most 256), a number's `Str()` length and decimals, 8 for a date, 1
-  for a logical; another type is `DBFNTX/1026` `Data type error`. `UNIQUE` (default `SET UNIQUE`) keeps the first
-  record of each key. Of `ordCondSet()`'s settings the condition (1st and 2nd arguments), `DESCENDING` (11th) and
-  `ADDITIVE` (13th) are used.
+- `INDEX ON <key> TO <file> [FOR <cond>] [ALL] [WHILE <cond>] [NEXT <n>] [RECORD <n>] [REST] [EVAL <block>]
+  [EVERY <n>] [UNIQUE] [DESCENDING] [ADDITIVE] [USECURRENT]` (`ordCondSet()` then `ordCreate()`; Clipper's
+  `dbCreateIndex()` too) evaluates the key of the records it takes (the condition's only), builds the file and opens it
+  as the controlling order; then the first record. The other orders stay open while it is built and close after it
+  unless `ADDITIVE`. Which records (`collect` in `order.c`): with no scope clause, or `ALL`, every record, deleted and
+  filtered ones included, in record order. `RECORD n` takes that record; `NEXT n`, `REST` and `WHILE` start at the
+  current record (`ordCondSet()`'s 7th argument, which the command gives as `RecNo()`), `USECURRENT` at the
+  controlling order's first record in its scope; those walk the controlling order (the record order without one)
+  raw: deleted and filtered records are taken, and a record the order has no entry for ends the walk. `WHILE` ends it
+  at the first record it rejects, `NEXT` after n records. The `EVAL` block runs after the first record taken and then
+  after every `EVERY` more (not after `NEXT`'s last one), with the area current; anything but `.T.` ends the build,
+  which keeps the records taken so far. Records appended while the build runs are not taken; in record order, blocks
+  that move the record do not change which records are taken. A record's key is the one it has when taken: a block
+  that changes records the build has taken leaves their entries as they were. The order is not in the area's list
+  while it is built (blocks that run meanwhile do not see it). The key's type and
+  length come from the first record's value (the blank record's when there is none): a string's length (at most 256),
+  a number's `Str()` length and decimals, 8 for a date, 1 for a logical; another type is `DBFNTX/1026` `Data type
+  error`. `UNIQUE` (default `SET UNIQUE`) keeps the first record of each key. `ordCondSet( [cFor], [bFor], [lAll],
+  [bWhile], [bEval], [nEvery], [nStart], [nNext], [nRecord], [lRest], [lDescend], [lCompound], [lAdditive],
+  [lCurrent] )` keeps these settings (`xb_order_conditions`) for the next order made in the area; `lCompound` is
+  NTX's one order per file.
 - `SET INDEX TO <files>` (`ordListClear()` and `ordListAdd()`), `USE ... INDEX <files>` (`dbSetIndex()`): an order
   opened when none is controlling becomes the controlling one, and the first record current; a file open already is
   not opened again; one that cannot be is `DBFNTX/1003` `Open error`, which may be retried. The key's type is the
   current record's value's; the key and condition are compiled from their text.
 - `SET ORDER TO <n>` (`ordSetFocus()`, `dbSetOrder()`: both give the name before) chooses the controlling order and
-  leaves the record where it is (0: the record order); `ordListClear()`, `CLOSE INDEXES` close the orders. `REINDEX`
-  (`ordListRebuild()`, `dbReindex()`), `PACK` and `ZAP` build every order again; then the first record. When an
-  order's key fails meanwhile, that order is closed and the ones after it stay as they were.
+  leaves the record where it is (0: the record order); `ordListClear()`, `CLOSE INDEXES` close the orders. `REINDEX
+  [EVAL <block>] [EVERY <n>]` (`ordListRebuild()`, `dbReindex()`), `PACK` and `ZAP` build every order again from all
+  the records (`REINDEX`'s `EVAL` as `INDEX ON`'s, for each order); then the first record. When an order's key or the
+  `EVAL` block fails meanwhile, that order is closed and the ones after it stay as they were.
+- Scopes: each order has a top and a bottom bound (`xb_order_scope`). `ordScope( nScope, [xValue] )` gives the
+  controlling order's bound before (0 top, 1 bottom; `NIL` for none) and sets it to `xValue`, `NIL` clearing it;
+  `nScope` 2 sets both (no value: clears both) and gives `NIL`. `SET SCOPETOP TO [x]`, `SET SCOPEBOTTOM TO [x]`,
+  `SET SCOPE TO [x [, y]]` (one value: both bounds), `SET SCOPE TO , y` are `std.ch` rules over it. A bound compares
+  as a prefix, as `SEEK` does; a value of another type than the key's leaves the bound off; a codeblock is evaluated
+  again before each navigation (one that fails leaves the bound as it was). Setting a scope does not move the record.
+  `GO TOP`, `GO BOTTOM`, `SKIP` and `SEEK` stay within it: `SKIP` past it, or from a record outside it, is the end
+  (back: `Bof()` on its first record); a `SEEK` of a key outside it finds nothing, and with `SOFTSEEK` stops on the
+  scope's first record when the key comes before the scope, at the end when after it.
+- Positions in the scope, the filter and `SET DELETED` not counted: `ordKeyCount( [xOrder] )` the entries,
+  `ordKeyNo( [xOrder] )` the current record's position (0 when it has no entry there), `ordKeyGoto( nKeyNo )` goes to
+  the record of entry n of the controlling order (then forward to the first that shows; past the last: the end; below
+  1: `.F.`), `ordKeyVal()` the current record's key as a value (a number with the key's width and decimals, a date, a
+  logical; `NIL` when it has no entry). `ordSkipUnique( [nDirection] )` goes to the next key's first record, or back
+  to the previous key's last one (back from the first key: the first record with `Bof()`). With no order they are
+  `LastRec()`, `RecNo()`, `GO n`, `NIL` and `SKIP n`.
 - `SEEK <value> [SOFTSEEK] [LAST]` (`dbSeek( xKey, [lSoft], [lLast] )`, `FIND`): the first record whose key starts
   with the value's key (a string is compared for its own length: a partial key; `SET EXACT` does not change that), the
   last one with `LAST`, skipping records that do not show (`SET DELETED`, the filter); `Found()` tells whether it is
@@ -139,8 +169,9 @@ An order (an index) keeps the records in the order of a key: `order.c` makes key
   `xb_area_cold` compares them with the keys after, before the record is written, before any navigation, on `COMMIT`
   and at closing): a key that did not change costs nothing more than its evaluation; an appended record enters with its
   keys; a record that stops meeting a condition leaves that order. `SKIP` after a change goes on from where the record
-  is now. While an order's key or condition block runs, the area's orders may not change: making, opening, closing
-  them there is `DBCMD/1050` `Operation not supported` (closing the area stops what the block was for).
+  is now. While an order's key, condition, `WHILE`, `EVAL` or scope block runs, the area's orders may not change:
+  making, opening, closing them or `ordCondSet()` there is `DBCMD/1050` `Operation not supported` (closing the area
+  stops what the block was for).
 - Names: an order's name (`ordName()`, `ordSetFocus()`) is its file's name without directories and extension, upper
   case, its first 10 characters (NTX's names), and so are the names functions take; `ordBagName()` is the file's name
   as given. `IndexKey()`, `ordKey()`, `ordFor()`, `IndexOrd()`, `ordNumber()`, `ordIsUnique()`, `ordDescend()`,
@@ -156,8 +187,11 @@ Where xbase does not follow the reference (checked by `tests/run/rdd_index_stres
 [Tests](#tests)): equal keys stay in record order through every change; the reference puts a key it adds after the
 keys equal to it (its order of equal keys then depends on the history of changes). Both read the other's files: an
 entry looked for by key and record that is not where record order puts it is looked for among its key's entries
-(`tests/run/rdd_index_seek.prg` keeps such a file). A key or condition block that closes the area, or would change its
-orders, is handled as above (`rdd_index_blocks.prg`); the reference fails or reads freed memory then.
+(`tests/run/rdd_index_seek.prg` keeps such a file). A key, condition, `EVAL` or scope block that closes the area, or
+would change its orders, is handled as above (`rdd_index_blocks.prg`, `rdd_index_eval.prg`); the reference fails or
+reads freed memory then. `ordKeyCount()` with a codeblock bound counts for the block's value now; the reference may
+give a count it made for an earlier value (`rdd_index_scope.prg`). `REINDEX EVAL` takes the pending `ordCondSet()`
+`EVAL` and `EVERY` and clears the pending settings; the reference keeps them for the next order made.
 
 ## Drivers
 
@@ -248,6 +282,11 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
 - Each open order keeps 128 pages (a hash from page to slot, the page used last checked first); pages changed are
   written on `COMMIT`, at closing, or when the cache needs their slot.
 - A page is searched by halves over its offsets; a key compares with `memcmp`.
+- Counting (`ordKeyCount()`, `ordKeyNo()`) and `ordKeyGoto()` read the pages' entry counts, never one entry at a
+  time: the pages where the bounds fall (`ordKeyNo()`: the current entry's path) are searched, the subtrees between
+  them counted whole (`xb_ntx_count`, `xb_ntx_count_before`, `xb_ntx_select`). An NTX page does not keep the size of
+  the tree under it, so the cost is the pages between the bounds (`ordKeyGoto( n )`: those before entry n), each read
+  once; a count that would read more pages than the file has is a broken file (a loop), `DBFNTX/1010`.
 - Files are read and written at a position in one call (`pread`/`pwrite`, `ReadFile`/`WriteFile` with an offset;
   `xb_platform_file_read_at`), the last record with the end mark after it in one write. Records read in order come
   64 KB at a time.
@@ -299,9 +338,8 @@ query (as data a driver can translate), falling back to the record-by-record way
    fields, `APPEND BLANK`, `REPLACE`, `DELETE`, `RECALL`, `PACK`, `ZAP`, `dbCreate`, `dbStruct`, `SET DELETED`,
    `LOCATE`, `SET FILTER`, `COUNT`, `SUM`; `dbstruct.ch`.
 2. Done: `DBT` memos.
-3. Done: `NTX` indexes: `INDEX ON`, `SET INDEX`, `SET ORDER`, `SEEK`, `REINDEX`, `SET SOFTSEEK`, `SET UNIQUE`,
-   conditions. Next in this step: scopes (`ordScope()`, `SET SCOPE`), key positions (`ordKeyCount()`, `ordKeyNo()`,
-   `ordKeyGoto()`, `ordKeyVal()`), `ordSkipUnique()`, and `INDEX ON`'s `WHILE`, `NEXT`, `EVAL` and `EVERY`.
+3. Done: `NTX` indexes: `INDEX ON` with its clauses, `SET INDEX`, `SET ORDER`, `SEEK`, `REINDEX`, `SET SOFTSEEK`,
+   `SET UNIQUE`, conditions, scopes, key positions, `ordSkipUnique()`.
 4. Sharing and locks.
 5. `FPT` memos and `CDX` indexes (`DBFCDX`).
 6. Relations, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `SORT`, `TOTAL`, `UPDATE`, `JOIN`.

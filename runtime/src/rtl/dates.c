@@ -84,17 +84,8 @@ void xbf_DTOS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* SToD( "YYYYMMDD" ): anything else gives the empty date. */
 void xbf_STOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
-  int64_t jd = 0;
-  if (argc >= 1 && argv[0].type == XB_T_STRING && argv[0].v.s->len >= 8) {
-    const char *s = argv[0].v.s->data;
-    int v[8], ok = 1;
-    for (int i = 0; i < 8; ++i) {
-      ok &= s[i] >= '0' && s[i] <= '9';
-      v[i] = s[i] - '0';
-    }
-    if (ok) jd = xb_date_encode(v[0] * 1000 + v[1] * 100 + v[2] * 10 + v[3], v[4] * 10 + v[5], v[6] * 10 + v[7]);
-  }
-  xb_set_date(ret, jd);
+  int ok = argc >= 1 && argv[0].type == XB_T_STRING && argv[0].v.s->len >= XB_DATE_DIGITS_SIZE - 1;
+  xb_set_date(ret, ok ? xb_date_from_digits(argv[0].v.s->data) : 0);
 }
 
 static void date_part(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, const char *fn, int part) {

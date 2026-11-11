@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 187 of 551 done. Commands (`std.ch` families): 57 of 157 done.
+Functions: 193 of 551 done. Commands (`std.ch` families): 60 of 157 done.
 
 ## Statements (grammar)
 
@@ -35,7 +35,7 @@ COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, 
 **SET FILTER**, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, **SET INDEX**, *SET
 INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*,
 *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, **SET ORDER**, *SET PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET
-RELATION*, *SET SAFETY*, *SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, **SET SOFTSEEK**, *SET
+RELATION*, *SET SAFETY*, **SET SCOPE**, **SET SCOPEBOTTOM**, **SET SCOPETOP**, *SET SCOREBOARD*, **SET SOFTSEEK**, *SET
 STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, **SET UNIQUE**, *SET VIDEOMODE*, *SET
 WRAP*, **SKIP**, *SORT*, **STORE**, **SUM**, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*, **USE**, *WAIT*,
 **ZAP**
@@ -57,11 +57,11 @@ Other standard headers, each to be provided with the matching runtime support: `
 **dbSetOrder**, *dbSetRelation*, **dbSkip**, **dbStruct**, *dbTableExt*, *dbUnlock*, *dbUnlockAll*, **dbUseArea**,
 **Deleted**, *Delim*, **Eof**, **FCount**, **FieldGet**, **FieldName**, **FieldPos**, **FieldPut**, *FLock*, **Found**,
 **Header**, **IndexExt**, **IndexKey**, **IndexOrd**, **LastRec**, *Lock*, **LUpdate**, **NetErr**, *ordBagClear*,
-**ordBagExt**, **ordBagName**, **ordCondSet** (FOR, DESCENDING, ADDITIVE), *ordCount*, **ordCreate**, *ordCustom*,
-**ordDescend**, *ordDestroy*, *ordFindRec*, **ordFor**, **ordIsUnique**, **ordKey**, *ordKeyAdd*, *ordKeyCount*,
-*ordKeyDel*, *ordKeyGoto*, *ordKeyNo*, *ordKeyRelPos*, *ordKeyVal*, **ordListAdd**, **ordListClear**,
-**ordListRebuild**, **ordName**, **ordNumber**, *ordScope*, **ordSetFocus**, *ordSetRelation*, *ordSkipRaw*,
-*ordSkipUnique*, *ordWildSeek*, *rddList*, **rddName**, *rddRegister*, **rddSetDefault**, *RDDSYS*, **RecCount**,
+**ordBagExt**, **ordBagName**, **ordCondSet** (its first 14 arguments), *ordCount*, **ordCreate**, *ordCustom*,
+**ordDescend**, *ordDestroy*, *ordFindRec*, **ordFor**, **ordIsUnique**, **ordKey**, *ordKeyAdd*, **ordKeyCount**,
+*ordKeyDel*, **ordKeyGoto**, **ordKeyNo**, *ordKeyRelPos*, **ordKeyVal**, **ordListAdd**, **ordListClear**,
+**ordListRebuild**, **ordName**, **ordNumber**, **ordScope**, **ordSetFocus**, *ordSetRelation*, *ordSkipRaw*,
+**ordSkipUnique**, *ordWildSeek*, *rddList*, **rddName**, *rddRegister*, **rddSetDefault**, *RDDSYS*, **RecCount**,
 **RecNo**, **RecSize**, *RLock*, *SDF*, **Select**, **Used**, *_DBF*, *_dtxCondSet*
 
 ### Databases (SIx/HiPer-SEEK extensions) (0 of 115 done)

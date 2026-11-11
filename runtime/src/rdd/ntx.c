@@ -42,6 +42,7 @@
 #define NTX_BUCKETS (1u << NTX_BUCKET_BITS)
 #define NTX_NONE 0xFFFF
 #define NTX_DEPTH 40     /* levels a tree may have: past what 4 GB of pages holds */
+#define NTX_CHILDREN (NTX_PAGE / NTX_ENTRY_HEAD + 1) /* more than a page's entries and the page after them */
 
 typedef struct page {
   uint32_t offset; /* in the file; 0: a slot with no page */
@@ -74,6 +75,7 @@ struct xb_ntx {
   int on;
   uint32_t onRecno;
   uint32_t changes, placed; /* changes made, and their number when the cursor was placed */
+  uint32_t visits;          /* pages a count may still read: a broken file's loop ends as an error */
 };
 
 /* An entry of a page buffer. */
@@ -630,22 +632,25 @@ int xb_ntx_prev(xb_ntx *x, uint32_t *recno, int32_t *err) {
   return climb(x, 1, recno, err);
 }
 
-/* What a descent looks for: the first entry that is not before it. */
-typedef struct target {
-  const unsigned char *key;
-  size_t len;      /* the bytes of the key compared */
-  uint32_t recno;  /* with the whole key: among equal keys */
-  int whole, past; /* past: the first entry after every match */
-} target;
-
-static int before(const xb_ntx *x, const target *t, unsigned char *b, uint32_t i) {
+static int before(const xb_ntx *x, const xb_ntx_bound *t, unsigned char *b, uint32_t i) {
   if (t->whole) return compare_entry(x, t->key, t->recno, b, i) > 0;
   int c = xb_ntx_compare(&x->info, key_of(b, i), t->key, t->len);
   return t->past ? c <= 0 : c < 0;
 }
 
-/* Places the cursor on the first entry not before the target; 0 when every entry is. */
-static int descend(xb_ntx *x, const target *t, uint32_t *recno, int32_t *err) {
+/* The index in page buffer `b` of its first entry not before the bound (its count when there is none). */
+static uint32_t lower_bound(const xb_ntx *x, const xb_ntx_bound *t, unsigned char *b) {
+  uint32_t lo = 0, hi = count(b);
+  while (lo < hi) {
+    uint32_t mid = lo + (hi - lo) / 2;
+    if (before(x, t, b, mid)) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/* Places the cursor on the first entry not before the bound; 0 when every entry is. */
+static int descend(xb_ntx *x, const xb_ntx_bound *t, uint32_t *recno, int32_t *err) {
   uint32_t offset = x->root;
   x->depth = 0;
   for (;;) {
@@ -655,12 +660,7 @@ static int descend(xb_ntx *x, const target *t, uint32_t *recno, int32_t *err) {
     }
     page *p = get(x, offset, err);
     if (!p) return -1;
-    uint32_t lo = 0, hi = count(p->b);
-    while (lo < hi) {
-      uint32_t mid = lo + (hi - lo) / 2;
-      if (before(x, t, p->b, mid)) lo = mid + 1;
-      else hi = mid;
-    }
+    uint32_t lo = lower_bound(x, t, p->b);
     x->path[x->depth].page = offset;
     x->path[x->depth].pos = lo;
     ++x->depth;
@@ -672,7 +672,7 @@ static int descend(xb_ntx *x, const target *t, uint32_t *recno, int32_t *err) {
 }
 
 int xb_ntx_seek(xb_ntx *x, const unsigned char *key, size_t len, int last, uint32_t *recno, int32_t *err) {
-  target t = {key, len < x->info.keyLen ? len : x->info.keyLen, 0, 0, last};
+  xb_ntx_bound t = {key, len < x->info.keyLen ? len : x->info.keyLen, 0, 0, last};
   int r = descend(x, &t, recno, err);
   if (!last) return r;
   if (r == 0) return xb_ntx_last(x, recno, err);
@@ -682,7 +682,7 @@ int xb_ntx_seek(xb_ntx *x, const unsigned char *key, size_t len, int last, uint3
 /* Equal keys come in record order here; a file another program kept may have them in the order they came in.
  * When the search by key and record misses, the record's entry is looked for among the entries of its key. */
 int xb_ntx_find(xb_ntx *x, const unsigned char *key, uint32_t recno, uint32_t *found, int32_t *err) {
-  target t = {key, x->info.keyLen, recno, 1, 0};
+  xb_ntx_bound t = {key, x->info.keyLen, recno, 1, 0};
   int r = descend(x, &t, found, err);
   if (r < 0 || (r > 0 && *found == recno)) return r;
   r = xb_ntx_seek(x, key, x->info.keyLen, 0, found, err);
@@ -693,6 +693,111 @@ int xb_ntx_find(xb_ntx *x, const unsigned char *key, uint32_t recno, uint32_t *f
   }
   if (r > 0 && *found == recno) return r;
   return r < 0 ? r : descend(x, &t, found, err); /* not there: where it would be */
+}
+
+/* Page `offset`, `depth` levels below the root, and its entry count. A tree deeper than NTX_DEPTH, or a count that
+ * would read more pages than the file has (a loop), is a broken file.
+ * The callers copy the children's offsets and release it before reading them: a deep tree never pins more than its
+ * path. */
+static page *get_level(xb_ntx *x, uint32_t offset, uint32_t depth, uint32_t *n, int32_t *err) {
+  if (depth >= NTX_DEPTH || x->visits == 0) {
+    *err = XB_FERR_FAILURE;
+    return NULL;
+  }
+  --x->visits;
+  page *p = get(x, offset, err);
+  if (p) *n = count(p->b);
+  return p;
+}
+
+/* Adds the entries of the tree under page `offset` to `n` (`depth`: the levels above it). */
+static int count_under(xb_ntx *x, uint32_t offset, uint32_t depth, uint64_t *n, int32_t *err) {
+  uint32_t entries, children[NTX_CHILDREN], nchildren = 0;
+  page *p = get_level(x, offset, depth, &entries, err);
+  if (!p) return 0;
+  for (uint32_t i = 0; i <= entries; ++i)
+    if (child(p->b, i)) children[nchildren++] = child(p->b, i);
+  release(p);
+  *n += entries;
+  for (uint32_t i = 0; i < nchildren; ++i)
+    if (!count_under(x, children[i], depth + 1, n, err)) return 0;
+  return 1;
+}
+
+/* Adds to `n` the entries under page `offset` not before `lo` and before `hi` (NULL: no bound that side), or, with
+ * `cursor`, before the cursor's entry, whose path goes through this page. Only the pages that hold the bounds are
+ * searched; the subtrees between them are counted whole. */
+static int count_between(xb_ntx *x, uint32_t offset, uint32_t depth, const xb_ntx_bound *lo, const xb_ntx_bound *hi,
+                         int cursor, uint64_t *n, int32_t *err) {
+  if (!lo && !hi && !cursor) return count_under(x, offset, depth, n, err);
+  uint32_t entries;
+  page *p = get_level(x, offset, depth, &entries, err);
+  if (!p) return 0;
+  /* The cursor's path holds the child descended at the levels above its entry, which follows that child. */
+  int below = cursor && depth + 1 < x->depth;
+  uint32_t a = lo ? lower_bound(x, lo, p->b) : 0;
+  uint32_t b = cursor ? x->path[depth].pos : hi ? lower_bound(x, hi, p->b) : entries;
+  uint32_t children[NTX_CHILDREN];
+  for (uint32_t i = a; i <= b; ++i) children[i - a] = child(p->b, i);
+  release(p);
+  if (a > b) return 1; /* the bounds cross: nothing between them */
+  *n += b - a;
+  for (uint32_t i = a; i <= b; ++i) {
+    int bounded = i == b && (cursor ? below : hi != NULL);
+    if (children[i - a] && !count_between(x, children[i - a], depth + 1, i == a ? lo : NULL,
+                                          bounded && !cursor ? hi : NULL, bounded && cursor, n, err))
+      return 0;
+  }
+  return 1;
+}
+
+int xb_ntx_count(xb_ntx *x, const xb_ntx_bound *lo, const xb_ntx_bound *hi, uint64_t *n, int32_t *err) {
+  *n = 0;
+  x->visits = x->end / NTX_PAGE + 1;
+  return count_between(x, x->root, 0, lo, hi, 0, n, err);
+}
+
+int xb_ntx_count_before(xb_ntx *x, const xb_ntx_bound *lo, uint64_t *n, int32_t *err) {
+  *n = 0;
+  x->visits = x->end / NTX_PAGE + 1;
+  return x->on ? count_between(x, x->root, 0, lo, NULL, 1, n, err) : 1;
+}
+
+/* Places the cursor on entry `*k` (from 0) among those under page `offset` not before `lo` (NULL: all), the path
+ * above it at levels 0 .. depth - 1: 1 on it, 0 when there are fewer (`*k` less those there are), -1 after an
+ * error. */
+static int select_from(xb_ntx *x, uint32_t offset, uint32_t depth, const xb_ntx_bound *lo, uint64_t *k,
+                       uint32_t *recno, int32_t *err) {
+  uint32_t entries;
+  page *p = get_level(x, offset, depth, &entries, err);
+  if (!p) return -1;
+  uint32_t a = lo ? lower_bound(x, lo, p->b) : 0;
+  uint32_t children[NTX_CHILDREN];
+  for (uint32_t i = a; i <= entries; ++i) children[i - a] = child(p->b, i);
+  release(p);
+  x->path[depth].page = offset;
+  for (uint32_t i = a; i <= entries; ++i) {
+    x->path[depth].pos = i;
+    uint32_t c = children[i - a];
+    if (c) { /* found there, or `*k` less its entries (the first child: those not before the bound) */
+      int r = select_from(x, c, depth + 1, i == a ? lo : NULL, k, recno, err);
+      if (r) return r;
+    }
+    if (i == entries) break;
+    if (*k == 0) {
+      x->depth = depth + 1;
+      return on_entry(x, recno, err);
+    }
+    --*k;
+  }
+  return 0;
+}
+
+int xb_ntx_select(xb_ntx *x, const xb_ntx_bound *lo, uint64_t k, uint32_t *recno, int32_t *err) {
+  x->visits = x->end / NTX_PAGE + 1;
+  int r = select_from(x, x->root, 0, lo, &k, recno, err);
+  if (r <= 0) x->on = 0;
+  return r;
 }
 
 const unsigned char *xb_ntx_key(xb_ntx *x) {
@@ -849,12 +954,12 @@ static int insert_at(xb_ntx *x, uint32_t d, uint32_t pos, unsigned char *e, uint
 int xb_ntx_insert(xb_ntx *x, const unsigned char *key, uint32_t recno, int32_t *err) {
   uint32_t found;
   if (x->info.unique) {
-    target u = {key, x->info.keyLen, 0, 0, 0};
+    xb_ntx_bound u = {key, x->info.keyLen, 0, 0, 0};
     int r = descend(x, &u, &found, err);
     if (r < 0) return 0;
     if (r > 0 && memcmp(xb_ntx_key(x), key, x->info.keyLen) == 0) return 1;
   }
-  target t = {key, x->info.keyLen, recno, 1, 0};
+  xb_ntx_bound t = {key, x->info.keyLen, recno, 1, 0};
   if (descend(x, &t, &found, err) < 0) return 0;
   /* The descent went down to a leaf; climbing back (on an ancestor's entry) left the path shorter: go down again
    * along the child before that entry to the leaf where the new one goes, at its end. */

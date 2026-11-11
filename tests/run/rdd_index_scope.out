@@ -1,0 +1,83 @@
+
+count:          9 no:          1          2 val: a1 
+rec 5 no:          8 d1 
+scope: NIL NIL b c
+after scope set:          5
+scoped: 1b1 4b2 6b3 3c1 9c2
+count scoped:          5 no:          0
+bottom:          9 c2           5
+past bottom:         10 .T.
+before top:          1 .T.
+seek a1: .F.         10 .T.
+seek c2: .T.          9
+seek d: .F.         10 .T.
+goto out of scope 5:          1          1
+skip from out of scope:         10 .T.    
+keygoto 2: .T.          4 b2 
+keygoto 9: .T.         10 .T.
+unscoped: 2a1 7a2 1b1 4b2 6b3 3c1 9c2 5d1 8e1
+keygoto 3: .T.          1 b1 
+skipunique: .T.          7 a2 
+skipunique: .T.          1 b1 
+skipunique back: .T.          7 a2 
+set scope: 3c1 9c2 5d1
+set scope to: 2a1 7a2 1b1 4b2 6b3 3c1 9c2 5d1 8e1
+set scope a1 b2: 2a1 7a2 1b1 4b2
+set scope b: 1b1 4b2 6b3
+count deleted:          9
+count filter:          9
+no filter:          7
+order 0:          9          9 NIL
+by name:          9          7          9
+none       6000       6000   72018292.00          0 .T.
+c-f       1846       1846   22123042.00          0 .T.
+d        462        462    5557360.00          0 .T.
+d50-e3        240        240    2875961.00          0 .T.
+x          0          0          0.00          0 .T.
+crossed          0          0          0.00          0 .T.
+bottom b          0          0          0.00          0 .T.
+top l        922        922   11072277.00          0 .T.
+block c       5077       5077   60869963.00          0 .T.
+block k       1384       1384   16612796.00          0 .T.
+scope val: B NIL
+scope 2: NIL g g
+scope 2 g        461        461    5591497.00          0 .T.
+scope 2 clear: NIL NIL NIL
+wrong type: NIL NIL
+after wrong type       6000       6000   72018292.00          0 .T.
+keygoto 0: .F.       6001
+desc none       6000       6000   71987487.00          0 .T.
+desc f-c       1846       1846   22135602.00          0 .T.
+desc c-f          0          0          0.00          0 .T.
+num 100-400        100        100     111753.00          0 .T.
+not in order:          0 NIL
+reindex eval:         18       6000       6000       2000
+unique keys:       1261
+unique keys back:       1261       1261
+unique keys scoped:        194
+count with deleted:        924          2
+keygoto 1: .T.       3007          3
+a .T. .F. .F.          1 .F. .F. b1 
+a .T. .T. .F.          1 .F. .F. b1 
+a .F. .F. .F.         10 .T. .F.    
+a .F. .T. .F.         10 .T. .F.    
+d .T. .F. .F.         10 .T. .F.    
+d .T. .T. .F.         10 .T. .F.    
+c .T. .T. .T.          9 .F. .F. c2 
+bz .T. .F. .F.          3 .F. .F. c1 
+bz .T. .T. .F.          6 .F. .F. b3 
+c3 .T. .F. .F.         10 .T. .F.    
+c3 .T. .T. .F.          9 .F. .F. c2 
+b0 .T. .T. .F.          1 .F. .F. b1 
+ .T. .T. .F.         10 .T. .F.    
+a .T. .F. .F.         10 .T. .F.    
+a .T. .T. .F.         10 .T. .F.    
+d .T. .F. .F.          9 .F. .F. c2 
+d .T. .T. .F.          9 .F. .F. c2 
+bz .T. .F. .F.          6 .F. .F. b3 
+c3 .T. .T. .F.          9 .F. .F. c2 
+big key: 1234567890123456786 N         19
+neg key:         -2         -2
+soft a: .F.          1 b 
+soft d: .F.          6 .T.
+hard a: .F.          6 .T.
