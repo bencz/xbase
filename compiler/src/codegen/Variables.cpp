@@ -86,8 +86,7 @@ Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss, bool others) {
   BasicBlock *arrIn = newBlock("ref.array.in");
   b_.CreateCondBr(b_.CreateICmpULT(pos0, arrayLength(array)), arrIn, miss);
   b_.SetInsertPoint(arrIn);
-  Value *items = loadFrom(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayItems), Mem::ArrayHeader, "items");
-  Value *elem = heapItem(b_.CreateInBoundsGEP(itemTy_, items, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "elem"));
+  Value *elem = arrayElement(array, pos0);
   b_.CreateBr(found);
   b_.SetInsertPoint(hash);
   Value *keyType = itemType(heapItem(b_.CreateStructGEP(refTy_, ref, RefKey)));

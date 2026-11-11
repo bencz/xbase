@@ -478,7 +478,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::EachMove: { // in place to an element of an array or a hash without holes (xb_each_move for the rest)
     Value *var = rawAddress(*i.var);
     Value *base = b_.CreateSelect(value(ops[0]), heapItem(itemPointer(var, "cell")), var, "base"); // a cell's value
-    Value *ref = itemPointer(base, "ref"); // the loop's reference
+    Value *ref = itemPointer(base, "ref");
     tag(b_.CreateStore(value(ops[1]), b_.CreateStructGEP(refTy_, ref, RefIndex)), Mem::Unknown);
     BasicBlock *slow = newBlock("each.move"), *join = newBlock("each.moved");
     inlineRefTarget(ref, slow, false);

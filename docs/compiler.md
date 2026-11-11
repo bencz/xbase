@@ -33,10 +33,10 @@ its functions, blocks), `Statements.cpp`, `Expressions.cpp`; `AST.h` holds the s
 
 Keywords are not reserved. A keyword is recognized at the start of a statement, except when:
 
-- the next token is an assignment or access to a variable (`:=`, `=`, compound assignments, `++`, `--`, `->`, `:`,
-  `[`), so `next := 1` and `exit = 2` assign variables; before `++` and `--`, `IF`, `WHILE`, `ELSEIF`, `CASE`,
-  `RETURN`, `SWITCH`, `NEXT`, `END`, `ENDIF`, `ENDDO` and `ENDCASE` stay keywords, as in Clipper (`IF --n > 0` is an
-  `IF`, `next++` an error);
+- the next token is an assignment or access to a variable (`:=`, `=`, compound assignments, `++`, `--`, `->`, `:`, `[`),
+  so `next := 1` and `exit = 2` assign variables; before `++` and `--`, `IF`, `WHILE`, `ELSEIF`, `CASE`, `RETURN`,
+  `SWITCH`, `NEXT`, `END`, `ENDIF`, `ENDDO` and `ENDCASE` stay keywords, as in Clipper (`IF --n > 0` is an `IF`,
+  `next++` an error), and `YIELD` when an operand follows (`YIELD ++n` yields, `yield++` increments a variable);
 - it is one of `EXIT`, `LOOP`, `NEXT`, `END`, `ENDIF`, `ENDDO`, `ELSE`, `ENDCASE`, `OTHERWISE`, `ENDSWITCH` and
   something follows it on the statement;
 - it is `FOR` and the statement has no `TO`, unless `EACH` follows (`FOR each := 1 TO n` is a `FOR` loop over a

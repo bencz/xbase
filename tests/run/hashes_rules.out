@@ -11,6 +11,8 @@ encolheu 124          3
  z=0 b=2 c=3 d=4
  a=1 b=2 d=4
  a=1 b=2 d=4
+ a=1 b=2 c=3
+ a=1 c=3
  Nome=4 x=5 y=6
          4          3 .T.
  Nome=4 x=5 y=6 NOVO=8

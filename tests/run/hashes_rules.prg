@@ -86,6 +86,15 @@ PROCEDURE Main()
    HMerge( g, g )
    HCopy( g, g, 1, 2 )
    ShowHash( g )
+   // A filter that changes or deletes the source's entry: the entry merged is the one it was given.
+   h := { "a" => 1, "b" => 2, "c" => 3 }
+   g := { => }
+   HMerge( g, h, {| k, v | h[ k ] := v * 100, .T. } )
+   ShowHash( g )
+   h := { "a" => 1, "b" => 2, "c" => 3 }
+   g := { => }
+   HMerge( g, h, {| k | IIF( k == "a" .OR. k == "c", HDel( h, k ), NIL ), .T. } )
+   ShowHash( g )
 
    // Letter case: keys that become equal merge into the first, which takes the last value.
    h := { "Nome" => 1, "x" => 2, "NOME" => 3, "nome" => 4, "X" => 5, "y" => 6 }

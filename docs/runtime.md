@@ -173,8 +173,9 @@ every context.
 
 ## Hashes
 
-`types/hash.c` holds the hash itself, `rtl/hashes.c` the `H*` functions, and `rtl/collections.c` what they share with
-the array functions: argument ranges, block calls from C, the order of values, the stable merge sort and deep copies.
+`types/hash.c` holds the hash itself, `rtl/hashes.c` the `H*` functions (`HEval`, `HScan` and `HMerge` are in
+`rtl/collections.prg`), and `rtl/collections.c` what they share with the array functions: argument ranges, block calls
+from C, the order of values, the stable merge sort and deep copies.
 
 - Keys are strings, numbers and dates; values are anything. A number that equals an integer is that integer as a key,
   so `1`, `1.0` and `-0.0` against `0` are each one key, also in a literal (`{ 1 => "a", 1.0 => "b" }` has one entry,

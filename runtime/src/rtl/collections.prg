@@ -318,13 +318,11 @@ RETURN Self
 // The smallest value of the elements of oCollection (of bValue( element ), with bValue), or with lGreatest the
 // greatest; NIL when there is none.
 STATIC FUNCTION Extreme( oCollection, bValue, lGreatest )
-   LOCAL x, xBest, lFirst := .T.
-   FOR EACH x IN oCollection
-      IF bValue != NIL
-         x := Eval( bValue, x )
-      ENDIF
-      IF lFirst .OR. IIF( lGreatest, x > xBest, x < xBest )
-         xBest := x
+   LOCAL x, xValue, xBest, lFirst := .T.
+   FOR EACH x IN oCollection // x stays unassigned: it is the element itself
+      xValue := IIF( bValue == NIL, x, Eval( bValue, x ) )
+      IF lFirst .OR. IIF( lGreatest, xValue > xBest, xValue < xBest )
+         xBest := xValue
          lFirst := .F.
       ENDIF
    NEXT
@@ -621,7 +619,7 @@ FUNCTION HScan( hHash, xSearch, nStart, nCount )
       IF ++nPos > nLast
          EXIT
       ENDIF
-      IF nPos >= nStart .AND. ValType( x := Eval( xSearch, k, v, nPos ) ) == "L" .AND. x // only .T. finds
+      IF nPos >= nStart .AND. ValType( x := Eval( xSearch, k, v, nPos ) ) == "L" .AND. x
          RETURN nPos
       ENDIF
    NEXT
@@ -632,7 +630,7 @@ RETURN 0
 // whatever the block does with its arguments. Each position is checked against hSource as it is, so the entries a
 // block adds are reached. Returns hDest; both must be hashes (BASE/1123).
 FUNCTION HMerge( hDest, hSource, bFilter )
-   LOCAL nPos := 0, k, v, x
+   LOCAL nPos := 0, k, v, x, xKey, xValue
    IF ValType( hDest ) != "H" .OR. ValType( hSource ) != "H"
       RETURN __ArgError( 1123 )
    ENDIF
@@ -640,9 +638,11 @@ FUNCTION HMerge( hDest, hSource, bFilter )
       RETURN HCopy( hSource, hDest )
    ENDIF
    FOR EACH k => v IN hSource
-      x := Eval( bFilter, k, v, ++nPos )
+      xKey := k // v designates the entry at the position, which the block may change or delete
+      xValue := v
+      x := Eval( bFilter, xKey, xValue, ++nPos )
       IF ValType( x ) == "L" .AND. x
-         hDest[ k ] := v
+         hDest[ xKey ] := xValue
       ENDIF
    NEXT
 RETURN hDest

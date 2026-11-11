@@ -33,6 +33,12 @@ Value *CodeGen::arrayLength(Value *array) {
                               i64_);
 }
 
+// The address of 0-based element `pos0` of an array (within its length).
+Value *CodeGen::arrayElement(Value *array, Value *pos0) {
+  Value *items = loadFrom(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayItems), Mem::ArrayHeader, "items");
+  return heapItem(b_.CreateInBoundsGEP(itemTy_, items, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "elem"));
+}
+
 Value *CodeGen::intValue(Value *item) {
   if (auto w = wordsAt_.find(item); w != wordsAt_.end()) return w->second.payload;
   return loadFrom(i64_, b_.CreateStructGEP(itemTy_, item, FValue), itemMemory(item), "int");
@@ -546,8 +552,7 @@ Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx
   p->addIncoming(dblPos, dblEnd);
   array = arr;
   pos = p;
-  Value *items = loadFrom(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayItems), Mem::ArrayHeader, "items");
-  return heapItem(b_.CreateInBoundsGEP(itemTy_, items, b_.CreateZExtOrTrunc(pos, intPtrTy_), "elem"));
+  return arrayElement(array, pos);
 }
 
 void CodeGen::emitIndex(const xir::Instruction &i) {

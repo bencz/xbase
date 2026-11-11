@@ -155,6 +155,7 @@ private:
   llvm::Value *intValue(llvm::Value *item);
   llvm::Value *itemPointer(llvm::Value *item, const char *name);
   llvm::Value *arrayLength(llvm::Value *array);
+  llvm::Value *arrayElement(llvm::Value *array, llvm::Value *pos0);
   void storeInt(llvm::Value *dst, llvm::Value *v);
   void storeDouble(llvm::Value *dst, llvm::Value *v, llvm::Value *dec);
   llvm::Value *isNumberType(llvm::Value *type);

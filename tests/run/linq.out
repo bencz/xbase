@@ -9,4 +9,6 @@ groupby:          2          2 duda         30
 tohash:         30          4
 last:          2          2 NIL
 min/max/avg:          1          9          4.43         30 NIL NIL
+source kept: A         25 A          6
+yield variable:          3
 lazy: [9 36 81 144]

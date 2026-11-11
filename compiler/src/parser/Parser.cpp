@@ -93,14 +93,15 @@ bool Parser::isKw(const Token &t, const char *kw) const {
 // `next++` is an error.
 bool Parser::atStmtKw(const char *kw) const {
   if (!atKw(kw)) return false;
-  static const char *const keywordBeforeIncDec[] = {"IF",  "WHILE", "ELSEIF", "CASE",    "RETURN", "YIELD",
-                                                    "SWITCH", "NEXT", "END", "ENDIF", "ENDDO", "ENDCASE"};
+  static const char *const keywordBeforeIncDec[] = {"IF",   "WHILE", "ELSEIF", "CASE",  "RETURN", "SWITCH",
+                                                    "NEXT", "END",   "ENDIF",  "ENDDO", "ENDCASE"};
   if (isAssignment(ahead().kind)) return false;
   switch (ahead().kind) {
   case Tok::Inc: case Tok::Dec:
     for (const char *k : keywordBeforeIncDec)
       if (std::strcmp(k, kw) == 0) return true;
-    return false;
+    // YIELD is no Clipper keyword: `yield++` increments a variable, `YIELD ++n` yields
+    return std::strcmp(kw, "YIELD") == 0 && ahead(2).kind != Tok::EndOfStmt && ahead(2).kind != Tok::Eof;
   case Tok::Colon: // a message to a variable named like the keyword; in WITH OBJECT, `RETURN :name` is the keyword
     return !withObjects_.empty() && ahead().spaceBefore && ahead(2).kind == Tok::Ident;
   case Tok::Arrow: case Tok::LBracket: case Tok::Eq:

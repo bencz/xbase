@@ -1,6 +1,7 @@
 // The query methods of Enumerable on arrays, strings and generators: TakeWhile, SkipWhile, SelectMany, Concat, Zip,
 // Distinct (by value or key, hashable or not), Reverse, OrderBy and OrderByDescending (stable, by key), GroupBy,
-// ToHash, Last, Min, Max and Average (NIL without elements), and a lazy chain over an endless generator (YIELD ++n).
+// ToHash, Last, Min, Max and Average (NIL without elements; with a block the collection stays as it was), a lazy
+// chain over an endless generator (YIELD ++n), and a variable named yield, which ++ still increments.
 PROCEDURE Main()
    LOCAL a := { 5, 3, 8, 1, 3, 9, 2 }, p := { { "ana", 30 }, { "bia", 25 }, { "caio", 30 }, { "duda", 25 } }, h
    ? "takewhile:", Show( a:TakeWhile( {| x | x > 2 } ) ), "skipwhile:", Show( a:SkipWhile( {| x | x > 2 } ) )
@@ -19,8 +20,17 @@ PROCEDURE Main()
    ? "tohash:", h[ "caio" ], Len( h )
    ? "last:", a:Last(), a:Last( {| x | x < 3 } ), {}:Last()
    ? "min/max/avg:", a:Min(), a:Max(), a:Average(), p:Max( {| r | r[ 2 ] } ), {}:Min(), {}:Average()
+   ? "source kept:", ValType( p[ 1 ] ), p:Min( {| r | r[ 2 ] } ), ValType( p[ 4 ] ), ;
+      { "a" => 3, "b" => 1 }:Max( {| n | n * 2 } )
+   ? "yield variable:", YieldVariable()
    ? "lazy:", Show( Naturals():Where( {| n | n % 3 == 0 } ):Select( {| n | n * n } ):Take( 4 ) )
 RETURN
+
+STATIC FUNCTION YieldVariable()
+   LOCAL yield := 1
+   yield++
+   ++yield
+RETURN yield
 
 FUNCTION Naturals()
    LOCAL n := 0
