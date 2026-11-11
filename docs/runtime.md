@@ -357,17 +357,22 @@ first time it is used (its class function, or a subclass):
   paths never see objects, so they are unchanged. As in the reference, the right operand's class is not asked, and
   `.AND.`, `.OR.` and unary minus cannot be overloaded (the compiler rejects `.AND.` and `.OR.`, which the reference
   accepts and never calls).
-- Built-in types as classes: a `SCALAR CLASS type` (`XB_CLASS_SCALAR`, named as `ClassName()` names the type:
-  `ARRAY`, `CHARACTER`, `HASH`, `NUMERIC`, `DATE`, `BLOCK`, ...; it has no class function and no instance variables)
-  is the class of the type's values when no class is associated with the type: a message to such a value reaches its
-  methods, the value as `Self`, and one the class does not answer keeps Clipper's error (`No exported method`). The
-  runtime's (`rtl/collections.prg`) give the type's functions as messages (`a:Len()`, `a:Add( x )`, `a:Sort()`,
-  `"x":Upper()`, `s:Split( "," )`, `h:Keys()`, `n:Round( 2 )`, `d:Year()`, `b:Eval( ... )`); `ARRAY`, `CHARACTER` and
-  `HASH` inherit `Enumerable`, whose methods work on any collection through `FOR EACH` over `Self`: `Select( bMap )`,
-  `Where( bTest )`, `Take( n )` and `Skip( n )` are generators (the sequence is made as it is gone through, so they
-  chain), and `ToArray()`, `Count( [bTest] )`, `Any( [bTest] )`, `All( bTest )`, `First( [bTest] )`, `Contains( x )`,
-  `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )` and `ForEach( bBlock )` go through it at once. A class that
-  inherits `Enumerable` only needs `GetEnumerator()`; a generator's enumerator answers `Enumerable`'s messages too
+- Built-in types as classes: a `SCALAR CLASS type` (`XB_CLASS_SCALAR`, named as `ClassName()` names the type: `ARRAY`,
+  `CHARACTER`, `HASH`, `NUMERIC`, `DATE`, `BLOCK`, ...; it has no class function and no instance variables) is the class
+  of the type's values when no class is associated with the type: a message to such a value reaches its methods, the
+  value as `Self`, and one the class does not answer keeps Clipper's error (`No exported method`). The runtime's
+  (`rtl/collections.prg`) give the type's functions as messages (`a:Len()`, `a:Add( x )`, `a:Sort()`, `"x":Upper()`,
+  `s:Split( "," )`, `h:Keys()`, `n:Round( 2 )`, `d:Year()`, `b:Eval( ... )`); `ARRAY`, `CHARACTER` and `HASH` inherit
+  `Enumerable`, whose methods work on any collection through `FOR EACH` over `Self`: `Select( bMap )`, `Where( bTest )`,
+  `Take( n )`, `Skip( n )`, `TakeWhile( bTest )`, `SkipWhile( bTest )`, `SelectMany( bMap )`, `Concat( xOther )`,
+  `Zip( xOther, [bCombine] )`, `Distinct( [bKey] )` (equal by `==`; numbers, strings and dates found through a hash) and
+  `Reverse()` are generators (the sequence is made as it is gone through, so they chain); `OrderBy( [bKey] )` and
+  `OrderByDescending( [bKey] )` give an array ordered as `ASort` orders values (the primitive `__ValueLess`), equal keys
+  in their order; `GroupBy( bKey )` gives a hash of each key to the array of its elements, `ToHash( bKey, [bValue] )` a
+  hash; and `ToArray()`, `Count( [bTest] )`, `Any( [bTest] )`, `All( bTest )`, `First( [bTest] )`, `Last( [bTest] )`,
+  `Contains( x )`, `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )`, `Min( [bValue] )`, `Max( [bValue] )`,
+  `Average( [bValue] )` (the last three NIL without elements) and `ForEach( bBlock )` go through it at once. A class
+  that inherits `Enumerable` only needs `GetEnumerator()`; a generator's enumerator answers `Enumerable`'s messages too
   (`xb_class_send_as`). `ClassName()` and `ValType()` of the values stay Clipper's.
 - Scalar classes: `ASSOCIATE CLASS name WITH TYPE type` (`std.ch`, `ClassAssociate( name(), "type" )`; a type as
   `ClassName()` names it: `ARRAY`, `BLOCK`, `CHARACTER`, `DATE`, `HASH`, `LOGICAL`, `NIL`, `NUMERIC`) makes values of

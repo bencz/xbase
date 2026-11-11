@@ -3,7 +3,8 @@
 // "abc":Upper()) while Len( a ), AAdd( a, x ) and the rest stay as they are. Enumerable works with FOR EACH over
 // Self: arrays, strings and hashes keep their own paths, an object goes through its enumerator (GetEnumerator(), or
 // MoveNext() and Current), and a generator's enumerator answers Enumerable's messages too. The methods that make a
-// sequence (Select, Where, Take, Skip) are generators: they run as the result is gone through.
+// sequence (Select, Where, Take, Skip, TakeWhile, SkipWhile, SelectMany, Concat, Zip, Distinct, Reverse) are
+// generators: they run as the result is gone through.
 
 // The methods of every collection. A class that inherits it only needs GetEnumerator() (a method with YIELD is
 // the simplest one).
@@ -12,14 +13,29 @@ CLASS Enumerable
    METHOD Where( bTest )
    METHOD Take( nCount )
    METHOD Skip( nCount )
+   METHOD TakeWhile( bTest )
+   METHOD SkipWhile( bTest )
+   METHOD SelectMany( bMap )
+   METHOD Concat( xOther )
+   METHOD Zip( xOther, bCombine )
+   METHOD Distinct( bKey )
+   METHOD Reverse()
+   METHOD OrderBy( bKey )
+   METHOD OrderByDescending( bKey )
+   METHOD GroupBy( bKey )
+   METHOD ToHash( bKey, bValue )
    METHOD ToArray()
    METHOD Count( bTest )
    METHOD Any( bTest )
    METHOD All( bTest )
    METHOD First( bTest )
+   METHOD Last( bTest )
    METHOD Contains( xValue )
    METHOD Aggregate( bFunc, xSeed )
    METHOD Sum( bValue )
+   METHOD Min( bValue )
+   METHOD Max( bValue )
+   METHOD Average( bValue )
    METHOD ForEach( bBlock )
 ENDCLASS
 
@@ -72,6 +88,120 @@ METHOD Skip( nCount ) CLASS Enumerable
    NEXT
 RETURN
 
+// The elements up to the first for which bTest( element, position ) is not .T.
+METHOD TakeWhile( bTest ) CLASS Enumerable
+   LOCAL x, n := 0
+   FOR EACH x IN Self
+      IF ! Eval( bTest, x, ++n )
+         EXIT
+      ENDIF
+      YIELD x
+   NEXT
+RETURN
+
+// The elements from the first for which bTest( element, position ) is not .T.
+METHOD SkipWhile( bTest ) CLASS Enumerable
+   LOCAL x, n := 0, lTaking := .F.
+   FOR EACH x IN Self
+      IF lTaking .OR. ! Eval( bTest, x, ++n )
+         lTaking := .T.
+         YIELD x
+      ENDIF
+   NEXT
+RETURN
+
+// The elements of each collection bMap( element, position ) gives, one after the other.
+METHOD SelectMany( bMap ) CLASS Enumerable
+   LOCAL x, y, n := 0
+   FOR EACH x IN Self
+      FOR EACH y IN Eval( bMap, x, ++n )
+         YIELD y
+      NEXT
+   NEXT
+RETURN
+
+// The elements, then those of the collection xOther.
+METHOD Concat( xOther ) CLASS Enumerable
+   LOCAL x
+   FOR EACH x IN Self
+      YIELD x
+   NEXT
+   FOR EACH x IN xOther
+      YIELD x
+   NEXT
+RETURN
+
+// bCombine( element, other ) for the elements of Self and of the collection xOther taken in pairs (without bCombine,
+// { element, other }), as long as both have one.
+METHOD Zip( xOther, bCombine ) CLASS Enumerable
+   LOCAL x, oOther := Elements( xOther )
+   FOR EACH x IN Self
+      IF ! oOther:MoveNext()
+         EXIT
+      ENDIF
+      YIELD IIF( bCombine == NIL, { x, oOther:Current }, Eval( bCombine, x, oOther:Current ) )
+   NEXT
+RETURN
+
+// The elements whose value (bKey( element ), with bKey) was not met before: equal by ==, a number, a string or a date
+// found through a hash.
+METHOD Distinct( bKey ) CLASS Enumerable
+   LOCAL x, xKey, hSeen := { => }, aSeen := {}
+   FOR EACH x IN Self
+      xKey := IIF( bKey == NIL, x, Eval( bKey, x ) )
+      IF ValType( xKey ) $ "CND"
+         IF xKey $ hSeen
+            LOOP
+         ENDIF
+         hSeen[ xKey ] := .T.
+      ELSE
+         IF AScan( aSeen, {| y | ValType( y ) == ValType( xKey ) .AND. y == xKey } ) > 0
+            LOOP
+         ENDIF
+         AAdd( aSeen, xKey )
+      ENDIF
+      YIELD x
+   NEXT
+RETURN
+
+// The elements from the last to the first (gathered when the first one is asked for).
+METHOD Reverse() CLASS Enumerable
+   LOCAL a := ::ToArray(), i
+   FOR i := Len( a ) TO 1 STEP -1
+      YIELD a[ i ]
+   NEXT
+RETURN
+
+// An array of the elements ordered by bKey( element ) (by themselves without bKey), as ASort orders values; elements
+// with equal keys keep their order.
+METHOD OrderBy( bKey ) CLASS Enumerable
+RETURN Ordered( Self, bKey, .F. )
+
+// The same, from the greatest key to the smallest.
+METHOD OrderByDescending( bKey ) CLASS Enumerable
+RETURN Ordered( Self, bKey, .T. )
+
+// A hash of bKey( element ) to the array of the elements with that key, in the order they come.
+METHOD GroupBy( bKey ) CLASS Enumerable
+   LOCAL x, xKey, h := { => }
+   FOR EACH x IN Self
+      xKey := Eval( bKey, x )
+      IF xKey $ h
+         AAdd( h[ xKey ], x )
+      ELSE
+         h[ xKey ] := { x }
+      ENDIF
+   NEXT
+RETURN h
+
+// A hash of bKey( element ) to bValue( element ) (the element without bValue); a key met again takes the new value.
+METHOD ToHash( bKey, bValue ) CLASS Enumerable
+   LOCAL x, h := { => }
+   FOR EACH x IN Self
+      h[ Eval( bKey, x ) ] := IIF( bValue == NIL, x, Eval( bValue, x ) )
+   NEXT
+RETURN h
+
 METHOD ToArray() CLASS Enumerable
    LOCAL x, a := {}
    FOR EACH x IN Self
@@ -119,6 +249,16 @@ METHOD First( bTest ) CLASS Enumerable
    NEXT
 RETURN NIL
 
+// The last element (for which bTest( element ) is .T., with bTest); NIL when there is none.
+METHOD Last( bTest ) CLASS Enumerable
+   LOCAL x, xLast
+   FOR EACH x IN Self
+      IF bTest == NIL .OR. Eval( bTest, x )
+         xLast := x
+      ENDIF
+   NEXT
+RETURN xLast
+
 // Whether an element is exactly equal (==) to xValue.
 METHOD Contains( xValue ) CLASS Enumerable
    LOCAL x
@@ -150,6 +290,23 @@ METHOD Sum( bValue ) CLASS Enumerable
    NEXT
 RETURN n
 
+// The smallest element (of bValue( element ), with bValue), by <; NIL when there is none.
+METHOD Min( bValue ) CLASS Enumerable
+RETURN Extreme( Self, bValue, .F. )
+
+// The greatest element (of bValue( element ), with bValue), by >; NIL when there is none.
+METHOD Max( bValue ) CLASS Enumerable
+RETURN Extreme( Self, bValue, .T. )
+
+// The mean of the elements (of bValue( element ), with bValue); NIL when there is none.
+METHOD Average( bValue ) CLASS Enumerable
+   LOCAL x, nSum := 0, n := 0
+   FOR EACH x IN Self
+      nSum += IIF( bValue == NIL, x, Eval( bValue, x ) )
+      n++
+   NEXT
+RETURN IIF( n == 0, NIL, nSum / n )
+
 // bBlock( element, position ) for each element; Self.
 METHOD ForEach( bBlock ) CLASS Enumerable
    LOCAL x, n := 0
@@ -157,6 +314,38 @@ METHOD ForEach( bBlock ) CLASS Enumerable
       Eval( bBlock, x, ++n )
    NEXT
 RETURN Self
+
+// The smallest value of the elements of oCollection (of bValue( element ), with bValue), or with lGreatest the
+// greatest; NIL when there is none.
+STATIC FUNCTION Extreme( oCollection, bValue, lGreatest )
+   LOCAL x, xBest, lFirst := .T.
+   FOR EACH x IN oCollection
+      IF bValue != NIL
+         x := Eval( bValue, x )
+      ENDIF
+      IF lFirst .OR. IIF( lGreatest, x > xBest, x < xBest )
+         xBest := x
+         lFirst := .F.
+      ENDIF
+   NEXT
+RETURN xBest
+
+// The elements of oCollection in an array, ordered by bKey( element ) (by themselves without bKey) as ASort orders
+// values, or from the greatest key with lDescending; equal keys keep their order (ASort is stable).
+STATIC FUNCTION Ordered( oCollection, bKey, lDescending )
+   LOCAL aPairs := {}, x, i
+   FOR EACH x IN oCollection
+      AAdd( aPairs, { IIF( bKey == NIL, x, Eval( bKey, x ) ), x } )
+   NEXT
+   IF lDescending
+      ASort( aPairs, , , {| a, b | __ValueLess( b[ 1 ], a[ 1 ] ) } )
+   ELSE
+      ASort( aPairs, , , {| a, b | __ValueLess( a[ 1 ], b[ 1 ] ) } )
+   ENDIF
+   FOR i := 1 TO Len( aPairs )
+      aPairs[ i ] := aPairs[ i ][ 2 ]
+   NEXT
+RETURN aPairs
 
 // Arrays: the array functions as messages; Self changes in place and comes back where that reads naturally.
 SCALAR CLASS ARRAY INHERIT Enumerable

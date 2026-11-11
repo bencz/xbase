@@ -162,6 +162,12 @@ void xbf___VALUEMATCHES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv)
   xb_set_logical(ret, argc > 1 && xb_value_matches(ctx, &argv[0], &argv[1]));
 }
 
+/* __ValueLess( x, y ): whether x goes before y in the order ASort gives
+ * values without a block (xb_value_less). */
+void xbf___VALUELESS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_logical(ret, argc > 1 && xb_value_less(ctx, &argv[0], &argv[1]));
+}
+
 /* __RangeStart( nLen, [nStart] ): where the range of a collection of nLen
  * items starts, as the collection functions take nStart (xb_range_start): 1
  * by default, 0 when the range is empty. For the runtime's xBase code. */

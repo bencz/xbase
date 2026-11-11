@@ -93,8 +93,8 @@ bool Parser::isKw(const Token &t, const char *kw) const {
 // `next++` is an error.
 bool Parser::atStmtKw(const char *kw) const {
   if (!atKw(kw)) return false;
-  static const char *const keywordBeforeIncDec[] = {"IF",   "WHILE", "ELSEIF", "CASE",  "RETURN", "SWITCH",
-                                                    "NEXT", "END",   "ENDIF",  "ENDDO", "ENDCASE"};
+  static const char *const keywordBeforeIncDec[] = {"IF",  "WHILE", "ELSEIF", "CASE",    "RETURN", "YIELD",
+                                                    "SWITCH", "NEXT", "END", "ENDIF", "ENDDO", "ENDCASE"};
   if (isAssignment(ahead().kind)) return false;
   switch (ahead().kind) {
   case Tok::Inc: case Tok::Dec:

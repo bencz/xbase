@@ -145,8 +145,8 @@ collection for an enumerator and moves it until it ends. Arrays, strings and has
 objects take part with `GetEnumerator()`, `MoveNext()`, `Current` and `Reset()` (done, see
 [runtime.md](runtime.md#objects-and-messages)). Positions, keys and values come from the loop itself (`FOR EACH k =>
 v`), never from messages sent to the loop variable. Generators produce enumerators, the built-in collections are
-classes that inherit `Enumerable` (LINQ-like methods, the lazy ones written with `YIELD`), and `AEval` goes through
-collection objects. Missing: the other collection functions (`AScan`, ...) going through them too.
+classes that inherit `Enumerable` (LINQ-like methods, the lazy ones written with `YIELD`), and `AEval` and `AScan` go
+through collection objects.
 
 ### Generators
 
