@@ -18,6 +18,7 @@
 #define DBT_BLOCK 512
 #define DBT_END 0x1A
 #define DBT_COPY 65536 /* bytes moved at a time when compacting */
+#define DBT_LOCK 0     /* the byte locked while a memo is added to a shared file */
 
 static int64_t block_pos(uint32_t block) { return (int64_t)block * DBT_BLOCK; }
 
@@ -30,33 +31,39 @@ static int write_next(xb_dbt *m, int32_t *err) {
 int xb_dbt_create(const char *path, int32_t *err) {
   unsigned char header[DBT_BLOCK] = {0};
   xb_put_le32(header, 1);
-  xb_file f;
-  if (!xb_platform_file_create(path, FC_NORMAL, &f, err)) return 0;
-  int ok = xb_platform_file_write(f, header, sizeof header, err);
+  xb_shared *s;
+  if (!xb_shared_open(path, 0, 1, 1, &s, err)) return 0;
+  int ok = xb_platform_file_write_at(xb_shared_handle(s), 0, header, sizeof header, err);
   int32_t closeErr = 0;
-  if (!xb_platform_file_close(f, &closeErr) && ok) {
+  if (!xb_shared_close(s, &closeErr) && ok) {
     *err = closeErr;
     ok = 0;
   }
   return ok;
 }
 
-int xb_dbt_open(xb_dbt *m, const char *path, int readonly, int32_t *err) {
-  if (!xb_platform_file_open(path, readonly ? FO_READ : FO_READWRITE, &m->f, err)) return 0;
+/* The first free block from the header, never below the end of the file. */
+static int read_next(xb_dbt *m, int32_t *err) {
   unsigned char word[4];
   int64_t end = -1;
-  if (!xb_file_read_at(m->f, 0, word, sizeof word, err) || (end = xb_platform_file_seek(m->f, 0, FS_END, err)) < 0) {
-    int32_t ignored;
-    xb_platform_file_close(m->f, &ignored);
+  if (!xb_file_read_at(m->f, 0, word, sizeof word, err) || (end = xb_platform_file_seek(m->f, 0, FS_END, err)) < 0)
     return 0;
-  }
   uint64_t used = ((uint64_t)end + DBT_BLOCK - 1) / DBT_BLOCK;
   m->next = xb_get_le32(word);
   if (m->next < used) m->next = used > UINT32_MAX ? UINT32_MAX : (uint32_t)used;
   return 1;
 }
 
-int xb_dbt_close(xb_dbt *m, int32_t *err) { return xb_platform_file_close(m->f, err); }
+int xb_dbt_open(xb_dbt *m, const char *path, int readonly, int exclusive, int32_t *err) {
+  if (!xb_shared_open(path, readonly, exclusive, 0, &m->s, err)) return 0;
+  m->f = xb_shared_handle(m->s);
+  if (read_next(m, err)) return 1;
+  int32_t ignored;
+  xb_shared_close(m->s, &ignored);
+  return 0;
+}
+
+int xb_dbt_close(xb_dbt *m, int32_t *err) { return xb_shared_close(m->s, err); }
 
 int xb_dbt_read(xb_dbt *m, uint32_t block, xb_item *r, int32_t *err) {
   size_t len = 0, cap = DBT_BLOCK;
@@ -89,7 +96,8 @@ int xb_dbt_read(xb_dbt *m, uint32_t block, xb_item *r, int32_t *err) {
   return ok;
 }
 
-int xb_dbt_append(xb_dbt *m, const char *p, size_t n, uint32_t *block, int32_t *err) {
+/* xb_dbt_append with the file to itself (exclusive, or under its lock). */
+static int append(xb_dbt *m, const char *p, size_t n, uint32_t *block, int32_t *err) {
   static const unsigned char ends[2] = {DBT_END, DBT_END};
   uint64_t blocks = ((uint64_t)n + sizeof ends + DBT_BLOCK - 1) / DBT_BLOCK;
   if (blocks > UINT32_MAX - m->next) {
@@ -108,6 +116,18 @@ int xb_dbt_append(xb_dbt *m, const char *p, size_t n, uint32_t *block, int32_t *
   *block = m->next;
   m->next += (uint32_t)blocks;
   return write_next(m, err);
+}
+
+int xb_dbt_append(xb_dbt *m, const char *p, size_t n, uint32_t *block, int32_t *err) {
+  if (xb_shared_exclusive(m->s)) return append(m, p, n, block, err);
+  if (!xb_shared_lock(m->s, DBT_LOCK, 1, XB_LOCK_WRITE, 1, err)) return 0;
+  int ok = read_next(m, err) && append(m, p, n, block, err); /* another program may have added memos */
+  int32_t unlockErr = 0;
+  if (!xb_shared_unlock(m->s, DBT_LOCK, 1, &unlockErr) && ok) {
+    *err = unlockErr;
+    ok = 0;
+  }
+  return ok;
 }
 
 int xb_dbt_zap(xb_dbt *m, int32_t *err) {

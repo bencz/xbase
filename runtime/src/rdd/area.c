@@ -88,6 +88,137 @@ int xb_area_writable(xb_ctx *ctx, xb_area *a) {
   return 0;
 }
 
+static int lock_held(const xb_area *a, uint32_t recno) {
+  for (uint32_t i = 0; i < a->nlocks; ++i)
+    if (a->locks[i] == recno) return 1;
+  return 0;
+}
+
+int xb_area_record_writable(xb_ctx *ctx, xb_area *a) {
+  if (!xb_area_writable(ctx, a)) return 0;
+  if (!a->shared || a->flocked || lock_held(a, a->recno)) return 1;
+  xb_area_error(ctx, a, EG_UNLOCKED, 1022, "", 0);
+  return 0;
+}
+
+int xb_area_exclusive(xb_ctx *ctx, xb_area *a) {
+  if (!a->shared) return 1;
+  xb_area_error(ctx, a, EG_SHARED, 1023, "", 0);
+  return 0;
+}
+
+/* Writes the current record's change (its index entries first), before the locks that allowed it go. */
+static int settle(xb_ctx *ctx, xb_area *a) {
+  int32_t err = 0;
+  if (!xb_area_cold(ctx, a) || a->closed) return 0;
+  if (a->rdd->flush(a, 0, &err)) return 1;
+  xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
+  return 0;
+}
+
+/* A record lock the area holds now joins its list. */
+static void add_lock(xb_area *a, uint32_t recno) {
+  if (a->nlocks == a->lockCap) {
+    uint32_t cap = a->lockCap ? a->lockCap * 2 : 8;
+    uint32_t *grown = realloc(a->locks, cap * sizeof *grown);
+    if (!grown) xb_gc_fatal("out of memory");
+    a->locks = grown;
+    a->lockCap = cap;
+  }
+  a->locks[a->nlocks++] = recno;
+}
+
+/* Releases lock `i` of the area's list. */
+static int release(xb_ctx *ctx, xb_area *a, uint32_t i) {
+  int32_t err = 0;
+  uint32_t recno = a->locks[i];
+  memmove(&a->locks[i], &a->locks[i + 1], (a->nlocks - i - 1) * sizeof *a->locks);
+  --a->nlocks;
+  if (a->rdd->lock(a, recno, 0, &err)) return 1;
+  xb_area_error(ctx, a, EG_LOCK, 1038, "", err);
+  return 0;
+}
+
+/* Releases the area's record locks but `keep` (0: none). */
+static int release_records(xb_ctx *ctx, xb_area *a, uint32_t keep) {
+  int ok = 1;
+  for (uint32_t i = a->nlocks; i-- > 0;)
+    if (a->locks[i] != keep) ok = release(ctx, a, i) && ok;
+  return ok;
+}
+
+int xb_area_lock(xb_ctx *ctx, xb_area *a, uint32_t recno, int add) {
+  if (!a->shared || a->flocked) return 1;
+  xb_area_pin(a);
+  int ok = settle(ctx, a);
+  int32_t err = 0;
+  if (ok && !recno) { /* the file: the record locks go first, whether it is had or not */
+    ok = release_records(ctx, a, 0) && a->rdd->lock(a, 0, 1, &err);
+    a->flocked = ok;
+  } else if (ok) {
+    if (!add) ok = release_records(ctx, a, recno);
+    if (ok && !lock_held(a, recno)) {
+      ok = a->rdd->lock(a, recno, 1, &err);
+      if (ok) add_lock(a, recno);
+    }
+  }
+  if (!ok && err && err != XB_FERR_LOCKED) xb_area_error(ctx, a, EG_LOCK, 1038, "", err); /* not a conflict */
+  xb_area_unpin(a);
+  return ok;
+}
+
+int xb_area_unlock_records(xb_ctx *ctx, xb_area *a) {
+  if (!a->shared) return 1;
+  xb_area_pin(a);
+  int ok = settle(ctx, a) && release_records(ctx, a, 0);
+  xb_area_unpin(a);
+  return ok;
+}
+
+int xb_area_unlock(xb_ctx *ctx, xb_area *a, uint32_t recno) {
+  if (!a->shared) return 1;
+  xb_area_pin(a);
+  int ok = settle(ctx, a);
+  if (ok && recno) {
+    for (uint32_t i = 0; i < a->nlocks; ++i)
+      if (a->locks[i] == recno) {
+        ok = release(ctx, a, i);
+        break;
+      }
+  } else if (ok) {
+    ok = release_records(ctx, a, 0);
+    int32_t err = 0;
+    if (a->flocked && !a->rdd->lock(a, 0, 0, &err)) {
+      xb_area_error(ctx, a, EG_LOCK, 1038, "", err);
+      ok = 0;
+    }
+    a->flocked = 0;
+  }
+  xb_area_unpin(a);
+  return ok;
+}
+
+int xb_area_append(xb_ctx *ctx, xb_area *a, int release) {
+  int32_t err = 0;
+  xb_area_pin(a);
+  int ok = xb_area_cold(ctx, a) && !a->closed && (!a->shared || !release || xb_area_unlock_records(ctx, a));
+  uint32_t recno = 0;
+  if (ok && !a->rdd->append(a, &recno, &err)) {
+    if (a->shared && err == XB_FERR_LOCKED) xb_error_of(ctx, a->rdd->name, EG_APPENDLOCK, 1024, "", NULL, err,
+                                                        XB_ERR_DEFAULT, 0, NULL, 0, NULL);
+    else xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
+    ok = 0;
+  }
+  if (ok) {
+    a->recno = recno;
+    a->bof = a->eof = 0;
+    if (a->shared && !a->flocked) add_lock(a, recno);
+    xb_area_hot(ctx, a, 1); /* a new record: its keys go in when it is written */
+  }
+  xb_area_unpin(a);
+  return ok;
+}
+
 void xb_order_conditions_clear(xb_order_conditions *c) {
   memset(c, 0, sizeof *c);
   xb_set_nil(&c->cond);
@@ -100,6 +231,7 @@ void xb_area_pin(xb_area *a) { ++a->pins; }
 
 static void area_free(xb_area *a) {
   free(a->alias);
+  free(a->locks);
   free(a);
 }
 
@@ -157,20 +289,36 @@ static int alias_name(const char *s, size_t len) {
   return len > 0;
 }
 
+/* An alias another area has, or a letter that names an area (`legal`): DBCMD/1011; one that is not a name: 1010. */
+static void alias_error(xb_ctx *ctx, const char *alias, size_t aliasLen, int legal) {
+  char text[64];
+  snprintf(text, sizeof text, "%.*s", (int)(aliasLen < 63 ? aliasLen : 63), alias);
+  xb_error_of(ctx, XB_DBCMD, legal ? EG_DUPALIAS : EG_BADALIAS, legal ? 1011 : 1010, text, NULL, 0, XB_ERR_DEFAULT, 0,
+              NULL, 0, NULL);
+}
+
 int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, const char *alias, size_t aliasLen,
-                 int readonly) {
+                 int readonly, int exclusive) {
   static uint32_t generations;
   xb_area_close(ctx, n);
+  aliasLen = without_trailing_blanks(alias, aliasLen);
+  int legal = alias_name(alias, aliasLen);
+  uint32_t taken = legal ? area_of_alias(ctx, alias, aliasLen) : 0;
+  if (taken && taken != n) { /* before the file is opened: the area using it would refuse the opening otherwise */
+    alias_error(ctx, alias, aliasLen, 1);
+    return 0;
+  }
   xb_area *a = calloc(1, sizeof *a);
   if (!a) xb_gc_fatal("out of memory");
   a->number = n;
   a->rdd = rdd;
   a->readonly = readonly;
+  a->shared = !exclusive;
   a->generation = ++generations;
   xb_order_conditions_clear(&a->pending);
   for (uint16_t tries = 1;; ++tries) {
     xb_open_failure why = {0, EG_OPEN, 1001, NULL};
-    if (rdd->open(a, path, readonly, &why)) break;
+    if (rdd->open(a, path, readonly, exclusive, &why)) break;
     int r = xb_error_of(ctx, rdd->name, why.gencode, why.subcode, "", why.file ? why.file : path, why.oscode,
                         XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries, NULL);
     free(why.file);
@@ -179,15 +327,9 @@ int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, c
       return 0;
     }
   }
-  aliasLen = without_trailing_blanks(alias, aliasLen);
-  int legal = alias_name(alias, aliasLen);
-  uint32_t taken = legal ? area_of_alias(ctx, alias, aliasLen) : 0;
-  if (!legal || (taken && taken != n) || letter_area(alias, aliasLen) || same_upper(alias, aliasLen, "M")) {
-    char text[64];
-    snprintf(text, sizeof text, "%.*s", (int)(aliasLen < 63 ? aliasLen : 63), alias);
+  if (!legal || letter_area(alias, aliasLen) || same_upper(alias, aliasLen, "M")) {
     close_table(ctx, a);
-    xb_error_of(ctx, XB_DBCMD, legal ? EG_DUPALIAS : EG_BADALIAS, legal ? 1011 : 1010, text, NULL, 0, XB_ERR_DEFAULT,
-                0, NULL, 0, NULL);
+    alias_error(ctx, alias, aliasLen, legal);
     return 0;
   }
   a->alias = malloc(aliasLen + 1);
@@ -451,7 +593,7 @@ int xb_area_field_get(xb_ctx *ctx, xb_area *a, uint32_t field, xb_item *r) {
 }
 
 int xb_area_field_put(xb_ctx *ctx, xb_area *a, uint32_t field, const xb_item *v) {
-  if (!xb_area_writable(ctx, a) || !xb_area_hot(ctx, a, 0) || a->closed) return 0;
+  if (!xb_area_record_writable(ctx, a) || !xb_area_hot(ctx, a, 0) || a->closed) return 0;
   int32_t err = 0;
   int r = a->rdd->put(a, field, v, &err);
   if (r == XB_PUT_OK) return 1;

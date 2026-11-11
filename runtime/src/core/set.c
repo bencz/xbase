@@ -75,6 +75,10 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_set_logical(ret, ctx->set_deleted);
       if (value) ctx->set_deleted = set_logical(value, ctx->set_deleted);
       break;
+    case _SET_EXCLUSIVE:
+      xb_set_logical(ret, !ctx->set_shared);
+      if (value) ctx->set_shared = !set_logical(value, !ctx->set_shared);
+      break;
     case _SET_SOFTSEEK:
       xb_set_logical(ret, ctx->set_softseek);
       if (value) ctx->set_softseek = set_logical(value, ctx->set_softseek);

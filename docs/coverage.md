@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 193 of 551 done. Commands (`std.ch` families): 60 of 157 done.
+Functions: 201 of 551 done. Commands (`std.ch` families): 62 of 157 done.
 
 ## Statements (grammar)
 
@@ -31,14 +31,14 @@ SCREEN*, *RUN*, **SAVE**, **SAVE ALL**, *SAVE SCREEN*, **SAVE TO**, **SEEK**, **
 AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET CENTURY**, **SET CODEPAGE** (an xbase command), *SET
 COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*, **SET DECIMALS**,
 *SET DEFAULT*, **SET DELETED**, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET DIRSEPARATOR*,
-*SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET EXCLUSIVE*, *SET FILECASE*,
+*SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, **SET EXCLUSIVE**, *SET FILECASE*,
 **SET FILTER**, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, **SET INDEX**, *SET
 INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*,
 *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, **SET ORDER**, *SET PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET
 RELATION*, *SET SAFETY*, **SET SCOPE**, **SET SCOPEBOTTOM**, **SET SCOPETOP**, *SET SCOREBOARD*, **SET SOFTSEEK**, *SET
 STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, **SET UNIQUE**, *SET VIDEOMODE*, *SET
-WRAP*, **SKIP**, *SORT*, **STORE**, **SUM**, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*, **USE**, *WAIT*,
-**ZAP**
+WRAP*, **SKIP**, *SORT*, **STORE**, **SUM**, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, **UNLOCK**, *UPDATE*, **USE**,
+*WAIT*, **ZAP**
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`, `set.ch`
 (partial), `error.ch` (provided: the severities and generic codes), `fileio.ch`, `directry.ch` and `dbstruct.ch`
@@ -47,22 +47,22 @@ Other standard headers, each to be provided with the matching runtime support: `
 
 ## Functions
 
-### Databases (RDD core) (63 of 112 done)
+### Databases (RDD core) (71 of 112 done)
 
 *AFields*, **Alias**, **Bof**, **dbAppend**, **dbClearFilter**, **dbClearIndex**, *dbClearRelation*, **dbCloseAll**,
 **dbCloseArea**, **dbCommit**, **dbCommitAll**, **dbCreate**, **dbCreateIndex**, **dbDelete**, **dbEval**, *Dbf*,
 *DBFBLOB*, *DBFDBT*, *dbFieldInfo*, *dbFileGet*, *dbFilePut*, **dbFilter**, *DBFSMT*, **dbGoBottom**, **dbGoto**,
-**dbGoTop**, *dbInfo*, *dbOrderInfo*, **dbRecall**, *dbRecordInfo*, **dbReindex**, *dbRelation*, *dbRLock*,
-*dbRLockList*, *dbRSelect*, *dbRUnlock*, **dbSeek**, **dbSelectArea**, *dbSetDriver*, **dbSetFilter**, **dbSetIndex**,
-**dbSetOrder**, *dbSetRelation*, **dbSkip**, **dbStruct**, *dbTableExt*, *dbUnlock*, *dbUnlockAll*, **dbUseArea**,
-**Deleted**, *Delim*, **Eof**, **FCount**, **FieldGet**, **FieldName**, **FieldPos**, **FieldPut**, *FLock*, **Found**,
-**Header**, **IndexExt**, **IndexKey**, **IndexOrd**, **LastRec**, *Lock*, **LUpdate**, **NetErr**, *ordBagClear*,
-**ordBagExt**, **ordBagName**, **ordCondSet** (its first 14 arguments), *ordCount*, **ordCreate**, *ordCustom*,
-**ordDescend**, *ordDestroy*, *ordFindRec*, **ordFor**, **ordIsUnique**, **ordKey**, *ordKeyAdd*, **ordKeyCount**,
-*ordKeyDel*, **ordKeyGoto**, **ordKeyNo**, *ordKeyRelPos*, **ordKeyVal**, **ordListAdd**, **ordListClear**,
-**ordListRebuild**, **ordName**, **ordNumber**, **ordScope**, **ordSetFocus**, *ordSetRelation*, *ordSkipRaw*,
-**ordSkipUnique**, *ordWildSeek*, *rddList*, **rddName**, *rddRegister*, **rddSetDefault**, *RDDSYS*, **RecCount**,
-**RecNo**, **RecSize**, *RLock*, *SDF*, **Select**, **Used**, *_DBF*, *_dtxCondSet*
+**dbGoTop**, *dbInfo*, *dbOrderInfo*, **dbRecall**, *dbRecordInfo*, **dbReindex**, *dbRelation*, **dbRLock**,
+**dbRLockList**, *dbRSelect*, **dbRUnlock**, **dbSeek**, **dbSelectArea**, *dbSetDriver*, **dbSetFilter**,
+**dbSetIndex**, **dbSetOrder**, *dbSetRelation*, **dbSkip**, **dbStruct**, *dbTableExt*, **dbUnlock**, **dbUnlockAll**,
+**dbUseArea**, **Deleted**, *Delim*, **Eof**, **FCount**, **FieldGet**, **FieldName**, **FieldPos**, **FieldPut**,
+**FLock**, **Found**, **Header**, **IndexExt**, **IndexKey**, **IndexOrd**, **LastRec**, **Lock**, **LUpdate**,
+**NetErr**, *ordBagClear*, **ordBagExt**, **ordBagName**, **ordCondSet** (its first 14 arguments), *ordCount*,
+**ordCreate**, *ordCustom*, **ordDescend**, *ordDestroy*, *ordFindRec*, **ordFor**, **ordIsUnique**, **ordKey**,
+*ordKeyAdd*, **ordKeyCount**, *ordKeyDel*, **ordKeyGoto**, **ordKeyNo**, *ordKeyRelPos*, **ordKeyVal**, **ordListAdd**,
+**ordListClear**, **ordListRebuild**, **ordName**, **ordNumber**, **ordScope**, **ordSetFocus**, *ordSetRelation*,
+*ordSkipRaw*, **ordSkipUnique**, *ordWildSeek*, *rddList*, **rddName**, *rddRegister*, **rddSetDefault**, *RDDSYS*,
+**RecCount**, **RecNo**, **RecSize**, **RLock**, *SDF*, **Select**, **Used**, *_DBF*, *_dtxCondSet*
 
 ### Databases (SIx/HiPer-SEEK extensions) (0 of 115 done)
 

@@ -23,8 +23,9 @@ typedef struct xb_ntx_info {
  * the name, as the reference's bulk build lays it out. */
 int xb_ntx_create(const char *path, const xb_ntx_info *info, const unsigned char *keys, const uint32_t *recnos,
                   uint32_t count, int32_t *err);
-/* Opens a file; `info` gets its header. A header that is not an NTX one is XB_FERR_FAILURE. */
-int xb_ntx_open(const char *path, int readonly, xb_ntx **out, xb_ntx_info *info, int32_t *err);
+/* Opens a file, `exclusive` or shared with other users (each operation then under the index lock, its pages read
+ * again when another user changed it); `info` gets its header. A header that is not an NTX one is XB_FERR_FAILURE. */
+int xb_ntx_open(const char *path, int readonly, int exclusive, xb_ntx **out, xb_ntx_info *info, int32_t *err);
 /* Writes the pages and the header that changed; then closes and frees. */
 int xb_ntx_flush(xb_ntx *x, int32_t *err);
 int xb_ntx_close(xb_ntx *x, int32_t *err);
@@ -56,15 +57,16 @@ int xb_ntx_count(xb_ntx *x, const xb_ntx_bound *lo, const xb_ntx_bound *hi, uint
 int xb_ntx_count_before(xb_ntx *x, const xb_ntx_bound *lo, uint64_t *n, int32_t *err);
 /* Places the cursor on entry `k` (from 0) of those not before `lo` (NULL: all): 1, 0 when there are fewer. */
 int xb_ntx_select(xb_ntx *x, const xb_ntx_bound *lo, uint64_t k, uint32_t *recno, int32_t *err);
-/* The key of the entry the cursor is on (keyLen bytes); valid until the index changes. */
+/* The key of the entry the cursor is on (keyLen bytes; NULL when it is on none), until the cursor moves. */
 const unsigned char *xb_ntx_key(xb_ntx *x);
 /* Whether the cursor is on the entry of record `recno` (an order has one at most), with nothing changed in the index
  * since it got there. */
 int xb_ntx_at(const xb_ntx *x, uint32_t recno);
 
-/* Adds and removes entries (the cursor is then on none). Adding an entry a unique order has the key of is nothing. */
-int xb_ntx_insert(xb_ntx *x, const unsigned char *key, uint32_t recno, int32_t *err);
-int xb_ntx_delete(xb_ntx *x, const unsigned char *key, uint32_t recno, int32_t *err);
+/* A record's entry changes: the one of key `old` goes, one of `key` comes (NULL: none), in one operation (shared: no
+ * other program sees the record missing between them); the cursor is then on none. Adding an entry a unique order
+ * has the key of is nothing. */
+int xb_ntx_replace(xb_ntx *x, const unsigned char *old, const unsigned char *key, uint32_t recno, int32_t *err);
 
 /* Compares keys in the order's order (the first `len` bytes). */
 int xb_ntx_compare(const xb_ntx_info *info, const unsigned char *a, const unsigned char *b, size_t len);

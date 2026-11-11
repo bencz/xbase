@@ -205,7 +205,7 @@ sizes and date. Operations that fail give the
 Clipper; `RddSetDefault()` and `USE ... VIA` choose) both give the `DBF` driver with `DBT` memos and `NTX` orders,
 named `DBFNTX`.
 
-*(Planned)*: locks in the table, and the order operations in it when a second index format comes; drivers that inherit
+*(Planned)*: the order operations in the driver when a second index format comes; drivers that inherit
 what they do not change from the driver they extend; `DBFCDX` (`DBF`, `FPT` memos and `CDX` compound indexes), `SDF` and
 `DELIM` (text files, for `COPY TO` and `APPEND FROM`); `SET DB ENGINE TO <name>` (xbase's own command, over
 `RddSetDefault()`); later, as libraries in `libs/`, SQL engines (SQLite, PostgreSQL), among them an SQLite driver that
@@ -297,9 +297,10 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
   order open. Measured once against the reference on one machine, the same program: the build and SEEK about as
   fast, SKIP and appends with an order open faster.
 
-## Sharing, locks and concurrency (planned)
+## Sharing, locks and concurrency
 
-Tables are shared between programs, and between the tasks and threads of one program, with one set of rules: two
+Tables are shared between programs, and between the areas (and, when they come, the tasks and threads) of one program,
+with one set of rules: two
 work areas on the same table behave the same whether they are in one task, in two tasks on different threads, or in
 two programs. The file protocol is the reference's, so xbase and Clipper/Harbour programs share tables correctly; what
 happens inside the process is xbase's own design, made for threads, tasks and `async`/`await`
@@ -307,7 +308,9 @@ happens inside the process is xbase's own design, made for threads, tasks and `a
 
 ### The file protocol
 
-Taken from the locks and writes the reference makes (observed with the system's lock table and a trace of its calls).
+Taken from the locks and writes the reference makes (observed with the system's lock table and a trace of its calls),
+and checked by programs of both sharing tables, memos and indexes at once (each locking, changing, appending, reading
+and keeping an index up to date while the other does); the Windows side by two xbase programs run under Wine.
 Offsets are bytes of the file; POSIX takes them with `fcntl` locks, Windows with `LockFileEx` on the same bytes.
 
 - `EXCLUSIVE` and `SHARED` opening (table, memo, index): on POSIX an exclusive or shared `flock`, not waiting; on
@@ -321,14 +324,19 @@ Offsets are bytes of the file; POSIX takes them with `fcntl` locks, Windows with
 - Index read (NTX): a read lock on byte 1,000,000,000 of the index (waiting); the header is read, and a counter
   (bytes 2-3) other than the last one seen means pages kept from before are stale.
 - Index change (NTX): a write lock on the same byte (waiting); the pages are written, then the header with the counter
-  plus one.
+  plus one. A changed key's old entry goes and the new one comes under one lock.
+- An order's cursor is placed from the current record's key as it is now (read from the record), so `SKIP` and
+  `ordKeyNo()` follow a key another program changed.
 
 - Records are read without locks. In shared mode the record count is the file's size (the header's may lag), and a
-  record is read from the file each time it becomes current.
+  record is read from the file each time it becomes current, and again when its lock (or the file lock) is had: a
+  change is made to the record as it is then, never to what was read before (no update of another program is lost).
+  Records read ahead serve only under the file lock, and go when it does.
 - Writing a record in shared mode needs its lock or the file lock: otherwise `DBFNTX/1022` `Lock required`. A changed
   record is written when the record changes, is unlocked, or at `COMMIT`; its index entries then change under the
   index write lock.
-- `RLock()` releases the area's other record locks first, `dbRLock( n )` adds one; `dbRUnlock( [n] )`, `dbUnlock()`,
+- `RLock()` releases the area's other record locks first, `dbRLock( n )` adds one (`dbRLock()` with no record is
+  `RLock()`); a shared `READONLY` table's locks are always had (it writes nothing); `dbRUnlock( [n] )`, `dbUnlock()`,
   `UNLOCK [ALL]`, `dbRLockList()`. `APPEND BLANK` in shared mode releases the record locks and locks the new record;
   when the append lock cannot be had it sets `NetErr()`. `USE` that cannot have the sharing it asks for sets
   `NetErr()` (`DBFNTX/1001` `Open error` for `dbUseArea`). `SET EXCLUSIVE` (on by default, as in Clipper) chooses
@@ -342,12 +350,14 @@ POSIX record locks belong to the process, not to a file handle: two handles of o
 and closing any handle of a file drops every lock the process has on it. Windows locks belong to a handle. Neither is
 what a program with several areas, tasks or threads needs, so the runtime arbitrates inside the process itself:
 
-- **Shared files** (`core/shared_file.c`): a process-wide registry, keyed by the file's identity (device and inode;
-  volume serial and file index on Windows), so that two paths of one file are one entry. On POSIX systems every area
-  that opens the file uses the entry's single OS handle, counted, closed when the last user closes; on Windows, where
-  locks belong to a handle, each user has its own. The entry knows each user's sharing (exclusive or shared): a second
-  exclusive opening, or an exclusive one while others use the file, is refused inside the process exactly as another
-  process would be refused by the OS.
+- **Shared files** (`core/shared_file.c`, `xb_shared`): a process-wide registry, keyed by the file's identity (device
+  and inode; volume serial and file index on Windows, found from the path before anything is opened), so that two
+  paths of one file are one entry. Each user has its own handle. On POSIX systems a handle is never closed while the
+  file has users (closing it would drop their locks): one its user gave up is kept for the next user of the same
+  access, and all of them close with the last user; on Windows, where locks belong to a handle, a user's handle closes
+  with it. The entry knows each user's sharing (exclusive or shared): a second exclusive opening, or an exclusive one
+  while others use the file, is refused inside the process, before a handle is opened, exactly as another process
+  would be refused by the OS.
 - **Lock manager**: each shared file keeps the locks its users hold (range, shared or exclusive, owner: the user,
   that is the area's opening). A request is checked first against the other users in the process, then taken from the
   OS only for bytes the process does not hold yet; a release gives back to the OS only the bytes no other user still
@@ -355,8 +365,10 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
   threads lock each other out with the same results as programs do, and closing one area never drops another's locks.
   On Windows each user's locks are its handle's, taken as they are asked.
 - **Waiting**: record and file locks never wait (Clipper's `RLock()` and `FLock()` answer at once). The transient locks
-  (append, memo, index) wait for another process in the OS call. With one thread, a transient lock held inside the
-  process can only be the caller's own, which the rule below rules out: such a conflict is an error, never a wait.
+  (append, memo, index) wait for another process: the OS lock is tried again after pauses growing to 63 ms, the
+  registry's mutex released in between, so a wait never blocks the process's other users. With one thread, a transient
+  lock held inside the process can only be the caller's own, which the rule below rules out: such a conflict is an
+  error, never a wait.
   *(With threads)*: a holder inside the process is waited for on a condition of the shared file; a thread that waits
   is parked for the collector (a safepoint: a collection never waits for it), and an `async` task that waits gives its
   thread back (below).
@@ -366,19 +378,26 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
   same program holds gets `.F.`, as from another program.
 - **Index pages**: in shared mode each index operation takes the index's read (or write) lock, reads the header and
   drops the pages it kept when the change counter moved; the cursor keeps a copy of its entry (key and record) and is
-  placed on it again then. Changes are written before the write lock is released, the counter one higher. *(Planned)*:
+  placed on it again then. Changes are written before the write lock is released, the counter one higher; a change
+  that fails half way leaves nothing to write later (the pages are read again). *(Planned)*:
   one page cache per index file in the process, read by many areas at once and changed by one at a time (a
   reader-writer lock), instead of one per open order.
 - **Records**: each area keeps its current record's bytes and its own changes until they are written; nothing of a
-  record is shared between areas, so no record lock is needed to read. Read-ahead stays in exclusive mode (and under
-  `FLock()`).
+  record is shared between areas, so no record lock is needed to read.
+- **Where**: the lock list of an area and the commands in `area.c` and `dbcmd.c` (`xb_area_lock`, `xb_area_unlock`,
+  `xb_area_append`, `xb_area_record_writable`, `xb_area_exclusive`); the driver's `lock` operation and its shared
+  reads, appends and header in `dbf.c`; the memo lock in `dbt.c`; the index lock (`begin`, `finish`) in `ntx.c`.
+- **Cost**: an exclusive table takes no lock and makes no extra call (the index benchmark is unchanged). Shared, each
+  index operation is a lock, a read of the header's first 12 bytes and an unlock, each navigation a look at the table's
+  size and the current key read from its record, each record read from the file; measured once on one machine, the index
+  benchmark's work in shared mode (with a lock per change) took less time than the reference's.
 
 ### Tasks, threads and async/await
 
-- A work area belongs to one task context (`ctx->areas`, already so), like its `SET` values; a task that resumes on
-  another thread takes its areas with it. An area is never used by two tasks at once, so it needs no lock of its own.
-  Handing an area from one task to another is explicit (planned: a function of xbase's own, the area closed in the
-  first task and open in the second with its position and locks).
+- *(Planned with tasks)*: a work area belongs to one task context (`ctx->areas`, already so), like its `SET` values; a
+  task that resumes on another thread takes its areas with it. An area is never used by two tasks at once, so it needs
+  no lock of its own. Handing an area from one task to another is explicit (planned: a function of xbase's own, the area
+  closed in the first task and open in the second with its position and locks).
 - What the runtime shares between threads is only the shared-file registry and the files' lock tables (one mutex) and,
   when they come, the shared page caches (reader-writer locks); no other global state in the database code.
 - Disk I/O and waits for locks are synchronous calls; under `async`/`await` they run on the blocking pool, so a task
@@ -422,8 +441,9 @@ query (as data a driver can translate), falling back to the record-by-record way
 2. Done: `DBT` memos.
 3. Done: `NTX` indexes: `INDEX ON` with its clauses, `SET INDEX`, `SET ORDER`, `SEEK`, `REINDEX`, `SET SOFTSEEK`,
    `SET UNIQUE`, conditions, scopes, key positions, `ordSkipUnique()`.
-4. Sharing, locks and concurrency: the shared-file registry, the lock manager, the file protocol, shared index
-   pages.
+4. Done: sharing and locks: the shared-file registry, the lock manager, the file protocol (tables, memos, NTX), `SET
+   EXCLUSIVE`, `RLock()`, `FLock()`, `dbRLock()`, `dbRUnlock()`, `dbRLockList()`, `UNLOCK`, `NetErr()`. With tasks and
+   threads: waiting inside the process, shared page caches, handing areas between tasks.
 5. `FPT` memos and `CDX` indexes (`DBFCDX`).
 6. Relations, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `SORT`, `TOTAL`, `UPDATE`, `JOIN`.
 7. `SET DB ENGINE`; then SQL engines as libraries, and queries.

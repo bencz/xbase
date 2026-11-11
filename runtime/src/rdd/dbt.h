@@ -4,21 +4,25 @@
 
 #include "xbrt_int.h"
 
+#include "core/shared_file.h"
+
 #define XB_DBT_EXT ".dbt"
 
 typedef struct xb_dbt {
-  xb_file f;
-  uint32_t next; /* the first free block, kept in the file's header */
+  xb_shared *s;
+  xb_file f;     /* s's handle */
+  uint32_t next; /* the first free block, kept in the file's header (read again under the lock when shared) */
 } xb_dbt;
 
 /* Creates an empty memo file (overwriting one of the name). */
 int xb_dbt_create(const char *path, int32_t *err);
-int xb_dbt_open(xb_dbt *m, const char *path, int readonly, int32_t *err);
+int xb_dbt_open(xb_dbt *m, const char *path, int readonly, int exclusive, int32_t *err);
 int xb_dbt_close(xb_dbt *m, int32_t *err);
 
 /* The memo that starts at `block` (up to its end mark, or the end of the file) as a string in `r`. */
 int xb_dbt_read(xb_dbt *m, uint32_t block, xb_item *r, int32_t *err);
-/* Writes `n` bytes as a new memo after the last one: the block it starts at in `block`. */
+/* Writes `n` bytes as a new memo after the last one: the block it starts at in `block`. Shared, under the memo
+ * file's lock (byte 0), with the first free block read again. */
 int xb_dbt_append(xb_dbt *m, const char *p, size_t n, uint32_t *block, int32_t *err);
 /* Leaves the file with no memo. */
 int xb_dbt_zap(xb_dbt *m, int32_t *err);

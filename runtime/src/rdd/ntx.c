@@ -14,8 +14,11 @@
  * at half of that or more. */
 #include "rdd/ntx.h"
 
+#include "rdd/rdd.h"
+
 #include "core/bytes.h"
 #include "core/file.h"
+#include "core/shared_file.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -54,8 +57,10 @@ typedef struct page {
 } page;
 
 struct xb_ntx {
-  xb_file f;
+  xb_shared *s;
+  xb_file f;                          /* s's handle */
   int readonly;
+  int shared;                         /* each operation under the lock, the header read again (docs/rdd.md) */
   xb_ntx_info info;
   uint32_t entrySize, max, half, base; /* base: where the entries start in a page */
   uint32_t root, freeList, end;       /* end: the offset of a page added at the end of the file */
@@ -74,6 +79,9 @@ struct xb_ntx {
   uint32_t depth;
   int on;
   uint32_t onRecno;
+  unsigned char onKey[XB_NTX_KEY_MAX]; /* shared: the key of the entry the cursor is on */
+  int displaced;                      /* shared: that entry went; the cursor is on the one after it (or none) */
+  int stale;                          /* shared: a change failed half way: the pages kept are read again */
   uint32_t changes, placed; /* changes made, and their number when the cursor was placed */
   uint32_t visits;          /* pages a count may still read: a broken file's loop ends as an error */
 };
@@ -426,8 +434,10 @@ int xb_ntx_create(const char *path, const xb_ntx_info *info, const unsigned char
   bd.err = err;
   unsigned char *e = malloc(x.entrySize);
   if (!e) xb_gc_fatal("out of memory");
-  int ok = xb_platform_file_create(path, FC_NORMAL, &bd.f, err);
+  xb_shared *sf = NULL;
+  int ok = xb_shared_open(path, 0, 1, 1, &sf, err);
   if (ok) {
+    bd.f = xb_shared_handle(sf);
     level_at(&bd, 0);
     for (uint32_t i = 0; ok && i < count_; ++i) {
       memset(e, 0, NTX_ENTRY_HEAD);
@@ -455,7 +465,7 @@ int xb_ntx_create(const char *path, const xb_ntx_info *info, const unsigned char
     put_header(info, x.entrySize, x.max, root, 0, 1, h);
     ok = ok && xb_platform_file_write_at(bd.f, 0, h, NTX_PAGE, err);
     int32_t closeErr = 0;
-    if (!xb_platform_file_close(bd.f, &closeErr) && ok) {
+    if (!xb_shared_close(sf, &closeErr) && ok) {
       *err = closeErr;
       ok = 0;
     }
@@ -469,9 +479,10 @@ int xb_ntx_create(const char *path, const xb_ntx_info *info, const unsigned char
   return ok;
 }
 
-int xb_ntx_open(const char *path, int readonly, xb_ntx **out, xb_ntx_info *info, int32_t *err) {
-  xb_file f;
-  if (!xb_platform_file_open(path, readonly ? FO_READ : FO_READWRITE, &f, err)) return 0;
+int xb_ntx_open(const char *path, int readonly, int exclusive, xb_ntx **out, xb_ntx_info *info, int32_t *err) {
+  xb_shared *sf;
+  if (!xb_shared_open(path, readonly, exclusive, 0, &sf, err)) return 0;
+  xb_file f = xb_shared_handle(sf);
   unsigned char h[NTX_PAGE];
   uint32_t entrySize, max;
   int64_t end = -1;
@@ -479,12 +490,14 @@ int xb_ntx_open(const char *path, int readonly, xb_ntx **out, xb_ntx_info *info,
       !header_valid(h, end, &entrySize, &max)) {
     if (end >= 0) *err = XB_FERR_FAILURE;
     int32_t ignored;
-    xb_platform_file_close(f, &ignored);
+    xb_shared_close(sf, &ignored);
     return 0;
   }
   xb_ntx *x = calloc(1, sizeof *x);
   if (!x) xb_gc_fatal("out of memory");
+  x->s = sf;
   x->f = f;
+  x->shared = !exclusive;
   x->readonly = readonly;
   memcpy(x->info.key, h + NTX_KEY_TEXT, XB_NTX_KEY_MAX);
   memcpy(x->info.cond, h + NTX_COND_TEXT, XB_NTX_KEY_MAX);
@@ -524,7 +537,7 @@ int xb_ntx_flush(xb_ntx *x, int32_t *err) {
 int xb_ntx_close(xb_ntx *x, int32_t *err) {
   int ok = x->readonly || xb_ntx_flush(x, err);
   int32_t closeErr = 0;
-  if (!xb_platform_file_close(x->f, &closeErr) && ok) {
+  if (!xb_shared_close(x->s, &closeErr) && ok) {
     *err = closeErr;
     ok = 0;
   }
@@ -539,6 +552,7 @@ static int on_entry(xb_ntx *x, uint32_t *recno, int32_t *err) {
   page *p = get(x, x->path[x->depth - 1].page, err);
   if (!p) return -1;
   *recno = x->onRecno = recno_of(p->b, x->path[x->depth - 1].pos);
+  if (x->shared) memcpy(x->onKey, key_of(p->b, x->path[x->depth - 1].pos), x->info.keyLen);
   release(p);
   x->on = 1;
   x->placed = x->changes;
@@ -596,17 +610,17 @@ static int end_entry(xb_ntx *x, int last, uint32_t *recno, int32_t *err) {
   return climb(x, last, recno, err);
 }
 
-int xb_ntx_first(xb_ntx *x, uint32_t *recno, int32_t *err) {
+static int go_first(xb_ntx *x, uint32_t *recno, int32_t *err) {
   x->depth = 0;
   return edge(x, x->root, 0, err) ? end_entry(x, 0, recno, err) : -1;
 }
 
-int xb_ntx_last(xb_ntx *x, uint32_t *recno, int32_t *err) {
+static int go_last(xb_ntx *x, uint32_t *recno, int32_t *err) {
   x->depth = 0;
   return edge(x, x->root, 1, err) ? end_entry(x, 1, recno, err) : -1;
 }
 
-int xb_ntx_next(xb_ntx *x, uint32_t *recno, int32_t *err) {
+static int go_next(xb_ntx *x, uint32_t *recno, int32_t *err) {
   page *p = get(x, x->path[x->depth - 1].page, err);
   if (!p) return -1;
   uint32_t pos = x->path[x->depth - 1].pos, n = count(p->b), right = child(p->b, pos + 1);
@@ -619,7 +633,7 @@ int xb_ntx_next(xb_ntx *x, uint32_t *recno, int32_t *err) {
   return pos + 1 < n ? on_entry(x, recno, err) : climb(x, 0, recno, err);
 }
 
-int xb_ntx_prev(xb_ntx *x, uint32_t *recno, int32_t *err) {
+static int go_prev(xb_ntx *x, uint32_t *recno, int32_t *err) {
   page *p = get(x, x->path[x->depth - 1].page, err);
   if (!p) return -1;
   uint32_t pos = x->path[x->depth - 1].pos, left = child(p->b, pos);
@@ -671,25 +685,25 @@ static int descend(xb_ntx *x, const xb_ntx_bound *t, uint32_t *recno, int32_t *e
   }
 }
 
-int xb_ntx_seek(xb_ntx *x, const unsigned char *key, size_t len, int last, uint32_t *recno, int32_t *err) {
+static int seek_key(xb_ntx *x, const unsigned char *key, size_t len, int last, uint32_t *recno, int32_t *err) {
   xb_ntx_bound t = {key, len < x->info.keyLen ? len : x->info.keyLen, 0, 0, last};
   int r = descend(x, &t, recno, err);
   if (!last) return r;
-  if (r == 0) return xb_ntx_last(x, recno, err);
-  return r < 0 ? r : xb_ntx_prev(x, recno, err);
+  if (r == 0) return go_last(x, recno, err);
+  return r < 0 ? r : go_prev(x, recno, err);
 }
 
 /* Equal keys come in record order here; a file another program kept may have them in the order they came in.
  * When the search by key and record misses, the record's entry is looked for among the entries of its key. */
-int xb_ntx_find(xb_ntx *x, const unsigned char *key, uint32_t recno, uint32_t *found, int32_t *err) {
+static int find_entry(xb_ntx *x, const unsigned char *key, uint32_t recno, uint32_t *found, int32_t *err) {
   xb_ntx_bound t = {key, x->info.keyLen, recno, 1, 0};
   int r = descend(x, &t, found, err);
   if (r < 0 || (r > 0 && *found == recno)) return r;
-  r = xb_ntx_seek(x, key, x->info.keyLen, 0, found, err);
+  r = seek_key(x, key, x->info.keyLen, 0, found, err);
   while (r > 0 && *found != recno) {
     const unsigned char *k = xb_ntx_key(x);
     if (!k || memcmp(k, key, x->info.keyLen) != 0) break;
-    r = xb_ntx_next(x, found, err);
+    r = go_next(x, found, err);
   }
   if (r > 0 && *found == recno) return r;
   return r < 0 ? r : descend(x, &t, found, err); /* not there: where it would be */
@@ -751,13 +765,13 @@ static int count_between(xb_ntx *x, uint32_t offset, uint32_t depth, const xb_nt
   return 1;
 }
 
-int xb_ntx_count(xb_ntx *x, const xb_ntx_bound *lo, const xb_ntx_bound *hi, uint64_t *n, int32_t *err) {
+static int count_range(xb_ntx *x, const xb_ntx_bound *lo, const xb_ntx_bound *hi, uint64_t *n, int32_t *err) {
   *n = 0;
   x->visits = x->end / NTX_PAGE + 1;
   return count_between(x, x->root, 0, lo, hi, 0, n, err);
 }
 
-int xb_ntx_count_before(xb_ntx *x, const xb_ntx_bound *lo, uint64_t *n, int32_t *err) {
+static int count_to_cursor(xb_ntx *x, const xb_ntx_bound *lo, uint64_t *n, int32_t *err) {
   *n = 0;
   x->visits = x->end / NTX_PAGE + 1;
   return x->on ? count_between(x, x->root, 0, lo, NULL, 1, n, err) : 1;
@@ -793,7 +807,7 @@ static int select_from(xb_ntx *x, uint32_t offset, uint32_t depth, const xb_ntx_
   return 0;
 }
 
-int xb_ntx_select(xb_ntx *x, const xb_ntx_bound *lo, uint64_t k, uint32_t *recno, int32_t *err) {
+static int select_entry(xb_ntx *x, const xb_ntx_bound *lo, uint64_t k, uint32_t *recno, int32_t *err) {
   x->visits = x->end / NTX_PAGE + 1;
   int r = select_from(x, x->root, 0, lo, &k, recno, err);
   if (r <= 0) x->on = 0;
@@ -801,6 +815,8 @@ int xb_ntx_select(xb_ntx *x, const xb_ntx_bound *lo, uint64_t k, uint32_t *recno
 }
 
 const unsigned char *xb_ntx_key(xb_ntx *x) {
+  if (!x->on) return NULL;
+  if (x->shared) return x->onKey; /* the pages may go at the next operation */
   int32_t err;
   page *p = get(x, x->path[x->depth - 1].page, &err);
   if (!p) return NULL;
@@ -951,7 +967,7 @@ static int insert_at(xb_ntx *x, uint32_t d, uint32_t pos, unsigned char *e, uint
   return 1;
 }
 
-int xb_ntx_insert(xb_ntx *x, const unsigned char *key, uint32_t recno, int32_t *err) {
+static int insert_entry(xb_ntx *x, const unsigned char *key, uint32_t recno, int32_t *err) {
   uint32_t found;
   if (x->info.unique) {
     xb_ntx_bound u = {key, x->info.keyLen, 0, 0, 0};
@@ -1060,9 +1076,9 @@ static int rebalance_up(xb_ntx *x, uint32_t d, int32_t *err) {
   return 1;
 }
 
-int xb_ntx_delete(xb_ntx *x, const unsigned char *key, uint32_t recno, int32_t *err) {
+static int delete_entry(xb_ntx *x, const unsigned char *key, uint32_t recno, int32_t *err) {
   uint32_t found;
-  int r = xb_ntx_find(x, key, recno, &found, err);
+  int r = find_entry(x, key, recno, &found, err);
   if (r < 0) return 0;
   if (r == 0 || found != recno || memcmp(xb_ntx_key(x), key, x->info.keyLen) != 0) return 1; /* not there */
   ++x->changes;
@@ -1092,4 +1108,128 @@ int xb_ntx_delete(xb_ntx *x, const unsigned char *key, uint32_t recno, int32_t *
   remove_entry(x, p, pos);
   release(p);
   return rebalance_up(x, d, err);
+}
+
+/* Shared indexes. Every operation holds the index lock (a read lock to read, a write lock to change it) and first
+ * reads the header's change counter: another program's (or area's) change since the last operation makes the pages
+ * kept stale, and the cursor is placed again on its entry (gone: on the one after it, `displaced`). A change is
+ * written, with the counter one higher, before the lock goes. An exclusive index skips all of it. */
+
+/* Drops the pages kept (none is changed between operations of a shared index). */
+static void forget_pages(xb_ntx *x) {
+  for (uint32_t i = 0; i < NTX_CACHE; ++i) {
+    page *p = &x->cache[i];
+    if (p->offset) unhash(x, p);
+    p->offset = 0;
+    p->dirty = 0;
+  }
+}
+
+static int unlock_index(xb_ntx *x, int ok, int32_t *err) {
+  int32_t unlockErr = 0;
+  if (!xb_shared_unlock(x->s, XB_DB_LOCK, 1, &unlockErr) && ok) {
+    *err = unlockErr;
+    ok = 0;
+  }
+  return ok;
+}
+
+static int begin(xb_ntx *x, int kind, int32_t *err) {
+  if (!x->shared) return 1;
+  if (!xb_shared_lock(x->s, XB_DB_LOCK, 1, kind, 1, err)) return 0;
+  x->displaced = 0;
+  unsigned char h[NTX_COUNTS];
+  if (!xb_file_read_at(x->f, 0, h, sizeof h, err)) return unlock_index(x, 0, err);
+  uint16_t version = xb_get_le16(h + NTX_VERSION);
+  if (version == x->version && !x->stale) return 1;
+  x->stale = 0;
+  int64_t end = xb_platform_file_seek(x->f, 0, FS_END, err);
+  if (end < 0) return unlock_index(x, 0, err);
+  forget_pages(x);
+  x->version = version;
+  x->root = xb_get_le32(h + NTX_ROOT);
+  x->freeList = xb_get_le32(h + NTX_FREE);
+  x->end = end > UINT32_MAX ? UINT32_MAX / NTX_PAGE * NTX_PAGE : (uint32_t)(end / NTX_PAGE * NTX_PAGE);
+  ++x->changes;
+  if (!x->on) return 1;
+  uint32_t was = x->onRecno, found;
+  unsigned char key[XB_NTX_KEY_MAX];
+  memcpy(key, x->onKey, x->info.keyLen);
+  int r = find_entry(x, key, was, &found, err);
+  if (r < 0) return unlock_index(x, 0, err);
+  x->displaced = r == 0 || found != was || memcmp(x->onKey, key, x->info.keyLen) != 0;
+  return 1;
+}
+
+/* Ends an operation that began (`ok`: it did not fail); `wrote`: it changed the index, which is written now. */
+static int finish(xb_ntx *x, int ok, int wrote, int32_t *err) {
+  if (!x->shared) return ok;
+  if (ok && wrote) ok = xb_ntx_flush(x, err);
+  if (!ok && wrote) { /* nothing half done is written later: the file is read again at the next operation */
+    forget_pages(x);
+    x->changed = x->headerDirty = 0;
+    x->stale = 1;
+  }
+  return unlock_index(x, ok, err);
+}
+
+int xb_ntx_first(xb_ntx *x, uint32_t *recno, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return -1;
+  int r = go_first(x, recno, err);
+  return finish(x, r >= 0, 0, err) ? r : -1;
+}
+
+int xb_ntx_last(xb_ntx *x, uint32_t *recno, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return -1;
+  int r = go_last(x, recno, err);
+  return finish(x, r >= 0, 0, err) ? r : -1;
+}
+
+int xb_ntx_next(xb_ntx *x, uint32_t *recno, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return -1;
+  int r;
+  if (!x->displaced) r = go_next(x, recno, err);
+  else if (x->on) r = (*recno = x->onRecno, 1); /* the entry after the one that went */
+  else r = 0;
+  return finish(x, r >= 0, 0, err) ? r : -1;
+}
+
+int xb_ntx_prev(xb_ntx *x, uint32_t *recno, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return -1;
+  int r = x->displaced && !x->on ? go_last(x, recno, err) : go_prev(x, recno, err);
+  return finish(x, r >= 0, 0, err) ? r : -1;
+}
+
+int xb_ntx_seek(xb_ntx *x, const unsigned char *key, size_t len, int last, uint32_t *recno, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return -1;
+  int r = seek_key(x, key, len, last, recno, err);
+  return finish(x, r >= 0, 0, err) ? r : -1;
+}
+
+int xb_ntx_find(xb_ntx *x, const unsigned char *key, uint32_t recno, uint32_t *found, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return -1;
+  int r = find_entry(x, key, recno, found, err);
+  return finish(x, r >= 0, 0, err) ? r : -1;
+}
+
+int xb_ntx_count(xb_ntx *x, const xb_ntx_bound *lo, const xb_ntx_bound *hi, uint64_t *n, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return 0;
+  return finish(x, count_range(x, lo, hi, n, err), 0, err);
+}
+
+int xb_ntx_count_before(xb_ntx *x, const xb_ntx_bound *lo, uint64_t *n, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return 0;
+  return finish(x, count_to_cursor(x, lo, n, err), 0, err);
+}
+
+int xb_ntx_select(xb_ntx *x, const xb_ntx_bound *lo, uint64_t k, uint32_t *recno, int32_t *err) {
+  if (!begin(x, XB_LOCK_READ, err)) return -1;
+  int r = select_entry(x, lo, k, recno, err);
+  return finish(x, r >= 0, 0, err) ? r : -1;
+}
+
+int xb_ntx_replace(xb_ntx *x, const unsigned char *old, const unsigned char *key, uint32_t recno, int32_t *err) {
+  if (!begin(x, XB_LOCK_WRITE, err)) return 0;
+  int ok = (!old || delete_entry(x, old, recno, err)) && (!key || insert_entry(x, key, recno, err));
+  return finish(x, ok, 1, err);
 }

@@ -152,16 +152,24 @@ static int open_as(const char *path, DWORD access, DWORD share, DWORD dispositio
   return 1;
 }
 
+/* The share mode of an FOpen() mode's sharing. */
+static DWORD share_of(int32_t mode) {
+  switch (mode & (FO_EXCLUSIVE | FO_DENYWRITE | FO_DENYREAD | FO_DENYNONE)) {
+  case FO_EXCLUSIVE: return 0;
+  case FO_DENYWRITE: return FILE_SHARE_READ;
+  case FO_DENYREAD: return FILE_SHARE_WRITE;
+  default: return FILE_SHARE_READ | FILE_SHARE_WRITE; /* compatibility mode and deny none */
+  }
+}
+
 int xb_platform_file_open(const char *path, int32_t mode, xb_file *f, int32_t *err) {
   static const DWORD access[] = {GENERIC_READ, GENERIC_WRITE, GENERIC_READ | GENERIC_WRITE};
-  DWORD share;
-  switch (mode & (FO_EXCLUSIVE | FO_DENYWRITE | FO_DENYREAD | FO_DENYNONE)) {
-  case FO_EXCLUSIVE: share = 0; break;
-  case FO_DENYWRITE: share = FILE_SHARE_READ; break;
-  case FO_DENYREAD: share = FILE_SHARE_WRITE; break;
-  default: share = FILE_SHARE_READ | FILE_SHARE_WRITE; break; /* compatibility mode and deny none */
-  }
-  return open_as(path, access[mode & (FO_WRITE | FO_READWRITE)], share, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, f, err);
+  return open_as(path, access[mode & (FO_WRITE | FO_READWRITE)], share_of(mode), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                 f, err);
+}
+
+int xb_platform_file_open_always(const char *path, int32_t mode, xb_file *f, int32_t *err) {
+  return open_as(path, GENERIC_READ | GENERIC_WRITE, share_of(mode), OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, f, err);
 }
 
 int xb_platform_file_create(const char *path, int32_t attr, xb_file *f, int32_t *err) {
@@ -248,6 +256,63 @@ int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *er
   }
   return pos.QuadPart;
 }
+
+int xb_platform_file_share(xb_file f, int kind, int32_t *err) {
+  (void)f;
+  (void)kind;
+  (void)err;
+  return 1;
+}
+
+int xb_platform_file_lock(xb_file f, uint64_t pos, uint64_t len, int kind, int32_t *err) {
+  OVERLAPPED o;
+  memset(&o, 0, sizeof o);
+  o.Offset = (DWORD)(pos & 0xFFFFFFFFu);
+  o.OffsetHigh = (DWORD)(pos >> 32);
+  DWORD low = (DWORD)(len & 0xFFFFFFFFu), high = (DWORD)(len >> 32);
+  BOOL ok;
+  if (kind == XB_LOCK_NONE) {
+    ok = UnlockFileEx((HANDLE)f, 0, low, high, &o);
+  } else {
+    DWORD flags = (kind == XB_LOCK_WRITE ? LOCKFILE_EXCLUSIVE_LOCK : 0) | LOCKFILE_FAIL_IMMEDIATELY;
+    ok = LockFileEx((HANDLE)f, flags, 0, low, high, &o);
+  }
+  if (ok) return 1;
+  DWORD code = GetLastError();
+  *err = code == ERROR_LOCK_VIOLATION || code == ERROR_IO_PENDING ? XB_FERR_LOCKED : common_code(code);
+  return 0;
+}
+
+int xb_platform_locks_per_handle(void) { return 1; }
+
+int xb_platform_file_id(xb_file f, xb_file_id *id, int32_t *err) {
+  BY_HANDLE_FILE_INFORMATION info;
+  if (!GetFileInformationByHandle((HANDLE)f, &info)) {
+    *err = common_code(GetLastError());
+    return 0;
+  }
+  id->volume = info.dwVolumeSerialNumber;
+  id->index = (uint64_t)info.nFileIndexHigh << 32 | info.nFileIndexLow;
+  return 1;
+}
+
+int xb_platform_path_id(const char *path, xb_file_id *id, int32_t *err) {
+  wchar_t *w = wide_path(path, err);
+  if (!w) return 0;
+  HANDLE h = CreateFileW(w, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                         FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  DWORD code = GetLastError();
+  free(w);
+  if (h == INVALID_HANDLE_VALUE) {
+    *err = common_code(code);
+    return 0;
+  }
+  int ok = xb_platform_file_id((xb_file)h, id, err);
+  CloseHandle(h); /* a handle with no access: it holds no lock */
+  return ok;
+}
+
+void xb_platform_sleep_ms(uint32_t ms) { Sleep(ms); }
 
 int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err) {
   LARGE_INTEGER zero, here, to;

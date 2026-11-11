@@ -1,11 +1,14 @@
 #include "xbrt_int.h"
 
+#include "core/shared_file.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 xb_ctx *xb_ctx_new(void) {
   xb_gc_init();
+  xb_shared_init();
   xb_ctx *ctx = calloc(1, sizeof *ctx);
   if (!ctx) xb_gc_fatal("out of memory");
   ctx->set_decimals = 2;

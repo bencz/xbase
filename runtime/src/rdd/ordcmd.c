@@ -217,7 +217,7 @@ void xbf_DBCLEARINDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* ordListRebuild(), dbReindex(): every order's file made again from the records; then the first record. */
 static void rebuild(xb_ctx *ctx, const char *fn) {
   xb_area *a = xb_db_used(ctx, fn);
-  if (!a || !xb_area_writable(ctx, a) || !orders_free(ctx, a, fn)) return;
+  if (!a || !xb_area_writable(ctx, a) || !xb_area_exclusive(ctx, a) || !orders_free(ctx, a, fn)) return;
   xb_area_pin(a);
   if (xb_area_cold(ctx, a) && !a->closed) xb_area_orders_rebuild(ctx, a, &a->pending.evalBlock, a->pending.every);
   if (!a->closed) {

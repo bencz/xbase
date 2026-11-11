@@ -53,6 +53,7 @@ int xb_names_find(const xb_names *t, const char *name, size_t len, uint32_t *id)
 }
 
 int xb_names_find_upper(const xb_names *t, const char *name, size_t len, uint32_t *id) {
+  if (len == 0) return xb_names_find(t, name, 0, id); /* nothing to turn upper case */
   char small[64];
   char *upper = len <= sizeof small ? small : malloc(len);
   if (!upper) xb_gc_fatal("out of memory");

@@ -15,6 +15,13 @@ STATIC FUNCTION DefError( oError )
    IF oError:genCode == EG_ZERODIV .AND. oError:canSubstitute
       RETURN 0
    ENDIF
+   // A table another program (or area) uses in a way that excludes this opening, and an append that cannot lock its
+   // new record: NetErr() tells, and the operation does nothing.
+   IF ( ( oError:genCode == EG_OPEN .AND. oError:osCode == 32 ) .OR. oError:genCode == EG_APPENDLOCK ) .AND. ;
+      oError:canDefault
+      NetErr( .T. )
+      RETURN .F.
+   ENDIF
    OutErr( Chr( 10 ) + ErrorMessage( oError ) )
    DO WHILE !Empty( ProcName( n ) )
       OutErr( Chr( 10 ) + "Called from " + ProcName( n ) + "(" + LTrim( Str( ProcLine( n ) ) ) + ")  " )

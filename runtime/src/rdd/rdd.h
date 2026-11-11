@@ -21,6 +21,11 @@ typedef struct xb_field_info {
 typedef struct xb_area xb_area;
 typedef struct xb_order xb_order;
 
+/* The file protocol of shared tables, memos and indexes (docs/rdd.md): record n's lock is the byte XB_DB_LOCK + n,
+ * the file lock the XB_DB_LOCK bytes after XB_DB_LOCK, and XB_DB_LOCK itself a table's append lock and an index's
+ * read and write lock. */
+#define XB_DB_LOCK 1000000000u
+
 /* ordCondSet()'s settings for the next order made in an area: the condition (block and text), WHILE, the EVAL block
  * and its interval (roots), the record to start at, NEXT, RECORD (0: none), REST, DESCENDING, ADDITIVE and
  * USECURRENT. */
@@ -52,8 +57,9 @@ typedef struct xb_rdd {
   int (*check)(xb_field_info *fields, uint32_t count);
   /* Creates the table (`count` fields, checked), overwriting a file of the name. */
   int (*create)(const char *path, const xb_field_info *fields, uint32_t count, int32_t *err);
-  /* Opens the table into `a` (its state, fields and field count). */
-  int (*open)(xb_area *a, const char *path, int readonly, xb_open_failure *why);
+  /* Opens the table into `a` (its state, fields and field count), `exclusive` or shared with other users (a sharing
+   * they do not allow: 32), with its memo file. */
+  int (*open)(xb_area *a, const char *path, int readonly, int exclusive, xb_open_failure *why);
   /* Writes what is pending and frees the state. */
   int (*close)(xb_area *a, int32_t *err);
   uint32_t (*lastrec)(xb_area *a);
@@ -61,8 +67,12 @@ typedef struct xb_rdd {
   int (*go)(xb_area *a, uint32_t recno, int32_t *err);
   /* Writes the current record when it changed; with `header`, the header too when the table changed (COMMIT). */
   int (*flush)(xb_area *a, int header, int32_t *err);
-  /* Adds a blank record after the last and makes it current. */
-  int (*append)(xb_area *a, int32_t *err);
+  /* Adds a blank record after the last and makes it current (its number in `recno`); shared, it is written at once
+   * and locked (unless the file is). */
+  int (*append)(xb_area *a, uint32_t *recno, int32_t *err);
+  /* Takes (`on`) or releases record `recno`'s lock, 0 the file's, not waiting: held by another user, 0 with 33. An
+   * exclusive table's locks cost nothing (always 1). */
+  int (*lock)(xb_area *a, uint32_t recno, int on, int32_t *err);
   int (*get)(xb_area *a, uint32_t field, xb_item *r, int32_t *err);
   int (*put)(xb_area *a, uint32_t field, const xb_item *v, int32_t *err);
   /* The bytes of a field in the current record, as stored (`len` of them; after load). */
@@ -90,6 +100,10 @@ struct xb_area {
   uint32_t recno;
   int bof, eof, found;
   int readonly;             /* opened READONLY: writes are "Write not allowed" */
+  int shared;               /* opened shared: writes need the record's or the file's lock */
+  uint32_t *locks;          /* shared: the records this area locked, in the order it locked them (malloc'ed) */
+  uint32_t nlocks, lockCap;
+  int flocked;              /* shared: the file lock is held */
   uint32_t pins;            /* code that runs blocks over the area (xb_area_pin) */
   int closed;               /* closed while pinned: no driver state, freed by the last unpin */
   uint32_t generation;      /* a different number for each table opened: field caches compare it */
@@ -123,7 +137,7 @@ uint32_t xb_area_free(xb_ctx *ctx);
  * one is DBCMD/1010, one another area has, or a letter that names an area (A to K, M), DBCMD/1011; the table is then
  * closed again. Returns 1, or 0 after the error (raised). */
 int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, const char *alias, size_t aliasLen,
-                 int readonly);
+                 int readonly, int exclusive);
 /* Writes what is pending and closes the table of area `n`, which is free before a close error is raised. */
 void xb_area_close(xb_ctx *ctx, uint32_t n);
 void xb_area_close_all(xb_ctx *ctx);
@@ -133,8 +147,24 @@ void xb_area_close_all(xb_ctx *ctx);
 void xb_area_pin(xb_area *a);
 void xb_area_unpin(xb_area *a);
 
-/* Whether the table can be written; "Write not allowed" (raised) when it was opened READONLY. */
+/* Whether the table can be written; "Write not allowed" (raised) when it was opened READONLY. Whether the current
+ * record can be changed: shared, it needs its lock or the file's ("Lock required", DBFNTX/1022). Whether the table
+ * is exclusive, as PACK, ZAP and REINDEX need ("Exclusive required", DBFNTX/1023). */
 int xb_area_writable(xb_ctx *ctx, xb_area *a);
+int xb_area_record_writable(xb_ctx *ctx, xb_area *a);
+int xb_area_exclusive(xb_ctx *ctx, xb_area *a);
+
+/* Locks of a shared table (docs/rdd.md; an exclusive one's cost nothing and are always had): record `recno`'s (0: the
+ * file's, which releases the record locks first); `add` keeps the other record locks (dbRLock()), else they go
+ * (RLock()). With the file lock held every lock is had. 1 when had, 0 when another user holds it (or after an
+ * error, raised). A change of the current record is written before any lock goes. */
+int xb_area_lock(xb_ctx *ctx, xb_area *a, uint32_t recno, int add);
+/* Releases record `recno`'s lock, or with 0 every lock of the area; its record locks. */
+int xb_area_unlock(xb_ctx *ctx, xb_area *a, uint32_t recno);
+int xb_area_unlock_records(xb_ctx *ctx, xb_area *a);
+/* APPEND BLANK: a new blank record, current; shared, the area's record locks go (unless not `release`) and the new
+ * record is locked (when that cannot be: DBFNTX/1024, which NetErr() reports under the default error handler). */
+int xb_area_append(xb_ctx *ctx, xb_area *a, int release);
 
 /* The current record is about to change (`fresh`: it is a new one): its keys now, for the orders (rdd/order.c);
  * the change is done: entries move where keys changed. Before the driver writes the record. 0 after an error

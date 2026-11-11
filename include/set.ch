@@ -14,6 +14,7 @@
 #define _SET_DECIMALS   3
 #define _SET_DATEFORMAT 4
 #define _SET_EPOCH      5
+#define _SET_EXCLUSIVE  8
 #define _SET_SOFTSEEK   9
 #define _SET_UNIQUE     10
 #define _SET_DELETED    11

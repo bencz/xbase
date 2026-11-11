@@ -611,7 +611,9 @@ error 9003: Too many recursive error handler calls`). In a `FOR` test, a substit
 A context starts with no error block. The program's startup calls `ErrorSys()` by name after the `STATIC`
 initializations and before the `INIT` procedures ([Program startup](#program-startup)): the runtime's, in xBase
 (`rtl/errorsys.prg`), unless the program defines its own. It installs `{| oError | DefError( oError ) }`: a division by
-zero gives 0 (as Clipper's default handler does); any other error prints
+zero gives 0 (as Clipper's default handler does); an opening refused for the file's sharing (`EG_OPEN` with system
+code 32) and an append that cannot lock its record (`EG_APPENDLOCK`), when they allow the default, set `NetErr()` and
+do nothing, as in Clipper ([rdd.md](rdd.md#sharing-locks-and-concurrency)); any other error prints
 `Error <subsystem>/<subcode>  <description>: <operation>` (the file name instead of the operation when there is one,
 then ` (DOS Error <osCode>)` when there is a system error code; `Warning` for a severity below `ES_ERROR`), then a line
 `Called from NAME(line)  ` for each level of the call stack (see [Frames](#frames); the handler's own frames are
@@ -931,15 +933,19 @@ leaves it as it is.
 The runtime reaches files through the platform layer (`platform/platform.h`): files are opened with an `FOpen()` mode
 (`xb_platform_file_open`), created (`xb_platform_file_create`, open for reading and writing, with `FCreate()`'s
 attributes), read, written (also at a position, in one call: `xb_platform_file_read_at`, `_write_at`, which tables and
-indexes use), moved in (`xb_platform_file_seek`) and closed on the system's handle as an integer, deleted and renamed;
-the layer also tells a file's entry (`xb_platform_file_info`), lists a directory (`xb_platform_dir_open`, `_next`,
-`_close`: name, size, attributes, time of last change in local time), whether names differ by letter case, the current
-directory, the free space of a drive and an environment variable (for `GetEnv()` only). Paths are UTF-8 (UTF-16 on
-Windows). A failure gives the code `FError()` reports: a DOS error number (2 file not found, 3 path not found, 5 access
-denied, 25 seek error, ...), which Windows reports itself and the POSIX build translates `errno` values to (31, general
-failure, for those without one). `xb_platform_path_separator` tells the characters that separate directories (`/`; also
-`\` and `:` on Windows). Binary fields of the file formats go through the little-endian helpers of `core/bytes.h`.
-`SAVE` and `RESTORE` ([Memory variables](#memory-variables)) use this layer too.
+indexes use), moved in (`xb_platform_file_seek`) and closed on the system's handle as an integer, deleted and renamed.
+Tables, memos and indexes also take a sharing (`xb_platform_file_share`: `flock` on POSIX, the share mode at opening on
+Windows), byte-range locks (`xb_platform_file_lock`: `fcntl`, `LockFileEx`) and the file's identity
+(`xb_platform_file_id`), through the registry of shared files ([rdd.md](rdd.md#inside-the-process)); a file can be
+opened without being emptied, created when missing (`xb_platform_file_open_always`). The layer also tells a file's entry
+(`xb_platform_file_info`), lists a directory (`xb_platform_dir_open`, `_next`, `_close`: name, size, attributes, time of
+last change in local time), whether names differ by letter case, the current directory, the free space of a drive and an
+environment variable (for `GetEnv()` only). Paths are UTF-8 (UTF-16 on Windows). A failure gives the code `FError()`
+reports: a DOS error number (2 file not found, 3 path not found, 5 access denied, 25 seek error, ...), which Windows
+reports itself and the POSIX build translates `errno` values to (31, general failure, for those without one).
+`xb_platform_path_separator` tells the characters that separate directories (`/`; also `\` and `:` on Windows). Binary
+fields of the file formats go through the little-endian helpers of `core/bytes.h`. `SAVE` and `RESTORE` ([Memory
+variables](#memory-variables)) use this layer too.
 
 - `include/fileio.ch` (`FO_*` modes, `FS_*` origins, `FC_*` attributes, `F_ERROR`) is included by the runtime's C as
   well, as `set.ch` is; `include/directry.ch` names the positions of a `Directory()` entry.

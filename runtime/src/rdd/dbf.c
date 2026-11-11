@@ -35,7 +35,10 @@
 #define DBF_AHEAD 65536          /* bytes of records read at once when records are read in order */
 
 typedef struct dbf {
-  xb_file f;
+  xb_shared *s;
+  xb_file f;               /* s's handle */
+  int shared;              /* opened shared: the count and records are read again, the header written on append */
+  int readonly;            /* shared READONLY: it writes nothing, its locks are had without the OS */
   uint32_t count;          /* records */
   uint32_t headerLen, recordLen;
   unsigned char header[DBF_HEADER];
@@ -99,10 +102,10 @@ static char *memo_path(const char *path, int tableCase) {
  * The name tried first in `*tried` (malloc'ed) when it fails. */
 static int open_memo(dbf *d, const char *path, int readonly, int32_t *err, char **tried) {
   *tried = memo_path(path, 0);
-  if (xb_dbt_open(&d->memo, *tried, readonly, err)) return 1;
+  if (xb_dbt_open(&d->memo, *tried, readonly, !d->shared, err)) return 1;
   char *other = memo_path(path, 1);
   int32_t otherErr = 0;
-  int ok = *err == 2 && strcmp(other, *tried) != 0 && xb_dbt_open(&d->memo, other, readonly, &otherErr);
+  int ok = *err == 2 && strcmp(other, *tried) != 0 && xb_dbt_open(&d->memo, other, readonly, !d->shared, &otherErr);
   free(other);
   return ok;
 }
@@ -153,12 +156,12 @@ static int dbf_create(const char *path, const xb_field_info *fields, uint32_t co
   xb_put_le16(h + 10, (uint16_t)recordLen);
   h[headerLen - 2] = DBF_FIELDS_END;
   h[headerLen] = DBF_EOF;
-  xb_file f;
+  xb_shared *s;
   int32_t closeErr = 0;
-  int ok = xb_platform_file_create(path, FC_NORMAL, &f, err);
+  int ok = xb_shared_open(path, 0, 1, 1, &s, err);
   if (ok) {
-    ok = xb_platform_file_write(f, h, headerLen + 1, err);
-    if (!xb_platform_file_close(f, &closeErr) && ok) {
+    ok = xb_platform_file_write_at(xb_shared_handle(s), 0, h, headerLen + 1, err);
+    if (!xb_shared_close(s, &closeErr) && ok) {
       *err = closeErr;
       ok = 0;
     }
@@ -172,14 +175,17 @@ static int dbf_create(const char *path, const xb_field_info *fields, uint32_t co
   return ok;
 }
 
-static int dbf_open(xb_area *a, const char *path, int readonly, xb_open_failure *why) {
+static int dbf_open(xb_area *a, const char *path, int readonly, int exclusive, xb_open_failure *why) {
   int32_t *err = &why->oscode;
   dbf *d = calloc(1, sizeof *d);
   if (!d) xb_gc_fatal("out of memory");
-  if (!xb_platform_file_open(path, readonly ? FO_READ : FO_READWRITE, &d->f, err)) {
+  if (!xb_shared_open(path, readonly, exclusive, 0, &d->s, err)) {
     free(d);
     return 0;
   }
+  d->f = xb_shared_handle(d->s);
+  d->shared = !exclusive;
+  d->readonly = readonly;
   unsigned char *h = NULL;
   xb_field_info *fields = NULL;
   uint32_t n = 0;
@@ -238,7 +244,7 @@ fail:
   free(h);
   free(fields);
   int32_t ignored;
-  xb_platform_file_close(d->f, &ignored);
+  xb_shared_close(d->s, &ignored);
   free(d);
   return 0;
 }
@@ -254,20 +260,21 @@ static int write_header(dbf *d, int32_t *err) {
 static int dbf_flush(xb_area *a, int header, int32_t *err) {
   dbf *d = state(a);
   if (d->dirty) {
-    size_t n = d->recordLen + (d->recno == d->count ? 1u : 0u); /* the last record: the end mark after it */
+    /* The last record: the end mark after it; shared, another program's record may follow it (append wrote it). */
+    size_t n = d->recordLen + (d->recno == d->count && !d->shared ? 1u : 0u);
     if (!xb_platform_file_write_at(d->f, record_pos(d, d->recno), d->record, n, err)) return 0;
     if (d->recno - d->aheadFirst < d->aheadCount) /* the copy read ahead too */
       memcpy(d->ahead + (size_t)(d->recno - d->aheadFirst) * d->recordLen, d->record, d->recordLen);
     d->dirty = 0;
   }
-  return !header || !d->changed || write_header(d, err);
+  return !header || !d->changed || d->shared || write_header(d, err); /* shared: only append writes it */
 }
 
 static int dbf_close(xb_area *a, int32_t *err) {
   dbf *d = state(a);
   int ok = dbf_flush(a, 1, err);
   int32_t closeErr = 0;
-  if (!xb_platform_file_close(d->f, &closeErr) && ok) {
+  if (!xb_shared_close(d->s, &closeErr) && ok) {
     *err = closeErr;
     ok = 0;
   }
@@ -284,17 +291,33 @@ static int dbf_close(xb_area *a, int32_t *err) {
   return ok;
 }
 
-static uint32_t dbf_lastrec(xb_area *a) { return state(a)->count; }
+/* Shared: the record count from the file's size, which other programs' appends make grow before the header says
+ * so. 0 when the size cannot be had (the count stays). */
+static int count_again(dbf *d, int32_t *err) {
+  int64_t size = xb_platform_file_seek(d->f, 0, FS_END, err);
+  if (size < 0) return 0;
+  if (size < (int64_t)d->headerLen) return 1;
+  int64_t n = (size - d->headerLen) / d->recordLen;
+  d->count = n > UINT32_MAX ? UINT32_MAX : (uint32_t)n;
+  return 1;
+}
+
+static uint32_t dbf_lastrec(xb_area *a) {
+  dbf *d = state(a);
+  int32_t ignored;
+  if (d->shared) count_again(d, &ignored);
+  return d->count;
+}
 
 /* Reads record `recno` into the record buffer: from the records read ahead, or with the ones after it when the
- * records are read in order. */
-static int read_record(dbf *d, uint32_t recno, int32_t *err) {
-  if (recno - d->aheadFirst < d->aheadCount) {
+ * records are read in order, when `ahead` allows (a shared table: under the file lock only). */
+static int read_record(dbf *d, uint32_t recno, int ahead, int32_t *err) {
+  if (ahead && recno - d->aheadFirst < d->aheadCount) {
     memcpy(d->record, d->ahead + (size_t)(recno - d->aheadFirst) * d->recordLen, d->recordLen);
     return 1;
   }
   uint32_t n = DBF_AHEAD / d->recordLen;
-  if (recno != d->lastRead + 1 || n < 2)
+  if (recno != d->lastRead + 1 || n < 2 || !ahead)
     return xb_file_read_at(d->f, record_pos(d, recno), d->record, d->recordLen, err);
   if (n > d->count - recno + 1) n = d->count - recno + 1;
   if (!d->ahead && !(d->ahead = malloc(DBF_AHEAD))) xb_gc_fatal("out of memory");
@@ -311,7 +334,7 @@ static int dbf_go(xb_area *a, uint32_t recno, int32_t *err) {
   XB_UNUSED(err);
   dbf *d = state(a);
   if (recno >= 1 && recno <= d->count) {
-    if (recno != d->recno) d->loaded = 0;
+    if (recno != d->recno || d->shared) d->loaded = 0;
     d->recno = recno;
     return 1;
   }
@@ -324,7 +347,7 @@ static int dbf_go(xb_area *a, uint32_t recno, int32_t *err) {
 static int dbf_load(xb_area *a, int32_t *err) {
   dbf *d = state(a);
   if (d->loaded) return 1;
-  if (!read_record(d, d->recno, err)) { /* the blank record after the last instead */
+  if (!read_record(d, d->recno, !d->shared || a->flocked, err)) { /* the blank record after the last instead */
     d->recno = d->count + 1;
     memset(d->record, ' ', d->recordLen);
     d->loaded = 1;
@@ -335,13 +358,65 @@ static int dbf_load(xb_area *a, int32_t *err) {
   return 1;
 }
 
-static int dbf_append(xb_area *a, int32_t *err) {
+/* Shared: under the append lock, the record written at once after the last one in the file now, locked (unless the
+ * file is), and the header with the new count. */
+static int append_shared(dbf *d, int flocked, int32_t *err) {
+  if (!xb_shared_lock(d->s, XB_DB_LOCK, 1, XB_LOCK_WRITE, 1, err)) return 0;
+  int ok = count_again(d, err);
+  uint32_t recno = d->count + 1;
+  int locked = !flocked;
+  if (ok && recno == 0) { /* no record number left */
+    *err = XB_FERR_FAILURE;
+    ok = 0;
+  }
+  ok = ok && (!locked || xb_shared_lock(d->s, (uint64_t)XB_DB_LOCK + recno, 1, XB_LOCK_WRITE, 0, err));
+  if (ok) {
+    memset(d->record, ' ', d->recordLen);
+    d->record[d->recordLen] = DBF_EOF;
+    ok = xb_platform_file_write_at(d->f, record_pos(d, recno), d->record, d->recordLen + 1u, err);
+    if (ok) {
+      d->count = recno;
+      ok = write_header(d, err);
+    }
+    int32_t ignored;
+    if (!ok && locked) xb_shared_unlock(d->s, (uint64_t)XB_DB_LOCK + recno, 1, &ignored);
+  }
+  int32_t unlockErr = 0;
+  if (!xb_shared_unlock(d->s, XB_DB_LOCK, 1, &unlockErr) && ok) {
+    *err = unlockErr;
+    ok = 0;
+  }
+  if (ok) d->recno = recno;
+  return ok;
+}
+
+static int dbf_append(xb_area *a, uint32_t *recno, int32_t *err) {
   dbf *d = state(a);
   if (!dbf_flush(a, 0, err)) return 0;
-  d->recno = ++d->count;
-  memset(d->record, ' ', d->recordLen);
-  d->loaded = d->dirty = d->changed = 1;
+  if (d->shared) {
+    if (!append_shared(d, a->flocked, err)) return 0;
+    d->loaded = 1;
+  } else {
+    d->recno = ++d->count;
+    memset(d->record, ' ', d->recordLen);
+    d->loaded = d->dirty = d->changed = 1;
+  }
+  *recno = d->recno;
   return 1;
+}
+
+/* Record `recno`'s lock (0: the file's), taken (`on`) or released; held by nobody else: 1, else 0 with 33. A lock
+ * had on the current record (or the file) makes it read again: what was read before may be another program's past.
+ * Records read ahead are dropped when the file lock comes or goes. */
+static int dbf_lock(xb_area *a, uint32_t recno, int on, int32_t *err) {
+  dbf *d = state(a);
+  if (!d->shared || d->readonly) return 1;
+  uint64_t pos = (uint64_t)XB_DB_LOCK + (recno ? recno : 1u), len = recno ? 1 : XB_DB_LOCK;
+  if (!recno) d->aheadCount = 0;
+  if (!on) return xb_shared_unlock(d->s, pos, len, err);
+  int ok = xb_shared_lock(d->s, pos, len, XB_LOCK_WRITE, 0, err);
+  if (ok && (!recno || recno == d->recno) && d->recno <= d->count) d->loaded = 0;
+  return ok;
 }
 
 /* The block number a memo field holds (digits after blanks), 0 for none. */
@@ -567,6 +642,7 @@ const xb_rdd xb_rdd_dbf = {
     .go = dbf_go,
     .flush = dbf_flush,
     .append = dbf_append,
+    .lock = dbf_lock,
     .get = dbf_get,
     .put = dbf_put,
     .field_bytes = dbf_field_bytes,

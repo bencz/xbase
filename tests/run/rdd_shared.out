@@ -1,0 +1,46 @@
+
+xa rlock: .T. xb rlock same: .F. xb rlock 2: .T.
+xa flock: .F. xa list:          0
+xb flock after: .T. .F. .F.
+xa rlock 1: .T.
+xb sees before unlock: NIL [          ]
+xb sees after unlock: [one       ]        600
+xb lastrec:          2
+xa append:          3          3          3 .F.
+xb rlock 3: .F.          3
+exclusive while shared: .T. .F. 
+exclusive alone: .F. .T. .T.          0
+shared while exclusive: .T. .F.
+set exclusive off: .F. .T. .F.
+excl rlock: .T. .T.          0 .T.          0
+list:          0
+rlock 2: .T. .T.          2          2          1
+rlock again: .T.          1
+after runlock 2:          0
+eof rlock:          3 .T.          1
+rlock 99: .T.          2
+flock: .T.          0 .T. .T.          0
+--replace with flock
+--unlock
+--pack
+ERR DBFNTX         37       1023 Exclusive required [] .F.
+ERR DBFNTX         37       1023 Exclusive required [] .F.
+--append
+append:          3          1 .F.
+--close
+ib seek before unlock: .F.
+ib seek after unlock: .T.         10         50         50
+ib top: 0001         43
+ib skip after other append: 0005         15
+ib top now: 0000         51         51         51
+reindex shared:
+ERR DBFNTX         37       1023 Exclusive required [] .F.
+xa reads: o1  p1 
+no lost update: [A  ][B  ]
+after the file lock went: new
+dbRLock(): .T.          1 .T.          1 .T. .T.          3
+openings while another area keeps it open:       3001
+readonly shared: .T. .T.          0
+skip after the key moved:         11 .T.
+skip back after the key moved:         10
+ordKeyNo after the key moved:          9

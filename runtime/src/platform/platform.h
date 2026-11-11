@@ -77,6 +77,10 @@ typedef intptr_t xb_file;
  * ignore). */
 int xb_platform_file_open(const char *path, int32_t mode, xb_file *f, int32_t *err);
 
+/* Opens a file for reading and writing with an FOpen() sharing (as xb_platform_file_open), creating it, empty, when
+ * there is none; a file that exists is not emptied. */
+int xb_platform_file_open_always(const char *path, int32_t mode, xb_file *f, int32_t *err);
+
 /* Creates a file, or empties one that exists, open for reading and writing;
  * `attr` may make it read-only, hidden or system (XB_FA_*; POSIX keeps the
  * read-only one only). */
@@ -102,6 +106,39 @@ int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err);
 
 /* Closes the file: 1 when nothing failed. */
 int xb_platform_file_close(xb_file f, int32_t *err);
+
+/* Sharing and locks of the files of tables, memos and indexes (the database layer's protocol, docs/rdd.md).
+ *
+ * xb_platform_file_share: the file's sharing, taken after opening: XB_LOCK_WRITE exclusive, XB_LOCK_READ shared,
+ * XB_LOCK_NONE given up; not waiting; refused: 32. POSIX takes a whole-file lock of its own kind for it (`flock`,
+ * which belongs to the handle); on Windows the sharing is the share mode the file was opened with (FO_EXCLUSIVE or
+ * FO_DENYNONE) and this does nothing.
+ *
+ * xb_platform_file_lock: a byte-range lock of `len` bytes at `pos`: XB_LOCK_READ (others may read-lock too),
+ * XB_LOCK_WRITE, or XB_LOCK_NONE to release; never waiting: another process's conflicting lock fails at once with 33.
+ * On POSIX systems the locks belong to the process: taking a range it holds changes its kind, releasing part of one
+ * releases that part, and closing any handle of the file releases them all. On Windows they belong to the handle, and a
+ * release names exactly a range locked before (xb_platform_locks_per_handle). */
+#define XB_LOCK_NONE 0
+#define XB_LOCK_READ 1
+#define XB_LOCK_WRITE 2
+#define XB_FERR_LOCKED 33
+int xb_platform_file_share(xb_file f, int kind, int32_t *err);
+int xb_platform_file_lock(xb_file f, uint64_t pos, uint64_t len, int kind, int32_t *err);
+/* Whether locks belong to a handle (Windows) rather than to the process (POSIX). */
+int xb_platform_locks_per_handle(void);
+
+/* What tells one file from another whatever the path that names it: the device and inode on POSIX systems, the
+ * volume serial number and the file index on Windows. */
+typedef struct xb_file_id {
+  uint64_t volume, index;
+} xb_file_id;
+int xb_platform_file_id(xb_file f, xb_file_id *id, int32_t *err);
+/* The same for the file a path names, without opening it for reading or writing. */
+int xb_platform_path_id(const char *path, xb_file_id *id, int32_t *err);
+
+/* Lets other threads and processes run for about `ms` milliseconds (0: gives up the rest of the time slice). */
+void xb_platform_sleep_ms(uint32_t ms);
 
 /* Deletes a file (not a directory: 5). */
 int xb_platform_file_erase(const char *path, int32_t *err);

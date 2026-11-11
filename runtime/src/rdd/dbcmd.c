@@ -45,7 +45,7 @@ static const xb_rdd *driver_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv,
  * even when the table cannot be opened) or the current one, under `alias` (NULL or empty: the file name without
  * directories and extension). Returns 1, or 0 after the error (raised). */
 static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str *name, const xb_str *alias,
-                       int readonly) {
+                       int readonly, int exclusive) {
   if (newArea) ctx->areaCurrent = xb_area_free(ctx);
   const char *aliasText;
   size_t aliasLen;
@@ -56,12 +56,13 @@ static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str 
     default_alias(name, &aliasText, &aliasLen);
   }
   char *path = xb_file_path_with_ext(name->data, name->len, ".dbf");
-  int ok = xb_area_open(ctx, ctx->areaCurrent, rdd, path, aliasText, aliasLen, readonly);
+  int ok = xb_area_open(ctx, ctx->areaCurrent, rdd, path, aliasText, aliasLen, readonly, exclusive);
   free(path);
   return ok;
 }
 
-/* dbUseArea( [lNewArea], [cDriver], cName, [cAlias], [lShared], [lReadOnly] ). */
+/* dbUseArea( [lNewArea], [cDriver], cName, [cAlias], [lShared], [lReadOnly] ): lShared defaults to SET EXCLUSIVE
+ * OFF. */
 void xbf_DBUSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   const xb_str *name = xb_db_str_arg(argc, argv, 2);
@@ -72,8 +73,9 @@ void xbf_DBUSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, NULL, 1005, "DBUSEAREA", argc, argv);
     return;
   }
+  int shared = argc > 4 && argv[4].type == XB_T_LOGICAL ? argv[4].v.l != 0 : ctx->set_shared;
   open_table(ctx, xb_db_logical_arg(argc, argv, 0), rdd, name, xb_db_str_arg(argc, argv, 3),
-             xb_db_logical_arg(argc, argv, 5));
+             xb_db_logical_arg(argc, argv, 5), !shared);
 }
 
 void xbf_DBCLOSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -305,7 +307,7 @@ void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   free(fields);
   uint32_t before = ctx->areaCurrent;
   if (argc > 3 && argv[3].type == XB_T_LOGICAL &&
-      !open_table(ctx, argv[3].v.l, rdd, name, xb_db_str_arg(argc, argv, 4), 0))
+      !open_table(ctx, argv[3].v.l, rdd, name, xb_db_str_arg(argc, argv, 4), 0, !ctx->set_shared))
     ctx->areaCurrent = before; /* unlike dbUseArea(), the area current before stays */
 }
 
@@ -315,26 +317,14 @@ void xbf_DBAPPEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argv);
   xb_area *a = xb_db_used(ctx, "DBAPPEND");
   if (!a || !xb_area_writable(ctx, a)) return;
-  int32_t err = 0;
   ctx->netErr = 0;
   a->found = 0;
-  xb_area_pin(a);
-  int ok = xb_area_cold(ctx, a) && !a->closed;
-  if (ok && !a->rdd->append(a, &err)) {
-    xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
-    ok = 0;
-  }
-  if (ok) {
-    a->recno = a->rdd->lastrec(a);
-    a->bof = a->eof = 0;
-    xb_area_hot(ctx, a, 1); /* a new record: its keys go in when it is written */
-  }
-  xb_area_unpin(a);
+  xb_area_append(ctx, a, !(argc > 0 && argv[0].type == XB_T_LOGICAL && !argv[0].v.l));
 }
 
 static void mark_deleted(xb_ctx *ctx, const char *fn, int deleted) {
   xb_area *a = xb_db_used(ctx, fn);
-  if (a && xb_area_writable(ctx, a) && !a->eof && xb_area_hot(ctx, a, 0) && !a->closed && xb_area_load(ctx, a) &&
+  if (a && xb_area_record_writable(ctx, a) && !a->eof && xb_area_hot(ctx, a, 0) && !a->closed && xb_area_load(ctx, a) &&
       !a->closed)
     a->rdd->set_deleted(a, deleted);
 }
@@ -361,7 +351,7 @@ void xbf_DELETED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* __dbPack(), __dbZap(): the deleted records, or all of them, go; then the first record. */
 static void shrink(xb_ctx *ctx, const char *fn, int all) {
   xb_area *a = xb_db_used(ctx, fn);
-  if (!a || !xb_area_writable(ctx, a)) return;
+  if (!a || !xb_area_writable(ctx, a) || !xb_area_exclusive(ctx, a)) return;
   int32_t err = 0;
   xb_area_pin(a);
   int cold = xb_area_cold(ctx, a) && !a->closed;
@@ -569,6 +559,76 @@ void xbf_DBEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_area_pin(a);
   scope_run(ctx, a, argc, argv, 1, eval_block, &argv[0]);
   xb_area_unpin(a);
+}
+
+/* RLock() (Lock()): the current record's lock, the area's other record locks released; dbRLock( [nRecord] ): a
+ * record's lock with the others kept (none given: as RLock()); FLock(): the file lock. .T. when had (an exclusive
+ * table: always). */
+void xbf_RLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_set_logical(ret, 0);
+  xb_area *a = xb_db_used(ctx, "RLOCK");
+  if (a) xb_set_logical(ret, xb_area_lock(ctx, a, a->recno, 0));
+}
+
+void xbf_LOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf_RLOCK(ctx, ret, argc, argv); }
+
+void xbf_DBRLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_logical(ret, 0);
+  xb_area *a = xb_db_used(ctx, "DBRLOCK");
+  if (!a) return;
+  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  int given = n > 0 && n <= UINT32_MAX;
+  xb_set_logical(ret, xb_area_lock(ctx, a, given ? (uint32_t)n : a->recno, given)); /* none given: as RLock() */
+}
+
+void xbf_FLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_set_logical(ret, 0);
+  xb_area *a = xb_db_used(ctx, "FLOCK");
+  if (a) xb_set_logical(ret, xb_area_lock(ctx, a, 0, 0));
+}
+
+/* dbRUnlock( [nRecord] ): releases a record's lock (none given: every record lock); dbUnlock() (UNLOCK): every lock
+ * of the area; dbUnlockAll() (UNLOCK ALL): every lock of every area. A change of the current record is written
+ * first. */
+void xbf_DBRUNLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  xb_area *a = xb_db_used(ctx, "DBRUNLOCK");
+  if (!a) return;
+  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  if (n > 0 && n <= UINT32_MAX) xb_area_unlock(ctx, a, (uint32_t)n);
+  else if (n == 0) xb_area_unlock_records(ctx, a);
+}
+
+void xbf_DBUNLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_area *a = xb_db_used(ctx, "DBUNLOCK");
+  if (a) xb_area_unlock(ctx, a, 0);
+}
+
+void xbf_DBUNLOCKALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  for (uint32_t n = 1; n <= ctx->areaCap; ++n)
+    if (xb_area_at(ctx, n)) xb_area_unlock(ctx, xb_area_at(ctx, n), 0);
+}
+
+/* dbRLockList(): the record locks the area holds, in the order they were taken (none for an exclusive table, or
+ * under the file lock). */
+void xbf_DBRLOCKLIST(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  const xb_area *a = xb_area_current(ctx);
+  uint32_t n = a ? a->nlocks : 0;
+  xb_array *list = xb_array_alloc(n);
+  xb_set_array(ret, list);
+  for (uint32_t k = 0; k < n; ++k) xb_set_int(&list->items[k], a->locks[k]);
 }
 
 /* NetErr( [lNew] ): whether the last USE or APPEND failed for another user's lock; lNew sets it. */

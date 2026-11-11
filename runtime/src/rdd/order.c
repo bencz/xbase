@@ -391,7 +391,7 @@ static int open_file(xb_ctx *ctx, xb_area *a, xb_order *o) {
   xb_ntx_info info;
   for (uint16_t tries = 1;; ++tries) {
     int32_t err = 0;
-    if (xb_ntx_open(o->bag, a->readonly, &o->ntx, &info, &err)) break;
+    if (xb_ntx_open(o->bag, a->readonly, !a->shared, &o->ntx, &info, &err)) break;
     if (xb_error_of(ctx, a->rdd->name, EG_OPEN, 1003, "", o->bag, err, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries,
                     NULL) != 2)
       return 0;
@@ -517,10 +517,13 @@ int xb_order_close(xb_ctx *ctx, xb_area *a, xb_order *o) {
  * 1, 0 when there is none after it, -1 after an error (raised). */
 static int sync(xb_ctx *ctx, xb_area *a, xb_order *o, uint32_t *found) {
   *found = a->recno;
-  if (xb_ntx_at(o->ntx, a->recno)) return 1;
+  int at = xb_ntx_at(o->ntx, a->recno);
+  if (at && !a->shared) return 1;
   unsigned char key[XB_NTX_KEY_MAX];
   int in;
   if (!record_key(ctx, a, o, key, &in)) return -1;
+  const unsigned char *k = at ? xb_ntx_key(o->ntx) : NULL; /* shared: another program may have changed the key */
+  if (k && memcmp(k, key, o->info.keyLen) == 0) return 1;
   int32_t err = 0;
   int r = xb_ntx_find(o->ntx, key, a->recno, found, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
@@ -795,8 +798,7 @@ int xb_area_cold(xb_ctx *ctx, xb_area *a) {
     int same = o->oldIn == in && (!in || memcmp(o->old, key, o->info.keyLen) == 0);
     if (same) continue;
     int32_t err = 0;
-    if ((o->oldIn && !xb_ntx_delete(o->ntx, o->old, a->recno, &err)) ||
-        (in && !xb_ntx_insert(o->ntx, key, a->recno, &err))) {
+    if (!xb_ntx_replace(o->ntx, o->oldIn ? o->old : NULL, in ? key : NULL, a->recno, &err)) {
       order_error(ctx, a, o, EG_WRITE, 1011, err);
       ok = 0;
     }

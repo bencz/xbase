@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <time.h>
@@ -139,6 +140,11 @@ int xb_platform_file_open(const char *path, int32_t mode, xb_file *f, int32_t *e
   return 1;
 }
 
+int xb_platform_file_open_always(const char *path, int32_t mode, xb_file *f, int32_t *err) {
+  (void)mode; /* the sharing is xb_platform_file_share's on POSIX systems */
+  return open_as(path, O_RDWR | O_CREAT, 0666, f, err);
+}
+
 int xb_platform_file_create(const char *path, int32_t attr, xb_file *f, int32_t *err) {
   return open_as(path, O_RDWR | O_CREAT | O_TRUNC, attr & XB_FA_READONLY ? 0444 : 0666, f, err);
 }
@@ -195,6 +201,68 @@ int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *er
   off_t pos = lseek((int)f, (off_t)offset, whence[origin]);
   if (pos < 0) *err = errno == EINVAL ? 25 : dos_error(errno);
   return pos;
+}
+
+int xb_platform_file_share(xb_file f, int kind, int32_t *err) {
+  int how = kind == XB_LOCK_WRITE ? LOCK_EX | LOCK_NB : kind == XB_LOCK_READ ? LOCK_SH | LOCK_NB : LOCK_UN;
+  int r;
+  do {
+    r = flock((int)f, how);
+  } while (r != 0 && errno == EINTR);
+  if (r == 0) return 1;
+  *err = errno == EWOULDBLOCK ? 32 : dos_error(errno);
+  return 0;
+}
+
+int xb_platform_file_lock(xb_file f, uint64_t pos, uint64_t len, int kind, int32_t *err) {
+  if ((uint64_t)(off_t)pos != pos || (uint64_t)(off_t)len != len) {
+    *err = 87;
+    return 0;
+  }
+  struct flock l;
+  memset(&l, 0, sizeof l);
+  l.l_type = (short)(kind == XB_LOCK_WRITE ? F_WRLCK : kind == XB_LOCK_READ ? F_RDLCK : F_UNLCK);
+  l.l_whence = SEEK_SET;
+  l.l_start = (off_t)pos;
+  l.l_len = (off_t)len;
+  int r;
+  do {
+    r = fcntl((int)f, F_SETLK, &l);
+  } while (r != 0 && errno == EINTR);
+  if (r == 0) return 1;
+  *err = errno == EACCES || errno == EAGAIN ? XB_FERR_LOCKED : dos_error(errno);
+  return 0;
+}
+
+int xb_platform_locks_per_handle(void) { return 0; }
+
+int xb_platform_file_id(xb_file f, xb_file_id *id, int32_t *err) {
+  struct stat st;
+  if (fstat((int)f, &st) != 0) {
+    *err = dos_error(errno);
+    return 0;
+  }
+  id->volume = (uint64_t)st.st_dev;
+  id->index = (uint64_t)st.st_ino;
+  return 1;
+}
+
+int xb_platform_path_id(const char *path, xb_file_id *id, int32_t *err) {
+  struct stat st;
+  if (stat(path, &st) != 0) {
+    *err = dos_error(errno);
+    return 0;
+  }
+  id->volume = (uint64_t)st.st_dev;
+  id->index = (uint64_t)st.st_ino;
+  return 1;
+}
+
+void xb_platform_sleep_ms(uint32_t ms) {
+  struct timespec t = {(time_t)(ms / 1000), (long)(ms % 1000) * 1000000L};
+  if (ms == 0) t.tv_nsec = 1000; /* the shortest pause the clock gives */
+  while (nanosleep(&t, &t) != 0 && errno == EINTR) {
+  }
 }
 
 int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err) {
