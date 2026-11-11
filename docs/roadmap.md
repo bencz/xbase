@@ -73,8 +73,9 @@ Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 
 1. Files and directories: done ([runtime.md](runtime.md#files)) but the drive functions (`DiskChange`, `DiskName`,
    `IsDisk`) and `FSetDevMod`.
-2. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the
-   Windows console; then `@ ... SAY/GET`, `READ`, `AChoice`, `MemoEdit`, `TBrowse`, `dbEdit`, menus.
+2. The terminal layer ([terminal.md](terminal.md)): screen, cursor, colors and keyboard, with drivers for plain
+   standard output, terminals (xbase's own, not ncurses) and the Windows console; then `@ ... SAY/GET`, `READ`,
+   `AChoice`, `MemoEdit`, `TBrowse`, `dbEdit`, menus.
 3. The RDD layer and the database functions and commands.
 
 The SIx Driver and HiPer-SEEK functions (`sx_*`, `hs_*`, `cfts*`) belong to add-on database drivers; whether xbase

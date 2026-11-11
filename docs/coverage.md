@@ -98,10 +98,10 @@ Other standard headers, each to be provided with the matching runtime support: `
 
 ### Screen, keyboard, mouse and UI (2 of 124 done)
 
-Built on one terminal interface (screen buffer of character and color cells, cursor, keyboard) with
-drivers: plain standard output (pipes, tests, servers; the default when output is not a terminal),
-ncurses (Linux, macOS, BSD) and the Windows console. The driver is chosen by a command-line option or
-at link time, never by an environment variable.
+Built on one terminal interface (screen buffer of character and color cells, cursor, keyboard) with drivers: plain
+standard output (pipes, tests, servers; the default when output is not a terminal), xbase's own terminal driver (Linux,
+macOS, BSD) and the Windows console ([terminal.md](terminal.md), planned). The driver is chosen when the program starts
+or by a runtime switch on the command line, never by an environment variable.
 
 *Accelerator*, *AChoice*, *Alert*, *ApplyDefau*, *Browse*, *ButtnDefCo*, *CheckBox*, *CheckDefCo*, *Col*, *ColorSelect*,
 *ComboDefCo*, *dbEdit*, *DevOut*, *DevOutPict*, *DevPos*, *DispBegin*, *DispBox*, *DispCount*, *DispEnd*, *DispOut*,

@@ -10,6 +10,7 @@ Find the task, read the doc it points to, then the code.
 | Directives, `#command`/`#translate` rules, `std.ch`, tokenization, comments, string literals | [preprocessor.md](preprocessor.md) |
 | Grammar, keywords, name resolution, code generation, object emission, cross-compilation, driver options | [compiler.md](compiler.md) |
 | Values (`xb_item`), frames, calling convention, error propagation, operators, the ABI shared with the compiler | [runtime.md](runtime.md) |
+| The screen, keyboard and mouse: screen model, events, terminal drivers (planned), the native GUI (later) | [terminal.md](terminal.md) |
 | Adding or running tests | [testing.md](testing.md) |
 | Which commands and functions exist, and what to implement next | [coverage.md](coverage.md) |
 

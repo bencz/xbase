@@ -124,6 +124,14 @@ A library is written in xBase and distributed compiled, so that programs include
   register when a library is loaded after the program started.
 - A project file (sources, include directories, libraries) lets `xbc <project>` compile and link a program in one
   step.
+- The libraries xbase itself provides live in `libs/<name>/`, one directory each (its xBase and C sources, its
+  description file, its tests), built by the same mechanism and installed beside the compiler, where `--lib=<name>`
+  finds them. They hold what a program uses only by choice, above all what needs the system's libraries: the Window
+  terminal driver, the native GUI backends (Win32, Cocoa, GTK 4) with their xBase classes ([terminal.md](terminal.md)),
+  and later sockets, regular expressions, JSON, compression. What every program may use without asking and that needs
+  nothing outside the C library stays in the runtime (the screen model, the events and the Stream, Dump, VT and
+  Console terminal drivers). A library adds what it brings when its module registers (a terminal driver registers
+  itself with the terminal layer, so linking the Window driver makes `//TERM:WINDOW` available).
 
 ### Classes
 
