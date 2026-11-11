@@ -1,0 +1,34 @@
+
+compiled: abc  abc  abc  abc           1          3
+assigned: xyz 
+compound:    11
+TQ->( RecNo(), Select() ) =>          1 area          3
+( "TQ" )->NAME => xyz  area          3
+( "TQ" )->( Select() ) =>          1 area          3
+( 1 )->NAME => xyz  area          3
+( "TQ" )->NAME := "w" => w area          3
+TQ->NAME => w    area          3 B A
+( A( "TQ" ) )->N := B( 20 ) =>         20 area          3 A B
+( A( "TQ" ) )->N += B( 5 ) =>         25 area          3 A
+( A( "TQ" ) )->N++ =>    25 area          3 A
+++( A( "TQ" ) )->N =>         27 area          3
+( "TQ" )->N-- =>    27 area          3
+TQ->N =>    26 area          3
+TQ->( TR->( N + Select() ) + N + Select() ) =>        129 area          3
+ERR       1003 Variable does not exist NOPE area          3
+Select() =>          3 area          3
+TQ->( Eval( {|| Select() } ) ) =>          1 area          3
+{| x | TQ->( x + N ) }:Eval( 1 ) =>         27 area          3
+ERR       1002 Alias does not exist XX area          3
+ERR       1002 Alias does not exist XX area          3
+FIELD->TQ->N =>    26 area          3
+ERR       1449 Syntax error & area          3
+type TQ->( N ) N
+type TQ->( NOPE ) U
+type TQ->( Eval( {|| N } ) ) N
+type ( "TQ" )->N N
+type ( "TQ" )->NOPE U
+type ( "XX" )->N U
+type &( "NO" + "PE" ) U
+type TQ->( 1 + "a" ) UE
+type N U

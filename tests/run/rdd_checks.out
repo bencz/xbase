@@ -1,0 +1,9 @@
+
+ERR DBCMD          1       1014 [Argument error] [DBCREATE] [] .F. .F.
+ERR DBCMD          1       1014 [Argument error] [DBCREATE] [] .F. .F.
+created: .F.
+ERR DBCMD         35       2001 [Workarea not in use] [__DBLOCATE] [] .F. .F.
+ERR DBCMD         18       1011 [Alias already in use] [rdd_checks] [] .T. .F.
+areas:          2 .F.
+ERR DBCMD         18       1011 [Alias already in use] [RDD_CHECKS] [] .T. .F.
+areas:          2 .F.

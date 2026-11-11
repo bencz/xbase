@@ -37,6 +37,7 @@ private:
   void markBoxed(Frame &f, uint32_t slot);
   void declare(LocalDecl &d, bool isStatic, Scope &s);
   void declareMemvar(const LocalDecl &d);
+  void declareField(const LocalDecl &d, const std::string &alias);
   void createdMemvar(const LocalDecl &d);
   bool memvarCreated(const std::string &name) const;
   bool constantInit(const Expr &e, unsigned blockDepth) const;
@@ -50,6 +51,7 @@ private:
     // MEMVAR names: memory variables, before any STATIC of an enclosing frame. PRIVATE, PUBLIC and PARAMETERS names
     // are not declarations (the reference keeps resolving them as before), only no longer undeclared.
     std::unordered_set<std::string> memvars, created;
+    std::unordered_map<std::string, std::string> fields; // FIELD names: fields, of the work area of the alias given
     std::vector<bool> *boxed;    // the function's table; null for the module and codeblocks
     BlockExpr *block;            // the codeblock, or null
   };

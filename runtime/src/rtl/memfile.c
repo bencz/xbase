@@ -15,6 +15,8 @@
  * not saved. */
 #include "xbrt_int.h"
 
+#include "core/file.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,20 +43,6 @@ static unsigned char *grow(bytes *b, size_t n) {
   unsigned char *at = b->p + b->len;
   b->len += n;
   return at;
-}
-
-/* The file `name` (NUL-terminated), with `.mem` added when its last component
- * has no extension. Malloc'ed. */
-static char *mem_path(const char *name) {
-  size_t len = strlen(name), start = len;
-  while (start > 0 && !xb_platform_path_separator(name[start - 1])) --start;
-  const char *ext = memchr(name + start, '.', len - start) ? "" : ".mem";
-  size_t extLen = strlen(ext);
-  char *path = malloc(len + extLen + 1);
-  if (!path) xb_gc_fatal("out of memory");
-  memcpy(path, name, len);
-  memcpy(path + len, ext, extLen + 1);
-  return path;
 }
 
 /* A record's header, followed by room for a value of `size` bytes: the type
@@ -134,7 +122,7 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     if (v) put_record(&out, name, len, v);
   }
   *grow(&out, 1) = MEM_END;
-  char *path = mem_path(argv[0].v.s->data);
+  char *path = xb_file_path_with_ext(argv[0].v.s->data, strlen(argv[0].v.s->data), ".mem");
   for (uint16_t tries = 1;; ++tries) {
     xb_file f;
     int32_t err = 0;
@@ -155,14 +143,8 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* Reads `n` bytes, unless the file ends or fails first: whether it read them. */
 static int read_all(xb_file f, unsigned char *buf, size_t n) {
-  while (n > 0) {
-    int32_t err;
-    int64_t got = xb_platform_file_read(f, buf, n, &err);
-    if (got <= 0) return 0;
-    buf += got;
-    n -= (size_t)got;
-  }
-  return 1;
+  int32_t err;
+  return xb_file_read_up_to(f, buf, n, &err) == (int64_t)n;
 }
 
 /* The next record's value in `*v` and its name: 0 at the end of the file (or
@@ -222,7 +204,7 @@ void xbf___MEMRESTORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   int additive = argc > 1 && argv[1].type == XB_T_LOGICAL && argv[1].v.l;
-  char *path = mem_path(argv[0].v.s->data);
+  char *path = xb_file_path_with_ext(argv[0].v.s->data, strlen(argv[0].v.s->data), ".mem");
   xb_file f;
   int opened = 0;
   for (uint16_t tries = 1; !opened; ++tries) {

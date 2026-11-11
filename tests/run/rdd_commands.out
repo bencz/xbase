@@ -1,0 +1,23 @@
+
+empty:          1          0 .T. .T. T1          1 .T.          4        162         25
+append:          1          1 .F. .F. [          ]   0.0   /  /   .F.
+fields: Bob        100.0 Bob                 2 AGE D Bob        100.0
+top:          1 .F. .F. Ann         12.3
+skip -1:          1 .T. .F. Ann       
+skip past:          4 .F. .T. [          ]   0.0
+goto 2:          2 Bob       
+count:          3          4 .T.
+sum:        112.3
+locate: .T.          3
+deleted 3: .T.
+count deleted on:          2
+after recall:          0
+replace all:  24.6
+filter:          2 Bob        AGE > 100
+area 2:          2 .F. Bob       
+areaeval:          2          3          2
+pack:          2          1 Bob       
+struct:          4 NAME L
+closed: .F.           1
+alias: OTHER Bob                 2
+zap:          0 .T.

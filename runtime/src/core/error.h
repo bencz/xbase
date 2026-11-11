@@ -49,6 +49,14 @@ int xb_error_retry(xb_ctx *ctx, int32_t gencode, int32_t subcode, const char *op
 int xb_error_file(xb_ctx *ctx, const char *frame, int32_t gencode, int32_t subcode, const char *filename,
                   int32_t oscode, uint16_t tries);
 
+/* An error of the subsystem `subsystem` (a database driver's, "DBFNTX", or "DBCMD"; NULL: BASE), with what the error
+ * block may do (`flags`), a file name and its FError() code when it concerns a file (else NULL and 0), the arguments,
+ * and the attempt `tries` (from 1) of an error that may be retried. Returns as xb_error_file does: 2 retry, 1 the
+ * default (or the substituted result in `result`), 0 with a request to unwind pending. */
+int xb_error_of(xb_ctx *ctx, const char *subsystem, int32_t gencode, int32_t subcode, const char *operation,
+                const char *filename, int32_t oscode, uint32_t flags, uint32_t argc, const xb_item *args,
+                uint16_t tries, xb_item *result);
+
 /* The argument error of an operator (EG_ARG, may be substituted), with its
  * operands. */
 static inline int xb_arg_error(xb_ctx *ctx, xb_item *result, int32_t subcode, const char *operation, uint32_t argc,

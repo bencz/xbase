@@ -17,6 +17,7 @@ xb_ctx *xb_ctx_new(void) {
   xb_set_nil(&ctx->error_block); /* until ErrorSys() sets one (xb_program_run) */
   xb_set_nil(&ctx->break_value);
   xb_set_nil(&ctx->language);
+  ctx->areaCurrent = 1;
   for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) xb_set_nil(&ctx->macro_cache[i]);
   return ctx;
 }
@@ -28,6 +29,7 @@ void xb_ctx_free(xb_ctx *ctx) {
   free(ctx->memvars);
   free(ctx->privates);
   free(ctx->date_format);
+  free(ctx->areas);
   free(ctx);
 }
 

@@ -3,6 +3,8 @@
  * the program's start function (see xb_program_run in xbrt.h). */
 #include "xbrt_int.h"
 
+#include "rdd/rdd.h"
+
 #include <stdlib.h>
 
 typedef struct xb_module {
@@ -88,9 +90,14 @@ void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
     xb_classes_finalize(ctx);
     ctx->pending = XB_PENDING_NONE;
   }
-  for (const xb_module *m = modules; m; m = m->next)
-    for (uint32_t k = 0; k < m->nexit; ++k) {
+  int stopped = 0;
+  for (const xb_module *m = modules; m && !stopped; m = m->next)
+    for (uint32_t k = 0; k < m->nexit && !stopped; ++k) {
       call(ctx, m->procs[m->ninit + k], 0, argv); /* no arguments; argv stays a valid address */
-      if (unwinding(ctx)) return;
+      stopped = unwinding(ctx);
     }
+  uint32_t requests = ctx->pending; /* the tables are written and closed whatever ended the program */
+  ctx->pending = XB_PENDING_NONE;
+  xb_area_close_all(ctx);
+  ctx->pending = requests;
 }

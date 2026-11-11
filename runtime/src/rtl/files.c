@@ -4,6 +4,8 @@
  * and Directory() are written in xBase over these (rtl/files.prg). */
 #include "xbrt_int.h"
 
+#include "core/file.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -74,18 +76,6 @@ void xbf_FCLOSE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, ok);
 }
 
-/* Reads up to `n` bytes into `buf`, unless the file ends first: the count read, -1 after an error. */
-static int64_t read_up_to(xb_file f, char *buf, size_t n, int32_t *err) {
-  size_t got = 0;
-  while (got < n) {
-    int64_t r = xb_platform_file_read(f, buf + got, n - got, err);
-    if (r < 0) return -1;
-    if (r == 0) break;
-    got += (size_t)r;
-  }
-  return (int64_t)got;
-}
-
 /* FRead( nHandle, @cBuffer, nBytes ): reads nBytes into the first bytes of the buffer, which keeps its length: the
  * count read. Nothing is read without a buffer passed by reference, or for nBytes below 1 or past the buffer's
  * length. */
@@ -109,7 +99,7 @@ void xbf_FREAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (target->type != XB_T_STRING || target->v.s->len != len) return;
   memcpy(buf->data, target->v.s->data, len);
   int32_t err = 0;
-  int64_t got = read_up_to(f, buf->data, (size_t)n, &err);
+  int64_t got = xb_file_read_up_to(f, buf->data, (size_t)n, &err);
   set_error(ctx, got >= 0, err);
   if (got <= 0) return;
   xb_item *var = xb_ref_target(ctx, &argv[1]);

@@ -1,0 +1,20 @@
+
+dbeval:          1 .F.          1
+for: .F.
+while: .F.
+filter: .F. .T.
+filter reopens: .T.          1
+locate: .F. .F.
+located: .T.          1
+ERR DBFNTX       1021 Data width error
+error block closed: .F.
+ERR DBFNTX         39       1025 Write not allowed .F.
+ERR DBFNTX         39       1025 Write not allowed .F.
+ERR DBFNTX         39       1025 Write not allowed .F.
+ERR DBFNTX         39       1025 Write not allowed .F.
+ERR DBFNTX         39       1025 Write not allowed .F.
+ERR DBFNTX         39       1025 Write not allowed .F. no error
+readonly:          2 [    ] .F.
+ERR DBFNTX         21       1001 Open error .T.
+ERR DBFNTX         21       1001 Open error .T.
+corrupt: .F.

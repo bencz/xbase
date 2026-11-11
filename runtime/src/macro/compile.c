@@ -12,8 +12,20 @@
  *   MO_MV_GET id            push the memory variable numbered id (MO_MV_REF:
  *                           a reference to it); MO_MV_SET id pops a value
  *                           into it
+ *   MO_MV_FIELD id          an undeclared name read: the current work area's
+ *                           field of the variable's name, else as MO_MV_GET
  *   MO_LOCAL_* s            the same for the codeblock's parameter s
- *   MO_FIELD k              error 1003 on the name k (alias->name)
+ *   MO_FIELD a k            push field k (a name) of the work area of alias
+ *                           a (XB_MACRO_NO_ALIAS: the current one;
+ *                           XB_MACRO_STACK_ALIAS: the item it pops);
+ *                           MO_FIELD_SET a k pops a value into it (with
+ *                           XB_MACRO_STACK_ALIAS, the alias first, below)
+ *   MO_AREA t               pops an alias and makes its work area current,
+ *                           pushing the number of the one current before
+ *                           (after the error of an alias that names none,
+ *                           NIL, and a jump to t); MO_AREA_END pops a value
+ *                           and that number, makes the area current again and
+ *                           pushes the value
  *   MO_UNARY u, MO_BINARY b, MO_STEP inc   operators (macro.h)
  *   MO_JUMP t, MO_JUMP_FALSE t, MO_JUMP_TRUE t   t a code offset; the
  *                           conditional ones pop a condition
@@ -31,6 +43,8 @@
  *   MO_RETURN               the top is the result */
 #include "macro/macro.h"
 
+#include "rdd/rdd.h"
+
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,7 +57,7 @@
 
 typedef enum nkind {
   N_NIL, N_TRUE, N_FALSE, N_NUMBER, N_STRING, N_VAR, N_ARG, N_FIELD, N_CALL, N_UNARY, N_BINARY, N_AND, N_OR,
-  N_ASSIGN, N_INCDEC, N_IIF, N_REF, N_LIST, N_ARRAY, N_HASH, N_INDEX, N_BLOCK, N_SEND, N_MACRO,
+  N_ASSIGN, N_INCDEC, N_IIF, N_REF, N_LIST, N_ARRAY, N_HASH, N_INDEX, N_BLOCK, N_SEND, N_MACRO, N_AREA,
 } nkind;
 
 typedef struct node node;
@@ -56,8 +70,10 @@ struct node {
   uint32_t height;          /* of the tree below it, for MAX_NESTING */
   const char *name;         /* N_VAR, N_CALL, N_SEND, N_FIELD: upper case, NUL-terminated (arena) */
   size_t nameLen;
+  const char *alias;        /* N_FIELD, N_AREA: the alias as a name (NULL: `a`, else the current work area) */
+  size_t aliasLen;
   const mtoken *tok;        /* N_NUMBER, N_STRING */
-  node *a, *b, *c;          /* operands */
+  node *a, *b, *c;          /* operands; N_FIELD, N_AREA: `a` the alias's expression, `b` N_AREA's body */
   node **list;              /* arguments, elements, body; N_HASH keys and values alternating; N_BLOCK params */
   uint32_t n;
 };
@@ -175,7 +191,8 @@ static const mtoken *keep(parser *p) {
 }
 
 static int is_lvalue(const node *n) {
-  return n->kind == N_VAR || n->kind == N_INDEX || n->kind == N_MACRO || (n->kind == N_SEND && !n->flag);
+  return n->kind == N_VAR || n->kind == N_FIELD || n->kind == N_INDEX || n->kind == N_MACRO ||
+         (n->kind == N_SEND && !n->flag);
 }
 
 static node *parse_expr(parser *p);
@@ -296,8 +313,35 @@ static node *parse_braced(parser *p) {
   return list_node(p, N_ARRAY, &elems);
 }
 
-/* A name's node: M->name and MEMVAR->name are memory variables; another
- * alias names a field (none exists yet). */
+/* What follows `->` after an alias (`alias` as a name, else the expression `area`, else none: FIELD->): a field
+ * name, or with an alias a parenthesized expression (list) evaluated with its work area current. */
+static node *parse_aliased(parser *p, node *area, const char *alias, size_t aliasLen) {
+  node *n;
+  if (cur(p) == MT_LPAREN && (area || alias)) {
+    advance(p);
+    nlist body = {0};
+    push(p, &body, parse_expr(p));
+    while (accept(p, MT_COMMA)) push(p, &body, parse_expr(p));
+    expect(p, MT_RPAREN);
+    n = mk(p, N_AREA);
+    n->b = body.n == 1 ? body.v[0] : list_node(p, N_LIST, &body);
+  } else if (cur(p) == MT_IDENT) {
+    n = mk(p, N_FIELD);
+    n->name = upper_name(p, p->lx.tok.text, p->lx.tok.len);
+    n->nameLen = p->lx.tok.len;
+    advance(p);
+  } else {
+    fail(p);
+    return mk(p, N_NIL);
+  }
+  n->a = area;
+  n->alias = alias;
+  n->aliasLen = aliasLen;
+  return grown(p, n);
+}
+
+/* A name's node: M->name and MEMVAR->name are memory variables; alias->name a field of the alias's work area,
+ * FIELD->name (and _FIELD->name) one of the current work area, FIELD->alias->name one of the alias's. */
 static node *parse_name(parser *p) {
   const mtoken t = p->lx.tok;
   advance(p);
@@ -305,17 +349,21 @@ static node *parse_name(parser *p) {
   v->name = upper_name(p, t.text, t.len);
   v->nameLen = t.len;
   if (!accept(p, MT_ARROW)) return v;
-  if (cur(p) != MT_IDENT) {
-    fail(p);
+  if ((!strcmp(v->name, "M") || !strcmp(v->name, "MEMVAR")) && cur(p) == MT_IDENT) {
+    v->flag = 1;
+    v->name = upper_name(p, p->lx.tok.text, p->lx.tok.len);
+    v->nameLen = p->lx.tok.len;
+    advance(p);
     return v;
   }
-  int memvar = !strcmp(v->name, "M") || !strcmp(v->name, "MEMVAR");
-  v->kind = memvar ? N_VAR : N_FIELD;
-  v->flag = memvar;
-  v->name = upper_name(p, p->lx.tok.text, p->lx.tok.len);
-  v->nameLen = p->lx.tok.len;
+  if (strcmp(v->name, "FIELD") && strcmp(v->name, "_FIELD")) return parse_aliased(p, NULL, v->name, v->nameLen);
+  if (cur(p) != MT_IDENT || ahead(p) != MT_ARROW) return parse_aliased(p, NULL, NULL, 0);
+  const char *alias = upper_name(p, p->lx.tok.text, p->lx.tok.len); /* FIELD->alias->name, not ->( expr ) */
+  size_t aliasLen = p->lx.tok.len;
   advance(p);
-  return v;
+  advance(p);
+  if (cur(p) != MT_IDENT) fail(p);
+  return parse_aliased(p, NULL, alias, aliasLen);
 }
 
 /* A macro inside the macro, `&name` or `&name.` (the `&` is current): the
@@ -358,9 +406,10 @@ static node *parse_primary(parser *p) {
     }
     expect(p, MT_RPAREN);
     e->parens = 1;
+    if (accept(p, MT_ARROW)) return parse_aliased(p, e, NULL, 0); /* ( expr )->: the work area it names */
     return e;
   }
-  case MT_AMP: { /* a macro inside the macro: &( expr ), or a macro name */
+  case MT_AMP: { /* a macro inside the macro: &( expr ), or a macro name; before ->, the text is an alias */
     node *m = mk(p, N_MACRO);
     if (at_amp_name(p)) {
       m->a = parse_macro_name(p);
@@ -371,7 +420,9 @@ static node *parse_primary(parser *p) {
       expect(p, MT_RPAREN);
     } else {
       fail(p);
+      return m;
     }
+    if (accept(p, MT_ARROW)) return parse_aliased(p, m->a, NULL, 0);
     return grown(p, m);
   }
   case MT_IDENT: {
@@ -599,9 +650,13 @@ typedef struct fn {
   uint32_t depth, maxDepth; /* the stack */
 } fn;
 
+/* For Type(): names are checked against the work area `area` (the current one, or that of the alias->( expr ) being
+ * generated; AREA_UNKNOWN inside one whose alias is an expression, where nothing is checked). */
+#define AREA_UNKNOWN UINT32_MAX
 typedef struct gen {
   xb_ctx *ctx;
   uint32_t flags;
+  uint32_t area;
 } gen;
 
 static void bytes(fn *f, const void *p, size_t n) {
@@ -683,8 +738,67 @@ static void gen_load(gen *g, fn *f, const node *v) {
     return;
   }
   uint32_t id = xb_memvar_number(v->name, v->nameLen);
-  if (!xb_memvar_exists(g->ctx, id)) g->flags |= XB_MACRO_NO_VAR;
-  emit1(f, MO_MV_GET, id, 0, 1);
+  if (v->flag) { /* M->name */
+    if (!xb_memvar_exists(g->ctx, id)) g->flags |= XB_MACRO_NO_VAR;
+    emit1(f, MO_MV_GET, id, 0, 1);
+    return;
+  }
+  if (g->area != AREA_UNKNOWN && !xb_memvar_exists(g->ctx, id)) {
+    const xb_area *a = xb_area_at(g->ctx, g->area);
+    if (!a || xb_area_field_index(a, v->name, v->nameLen) < 0) g->flags |= XB_MACRO_NO_VAR;
+  }
+  emit1(f, MO_MV_FIELD, id, 0, 1);
+}
+
+/* The number of the work area an alias names, 0 for none. */
+static uint32_t area_of(gen *g, const char *alias, size_t len) {
+  return xb_area_number(xb_area_named(g->ctx, alias, len));
+}
+
+/* A field's alias and name operands (with an alias by name, the field must be there now for Type()). */
+static void field_operands(gen *g, fn *f, const node *v) {
+  if (v->a) {
+    word(f, XB_MACRO_STACK_ALIAS);
+  } else {
+    uint32_t n = v->alias ? area_of(g, v->alias, v->aliasLen) : g->area;
+    const xb_area *a = n == AREA_UNKNOWN ? NULL : xb_area_at(g->ctx, n);
+    if (n != AREA_UNKNOWN && (!a || xb_area_field_index(a, v->name, v->nameLen) < 0)) g->flags |= XB_MACRO_NO_VAR;
+    word(f, v->alias ? add_string(f, v->alias, v->aliasLen) : XB_MACRO_NO_ALIAS);
+  }
+  word(f, add_string(f, v->name, v->nameLen));
+}
+
+/* Assigns to a field whose alias is an expression, evaluated once: after the value of a plain assignment, before
+ * the field's value otherwise (genFieldAssign). The alias stays below the value MO_FIELD_SET stores. */
+static void gen_field_assign(gen *g, fn *f, const node *target, const node *value, int op, int incdec, int inc,
+                             int prefix) {
+  if (!incdec && op < 0) {
+    gen_expr(g, f, value);
+    emit1(f, MO_PICK, 0, 0, 1);
+    gen_expr(g, f, target->a);
+    emit1(f, MO_INSERT, 1, 1, 1); /* value, alias, value */
+  } else {
+    gen_expr(g, f, target->a);
+    emit1(f, MO_PICK, 0, 0, 1);
+    emit(f, MO_FIELD, 1, 1); /* alias, old value */
+    field_operands(g, f, target);
+    if (incdec && !prefix) {
+      emit1(f, MO_INSERT, 1, 1, 1);
+      emit1(f, MO_PICK, 1, 0, 1);
+      emit1(f, MO_STEP, (uint32_t)inc, 1, 1); /* old value, alias, new value */
+    } else {
+      if (incdec) {
+        emit1(f, MO_STEP, (uint32_t)inc, 1, 1);
+      } else {
+        gen_expr(g, f, value);
+        emit1(f, MO_BINARY, (uint32_t)op, 2, 1);
+      }
+      emit1(f, MO_PICK, 0, 0, 1);
+      emit1(f, MO_INSERT, 2, 1, 1); /* new value, alias, new value */
+    }
+  }
+  emit(f, MO_FIELD_SET, 2, 0);
+  field_operands(g, f, target);
 }
 
 /* Stores the top item (popped) into a variable. */
@@ -738,6 +852,27 @@ static void gen_assign(gen *g, fn *f, const node *target, const node *value, int
                        int prefix) {
   int plain = !incdec && op < 0;
   switch (target->kind) {
+  case N_FIELD:
+    if (target->a) {
+      gen_field_assign(g, f, target, value, op, incdec, inc, prefix);
+      return;
+    }
+    if (plain) {
+      gen_expr(g, f, value);
+    } else {
+      gen_expr(g, f, target);
+      if (incdec) {
+        if (!prefix) emit1(f, MO_PICK, 0, 0, 1);
+        emit1(f, MO_STEP, (uint32_t)inc, 1, 1);
+      } else {
+        gen_expr(g, f, value);
+        emit1(f, MO_BINARY, (uint32_t)op, 2, 1);
+      }
+    }
+    if (!incdec || prefix) emit1(f, MO_PICK, 0, 0, 1);
+    emit(f, MO_FIELD_SET, 1, 0);
+    field_operands(g, f, target);
+    return;
   case N_VAR:
     if (plain) {
       gen_expr(g, f, value);
@@ -933,9 +1068,23 @@ static void gen_expr(gen *g, fn *f, const node *n) {
   case N_VAR:
   case N_ARG: gen_load(g, f, n); return;
   case N_FIELD:
-    g->flags |= XB_MACRO_NO_VAR;
-    emit1(f, MO_FIELD, add_string(f, n->name, n->nameLen), 0, 1);
+    if (n->a) gen_expr(g, f, n->a);
+    emit(f, MO_FIELD, n->a ? 1 : 0, 1);
+    field_operands(g, f, n);
     return;
+  case N_AREA: { /* an alias that names no work area leaves NIL, past the body */
+    if (n->a) gen_expr(g, f, n->a);
+    else emit1(f, MO_CONST, add_string(f, n->alias, n->aliasLen), 0, 1);
+    emit1(f, MO_AREA, 0, 1, 1);
+    size_t skip = f->len - 4;
+    uint32_t outer = g->area;
+    g->area = n->a ? AREA_UNKNOWN : area_of(g, n->alias, n->aliasLen);
+    gen_expr(g, f, n->b);
+    g->area = outer;
+    emit(f, MO_AREA_END, 2, 1);
+    patch(f, skip);
+    return;
+  }
   case N_CALL: gen_call(g, f, n); return;
   case N_UNARY:
     gen_expr(g, f, n->a);
@@ -1041,7 +1190,7 @@ uint32_t xb_macro_compile(xb_ctx *ctx, xb_item *code, const char *text, size_t l
     free_arena(p.arena);
     return XB_MACRO_SYNTAX;
   }
-  gen g = {ctx, e->kind == N_BLOCK ? XB_MACRO_BLOCK : 0u};
+  gen g = {ctx, e->kind == N_BLOCK ? XB_MACRO_BLOCK : 0u, ctx->areaCurrent};
   fn top;
   if (goal == MG_ASSIGN) { /* `target := the function's argument` */
     fn_init(&g, &top, NULL);

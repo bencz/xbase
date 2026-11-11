@@ -101,6 +101,7 @@ private:
   bool atMacroName() const;
   bool atClassStart() const;
   ExprPtr parseSend(SourceLoc loc, ExprPtr object);
+  ExprPtr parseAliased(SourceLoc loc, std::string alias, ExprPtr aliasExpr);
   bool atMemberStart() const;
   std::unique_ptr<ClassDecl> parseClass();
   void parseInline(ClassMethodDecl &m);

@@ -99,11 +99,7 @@ StmtPtr Parser::parseStmtKind() {
   if (atStmtKw("PUBLIC")) return parseDecl(StmtKind::Public);
   if (atStmtKw("MEMVAR")) return parseDecl(StmtKind::Memvar);
   if (atStmtKw("PARAMETERS")) return parseDecl(StmtKind::Parameters);
-  if (atStmtKw("FIELD")) {
-    diag_.error(loc, "'" + cur().text + "' is not supported yet");
-    skipToEndOfStmt();
-    return nullptr;
-  }
+  if (atStmtKw("FIELD")) return parseDecl(StmtKind::Field);
 
   // A statement `operand = expr` is an assignment (`x = y = 3` is
   // `x := ( y = 3 )`), whose target must be an lvalue (isLvalue), also in
@@ -162,7 +158,7 @@ StmtPtr Parser::parseStmtKind() {
 StmtPtr Parser::parseDecl(StmtKind kind) {
   auto st = std::make_unique<LocalStmt>(cur().loc, kind);
   std::string keyword = cur().upper;
-  bool namesOnly = kind == StmtKind::Memvar || kind == StmtKind::Parameters;
+  bool namesOnly = kind == StmtKind::Memvar || kind == StmtKind::Parameters || kind == StmtKind::Field;
   advance();
   bool macros = kind == StmtKind::Private || kind == StmtKind::Public; // PRIVATE &name: named when the code runs
   do {
@@ -199,6 +195,15 @@ StmtPtr Parser::parseDecl(StmtKind kind) {
     if (namesOnly && d.init) diag_.error(d.loc, keyword + " takes names only");
     st->decls.push_back(std::move(d));
   } while (accept(Tok::Comma));
+  if (kind == StmtKind::Field && atKw("IN")) { // FIELD names IN alias
+    advance();
+    if (at(Tok::Ident)) {
+      st->fieldAlias = cur().upper;
+      advance();
+    } else {
+      expect(Tok::Ident, "an alias");
+    }
+  }
   endOfStmt();
   return st;
 }

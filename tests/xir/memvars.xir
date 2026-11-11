@@ -16,7 +16,7 @@ entry:
 function SHOW params 0 args {
 entry:
   mv.param A 0
-  %1 = mv.get A
+  %1 = mv.field A
   %2 = mv.get PUB
   %3 = call QOUT native %1, %2
   ret

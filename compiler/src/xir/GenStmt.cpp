@@ -20,6 +20,7 @@ void Generator::genStmt(const Stmt &s) {
   case StmtKind::Local: genLocals(static_cast<const LocalStmt &>(s)); break;
   case StmtKind::Static: break; // initialized by the module initialization
   case StmtKind::Memvar: break;  // a declaration only
+  case StmtKind::Field: break;
   case StmtKind::Private:
   case StmtKind::Public:
   case StmtKind::Parameters: genMemvars(static_cast<const LocalStmt &>(s)); break;

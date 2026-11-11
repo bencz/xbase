@@ -41,9 +41,14 @@ enum class Op : uint8_t {
   ParamsRef,      // parameters (captures) -> Bool: one of them holds a reference its caller passed
   CallForward,    // callee -> Item: calls it with this function's own arguments, as received [may fail]
   ClassNew,       // -> Item: a new object of class `classIndex` (its INIT values run once)  [may fail]
+  // Fields of work areas, by name (`message`): of the work area of `alias` ("" the current one), or of the one an
+  // operand names (an alias or a number); a missing alias or field is an error the error block may retry.
+  FieldGet,       // [area] -> Item: the field's value                              [may fail]
+  FieldSet,       // [area,] value: writes the field                               [may fail]
   // Memory variables, by name (`message`): what the name designates is decided at run time, and any call may
   // create, change or end one, so they are read and written like the heap.
   MvGet,          // -> Item: the value of the variable visible; none is error 1003, retried or fatal [may fail]
+  MvField,        // -> Item: an undeclared name read: the field of the current work area, else as MvGet [may fail]
   MvSet,          // value: assigns it; with none, a PRIVATE of the activation is created [may fail]
   MvRef,          // -> Item: a reference to it (an argument @name) [may fail]
   MvPrivate,      // PRIVATE name: a new variable, unless the activation has one

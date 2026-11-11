@@ -274,6 +274,8 @@ ExprPtr Parser::parseRef() {
     diag_.error(target->loc, "function references (@name()) are not supported yet");
   else if (target->kind == ExprKind::Macro)
     diag_.error(target->loc, "a macro cannot be passed by reference (@&name) yet");
+  else if (target->kind == ExprKind::Field)
+    diag_.error(target->loc, "a field cannot be passed by reference");
   else if (!isLvalue(*target) || target->kind == ExprKind::Send || target->parenthesized)
     diag_.error(target->loc, "only a variable or an array element can be passed by reference");
   return std::make_unique<RefExpr>(loc, std::move(target));
@@ -320,7 +322,8 @@ ExprPtr Parser::parseMacroText() {
   return std::make_unique<MacroTextExpr>(loc, std::move(written));
 }
 
-// A macro: a macro name or `&( expr )`, and a call when `(` follows.
+// A macro: a macro name or `&( expr )`, and a call when `(` follows. Before `->`, the text names a work area
+// (`&cAlias->name`, `&cAlias->( expr )`): it is not compiled.
 ExprPtr Parser::parseMacro() {
   SourceLoc loc = cur().loc;
   ExprPtr text;
@@ -332,6 +335,7 @@ ExprPtr Parser::parseMacro() {
   } else {
     text = parseMacroText();
   }
+  if (accept(Tok::Arrow)) return parseAliased(loc, "", std::move(text));
   if (!accept(Tok::LParen)) return std::make_unique<MacroExpr>(loc, std::move(text));
   auto call = std::make_unique<MacroCallExpr>(loc, std::move(text));
   call->args = parseArgs(Tok::RParen, true, false);
@@ -413,6 +417,7 @@ ExprPtr Parser::parsePrimary() {
     }
     expect(Tok::RParen, "')'");
     e->parenthesized = true;
+    if (accept(Tok::Arrow)) return parseAliased(loc, "", std::move(e)); // (expr)->...: the work area it names
     return e;
   }
   case Tok::Ident: {
@@ -438,18 +443,13 @@ ExprPtr Parser::parsePrimary() {
     if (name == "NIL") return std::make_unique<NilExpr>(loc);
     if (at(Tok::Arrow)) { // M->name and MEMVAR->name: a memory variable; other aliases name work areas
       advance();
-      if (!at(Tok::Ident)) {
-        expect(Tok::Ident, "a variable name");
-        return std::make_unique<NilExpr>(loc);
-      }
-      auto v = std::make_unique<VarExpr>(cur().loc, cur().upper);
-      advance();
-      if (name == "M" || name == "MEMVAR") {
+      if ((name == "M" || name == "MEMVAR") && at(Tok::Ident)) {
+        auto v = std::make_unique<VarExpr>(cur().loc, cur().upper);
+        advance();
         v->memvarAlias = true;
         return v;
       }
-      diag_.error(loc, "the alias '" + t.text + "->' is not supported yet (work areas)");
-      return std::make_unique<NilExpr>(loc);
+      return parseAliased(loc, name == "FIELD" || name == "_FIELD" ? "" : name, nullptr);
     }
     return std::make_unique<VarExpr>(loc, name);
   }
@@ -459,6 +459,37 @@ ExprPtr Parser::parsePrimary() {
     if (!atEndOfStmt() && t.kind != Tok::RParen && t.kind != Tok::RBracket && t.kind != Tok::RBrace) advance();
     return std::make_unique<NilExpr>(loc);
   }
+}
+
+// What follows `alias->` (after an alias, FIELD or _FIELD, or a parenthesized expression naming the work area): a
+// field name, or a parenthesized expression (list) evaluated with that work area current, which becomes
+// __AreaEval( alias, {|| ... } ). After FIELD->alias-> only a field name.
+ExprPtr Parser::parseAliased(SourceLoc loc, std::string alias, ExprPtr aliasExpr) {
+  bool fieldAlias = alias.empty() && !aliasExpr && at(Tok::Ident) && ahead().kind == Tok::Arrow;
+  if (fieldAlias) { // FIELD->alias->name
+    alias = cur().upper;
+    advance();
+    advance();
+  }
+  if (at(Tok::LParen) && !fieldAlias && (aliasExpr || !alias.empty())) {
+    advance();
+    auto block = std::make_unique<BlockExpr>(loc);
+    block->body.push_back(parseExpr());
+    while (accept(Tok::Comma)) block->body.push_back(parseExpr());
+    expect(Tok::RParen, "')'");
+    auto call = std::make_unique<CallExpr>(loc, "__AREAEVAL");
+    call->args.push_back(aliasExpr ? std::move(aliasExpr) : std::make_unique<StringExpr>(loc, alias));
+    call->args.push_back(std::move(block));
+    return call;
+  }
+  if (!at(Tok::Ident)) {
+    expect(Tok::Ident, "a field name");
+    if (at(Tok::LParen)) parsePrimary(); // FIELD->alias->( ... ): passed over, reported once
+    return std::make_unique<NilExpr>(loc);
+  }
+  std::string name = cur().upper;
+  advance();
+  return std::make_unique<FieldExpr>(loc, std::move(alias), std::move(aliasExpr), std::move(name));
 }
 
 } // namespace xb

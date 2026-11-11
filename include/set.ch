@@ -14,6 +14,7 @@
 #define _SET_DECIMALS   3
 #define _SET_DATEFORMAT 4
 #define _SET_EPOCH      5
+#define _SET_DELETED    11
 
 #define _SET_LANGUAGE   200 /* the language of the runtime's texts: "EN" (the default), "PT", "ES" */
 #define _SET_CODEPAGE   201 /* how the text functions read strings: "UTF8" (the default), "CP437", "CP850", "CP1252",

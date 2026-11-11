@@ -1,0 +1,19 @@
+
+abc      7
+select 3:          3
+select B:          2
+select t5:          1
+dbselectarea '4':          4
+dbselectarea 'C':          3
+select 0:          2
+select('t5'):          1          0
+J         10
+K         11
+L error
+M error
+N error
+Z error
+AB error
+ 5          5
+5x          5
+05          5

@@ -328,6 +328,28 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtMvSet_, {fnCtx_, memvars_.at(i.message), callArg(addr(ops[0]), 1)});
     checkPending(unwind_);
     break;
+  case Op::MvField: {
+    CallResult r = callResult(dest(i), 0);
+    b_.CreateCall(rtMvField_, {fnCtx_, r.arg, memvars_.at(i.message), fieldCache()});
+    callDone(r);
+    checkPending(unwind_);
+    break;
+  }
+  case Op::FieldGet: {
+    CallResult r = callResult(dest(i), 0);
+    Value *area = ops.empty() ? static_cast<Value *>(ConstantPointerNull::get(ptrTy_)) : callArg(addr(ops[0]), 1);
+    b_.CreateCall(rtFieldGet_, {fnCtx_, r.arg, area, aliasName(i.alias), messageName(i.message), fieldCache()});
+    callDone(r);
+    checkPending(unwind_);
+    break;
+  }
+  case Op::FieldSet: {
+    Value *area = ops.size() < 2 ? static_cast<Value *>(ConstantPointerNull::get(ptrTy_)) : callArg(addr(ops[0]), 0);
+    b_.CreateCall(rtFieldSet_, {fnCtx_, area, aliasName(i.alias), messageName(i.message), fieldCache(),
+                                callArg(addr(ops.back()), 1)});
+    checkPending(unwind_);
+    break;
+  }
   case Op::MvPrivate: b_.CreateCall(rtMvPrivate_, {fnCtx_, memvars_.at(i.message), fnMark_}); break;
   case Op::MvPublic: b_.CreateCall(rtMvPublic_, {fnCtx_, memvars_.at(i.message)}); break;
   case Op::MvParam: // argument `index` of those received, NIL past them

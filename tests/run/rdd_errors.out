@@ -1,0 +1,30 @@
+
+ERR DBFNTX         34       1021 [Data width error] [AGE] []          0 .T. .F. .F.          1
+     12345
+toolongvalue
+ERR DBFNTX         33       1020 [Data type error] [AGE] []          0 .T. .F. .F.          1
+x
+ERR DBFNTX         33       1020 [Data type error] [D] []          0 .T. .F. .F.          1
+         1
+ERR DBFNTX         33       1020 [Data type error] [L] []          0 .T. .F. .F.          1
+T
+NIL
+after: [tool]   0   /  /   .F.
+ERR DBFNTX         21       1001 [Open error] [] [rdd_errors_none.dbf]          2 .T. .T. .F.         -1
+after use: .F. []          2 .F.
+empty area: NIL          0          0          0 .T. .T. []          0 .F. .F.          0          0 
+ERR DBCMD         35       2001 [Workarea not in use] [RDDNAME] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [DBGOTOP] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [DBGOBOTTOM] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [DBGOTO] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [DBSKIP] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [DBAPPEND] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [DBDELETE] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [DBRECALL] []          0 .F. .F. .F.         -1
+no error
+ERR DBCMD         35       2001 [Workarea not in use] [DBCOMMIT] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [__DBPACK] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [__DBZAP] []          0 .F. .F. .F.         -1
+ERR DBCMD         35       2001 [Workarea not in use] [DBEVAL] []          0 .F. .F. .F.         -1
+ERR BASE         15       1002 [Alias does not exist] [NOPE] []          0 .F. .T. .F.         -1
+field 9: NIL NIL 

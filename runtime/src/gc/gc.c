@@ -51,6 +51,8 @@
  * threads, the allocating thread is the only mutator. */
 #include "xbrt_int.h"
 
+#include "rdd/rdd.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -638,6 +640,7 @@ static void mark_roots(void) {
     mark_item(&ctx->error_block);
     mark_item(&ctx->break_value);
     mark_item(&ctx->language);
+    xb_areas_mark(ctx, mark_item);
     for (uint32_t i = 0; i < ctx->memvarCap; ++i) mark_item(&ctx->memvars[i]);
     for (uint32_t i = 0; i < ctx->privateLen; ++i) mark_item(&ctx->privates[i].hidden);
     for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) mark_item(&ctx->macro_cache[i]);

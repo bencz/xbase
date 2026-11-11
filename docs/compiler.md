@@ -83,14 +83,17 @@ Statements:
   that name; a `STATIC` one is an error, and a second `ANNOUNCE` in the module is ignored with a warning.
 - `LOCAL name [:= expr], ...` and `STATIC name [:= expr], ...` at the start of a function, in any order. A function
   `STATIC` keeps its value between calls.
-- Memory variables ([runtime.md](runtime.md#memory-variables)), found by name at run time: `MEMVAR name, ...`
-  declares names (before the first function, for the whole file; in a function, before its statements);
+- Memory variables ([runtime.md](runtime.md#memory-variables)), found by name at run time: `MEMVAR name, ...` declares
+  names (before the first function, for the whole file; in a function, before its statements);
   `PRIVATE name [:= expr], ...` and `PUBLIC name [:= expr], ...` (also `name[n1, n2]`) create them when they run, the
   statement's initializers all running first (they read the variables visible before it); `DECLARE` is Clipper's other
   spelling of `PRIVATE`; `PARAMETERS name, ...` creates PRIVATEs holding the arguments received, in order (the function
   keeps its arguments, as for `PCount()`), and may come before the `LOCAL`s. `M->name` and `MEMVAR->name` are a memory
-  variable whatever else the name is; other aliases (`alias->field`) wait for the work areas. `RELEASE` and
-  `CLEAR MEMORY` are commands (`std.ch`).
+  variable whatever else the name is. `RELEASE` and `CLEAR MEMORY` are commands (`std.ch`).
+- Fields ([rdd.md](rdd.md#field-references)): `FIELD name, ... [IN alias]` declares fields as `MEMVAR` declares memory
+  variables; `alias->name`, `FIELD->name` (`_FIELD->name`), `FIELD->alias->name`, `( expr )->name` and a macro before
+  `->` (`&cAlias->name`, `&( expr )->name`) are fields (`FieldExpr`, assignable); `alias->( expr, ... )` (also after
+  `( expr )` or a macro, not after `FIELD->alias`) becomes `__AreaEval( alias, {|| expr, ... } )`.
 - `RETURN [expr]` (a `PROCEDURE` cannot return a value)
 - `IF ... [ELSEIF ...] [ELSE ...] ENDIF | END`
 - `DO CASE`, then `CASE cond` arms, an optional `OTHERWISE`, and `ENDCASE | END`; the first true arm runs. Nothing
@@ -149,9 +152,8 @@ Statements:
   other arguments (an element, a variable in parentheses, an expression) by value
 - expression statements; a statement `operand = expr` is an assignment, and `=` inside `expr` compares:
   `x = y = 3` is `x := ( y = 3 )`, `a[1] = 5` assigns. The parser reports an invalid assignment target (anything but
-  a variable or an element, also in parentheses) here, for `:=`, `op=`, `++`/`--` and `@`.
-
-`FIELD` is recognized and reported as not supported yet.
+  a variable, an element, an instance variable, a macro or a field, also in parentheses) here, for `:=`, `op=` and
+  `++`/`--`, and anything but a variable or an element for `@`.
 
 Expression precedence, lowest first: `:=` and compound assignments (`+=` `-=` `*=` `/=` `%=` `^=`, and xbase's `&=` `|=`
 `^^=` `<<=` `>>=`; right-associative), `.OR.`, `.AND.`, `.NOT.`/`!`, xbase's bit operators `|`, `^^` and `&`, `=` `==`
@@ -167,13 +169,15 @@ ends without one; the procedure rule does not apply), any other statement but `S
 and `PARAMETERS`. A codeblock inside captures its `LOCAL`s like a function's, and they can be passed by reference
 (`BlockExpr::boxed`). It is generated like any codeblock, with a frame of its own. A call argument `@name` or
 `@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is an error (references in
-array literals are not supported yet), and so are function references `@name()`. `...` as the last argument of a call or
-a send or the last element of an array literal (`SpreadExpr`; once, with nothing after it, not even an empty argument)
-stands for the arguments the function received past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ...
-)`, `{ ... }`. Sema accepts it only in a function declared with `...`, outside its codeblocks (which have arguments of
-their own); a `CHECKED` function's count includes the other arguments only, so only too many of them is an error.
-Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`, a message without arguments)
-and macros can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
+array literals are not supported yet), and so are function references `@name()` and fields (`@alias->name`, and a name
+`FIELD` declares, also as the argument `DO ... WITH` passes by reference or as the variable of `FOR EACH`). `...` as the
+last argument of a call or a send or the last element of an array literal (`SpreadExpr`; once, with nothing after it,
+not even an empty argument) stands for the arguments the function received past its parameters, as many as there are:
+`f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it only in a function declared with `...`, outside its
+codeblocks (which have arguments of their own); a `CHECKED` function's count includes the other arguments only, so only
+too many of them is an error. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`,
+a message without arguments) and macros can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares
+`a := Array( n1, n2 )`.
 
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
 C has them, so a comparison binds tighter than `&`, `^^` and `|`: `x & 1 == 0` is `x & ( 1 == 0 )`, an argument error at
@@ -281,14 +285,16 @@ called inside it). Anything else, a plain variable included, is "illegal initial
 in its own initializer, so a codeblock stored in it can call itself; a `LOCAL`'s initializer is resolved before the
 `LOCAL` exists.
 
-A name that is not a parameter, `LOCAL`, `STATIC` or capture is a memory variable (`VarWhere::Memvar`), as in Clipper
-(which looks for a field of the current work area first; fields come with the work areas). A `MEMVAR` of a frame (the
-file or a function) makes the name a memory variable there, before a `STATIC` of an enclosing frame, and cannot name a
-`LOCAL`, parameter or `STATIC` of the same frame; a function's `LOCAL` hides a file-wide `MEMVAR`. `PRIVATE`, `PUBLIC`
-and `PARAMETERS` do not declare (as in the reference, a `STATIC` of the name stays the `STATIC`), and their names cannot
-be a `LOCAL` or parameter of the same function. A name nothing declares (no `MEMVAR`, and no `PRIVATE`, `PUBLIC` or
-`PARAMETERS` earlier in the function) gets a warning; `-Wno-undeclared` drops it and `-Werror=undeclared` makes it an
-error. A memory variable cannot be the variable of a `FOR EACH` yet.
+A name that is not a parameter, `LOCAL`, `STATIC` or capture is a memory variable (`VarWhere::Memvar`), as in Clipper;
+read, it is a field of the current work area first (`fieldFirst`, the `mv.field` operation), unless a `MEMVAR` declares
+it. A `FIELD` of a frame makes the name a field there (`VarWhere::Field`, with its `IN` alias), as `MEMVAR` does for
+memory variables, and the two cannot name the same name. A `MEMVAR` of a frame (the file or a function) makes the name a
+memory variable there, before a `STATIC` of an enclosing frame, and cannot name a `LOCAL`, parameter or `STATIC` of the
+same frame; a function's `LOCAL` hides a file-wide `MEMVAR`. `PRIVATE`, `PUBLIC` and `PARAMETERS` do not declare (as in
+the reference, a `STATIC` of the name stays the `STATIC`), and their names cannot be a `LOCAL` or parameter of the same
+function. A name nothing declares (no `MEMVAR`, and no `PRIVATE`, `PUBLIC` or `PARAMETERS` earlier in the function) gets
+a warning; `-Wno-undeclared` drops it and `-Werror=undeclared` makes it an error. A memory variable cannot be the
+variable of a `FOR EACH` yet.
 
 Sema reports: duplicate functions, parameters or locals, `EXIT` outside a loop or `SWITCH`, `LOOP`
 outside a loop, a `LOCAL`, `STATIC` or `MEMVAR` that follows an executable statement or appears inside a nested block, a
@@ -517,6 +523,10 @@ emits the object file.
   a `PRIVATES` function (`xir::Function::callsPrivates`), takes the activation's mark in its prologue (`xb_mv_mark`)
   and releases to it in its exit block (`xb_mv_release`), the one returns and unwinding both reach; other functions do
   neither.
+- Fields ([runtime.md](runtime.md#work-areas)): `field.get` and `field.set` call `xb_field_get` and `xb_field_set`
+  with the alias's item (`( expr )->name`) or its name as a C string (`aliasName`: null for the current work area),
+  the field's name and a cache of the reference's own (`fieldCache`, a zeroed private global); `mv.field` calls
+  `xb_mv_field` with the name's `xb_memvar` and a cache.
 - Macros ([runtime.md](runtime.md#macro-operator)): `macro.get`, `macro.set`, `macro.private`, `macro.public` and
   `macro.text` call `xb_macro_get`, `xb_macro_set`, `xb_macro_private` (with the activation's mark),
   `xb_macro_public` and `xb_macro_text` with the text's item; `macro.call` puts the text and the arguments in

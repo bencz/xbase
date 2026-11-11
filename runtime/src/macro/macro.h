@@ -65,15 +65,20 @@ uint32_t xb_macro_compile(xb_ctx *ctx, xb_item *code, const char *text, size_t l
 /* The stack machine's operations (see compile.c for their operands). */
 typedef enum mop {
   MO_NIL, MO_TRUE, MO_FALSE, MO_CONST,
-  MO_MV_GET, MO_MV_SET, MO_MV_REF, MO_FIELD,
+  MO_MV_GET, MO_MV_SET, MO_MV_REF, MO_MV_FIELD, MO_FIELD, MO_FIELD_SET,
   MO_LOCAL_GET, MO_LOCAL_SET, MO_LOCAL_REF,
   MO_UNARY, MO_BINARY, MO_STEP,
   MO_JUMP, MO_JUMP_FALSE, MO_JUMP_TRUE,
   MO_POP, MO_PICK, MO_INSERT,
   MO_ARRAY, MO_HASH, MO_INDEX, MO_INDEX_SET, MO_REF_INDEX,
   MO_CALL, MO_NO_FUNC, MO_SEND, MO_BLOCK, MO_MACRO,
+  MO_AREA, MO_AREA_END,
   MO_RETURN,
 } mop;
+
+/* MO_FIELD's alias operand for the current work area; for an alias on the stack (`( expr )->name`). */
+#define XB_MACRO_NO_ALIAS    UINT32_MAX
+#define XB_MACRO_STACK_ALIAS (UINT32_MAX - 1)
 
 /* MO_UNARY operands. */
 enum { MU_NEG, MU_NOT, MU_BITNOT };

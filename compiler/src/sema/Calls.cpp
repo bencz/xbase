@@ -141,6 +141,9 @@ void CallResolver::expr(Expr &e) {
   case ExprKind::Ref:
     expr(*static_cast<RefExpr &>(e).target);
     break;
+  case ExprKind::Field:
+    if (auto &f = static_cast<FieldExpr &>(e); f.aliasExpr) expr(*f.aliasExpr);
+    break;
   case ExprKind::ArrayLit:
     for (auto &el : static_cast<ArrayLitExpr &>(e).elems) expr(*el);
     break;
@@ -202,7 +205,7 @@ void CallResolver::block(Block &b) {
         if (d.init) expr(*d.init);
       }
       break;
-    case StmtKind::Parameters: case StmtKind::Memvar: // names only
+    case StmtKind::Parameters: case StmtKind::Memvar: case StmtKind::Field: // names only
       break;
     case StmtKind::Return: {
       auto &r = static_cast<ReturnStmt &>(*st);

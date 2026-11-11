@@ -443,6 +443,8 @@ frame of the activation that created it and the binding it hid (`xb_ctx.privates
   ends, unless one of that name is visible already (a PRIVATE or a PUBLIC): then it does nothing, and its initializer
   assigns the visible one.
 - Assigning a name with no variable visible creates a PRIVATE of the running activation, as in Clipper.
+- A name the compiler leaves undeclared is read with `xb_mv_field`: a field of the current work area of that name
+  first, else the memory variable ([Work areas](#work-areas)); `MEMVAR` and `M->` read the memory variable alone.
 - `PARAMETERS` creates a PRIVATE per name holding the argument at its position (NIL past the arguments received); an
   argument passed by reference makes the PRIVATE the caller's variable itself (its cell, or a cell holding the
   element's reference).
@@ -484,14 +486,17 @@ frame of the activation that created it and the binding it hid (`xb_ctx.privates
 the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar) for the forms).
 
 - The grammar is the compiler's expression grammar, with its precedence, evaluation order and literal rules (the width
-  of a numeric literal is `xb_num_literal_width`, shared). A macro sees memory variables, the program's public
-  functions and the runtime's functions, by name; never a function's `LOCAL`s or `STATIC`s, nor a `STATIC FUNCTION`.
-  `M->name` and `MEMVAR->name` are memory variables; another alias names a field, which no work area has yet (error
-  1003 on the name). A codeblock made from text sees its own parameters, not those of the codeblock around it (as a
-  compiled one, Clipper's rule). Inside the text, `&name` is a macro of its own (the variable's text); a name joined to
-  other identifiers there is one the substitution below could not make, an error. A text nested deeper than 1024
-  levels (parentheses, a chain of operators, `a[1][2]...`), the compiler's limit, is error 1449, so that compiling it
-  keeps the stack small.
+  of a numeric literal is `xb_num_literal_width`, shared). A macro sees memory variables, the program's public functions
+  and the runtime's functions, by name; never a function's `LOCAL`s or `STATIC`s, nor a `STATIC FUNCTION`. `M->name` and
+  `MEMVAR->name` are memory variables; a name alone is a field of the current work area before a memory variable
+  (`MO_MV_FIELD`), and the aliases of [rdd.md](rdd.md#field-references) name fields (`alias->name`, `FIELD->name`,
+  `FIELD->alias->name`, `( expr )->name`, `&( expr )->name`) or evaluate in a work area (`alias->( expr, ... )`,
+  `( expr )->( ... )`, with `MO_AREA`, which makes the area current again when the evaluation ends, also by an error);
+  `M->( expr )` names the alias `M`, as in compiled code. A codeblock made from text sees its own parameters, not those
+  of the codeblock around it (as a compiled one, Clipper's rule). Inside the text, `&name` is a macro of its own (the
+  variable's text); a name joined to other identifiers there is one the substitution below could not make, an error. A
+  text nested deeper than 1024 levels (parentheses, a chain of operators, `a[1][2]...`), the compiler's limit, is error
+  1449, so that compiling it keeps the stack small.
 - `compile.c` parses the text into a tree, then generates code for a stack machine: a function is an array, its
   code (a string of bytes) and its constants. `run.c` runs it with the runtime's operators (`xb_op_*`, as compiled code
   calls them); nothing is folded, so `&( "7 % 3" )` is `1.00`, as `n % m` is (the reference folds some constants). The
@@ -519,11 +524,14 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
 - `Type( cExpr )` substitutes and compiles the text without running the error block: `"UE"` when it is not an
   expression, `"B"` for a codeblock (not evaluated), `"U"` when it calls a function the program does not have, `"UI"`
   when it calls one that is not one of Clipper's predefined ones (`RESERVED` in `rtl.ch`, carried into the symbol
-  table; nothing is evaluated), `"U"` when it names a variable that is not visible; otherwise it evaluates the
-  expression with the context's `error_trap` set: an error ends the evaluation (`XB_PENDING_TRAP`, which unwinds like
-  a `BREAK` but no `BEGIN SEQUENCE` catches) and gives `"UE"`; else the letter `ValType()` would give. A PRIVATE the
+  table; nothing is evaluated), `"U"` when it names a variable or field that is not visible (inside
+  `alias->( expr )`, a field of the alias's work area; inside `( expr )->( ... )` nothing is checked); otherwise it
+  evaluates the expression with the context's `error_trap` set: an error ends the evaluation (`XB_PENDING_TRAP`, which
+  unwinds like a `BREAK` but no `BEGIN SEQUENCE` catches; `error_trapped` keeps its generic code) and gives `"U"` when
+  it is `EG_NOVAR` or `EG_NOALIAS` (a variable, field or alias found missing only then), `"UE"` otherwise; else the
+  letter `ValType()` would give. A PRIVATE the
   evaluation creates is the calling function's (`PRIVATES` in `rtl.ch`). Anything but a string is `BASE/1121`.
-- Not yet: `o:&message`, `@&name`, aliases of work areas, and `PCount()`/`PValue()` inside a macro (they read the
+- Not yet: `o:&message`, `@&name`, and `PCount()`/`PValue()` inside a macro (they read the
   macro's frame, which keeps no arguments).
 
 ## Calling convention
@@ -567,14 +575,15 @@ pauses (a safepoint) and destructors ([Classes](#classes)) and returns non-zero 
 `BEGIN SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)).
 The check stays valid across `AWAIT`. `QUIT` raises `XB_PENDING_QUIT` with exit code 0.
 
-A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`) makes an `Error` object (see [Objects
-and messages](#objects-and-messages)): subsystem `BASE`, the subcode, the generic code (`error.ch`, shared with xBase
-code like `set.ch`) and its description (in the current language, [Languages](#languages)), the operation, severity
-`ES_ERROR`, `canSubstitute`, and in `args` the operands of an operator or the arguments of a function (NIL when there
-are none). Then it evaluates the context's error block with it (`ErrorBlock( [bNew] )` returns the block and replaces it
-with a codeblock argument; the block and the `BREAK` value are roots of the collector). With no error block (a program's
-`ErrorSys()` set none) the error is unrecoverable: `Unrecoverable error 9002: No ERRORBLOCK() for error`. After the
-block:
+A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`; `xb_error_of` for one with another
+subsystem, a file name or a system code) makes an `Error` object (see [Objects and messages](#objects-and-messages)):
+subsystem `BASE` (the work areas' errors are `DBCMD` and the driver's name, [rdd.md](rdd.md#work-areas)), the subcode,
+the generic code (`error.ch`, shared with xBase code like `set.ch`) and its description (in the current language,
+[Languages](#languages)), the operation, severity `ES_ERROR`, `canSubstitute`, and in `args` the operands of an operator
+or the arguments of a function (NIL when there are none). Then it evaluates the context's error block with it
+(`ErrorBlock( [bNew] )` returns the block and replaces it with a codeblock argument; the block and the `BREAK` value are
+roots of the collector). With no error block (a program's `ErrorSys()` set none) the error is unrecoverable:
+`Unrecoverable error 9002: No ERRORBLOCK() for error`. After the block:
 
 - a request to unwind is pending (the block called `Break()`, or quit): the operation fails with it;
 - the error may be retried (`XB_ERR_RETRY`, `xb_error_retry`: `canRetry`, with `tries` counting the attempts from 1;
@@ -754,6 +763,7 @@ Conventions:
 - `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array and the empty date.
 - `Set( n [, x] )` returns the setting before the call. `_SET_EXACT` takes a logical or a string starting with
   `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020);
+  `_SET_DELETED` takes a logical or `ON`/`OFF` as `_SET_EXACT` does ([rdd.md](rdd.md#work-areas));
   `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more, off
   otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it in front when the picture
   has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name ([Languages](#languages)),
@@ -952,6 +962,23 @@ helpers of `core/bytes.h`. `SAVE` and `RESTORE` ([Memory variables](#memory-vari
   in `FError()`. On Windows, `FCreate` of an existing hidden or system file keeps those attributes. File offsets are 64
   bits everywhere.
 
+## Work areas
+
+The work areas, their tables and the database functions are in `runtime/src/rdd/` ([rdd.md](rdd.md)). Each context
+has its own (`xb_ctx.areas`, `areaCurrent`, `set_deleted`, `rddDefault`, `netErr`). Compiled code reaches fields
+through three entry points of `xbrt.h`, each call with a cache of its own (`xb_field_cache`, a zeroed static of the
+reference: the `generation` of the table it found the field in and the field's position):
+
+- `xb_field_get( ctx, r, area, alias, name, cache )` reads field `name` (upper case) of the work area that the item
+  `area` names (an alias or a number, for `( expr )->name`), else the C string `alias`, else the current one (both
+  NULL); `xb_field_set( ctx, area, alias, name, cache, v )` writes it. A field that is not there is `BASE/1003`, an
+  alias that names no area `BASE/1002`, both retried while the error block returns `.T.`.
+- `xb_mv_field( ctx, r, memvar, cache )` reads an undeclared name: the current area's field of the variable's name,
+  else the memory variable (as `xb_mv_get`).
+
+`__AreaEval( xArea, bBlock )` (`alias->( expr )`) and the macro machine's `MO_AREA` make an area current through
+`xb_area_enter`, which raises the alias error.
+
 ## Program startup
 
 Before `main`, the global constructor of every module calls `xb_module_register` (`core/module.c`) with the
@@ -987,7 +1014,8 @@ program's name strings in a frame of its own linked into the context's chain (so
 5. the `EXIT` procedures, module by module, each module's in the order written, without arguments.
 
 A request to unwind (a `QUIT`, a `BREAK` with no sequence, an error that ended the program) stops steps 1 to 4; the
-request is then dropped (with a `BREAK` value) and step 5 runs, a new request stopping it. The exit code is kept
+request is then dropped (with a `BREAK` value) and step 5 runs, a new request stopping it. Then every table open is
+written and closed ([Work areas](#work-areas)), whatever ended the program. The exit code is kept
 throughout: `ErrorLevel( [nNew] )` returns it and sets it from an argument, a number wrapped to 32 bits, anything else
 0 (the default error handler sets 1). Registration order follows the global constructors,
 which is the link order on the usual toolchains. Inside an `EXIT` procedure the call stack starts with it (the

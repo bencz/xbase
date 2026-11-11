@@ -28,13 +28,14 @@ design of the larger parts.
   `CLEAR MEMORY`, `SAVE`/`RESTORE` (`.mem` files), and Clipper's rule for undeclared names (a memory variable at run
   time, with a warning; `-Wno-undeclared`, `-Werror=undeclared`) ([runtime.md](runtime.md#memory-variables),
   [compiler.md](compiler.md#semantic-checks)).
-- Missing: a memory variable as the variable of `FOR EACH`, and the field first in the lookup of an undeclared name
-  once work areas exist.
+- Missing: a memory variable as the variable of `FOR EACH`.
 
 ### Fields and work areas
 
-`FIELD`, `alias->field`, `FIELD->name`, `(alias)->( expr )`, `SELECT`, and the work areas themselves (the RDD
-layer: DBF, FPT/DBT, NTX, CDX, SDF, DELIM), as [rdd.md](rdd.md) plans them.
+- Done: `FIELD` (with `IN`), `alias->field`, `FIELD->name`, `(expr)->name`, `alias->( expr )`, undeclared names read
+  as a field first, `SELECT`, the work areas and `DBF` tables without memos ([rdd.md](rdd.md)).
+- Missing: memos (DBT, FPT), indexes (NTX, CDX), sharing and locks, relations, SDF and DELIM, as
+  [rdd.md](rdd.md#order-of-the-work) orders them.
 
 ### Macro operator
 
@@ -42,8 +43,9 @@ layer: DBF, FPT/DBT, NTX, CDX, SDF, DELIM), as [rdd.md](rdd.md) plans them.
   `PRIVATE`/`PUBLIC &name`, blocks built from text (`&( "{|| ... }" )`), Clipper's text substitution in strings and
   `Type()`, compiled by the runtime's own expression compiler and cached
   ([runtime.md](runtime.md#macro-operator), [compiler.md](compiler.md#grammar)).
-- Missing: `o:&message`, `@&name`, aliased macros (`&cAlias->field`, with the work areas), `PCount()`/`PValue()`
-  inside a macro, and the reference's macro lists (`&c` spread into arguments, its own extension).
+- Done also: aliases in and before macros (`&cAlias->field`, `( expr )->( ... )` inside the text).
+- Missing: `o:&message`, `@&name`, `PCount()`/`PValue()` inside a macro, and the reference's macro lists (`&c` spread
+  into arguments, its own extension).
 
 ### Errors
 
@@ -76,7 +78,8 @@ Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 2. The terminal layer ([terminal.md](terminal.md)): screen, cursor, colors and keyboard, with drivers for plain
    standard output, terminals (xbase's own, not ncurses) and the Windows console; then `@ ... SAY/GET`, `READ`,
    `AChoice`, `MemoEdit`, `TBrowse`, `dbEdit`, menus.
-3. The RDD layer and the database functions and commands ([rdd.md](rdd.md)).
+3. The RDD layer and the database functions and commands ([rdd.md](rdd.md)): work areas and `DBF` tables done; memos,
+   indexes, locks and the rest next.
 
 The SIx Driver and HiPer-SEEK functions (`sx_*`, `hs_*`, `cfts*`) belong to add-on database drivers; whether xbase
 provides them is decided when the RDD layer exists.
@@ -196,7 +199,7 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
   inner ones with one error; an error node in the tree, so the semantic checks run after a syntax error; an undeclared
   name reported once per function.
 - A statement that is an expression without effect (`x == 3`) is an error in Clipper; xbase warns.
-- Messages show names as written and the text of tokens; aliases and macros give one "not supported yet" error each.
+- Messages show names as written and the text of tokens.
 
 ### Front end
 

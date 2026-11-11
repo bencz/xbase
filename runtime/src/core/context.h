@@ -20,9 +20,9 @@ struct xb_ctx {
   uint32_t error_depth;     /* error blocks running */
   /* Type() evaluating (error_trap > 0): an error runs no block, it ends the
    * evaluation (XB_PENDING_TRAP, which no BEGIN SEQUENCE catches) and sets
-   * error_trapped. */
+   * error_trapped to its generic code (never 0). */
   uint32_t error_trap;
-  int      error_trapped;
+  int32_t  error_trapped;
   /* Memory variables (core/memvar.c): by number, the binding visible (an
    * XB_T_CELL item, NIL for none); the PRIVATEs alive, each with the binding
    * it hid, in creation order. Roots of the collector. Per task, like the
@@ -43,6 +43,13 @@ struct xb_ctx {
   int32_t  file_error;      /* FError(): the code of the last file function (rtl/files.c) */
   xb_item  language;        /* SET LANGUAGE: the current language's texts (core/language.c), a root; NIL until used */
   const struct xb_codepage *codepage; /* SET CODEPAGE (core/codepage.h); NULL: UTF-8 */
+  /* Work areas (rdd/rdd.h): by number, NULL where no table is open; the current one's number (1 at the start); SET
+   * DELETED; the default driver (NULL: DBFNTX); NetErr(). */
+  struct xb_area **areas;
+  uint32_t areaCap, areaCurrent;
+  int      set_deleted;
+  const struct xb_rdd *rddDefault;
+  int      netErr;
 };
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);

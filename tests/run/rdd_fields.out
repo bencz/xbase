@@ -1,0 +1,16 @@
+
+read: field      memvar field      field      field     
+after assign: field      assigned field     
+type: C N N U U
+macro assign: by macro  
+after close: assigned
+declared: abcd  42 abcd
+ERR BASE         14       1003 [Variable does not exist] [NOPE] .F. .T. .F.         -1
+ERR BASE         15       1002 [Alias does not exist] [XX] .F. .T. .F.         -1
+ERR BASE         14       1003 [Variable does not exist] [CODE] .F. .T. .F.         -1
+ERR BASE         15       1002 [Alias does not exist] [XX] .F. .T. .F.         -1
+ERR BASE         14       1003 [Variable does not exist] [CODE] .F. .T. .F.         -1
+ERR BASE         14       1003 [Variable does not exist] [NOPE] .F. .T. .F.         -1
+areaeval keeps area:          2
+ERR DBFNTX         33       1020 [Data type error] [CODE] .T. .F. .F.          1
+after nil: abcd

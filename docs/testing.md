@@ -18,6 +18,11 @@ parallel do not share them, and each run overwrites them.
 Include files used by a test sit next to it (for example `tests/run/commands.ch`). Execution tests are rebuilt when
 `std.ch` or an included file changes (`xbc --depfile`).
 
+A test that creates files (tables, `.mem` files, ...) runs in the build's test directory: its files' names start with
+the test's name, so that tests running in parallel never share one, and the test deletes them at the end. A table
+written by the reference that a test needs is kept inside the test (its bytes in hexadecimal, as in
+`tests/run/rdd_format.prg`), written out when the test runs.
+
 ## Expected outputs
 
 Expected outputs follow Clipper behavior; `?` starts with a newline, so `.out` files usually begin with an empty line

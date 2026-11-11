@@ -5,6 +5,7 @@ add_library(xbrt STATIC
   src/core/ctx.c
   src/core/display.c
   src/core/error.c
+  src/core/file.c
   src/core/language.c
   src/core/main.c
   src/core/memvar.c
@@ -24,6 +25,10 @@ add_library(xbrt STATIC
   src/types/object.c
   src/types/ref.c
   src/types/string.c
+  src/rdd/area.c
+  src/rdd/dbcmd.c
+  src/rdd/dbf.c
+  src/rdd/field.c
   src/rtl/arrays.c
   src/rtl/collections.c
   src/rtl/console.c

@@ -11,7 +11,7 @@ Find the task, read the doc it points to, then the code.
 | Grammar, keywords, name resolution, code generation, object emission, cross-compilation, driver options | [compiler.md](compiler.md) |
 | Values (`xb_item`), frames, calling convention, error propagation, operators, the ABI shared with the compiler | [runtime.md](runtime.md) |
 | The screen, keyboard and mouse: screen model, events, terminal drivers (planned), the native GUI (later) | [terminal.md](terminal.md) |
-| Work areas and database drivers: DBF, DBT/FPT memos, NTX/CDX indexes, locking, field references (planned) | [rdd.md](rdd.md) |
+| Work areas, field references, database drivers: DBF; DBT/FPT memos, NTX/CDX indexes, locking (planned) | [rdd.md](rdd.md) |
 | Adding or running tests | [testing.md](testing.md) |
 | Which commands and functions exist, and what to implement next | [coverage.md](coverage.md) |
 

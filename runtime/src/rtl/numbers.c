@@ -29,14 +29,7 @@ static xb_str *str_of(uint32_t argc, const xb_item *argv) {
   if (width > 1 && argc > 2) {
     int64_t d = xb_num_to_i64(&argv[2]);
     dec = d <= 0 ? 0 : (d > INT32_MAX ? INT32_MAX : (int)d);
-    if (hasWidth && dec > 0) {
-      if (dec >= width) {
-        xb_str *s = xb_str_alloc((size_t)width);
-        memset(s->data, '*', (size_t)width);
-        return s;
-      }
-      width -= dec + 1;
-    }
+    if (hasWidth) return xb_num_to_field(&argv[0], width, dec);
   }
   return xb_num_to_str(&argv[0], width, dec);
 }
@@ -76,51 +69,7 @@ void xbf_VAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1098, "VAL", argc, argv);
     return;
   }
-  const char *s = argv[0].v.s->data;
-  size_t len = argv[0].v.s->len, pos = 0;
-  while (pos < len && xb_is_blank(s[pos])) ++pos;
-  int neg = 0;
-  if (pos < len && (s[pos] == '-' || s[pos] == '+')) neg = s[pos++] == '-';
-  size_t width = pos, dec = 0, decRest = 0;
-  int64_t iv = 0;
-  double dv = 0.0;
-  int isDouble = 0, inDec = 0;
-  for (; pos < len; ++pos) {
-    char c = s[pos];
-    if (c >= '0' && c <= '9') {
-      if (!isDouble && (xb_mul_overflow(iv, 10, &iv) || xb_add_overflow(iv, c - '0', &iv))) isDouble = 1;
-      dv = dv * 10.0 + (c - '0');
-      if (inDec) ++dec;
-      else ++width;
-    } else if (c == '.' && !inDec) {
-      inDec = 1;
-      isDouble = 1;
-    } else {
-      while (!inDec && pos < len) { /* characters up to a dot widen the field */
-        if (s[pos++] == '.') inDec = 1;
-        else ++width;
-      }
-      if (inDec) { /* a dot after other characters still makes a number with decimals */
-        decRest = len - pos;
-        isDouble = 1;
-      }
-      break;
-    }
-  }
-  if (dec) dv /= pow(10.0, (double)dec);
-  dec += decRest;
-  double d = neg ? -dv : dv;
-  int64_t i = neg ? (int64_t)(0 - (uint64_t)iv) : iv; /* iv may have wrapped (a double then) */
-  uint16_t w;
-  if (width > 10) w = isDouble ? xb_num_dbl_width(d) : xb_num_int_width(i);
-  else if (dec == 0) w = (uint16_t)len;
-  else if (width == 0) w = 1;
-  else if (neg && width == 1 && dv != 0) w = 2;
-  else w = (uint16_t)width;
-  uint64_t value = (uint64_t)i;
-  if (isDouble) memcpy(&value, &d, 8);
-  uint16_t dec16 = isDouble ? (uint16_t)(dec > UINT16_MAX ? UINT16_MAX : dec) : 0;
-  xb_put(ret, xb_header_word(isDouble ? XB_T_DOUBLE : XB_T_INT, w, dec16), value);
+  xb_num_parse(argv[0].v.s->data, argv[0].v.s->len, ret);
 }
 
 void xbf_INT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

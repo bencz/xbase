@@ -25,10 +25,12 @@ struct Sema::Scope {
 
 void Sema::run(Module &m) {
   module_ = &m;
-  frames_.push_back({{}, {}, {}, nullptr, nullptr}); // the file's STATICs and MEMVARs
+  frames_.push_back({{}, {}, {}, {}, nullptr, nullptr}); // the file's STATICs and MEMVARs
   Scope fileScope;
   for (LocalDecl &d : m.fileStatics) declare(d, true, fileScope);
   for (const LocalDecl &d : m.fileMemvars) declareMemvar(d);
+  for (const auto &st : m.fileFields)
+    for (const LocalDecl &d : st->decls) declareField(d, st->fieldAlias);
   std::unordered_map<std::string, SourceLoc> seen;
   for (auto &f : m.funcs) {
     // INIT and EXIT procedures have names of their own: nothing calls them.
@@ -102,7 +104,8 @@ bool Sema::constantInit(const Expr &e, unsigned blockDepth) const {
 // codeblock stored in it can call itself.
 void Sema::declare(LocalDecl &d, bool isStatic, Scope &s) {
   if (!isStatic && d.init) expr(*d.init, s);
-  bool duplicate = frames_.back().names.count(d.name) != 0 || frames_.back().memvars.count(d.name) != 0;
+  bool duplicate = frames_.back().names.count(d.name) != 0 || frames_.back().memvars.count(d.name) != 0 ||
+                   frames_.back().fields.count(d.name) != 0;
   if (duplicate) {
     diag_.error(d.loc, "'" + d.name + "' is already declared");
   } else if (isStatic) {
@@ -125,8 +128,17 @@ void Sema::declare(LocalDecl &d, bool isStatic, Scope &s) {
 // function); it cannot also be one of the frame's LOCALs, parameters or
 // STATICs.
 void Sema::declareMemvar(const LocalDecl &d) {
-  if (frames_.back().names.count(d.name)) diag_.error(d.loc, "'" + d.name + "' is already declared");
+  if (frames_.back().names.count(d.name) || frames_.back().fields.count(d.name))
+    diag_.error(d.loc, "'" + d.name + "' is already declared");
   frames_.back().memvars.insert(d.name);
+}
+
+// FIELD: the name is a field of the work area of `alias` (the current one for "") in the frame, as MEMVAR makes one
+// a memory variable.
+void Sema::declareField(const LocalDecl &d, const std::string &alias) {
+  if (frames_.back().names.count(d.name) || frames_.back().memvars.count(d.name))
+    diag_.error(d.loc, "'" + d.name + "' is already declared");
+  frames_.back().fields[d.name] = alias;
 }
 
 // PRIVATE, PUBLIC and PARAMETERS create memory variables: the name cannot be a
@@ -146,7 +158,7 @@ void Sema::func(FuncDecl &f) {
   curFunc_ = &f;
   Scope s;
   if (f.generator) f.params.insert(f.params.begin(), Param{f.loc, "(GENERATOR)"}); // the enumerator it runs for
-  frames_.push_back({{}, {}, {}, &f.boxed, nullptr});
+  frames_.push_back({{}, {}, {}, {}, &f.boxed, nullptr});
   for (const Param &p : f.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, s.next}).second)
       diag_.error(p.loc, "duplicate parameter '" + p.name + "'");
@@ -190,6 +202,11 @@ bool Sema::resolve(VarExpr &v) {
   for (size_t fi = frames_.size(); fi-- > 0;) {
     auto it = frames_[fi].names.find(v.name);
     if (it == frames_[fi].names.end()) {
+      if (auto field = frames_[fi].fields.find(v.name); field != frames_[fi].fields.end()) {
+        v.where = VarWhere::Field; // FIELD in this frame, as MEMVAR
+        v.alias = field->second;
+        return true;
+      }
       if (!frames_[fi].memvars.count(v.name)) continue;
       v.where = VarWhere::Memvar; // MEMVAR in this frame: before a STATIC of an enclosing one
       return true;
@@ -247,7 +264,7 @@ void Sema::superSend(SendExpr &m) {
 // A codeblock's frame: its parameters, then an extended codeblock's LOCALs, which inner codeblocks capture and
 // references reach like a function's (BlockExpr::boxed).
 void Sema::codeblock(BlockExpr &b, Scope &s) {
-  frames_.push_back({{}, {}, {}, &b.boxed, &b});
+  frames_.push_back({{}, {}, {}, {}, &b.boxed, &b});
   uint32_t n = 0;
   for (const Param &p : b.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, n}).second)
@@ -271,7 +288,7 @@ void Sema::block(Block &b, Scope &s) {
   for (auto &st : b) {
     // PARAMETERS may come before the LOCALs, as the reference accepts.
     if (st->kind != StmtKind::Local && st->kind != StmtKind::Static && st->kind != StmtKind::Memvar &&
-        st->kind != StmtKind::Parameters)
+        st->kind != StmtKind::Field && st->kind != StmtKind::Parameters)
       s.seenExecutable = true;
     stmt(*st, s);
   }
@@ -302,6 +319,13 @@ void Sema::stmt(Stmt &st, Scope &s) {
     if (s.seenExecutable || s.blockDepth) diag_.error(st.loc, "MEMVAR declaration follows executable statement");
     for (const LocalDecl &d : static_cast<LocalStmt &>(st).decls) declareMemvar(d);
     break;
+  case StmtKind::Field: {
+    if (s.inBlock) diag_.error(st.loc, "FIELD is not allowed in a codeblock");
+    if (s.seenExecutable || s.blockDepth) diag_.error(st.loc, "FIELD declaration follows executable statement");
+    auto &decl = static_cast<LocalStmt &>(st);
+    for (const LocalDecl &d : decl.decls) declareField(d, decl.fieldAlias);
+    break;
+  }
   case StmtKind::Private:
   case StmtKind::Public:
     if (s.inBlock) diag_.error(st.loc, "PRIVATE and PUBLIC are not allowed in a codeblock");
@@ -322,8 +346,11 @@ void Sema::stmt(Stmt &st, Scope &s) {
     auto &f = static_cast<ForEachStmt &>(st);
     auto loopVar = [&](Expr &v) {
       expr(v, s);
-      if (v.kind == ExprKind::Var && static_cast<const VarExpr &>(v).where == VarWhere::Memvar)
+      VarWhere where = v.kind == ExprKind::Var ? static_cast<const VarExpr &>(v).where : VarWhere::Frame;
+      if (where == VarWhere::Memvar)
         diag_.error(v.loc, "a memory variable as the variable of FOR EACH is not supported yet");
+      else if (where == VarWhere::Field)
+        diag_.error(v.loc, "a field cannot be the variable of FOR EACH");
     };
     if (f.key) loopVar(*f.key);
     for (auto &v : f.vars) loopVar(*v);
@@ -460,14 +487,18 @@ void Sema::expr(Expr &e, Scope &s) {
       break;
     }
     if (resolve(v)) break;
-    v.where = VarWhere::Memvar; // looked up by name when it runs, as in Clipper
+    v.where = VarWhere::Memvar; // looked up by name when it runs, as in Clipper: read, a field first
+    v.fieldFirst = true;
     if (memvarCreated(v.name) || undeclared_ == Undeclared::Ignore) break;
-    std::string text = "'" + v.name + "' is not declared: a memory variable found by name at run time (MEMVAR or M->" +
-                       v.name + " declares one)";
+    std::string text = "'" + v.name + "' is not declared: a field or memory variable found by name at run time " +
+                       "(FIELD, MEMVAR or M->" + v.name + " declares one)";
     if (undeclared_ == Undeclared::Error) diag_.error(v.loc, text);
     else diag_.warning(v.loc, text);
     break;
   }
+  case ExprKind::Field:
+    if (auto &f = static_cast<FieldExpr &>(e); f.aliasExpr) expr(*f.aliasExpr, s);
+    break;
   case ExprKind::ArrayLit:
     for (auto &el : static_cast<ArrayLitExpr &>(e).elems) expr(*el, s);
     break;
@@ -547,6 +578,7 @@ void Sema::expr(Expr &e, Scope &s) {
     if (target.kind == ExprKind::Var) {
       auto &v = static_cast<VarExpr &>(target);
       if (v.where == VarWhere::Frame) markBoxed(frames_.back(), v.slot);
+      if (v.where == VarWhere::Field) diag_.error(v.loc, "a field cannot be passed by reference");
     }
     break;
   }

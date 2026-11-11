@@ -33,6 +33,7 @@ enum class ExprKind : uint8_t {
   Macro,      // &name, &name.suffix, prefix&name., &( expr ): an expression compiled from text when the code runs
   MacroCall,  // &name( args ): the function the text names
   MacroText,  // a string literal with `&name` in it: substituted when the code runs
+  Field,      // alias->name, FIELD->name, (expr)->name: a field of a work area
 };
 
 enum class BinOp : uint8_t {
@@ -92,6 +93,7 @@ enum class VarWhere : uint8_t {
   Capture,   // captured cell `slot` of the current codeblock
   Static,    // item `slot` of the module's STATICs
   Memvar,    // a memory variable (PRIVATE or PUBLIC), found by name at run time
+  Field,     // a field a FIELD statement declares: of the work area `alias` (the current one without)
 };
 
 struct VarExpr : Expr {
@@ -99,6 +101,9 @@ struct VarExpr : Expr {
   VarWhere where = VarWhere::Frame;
   uint32_t slot = 0;
   bool memvarAlias = false;      // written M->name (or MEMVAR->name): a memory variable whatever is declared
+  bool fieldFirst = false;       // set by Sema: an undeclared name, read as a field of the current work area when
+                                 // it has one (Clipper's rule; assigned, it is a memory variable)
+  std::string alias;             // VarWhere::Field: the FIELD statement's IN alias, "" for the current work area
   bool methodSelf = false;       // the Self that :: and Super stand for: valid only in a method
   VarExpr(SourceLoc l, std::string n) : Expr(ExprKind::Var, l), name(std::move(n)) {}
 };
@@ -210,10 +215,21 @@ struct MacroCallExpr : Expr {
   MacroCallExpr(SourceLoc l, ExprPtr t) : Expr(ExprKind::MacroCall, l), text(std::move(t)) {}
 };
 
+// alias->name, FIELD->name (and _FIELD->name), (expr)->name: a field of the work area of an alias, the current one,
+// or the one the value of `aliasExpr` names (an alias or a number).
+struct FieldExpr : Expr {
+  std::string alias;             // upper-cased; "" for the current work area or with aliasExpr
+  ExprPtr aliasExpr;
+  std::string name;              // upper-cased
+  FieldExpr(SourceLoc l, std::string a, ExprPtr ae, std::string n)
+      : Expr(ExprKind::Field, l), alias(std::move(a)), aliasExpr(std::move(ae)), name(std::move(n)) {}
+};
+
 // What can be assigned or incremented: a variable, an element, an instance
-// variable (a message written without arguments), or a macro.
+// variable (a message written without arguments), a macro, or a field.
 inline bool isLvalue(const Expr &e) {
   return e.kind == ExprKind::Var || e.kind == ExprKind::Index || e.kind == ExprKind::Macro ||
+         e.kind == ExprKind::Field ||
          (e.kind == ExprKind::Send && !static_cast<const SendExpr &>(e).withArgs);
 }
 
@@ -259,7 +275,7 @@ struct IIfExpr : Expr {
 };
 
 enum class StmtKind : uint8_t {
-  Expr, Local, Static, Private, Public, Parameters, Memvar, Return, If, While, For, ForEach, Switch, Sequence, Exit,
+  Expr, Local, Static, Private, Public, Parameters, Memvar, Field, Return, If, While, For, ForEach, Switch, Sequence, Exit,
   Loop, WithObject, Yield
 };
 
@@ -290,6 +306,7 @@ struct LocalDecl {
 // runs before the variable is created), PARAMETERS and MEMVAR (names only) declare memory variables.
 struct LocalStmt : Stmt {
   std::vector<LocalDecl> decls;
+  std::string fieldAlias;        // FIELD ... IN alias: the work area of the fields ("" for the current one)
   explicit LocalStmt(SourceLoc l, StmtKind k = StmtKind::Local) : Stmt(k, l) {}
 };
 
@@ -494,6 +511,7 @@ struct Module {
   std::vector<std::unique_ptr<ClassDecl>> classes;
   std::vector<LocalDecl> fileStatics; // STATICs before the first function: visible in the whole file
   std::vector<LocalDecl> fileMemvars; // MEMVARs before the first function: declared in the whole file
+  std::vector<std::unique_ptr<LocalStmt>> fileFields; // FIELD statements before the first function: the whole file
   std::vector<LocalDecl *> statics;   // every STATIC of the module, in slot order (set by Sema)
   std::vector<ExternDecl> externs;
   // The EXTERNAL names; after CallResolver, only those of another module of the program (the runtime's functions

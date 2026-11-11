@@ -172,8 +172,11 @@ private:
       out_ += " " + i.message;
       if (i.classIndex >= 0) out_ += std::string(i.superSend ? " super " : " from ") + std::to_string(i.classIndex);
       break;
-    case Op::MvGet: case Op::MvSet: case Op::MvRef: case Op::MvPrivate: case Op::MvPublic:
+    case Op::MvGet: case Op::MvField: case Op::MvSet: case Op::MvRef: case Op::MvPrivate: case Op::MvPublic:
       out_ += " " + i.message;
+      break;
+    case Op::FieldGet: case Op::FieldSet:
+      out_ += " " + (i.alias.empty() ? std::string() : i.alias + "->") + i.message;
       break;
     case Op::ClassNew: out_ += " " + std::to_string(i.classIndex); break;
     case Op::MvParam: out_ += " " + i.message + " " + std::to_string(i.index); break;

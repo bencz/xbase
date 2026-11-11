@@ -45,6 +45,58 @@
 #command ASSOCIATE CLASS <cls> WITH TYPE <type: ARRAY, BLOCK, CHARACTER, DATE, HASH, LOGICAL, NIL, NUMERIC> => ;
          ClassAssociate( <cls>(), <"type"> )
 
+/* Work areas and tables (docs/rdd.md). A later rule wins: the plain forms come after the general ones. */
+#command USE                           => dbCloseArea()
+#command USE <(db)> [VIA <rdd>] [ALIAS <a>] [<new: NEW>] [<ex: EXCLUSIVE>] [<sh: SHARED>] [<ro: READONLY>] => ;
+         dbUseArea( <.new.>, <rdd>, <(db)>, <(a)>, iif( <.sh.> .or. <.ex.>, !<.ex.>, NIL ), <.ro.> )
+#command SELECT <whatever>             => dbSelectArea( <(whatever)> )
+#command SELECT <f>( [<list,...>] )    => dbSelectArea( <f>( <list> ) )
+#command CLOSE <alias>                 => <alias>->( dbCloseArea() )
+#command CLOSE                         => dbCloseArea()
+#command CLOSE DATABASES               => dbCloseAll()
+#command CLOSE ALL                     => dbCloseAll()
+#command COMMIT                        => dbCommitAll()
+#command APPEND BLANK                  => dbAppend()
+#command PACK                          => __dbPack()
+#command ZAP                           => __dbZap()
+#command GOTO <n>                      => dbGoTo( <n> )
+#command GO <n>                        => dbGoTo( <n> )
+#command GOTO TOP                      => dbGoTop()
+#command GO TOP                        => dbGoTop()
+#command GOTO BOTTOM                   => dbGoBottom()
+#command GO BOTTOM                     => dbGoBottom()
+#command SKIP                          => dbSkip( 1 )
+#command SKIP <n>                      => dbSkip( <n> )
+#command SKIP ALIAS <a>                => <a>->( dbSkip( 1 ) )
+#command SKIP <n> ALIAS <a>            => <a>->( dbSkip( <n> ) )
+#command SET DELETED <x:ON,OFF,&>      => Set( _SET_DELETED, <(x)> )
+#command SET DELETED (<x>)             => Set( _SET_DELETED, <x> )
+#command SET FILTER TO                 => dbClearFilter()
+#command SET FILTER TO <xpr>           => dbSetFilter( <{xpr}>, <"xpr"> )
+#command SET FILTER TO <x:&>           => if ( Empty( <(x)> ) ) ; dbClearFilter() ; ;
+                                          else ; dbSetFilter( <{x}>, <(x)> ) ; end
+
+/* Commands over a scope of records: FOR, WHILE, NEXT, RECORD, REST, ALL (dbEval). */
+#command DELETE [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] [<rest: REST>] [ALL] => ;
+         dbEval( {|| dbDelete() }, <{for}>, <{while}>, <next>, <rec>, <.rest.> )
+#command DELETE                        => dbDelete()
+#command RECALL [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] [<rest: REST>] [ALL] => ;
+         dbEval( {|| dbRecall() }, <{for}>, <{while}>, <next>, <rec>, <.rest.> )
+#command RECALL                        => dbRecall()
+#command REPLACE [<f1> WITH <x1> [, <fN> WITH <xN>]] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+                 [<rest: REST>] [ALL] => ;
+         dbEval( {|| _FIELD-><f1> := <x1> [, _FIELD-><fN> := <xN>] }, <{for}>, <{while}>, <next>, <rec>, <.rest.> )
+#command REPLACE <f1> WITH <x1> [, <fN> WITH <xN>] => _FIELD-><f1> := <x1> [; _FIELD-><fN> := <xN>]
+#command LOCATE [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] [<rest: REST>] [ALL] => ;
+         __dbLocate( <{for}>, <{while}>, <next>, <rec>, <.rest.> )
+#command CONTINUE                      => __dbContinue()
+#command COUNT [TO <var>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] [<rest: REST>] [ALL] => ;
+         <var> := 0 ; dbEval( {|| <var> := <var> + 1 }, <{for}>, <{while}>, <next>, <rec>, <.rest.> )
+#command SUM <x1> [, <xN>] TO <v1> [, <vN>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+             [<rest: REST>] [ALL] => ;
+         <v1> := [ <vN> := ] 0 ; ;
+         dbEval( {|| <v1> := <v1> + <x1> [, <vN> := <vN> + <xN>] }, <{for}>, <{while}>, <next>, <rec>, <.rest.> )
+
 #command ?  [<explist,...>]            => QOut( <explist> )
 #command ?? [<explist,...>]            => QQOut( <explist> )
 

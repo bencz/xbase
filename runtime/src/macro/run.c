@@ -2,6 +2,8 @@
  * the stack machine that runs what macro/compile.c makes, and Type(). */
 #include "macro/macro.h"
 
+#include "rdd/rdd.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -70,6 +72,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
   frame->nslots = 1 + nslots;
   uint32_t mark = self ? xb_mv_mark(ctx) : 0; /* a codeblock ends the PRIVATEs it creates */
   size_t sp = nparams; /* the top item; the stack starts above the parameters */
+  uint32_t areas = 0, areaBefore = 0; /* alias->( expr ) entered, and the work area current before the first */
 #define FAILED() (ctx->pending && xb_pending(ctx))
   for (;;) {
     mop op = (mop)*pc++;
@@ -96,9 +99,34 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       if (FAILED()) goto out;
       break;
     }
-    case MO_FIELD: /* no work area has the field */
-      xb_error(ctx, NULL, EG_NOVAR, 1003, fa->items[word(&pc)].v.s->data, 0, 0, NULL);
-      goto out;
+    case MO_MV_FIELD: {
+      xb_memvar m = memvar_of(word(&pc));
+      xb_field_cache cache = {0, 0};
+      xb_set_nil(r);
+      xb_mv_field(ctx, r, &m, &cache);
+      ++sp;
+      if (FAILED()) goto out;
+      break;
+    }
+    case MO_FIELD:
+    case MO_FIELD_SET: {
+      uint32_t alias = word(&pc);
+      const char *name = fa->items[word(&pc)].v.s->data;
+      xb_field_cache cache = {0, 0};
+      int onStack = alias == XB_MACRO_STACK_ALIAS;
+      const char *aliasName = alias >= XB_MACRO_STACK_ALIAS ? NULL : fa->items[alias].v.s->data;
+      if (op == MO_FIELD) {
+        xb_set_nil(r);
+        xb_field_get(ctx, r, onStack ? &s[sp] : NULL, aliasName, name, &cache);
+        if (onStack) s[sp] = *r;
+        else ++sp;
+      } else {
+        xb_field_set(ctx, onStack ? &s[sp - 1] : NULL, aliasName, name, &cache, &s[sp]);
+        sp -= onStack ? 2 : 1;
+      }
+      if (FAILED()) goto out;
+      break;
+    }
     case MO_LOCAL_GET:
       xb_set_nil(r);
       read_var(ctx, r, &s[1 + word(&pc)]);
@@ -251,6 +279,24 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       }
       if (FAILED()) goto out;
       break;
+    case MO_AREA: {
+      uint32_t skip = word(&pc), before;
+      if (!xb_area_enter(ctx, &s[sp], &before)) {
+        if (FAILED()) goto out;
+        xb_set_nil(&s[sp]);
+        pc = ops + skip;
+        break;
+      }
+      if (areas++ == 0) areaBefore = before;
+      xb_set_int(&s[sp], before);
+      break;
+    }
+    case MO_AREA_END:
+      ctx->areaCurrent = (uint32_t)xb_num_to_i64(&s[sp - 1]);
+      --areas;
+      s[sp - 1] = s[sp];
+      --sp;
+      break;
     case MO_RETURN:
       *ret = s[sp];
       goto out;
@@ -258,6 +304,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
   }
 #undef FAILED
 out:
+  if (areas) ctx->areaCurrent = areaBefore; /* an error or a BREAK left alias->( expr ) */
   if (self) xb_mv_release(ctx, mark);
   xb_frame_pop(ctx, frame);
   free(frame);
@@ -477,8 +524,9 @@ void xb_macro_public(xb_ctx *ctx, const xb_item *text) {
 
 /* Type( cExpr ): the type of the expression's value, as ValType() gives it,
  * without running the error block: "UE" when it is not an expression or its
- * evaluation fails, "U" when it names a variable that is not visible or a
- * function the program does not have, "UI" when it calls a function that is
+ * evaluation fails, "U" when it names a variable that is not visible (also
+ * when the evaluation finds it: a variable, field or alias that does not
+ * exist) or a function the program does not have, "UI" when it calls a function that is
  * not one of Clipper's predefined ones (it is not evaluated), "B" for a
  * codeblock (not evaluated). */
 void xbf_TYPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -506,14 +554,14 @@ void xbf_TYPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   } else if (flags & XB_MACRO_NO_VAR) {
     type = "U";
   } else {
-    int trapped = ctx->error_trapped;
+    int32_t trapped = ctx->error_trapped;
     ctx->error_trapped = 0;
     ++ctx->error_trap;
     run(ctx, &work[2], &work[1], 0, NULL, NULL);
     --ctx->error_trap;
     if (ctx->error_trapped) {
       ctx->pending &= ~(uint32_t)XB_PENDING_TRAP;
-      type = "UE";
+      type = ctx->error_trapped == EG_NOVAR || ctx->error_trapped == EG_NOALIAS ? "U" : "UE";
     } else {
       letter[0] = xb_type_letter(&work[2]);
       type = letter;

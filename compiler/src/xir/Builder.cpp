@@ -105,8 +105,17 @@ Instruction *Builder::stepByOne(bool up, Value *a) {
 }
 
 Instruction *Builder::memvar(Op op, const std::string &name, Value *value) {
-  Type t = op == Op::MvGet || op == Op::MvRef ? Type::Item : Type::Void;
+  Type t = op == Op::MvGet || op == Op::MvField || op == Op::MvRef ? Type::Item : Type::Void;
   Instruction *i = value ? make(op, t, {value}) : make(op, t, {});
+  i->message = name;
+  return i;
+}
+
+Instruction *Builder::field(const std::string &alias, Value *area, const std::string &name, Value *value) {
+  Instruction *i = make(value ? Op::FieldSet : Op::FieldGet, value ? Type::Void : Type::Item, {});
+  if (area) i->addOperand(area);
+  if (value) i->addOperand(value);
+  i->alias = alias;
   i->message = name;
   return i;
 }

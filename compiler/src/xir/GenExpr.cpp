@@ -91,6 +91,12 @@ Value *Generator::genExpr(const Expr &e) {
     b.setLoc(m.loc);
     return b.macro(Op::MacroCall, text, args);
   }
+  case ExprKind::Field: {
+    auto &f = static_cast<const FieldExpr &>(e);
+    Value *area = f.aliasExpr ? genExpr(*f.aliasExpr) : nullptr;
+    b.setLoc(f.loc);
+    return b.field(f.alias, area, f.name);
+  }
   }
   return b.nil();
 }
@@ -170,6 +176,7 @@ Value *Generator::genAssign(const AssignExpr &a) {
   if (a.target->kind == ExprKind::Index) return genIndexAssign(static_cast<const IndexExpr &>(*a.target), &a, nullptr);
   if (a.target->kind == ExprKind::Send) return genSendAssign(static_cast<const SendExpr &>(*a.target), &a, nullptr);
   if (a.target->kind == ExprKind::Macro) return genMacroAssign(static_cast<const MacroExpr &>(*a.target), &a, nullptr);
+  if (a.target->kind == ExprKind::Field) return genFieldAssign(static_cast<const FieldExpr &>(*a.target), &a, nullptr);
   auto &target = static_cast<const VarExpr &>(*a.target);
   Value *value;
   if (a.compound) {
@@ -187,6 +194,7 @@ Value *Generator::genIncDec(const IncDecExpr &e) {
   if (e.target->kind == ExprKind::Index) return genIndexAssign(static_cast<const IndexExpr &>(*e.target), nullptr, &e);
   if (e.target->kind == ExprKind::Send) return genSendAssign(static_cast<const SendExpr &>(*e.target), nullptr, &e);
   if (e.target->kind == ExprKind::Macro) return genMacroAssign(static_cast<const MacroExpr &>(*e.target), nullptr, &e);
+  if (e.target->kind == ExprKind::Field) return genFieldAssign(static_cast<const FieldExpr &>(*e.target), nullptr, &e);
   auto &target = static_cast<const VarExpr &>(*e.target);
   Value *old = load(target);
   Value *now = cur_.b->stepByOne(e.increment, old);
@@ -254,6 +262,27 @@ Value *Generator::genMacroAssign(const MacroExpr &target, const AssignExpr *assi
   Value *now = assign ? b.binary(assign->op, old, genExpr(*assign->value)) : b.stepByOne(incdec->increment, old);
   b.setLoc(target.loc);
   b.macro(Op::MacroSet, text, {now});
+  return incdec && !incdec->prefix ? old : now;
+}
+
+// Field assignment, each operand once:
+//   alias->x := v      v, then the work area's value (for (expr)->x), then the store;
+//   alias->x op= v     the work area's value, then the field, then v, then the store.
+Value *Generator::genFieldAssign(const FieldExpr &target, const AssignExpr *assign, const IncDecExpr *incdec) {
+  Builder &b = *cur_.b;
+  if (assign && !assign->compound) {
+    Value *value = genExpr(*assign->value);
+    Value *area = target.aliasExpr ? genExpr(*target.aliasExpr) : nullptr;
+    b.setLoc(target.loc);
+    b.field(target.alias, area, target.name, value);
+    return value;
+  }
+  Value *area = target.aliasExpr ? genExpr(*target.aliasExpr) : nullptr;
+  b.setLoc(target.loc);
+  Value *old = b.field(target.alias, area, target.name);
+  Value *now = assign ? b.binary(assign->op, old, genExpr(*assign->value)) : b.stepByOne(incdec->increment, old);
+  b.setLoc(target.loc);
+  b.field(target.alias, area, target.name, now);
   return incdec && !incdec->prefix ? old : now;
 }
 

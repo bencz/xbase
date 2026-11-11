@@ -68,6 +68,7 @@ private:
   Value *genIndexAssign(const IndexExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);
   Value *genSendAssign(const SendExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);
   Value *genMacroAssign(const MacroExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);
+  Value *genFieldAssign(const FieldExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);
   Value *genLogic(const LogicExpr &l);
   Value *genIIf(const IIfExpr &e);
   Value *genCodeblock(const BlockExpr &b);

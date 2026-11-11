@@ -216,6 +216,19 @@ int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *er
   return pos.QuadPart;
 }
 
+int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err) {
+  LARGE_INTEGER zero, here, to;
+  zero.QuadPart = 0;
+  to.QuadPart = size;
+  if (!SetFilePointerEx((HANDLE)f, zero, &here, FILE_CURRENT) || !SetFilePointerEx((HANDLE)f, to, NULL, FILE_BEGIN) ||
+      !SetEndOfFile((HANDLE)f)) {
+    *err = common_code(GetLastError());
+    return 0;
+  }
+  SetFilePointerEx((HANDLE)f, here, NULL, FILE_BEGIN);
+  return 1;
+}
+
 int xb_platform_file_close(xb_file f, int32_t *err) {
   if (CloseHandle((HANDLE)f)) return 1;
   *err = (int32_t)GetLastError();

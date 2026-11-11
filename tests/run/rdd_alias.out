@@ -1,0 +1,26 @@
+B in 1 
+ERR DBCMD         18       1011 Alias already in use [B] .T. .F.
+         1 B in 2 
+ERR DBCMD         18       1011 Alias already in use [B] .T. .F.
+         2           2M 
+ERR DBCMD         18       1011 Alias already in use [M] .T. .F.
+         1 L no error
+         1 L          12024 
+ERR DBCMD         17       1010 Illegal characters in alias [2024] .T. .F.
+          11X 
+ERR DBCMD         17       1010 Illegal characters in alias [1X] .T. .F.
+          1A B 
+ERR DBCMD         17       1010 Illegal characters in alias [A B] .T. .F.
+          1_X9 no error
+_X9          1X-Y 
+ERR DBCMD         17       1010 Illegal characters in alias [X-Y] .T. .F.
+          1blanks no error
+[RA]          1          1
+select          1          2         11          0          1          0selectarea blanks no error
+         1missing file 
+ERR DBFNTX         21       1001 Open error [] .T. .T.
+          1 .F.dbcreate dup 
+ERR DBCMD         18       1011 Alias already in use [R1A] .T. .F.
+         1 R1A .T.use dup 
+ERR DBCMD         18       1011 Alias already in use [R1A] .T. .F.
+         2  .F.

@@ -7,6 +7,11 @@
 /* Text of a number in a field of `width` integer columns and `dec` decimals
  * (`width + 1 + dec` characters when dec > 0), Clipper style. */
 xb_str *xb_num_to_str(const xb_item *it, int width, int dec);
+/* Str( n, nWidth, nDec ): the number in `width` characters in all, `dec` of them decimals (stars when it does not
+ * fit, or when dec >= width); a database's numeric field holds this text. */
+xb_str *xb_num_to_field(const xb_item *it, int width, int dec);
+/* Val( c ) of the `len` bytes at `s`: the number, with the width and decimals its text gives. */
+void xb_num_parse(const char *s, size_t len, xb_item *r);
 
 static inline int xb_is_number(const xb_item *it) { return it->type == XB_T_INT || it->type == XB_T_DOUBLE; }
 

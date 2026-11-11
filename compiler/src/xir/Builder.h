@@ -46,6 +46,8 @@ public:
   Instruction *binary(BinOp op, Value *a, Value *b);
   Instruction *stepByOne(bool up, Value *a); // ++ (up) or --: a binary add or sub of 1, byOne
   Instruction *memvar(Op op, const std::string &name, Value *value = nullptr); // MvGet, MvSet, MvRef, MvPrivate, ...
+  // FieldGet (value null) or FieldSet of field `name` of the work area of `alias`, or of the one `area` names.
+  Instruction *field(const std::string &alias, Value *area, const std::string &name, Value *value = nullptr);
   Instruction *memvarParam(const std::string &name, uint32_t index);
   Instruction *macro(Op op, Value *text, const std::vector<Value *> &more = {}); // MacroGet, MacroSet, ...
   Instruction *truth(Value *a);

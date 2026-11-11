@@ -61,6 +61,7 @@ int xb_platform_path_separator(char c);
  * seek error, 32 sharing violation, 80 file exists, 87 invalid parameter, 112
  * disk full, 206 name too long; 31, general failure, for the others). */
 typedef intptr_t xb_file;
+#define XB_FERR_FAILURE 31
 
 /* File attributes, as DOS numbers them: those FCreate() takes (fileio.ch),
  * and those Directory() tells besides. */
@@ -89,6 +90,9 @@ int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err);
 /* Moves to `offset` from the start (0), the current position (1) or the end
  * (2): the new position; before the start is 25. */
 int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *err);
+
+/* Makes the file `size` bytes long (the position stays where it was). */
+int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err);
 
 /* Closes the file: 1 when nothing failed. */
 int xb_platform_file_close(xb_file f, int32_t *err);

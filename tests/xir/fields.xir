@@ -1,0 +1,30 @@
+module FIELDS
+
+function MAIN params 0 {
+  $f0 = frame 0 "C"
+entry:
+  %0 = field.get CUST->NAME
+  %1 = field.get NAME
+  %2 = field.get ORDERS->QTY
+  %3 = field.get QTY "ORDERS"
+  %4 = mv.field UNDECLARED
+  %5 = call QOUT native %0, %1, %2, %3, %4
+  field.set CUST->NAME "x"
+  %7 = field.get QTY "ORDERS"
+  %8 = binary add %7, 1:w10
+  field.set QTY "ORDERS", %8
+  %10 = field.get ORDERS->QTY
+  %11 = binary add.one %10, 1:w0
+  field.set ORDERS->QTY %11
+  mv.set UNDECLARED 2:w10
+  %14 = block MAIN.block1
+  %15 = call __AREAEVAL native "CUST", %14
+  %16 = call QOUT native %15
+  ret
+}
+
+block MAIN.block1 internal params 0 {
+entry:
+  %0 = call RECNO native
+  ret %0
+}

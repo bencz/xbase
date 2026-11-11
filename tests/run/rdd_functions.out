@@ -1,0 +1,21 @@
+
+empty:          1          0 .T. .T. RDD_FUNCTIONS          1 .T.          4        162         25
+append:          1          1 .F. .F. [          ]   0.0   /  /   .F.
+fields: Bob        999.9          2 AGE D 999.9
+top:          1 .F. .F. Ann         12.3 02/29/24 .T.
+skip -1:          1 .T. .F. Ann       
+skip past:          3 .F. .T. [          ]   0.0
+skip again:          3 .T.
+back:          2 .F. Bob       
+deleted: .T.          1
+set deleted top:          2 Bob       
+skip -1 deleted:          2 .T.
+struct:          4 AGE N          5          1
+recall: .F.
+goto 9:          3 .T. .T.
+goto 0:          3 .T. .T.
+filter:          2 AGE > 100 Bob       
+locate: .T.          2
+continue: .F.          3 .T.
+sum:       1012.2 DBFNTX DBFNTX
+closed: .F.           1

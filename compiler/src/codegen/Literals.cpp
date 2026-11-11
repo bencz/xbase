@@ -85,7 +85,7 @@ Constant *CodeGen::stringLiteral(const std::string &s) {
   return c;
 }
 
-// A message name as the C string xb_op_send receives.
+// A message name (or a field's) as the C string xb_op_send (or xb_field_get) receives.
 Constant *CodeGen::messageName(const std::string &message) {
   Constant *&c = messages_[message];
   if (c) return c;
@@ -95,6 +95,18 @@ Constant *CodeGen::messageName(const std::string &message) {
   name->setAlignment(Align(1));
   c = name;
   return c;
+}
+
+// A work area's alias as xb_field_get receives it: NULL for the current work area.
+Constant *CodeGen::aliasName(const std::string &alias) {
+  return alias.empty() ? static_cast<Constant *>(ConstantPointerNull::get(ptrTy_)) : messageName(alias);
+}
+
+// A field reference's own cache (xb_field_cache: two 32-bit words the runtime fills).
+Constant *CodeGen::fieldCache() {
+  auto *ty = ArrayType::get(i32_, 2);
+  return new GlobalVariable(mod_, ty, false, GlobalValue::PrivateLinkage, ConstantAggregateZero::get(ty),
+                            "xb.field.cache");
 }
 
 } // namespace xb

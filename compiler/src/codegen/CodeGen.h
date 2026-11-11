@@ -129,6 +129,8 @@ private:
   llvm::Constant *literal(const xir::Constant &c);
   llvm::Constant *stringLiteral(const std::string &s);
   llvm::Constant *messageName(const std::string &message);
+  llvm::Constant *aliasName(const std::string &alias);
+  llvm::Constant *fieldCache();
 
   // Variables.cpp: where variables are, references, write barriers.
   llvm::Value *slot(uint32_t idx);
@@ -260,6 +262,7 @@ private:
   llvm::FunctionCallee rtSwitchMatch_;
   llvm::FunctionCallee rtModuleRegister_, rtProgramRun_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
   llvm::FunctionCallee rtMvMark_, rtMvRelease_, rtMvGet_, rtMvSet_, rtMvRef_, rtMvPrivate_, rtMvPublic_, rtMvParam_;
+  llvm::FunctionCallee rtMvField_, rtFieldGet_, rtFieldSet_;
   llvm::FunctionCallee rtSendFrom_, rtClassInstance_, rtClassesRegister_;
   llvm::FunctionCallee rtGenNew_, rtGenRestore_, rtGenYield_, rtGenDone_;
   llvm::GlobalVariable *classTable_ = nullptr; // the module's xb_class_def array, or null

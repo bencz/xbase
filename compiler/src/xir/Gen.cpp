@@ -312,6 +312,7 @@ Var *Generator::varOf(const VarExpr &v) {
     if (x->name.empty()) x->name = v.name;
     return x;
   }
+  case VarWhere::Field:  // no Var: a field, reached by name
   case VarWhere::Memvar: // no Var: reached by name (load, store, the reference of an argument)
     return nullptr;
   }
@@ -338,7 +339,8 @@ Access Generator::accessOf(const Var &v) {
 }
 
 Value *Generator::load(const VarExpr &v) {
-  if (v.where == VarWhere::Memvar) return cur_.b->memvar(Op::MvGet, v.name);
+  if (v.where == VarWhere::Memvar) return cur_.b->memvar(v.fieldFirst ? Op::MvField : Op::MvGet, v.name);
+  if (v.where == VarWhere::Field) return cur_.b->field(v.alias, nullptr, v.name);
   Access a = accessOf(v);
   return cur_.b->load(varOf(v), a);
 }
@@ -349,6 +351,10 @@ Value *Generator::load(const VarExpr &v) {
 void Generator::store(const VarExpr &v, Value *value) {
   if (v.where == VarWhere::Memvar) {
     cur_.b->memvar(Op::MvSet, v.name, value);
+    return;
+  }
+  if (v.where == VarWhere::Field) {
+    cur_.b->field(v.alias, nullptr, v.name, value);
     return;
   }
   Var *x = varOf(v);

@@ -1,4 +1,4 @@
-/* Number to text, Clipper style.
+/* Number to text, Clipper style (and text to number, Val()).
  *
  * The field has `width` columns for the sign and integer digits, then a dot
  * and `dec` decimals. Doubles keep 16 significant digits (later digits print
@@ -110,4 +110,63 @@ static xb_str *format_double(double v, int width, int dec) {
 xb_str *xb_num_to_str(const xb_item *it, int width, int dec) {
   if (dec < 0) dec = 0;
   return it->type == XB_T_INT ? format_int(it->v.i, width, dec) : format_double(it->v.d, width, dec);
+}
+
+xb_str *xb_num_to_field(const xb_item *it, int width, int dec) {
+  if (dec > 0) {
+    if (dec >= width) {
+      xb_str *s = xb_str_alloc((size_t)width);
+      memset(s->data, '*', (size_t)width);
+      return s;
+    }
+    width -= dec + 1;
+  }
+  return xb_num_to_str(it, width, dec);
+}
+
+void xb_num_parse(const char *s, size_t len, xb_item *r) {
+  size_t pos = 0;
+  while (pos < len && xb_is_blank(s[pos])) ++pos;
+  int neg = 0;
+  if (pos < len && (s[pos] == '-' || s[pos] == '+')) neg = s[pos++] == '-';
+  size_t width = pos, dec = 0, decRest = 0;
+  int64_t iv = 0;
+  double dv = 0.0;
+  int isDouble = 0, inDec = 0;
+  for (; pos < len; ++pos) {
+    char c = s[pos];
+    if (c >= '0' && c <= '9') {
+      if (!isDouble && (xb_mul_overflow(iv, 10, &iv) || xb_add_overflow(iv, c - '0', &iv))) isDouble = 1;
+      dv = dv * 10.0 + (c - '0');
+      if (inDec) ++dec;
+      else ++width;
+    } else if (c == '.' && !inDec) {
+      inDec = 1;
+      isDouble = 1;
+    } else {
+      while (!inDec && pos < len) { /* characters up to a dot widen the field */
+        if (s[pos++] == '.') inDec = 1;
+        else ++width;
+      }
+      if (inDec) { /* a dot after other characters still makes a number with decimals */
+        decRest = len - pos;
+        isDouble = 1;
+      }
+      break;
+    }
+  }
+  if (dec) dv /= pow(10.0, (double)dec);
+  dec += decRest;
+  double d = neg ? -dv : dv;
+  int64_t i = neg ? (int64_t)(0 - (uint64_t)iv) : iv; /* iv may have wrapped (a double then) */
+  uint16_t w;
+  if (width > 10) w = isDouble ? xb_num_dbl_width(d) : xb_num_int_width(i);
+  else if (dec == 0) w = (uint16_t)len;
+  else if (width == 0) w = 1;
+  else if (neg && width == 1 && dv != 0) w = 2;
+  else w = (uint16_t)width;
+  uint64_t value = (uint64_t)i;
+  if (isDouble) memcpy(&value, &d, 8);
+  uint16_t dec16 = isDouble ? (uint16_t)(dec > UINT16_MAX ? UINT16_MAX : dec) : 0;
+  xb_put(r, xb_header_word(isDouble ? XB_T_DOUBLE : XB_T_INT, w, dec16), value);
 }

@@ -191,6 +191,7 @@ void Folder::stmt(Stmt &s) {
   case StmtKind::Loop:
   case StmtKind::Parameters:
   case StmtKind::Memvar:
+  case StmtKind::Field:
     break;
   }
 }

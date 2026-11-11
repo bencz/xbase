@@ -111,7 +111,7 @@ static int32_t dos_error(int e) {
   };
   for (size_t i = 0; i < sizeof table / sizeof table[0]; ++i)
     if (table[i].errno_value == e) return table[i].dos;
-  return 31;
+  return XB_FERR_FAILURE;
 }
 
 static int open_as(const char *path, int flags, mode_t perms, xb_file *f, int32_t *err) {
@@ -176,6 +176,20 @@ int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *er
   off_t pos = lseek((int)f, (off_t)offset, whence[origin]);
   if (pos < 0) *err = errno == EINVAL ? 25 : dos_error(errno);
   return pos;
+}
+
+int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err) {
+  if ((off_t)size != size) {
+    *err = 25;
+    return 0;
+  }
+  int r;
+  do {
+    r = ftruncate((int)f, (off_t)size);
+  } while (r != 0 && errno == EINTR);
+  if (r == 0) return 1;
+  *err = dos_error(errno);
+  return 0;
 }
 
 int xb_platform_file_close(xb_file f, int32_t *err) {

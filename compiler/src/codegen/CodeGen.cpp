@@ -123,6 +123,9 @@ void CodeGen::initTypes() {
   rtMvPrivate_ = rt("xb_mv_private", voidTy, {ptrTy_, ptrTy_, i32_});
   rtMvPublic_ = rt("xb_mv_public", voidTy, {ptrTy_, ptrTy_});
   rtMvParam_ = rt("xb_mv_param", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtMvField_ = rt("xb_mv_field", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
+  rtFieldGet_ = rt("xb_field_get", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, ptrTy_, ptrTy_});
+  rtFieldSet_ = rt("xb_field_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtMacroGet_ = rt("xb_macro_get", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtMacroSet_ = rt("xb_macro_set", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtMacroCall_ = rt("xb_macro_call", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});

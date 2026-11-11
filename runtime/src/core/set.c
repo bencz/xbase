@@ -71,6 +71,10 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
         else ctx->epoch = n > INT32_MAX ? INT32_MAX : (int32_t)n;
       }
       break;
+    case _SET_DELETED:
+      xb_set_logical(ret, ctx->set_deleted);
+      if (value) ctx->set_deleted = set_logical(value, ctx->set_deleted);
+      break;
     case _SET_LANGUAGE: { /* a name the runtime has no language for leaves it as it is */
       const xb_array *texts = xb_language(ctx);
       if (texts && texts->len >= LANG_ID) *ret = texts->items[LANG_ID - 1];

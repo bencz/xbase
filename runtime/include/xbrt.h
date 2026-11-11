@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 34u
+#define XB_ABI_VERSION 35u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -469,6 +469,22 @@ void     xb_mv_private(xb_ctx *ctx, const xb_memvar *m, uint32_t mark);
 void     xb_mv_public(xb_ctx *ctx, const xb_memvar *m);
 void     xb_mv_param(xb_ctx *ctx, const xb_memvar *m, const xb_item *arg);
 void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv);
+
+/* [ABI] Fields of work areas (rdd/field.c). A field reference of compiled code has its own cache, zeroed: the table
+ * where it last found the field (the work area's generation) and the field's position there, so a reference to the
+ * same table looks for nothing. get and set reach the field `name` of the work area of `alias` (NULL: the current
+ * one), or of the one the item `area`, when not NULL, names (an alias or a number); a missing alias (1002) or field
+ * (1003) is an error the block may retry; on the blank record after the last a write does nothing. mv_field reads
+ * an undeclared name: the current work area's field of that name, else the memory variable (as xb_mv_get). */
+typedef struct xb_field_cache {
+  uint32_t generation;
+  uint32_t index;
+} xb_field_cache;
+void     xb_field_get(xb_ctx *ctx, xb_item *r, const xb_item *area, const char *alias, const char *name,
+                      xb_field_cache *cache);
+void     xb_field_set(xb_ctx *ctx, const xb_item *area, const char *alias, const char *name, xb_field_cache *cache,
+                      const xb_item *v);
+void     xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache *cache);
 
 /* [ABI] Classes compiled from xBase (types/class.c). A module describes each
  * of its classes (xb_class_def) and registers them when it registers
