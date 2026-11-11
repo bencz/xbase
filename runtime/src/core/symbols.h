@@ -14,6 +14,7 @@ typedef struct xb_runtime_symbol {
   const char *name;
   xb_func fn;
   uint32_t byref;
+  int reserved;             /* RESERVED in rtl.ch: one of Clipper's predefined functions */
 } xb_runtime_symbol;
 extern const xb_runtime_symbol xb_runtime_symbols[];
 extern const uint32_t xb_runtime_symbol_count;
@@ -26,6 +27,7 @@ typedef struct xb_symbol_entry {
   xb_func fn;
   int native;
   uint32_t byref;
+  int reserved;             /* a runtime function declared RESERVED (Type() calls the others "UI") */
 } xb_symbol_entry;
 
 /* Adds the program's symbols (names upper-cased); a name already there keeps

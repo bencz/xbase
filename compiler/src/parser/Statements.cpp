@@ -134,6 +134,7 @@ StmtPtr Parser::parseStmtKind() {
   }
   switch (e->kind) {
   case ExprKind::Call: case ExprKind::Assign: case ExprKind::IncDec: case ExprKind::IIf: case ExprKind::List:
+  case ExprKind::Macro: case ExprKind::MacroCall: // a macro runs code
     break;
   case ExprKind::Send:
     if (static_cast<const SendExpr &>(*e).withArgs) break;
@@ -152,16 +153,25 @@ StmtPtr Parser::parseDecl(StmtKind kind) {
   std::string keyword = cur().upper;
   bool namesOnly = kind == StmtKind::Memvar || kind == StmtKind::Parameters;
   advance();
+  bool macros = kind == StmtKind::Private || kind == StmtKind::Public; // PRIVATE &name: named when the code runs
   do {
-    if (!at(Tok::Ident)) {
+    LocalDecl d;
+    d.loc = cur().loc;
+    if (macros && atMacroParen()) {
+      advance();
+      advance();
+      d.macro = parseExpr();
+      expect(Tok::RParen, "')'");
+    } else if (macros && atMacroName()) {
+      d.macro = parseMacroText();
+    } else if (!at(Tok::Ident)) {
       expect(Tok::Ident, "variable name");
       skipToEndOfStmt();
       break;
+    } else {
+      d.name = cur().upper;
+      advance();
     }
-    LocalDecl d;
-    d.loc = cur().loc;
-    d.name = cur().upper;
-    advance();
     if (at(Tok::LBracket)) { // LOCAL a[n1, n2] or a[n1][n2] is LOCAL a := Array( n1, n2 )
       auto dims = std::make_unique<CallExpr>(cur().loc, "ARRAY");
       dims->declaredOnly = true; // Clipper creates the array: a program's own Array() is not used

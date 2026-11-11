@@ -333,6 +333,31 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::MvParam: // argument `index` of those received, NIL past them
     b_.CreateCall(rtMvParam_, {fnCtx_, memvars_.at(i.message), argItem(fn_->getArg(2), fn_->getArg(3), i.index)});
     break;
+  case Op::MacroGet:
+    callItemOp(rtMacroGet_, dest(i), {addr(ops[0])});
+    checkPending(unwind_);
+    break;
+  case Op::MacroSet:
+    b_.CreateCall(rtMacroSet_, {fnCtx_, callArg(addr(ops[0]), 0), callArg(addr(ops[1]), 1)});
+    checkPending(unwind_);
+    break;
+  case Op::MacroCall: { // the text, then the arguments, in consecutive slots
+    Value *group = operandGroup(i);
+    CallResult r = callResult(dest(i), 0);
+    setNil(r.arg);
+    Value *argv = b_.CreateConstInBoundsGEP1_32(itemTy_, group, 1, "macro.args");
+    b_.CreateCall(rtMacroCall_, {fnCtx_, r.arg, group, ConstantInt::get(i32_, ops.size() - 1), argv});
+    callDone(r);
+    checkPending(unwind_);
+    break;
+  }
+  case Op::MacroText: callItemOp(rtMacroText_, dest(i), {addr(ops[0])}); break;
+  case Op::MacroPrivate:
+  case Op::MacroPublic:
+    if (i.op == Op::MacroPrivate) b_.CreateCall(rtMacroPrivate_, {fnCtx_, callArg(addr(ops[0]), 0), fnMark_});
+    else b_.CreateCall(rtMacroPublic_, {fnCtx_, callArg(addr(ops[0]), 0)});
+    checkPending(unwind_);
+    break;
   case Op::ArgsRest: break; // read by the list that uses it (withRest)
   case Op::Call: {
     if (emitBitCall(i) || emitInlineCall(i)) break;

@@ -106,7 +106,7 @@ void CallResolver::checkArgs(const CallExpr &c, const ExternDecl &d) {
 void CallResolver::expr(Expr &e) {
   switch (e.kind) {
   case ExprKind::Nil: case ExprKind::Logical: case ExprKind::Number: case ExprKind::String: case ExprKind::Var:
-  case ExprKind::Spread:
+  case ExprKind::Spread: case ExprKind::MacroText:
     break;
   case ExprKind::Call: {
     auto &c = static_cast<CallExpr &>(e);
@@ -177,6 +177,15 @@ void CallResolver::expr(Expr &e) {
     expr(*i.otherwise);
     break;
   }
+  case ExprKind::Macro:
+    expr(*static_cast<MacroExpr &>(e).text);
+    break;
+  case ExprKind::MacroCall: {
+    auto &m = static_cast<MacroCallExpr &>(e);
+    expr(*m.text);
+    for (auto &a : m.args) expr(*a);
+    break;
+  }
   }
 }
 
@@ -187,8 +196,10 @@ void CallResolver::block(Block &b) {
       expr(*static_cast<ExprStmt &>(*st).expr);
       break;
     case StmtKind::Local: case StmtKind::Static: case StmtKind::Private: case StmtKind::Public:
-      for (LocalDecl &d : static_cast<LocalStmt &>(*st).decls)
+      for (LocalDecl &d : static_cast<LocalStmt &>(*st).decls) {
+        if (d.macro) expr(*d.macro);
         if (d.init) expr(*d.init);
+      }
       break;
     case StmtKind::Parameters: case StmtKind::Memvar: // names only
       break;

@@ -30,10 +30,11 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 | `compiler/src/driver/` | `xbc` command line |
 | `include/` | `std.ch`, `set.ch` and the other standard headers |
 | `runtime/include/xbrt.h` | runtime ABI shared with the compiler |
-| `runtime/src/core/` | contexts and frames, operators, number formatting, `Set()`, program startup |
+| `runtime/src/core/` | contexts and frames, operators, number formatting, `Set()`, memory variables, program startup |
 | `runtime/src/gc/` | garbage collector |
 | `runtime/src/types/` | representation and base operations of strings, arrays, hashes, codeblocks, references, objects |
 | `runtime/src/rtl/` | functions of the language, by area (`collections.c`: what the array and hash functions share) |
+| `runtime/src/macro/` | the macro operator: expression compiler, stack machine, text substitution, `Type()` ([runtime.md](runtime.md#macro-operator)) |
 | `runtime/src/platform/` | operating-system interface (`platform.h`) and one directory per platform |
 | `tests/run`, `tests/pp`, `tests/fail`, `tests/xir` | execution, preprocessor, compile-failure and xIR tests |
 | `bench/` | benchmark programs and the `bench` target ([testing.md](testing.md#benchmarks)) |

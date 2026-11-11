@@ -18,6 +18,18 @@ const char *xb_memvar_name(uint32_t id, size_t *len);
  * reaching it raised an error, which leaves a request to unwind pending). */
 const xb_item *xb_memvar_value(xb_ctx *ctx, uint32_t id);
 
+/* The number of the name `name` (`len` bytes, any letter case), new when no
+ * module uses it. */
+uint32_t xb_memvar_number(const char *name, size_t len);
+
+/* Whether a variable numbered `id` is visible. */
+int xb_memvar_exists(xb_ctx *ctx, uint32_t id);
+
+/* The value of the variable visible by the name `name` (any letter case), read
+ * without raising anything: NULL when there is none (or it designates an
+ * array element). */
+const xb_item *xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len);
+
 /* The variable visible by the name `name` (`len` bytes, any letter case)
  * takes `value`; with none, a new PRIVATE of the function calling the runtime
  * holds it (that function ends it: PRIVATES in rtl.ch). */

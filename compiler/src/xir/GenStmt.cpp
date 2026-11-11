@@ -74,9 +74,17 @@ void Generator::genMemvars(const LocalStmt &s) {
     values.push_back(d.init ? genExpr(*d.init) : nullptr);
   }
   for (size_t k = 0; k < s.decls.size(); ++k) {
-    b.setLoc(s.decls[k].loc);
-    b.memvar(s.kind == StmtKind::Private ? Op::MvPrivate : Op::MvPublic, s.decls[k].name);
-    if (values[k]) b.memvar(Op::MvSet, s.decls[k].name, values[k]);
+    const LocalDecl &d = s.decls[k];
+    b.setLoc(d.loc);
+    if (d.macro) { // PRIVATE &name: the text names the variable when the code runs
+      Value *text = genExpr(*d.macro);
+      b.setLoc(d.loc);
+      b.macro(s.kind == StmtKind::Private ? Op::MacroPrivate : Op::MacroPublic, text);
+      if (values[k]) b.macro(Op::MacroSet, text, {values[k]});
+      continue;
+    }
+    b.memvar(s.kind == StmtKind::Private ? Op::MvPrivate : Op::MvPublic, d.name);
+    if (values[k]) b.memvar(Op::MvSet, d.name, values[k]);
   }
 }
 

@@ -271,14 +271,77 @@ ExprPtr Parser::parseRef() {
   ExprPtr target = parsePostfix();
   if (target->kind == ExprKind::Call)
     diag_.error(target->loc, "function references (@name()) are not supported yet");
+  else if (target->kind == ExprKind::Macro)
+    diag_.error(target->loc, "a macro cannot be passed by reference (@&name) yet");
   else if (!isLvalue(*target) || target->kind == ExprKind::Send || target->parenthesized)
     diag_.error(target->loc, "only a variable or an array element can be passed by reference");
   return std::make_unique<RefExpr>(loc, std::move(target));
 }
 
+// `&name` (with an identifier right after it, no blanks between) starts a
+// macro name; so does an identifier right before one (`prefix&name.`).
+bool Parser::atMacroName() const {
+  if (at(Tok::Amp)) return ahead().kind == Tok::Ident && !ahead().spaceBefore;
+  return at(Tok::Ident) && ahead().kind == Tok::Amp && !ahead().spaceBefore && ahead(2).kind == Tok::Ident &&
+         !ahead(2).spaceBefore;
+}
+
+// `&(` where an operand starts: the macro of an expression.
+bool Parser::atMacroParen() const { return at(Tok::Amp) && ahead().kind == Tok::LParen; }
+
+// A macro name's text: the variable for `&name` (or `&name.`) alone; when
+// identifiers are joined to it with no blanks between (`&name.suffix`,
+// `prefix&name.`), the name as written, which Clipper's text substitution
+// turns into the name when the code runs ("ABC&NAME.Z").
+ExprPtr Parser::parseMacroText() {
+  SourceLoc loc = cur().loc;
+  std::string written;
+  std::unique_ptr<VarExpr> alone;
+  size_t parts = 0;
+  for (bool first = true; first || !cur().spaceBefore; first = false, ++parts) {
+    if (at(Tok::Amp) && ahead().kind == Tok::Ident && !ahead().spaceBefore) {
+      advance();
+      alone = std::make_unique<VarExpr>(cur().loc, cur().upper);
+      written += "&" + cur().upper;
+      advance();
+      if (at(Tok::Dot) && !cur().spaceBefore) { // the dot ends the name
+        written += ".";
+        advance();
+      }
+    } else if (at(Tok::Ident)) {
+      written += cur().upper;
+      advance();
+    } else {
+      break;
+    }
+  }
+  if (parts == 1) return alone;
+  return std::make_unique<MacroTextExpr>(loc, std::move(written));
+}
+
+// A macro: a macro name or `&( expr )`, and a call when `(` follows.
+ExprPtr Parser::parseMacro() {
+  SourceLoc loc = cur().loc;
+  ExprPtr text;
+  if (atMacroParen()) {
+    advance();
+    advance();
+    text = parseExpr();
+    expect(Tok::RParen, "')'");
+  } else {
+    text = parseMacroText();
+  }
+  if (!accept(Tok::LParen)) return std::make_unique<MacroExpr>(loc, std::move(text));
+  auto call = std::make_unique<MacroCallExpr>(loc, std::move(text));
+  call->args = parseArgs(Tok::RParen, true, false);
+  expect(Tok::RParen, "')'");
+  return call;
+}
+
 ExprPtr Parser::parsePrimary() {
   const Token &t = cur();
   SourceLoc loc = t.loc;
+  if (atMacroName() || atMacroParen()) return parseMacro();
   switch (t.kind) {
   case Tok::Number: {
     auto e = std::make_unique<NumberExpr>(loc, t.isInt, t.ival, t.dval, t.dec, t.width);
@@ -286,7 +349,9 @@ ExprPtr Parser::parsePrimary() {
     return e;
   }
   case Tok::String: {
-    auto e = std::make_unique<StringExpr>(loc, t.text);
+    ExprPtr e;
+    if (!MacroTextExpr::names(t.text).empty()) e = std::make_unique<MacroTextExpr>(loc, t.text);
+    else e = std::make_unique<StringExpr>(loc, t.text);
     advance();
     return e;
   }

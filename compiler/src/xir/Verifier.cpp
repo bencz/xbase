@@ -194,6 +194,14 @@ private:
       expect(i, 1, {Type::Item});
       if (i.message.empty()) fail("memory variable without a name");
       break;
+    case Op::MacroGet: case Op::MacroPrivate: case Op::MacroPublic: case Op::MacroText:
+      expect(i, 1, {Type::Item});
+      break;
+    case Op::MacroSet: expect(i, 2, {Type::Item, Type::Item}); break;
+    case Op::MacroCall:
+      allItems(i);
+      if (i.operands().empty()) fail("macro call without a text");
+      break;
     case Op::HashLit:
       allItems(i);
       if (i.operands().size() % 2) fail("hash with a key without a value");

@@ -115,6 +115,12 @@ void CodeGen::initTypes() {
   rtMvPrivate_ = rt("xb_mv_private", voidTy, {ptrTy_, ptrTy_, i32_});
   rtMvPublic_ = rt("xb_mv_public", voidTy, {ptrTy_, ptrTy_});
   rtMvParam_ = rt("xb_mv_param", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtMacroGet_ = rt("xb_macro_get", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtMacroSet_ = rt("xb_macro_set", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtMacroCall_ = rt("xb_macro_call", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtMacroPrivate_ = rt("xb_macro_private", voidTy, {ptrTy_, ptrTy_, i32_});
+  rtMacroPublic_ = rt("xb_macro_public", voidTy, {ptrTy_, ptrTy_});
+  rtMacroText_ = rt("xb_macro_text", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtProgramRun_ = rt("xb_program_run", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,

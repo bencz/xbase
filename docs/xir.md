@@ -193,7 +193,10 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 - Operations mirror the runtime: unary and binary operators (`++`, `--` and the step of a `FOR` without `STEP` are a
   `binary add` or `sub` of 1 marked `byOne`, printed `add.one`: the same fast paths, and an error that is theirs,
   `xb_op_inc`/`xb_op_dec`), memory variables by name (`mv.get`, `mv.set`, `mv.ref`, `mv.private`, `mv.public`,
-  `mv.param`; read and written as the heap is, since any call may create, change or end one), the truth test, calls
+  `mv.param`; read and written as the heap is, since any call may create, change or end one), the macro operator
+  (`macro.get`, `macro.set`, `macro.call`, `macro.private`, `macro.public`, the text an item operand, and
+  `macro.text`, the substitution in a string literal; a macro may do anything a call does, and create a PRIVATE of the
+  function, which `createsPrivates` tells codegen), the truth test, calls
   (to the module's functions or to
   declared externals), `send` (a message to the first operand, with the others as arguments), array literals (`...` in a
   call, a send or an array literal is its last operand, of type `args`, `args.rest`: the function's arguments past its

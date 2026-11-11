@@ -333,6 +333,54 @@ frame of the activation that created it and the binding it hid (`xb_ctx.privates
   leaves the variables as they were, where the reference releases them first. No file name is error 2007
   (`EG_ARG`). Reading stops at the end mark (0x1A), at the end of the file, or at a record it cannot read.
 
+## Macro operator
+
+`&text` compiles an expression from text when the code runs (`runtime/src/macro/`: `lex.c`, `compile.c`, `run.c`;
+the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar) for the forms).
+
+- The grammar is the compiler's expression grammar, with its precedence, evaluation order and literal rules (the width
+  of a numeric literal is `xb_num_literal_width`, shared). A macro sees memory variables, the program's public
+  functions and the runtime's functions, by name; never a function's `LOCAL`s or `STATIC`s, nor a `STATIC FUNCTION`.
+  `M->name` and `MEMVAR->name` are memory variables; another alias names a field, which no work area has yet (error
+  1003 on the name). A codeblock made from text sees its own parameters, not those of the codeblock around it (as a
+  compiled one, Clipper's rule). Inside the text, `&name` is a macro of its own (the variable's text); a name joined to
+  other identifiers there is one the substitution below could not make, an error. A text nested deeper than 1024
+  levels (parentheses, a chain of operators, `a[1][2]...`), the compiler's limit, is error 1449, so that compiling it
+  keeps the stack small.
+- `compile.c` parses the text into a tree, then generates code for a stack machine: a function is an array, its
+  code (a string of bytes) and its constants. `run.c` runs it with the runtime's operators (`xb_op_*`, as compiled code
+  calls them); nothing is folded, so `&( "7 % 3" )` is `1.00`, as `n % m` is (the reference folds some constants). The
+  machine's items live in a frame linked into the context's chain (the collector sees them). The frame of an
+  expression's evaluation is not an activation (`XB_PROC_TRANSPARENT`): a PRIVATE the macro creates (`&c := 1` with no
+  variable of that name) belongs to the function running it, which takes a mark for it (see
+  [compiler.md](compiler.md#xir-to-llvm)), and `RELEASE ALL` there reaches it. A codeblock from text is an activation
+  of its own, which ends its PRIVATEs.
+- What a text compiles to depends on the text alone (the symbol table is complete before the program runs, names keep
+  their numbers), so each context keeps the last texts compiled and their functions (`xb_ctx.macro_cache`, 64 entries
+  chosen by a hash of the text, roots of the collector): a macro in a loop is compiled once.
+- Before it is compiled, the text goes through Clipper's text substitution, as a string literal with `&name` does
+  (`xb_macro_text`): each `&name` or `&name.` whose name is a memory variable holding a string becomes that string, and
+  the scan goes on at the start of what was inserted, so a name may run on past its end (`c := "&d"` then `&c`
+  evaluates `d`'s text); anything else stays as written. After 4096 insertions in a row with nothing written out, or
+  once the text would grow past about 16 MB, the rest is copied as written: a text that keeps inserting itself
+  (`c := "&c"`) ends there, where the reference never ends.
+- Errors: a value that is not a string is `BASE/1065` (`&`, the value in `args`), a text that is not an expression
+  `BASE/1449` `Syntax error` (`&`, the text in `args`; also a comma list, as in Clipper, where the reference's own mode
+  spreads it into arguments), both substitutable; a variable that does not exist is `BASE/1003` (retried, as compiled
+  code's), a function the program does not have `BASE/1001` (substitutable).
+- `&c( args )` calls the function `c` names (blanks around it dropped; anything but a name is `1449`; references as
+  `Do()` passes them). `PRIVATE &c` and `PUBLIC &c` create the variable it names; `&c := v` assigns what it designates
+  (a variable, an element, an instance variable, or another macro; anything else is `1449`).
+- `Type( cExpr )` substitutes and compiles the text without running the error block: `"UE"` when it is not an
+  expression, `"B"` for a codeblock (not evaluated), `"U"` when it calls a function the program does not have, `"UI"`
+  when it calls one that is not one of Clipper's predefined ones (`RESERVED` in `rtl.ch`, carried into the symbol
+  table; nothing is evaluated), `"U"` when it names a variable that is not visible; otherwise it evaluates the
+  expression with the context's `error_trap` set: an error ends the evaluation (`XB_PENDING_TRAP`, which unwinds like
+  a `BREAK` but no `BEGIN SEQUENCE` catches) and gives `"UE"`; else the letter `ValType()` would give. A PRIVATE the
+  evaluation creates is the calling function's (`PRIVATES` in `rtl.ch`). Anything but a string is `BASE/1121`.
+- Not yet: `o:&message`, `@&name`, aliases of work areas, and `PCount()`/`PValue()` inside a macro (they read the
+  macro's frame, which keeps no arguments).
+
 ## Calling convention
 
 Every xBase-callable function, compiled or written in C, has the dynamic convention:
@@ -366,7 +414,8 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
 `xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t exitcode`,
 `xb_frame *frames` and `int32_t set_decimals` (SET DECIMALS, which inline `/` and `%` read). `pending` holds requests.
-The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`). Compiled code tests the
+The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`, and `XB_PENDING_TRAP`
+while `Type()` evaluates, see [Macro operator](#macro-operator)). Compiled code tests the
 field after each fallible call; when it is set the code calls `xb_pending`, which serves pauses (a safepoint) and
 returns non-zero when the function must unwind: to a `BEGIN SEQUENCE` handler of the function, or to its caller
 ([xir.md](xir.md#control-flow-for-errors-and-exceptions)). The check stays valid across `AWAIT`. `QUIT` raises

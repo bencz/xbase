@@ -19,7 +19,8 @@ design of the larger parts.
 - Done: `INIT PROCEDURE` and `EXIT PROCEDURE`, the symbol table of public and runtime functions by name, `Do()`
   ([runtime.md](runtime.md#program-startup)).
 - Done: `ANNOUNCE`, `REQUEST`/`EXTERNAL` ([compiler.md](compiler.md#grammar)).
-- Missing: the macro operator's use of the table, and Clipper's 10 significant characters of names.
+- Done: the macro operator's calls by name ([runtime.md](runtime.md#macro-operator)).
+- Missing: Clipper's 10 significant characters of names.
 
 ### Variables
 
@@ -27,8 +28,8 @@ design of the larger parts.
   `CLEAR MEMORY`, `SAVE`/`RESTORE` (`.mem` files), and Clipper's rule for undeclared names (a memory variable at run
   time, with a warning; `-Wno-undeclared`, `-Werror=undeclared`) ([runtime.md](runtime.md#memory-variables),
   [compiler.md](compiler.md#semantic-checks)).
-- Missing: `Type()` (with the macro operator), a memory variable as the variable of `FOR EACH`, and the field first in
-  the lookup of an undeclared name once work areas exist.
+- Missing: a memory variable as the variable of `FOR EACH`, and the field first in the lookup of an undeclared name
+  once work areas exist.
 
 ### Fields and work areas
 
@@ -37,10 +38,12 @@ layer: DBF, FPT/DBT, NTX, CDX, SDF, DELIM).
 
 ### Macro operator
 
-`&var`, `&var.suffix`, `&( expr )`, macros inside commands (`USE &cFile`), and blocks built from text
-(`&( "{|| ... }" )`). The runtime evaluates them with an expression compiler of its own
-([architecture.md](architecture.md#decisions)); names resolve through the dynamic symbol table and the memory
-variables.
+- Done: `&var`, `&var.`, `&var.suffix`, `prefix&var.`, `&( expr )`, assignment, `&name( args )`,
+  `PRIVATE`/`PUBLIC &name`, blocks built from text (`&( "{|| ... }" )`), Clipper's text substitution in strings and
+  `Type()`, compiled by the runtime's own expression compiler and cached
+  ([runtime.md](runtime.md#macro-operator), [compiler.md](compiler.md#grammar)).
+- Missing: `o:&message`, `@&name`, aliased macros (`&cAlias->field`, with the work areas), `PCount()`/`PValue()`
+  inside a macro, and the reference's macro lists (`&c` spread into arguments, its own extension).
 
 ### Errors
 
@@ -240,13 +243,12 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. The macro operator.
-2. The rest of the array, string and number functions; the call-stack functions.
-3. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
+1. The rest of the array, string and number functions; the call-stack functions.
+2. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
    `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks.
-4. Files and directories; the terminal layer; GET/READ and TBrowse.
-5. The RDD layer.
-6. Generators, async/await and threads, sockets and the other libraries.
+3. Files and directories; the terminal layer; GET/READ and TBrowse.
+4. The RDD layer.
+5. Generators, async/await and threads, sockets and the other libraries.
 
 Alongside, the compiler's own track ([xir.md](xir.md#phases)): type inference and unboxed numbers, value numbering,
 statepoints and a moving collector, inlining, loop optimizations, measured with the benchmarks

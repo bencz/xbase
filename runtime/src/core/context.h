@@ -4,6 +4,8 @@
 
 #include "gc/gc.h"
 
+#define XB_MACRO_CACHE 64
+
 struct xb_ctx {
   uint32_t  pending;        /* [ABI] the first four fields, in this order (see xbrt.h) */
   int32_t   exitcode;
@@ -16,6 +18,11 @@ struct xb_ctx {
   xb_item  error_block;
   xb_item  break_value;     /* the value of a pending BREAK */
   uint32_t error_depth;     /* error blocks running */
+  /* Type() evaluating (error_trap > 0): an error runs no block, it ends the
+   * evaluation (XB_PENDING_TRAP, which no BEGIN SEQUENCE catches) and sets
+   * error_trapped. */
+  uint32_t error_trap;
+  int      error_trapped;
   /* Memory variables (core/memvar.c): by number, the binding visible (an
    * XB_T_CELL item, NIL for none); the PRIVATEs alive, each with the binding
    * it hid, in creation order. Roots of the collector. Per task, like the
@@ -24,6 +31,11 @@ struct xb_ctx {
   uint32_t  memvarCap;
   struct xb_private *privates;
   uint32_t  privateLen, privateCap;
+  /* Macros compiled lately (macro/run.c): per entry, chosen by a hash of the
+   * text, the text and its compiled function (roots of the collector), and
+   * what the text was compiled as (mgoal). */
+  xb_item  macro_cache[2 * XB_MACRO_CACHE];
+  uint8_t  macro_cache_goal[XB_MACRO_CACHE];
   int      set_exact;
   char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
   int32_t  epoch;           /* SET EPOCH */

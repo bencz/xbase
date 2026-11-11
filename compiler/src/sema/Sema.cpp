@@ -1,6 +1,9 @@
 #include "sema/Sema.h"
 
+#include "common/Text.h"
+
 #include <algorithm>
+#include <cctype>
 #include <set>
 
 namespace xb {
@@ -40,6 +43,31 @@ void Sema::run(Module &m) {
 // A STATIC is initialized once, before the program starts, so its initializer
 // must be constant after folding: literals, arrays of constants, codeblocks
 // whose variables are their parameters and STATICs (Clipper rule).
+// Where a constant is required (a STATIC's initializer, a CASE of SWITCH), a
+// string with `&name` in it is the string as written: nothing is substituted
+// there, as in Clipper (a STATIC gets its value before any memory variable
+// exists). Codeblocks keep theirs: they run later.
+static void literalStrings(ExprPtr &e) {
+  switch (e->kind) {
+  case ExprKind::MacroText:
+    e = std::make_unique<StringExpr>(e->loc, static_cast<MacroTextExpr &>(*e).value);
+    break;
+  case ExprKind::ArrayLit:
+    for (auto &el : static_cast<ArrayLitExpr &>(*e).elems) literalStrings(el);
+    break;
+  case ExprKind::HashLit: {
+    auto &h = static_cast<HashLitExpr &>(*e);
+    for (size_t k = 0; k < h.keys.size(); ++k) {
+      literalStrings(h.keys[k]);
+      literalStrings(h.values[k]);
+    }
+    break;
+  }
+  default:
+    break;
+  }
+}
+
 bool Sema::constantInit(const Expr &e, unsigned blockDepth) const {
   switch (e.kind) {
   case ExprKind::Nil: case ExprKind::Logical: case ExprKind::Number: case ExprKind::String:
@@ -82,6 +110,7 @@ void Sema::declare(LocalDecl &d, bool isStatic, Scope &s) {
     frames_.back().names.emplace(d.name, Binding{VarWhere::Frame, d.slot});
   }
   if (isStatic && d.init) {
+    literalStrings(d.init);
     expr(*d.init, s);
     if (!constantInit(*d.init, 0))
       diag_.error(d.init->loc, "illegal initializer for STATIC '" + d.name + "': it must be constant");
@@ -129,6 +158,16 @@ void Sema::markBoxed(Frame &f, uint32_t slot) {
   std::vector<bool> &boxed = *f.boxed;
   if (boxed.size() <= slot) boxed.resize(slot + 1);
   boxed[slot] = true;
+}
+
+// Whether `name` is a LOCAL, STATIC or parameter where the code is (a MEMVAR
+// declaration of the name wins, as in resolve).
+bool Sema::declaredVariable(const std::string &name) const {
+  for (size_t fi = frames_.size(); fi-- > 0;) {
+    if (frames_[fi].names.count(name)) return true;
+    if (frames_[fi].memvars.count(name)) return false;
+  }
+  return false;
 }
 
 // Finds a variable in the current frame or an enclosing one. A variable of the
@@ -228,7 +267,8 @@ void Sema::stmt(Stmt &st, Scope &s) {
   case StmtKind::Public:
     for (LocalDecl &d : static_cast<LocalStmt &>(st).decls) {
       if (d.init) expr(*d.init, s); // before the variable exists: it reads the one visible
-      createdMemvar(d);
+      if (d.macro) expr(*d.macro, s);
+      else createdMemvar(d);
     }
     break;
   case StmtKind::Parameters: // PRIVATEs holding the arguments received
@@ -258,6 +298,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
     std::set<std::string> strings;
     for (auto &c : w.cases) {
       if (c.value) {
+        literalStrings(c.value);
         expr(*c.value, s);
         ExprKind k = c.value->kind;
         bool fresh = true;
@@ -447,6 +488,22 @@ void Sema::expr(Expr &e, Scope &s) {
     expr(*i.cond, s);
     expr(*i.then, s);
     expr(*i.otherwise, s);
+    break;
+  }
+  case ExprKind::MacroText: // the names are memory variables: a LOCAL or STATIC would never be seen
+    for (std::string_view written : MacroTextExpr::names(static_cast<MacroTextExpr &>(e).value)) {
+      std::string name = upperCase(written);
+      if (declaredVariable(name))
+        diag_.error(e.loc, "'&" + name + "' names a LOCAL, STATIC or parameter, which a macro's text cannot see");
+    }
+    break;
+  case ExprKind::Macro: // the text is evaluated here; what it names, when it runs (never this function's LOCALs)
+    expr(*static_cast<MacroExpr &>(e).text, s);
+    break;
+  case ExprKind::MacroCall: {
+    auto &m = static_cast<MacroCallExpr &>(e);
+    expr(*m.text, s);
+    for (auto &a : m.args) expr(*a, s);
     break;
   }
   }

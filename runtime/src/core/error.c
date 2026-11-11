@@ -36,7 +36,7 @@ static const struct {
   {EG_ARG, "Argument error"},          {EG_BOUND, "Bound error"},    {EG_STROVERFLOW, "String overflow"},
   {EG_ZERODIV, "Zero divisor"},        {EG_NOFUNC, "Undefined function"},  {EG_NOMETHOD, "No exported method"},
   {EG_NOVARMETHOD, "No exported variable"}, {EG_NOVAR, "Variable does not exist"}, {EG_CREATE, "Create error"},
-  {EG_OPEN, "Open error"},             {EG_WRITE, "Write error"},
+  {EG_OPEN, "Open error"},             {EG_WRITE, "Write error"},   {EG_SYNTAX, "Syntax error"},
 };
 
 static const char *description_of(int32_t gencode) {
@@ -86,6 +86,11 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
   const char *frame = f->frame;
   uint32_t flags = f->flags, argc = f->argc;
   const xb_item *args = f->args;
+  if (ctx->error_trap) { /* Type() evaluating: it ends here */
+    ctx->error_trapped = 1;
+    ctx->pending |= XB_PENDING_TRAP;
+    return 0;
+  }
   xb_proc proc = XB_RUNTIME_PROC(frame, 0);
   xb_frame inside;
   if (frame) xb_frame_push(ctx, &inside, &proc);

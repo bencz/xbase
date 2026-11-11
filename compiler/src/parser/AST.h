@@ -2,9 +2,11 @@
 
 #include "common/Diagnostics.h"
 
+#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace xb {
@@ -28,6 +30,9 @@ enum class ExprKind : uint8_t {
   HashLit,    // { k => v, ... }, {=>}
   Spread,     // ... in the arguments of a call or send, or in an array literal: the function's own arguments past
               // its parameters
+  Macro,      // &name, &name.suffix, prefix&name., &( expr ): an expression compiled from text when the code runs
+  MacroCall,  // &name( args ): the function the text names
+  MacroText,  // a string literal with `&name` in it: substituted when the code runs
 };
 
 enum class BinOp : uint8_t {
@@ -170,10 +175,42 @@ struct SendExpr : Expr {
       : Expr(ExprKind::Send, l), object(std::move(o)), message(std::move(m)) {}
 };
 
-// What can be assigned or incremented: a variable, an element, or an instance
-// variable (a message written without arguments).
+// The macro operator: `text` gives the string, which the runtime compiles
+// and evaluates (a variable for &name, its text joined with the written
+// parts for &name.suffix and prefix&name., the expression for &( expr )).
+struct MacroExpr : Expr {
+  ExprPtr text;
+  MacroExpr(SourceLoc l, ExprPtr t) : Expr(ExprKind::Macro, l), text(std::move(t)) {}
+};
+
+// A string literal in which `&name` (or `&name.`) stands for the text of the
+// memory variable `name`, as in Clipper.
+struct MacroTextExpr : Expr {
+  std::string value;
+  MacroTextExpr(SourceLoc l, std::string v) : Expr(ExprKind::MacroText, l), value(std::move(v)) {}
+  // The names `&name` in `s` (as written), the runtime's rule (xb_macro_text).
+  static std::vector<std::string_view> names(std::string_view s) {
+    std::vector<std::string_view> found;
+    for (size_t k = 0; k + 1 < s.size(); ++k) {
+      if (s[k] != '&' || !(std::isalpha((unsigned char)s[k + 1]) || s[k + 1] == '_')) continue;
+      size_t end = k + 2;
+      while (end < s.size() && (std::isalnum((unsigned char)s[end]) || s[end] == '_')) ++end;
+      found.push_back(s.substr(k + 1, end - k - 1));
+    }
+    return found;
+  }
+};
+
+struct MacroCallExpr : Expr {
+  ExprPtr text;                  // the function's name
+  std::vector<ExprPtr> args;
+  MacroCallExpr(SourceLoc l, ExprPtr t) : Expr(ExprKind::MacroCall, l), text(std::move(t)) {}
+};
+
+// What can be assigned or incremented: a variable, an element, an instance
+// variable (a message written without arguments), or a macro.
 inline bool isLvalue(const Expr &e) {
-  return e.kind == ExprKind::Var || e.kind == ExprKind::Index ||
+  return e.kind == ExprKind::Var || e.kind == ExprKind::Index || e.kind == ExprKind::Macro ||
          (e.kind == ExprKind::Send && !static_cast<const SendExpr &>(e).withArgs);
 }
 
@@ -234,6 +271,7 @@ struct ExprStmt : Stmt {
 struct LocalDecl {
   SourceLoc loc;
   std::string name;
+  ExprPtr macro;                 // PRIVATE &name, PUBLIC &name: the text naming the variable (`name` empty)
   ExprPtr init;                  // may be null
   uint32_t slot = 0;             // set by Sema
 };

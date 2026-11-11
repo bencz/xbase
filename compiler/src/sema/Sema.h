@@ -31,6 +31,7 @@ private:
   void expr(Expr &e, Scope &s);
   void codeblock(BlockExpr &b, Scope &s);
   bool resolve(VarExpr &v);
+  bool declaredVariable(const std::string &name) const;
   struct Frame;
   void markBoxed(Frame &f, uint32_t slot);
   void declare(LocalDecl &d, bool isStatic, Scope &s);

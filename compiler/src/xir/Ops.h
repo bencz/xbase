@@ -46,6 +46,14 @@ enum class Op : uint8_t {
   MvPrivate,      // PRIVATE name: a new variable, unless the activation has one
   MvPublic,       // PUBLIC name: a new variable, unless one is visible
   MvParam,        // PARAMETERS: a PRIVATE holding argument `index` of the function
+  // The macro operator: the text (an item, the first operand) is compiled and run when the code runs; it may do
+  // anything a call does, and create PRIVATEs of the activation.
+  MacroGet,       // text -> Item: its value                                    [may fail]
+  MacroSet,       // text, value: assigns what it designates                     [may fail]
+  MacroCall,      // text, args... -> Item: calls the function it names           [may fail]
+  MacroPrivate,   // text: PRIVATE &text                                         [may fail]
+  MacroPublic,    // text: PUBLIC &text                                          [may fail]
+  MacroText,      // string -> Item: `&name` in it replaced by the memory variable's text (a string literal)
   ArgsRest,       // -> Args: the arguments the function received past its parameters (`...`), right before the
                   // call, send or array literal that is its one use; read there, they may have changed before
                   // (PValue()), so it is never merged or moved
@@ -66,9 +74,13 @@ enum class Op : uint8_t {
 };
 
 // Operations on memory variables, by name; those that may create a PRIVATE of
-// the activation running.
+// the activation running (a macro may assign a name no variable has).
 inline bool isMemvarOp(Op op) { return op >= Op::MvGet && op <= Op::MvParam; }
-inline bool createsPrivates(Op op) { return op == Op::MvSet || op == Op::MvPrivate || op == Op::MvParam; }
+inline bool isMacroOp(Op op) { return op >= Op::MacroGet && op <= Op::MacroText; }
+inline bool createsPrivates(Op op) {
+  return op == Op::MvSet || op == Op::MvPrivate || op == Op::MvParam ||
+         (isMacroOp(op) && op != Op::MacroPublic && op != Op::MacroText);
+}
 
 // What an operation does besides computing its result from its operands, for
 // the passes that move, merge or remove operations (one row per operation in

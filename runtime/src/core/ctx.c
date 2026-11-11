@@ -16,6 +16,7 @@ xb_ctx *xb_ctx_new(void) {
   xb_gc_register(ctx);
   xb_set_nil(&ctx->error_block); /* until ErrorSys() sets one (xb_program_run) */
   xb_set_nil(&ctx->break_value);
+  for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) xb_set_nil(&ctx->macro_cache[i]);
   return ctx;
 }
 

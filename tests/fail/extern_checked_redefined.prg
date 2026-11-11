@@ -1,6 +1,6 @@
 PROCEDURE Main()
-   ? Eval()
+   ? BitNot()
    RETURN
 
-FUNCTION Eval()
+FUNCTION BitNot()
    RETURN "mine"

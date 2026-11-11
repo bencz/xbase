@@ -130,13 +130,31 @@ element of an array literal (`SpreadExpr`; once, with nothing after it, not even
 arguments the function received past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`.
 Sema accepts it only in a function declared with `...`, outside its codeblocks (which have arguments of their own); a
 `CHECKED` function's count includes the other arguments only, so only too many of them is an error. Variables, elements
-(`a[i] := v`, `a[i] += v`, `a[i]++`) and instance variables (`o:x := v`, a message without arguments) can be assigned.
+(`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`, a message without arguments) and macros can be
+assigned.
 `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
 
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
 C has them, so a comparison binds tighter than `&`, `^^` and `|`: `x & 1 == 0` is `x & ( 1 == 0 )`, an argument error at
-run time, and is written `( x & 1 ) == 0`. `&` is the bit operator after an operand; before one it is the macro operator
-(planned). `|` is the operator inside a codeblock's body; the bars around its parameters stay delimiters.
+run time, and is written `( x & 1 ) == 0`. `&` is the bit operator after an operand; before one it is the macro
+operator. `|` is the operator inside a codeblock's body; the bars around its parameters stay delimiters.
+
+The macro operator ([runtime.md](runtime.md#macro-operator)) takes the text of an expression, compiled when the code
+runs (`MacroExpr`, whose `text` is the expression giving the string):
+
+- `&name` (no blanks between), optionally ended by a `.`: the text in the variable `name`. Identifiers joined to it
+  with no blanks make a name of their own (`&name.suffix`, `prefix&name.`, `a&b`): its text is the name as written
+  (`"A&B"`, a `MacroTextExpr`), which the text substitution turns into the name when the code runs (a part that is
+  not a memory variable holding a string stays, and the text is then error 1449). With blanks, `a & b` is the bit
+  operator.
+- `&( expr )`: the text is the expression's value.
+- A macro can be assigned (`&c := v`, `&c += v`, `&c++`; the text is evaluated once), and called: `&name( args )`
+  (`MacroCallExpr`, the function the text names, found by name when the code runs; `...` is not accepted there).
+- `PRIVATE &name` and `PUBLIC &name` (also `&( expr )`, with an initializer or array dimensions) create the variable
+  the text names. A macro cannot be passed by reference (`@&name`, an error).
+- A string literal with `&name` in it (`"Hello &cName."`) is substituted when the code runs (`MacroTextExpr`; Clipper's
+  rule): it is not a constant, so nothing folds it. A name there (or in a macro name joined to identifiers) that is a
+  `LOCAL`, `STATIC` or parameter of the code is an error (the substitution sees memory variables only).
 
 Nesting is limited, so that a deep source is reported instead of exhausting the compiler's stack: 1024 levels of
 nested expressions (parentheses, calls, arrays, codeblocks, prefix operators; `Parser::kMaxExprNesting`) and 1024 of
@@ -414,9 +432,14 @@ emits the object file.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
   call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,
-  `mv.param`: `xir::createsPrivates`), or that calls a `PRIVATES` function (`xir::Function::callsPrivates`), takes the
-  activation's mark in its prologue (`xb_mv_mark`) and releases to it in its exit block (`xb_mv_release`), the one
-  returns and unwinding both reach; other functions do neither.
+  `mv.param`, and the `macro.*` operations but `macro.public` and `macro.text`: `xir::createsPrivates`), or that calls
+  a `PRIVATES` function (`xir::Function::callsPrivates`), takes the activation's mark in its prologue (`xb_mv_mark`)
+  and releases to it in its exit block (`xb_mv_release`), the one returns and unwinding both reach; other functions do
+  neither.
+- Macros ([runtime.md](runtime.md#macro-operator)): `macro.get`, `macro.set`, `macro.private`, `macro.public` and
+  `macro.text` call `xb_macro_get`, `xb_macro_set`, `xb_macro_private` (with the activation's mark),
+  `xb_macro_public` and `xb_macro_text` with the text's item; `macro.call` puts the text and the arguments in
+  consecutive slots (a list, as a send does) and calls `xb_macro_call`.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`, its number of parameters, `XB_PROC_ARGS` when it keeps its arguments, `XB_PROC_HIDDEN`
   when it is hidden, and its source file name without directories, one string per module, none for a module of the

@@ -1,0 +1,50 @@
+module MACRO
+
+function MAIN params 0 {
+  $f0 = frame 0 "N"
+entry:
+  mv.set C "n"
+  %1 = mv.get C
+  %2 = macro.get %1
+  %3 = binary add %2, 1:w10
+  %4 = mv.get C
+  macro.set %4, %3
+  %6 = mv.get C
+  %7 = macro.get %6
+  %8 = binary add.one %7, 1:w0
+  macro.set %6, %8
+  %10 = mv.get C
+  %11 = macro.call %10, %3
+  %12 = macro.text "&c.x"
+  %13 = call QOUT native %11, %12
+  %14 = mv.get C
+  macro.private %14
+  macro.set %14, 2:w10
+  %17 = mv.get C
+  %18 = binary add %17, "2"
+  macro.public %18
+  ret
+}
+
+function NOMACRO params 1 {
+  $f0 = frame 0 "X"
+  $f1 = frame 1 "X"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward NOMACRO.byref
+  ret %2
+body:
+  %4 = load $f0
+  %5 = binary add %4, "a & b"
+  ret %5
+}
+
+function NOMACRO.byref internal params 1 {
+  $f0 = frame 0 "X"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = binary add %0, "a & b"
+  ret %1
+}

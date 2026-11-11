@@ -47,6 +47,7 @@ public:
   Instruction *stepByOne(bool up, Value *a); // ++ (up) or --: a binary add or sub of 1, byOne
   Instruction *memvar(Op op, const std::string &name, Value *value = nullptr); // MvGet, MvSet, MvRef, MvPrivate, ...
   Instruction *memvarParam(const std::string &name, uint32_t index);
+  Instruction *macro(Op op, Value *text, const std::vector<Value *> &more = {}); // MacroGet, MacroSet, ...
   Instruction *truth(Value *a);
   Instruction *fromBool(Value *b);
   Instruction *call(Callee c, const std::vector<Value *> &args);

@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 25u
+#define XB_ABI_VERSION 26u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -97,7 +97,8 @@ typedef struct xb_item {
  * fail. When it is non-zero the code calls xb_pending(), which serves
  * requests that only need a pause (a GC safepoint) and returns non-zero when
  * the function must unwind (a BREAK or a QUIT; an error that is not recovered
- * ends in one). The common case costs one
+ * ends in one; an error while Type() evaluates its text ends that evaluation,
+ * a TRAP no BEGIN SEQUENCE catches). The common case costs one
  * load and one predictable branch, works on every target, and survives AWAIT
  * (unlike setjmp/longjmp). */
 enum {
@@ -105,8 +106,9 @@ enum {
   XB_PENDING_BREAK     = 1u << 1,
   XB_PENDING_QUIT      = 1u << 2,
   XB_PENDING_SAFEPOINT = 1u << 3,
+  XB_PENDING_TRAP      = 1u << 4,
 };
-#define XB_PENDING_UNWIND (XB_PENDING_BREAK | XB_PENDING_QUIT)
+#define XB_PENDING_UNWIND (XB_PENDING_BREAK | XB_PENDING_QUIT | XB_PENDING_TRAP)
 
 /* [ABI] An array: `len` items at `items`, which start in the same
  * allocation (`inline_items`); when it grows past that, they move to an
@@ -141,6 +143,10 @@ typedef struct xb_proc {
  * stack does not show (PCount() and PValue() still read its frame). */
 #define XB_PROC_ARGS 1u
 #define XB_PROC_HIDDEN 2u
+/* xb_proc.flags the runtime alone sets: XB_PROC_TRANSPARENT, a frame that
+ * evaluates a macro, which is not an activation of its own (PRIVATEs it
+ * creates belong to the one below it, RELEASE ALL acts there). */
+#define XB_PROC_TRANSPARENT 4u
 
 /* [ABI] A compiled function's item frame (parameters, LOCALs, temporaries):
  * on the machine stack, linked into its context's chain while the function
@@ -406,6 +412,26 @@ void     xb_mv_public(xb_ctx *ctx, const xb_memvar *m);
 void     xb_mv_param(xb_ctx *ctx, const xb_memvar *m, const xb_item *arg);
 void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv);
 
+/* The macro operator (macro/run.c): `text` holds an expression, compiled when
+ * the code runs; it sees memory variables and functions by name, never the
+ * caller's LOCALs. xb_macro_get stores its value in `r` (&text);
+ * xb_macro_set assigns `value` to what it designates (&text := value);
+ * xb_macro_call calls the function it names (&text( args ), references as
+ * in Do()); xb_macro_private and xb_macro_public create the variable it
+ * names (PRIVATE &text, `mark` the activation's, and PUBLIC &text). A text
+ * that is not a string is error 1065, one that is not an expression (or a
+ * name, or something assignable) error 1449; both may be substituted. */
+void     xb_macro_get(xb_ctx *ctx, xb_item *r, const xb_item *text);
+void     xb_macro_set(xb_ctx *ctx, const xb_item *text, const xb_item *value);
+void     xb_macro_call(xb_ctx *ctx, xb_item *r, const xb_item *text, uint32_t argc, xb_item *argv);
+void     xb_macro_private(xb_ctx *ctx, const xb_item *text, uint32_t mark);
+void     xb_macro_public(xb_ctx *ctx, const xb_item *text);
+/* Clipper's text substitution, for a string literal with `&name` in it and
+ * for the text of a macro before it is compiled: each `&name` or `&name.`
+ * whose name is a memory variable holding a string becomes that string (the
+ * scan goes on through what was inserted); the rest stays as written. */
+void     xb_macro_text(xb_ctx *ctx, xb_item *r, const xb_item *text);
+
 /* Codeblocks. xb_block_new stores the new block in `r` and returns it; the
  * caller fills cells[0 .. ncells-1] (xb_cell_of of each captured variable,
  * obtained first) before anything else can allocate. */
@@ -625,6 +651,16 @@ static inline uint16_t xb_num_const_int_width(int64_t i) {
   uint16_t w = 10;
   for (; i >= 1000000000; i /= 10) ++w;
   return w;
+}
+
+/* Display width of a numeric literal's integer part, written with
+ * `intDigits` integer digits and `dec` decimals: an integer is a program
+ * constant; a double with 10 or more integer digits keeps its own width.
+ * Shared by the compiler and the macro compiler. */
+static inline uint16_t xb_num_literal_width(int isDouble, int64_t ival, double dval, size_t intDigits, uint16_t dec) {
+  if (!isDouble) return xb_num_const_int_width(ival);
+  if (intDigits < 10) return xb_num_dbl_width(dval);
+  return (uint16_t)(intDigits + (dec == 0 ? 1 : 0));
 }
 
 /* Clipper's string `-`: the trailing blanks of `a` move after `b`. Writes

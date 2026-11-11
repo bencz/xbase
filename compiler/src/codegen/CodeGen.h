@@ -248,6 +248,7 @@ private:
   llvm::FunctionCallee rtSwitchMatch_;
   llvm::FunctionCallee rtModuleRegister_, rtProgramRun_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
   llvm::FunctionCallee rtMvMark_, rtMvRelease_, rtMvGet_, rtMvSet_, rtMvRef_, rtMvPrivate_, rtMvPublic_, rtMvParam_;
+  llvm::FunctionCallee rtMacroGet_, rtMacroSet_, rtMacroCall_, rtMacroPrivate_, rtMacroPublic_, rtMacroText_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
   // state of the object (every module added)

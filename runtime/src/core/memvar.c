@@ -71,6 +71,14 @@ static void new_binding(xb_ctx *ctx, xb_item *r, const xb_item *value) {
   xb_set_ptr(r, XB_T_CELL, c);
 }
 
+/* The frame of the activation running: a macro's evaluation is not one (see
+ * XB_PROC_TRANSPARENT). */
+static const xb_frame *activation(const xb_ctx *ctx) {
+  const xb_frame *f = ctx->frames;
+  while (f && f->proc && (f->proc->flags & XB_PROC_TRANSPARENT)) f = f->prev;
+  return f;
+}
+
 /* A new binding for `id`, holding `value` (or the cell of a variable passed by
  * reference), recorded as a PRIVATE of the activation that runs now. */
 static void push_private(xb_ctx *ctx, uint32_t id, const xb_item *value) {
@@ -89,7 +97,7 @@ static void push_private(xb_ctx *ctx, uint32_t id, const xb_item *value) {
   xb_private *p = &ctx->privates[ctx->privateLen++];
   p->id = id;
   p->borrowed = (uint32_t)borrowed;
-  p->owner = ctx->frames;
+  p->owner = activation(ctx);
   p->hidden = *b;
   *b = fresh;
 }
@@ -174,15 +182,29 @@ const xb_item *xb_memvar_value(xb_ctx *ctx, uint32_t id) {
   return b->type == XB_T_CELL ? xb_ref_target(ctx, b) : NULL;
 }
 
-void xb_memvar_assign(xb_ctx *ctx, const char *name, size_t len, const xb_item *value) {
+uint32_t xb_memvar_number(const char *name, size_t len) {
   uint32_t id;
-  if (!xb_names_find_upper(&names, name, len, &id)) {
-    char *upper = malloc(len ? len : 1); /* a name no module uses: kept for the program's life */
-    if (!upper) xb_gc_fatal("out of memory");
-    for (size_t i = 0; i < len; ++i) upper[i] = xb_ascii_upper(name[i]);
-    id = number(upper, len);
-  }
-  assign(ctx, id, value);
+  if (xb_names_find_upper(&names, name, len, &id)) return id;
+  char *upper = malloc(len + 1); /* a name no module uses: kept for the program's life */
+  if (!upper) xb_gc_fatal("out of memory");
+  for (size_t i = 0; i < len; ++i) upper[i] = xb_ascii_upper(name[i]);
+  upper[len] = 0;
+  return number(upper, len);
+}
+
+int xb_memvar_exists(xb_ctx *ctx, uint32_t id) { return binding(ctx, id)->type == XB_T_CELL; }
+
+const xb_item *xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len) {
+  uint32_t id;
+  if (!xb_names_find_upper(&names, name, len, &id)) return NULL;
+  const xb_item *b = binding(ctx, id);
+  if (b->type != XB_T_CELL) return NULL;
+  const xb_item *v = &((const xb_cell *)b->v.p)->value;
+  return v->type == XB_T_REF ? NULL : v; /* an element passed to PARAMETERS: read only with its checks */
+}
+
+void xb_memvar_assign(xb_ctx *ctx, const char *name, size_t len, const xb_item *value) {
+  assign(ctx, xb_memvar_number(name, len), value);
 }
 
 /* Whether cell `c` is a memory variable's binding (visible, or hidden by a
@@ -272,7 +294,7 @@ void xbf___MEMRELEASE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf___MEMRELEASEALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   if (argc < 2 || argv[0].type != XB_T_STRING || argv[1].type != XB_T_LOGICAL) return;
-  const xb_frame *caller = ctx->frames;
+  const xb_frame *caller = activation(ctx);
   for (uint32_t i = 0; i < ctx->privateLen && !(ctx->pending & XB_PENDING_UNWIND); ++i) {
     const xb_private *p = &ctx->privates[i];
     if (p->id == CLEARED || p->owner != caller) continue;

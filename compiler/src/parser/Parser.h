@@ -92,6 +92,10 @@ private:
   ExprPtr parseBraced();
   std::vector<ExprPtr> parseArgs(Tok close, bool refs, bool spread);
   ExprPtr parseRef();
+  ExprPtr parseMacroText();
+  ExprPtr parseMacro();
+  bool atMacroName() const;
+  bool atMacroParen() const;
 
   std::vector<Token> toks_;
   Diagnostics &diag_;

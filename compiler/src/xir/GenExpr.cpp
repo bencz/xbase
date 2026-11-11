@@ -77,6 +77,20 @@ Value *Generator::genExpr(const Expr &e) {
     return b.refIndex(base, idx);
   }
   case ExprKind::Spread: break; // only an element of a list (genArgs)
+  case ExprKind::Macro: {
+    Value *text = genExpr(*static_cast<const MacroExpr &>(e).text);
+    b.setLoc(e.loc);
+    return b.macro(Op::MacroGet, text);
+  }
+  case ExprKind::MacroText:
+    return b.macro(Op::MacroText, b.string(static_cast<const MacroTextExpr &>(e).value));
+  case ExprKind::MacroCall: {
+    auto &m = static_cast<const MacroCallExpr &>(e);
+    Value *text = genExpr(*m.text);
+    std::vector<Value *> args = genArgs(m.args);
+    b.setLoc(m.loc);
+    return b.macro(Op::MacroCall, text, args);
+  }
   }
   return b.nil();
 }
@@ -155,6 +169,7 @@ Value *Generator::genCall(const CallExpr &c) {
 Value *Generator::genAssign(const AssignExpr &a) {
   if (a.target->kind == ExprKind::Index) return genIndexAssign(static_cast<const IndexExpr &>(*a.target), &a, nullptr);
   if (a.target->kind == ExprKind::Send) return genSendAssign(static_cast<const SendExpr &>(*a.target), &a, nullptr);
+  if (a.target->kind == ExprKind::Macro) return genMacroAssign(static_cast<const MacroExpr &>(*a.target), &a, nullptr);
   auto &target = static_cast<const VarExpr &>(*a.target);
   Value *value;
   if (a.compound) {
@@ -171,6 +186,7 @@ Value *Generator::genAssign(const AssignExpr &a) {
 Value *Generator::genIncDec(const IncDecExpr &e) {
   if (e.target->kind == ExprKind::Index) return genIndexAssign(static_cast<const IndexExpr &>(*e.target), nullptr, &e);
   if (e.target->kind == ExprKind::Send) return genSendAssign(static_cast<const SendExpr &>(*e.target), nullptr, &e);
+  if (e.target->kind == ExprKind::Macro) return genMacroAssign(static_cast<const MacroExpr &>(*e.target), nullptr, &e);
   auto &target = static_cast<const VarExpr &>(*e.target);
   Value *old = load(target);
   Value *now = cur_.b->stepByOne(e.increment, old);
@@ -218,6 +234,27 @@ Value *Generator::genSendAssign(const SendExpr &target, const AssignExpr *assign
   b.setLoc(target.loc);
   Value *result = b.send(setter, object, {now});
   return incdec && !incdec->prefix ? old : result;
+}
+
+// Macro assignment, the text evaluated once:
+//   &x := v            v, then the text, then the store;
+//   &x op= v, &x++     the text, then its value, then v, then the store.
+Value *Generator::genMacroAssign(const MacroExpr &target, const AssignExpr *assign, const IncDecExpr *incdec) {
+  Builder &b = *cur_.b;
+  if (assign && !assign->compound) {
+    Value *value = genExpr(*assign->value);
+    Value *text = genExpr(*target.text);
+    b.setLoc(target.loc);
+    b.macro(Op::MacroSet, text, {value});
+    return value;
+  }
+  Value *text = genExpr(*target.text);
+  b.setLoc(target.loc);
+  Value *old = b.macro(Op::MacroGet, text);
+  Value *now = assign ? b.binary(assign->op, old, genExpr(*assign->value)) : b.stepByOne(incdec->increment, old);
+  b.setLoc(target.loc);
+  b.macro(Op::MacroSet, text, {now});
+  return incdec && !incdec->prefix ? old : now;
 }
 
 // .AND. and .OR. as a value: the left side decides (it must be logical) and,

@@ -1,0 +1,99 @@
+
+names:         10         10         11         20          3 ABC          2.50
+suffix:         10
+prefix: joined
+blanks:         10
+assigned:          5
+compound:          7          6          6          5
+elements:          6         20         30
+inside:          5          5          5          6          7         17
+in the callee: N
+a callee's variable ends with it: -
+RELEASE ALL reaches a macro's variable: U
+declared:         11 L
+blanks around the name:          3
+calls:    42          3          6
+a name with blanks: X
+block: B         16
+parameters:          2          4
+elements in a block:          9         10
+a block in a block sees its own parameters only: -
+Hello World, World! World World A&Q &World
+nested:          2          6
+iif:          1          2          5 x .T.
+send:          0          2
+by reference:          7          7
+the caller: MAIN
+[abc]                C => abc
+123                  N =>        123
+1.50                 N =>          1.50
+-5                   N =>         -5
+.F.                  L => .F.
+NIL                  U => NIL
+0x10                 N =>         16
+1e3                  UE error       1449
+'a' $ 'abc'          L => .T.
+1 == 1               L => .T.
+!.T.                 L => .F.
+.NOT. .F.            L => .T.
+2 ** 3               N =>          8.00
+7 % 3                N =>          1.00
+'ab ' - 'c'          C => abc 
+{ 'a' => 1 }['a']    N =>          1
+&( '1+1' )           N =>          2
+StaticF()            U error       1001
+1 2                  UE error       1449
+x :=                 UE error       1449
+arr[1]               N =>          7
+arr[10]              UE error       1132
+@arr                 UE error       1449
+a->b                 U error       1003
+{|| zz }             B => 
+1;2                  UE error       1449
+(1,2)                N =>          2
+arr[1,]              UE error       1449
+Upper(               UE error       1449
+'abc                 UE error       1449
+1.                   UE error       1449
+.5                   N =>          0.5
+1.2.3                UE error       1449
+10 / 4               N =>          2.50
+3 ^ 2                N =>          9.00
+-arr[1]              N =>         -7
++1                   N =>          1
+{}                   A => 
+{||}                 UE error       1449
+M->arr               A => 
+MEMVAR->arr          A => 
+1+1                  N =>          2
+1 .AND. 2            UE error       1066
+IIF(.T.,1)           UE error       1449
+Len(arr)             N =>          3
+arr:Len              UE error       1004
+1 = 1                L => .T.
+1 <> 2               L => .T.
+1 # 2                L => .T.
+1 != 2               L => .T.
+MyFunc()             UI =>          1
+undefinedvar         U error       1003
+l                    U error       1003
+CToD( '' )           D =>   /  /  
+  mv                 N =>         10
+                     UE error       1449
+mv + 'a'             UE error       1081
+{1}                  A => 
+Type() calls nothing:          1
+error:          7       1449 Syntax error & A .T. .F.
+error:          1       1065 Argument error & A .T. .F.
+error:         14       1003 Variable does not exist ZZUNDEF U .F. .T.
+error:         12       1001 Undefined function NOFUNC U .T. .F.
+error:         14       1003 Variable does not exist L U .F. .T.
+error:          7       1449 Syntax error & A .T. .F.
+error:          7       1449 Syntax error & A .T. .F.
+error:         12       1001 Undefined function NOFUNC U .T. .F.
+error:          1       1065 Argument error & A .T. .F.
+error:          7       1449 Syntax error & A .T. .F.
+error:          7       1449 Syntax error & A .T. .F.
+error:          7       1449 Syntax error & A .T. .F.
+error:          1       1121 Argument error TYPE A .T. .F.
+substituted: sub

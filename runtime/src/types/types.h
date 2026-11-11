@@ -177,6 +177,9 @@ void     xb_hash_reindex(xb_hash *h);
 
 /* The empty string, never collected. */
 xb_str *xb_str_empty(void);
+
+/* The letter ValType() gives a value's type. */
+char xb_type_letter(const xb_item *it);
 /* A string of `len` bytes (unset) that may grow in place up to `room`
  * (XB_STR_APPEND, the room in `hash`; without the flag when the room cannot
  * be recorded); xb_str_share ends the growth. */
