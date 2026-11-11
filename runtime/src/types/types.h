@@ -196,6 +196,9 @@ void    xb_date_decode(int64_t jd, int *year, int *month, int *day);
 void    xb_set_date(xb_item *it, int64_t jd);
 void    xb_date_to_digits(int64_t jd, char out[XB_DATE_DIGITS_SIZE]);
 size_t  xb_date_format(int64_t jd, const char *fmt, char out[XB_DATE_TEXT_SIZE]);
+/* The same for the eight characters of `digits` as YYYYMMDD (Transform()
+ * formats "99999999" this way for a picture's template). */
+size_t  xb_date_format_digits(const char *digits, const char *fmt, char out[XB_DATE_TEXT_SIZE]);
 int     xb_date_epoch_year(int year, int epoch);
 int64_t xb_date_parse(const char *text, size_t len, const char *fmt, int epoch);
 int64_t xb_date_today(void);

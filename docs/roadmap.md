@@ -70,14 +70,13 @@ Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 
 ### Runtime library
 
-104 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
+105 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
 
-1. Strings and numbers: `Transform`.
-2. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
+1. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
    `GetEnv`.
-3. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the
+2. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the
    Windows console; then `@ ... SAY/GET`, `READ`, `AChoice`, `MemoEdit`, `TBrowse`, `dbEdit`, menus.
-4. The RDD layer and the database functions and commands.
+3. The RDD layer and the database functions and commands.
 
 The SIx Driver and HiPer-SEEK functions (`sx_*`, `hs_*`, `cfts*`) belong to add-on database drivers; whether xbase
 provides them is decided when the RDD layer exists.
@@ -242,12 +241,11 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. The rest of the array, string and number functions; the call-stack functions.
-2. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
+1. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
    `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks.
-3. Files and directories; the terminal layer; GET/READ and TBrowse.
-4. The RDD layer.
-5. Generators, async/await and threads, sockets and the other libraries.
+2. Files and directories; the terminal layer; GET/READ and TBrowse.
+3. The RDD layer.
+4. Generators, async/await and threads, sockets and the other libraries.
 
 Alongside, the compiler's own track ([xir.md](xir.md#phases)): type inference and unboxed numbers, value numbering,
 statepoints and a moving collector, inlining, loop optimizations, measured with the benchmarks

@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 104 of 551 done. Commands (`std.ch` families): 25 of 155 done.
+Functions: 105 of 551 done. Commands (`std.ch` families): 25 of 155 done.
 
 ## Statements (grammar)
 
@@ -119,10 +119,10 @@ at link time, never by an environment variable.
 
 *DosError*, **ErrorBlock**, **ErrorNew**, **ErrorSys**
 
-### Numbers and math (19 of 21 done)
+### Numbers and math (20 of 21 done)
 
 **Abs**, **Bin2I**, **Bin2L**, **Bin2W**, **Descend**, **Exp**, **I2Bin**, **Int**, *IsPrinter*, **L2Bin**, **LenNum**,
-**Log**, **Max**, **Min**, **Mod**, **Round**, **Sqrt**, **Str**, **SubStr**, *Transform*, **Val**
+**Log**, **Max**, **Min**, **Mod**, **Round**, **Sqrt**, **Str**, **SubStr**, **Transform**, **Val**
 
 ### Strings (32 of 33 done)
 

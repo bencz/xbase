@@ -16,6 +16,18 @@ static inline int xb_is_number(const xb_item *it) { return it->type == XB_T_INT 
 static inline int xb_dbl_finite(double d) { return d - d == 0.0; }
 static inline int xb_dbl_infinite(double d) { return d == d && !xb_dbl_finite(d); }
 
+/* A number's own field: its integer columns (its width, or the default for
+ * its value) and its decimals. */
+static inline void xb_num_field(const xb_item *it, int *width, int *dec) {
+  if (it->type == XB_T_INT) {
+    *width = it->width ? it->width : xb_num_int_width(it->v.i);
+    *dec = 0;
+  } else {
+    *width = it->width ? it->width : xb_num_dbl_width(it->v.d);
+    *dec = it->dec;
+  }
+}
+
 /* A number item's value as a double. */
 static inline double xb_num_value(const xb_item *it) { return it->type == XB_T_INT ? (double)it->v.i : it->v.d; }
 

@@ -70,6 +70,10 @@ void xb_date_to_digits(int64_t jd, char out[XB_DATE_DIGITS_SIZE]) {
 size_t xb_date_format(int64_t jd, const char *fmt, char out[XB_DATE_TEXT_SIZE]) {
   char digits[XB_DATE_DIGITS_SIZE];
   xb_date_to_digits(jd, digits);
+  return xb_date_format_digits(digits, fmt, out);
+}
+
+size_t xb_date_format_digits(const char *digits, const char *fmt, char out[XB_DATE_TEXT_SIZE]) {
   size_t size = strlen(fmt);
   if (size > XB_DATE_TEXT_SIZE - 1) size = XB_DATE_TEXT_SIZE - 1;
   size_t n = 0;

@@ -7,17 +7,6 @@
 
 #define XB_STR_MAX_WIDTH 90 /* widest field Str() takes from an item */
 
-/* Default field of a number: its own width, or the default for its value. */
-static void item_field(const xb_item *it, int *width, int *dec) {
-  if (it->type == XB_T_INT) {
-    *width = it->width ? it->width : xb_num_int_width(it->v.i);
-    *dec = 0;
-  } else {
-    *width = it->width ? it->width : xb_num_dbl_width(it->v.d);
-    *dec = it->dec;
-  }
-}
-
 /* Every argument passed, even NIL, must be a number. */
 static int str_args_ok(uint32_t argc, const xb_item *argv) {
   for (uint32_t i = 0; i < argc && i < 3; ++i)
@@ -29,7 +18,7 @@ static int str_args_ok(uint32_t argc, const xb_item *argv) {
  * decimals is all stars. */
 static xb_str *str_of(uint32_t argc, const xb_item *argv) {
   int width, dec;
-  item_field(&argv[0], &width, &dec);
+  xb_num_field(&argv[0], &width, &dec);
   if (width > XB_STR_MAX_WIDTH) width = XB_STR_MAX_WIDTH;
   int hasWidth = argc > 1;
   if (hasWidth) {

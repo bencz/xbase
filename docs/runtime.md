@@ -573,6 +573,14 @@ Conventions:
   of a truncated number.
 - `SoundEx` keeps the first letter, then the digits of the next letters, a digit once for neighbors with it (A E I O U
   H W Y have none and part neighbors), skipping anything but a letter, padded with zeros to 4 characters.
+- `Transform( x, cPicture )` (`rtl/transform.c`, the rules in its header): Clipper's functions (`@B @C @X @( @) @R
+  @! @D @E @Z @S`, and `@L`/`@0` leading zeros) and templates for strings, numbers, dates and logicals, with their
+  corner cases (`@R` on a date inserts the picture's separators again, `@E` on a string trades characters 1-2 and 4-5,
+  a field too narrow is stars). Dates follow SET DATE and SET CENTURY (`xb_date_format_digits` formats the
+  `"99999999"` template). SET FIXED does not exist yet, so numbers keep their own decimals. Without a picture: a
+  string as it is, a number as `Str`, a date as `DToC`, a logical as `T`/`F`; any other value, or a picture that is
+  not a string, is error 1122. Compared with the reference over random values, pictures and settings, the results are
+  the same.
 - The memo-line functions (`rtl/memoline.c`) cut a text into lines of a width (79 by default; tab size 4, word wrap on):
   `MemoLine`, `MLCount`, `MLPos`, `MLCToPos`, `MPosToLC` share one scanner, Clipper's rules and their corner cases (a
   line ends at a hard return, CR LF, or before the character that would pass the width: with word wrap after the
