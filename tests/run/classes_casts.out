@@ -1,0 +1,16 @@
+
+casts: a b a a
+assigned: a b2 a          6
+kept: O b2 TB TB TM .T.
+methods: TA:a TA who TM:a TM:a TB who TM:a
+inside: a/b2 b2 TA
+args: 2NNUU 0UUUU 3UCLU
+kind: .T. .T. .F. .F. .T.
+has: .T. .F. .T. .F. .T. .T. .F.
+vars: A,N methods: SHOW,BOTH,GETTER,PARENT,ARGS,WHO error:         14          0
+send: TM:a set set 1NUUU NUMERIC
+error:         13       1004 Message not found TM:TX
+error:         13         41 Scope violation (hidden) TM:SECRET
+error:          1          0 Argument error OBJSEND
+error:          1          0 Argument error OBJVARS
+error:         13       1004 Message not found TA:SUPER

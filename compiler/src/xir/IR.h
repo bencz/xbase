@@ -269,6 +269,7 @@ public:
   bool readsArgs = false;         // its frame keeps the arguments received (PCount(), PValue())
   bool callsPrivates = false;     // calls a function that creates PRIVATEs of its caller (PRIVATES in rtl.ch)
   bool hidden = false;            // the call stack does not show it (a STATIC function or codeblock of the runtime)
+  bool method = false;            // a method: its first parameter is Self, which PCount() and PValue() skip
   bool byRefBody = false;         // the body versioned for references (NAME.byref), reached by call.forward
   bool usesRest = false;          // has an args.rest (`...`)
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures

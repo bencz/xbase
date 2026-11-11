@@ -96,10 +96,10 @@ hashes (literals, the `H*` functions, see [runtime.md](runtime.md#hashes)).
 
 Done: `CLASS ... ENDCLASS` with `INHERIT` (multiple, an area of variables per ancestor), `VAR`/`DATA [INIT]`,
 `METHOD` (implemented, `INLINE`, `CONSTRUCTOR`), `ACCESS`/`ASSIGN`, `Self`, `::`, `Super`, `New`/`Init`, the scopes
-`EXPORTED`, `PROTECTED`, `HIDDEN`, `READONLY`, `STATIC CLASS`, classes across modules
-([runtime.md](runtime.md#classes)).
-Missing, from the plan below: casts to an ancestor (`o:Parent1:name`), `FRIEND`, shared variables, destructors, scalar
-classes, operator overloading, reflection, and the compiled fast paths.
+`EXPORTED`, `PROTECTED`, `HIDDEN`, `READONLY`, `STATIC CLASS`, classes across modules, casts to an ancestor
+(`o:Parent1:name`, `o:Super`), reflection ([runtime.md](runtime.md#classes)).
+Missing, from the plan below: `FRIEND`, shared variables, destructors, scalar classes, operator overloading, and the
+compiled fast paths.
 
 - Syntax: `CLASS Name [INHERIT Parent1, Parent2, ...]`, `VAR`/`DATA name [INIT value]`, `METHOD name( params )
   [CONSTRUCTOR | INLINE expr]`, `ACCESS`/`ASSIGN`, `ENDCLASS`; a method's body is `METHOD name( params ) CLASS Name`,

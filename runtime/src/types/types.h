@@ -118,6 +118,14 @@ int        xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
 /* What every value answers (ClassName), else the error of a message no
  * class has: BASE/1004, or BASE/1005 for an assignment. */
 void       xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
+/* Reflection on an object of a compiled class: whether its class, or one it
+ * inherits from, is `name` (upper-cased); whether it answers `message` with a
+ * method (`method`) or a variable, in any scope; the messages of its EXPORTED
+ * variables (or methods; not the assigning "_NAME" ones), in the order of its
+ * table, stored in `out` when it is not NULL, their count returned. */
+int      xb_class_kind_of(const xb_object *o, const char *name);
+int      xb_class_has(const xb_object *o, const char *message, int method);
+uint32_t xb_class_names(const xb_object *o, int methods, const char **out);
 /* "CLASS:MESSAGE" in `buf`, cut to fit: how an error names a message to an object. */
 #define XB_MESSAGE_TEXT_SIZE 128
 const char *xb_message_text(char buf[XB_MESSAGE_TEXT_SIZE], const char *cls, const char *message);

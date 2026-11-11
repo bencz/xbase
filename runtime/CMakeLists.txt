@@ -29,6 +29,7 @@ add_library(xbrt STATIC
   src/rtl/memfile.c
   src/rtl/memoline.c
   src/rtl/numbers.c
+  src/rtl/objects.c
   src/rtl/strings.c
   src/rtl/transform.c
   src/macro/compile.c

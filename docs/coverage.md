@@ -153,3 +153,6 @@ monotonic clock, for timing), the bit functions **BitAnd**, **BitOr**, **BitXor*
 Hashes ([runtime.md](runtime.md#hashes)): **Hash**, **HAllocate**, **HCaseMatch**, **HClear**, **HClone**, **HCopy**,
 **HDel**, **HDelAt**, **HEval**, **HFill**, **HGet**, **HGetDef**, **HHasKey**, **HKeyAt**, **HKeys**, **HMerge**,
 **HPairAt**, **HPos**, **HScan**, **HSet**, **HSort**, **HValueAt**, **HValues**.
+
+Objects ([runtime.md](runtime.md#classes)): **ObjHasMethod**, **ObjHasVar**, **ObjIsKindOf**, **ObjMethods**,
+**ObjSend**, **ObjVars**.

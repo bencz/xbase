@@ -377,6 +377,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   fnRet_ = nullptr;
   fnSelf_ = nullptr;
   fnParams_ = f.numParams;
+  fnSkip_ = f.method ? 1 : 0;
   size_t rests = 0;
   const xir::BasicBlock *restBlock = nullptr;
   for (auto &b : f.blocks)
@@ -456,7 +457,8 @@ Constant *CodeGen::procOf(const xir::Function &f) {
   Constant *name = b_.CreateGlobalString(f.stackName, ".xb.procname", 0, &mod_);
   auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_, ptrTy_});
   Constant *nparams = ConstantInt::get(i32_, f.numParams);
-  Constant *flags = ConstantInt::get(i32_, (f.readsArgs ? XB_PROC_ARGS : 0) | (f.hidden ? XB_PROC_HIDDEN : 0));
+  Constant *flags = ConstantInt::get(i32_, (f.readsArgs ? XB_PROC_ARGS : 0) | (f.hidden ? XB_PROC_HIDDEN : 0) |
+                                               (f.method ? XB_PROC_METHOD : 0));
   auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage,
                                   ConstantStruct::get(ty, {name, nparams, flags, file_}), ".xb.proc");
   proc->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);

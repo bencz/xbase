@@ -278,6 +278,7 @@ private:
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
   llvm::Value *fnMark_ = nullptr; // the PRIVATE mark of an activation that may create PRIVATEs (xb_mv_mark), or null
   uint32_t fnParams_ = 0; // the function's parameters: the arguments past them are what `...` passes on
+  uint32_t fnSkip_ = 0;   // 1 in a method: its first argument (Self) is not one PCount() and PValue() count
   // `...` passes its arguments on in place (no copy): the function's one args.rest, outside loops, in a call that
   // takes references, in a function that reads its arguments nowhere else (PCount(), PValue()).
   bool forwardInPlace_ = false;

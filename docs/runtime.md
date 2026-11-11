@@ -85,7 +85,8 @@ which keeps them during the call. The function may replace them (`PValue()`), so
 again after the call: `HMerge` merges the entry as it was before its filter ran, and each `INIT` procedure receives its
 own copy of the command-line arguments. `PCount()` and `PValue( nArg, [xNew] )` (`rtl/lang.c`) read the innermost frame
 with a `proc` (a codeblock's own, also a hidden one of the runtime's xBase code; `Do`'s, with `Do`'s own arguments,
-while `Do` runs; a frame without `XB_PROC_ARGS` counts no arguments): `PCount()` is `argc`; `PValue()` gives argument
+while `Do` runs; a frame without `XB_PROC_ARGS` counts no arguments): `PCount()` is `argc` (in a method's frame,
+`XB_PROC_METHOD`, the arguments after `Self`, which `PValue()` numbers from 1 too); `PValue()` gives argument
 `nArg` (a fraction truncated) for `1 <= nArg <= argc`, `NIL` otherwise: a parameter's current value (the first
 `xb_proc.nparams` slots; a function calling `PValue()` keeps its parameters there, see
 [compiler.md](compiler.md#calls)), or past the parameters the argument as passed. With `xNew` it stores `xNew` there,
@@ -294,9 +295,20 @@ first time it is used (its class function, or a subclass):
   `Scope violation (protected)` (generic code 13, the operation `CLASS:MESSAGE`, no `args`). A message the class does
   not answer is `BASE/1004` (`BASE/1005` to assign) `Message not found`, the operation `CLASS:MESSAGE`, the object in
   `args`, as in the reference; the runtime's own classes keep Clipper's `No exported method`.
-- Not yet: `o:Parent:name` and `o:Super` outside a method (casts to an ancestor's area), class (shared) variables,
-  destructors, `FRIEND`, scalar classes, operator overloading, reflection functions, and the compiled fast paths (see
-  [xir.md](xir.md#classes)). A method's `PCount()` counts `Self`.
+- Casts: a message naming a class of the object's line that no member answers (`o:TParent`; `SUPER`, outside the
+  `Super:` of a method, the first parent) gives the object seen as that class, without allocating: the same item with
+  the class's position in the line in its `width` field. A message to a cast reaches what that class answers (its
+  methods, its variables in their areas), `ClassName()` is that class's name, a method receives the object itself as
+  `Self`, and a cast kept in a variable stays one. A cast is the object: `==` gives `.T.` (the reference makes a new
+  object, so `.F.`).
+- A method's frame is marked `XB_PROC_METHOD`: `PCount()` and `PValue()` count the arguments after `Self`.
+- Reflection (`rtl/objects.c`, names in any letter case): `ObjIsKindOf( o, cClass )` (the class or one it inherits
+  from), `ObjHasVar( o, cName )` and `ObjHasMethod( o, cName )` (any scope; ACCESS and ASSIGN are methods),
+  `ObjVars( o )` and `ObjMethods( o )` (the EXPORTED ones, upper-cased, in table order; anything but an object is
+  `BASE/0`), `ObjSend( x, cMessage, ... )` (`x:cMessage( ... )` from outside the class; `_NAME` assigns). The
+  runtime's own classes answer with their variables and no methods.
+- Not yet: class (shared) variables, destructors, `FRIEND`, scalar classes, operator overloading, and the compiled
+  fast paths (see [xir.md](xir.md#classes)).
 
 ## References
 

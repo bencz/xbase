@@ -105,13 +105,16 @@ static xb_frame *caller_frame(const xb_ctx *ctx) {
   return f && (f->proc->flags & XB_PROC_ARGS) ? f : NULL;
 }
 
+/* 1 when the frame is a method's: its first argument, Self, is not counted. */
+static uint32_t self_of(const xb_frame *f) { return (f->proc->flags & XB_PROC_METHOD) && f->argc ? 1u : 0u; }
+
 /* PCount(): the number of arguments the calling function (or codeblock)
  * received, parameters or not. */
 void xbf_PCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   const xb_frame *f = caller_frame(ctx);
-  xb_set_int(ret, f ? f->argc : 0);
+  xb_set_int(ret, f ? f->argc - self_of(f) : 0);
 }
 
 /* PValue( nArg, [xNew] ): argument nArg (1-based, a fraction truncated) of the
@@ -121,7 +124,8 @@ void xbf_PCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_PVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_frame *f = caller_frame(ctx);
   int64_t n = argc && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 0;
-  if (!f || n < 1 || n > f->argc) return;
+  if (!f || n < 1 || n > f->argc - self_of(f)) return;
+  n += self_of(f);
   xb_item *arg = (uint64_t)n <= f->proc->nparams ? &f->slots[n - 1] : &f->argv[n - 1];
   int ref = arg->type == XB_T_CELL || arg->type == XB_T_REF;
   xb_item *target = ref ? xb_ref_target(ctx, arg) : arg;

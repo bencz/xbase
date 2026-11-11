@@ -9,7 +9,7 @@ entry:
   ret
 }
 
-function TFOO:GET internal params 1 {
+function TFOO:GET internal params 1 method {
   $f0 = frame 0 shared "SELF"
 entry:
   %0 = block TFOO:GET.block1 $f0
@@ -31,7 +31,7 @@ entry:
   ret %0
 }
 
-function TBAR:GET internal params 1 {
+function TBAR:GET internal params 1 method {
   $f0 = frame 0 "SELF"
   $f1 = frame 1 "SELF"
 entry:
@@ -58,7 +58,7 @@ entry:
   ret %1
 }
 
-function TBAR:GET.byref internal params 1 {
+function TBAR:GET.byref internal params 1 method {
   $f0 = frame 0 "SELF"
 entry:
   ret 2:w10

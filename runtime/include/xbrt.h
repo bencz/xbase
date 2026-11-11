@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 27u
+#define XB_ABI_VERSION 28u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -143,6 +143,9 @@ typedef struct xb_proc {
  * stack does not show (PCount() and PValue() still read its frame). */
 #define XB_PROC_ARGS 1u
 #define XB_PROC_HIDDEN 2u
+/* XB_PROC_METHOD: a method, whose first argument is the object (Self):
+ * PCount() and PValue() count the arguments after it. */
+#define XB_PROC_METHOD 8u
 /* xb_proc.flags the runtime alone sets: XB_PROC_TRANSPARENT, a frame that
  * evaluates a macro, which is not an activation of its own (PRIVATEs it
  * creates belong to the one below it, RELEASE ALL acts there). */

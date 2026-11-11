@@ -108,6 +108,7 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   fn->hidden = runtimeLibrary_ && f.isStatic;
   fn->numParams = (uint32_t)f.params.size();
   fn->readsArgs = f.readsArgs;
+  fn->method = f.ofClass != nullptr;
   fn->callsPrivates = f.callsPrivates;
   for (uint32_t s = 0; s < f.numLocals; ++s) {
     Var *v = fn->addVar(Var::Kind::Frame, s, s < f.params.size() ? f.params[s].name : "");

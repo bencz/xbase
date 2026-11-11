@@ -326,8 +326,8 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     else storeTagged(d, XB_T_STRING, byteString(byte));
     break;
   }
-  case Inline::PCount: { // the function's own count (the slow path is never taken)
-    storeInt(d, b_.CreateZExt(fn_->getArg(2), i64_));
+  case Inline::PCount: { // the function's own count (the slow path is never taken); a method always has Self
+    storeInt(d, b_.CreateSub(b_.CreateZExt(fn_->getArg(2), i64_), ConstantInt::get(i64_, fnSkip_)));
     break;
   }
   case Inline::PValue: { // PValue( n ), n an integer: the parameter's slot or the argument as passed, NIL outside
@@ -335,8 +335,11 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     BasicBlock *copy = newBlock("pvalue.copy");
     branchLikely(isType(argType(0), XB_T_INT), check, slow);
     b_.SetInsertPoint(check);
-    Value *k = b_.CreateSub(intValue(arg(0)), ConstantInt::get(i64_, 1));
-    branchLikely(b_.CreateICmpULT(k, b_.CreateZExt(fn_->getArg(2), i64_)), in, nil);
+    Value *n = intValue(arg(0));
+    Value *k = b_.CreateAdd(b_.CreateSub(n, ConstantInt::get(i64_, 1)), ConstantInt::get(i64_, fnSkip_));
+    branchLikely(b_.CreateAnd(b_.CreateICmpSGE(n, ConstantInt::get(i64_, 1)),
+                              b_.CreateICmpULT(k, b_.CreateZExt(fn_->getArg(2), i64_))),
+                 in, nil);
     b_.SetInsertPoint(nil);
     setNil(d);
     b_.CreateBr(join);

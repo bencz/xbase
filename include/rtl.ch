@@ -62,6 +62,14 @@ EXTERN FUNCTION HValueAt( hHash, nPos, [xNew] ) NATIVE
 EXTERN FUNCTION HValues( hHash ) NATIVE
 EXTERN FUNCTION Hash( ... ) NATIVE
 
+// Objects: reflection (xbase names)
+EXTERN FUNCTION ObjHasMethod( oObject, cName ) NATIVE
+EXTERN FUNCTION ObjHasVar( oObject, cName ) NATIVE
+EXTERN FUNCTION ObjIsKindOf( oObject, cClass ) NATIVE
+EXTERN FUNCTION ObjMethods( oObject ) NATIVE
+EXTERN FUNCTION ObjSend( xValue, cMessage, ... ) NATIVE
+EXTERN FUNCTION ObjVars( oObject ) NATIVE
+
 // Strings
 EXTERN FUNCTION AllTrim( cString ) NATIVE
 EXTERN FUNCTION Asc( cExp ) NATIVE RESERVED CHECKED

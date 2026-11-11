@@ -19,7 +19,13 @@
  * assigned by those only; anything else is a scope violation (BASE/41,
  * BASE/42). Without a method of its own, a class answers New (it sends Init
  * with the arguments, as its own method would, and returns the object) and
- * Init (the object). */
+ * Init (the object).
+ *
+ * A message naming a class of the object's line that no member answers (SUPER:
+ * its first parent) is a cast: the object, its item's `width` holding the
+ * class's position in the line. A message to a cast reaches what that class
+ * answers (its methods, its variables in their areas of the object); a method
+ * still receives the object itself as Self. */
 #include "xbrt_int.h"
 
 #include "rtl/collections.h"
@@ -30,6 +36,7 @@
 typedef enum member_kind { M_GET, M_SET, M_METHOD } member_kind;
 
 typedef struct member {
+  const char *message;
   member_kind kind;
   uint32_t flags;           /* scope, XB_MEMBER_READONLY */
   xb_class_def *owner;
@@ -103,6 +110,7 @@ static void table(cls *c, const char *message, member m) {
     if (!grown) xb_gc_fatal("out of memory");
     c->members = grown;
   }
+  m.message = message;
   c->members[id] = m;
   c->nmembers = id + 1;
 }
@@ -133,13 +141,13 @@ static void build_tables(cls *c) {
     xb_class_def *x = c->line[k];
     for (uint32_t i = 0; i < x->nvars; ++i) c->slots[c->area[k] + i] = (xb_class_var){x->vars[i].name, XB_VAR_ANY};
     for (uint32_t i = 0; i < x->nmethods; ++i)
-      table(c, x->methods[i].message, (member){M_METHOD, x->methods[i].flags, x, 0, x->methods[i].fn});
+      table(c, x->methods[i].message, (member){NULL, M_METHOD, x->methods[i].flags, x, 0, x->methods[i].fn});
     for (uint32_t i = 0; i < x->nvars; ++i) {
-      table(c, x->vars[i].name, (member){M_GET, x->vars[i].flags, x, i, NULL});
+      table(c, x->vars[i].name, (member){NULL, M_GET, x->vars[i].flags, x, i, NULL});
       uint32_t id;
       const char *set = setter(x->vars[i].name);
       if (xb_names_find(&c->messages, set, strlen(set), &id)) free((char *)set);
-      else table(c, set, (member){M_SET, x->vars[i].flags, x, i, NULL});
+      else table(c, set, (member){NULL, M_SET, x->vars[i].flags, x, i, NULL});
     }
   }
   c->base.name = c->def->name;
@@ -301,18 +309,44 @@ static member *lookup_from(cls *c, cls *f, const char *message) {
   return mc ? mc : mf;
 }
 
+/* The object seen as the class of its line named `message` (also SUPER: its
+ * first parent), a cast (see the top of the file); 0 when there is none. */
+static int cast(xb_item *r, const cls *c, const xb_item *self, const char *message) {
+  uint32_t k = 0;
+  if (strcmp(message, "SUPER") == 0) {
+    k = c->nline > 1 ? 1 : 0; /* the first parent's line comes first after the class */
+  } else {
+    while (k < c->nline && strcmp(c->line[k]->name, message) != 0) ++k;
+  }
+  if ((k == 0 && strcmp(message, c->def->name) != 0) || k >= c->nline || k > UINT16_MAX) return 0;
+  *r = *self;
+  r->width = (uint16_t)k;
+  return 1;
+}
+
 int xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super, uint32_t argc,
                   xb_item *argv) {
   xb_object *o = argv[0].v.p;
   cls *c = o->cls->compiled;
   cls *f = from ? runtime_of(from) : NULL;
+  uint32_t view = argv[0].width < c->nline ? argv[0].width : 0; /* a cast: the class of the line it sees */
+  argv[0].width = 0; /* a method's Self is the object itself */
   int related = f && kind_of(c, from); /* Self is of the method's class (it may have been assigned another object) */
   if (super && !related) {
     not_found(ctx, r, c, message, &argv[0]);
     return 1;
   }
-  member *m = super ? lookup_super(f, message) : related ? lookup_from(c, f, message) : lookup(c, message);
+  member *m = view       ? lookup(runtime_of(c->line[view]), message)
+              : super    ? lookup_super(f, message)
+              : related  ? lookup_from(c, f, message)
+                         : lookup(c, message);
   if (!m) {
+    if (cast(r, c, &argv[0], message)) return 1;
+    if (view && strcmp(message, "CLASSNAME") == 0) { /* a cast's is the class it sees */
+      const char *name = c->line[view]->name;
+      xb_set_str(r, xb_str_new(name, strlen(name)));
+      return 1;
+    }
     if (strcmp(message, "NEW") == 0) { /* New: Init with the arguments, as the class's own method sends it */
       xb_item self = argv[0];
       xb_gc_root_push(ctx, &self);
@@ -365,4 +399,31 @@ void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def 
     xb_class_send(ctx, r, message, from, super, argc, argv);
   else
     xb_op_send(ctx, r, message, argc, argv);
+}
+
+int xb_class_kind_of(const xb_object *o, const char *name) {
+  const cls *c = o->cls->compiled;
+  for (uint32_t k = 0; k < c->nline; ++k)
+    if (strcmp(c->line[k]->name, name) == 0) return 1;
+  return 0;
+}
+
+int xb_class_has(const xb_object *o, const char *message, int method) {
+  const cls *c = o->cls->compiled;
+  uint32_t id;
+  if (!xb_names_find(&c->messages, message, strlen(message), &id)) return 0;
+  return method ? c->members[id].kind == M_METHOD : c->members[id].kind == M_GET;
+}
+
+uint32_t xb_class_names(const xb_object *o, int methods, const char **out) {
+  const cls *c = o->cls->compiled;
+  uint32_t n = 0;
+  for (uint32_t id = 0; id < c->nmembers; ++id) {
+    const member *m = &c->members[id];
+    if ((m->flags & XB_SCOPE_MASK) != XB_SCOPE_EXPORTED || m->message[0] == '_') continue;
+    if (methods ? m->kind != M_METHOD : m->kind != M_GET) continue;
+    if (out) out[n] = m->message;
+    ++n;
+  }
+  return n;
 }
