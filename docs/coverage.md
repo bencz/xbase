@@ -154,5 +154,5 @@ Hashes ([runtime.md](runtime.md#hashes)): **Hash**, **HAllocate**, **HCaseMatch*
 **HDel**, **HDelAt**, **HEval**, **HFill**, **HGet**, **HGetDef**, **HHasKey**, **HKeyAt**, **HKeys**, **HMerge**,
 **HPairAt**, **HPos**, **HScan**, **HSet**, **HSort**, **HValueAt**, **HValues**.
 
-Objects ([runtime.md](runtime.md#classes)): **ObjHasMethod**, **ObjHasVar**, **ObjIsKindOf**, **ObjMethods**,
-**ObjSend**, **ObjVars**.
+Objects ([runtime.md](runtime.md#classes)): **ClassAssociate** (`ASSOCIATE CLASS`), **ObjHasMethod**, **ObjHasVar**,
+**ObjIsKindOf**, **ObjMethods**, **ObjSend**, **ObjVars**.

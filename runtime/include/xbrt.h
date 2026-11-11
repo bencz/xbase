@@ -479,6 +479,27 @@ void     xb_classes_register(xb_class_def *defs, uint32_t n);
 /* The class function NAME(): a new object of the class, its variables at their
  * initial values (:New() then initializes it). */
 void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
+/* The messages of the operators a class overloads (OPERATOR "+" ...): an
+ * object that is the left (or only) operand receives the right operand as its
+ * argument; [] receives the index, and the value when it assigns. */
+#define XB_OPERATOR_ADD      "+"
+#define XB_OPERATOR_SUB      "-"
+#define XB_OPERATOR_MUL      "*"
+#define XB_OPERATOR_DIV      "/"
+#define XB_OPERATOR_MOD      "%"
+#define XB_OPERATOR_POW      "^"
+#define XB_OPERATOR_EQ       "="
+#define XB_OPERATOR_EXACT_EQ "=="
+#define XB_OPERATOR_NE       "!="
+#define XB_OPERATOR_LT       "<"
+#define XB_OPERATOR_LE       "<="
+#define XB_OPERATOR_GT       ">"
+#define XB_OPERATOR_GE       ">="
+#define XB_OPERATOR_IN       "$"
+#define XB_OPERATOR_NOT      "!"
+#define XB_OPERATOR_INC      "++"
+#define XB_OPERATOR_DEC      "--"
+#define XB_OPERATOR_INDEX    "[]"
 /* A message sent from a method of class `from` (its scope decides what the
  * method may reach, and a variable is first the one `from` sees); with
  * `super`, the method or variable of `from`'s ancestors (Super:message). */

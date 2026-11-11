@@ -2,7 +2,7 @@
 #include "parser/Parser.h"
 
 #include "common/Text.h"
-#include "xbrt.h" // XB_SCOPE_*, XB_MEMBER_*
+#include "xbrt.h" // XB_SCOPE_*, XB_MEMBER_*, XB_OPERATOR_*
 
 #include <algorithm>
 #include <cstring>
@@ -459,18 +459,36 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
         expect(Tok::RParen, "')'");
       }
       asType();
-      if (at(Tok::Ident) && cur().upper == "CONSTRUCTOR") advance();
-      if (at(Tok::Ident) && cur().upper == "INLINE") { // expressions evaluated in order, the last one returned
-        SourceLoc inlineLoc = cur().loc;
+      if (method && at(Tok::Ident) && cur().upper == "OPERATOR" && ahead().kind == Tok::String) { // its message
         advance();
-        m.inlineBody = parseExpr();
-        if (at(Tok::Comma)) {
-          auto list = std::make_unique<ListExpr>(inlineLoc);
-          list->exprs.push_back(std::move(m.inlineBody));
-          while (accept(Tok::Comma)) list->exprs.push_back(parseExpr());
-          m.inlineBody = std::move(list);
-        }
+        m.op = operatorMessage();
       }
+      if (at(Tok::Ident) && cur().upper == "CONSTRUCTOR") advance();
+      if (at(Tok::Ident) && cur().upper == "INLINE") parseInline(m);
+      memberScope(m.flags, false, false);
+      cls->methods.push_back(std::move(m));
+      endOfStmt();
+      continue;
+    }
+    if (atStmtKw("OPERATOR") && ahead().kind == Tok::String) { // OPERATOR "op" [ARG name, ...] INLINE expr, ...
+      advance();
+      ClassMethodDecl m;
+      m.loc = cur().loc;
+      m.op = operatorMessage();
+      m.name = m.op;
+      if (at(Tok::Ident) && (cur().upper == "ARG" || cur().upper == "ARGS")) {
+        do {
+          advance();
+          if (!at(Tok::Ident)) {
+            expect(Tok::Ident, "parameter name");
+            break;
+          }
+          m.params.push_back({cur().loc, cur().upper});
+          advance();
+        } while (at(Tok::Comma));
+      }
+      if (at(Tok::Ident) && cur().upper == "INLINE") parseInline(m);
+      else diag_.error(cur().loc, "expected INLINE after OPERATOR, " + found());
       memberScope(m.flags, false, false);
       cls->methods.push_back(std::move(m));
       endOfStmt();
@@ -496,6 +514,39 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
     accept(Tok::EndOfStmt);
   }
   return cls;
+}
+
+// INLINE expr, ...: the expressions evaluated in order, the last one returned.
+void Parser::parseInline(ClassMethodDecl &m) {
+  SourceLoc loc = cur().loc;
+  advance();
+  m.inlineBody = parseExpr();
+  if (at(Tok::Comma)) {
+    auto list = std::make_unique<ListExpr>(loc);
+    list->exprs.push_back(std::move(m.inlineBody));
+    while (accept(Tok::Comma)) list->exprs.push_back(parseExpr());
+    m.inlineBody = std::move(list);
+  }
+}
+
+// The operator a string names, as the message the runtime sends for it (XB_OPERATOR_* in xbrt.h); the
+// reference's other spellings name the same operators. An unknown one is reported (and kept as written).
+std::string Parser::operatorMessage() {
+  static const std::pair<const char *, const char *> operators[] = {
+      {"+", XB_OPERATOR_ADD},  {"-", XB_OPERATOR_SUB},       {"*", XB_OPERATOR_MUL},   {"/", XB_OPERATOR_DIV},
+      {"%", XB_OPERATOR_MOD},  {"^", XB_OPERATOR_POW},       {"**", XB_OPERATOR_POW},  {"=", XB_OPERATOR_EQ},
+      {"==", XB_OPERATOR_EXACT_EQ}, {"!=", XB_OPERATOR_NE}, {"<>", XB_OPERATOR_NE},   {"#", XB_OPERATOR_NE},
+      {"<", XB_OPERATOR_LT},   {"<=", XB_OPERATOR_LE},       {">", XB_OPERATOR_GT},    {">=", XB_OPERATOR_GE},
+      {"$", XB_OPERATOR_IN},   {"!", XB_OPERATOR_NOT},       {".NOT.", XB_OPERATOR_NOT}, {"++", XB_OPERATOR_INC},
+      {"--", XB_OPERATOR_DEC}, {"[]", XB_OPERATOR_INDEX}};
+  std::string text = cur().text;
+  SourceLoc loc = cur().loc;
+  advance();
+  std::string upper = upperCase(text);
+  for (const auto &[spelling, message] : operators)
+    if (upper == spelling) return message;
+  diag_.error(loc, "'" + text + "' is not an operator a class can overload");
+  return text;
 }
 
 // EXTERN FUNCTION name( p1, [p2], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ARGS] [PARAMS] [ABBREV n]

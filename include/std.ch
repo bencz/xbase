@@ -41,6 +41,10 @@
 #command SAVE ALL EXCEPT <skel> TO <(f)> => __MemSave( <(f)>, #<skel>, .F. )
 #command RESTORE [FROM <(f)>] [<add: ADDITIVE>] => __MemRestore( <(f)>, <.add.> )
 
+/* Scalar classes: values of the type answer the class's messages, as Self. */
+#command ASSOCIATE CLASS <cls> WITH TYPE <type: ARRAY, BLOCK, CHARACTER, DATE, HASH, LOGICAL, NIL, NUMERIC> => ;
+         ClassAssociate( <cls>(), <"type"> )
+
 #command ?  [<explist,...>]            => QOut( <explist> )
 #command ?? [<explist,...>]            => QQOut( <explist> )
 

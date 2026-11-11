@@ -62,7 +62,8 @@ EXTERN FUNCTION HValueAt( hHash, nPos, [xNew] ) NATIVE
 EXTERN FUNCTION HValues( hHash ) NATIVE
 EXTERN FUNCTION Hash( ... ) NATIVE
 
-// Objects: reflection (xbase names)
+// Objects: reflection and scalar classes (xbase names)
+EXTERN FUNCTION ClassAssociate( oObject, cType ) NATIVE
 EXTERN FUNCTION ObjHasMethod( oObject, cName ) NATIVE
 EXTERN FUNCTION ObjHasVar( oObject, cName ) NATIVE
 EXTERN FUNCTION ObjIsKindOf( oObject, cClass ) NATIVE

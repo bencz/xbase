@@ -99,7 +99,8 @@ Done: `CLASS ... ENDCLASS` with `INHERIT` (multiple, an area of variables per an
 `EXPORTED`, `PROTECTED`, `HIDDEN`, `READONLY`, `STATIC CLASS`, classes across modules, casts to an ancestor
 (`o:Parent1:name`, `o:Super`), reflection, class variables (`CLASSVAR`, `SHARED`), `FRIEND CLASS`/`FRIEND FUNCTION`
 ([runtime.md](runtime.md#classes)).
-Missing, from the plan below: destructors, scalar classes, operator overloading, and the compiled fast paths.
+Operator overloading and scalar classes (`ASSOCIATE CLASS`) are done too.
+Missing, from the plan below: destructors and the compiled fast paths.
 
 - Syntax: `CLASS Name [INHERIT Parent1, Parent2, ...]`, `VAR`/`DATA name [INIT value]`, `METHOD name( params )
   [CONSTRUCTOR | INLINE expr]`, `ACCESS`/`ASSIGN`, `ENDCLASS`; a method's body is `METHOD name( params ) CLASS Name`,

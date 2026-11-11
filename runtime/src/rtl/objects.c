@@ -1,5 +1,6 @@
 /* Reflection on objects, with xbase names: ObjIsKindOf, ObjHasVar,
- * ObjHasMethod, ObjVars, ObjMethods and ObjSend. Names are compared in any
+ * ObjHasMethod, ObjVars, ObjMethods and ObjSend; and ClassAssociate (scalar
+ * classes). Names are compared in any
  * letter case. They see objects of compiled classes (types/class.c) and of
  * the runtime's own classes (their variables; they have no methods). */
 #include "xbrt_int.h"
@@ -98,6 +99,29 @@ void xbf_OBJVARS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 void xbf_OBJMETHODS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   names(ctx, ret, argc, argv, 1, "OBJMETHODS");
+}
+
+/* ClassAssociate( oObject, cType ): values of the type cType names (as
+ * ClassName() does: "CHARACTER", "NUMERIC", "ARRAY" ...) answer the messages
+ * of the object's class, as Self (a scalar class); .F. for an unknown type. A
+ * class with instance variables is BASE/3005. ASSOCIATE CLASS calls it. */
+void xbf_CLASSASSOCIATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_object *o = object_arg(argc, argv);
+  char buf[NAME_SIZE];
+  char *type = argc > 1 ? upper_name(&argv[1], buf) : NULL;
+  if (!o || !o->cls->compiled || !type) {
+    if (type) free_name(type, buf);
+    xb_fn_arg_error(ctx, ret, 0, "CLASSASSOCIATE", argc, argv);
+    return;
+  }
+  int done = xb_class_associate(o, type);
+  free_name(type, buf);
+  if (done < 0) {
+    xb_error_described(ctx, ret, EG_ARG, 3005, "Scalar class cannot have instance variables", "CLASSASSOCIATE",
+                       0, argc, argv);
+    return;
+  }
+  xb_set_logical(ret, done);
 }
 
 /* ObjSend( xValue, cMessage, [xArgs...] ): the message cMessage ("_NAME"

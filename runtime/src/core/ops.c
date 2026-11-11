@@ -25,6 +25,7 @@ static void zero_divisor(xb_ctx *ctx, xb_item *r, int32_t code, const char *op, 
 }
 
 void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_ADD, a, b, NULL)) return;
   if (a->type == XB_T_INT && b->type == XB_T_INT) {
     int64_t v;
     if (!xb_add_overflow(a->v.i, b->v.i, &v)) { xb_set_int(r, v); return; }
@@ -75,6 +76,7 @@ void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
 }
 
 void xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_SUB, a, b, NULL)) return;
   if (a->type == XB_T_INT && b->type == XB_T_INT) {
     int64_t v;
     if (!xb_sub_overflow(a->v.i, b->v.i, &v)) { xb_set_int(r, v); return; }
@@ -99,6 +101,8 @@ void xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 
 /* ++ and --: + and - with 1 where they apply, else their own error. */
 static void step_by_one(xb_ctx *ctx, xb_item *r, const xb_item *a, int up) {
+  const char *op = up ? XB_OPERATOR_INC : XB_OPERATOR_DEC;
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, op, a, NULL, NULL)) return;
   if (!xb_is_number(a) && a->type != XB_T_DATE) {
     xb_item args[1] = {*a};
     xb_arg_error(ctx, r, up ? 1086 : 1087, up ? "++" : "--", 1, args);
@@ -114,6 +118,7 @@ void xb_op_inc(xb_ctx *ctx, xb_item *r, const xb_item *a) { step_by_one(ctx, r, 
 void xb_op_dec(xb_ctx *ctx, xb_item *r, const xb_item *a) { step_by_one(ctx, r, a, 0); }
 
 void xb_op_mul(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_MUL, a, b, NULL)) return;
   if (a->type == XB_T_INT && b->type == XB_T_INT) {
     int64_t v;
     if (!xb_mul_overflow(a->v.i, b->v.i, &v)) { xb_set_int(r, v); return; }
@@ -128,12 +133,14 @@ void xb_op_mul(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 /* `/` and `%` always produce a double with SET DECIMALS decimals; an integer
  * result for exact division only comes from compile-time folding. */
 void xb_op_div(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_DIV, a, b, NULL)) return;
   if (!xb_is_number(a) || !xb_is_number(b)) { arg_error2(ctx, r, 1084, "/", a, b); return; }
   if (xb_num_value(b) == 0.0) { zero_divisor(ctx, r, 1340, "/", a, b); return; }
   xb_set_double(r, xb_num_value(a) / xb_num_value(b), xb_decimals(ctx));
 }
 
 void xb_op_mod(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_MOD, a, b, NULL)) return;
   if (!xb_is_number(a) || !xb_is_number(b)) { arg_error2(ctx, r, 1085, "%", a, b); return; }
   if (xb_num_value(b) == 0.0) { zero_divisor(ctx, r, 1341, "%", a, b); return; }
   double v;
@@ -147,6 +154,7 @@ void xb_num_default_dec(xb_ctx *ctx, xb_item *r, double value) {
 }
 
 void xb_op_pow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_POW, a, b, NULL)) return;
   if (!xb_is_number(a) || !xb_is_number(b)) { arg_error2(ctx, r, 1088, "^", a, b); return; }
   xb_set_double(r, pow(xb_num_value(a), xb_num_value(b)), xb_decimals(ctx));
 }
@@ -162,6 +170,7 @@ void xb_op_neg(xb_ctx *ctx, xb_item *r, const xb_item *a) {
 }
 
 void xb_op_not(xb_ctx *ctx, xb_item *r, const xb_item *a) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_NOT, a, NULL, NULL)) return;
   if (a->type == XB_T_LOGICAL) xb_set_logical(r, !a->v.l);
   else xb_arg_error(ctx, r, 1077, ".NOT.", 1, a);
 }
@@ -222,6 +231,7 @@ int xb_compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
 }
 
 void xb_op_eq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_EQ, a, b, NULL)) return;
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
   int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error2(ctx, r, 1071, "=", a, b);
@@ -229,6 +239,7 @@ void xb_op_eq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 }
 
 void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_NE, a, b, NULL)) return;
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type != b->type); return; }
   int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error2(ctx, r, 1072, "<>", a, b);
@@ -236,6 +247,7 @@ void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 }
 
 void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_EXACT_EQ, a, b, NULL)) return;
   int identity = a->type == XB_T_ARRAY || a->type == XB_T_BLOCK || a->type == XB_T_OBJECT || a->type == XB_T_HASH;
   if (identity && a->type == b->type) {
     xb_set_logical(r, a->v.p == b->v.p);
@@ -252,20 +264,24 @@ void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) 
   else xb_set_logical(r, xb_order_is(c, 0, 1, 0));
 }
 
+/* `sym` is the operator's XB_OPERATOR_ message as well as its symbol. */
 #define XB_REL_OP(name, code, sym, less, equal, greater)                          \
   void name(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {       \
+    if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, sym, a, b, NULL))    \
+      return;                                                                    \
     int c = xb_compare(ctx, a, b);                                               \
     if (c == 2) arg_error2(ctx, r, code, sym, a, b);                             \
     else xb_set_logical(r, xb_order_is(c, less, equal, greater));                \
   }
 
-XB_REL_OP(xb_op_lt, 1073, "<", 1, 0, 0)
-XB_REL_OP(xb_op_le, 1074, "<=", 1, 1, 0)
-XB_REL_OP(xb_op_gt, 1075, ">", 0, 0, 1)
-XB_REL_OP(xb_op_ge, 1076, ">=", 0, 1, 1)
+XB_REL_OP(xb_op_lt, 1073, XB_OPERATOR_LT, 1, 0, 0)
+XB_REL_OP(xb_op_le, 1074, XB_OPERATOR_LE, 1, 1, 0)
+XB_REL_OP(xb_op_gt, 1075, XB_OPERATOR_GT, 0, 0, 1)
+XB_REL_OP(xb_op_ge, 1076, XB_OPERATOR_GE, 0, 1, 1)
 
 /* `$`: a substring of a string, or a key of a hash. */
 void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_IN, a, b, NULL)) return;
   if (b->type == XB_T_HASH && xb_hash_key_ok(a)) {
     xb_set_logical(r, xb_hash_find(b->v.p, a) >= 0);
     return;

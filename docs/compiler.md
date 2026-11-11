@@ -114,12 +114,14 @@ Statements:
   [READONLY | RO]` (the type is accepted and ignored; each name gets the INIT expression; `scope` is `EXPORTED`,
   `VISIBLE`, `PROTECTED` or `HIDDEN`); `CLASSVAR`, `CLASSDATA`, `CLASS VAR` or `CLASS DATA`, as `VAR` with `SHARED` too,
   declare class variables; `FRIEND CLASS name, ...` and `FRIEND FUNCTION name, ...`; `METHOD name[( params )] [AS type]
-  [CONSTRUCTOR] [INLINE expr, ...] [scope]`; `ACCESS name [INLINE expr, ...]` and `ASSIGN name( param ) [INLINE expr,
-  ...]` (an `INLINE` list is evaluated in order and returns its last value). A method is implemented with `METHOD name[(
-  params )] [CLASS name]` (also `ACCESS name CLASS ...` and `ASSIGN name( param ) CLASS ...`; without `CLASS`, the last
-  class declared before it in the preprocessed source, an included file's too) and a body, like a function. In a method,
-  `Self` is the object, `::name` is `Self:name`, and `Super:name` (when no variable named `Super` is declared there) or
-  `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super` are ordinary names.
+  [OPERATOR "op"] [CONSTRUCTOR] [INLINE expr, ...] [scope]` (with `OPERATOR`, the method answers the operator);
+  `OPERATOR "op" [ARG | ARGS name, ...] INLINE expr, ... [scope]`; `ACCESS name [INLINE expr, ...]` and `ASSIGN name(
+  param ) [INLINE expr, ...]` (an `INLINE` list is evaluated in order and returns its last value). A method is
+  implemented with `METHOD name[( params )] [CLASS name]` (also `ACCESS name CLASS ...` and `ASSIGN name( param ) CLASS
+  ...`; without `CLASS`, the last class declared before it in the preprocessed source, an included file's too) and a
+  body, like a function. In a method, `Self` is the object, `::name` is `Self:name`, and `Super:name` (when no variable
+  named `Super` is declared there) or `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super`
+  are ordinary names.
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
   other arguments (an element, a variable in parentheses, an expression) by value
 - expression statements; a statement `operand = expr` is an assignment, and `=` inside `expr` compares:

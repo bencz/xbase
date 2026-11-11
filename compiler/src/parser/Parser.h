@@ -99,6 +99,8 @@ private:
   ExprPtr parseSend(SourceLoc loc, ExprPtr object);
   bool atMemberStart() const;
   std::unique_ptr<ClassDecl> parseClass();
+  void parseInline(ClassMethodDecl &m);
+  std::string operatorMessage();
   bool atMacroParen() const;
 
   std::vector<Token> toks_;

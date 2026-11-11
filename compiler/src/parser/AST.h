@@ -396,9 +396,13 @@ struct ClassMethodDecl {
   uint32_t flags = 0;            // XB_SCOPE_*
   std::vector<Param> params;
   bool variadic = false;
+  std::string op;                // OPERATOR: its message (XB_OPERATOR_*), else empty
   ExprPtr inlineBody;            // INLINE expr, or null
   FuncDecl *impl = nullptr;      // set by Sema: the function that implements it
-  std::string message() const { return (kind == FuncDecl::Member::Assign ? "_" : "") + name; }
+  std::string message() const {
+    if (!op.empty()) return op;
+    return (kind == FuncDecl::Member::Assign ? "_" : "") + name;
+  }
 };
 struct ClassDecl {
   SourceLoc loc;

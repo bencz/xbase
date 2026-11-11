@@ -314,7 +314,20 @@ first time it is used (its class function, or a subclass):
   `ObjVars( o )` and `ObjMethods( o )` (the EXPORTED ones, upper-cased, in table order; anything but an object is
   `BASE/0`), `ObjSend( x, cMessage, ... )` (`x:cMessage( ... )` from outside the class; `_NAME` assigns). The
   runtime's own classes answer with their variables and no methods.
-- Not yet: destructors, scalar classes, operator overloading, and the compiled fast paths (see
+- Operators (`OPERATOR "op"`, `METHOD name OPERATOR "op"`): a method whose message is the operator
+  (`XB_OPERATOR_*` in `xbrt.h`: `+ - * / % ^ = == != < <= > >= $ ! ++ -- []`; the compiler maps `**`, `<>`, `#`
+  and `.NOT.` to them). The runtime's operator functions ask the class of the left (or only) operand when it is an
+  object, before anything else (`xb_class_operator`; `==` too, even for the same object): the method receives the
+  right operand; `[]` receives the index, and the value when it assigns (`o[i] += x` reads, then assigns). Compiled
+  fast paths never see objects, so they are unchanged. As in the reference, the right operand's class is not asked,
+  and `.AND.`, `.OR.` and unary minus cannot be overloaded (the compiler rejects `.AND.` and `.OR.`, which the
+  reference accepts and never calls).
+- Scalar classes: `ASSOCIATE CLASS name WITH TYPE type` (`std.ch`, `ClassAssociate( name(), "type" )`; a type as
+  `ClassName()` names it: `ARRAY`, `BLOCK`, `CHARACTER`, `DATE`, `HASH`, `LOGICAL`, `NIL`, `NUMERIC`) makes values of
+  the type answer the class's methods and class variables, the value as `Self`; `ClassName()` is the class's, and its
+  errors name it. A class with instance variables is `BASE/3005`. Messages it does not answer are the class's
+  `Message not found`; values of other types behave as before.
+- Not yet: destructors, and the compiled fast paths (see
   [xir.md](xir.md#classes)).
 
 ## References

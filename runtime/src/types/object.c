@@ -103,16 +103,18 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
         return;
       }
   }
-  xb_object_message(ctx, r, message, argc, argv);
+  if (!xb_class_scalar_send(ctx, r, message, NULL, 0, argc, argv)) xb_object_message(ctx, r, message, argc, argv);
 }
+
+const char *xb_type_class_name(xb_type type) { return type < XB_T_COUNT_ ? type_class_names[type] : NULL; }
 
 void xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
   int assign = message[0] == '_';
   const char *name = message + assign;
   if (!assign && strcmp(message, "CLASSNAME") == 0) {
     const char *cn = argv[0].type == XB_T_OBJECT ? ((const xb_object *)argv[0].v.p)->cls->name
-                     : argv[0].type < XB_T_COUNT_ && type_class_names[argv[0].type] ? type_class_names[argv[0].type]
-                                                                                    : "NIL";
+                                                 : xb_type_class_name((xb_type)argv[0].type);
+    if (!cn) cn = "NIL";
     xb_set_str(r, xb_str_new(cn, strlen(cn)));
     return;
   }

@@ -115,14 +115,30 @@ void       xb_set_object(xb_item *it, xb_object *o);
  * answer is the class's error ("Message not found"). Returns 1. */
 int        xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                          uint32_t argc, xb_item *argv);
+/* A message to a value of a type a compiled class is associated with
+ * (ClassAssociate): 0 when there is none. xb_class_associate associates the
+ * class of `o` with the type named `type` (as ClassName() names it): 1, 0 for
+ * an unknown type, -1 when the class has instance variables. */
+int        xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
+                                uint32_t argc, xb_item *argv);
+int        xb_class_associate(const xb_object *o, const char *type);
+/* The name ClassName() gives values of a type that is not an object's
+ * ("NUMERIC", "CHARACTER" ...), NULL for internal types. */
+const char *xb_type_class_name(xb_type type);
 /* What every value answers (ClassName), else the error of a message no
  * class has: BASE/1004, or BASE/1005 for an assignment. */
 void       xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
+/* An operator the class of `a` overloads (`op`, an XB_OPERATOR_* message),
+ * sent to `a` with `b` and `c` (NULL when absent): 0, and nothing done, when
+ * `a` is not an object of a compiled class with that operator. */
+int      xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a, const xb_item *b,
+                           const xb_item *c);
 /* Reflection on an object of a compiled class: whether its class, or one it
  * inherits from, is `name` (upper-cased); whether it answers `message` with a
  * method (`method`) or a variable, in any scope; the messages of its EXPORTED
- * variables (or methods; not the assigning "_NAME" ones), in the order of its
- * table, stored in `out` when it is not NULL, their count returned. */
+ * variables (or methods; not the assigning "_NAME" ones, nor operators), in
+ * the order of its table, stored in `out` when it is not NULL, their count
+ * returned. */
 int      xb_class_kind_of(const xb_object *o, const char *name);
 int      xb_class_has(const xb_object *o, const char *message, int method);
 uint32_t xb_class_names(const xb_object *o, int methods, const char **out);

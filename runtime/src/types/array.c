@@ -86,6 +86,7 @@ static xb_item *hash_value(xb_ctx *ctx, xb_item *r, const xb_item *base, const x
  * index within it (compiler/src/codegen/FastPaths.cpp, inlineElement) and calls
  * these for every other case. */
 void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
+  if (base->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_INDEX, base, idx, NULL)) return;
   if (base->type == XB_T_HASH) {
     const xb_item *v = hash_value(ctx, r, base, idx);
     if (v) *r = *v;
@@ -113,6 +114,8 @@ void xb_array_bound_error(xb_ctx *ctx, const xb_item *base, const xb_item *idx) 
 }
 
 void xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value) {
+  xb_item ignored;
+  if (base->type == XB_T_OBJECT && xb_class_operator(ctx, &ignored, XB_OPERATOR_INDEX, base, idx, value)) return;
   if (base->type == XB_T_HASH && xb_hash_key_ok(idx)) {
     xb_hash_set(base->v.p, idx, value);
     return;

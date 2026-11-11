@@ -384,50 +384,45 @@ static int cast(xb_item *r, const cls *c, const xb_item *self, const char *messa
   return 1;
 }
 
-int xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super, uint32_t argc,
-                  xb_item *argv) {
-  xb_object *o = argv[0].v.p;
-  cls *c = o->cls->compiled;
+/* The message to argv[0], an object of class `c` or a value of a type `c` is
+ * associated with (see the top of the file). */
+static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_class_def *from, uint32_t super,
+                     uint32_t argc, xb_item *argv) {
+  int object = argv[0].type == XB_T_OBJECT; /* else a value of a scalar class, which has no variables */
   cls *f = from ? runtime_of(from) : NULL;
-  uint32_t view = argv[0].width < c->nline ? argv[0].width : 0; /* a cast: the class of the line it sees */
-  argv[0].width = 0; /* a method's Self is the object itself */
+  uint32_t view = object && argv[0].width < c->nline ? argv[0].width : 0; /* a cast: the class of the line it sees */
+  if (object) argv[0].width = 0; /* a method's Self is the object itself */
   int related = f && kind_of(c, from); /* Self is of the method's class (it may have been assigned another object) */
   if (super && !related) {
     not_found(ctx, r, c, message, &argv[0]);
-    return 1;
+    return;
   }
   member *m = view       ? lookup(runtime_of(c->line[view]), message)
               : super    ? lookup_super(f, message)
               : related  ? lookup_from(c, f, message)
                          : lookup(c, message);
   if (!m) {
-    if (cast(r, c, &argv[0], message)) return 1;
-    if (view && strcmp(message, "CLASSNAME") == 0) { /* a cast's is the class it sees */
-      const char *name = c->line[view]->name;
+    if (object && cast(r, c, &argv[0], message)) return;
+    if (strcmp(message, "CLASSNAME") == 0) { /* a cast's is the class it sees; Super:ClassName() the parent's */
+      const char *name = view ? c->line[view]->name : super && f->nline > 1 ? f->line[1]->name : c->def->name;
       xb_set_str(r, xb_str_new(name, strlen(name)));
-      return 1;
+      return;
     }
     if (strcmp(message, "NEW") == 0) { /* New: Init with the arguments, as the class's own method sends it */
       xb_item self = argv[0];
       xb_gc_root_push(ctx, &self);
-      if (super) xb_class_send(ctx, r, "INIT", from, 1, argc, argv);
-      else xb_class_send(ctx, r, "INIT", c->def, 0, argc, argv);
+      if (super) dispatch(ctx, r, c, "INIT", from, 1, argc, argv);
+      else dispatch(ctx, r, c, "INIT", c->def, 0, argc, argv);
       xb_gc_root_pop(ctx, 1);
       if (!(ctx->pending & XB_PENDING_UNWIND)) *r = self;
-      return 1;
+      return;
     }
     if (strcmp(message, "INIT") == 0) {
       *r = argv[0];
-      return 1;
+      return;
     }
-    if (super && f->nline > 1 && strcmp(message, "CLASSNAME") == 0) { /* Super:ClassName() is the parent's */
-      const char *name = f->line[1]->name;
-      xb_set_str(r, xb_str_new(name, strlen(name)));
-      return 1;
-    }
-    if (strcmp(message, "CLASSNAME") == 0) xb_object_message(ctx, r, message, argc, argv);
-    else not_found(ctx, r, c, message, &argv[0]);
-    return 1;
+    not_found(ctx, r, c, message, &argv[0]);
+    return;
   }
   uint32_t scope = m->flags & XB_SCOPE_MASK;
   int inside = f && kind_of(f, m->owner); /* a method of the member's class or of a subclass */
@@ -436,11 +431,11 @@ int xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *fr
        (assigns && (m->flags & XB_MEMBER_READONLY) && !inside)) &&
       !friend_of(ctx, m->owner, from)) {
     violation(ctx, r, c, message, scope == XB_SCOPE_HIDDEN);
-    return 1;
+    return;
   }
   if (m->kind == M_METHOD) {
     m->fn(ctx, r, argc, argv);
-    return 1;
+    return;
   }
   if (m->kind == M_CLASS_GET || m->kind == M_CLASS_SET) {
     const cls *holder = view ? runtime_of(c->line[view]) : c; /* a cast reads the class it sees */
@@ -451,8 +446,9 @@ int xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *fr
       *v = argc > 1 ? argv[1] : nil; /* a root: no barrier */
     }
     *r = *v;
-    return 1;
+    return;
   }
+  xb_object *o = argv[0].v.p;
   uint32_t slot = c->area[position(c, m->owner)] + m->index;
   if (m->kind == M_GET) {
     *r = o->vars[slot]; /* arguments are ignored */
@@ -463,14 +459,45 @@ int xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *fr
     xb_gc_write(o);
     *r = o->vars[slot];
   }
+}
+
+int xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super, uint32_t argc,
+                  xb_item *argv) {
+  const xb_object *o = argv[0].v.p;
+  dispatch(ctx, r, o->cls->compiled, message, from, super, argc, argv);
   return 1;
+}
+
+/* The classes associated with the types of values (ClassAssociate). */
+static cls *scalars[XB_T_COUNT_];
+
+int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
+                         uint32_t argc, xb_item *argv) {
+  cls *c = argv[0].type < XB_T_COUNT_ ? scalars[argv[0].type] : NULL;
+  if (!c) return 0;
+  dispatch(ctx, r, c, message, from, super, argc, argv);
+  return 1;
+}
+
+int xb_class_associate(const xb_object *o, const char *type) {
+  cls *c = o->cls->compiled;
+  if (c->base.nvars) return -1;
+  int found = 0;
+  for (uint32_t t = 0; t < XB_T_COUNT_; ++t) {
+    const char *name = xb_type_class_name((xb_type)t);
+    if (name && strcmp(name, type) == 0) {
+      scalars[t] = c;
+      found = 1;
+    }
+  }
+  return found;
 }
 
 void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super, uint32_t argc,
                      xb_item *argv) {
   if (argv[0].type == XB_T_OBJECT && ((const xb_object *)argv[0].v.p)->cls->compiled)
     xb_class_send(ctx, r, message, from, super, argc, argv);
-  else
+  else if (!xb_class_scalar_send(ctx, r, message, from, super, argc, argv))
     xb_op_send(ctx, r, message, argc, argv);
 }
 
@@ -494,10 +521,28 @@ uint32_t xb_class_names(const xb_object *o, int methods, const char **out) {
   uint32_t n = 0;
   for (uint32_t id = 0; id < c->nmembers; ++id) {
     const member *m = &c->members[id];
-    if ((m->flags & XB_SCOPE_MASK) != XB_SCOPE_EXPORTED || m->message[0] == '_') continue;
+    int named = m->message[0] >= 'A' && m->message[0] <= 'Z'; /* not "_NAME", nor an operator's */
+    if ((m->flags & XB_SCOPE_MASK) != XB_SCOPE_EXPORTED || !named) continue;
     if (methods ? m->kind != M_METHOD : m->kind != M_GET && m->kind != M_CLASS_GET) continue;
     if (out) out[n] = m->message;
     ++n;
   }
   return n;
+}
+
+int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a, const xb_item *b,
+                      const xb_item *c) {
+  const xb_object *o = a->v.p;
+  cls *k = o->cls->compiled;
+  if (!k) return 0;
+  const member *m = lookup(k, op);
+  if (!m || m->kind != M_METHOD) return 0;
+  xb_item argv[3] = {*a};
+  uint32_t argc = 1;
+  if (b) argv[argc++] = *b;
+  if (c) argv[argc++] = *c;
+  for (uint32_t i = 0; i < argc; ++i) xb_gc_root_push(ctx, &argv[i]);
+  xb_class_send(ctx, r, op, NULL, 0, argc, argv);
+  xb_gc_root_pop(ctx, argc);
+  return 1;
 }

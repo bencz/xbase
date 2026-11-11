@@ -1,0 +1,18 @@
+
+arith:          3          0          3          0.50          1.00          1.00          1.00
+compare: eqeq eq ne ne ne lt le gt ge in eqeq
+not: not not
+inc:         11          1          1
+dec:        -89
+index:        500 [5,NIL]
+assign: [5,NIL][2,7][3,NIL][3,301]
+named: TV 11 NEW,WHO
+scalar: ABC! TSTR          6          5.0          5          3 ARRAY C ABC!?
+associate: .F. .T.
+error:       1081 Argument error +
+error:       1080 Argument error -
+error:       1004 Message not found TSTR:NOPE
+error:       1004 Message not found TNUM:NOPE
+error:         41 Scope violation (hidden) TSTR:HIDDEN
+error:       3005 Scalar class cannot have instance variables CLASSASSOCIATE
+error:          0 Argument error CLASSASSOCIATE
