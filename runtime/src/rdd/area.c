@@ -7,11 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The names of the drivers: DBFNTX is the DBF driver until it has indexes. */
+/* The names of the drivers: DBF is DBFNTX, as in Clipper. */
 static const struct {
   const char *alias;
   const xb_rdd *rdd;
-} driver_names[] = {{"DBF", &xb_rdd_dbf}, {"DBFNTX", &xb_rdd_dbf}};
+} driver_names[] = {{"DBF", &xb_rdd_dbf}, {"DBFNTX", &xb_rdd_dbf}, {"DBFCDX", &xb_rdd_dbfcdx}};
 
 static int same_upper(const char *a, size_t len, const char *upper) {
   for (size_t i = 0; i < len; ++i)

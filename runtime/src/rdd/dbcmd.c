@@ -287,7 +287,7 @@ void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     fi->dec = ok ? (uint32_t)dec : 0;
     for (size_t j = 0; ok && j < k; ++j) ok = strcmp(fields[j].name, fi->name) != 0; /* names are unique */
   }
-  if (!ok || !rdd->check(fields, (uint32_t)n)) {
+  if (!ok || !rdd->check(rdd, fields, (uint32_t)n)) {
     free(fields);
     xb_error_of(ctx, XB_DBCMD, EG_ARG, 1014, "DBCREATE", NULL, 0, 0, argc, argv, 0, NULL);
     return;
@@ -295,7 +295,7 @@ void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   char *path = xb_file_path_with_ext(name->data, name->len, ".dbf");
   for (uint16_t tries = 1;; ++tries) {
     int32_t err = 0;
-    if (rdd->create(path, fields, (uint32_t)n, &err)) break;
+    if (rdd->create(rdd, path, fields, (uint32_t)n, &err)) break;
     if (xb_error_of(ctx, rdd->name, EG_CREATE, 1004, "", path, err, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries,
                     NULL) != 2) {
       free(path);
@@ -652,3 +652,14 @@ void xbf_RDDNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_area *a = xb_db_used(ctx, "RDDNAME");
   if (a) xb_set_str(ret, xb_str_new(a->rdd->name, strlen(a->rdd->name)));
 }
+
+/* DBFNTX(), DBFCDX(): the drivers' names as functions, which REQUEST links in as Clipper's programs do; they do
+ * nothing (every driver is always there). */
+void xbf_DBFNTX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(ret);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+}
+
+void xbf_DBFCDX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf_DBFNTX(ctx, ret, argc, argv); }

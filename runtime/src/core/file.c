@@ -63,3 +63,17 @@ char *xb_file_path_with_ext(const char *name, size_t len, const char *ext) {
   xb_file_name_parts(name, len, &start, &stem);
   return joined(name, len, ext, stem < len ? 0 : strlen(ext));
 }
+
+int xb_file_copy_within(xb_file f, int64_t from, int64_t to, int64_t len, int32_t *err) {
+  enum { CHUNK = 65536 };
+  unsigned char *buf = malloc(CHUNK);
+  if (!buf) xb_gc_fatal("out of memory");
+  int ok = 1;
+  for (int64_t done = 0; ok && done < len;) {
+    size_t n = (size_t)(len - done < CHUNK ? len - done : CHUNK);
+    ok = xb_file_read_at(f, from + done, buf, n, err) && xb_platform_file_write_at(f, to + done, buf, n, err);
+    done += (int64_t)n;
+  }
+  free(buf);
+  return ok;
+}

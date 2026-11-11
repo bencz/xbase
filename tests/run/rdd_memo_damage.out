@@ -9,3 +9,6 @@ ERR DBFNTX         32       1012 Corruption detected [rdd_memo_damage.dbf]      
 dbase iv: .F.
 upper case: .T.
 kept: M M C C C
+ERR DBFCDX         23       1010 Read error []         31
+written anew: again       1216
+the other: second

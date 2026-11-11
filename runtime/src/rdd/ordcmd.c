@@ -68,6 +68,14 @@ static int close_order(xb_ctx *ctx, xb_area *a, uint32_t n) {
   return xb_order_close(ctx, a, o);
 }
 
+/* Whether the area's driver has the orders made here (NTX; CDX comes with its own code): "Operation not supported"
+ * otherwise. */
+static int orders_known(xb_ctx *ctx, const xb_area *a, const char *fn) {
+  if (strcmp(a->rdd->indexExt, XB_NTX_EXT) == 0) return 1;
+  xb_error_of(ctx, a->rdd->name, EG_UNSUPPORTED, 1000, fn, NULL, 0, 0, 0, NULL, 0, NULL);
+  return 0;
+}
+
 /* Whether the area's orders may change now: not while one of its key or condition blocks runs ("Operation not
  * supported" for the function `fn` then). */
 static int orders_free(xb_ctx *ctx, xb_area *a, const char *fn) {
@@ -109,7 +117,7 @@ void xbf_ORDCONDSET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const xb_str *keyText, const xb_item *keyBlock,
                          const xb_item *unique) {
   xb_area *a = xb_db_used(ctx, fn);
-  if (!a || !orders_free(ctx, a, fn)) return;
+  if (!a || !orders_known(ctx, a, fn) || !orders_free(ctx, a, fn)) return;
   if (!bag || !bag->len || !keyText || !keyText->len) {
     xb_error_of(ctx, XB_DBCMD, EG_ARG, 1006, fn, NULL, 0, 0, 0, NULL, 0, NULL);
     return;
@@ -162,7 +170,7 @@ void xbf_DBCREATEINDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) 
 static void add_bag(xb_ctx *ctx, const char *fn, uint32_t argc, xb_item *argv) {
   xb_area *a = xb_db_used(ctx, fn);
   const xb_str *bag = xb_db_str_arg(argc, argv, 0);
-  if (!a || !bag || !bag->len || !orders_free(ctx, a, fn)) return;
+  if (!a || !bag || !bag->len || !orders_known(ctx, a, fn) || !orders_free(ctx, a, fn)) return;
   char *path = bag_path(bag);
   xb_area_pin(a);
   if (!bag_open(a, path) && xb_area_cold(ctx, a) && !a->closed) {
@@ -342,20 +350,16 @@ void xbf_ORDDESCEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, o && o->info.descend);
 }
 
-/* ordBagExt(), IndexExt(): the extension of the default driver's order files. */
+/* ordBagExt(), IndexExt(): the extension of the order files of the current area's driver (none open: the default
+ * driver's). */
 void xbf_ORDBAGEXT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  set_text(ret, XB_NTX_EXT);
+  const xb_area *a = xb_area_current(ctx);
+  set_text(ret, (a ? a->rdd : xb_rdd_default(ctx))->indexExt);
 }
 
-void xbf_INDEXEXT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
-  XB_UNUSED(argc);
-  XB_UNUSED(argv);
-  set_text(ret, XB_NTX_EXT);
-}
+void xbf_INDEXEXT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf_ORDBAGEXT(ctx, ret, argc, argv); }
 
 /* ordScope( nScope, [xValue] ): the controlling order's scope bound before (0 top, 1 bottom; NIL for none);
  * xValue sets it (a codeblock: evaluated again before each navigation), NIL clears it. nScope 2 sets both bounds

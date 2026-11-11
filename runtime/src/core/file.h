@@ -13,6 +13,10 @@ int64_t xb_file_read_up_to(xb_file f, void *buf, size_t n, int32_t *err);
 /* Reads `n` bytes at `pos`: whether all of them were there (a file that ends early is XB_FERR_FAILURE). */
 int xb_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err);
 
+/* Copies `len` bytes at `from` to `to` in the same file, front first: right when `to` is not after `from` or the two
+ * ranges do not overlap. */
+int xb_file_copy_within(xb_file f, int64_t from, int64_t to, int64_t len, int32_t *err);
+
 /* Where the last component of `len` bytes of `name` starts (`*start`) and where its extension, the part from its last
  * '.', starts (`*ext`; `len` when it has none). */
 void xb_file_name_parts(const char *name, size_t len, size_t *start, size_t *ext);

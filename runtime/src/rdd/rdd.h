@@ -21,10 +21,12 @@ typedef struct xb_field_info {
 typedef struct xb_area xb_area;
 typedef struct xb_order xb_order;
 
-/* The file protocol of shared tables, memos and indexes (docs/rdd.md): record n's lock is the byte XB_DB_LOCK + n,
+/* Clipper's file protocol of shared tables and NTX indexes (docs/rdd.md): record n's lock is the byte XB_DB_LOCK + n,
  * the file lock the XB_DB_LOCK bytes after XB_DB_LOCK, and XB_DB_LOCK itself a table's append lock and an index's
- * read and write lock. */
+ * read and write lock. FoxPro's (DBFCDX) places a table's locks from XB_FOX_LOCK by the records' offsets. */
 #define XB_DB_LOCK 1000000000u
+#define XB_FOX_LOCK 0x40000000u
+enum { XB_LOCKS_CLIPPER, XB_LOCKS_FOXPRO };
 
 /* ordCondSet()'s settings for the next order made in an area: the condition (block and text), WHILE, the EVAL block
  * and its interval (roots), the record to start at, NEXT, RECORD (0: none), REST, DESCENDING, ADDITIVE and
@@ -52,11 +54,15 @@ typedef struct xb_open_failure {
 /* A driver. The operations work on the raw table; those that fail give the FError() code of the failure. */
 typedef struct xb_rdd {
   const char *name;
+  const struct xb_memo_format *memo; /* the memos of the tables it creates (rdd/memo.h) */
+  const char *indexExt;              /* its order files' extension */
+  int lockScheme;                    /* XB_LOCKS_CLIPPER, XB_LOCKS_FOXPRO */
   /* Whether the driver can make a table of these fields (types, lengths, decimals, sizes), completing them as it
    * stores them (the length of a date, ...); the caller has checked the names. */
-  int (*check)(xb_field_info *fields, uint32_t count);
+  int (*check)(const struct xb_rdd *rdd, xb_field_info *fields, uint32_t count);
   /* Creates the table (`count` fields, checked), overwriting a file of the name. */
-  int (*create)(const char *path, const xb_field_info *fields, uint32_t count, int32_t *err);
+  int (*create)(const struct xb_rdd *rdd, const char *path, const xb_field_info *fields, uint32_t count,
+                int32_t *err);
   /* Opens the table into `a` (its state, fields and field count), `exclusive` or shared with other users (a sharing
    * they do not allow: 32), with its memo file. */
   int (*open)(xb_area *a, const char *path, int readonly, int exclusive, xb_open_failure *why);
@@ -234,6 +240,7 @@ void xb_order_conditions_clear(xb_order_conditions *c);
 void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *));
 
 /* The DBF driver (rdd/dbf.c), and the names it serves. */
-extern const xb_rdd xb_rdd_dbf;
+extern const xb_rdd xb_rdd_dbf;    /* DBFNTX: DBT memos, NTX orders */
+extern const xb_rdd xb_rdd_dbfcdx; /* DBFCDX: FPT memos, CDX orders */
 
 #endif

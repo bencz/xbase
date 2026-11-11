@@ -203,6 +203,8 @@ EXTERN FUNCTION dbCreate( cFile, aStruct, [cDriver], [lNewArea], [cAlias] ) NATI
 EXTERN FUNCTION dbCreateIndex( cFile, cKey, [bKey], [lUnique] ) NATIVE
 EXTERN FUNCTION dbDelete() NATIVE
 EXTERN FUNCTION dbEval( bBlock, [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
+EXTERN FUNCTION DBFCDX() NATIVE
+EXTERN FUNCTION DBFNTX() NATIVE
 EXTERN FUNCTION dbFilter() NATIVE
 EXTERN FUNCTION dbGoBottom() NATIVE
 EXTERN FUNCTION dbGoTo( nRecord ) NATIVE

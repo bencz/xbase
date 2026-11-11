@@ -1,9 +1,9 @@
 # Databases
 
 The work areas and the database drivers (RDDs, Clipper's replaceable database drivers): tables, memos, indexes, locking,
-and the commands and functions over them. The first three steps are done: work areas, the driver interface, `DBF` tables
-with `DBT` memos and `NTX` orders (indexes), the compiler's field references and the commands over them. The rest of
-this document marked *(planned)* is the plan the work follows.
+and the commands and functions over them. Done: work areas, the driver interface, `DBF` tables with `DBT` and `FPT`
+memos and `NTX` orders (indexes), sharing and locks, the compiler's field references and the commands over them. The
+rest of this document marked *(planned)* is the plan the work follows.
 
 Goals: Clipper's behavior, and files that Clipper programs and the reference read and write at the same time as xbase
 programs (the same bytes on disk, the same locks), on every platform and byte order; drivers that can be added without
@@ -201,12 +201,20 @@ names), create, open, close, the record count, go to a record (the blank one aft
 record's bytes are read when first used: `load`, which `get` and `put` do themselves), flush (the record, and on
 `COMMIT` the header), append, read and write a field, a field's bytes, the deletion flag, pack, zap, and the header's
 sizes and date. Operations that fail give the
-`FError()` code of the failure; the work area raises the error. The names `DBF` and `DBFNTX` (the default, as in
-Clipper; `RddSetDefault()` and `USE ... VIA` choose) both give the `DBF` driver with `DBT` memos and `NTX` orders,
-named `DBFNTX`.
+`FError()` code of the failure; the work area raises the error. `RddSetDefault()` and `USE ... VIA` choose the driver:
 
-*(Planned)*: the order operations in the driver when a second index format comes; drivers that inherit
-what they do not change from the driver they extend; `DBFCDX` (`DBF`, `FPT` memos and `CDX` compound indexes), `SDF` and
+- `DBFNTX` (the default, as in Clipper; `DBF` is the same): new tables get `DBT` memos, orders are `NTX`, shared tables
+  are locked by Clipper's scheme.
+- `DBFCDX`: the same `DBF` code (`xb_rdd_dbfcdx`); new tables get `FPT` memos, shared tables are locked by FoxPro's
+  scheme. Its orders are `CDX` files *(planned: until they come, making or opening an order in a `DBFCDX` area is
+  `DBFCDX/1000` `Operation not supported`)*.
+
+A driver tells its memo format (`memo`, rdd/memo.h), its order files' extension (`indexExt`, `ordBagExt()`) and its
+lock scheme (`lockScheme`). A table's memo format comes from its version byte, whatever driver opens it (`0x83` DBT,
+`0xF5` FPT; a table of plain fields, `0x03`, its driver's), so either driver reads and writes the other's tables.
+`DBFNTX()` and `DBFCDX()` are functions only so that `REQUEST DBFCDX` links as in Clipper programs.
+
+*(Planned)*: the order operations in the driver when a second index format comes; `SDF` and
 `DELIM` (text files, for `COPY TO` and `APPEND FROM`); `SET DB ENGINE TO <name>` (xbase's own command, over
 `RddSetDefault()`); later, as libraries in `libs/`, SQL engines (SQLite, PostgreSQL), among them an SQLite driver that
 behaves as `DBF` does (the row id as `RecNo()`, navigation in the order of an index, `Deleted()` a column). The
@@ -242,9 +250,28 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
   records renumbered, the older memos cut. ZAP leaves the header only, its first free block 1. The memo file is the
   table's name with `.dbt` (also beside `DATA.DBF`, as the reference names it); opening finds `DATA.DBT` too when
   there is no `DATA.dbt`, as tables copied from systems that write names in upper case have it. A table with memo
-  fields and another version byte (dBASE IV, FoxPro: memos of another format) is `DBFNTX/1012` `Corruption
-  detected`.
-- **FPT** (FoxPro memos): the block size in the header, each block with its type and length; big-endian.
+  fields and a version byte of another memo format (dBASE IV, ...) is `DBFNTX/1012` `Corruption detected`.
+- **FPT** (`fpt.c`, FoxPro memos as the reference writes them, with the free list of Clipper's FlexFile): a 1024-byte
+  header (the first free block and the block size, 64 for new files, big-endian; the FlexFile mark at `0x200`, then,
+  little-endian, the byte offsets of the free list's two pages and a counter of changes). A memo starts a block: its
+  type (1: text; others, such as arrays, read as `NIL`) and length, big-endian, then its bytes, and `0xAF` in the last
+  byte of its last block unless it fills it. Each write is one operation: the old memo's blocks are freed (back to the
+  end of the file, or into the free list joined with their neighbours), the new memo takes the smallest free area it
+  fits, or the end; then the free list's pages (1018 bytes each, made when the list first has an area, dropped when
+  it empties at the end of the file; at most 126 areas, the smallest dropped past that), the changed free areas'
+  headers (type 1001) and the header are written, and the file is cut when it ends sooner. A memo field is 10
+  characters (the block number in digits) or, when asked for exactly 4, the number in 4 bytes (little-endian; a blank
+  record holds zeros there). PACK copies the memos kept, each at the next block, without `0xAF`, and gives the file a
+  fresh header; ZAP leaves a fresh header. Bytes 8-15 hold a writer's signature, which the reference fills with its
+  name; xbase leaves them zero. A file without the FlexFile mark (FoxPro's, its header 512 bytes) keeps no list: what
+  a write frees serves that write only; PACK and ZAP keep it so. PACK goes in the steps of DBT's, its first free block
+  on disk past every copy at each step, so that a failure leaves the copies where no new memo goes. Where xbase does
+  better than the reference: a memo whose length goes past the file is a Read error (the reference raises Corruption
+  detected, or runs out of memory for a large length); a record's memo block that is not a memo of the file (in the
+  header, past its end, a free area, a length past the end) is not freed when the field is written again, where the
+  reference frees it, so that a damaged record never hands live blocks to a new memo; areas of the free list that are
+  not areas of the file are left out of it; a FlexFile file does not grow past 4 GB, which its list's 32-bit offsets
+  reach. The memo interface (`memo.h`: create, open, read, write, zap, PACK's steps) is the same for DBT and FPT.
 - **NTX** (`ntx.c`): 1024-byte pages. Page 0 is the header: a signature (6, 7 with a condition), a counter of
   changes, the root's and the first free page's offsets, an entry's size (the key's and 8), the key's length and
   decimals, the entries a page holds (`floor(1022 / (entry + 2)) - 1`, made even) and half of that, the key's text,
@@ -320,7 +347,11 @@ Offsets are bytes of the file; POSIX takes them with `fcntl` locks, Windows with
 - Append (`APPEND BLANK`): a write lock on byte 1,000,000,000 (waiting) while the record count grows and the header
   is written; the new record is locked.
 - Memo block added (DBT): a write lock on byte 0 of the memo file (waiting) while the block and the next free block
-  are written.
+  are written. FPT: the same lock around every memo write, the header and the free list read again under it; a read
+  lock on it while the header is read at opening.
+- `DBFCDX` locks a table by FoxPro's scheme instead: record r's lock at byte `0x40000000 + (r-1) * record length +
+  header length`, the file lock on `0x40000001` to `0x7FFFFFFD`, the append lock on `0x40000000` *(planned with
+  `CDX`: other bytes while the table's structural index is open)*.
 - Index read (NTX): a read lock on byte 1,000,000,000 of the index (waiting); the header is read, and a counter
   (bytes 2-3) other than the last one seen means pages kept from before are stale.
 - Index change (NTX): a write lock on the same byte (waiting); the pages are written, then the header with the counter
@@ -444,6 +475,7 @@ query (as data a driver can translate), falling back to the record-by-record way
 4. Done: sharing and locks: the shared-file registry, the lock manager, the file protocol (tables, memos, NTX), `SET
    EXCLUSIVE`, `RLock()`, `FLock()`, `dbRLock()`, `dbRUnlock()`, `dbRLockList()`, `UNLOCK`, `NetErr()`. With tasks and
    threads: waiting inside the process, shared page caches, handing areas between tasks.
-5. `FPT` memos and `CDX` indexes (`DBFCDX`).
+5. `DBFCDX`: done: the driver, `FPT` memos, FoxPro's lock scheme; next: `CDX` indexes (the order operations as an
+   interface of the driver, with `NTX` and `CDX` behind it).
 6. Relations, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `SORT`, `TOTAL`, `UPDATE`, `JOIN`.
 7. `SET DB ENGINE`; then SQL engines as libraries, and queries.

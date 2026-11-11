@@ -19,6 +19,13 @@ static inline uint32_t xb_get_le32(const unsigned char *p) {
   return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
+static inline void xb_put_be32(unsigned char *p, uint32_t v) {
+  for (int i = 0; i < 4; ++i) p[i] = (unsigned char)(v >> 8 * (3 - i));
+}
+static inline uint32_t xb_get_be32(const unsigned char *p) {
+  return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | (uint32_t)p[3];
+}
+
 static inline void xb_put_le64(unsigned char *p, uint64_t v) {
   for (int i = 0; i < 8; ++i) p[i] = (unsigned char)(v >> 8 * i);
 }

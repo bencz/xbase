@@ -1,0 +1,30 @@
+
+struct:         10          4
+rdd: DBFCDX        130         18
+five       1600  898370880.00  10A 100B 56C 200D 30E
+grow at end       1728  233869368.00  10A 100B 56C 200D 150F
+shrink at end       1600  553039469.00  10A 100B 56C 200D 5G
+rewrite middle       3962  145460072.00  10A 300H 56C 200D 5G
+empty 1       3962  568969033.00  0 300H 56C 200D 5G
+reuse       3962  195306355.00  0 300H 20I 200D 5G
+width 4       3962   56544166.00  0 300H 20I 200D 5G
+best fit       3962  854351313.00  40J 300H 20I 200D 5G
+all empty       3962  220642181.00  0 0 0 0 0
+again       3962  197016981.00  37A 74B 111C 148D 185E
+exact fit marks       3962  950554115.00  37A 0 111C 10z 10y
+pack       1234   97461795.00  37A 111C 10y
+many free      22522  303079542.00  37A 111C 10y 0 20p
+zap       1024  966041778.00 
+shared:         10 u          2
+after shared       3258  372281721.00  10u 30t
+fpt by DBFNTX: DBFNTX         10 u
+written by DBFNTX       3258   39051804.00  7v 30t
+dbt by DBFCDX: DBFCDX dbt memo .T. .F.
+bigger       1872  559026624.00  30A 200x 90C 120D 150E
+emptied       1872  559026624.00  30A 200x 90C 0 150E
+rewrite       1872  877267191.00  30A 200x 20y 0 150E
+append       1978  947715520.00  30A 200x 20y 0 150E 50z
+pack       1146  110664506.00  30A 200x 20y 0 150E 50z
+after pack       1146   70754456.00  30A 10w 20y 0 150E 50z
+zap        512  365182575.00 
+after zap        529    2389443.00  9a

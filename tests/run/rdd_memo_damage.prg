@@ -1,11 +1,11 @@
-// Memo files another program left in a state xbase does not write: a header whose first free block is below the end
-// of the file (a new memo goes after the last one, never over it; the reference loses it), a record whose memo block
-// is past the end (an empty memo; PACK makes it none), memos out of record order and two records on one memo (PACK
-// gives each its own copy); a .dbt shorter than its header is an Open error (the reference opens it), a dBASE IV
-// table (version 0x8B) with memos Corruption detected. The memo file is made ".dbt" also beside a table named in upper
-// case, and found as ".DBT" there when there is no ".dbt". Functions that give back their argument unchanged keep a
-// memo's "M" (AllTrim, PadR to its length), HardCR() makes a plain string. The files start with "rdd_memo_damage"
-// (upper case for one), deleted at the end.
+// Memo files another program left in a state xbase does not write: a header whose first free block is below the end of
+// the file (a new memo goes after the last one, never over it; the reference loses it), a record whose memo block is
+// past the end (an empty memo; PACK makes it none), memos out of record order and two records on one memo (PACK gives
+// each its own copy); a .dbt shorter than its header is an Open error (the reference opens it), a dBASE IV table
+// (version 0x8B) with memos Corruption detected. The memo file is made ".dbt" also beside a table named in upper case,
+// and found as ".DBT" there when there is no ".dbt". An FPT memo whose length goes past the file is a Read error.
+// Functions that give back their argument unchanged keep a memo's "M" (AllTrim, PadR to its length), HardCR() makes a
+// plain string. The files start with "rdd_memo_damage" (upper case for one), deleted at the end.
 FIELD NAME, NOTE
 
 PROCEDURE Main()
@@ -62,6 +62,31 @@ PROCEDURE Main()
    FErase( "RDD_MEMO_DAMAGE_UP.dbt" )
    FErase( "rdd_memo_damage.dbf" )
    FErase( "rdd_memo_damage.dbt" )
+   Fpt()
+RETURN
+
+// An FPT memo whose length goes past the file is a Read error, not a value of that length; writing the field anew
+// leaves the damaged blocks alone (they are not freed into the free list).
+STATIC PROCEDURE Fpt()
+   dbCreate( "rdd_memo_damage_f", { { "NOTE", "M", 10, 0 } }, "DBFCDX" )
+   USE rdd_memo_damage_f VIA "DBFCDX" NEW
+   APPEND BLANK
+   REPLACE NOTE WITH "first"
+   APPEND BLANK
+   REPLACE NOTE WITH "second"
+   CLOSE
+   PutBytes( "rdd_memo_damage_f.fpt", 1024 + 4, Chr( 255 ) + Chr( 255 ) + Chr( 255 ) + Chr( 240 ) )
+   USE rdd_memo_damage_f VIA "DBFCDX" NEW
+   BEGIN SEQUENCE
+      ? "damaged length:", Len( NOTE )
+   END SEQUENCE
+   REPLACE NOTE WITH "again"
+   ? "written anew:", NOTE, FileSize( "rdd_memo_damage_f.fpt" )
+   GO 2
+   ? "the other:", NOTE
+   CLOSE
+   FErase( "rdd_memo_damage_f.dbf" )
+   FErase( "rdd_memo_damage_f.fpt" )
 RETURN
 
 // Three records: "a" with "alpha" (block 1), "b" with "beta", "c" with "gamma".
@@ -114,3 +139,8 @@ RETURN
 STATIC FUNCTION FSize( cFile )
    LOCAL a := Directory( cFile )
 RETURN IIf( Empty( a ), -1, a[ 1 ][ 2 ] )
+
+STATIC FUNCTION FileSize( cFile )
+   LOCAL h := FOpen( cFile ), n := FSeek( h, 0, 2 )
+   FClose( h )
+RETURN n
