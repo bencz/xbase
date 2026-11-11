@@ -307,14 +307,15 @@ public:
       std::string name;
       uint32_t flags;
     };
-    std::vector<Variable> vars;
+    std::vector<Variable> vars, classVars;
+    std::vector<std::string> friendClasses, friendFunctions;
     struct Method {
       std::string message;
       Function *fn;
       uint32_t flags;
     };
     std::vector<Method> methods;
-    Function *init = nullptr;                       // returns the INIT values, or null
+    Function *init = nullptr;                       // returns the INIT values (vars, then classVars), or null
   };
   std::vector<Class> classes;
 };

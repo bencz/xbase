@@ -47,10 +47,12 @@ void ClassResolver::run(Module &m) {
     if (!byName.emplace(c->name, c.get()).second) diag_.error(c->loc, "class " + c->name + " is already defined");
     if (functions.count(c->name)) diag_.error(c->loc, "class " + c->name + " has the name of a function");
     std::set<std::string> messages; // a variable answers NAME and _NAME
-    for (const ClassVarDecl &v : c->vars) {
-      if (!messages.insert(v.name).second) diag_.error(v.loc, "'" + v.name + "' is declared twice in class " + c->name);
-      messages.insert("_" + v.name);
-    }
+    for (const auto *vars : {&c->vars, &c->classVars})
+      for (const ClassVarDecl &v : *vars) {
+        if (!messages.insert(v.name).second)
+          diag_.error(v.loc, "'" + v.name + "' is declared twice in class " + c->name);
+        messages.insert("_" + v.name);
+      }
     for (const ClassMethodDecl &d : c->methods)
       if (!messages.insert(d.message()).second)
         diag_.error(d.loc, "'" + d.name + "' is declared twice in class " + c->name);
@@ -113,15 +115,17 @@ void ClassResolver::run(Module &m) {
     classFn->instantiates = c.get();
     made.push_back(std::move(classFn));
     bool inits = false;
-    for (const ClassVarDecl &v : c->vars) inits = inits || v.init;
-    if (inits) { // the INIT values, in the order of the variables
+    for (const auto *vars : {&c->vars, &c->classVars})
+      for (const ClassVarDecl &v : *vars) inits = inits || v.init;
+    if (inits) { // the INIT values: the variables', then the class variables'
       auto f = std::make_unique<FuncDecl>();
       f->loc = c->loc;
       f->name = c->name + ":(INIT)";
       f->isStatic = true;
       auto values = std::make_unique<ArrayLitExpr>(c->loc);
-      for (ClassVarDecl &v : c->vars)
-        values->elems.push_back(v.init ? std::move(v.init) : std::make_unique<NilExpr>(v.loc));
+      for (auto *vars : {&c->vars, &c->classVars})
+        for (ClassVarDecl &v : *vars)
+          values->elems.push_back(v.init ? std::move(v.init) : std::make_unique<NilExpr>(v.loc));
       f->body.push_back(std::make_unique<ReturnStmt>(c->loc, std::move(values)));
       c->initValues = f.get();
       made.push_back(std::move(f));

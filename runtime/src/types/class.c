@@ -33,14 +33,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum member_kind { M_GET, M_SET, M_METHOD } member_kind;
+typedef enum member_kind { M_GET, M_SET, M_CLASS_GET, M_CLASS_SET, M_METHOD } member_kind;
 
 typedef struct member {
   const char *message;
   member_kind kind;
   uint32_t flags;           /* scope, XB_MEMBER_READONLY */
   xb_class_def *owner;
-  uint32_t index;           /* M_GET, M_SET: the variable among its owner's */
+  uint32_t index;           /* the variable (or class variable) among its owner's */
   xb_func fn;               /* M_METHOD */
 } member;
 
@@ -60,7 +60,10 @@ typedef struct cls {
   xb_names messages;        /* message to its member */
   member *members;
   uint32_t nmembers, capMembers;
-  xb_item *initial;         /* the class's own variables' initial values (a root) */
+  xb_item *initial;         /* its own variables' initial values, then its class variables' (a root) */
+  uint32_t *classArea;      /* the first class variable of each class of the line */
+  xb_item *classValues;     /* the values of the class variables it holds itself (a root) */
+  xb_item **classSlots;     /* where each class variable of the line is: here, or an ancestor's when SHARED */
   cls_state state;
   uint32_t initsBefore;     /* C_LINE: the INIT evaluations in progress when it began */
 } cls;
@@ -149,16 +152,55 @@ static void build_tables(cls *c) {
       if (xb_names_find(&c->messages, set, strlen(set), &id)) free((char *)set);
       else table(c, set, (member){NULL, M_SET, x->vars[i].flags, x, i, NULL});
     }
+    for (uint32_t i = 0; i < x->nclassVars; ++i) {
+      table(c, x->classVars[i].name, (member){NULL, M_CLASS_GET, x->classVars[i].flags, x, i, NULL});
+      uint32_t id;
+      const char *set = setter(x->classVars[i].name);
+      if (xb_names_find(&c->messages, set, strlen(set), &id)) free((char *)set);
+      else table(c, set, (member){NULL, M_CLASS_SET, x->classVars[i].flags, x, i, NULL});
+    }
   }
+  c->classArea = malloc(c->nline * sizeof *c->classArea);
+  if (!c->classArea) xb_gc_fatal("out of memory");
+  uint32_t nclass = 0;
+  for (uint32_t k = 0; k < c->nline; ++k) {
+    c->classArea[k] = nclass;
+    nclass += c->line[k]->nclassVars;
+  }
+  c->classValues = malloc((nclass ? nclass : 1) * sizeof *c->classValues);
+  c->classSlots = malloc((nclass ? nclass : 1) * sizeof *c->classSlots);
+  if (!c->classValues || !c->classSlots) xb_gc_fatal("out of memory");
+  for (uint32_t k = 0; k < c->nline; ++k) {
+    const xb_class_def *x = c->line[k];
+    for (uint32_t i = 0; i < x->nclassVars; ++i) { /* an ancestor's shared one is in its own area (the first) */
+      uint32_t at = c->classArea[k] + i;
+      xb_set_nil(&c->classValues[at]);
+      c->classSlots[at] = k && (x->classVars[i].flags & XB_MEMBER_SHARED) ? &runtime_of(x)->classValues[i]
+                                                                          : &c->classValues[at];
+    }
+  }
+  if (nclass) xb_gc_add_root(c->classValues, nclass);
   c->base.name = c->def->name;
   c->base.nvars = slots;
   c->base.vars = c->slots;
   c->base.compiled = c;
-  uint32_t nvars = c->def->nvars;
-  c->initial = malloc((nvars ? nvars : 1) * sizeof *c->initial);
+  uint32_t ninitial = c->def->nvars + c->def->nclassVars;
+  c->initial = malloc((ninitial ? ninitial : 1) * sizeof *c->initial);
   if (!c->initial) xb_gc_fatal("out of memory");
-  for (uint32_t i = 0; i < nvars; ++i) xb_set_nil(&c->initial[i]);
-  if (nvars) xb_gc_add_root(c->initial, nvars);
+  for (uint32_t i = 0; i < ninitial; ++i) xb_set_nil(&c->initial[i]);
+  if (ninitial) xb_gc_add_root(c->initial, ninitial);
+}
+
+/* The class variables' values once the INIT values are known: its own, and a
+ * copy of each ancestor's initial value for those it does not share. */
+static void start_class_vars(cls *c) {
+  for (uint32_t k = 0; k < c->nline; ++k) {
+    const xb_class_def *x = c->line[k];
+    const cls *owner = runtime_of(x);
+    for (uint32_t i = 0; i < x->nclassVars; ++i)
+      if (!k || !(x->classVars[i].flags & XB_MEMBER_SHARED))
+        c->classValues[c->classArea[k] + i] = owner->initial[x->nvars + i];
+  }
 }
 
 /* The INIT values: 0 when evaluating them failed (they stay NIL). */
@@ -174,7 +216,7 @@ static int call_init(xb_ctx *ctx, cls *c) {
   int ok = !(ctx->pending & XB_PENDING_UNWIND);
   if (ok && values.type == XB_T_ARRAY) {
     const xb_array *a = values.v.p;
-    for (uint32_t i = 0; i < def->nvars && i < a->len; ++i) c->initial[i] = a->items[i];
+    for (uint32_t i = 0; i < def->nvars + def->nclassVars && i < a->len; ++i) c->initial[i] = a->items[i];
   }
   xb_gc_root_pop(ctx, 1);
   return ok;
@@ -243,7 +285,9 @@ static cls *prepare(xb_ctx *ctx, xb_class_def *def) {
   c->state = C_INIT;
   int ok = call_init(ctx, c);
   c->state = ok ? C_READY : C_TABLED;
-  return ok ? c : NULL;
+  if (!ok) return NULL;
+  start_class_vars(c);
+  return c;
 }
 
 void xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def) {
@@ -295,6 +339,22 @@ static void not_found(xb_ctx *ctx, xb_item *r, const cls *c, const char *message
   int assign = message[0] == '_';
   xb_error_described(ctx, r, assign ? EG_NOVARMETHOD : EG_NOMETHOD, assign ? 1005 : 1004, "Message not found",
                      xb_message_text(op, c->def->name, message), XB_ERR_SUBSTITUTE, 1, self);
+}
+
+/* Whether what runs is a friend of class `owner`: a method of a class it
+ * names (`from`), or a function it names, or a codeblock that one made. */
+static int friend_of(const xb_ctx *ctx, const xb_class_def *owner, const xb_class_def *from) {
+  for (uint32_t k = 0; from && k < owner->nfriendClasses; ++k)
+    if (strcmp(owner->friendClasses[k], from->name) == 0) return 1;
+  if (!owner->nfriendFunctions) return 0;
+  const xb_frame *fr = ctx->frames;
+  while (fr && !fr->proc) fr = fr->prev;
+  if (!fr || from) return 0;
+  const char *name = fr->proc->name;
+  while (strncmp(name, XB_BLOCK_PREFIX, strlen(XB_BLOCK_PREFIX)) == 0) name += strlen(XB_BLOCK_PREFIX);
+  for (uint32_t k = 0; k < owner->nfriendFunctions; ++k)
+    if (strcmp(owner->friendFunctions[k], name) == 0) return 1;
+  return 0;
 }
 
 static int is_hidden(const member *m) { return (m->flags & XB_SCOPE_MASK) == XB_SCOPE_HIDDEN; }
@@ -371,13 +431,26 @@ int xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *fr
   }
   uint32_t scope = m->flags & XB_SCOPE_MASK;
   int inside = f && kind_of(f, m->owner); /* a method of the member's class or of a subclass */
-  if ((scope == XB_SCOPE_HIDDEN && from != m->owner) || (scope == XB_SCOPE_PROTECTED && !inside) ||
-      (m->kind == M_SET && (m->flags & XB_MEMBER_READONLY) && !inside)) {
+  int assigns = m->kind == M_SET || m->kind == M_CLASS_SET;
+  if (((scope == XB_SCOPE_HIDDEN && from != m->owner) || (scope == XB_SCOPE_PROTECTED && !inside) ||
+       (assigns && (m->flags & XB_MEMBER_READONLY) && !inside)) &&
+      !friend_of(ctx, m->owner, from)) {
     violation(ctx, r, c, message, scope == XB_SCOPE_HIDDEN);
     return 1;
   }
   if (m->kind == M_METHOD) {
     m->fn(ctx, r, argc, argv);
+    return 1;
+  }
+  if (m->kind == M_CLASS_GET || m->kind == M_CLASS_SET) {
+    const cls *holder = view ? runtime_of(c->line[view]) : c; /* a cast reads the class it sees */
+    xb_item *v = holder->classSlots[holder->classArea[position(holder, m->owner)] + m->index];
+    if (m->kind == M_CLASS_SET) {
+      xb_item nil;
+      xb_set_nil(&nil);
+      *v = argc > 1 ? argv[1] : nil; /* a root: no barrier */
+    }
+    *r = *v;
     return 1;
   }
   uint32_t slot = c->area[position(c, m->owner)] + m->index;
@@ -412,7 +485,8 @@ int xb_class_has(const xb_object *o, const char *message, int method) {
   const cls *c = o->cls->compiled;
   uint32_t id;
   if (!xb_names_find(&c->messages, message, strlen(message), &id)) return 0;
-  return method ? c->members[id].kind == M_METHOD : c->members[id].kind == M_GET;
+  member_kind kind = c->members[id].kind;
+  return method ? kind == M_METHOD : kind == M_GET || kind == M_CLASS_GET;
 }
 
 uint32_t xb_class_names(const xb_object *o, int methods, const char **out) {
@@ -421,7 +495,7 @@ uint32_t xb_class_names(const xb_object *o, int methods, const char **out) {
   for (uint32_t id = 0; id < c->nmembers; ++id) {
     const member *m = &c->members[id];
     if ((m->flags & XB_SCOPE_MASK) != XB_SCOPE_EXPORTED || m->message[0] == '_') continue;
-    if (methods ? m->kind != M_METHOD : m->kind != M_GET) continue;
+    if (methods ? m->kind != M_METHOD : m->kind != M_GET && m->kind != M_CLASS_GET) continue;
     if (out) out[n] = m->message;
     ++n;
   }

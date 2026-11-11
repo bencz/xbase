@@ -290,11 +290,18 @@ first time it is used (its class function, or a subclass):
   object's class answers. `Super:message` takes the member of the ancestors after F in F's line; `Super:ClassName()`
   is F's first parent's name. When `Self` was assigned an object that is not of F's class, `Super:message` is
   `Message not found`.
+- Class variables (`CLASSVAR`): each class of the line holds its own value of each, starting from the INIT value of
+  the class that declares it (the value itself: an INIT array is the same array), except a `SHARED` one, which the
+  class and its subclasses share; the values are roots of the collector. A cast reads the values of the class it sees.
+- Friends: the methods of a class named by `FRIEND CLASS` (not its subclasses'), and a function named by `FRIEND
+  FUNCTION` with the codeblocks it makes (found from the innermost frame of the call stack, a codeblock's name without
+  its `(b)` prefix, `XB_BLOCK_PREFIX`), reach the HIDDEN and PROTECTED members of the class and assign its READONLY
+  variables.
 - Scopes: HIDDEN members answer F's own methods, PROTECTED ones the methods of their class and its subclasses, a
-  READONLY variable is assigned by those only; anything else is `BASE/41` `Scope violation (hidden)` or `BASE/42`
-  `Scope violation (protected)` (generic code 13, the operation `CLASS:MESSAGE`, no `args`). A message the class does
-  not answer is `BASE/1004` (`BASE/1005` to assign) `Message not found`, the operation `CLASS:MESSAGE`, the object in
-  `args`, as in the reference; the runtime's own classes keep Clipper's `No exported method`.
+  READONLY variable is assigned by those only (and by friends); anything else is `BASE/41` `Scope violation (hidden)` or
+  `BASE/42` `Scope violation (protected)` (generic code 13, the operation `CLASS:MESSAGE`, no `args`). A message the
+  class does not answer is `BASE/1004` (`BASE/1005` to assign) `Message not found`, the operation `CLASS:MESSAGE`, the
+  object in `args`, as in the reference; the runtime's own classes keep Clipper's `No exported method`.
 - Casts: a message naming a class of the object's line that no member answers (`o:TParent`; `SUPER`, outside the
   `Super:` of a method, the first parent) gives the object seen as that class, without allocating: the same item with
   the class's position in the line in its `width` field. A message to a cast reaches what that class answers (its
@@ -307,8 +314,8 @@ first time it is used (its class function, or a subclass):
   `ObjVars( o )` and `ObjMethods( o )` (the EXPORTED ones, upper-cased, in table order; anything but an object is
   `BASE/0`), `ObjSend( x, cMessage, ... )` (`x:cMessage( ... )` from outside the class; `_NAME` assigns). The
   runtime's own classes answer with their variables and no methods.
-- Not yet: class (shared) variables, destructors, `FRIEND`, scalar classes, operator overloading, and the compiled
-  fast paths (see [xir.md](xir.md#classes)).
+- Not yet: destructors, scalar classes, operator overloading, and the compiled fast paths (see
+  [xir.md](xir.md#classes)).
 
 ## References
 

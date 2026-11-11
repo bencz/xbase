@@ -1,0 +1,11 @@
+
+start:         10         10        100        100 .T.
+a inc:         11         10        101        101
+b inc:         11         12        103        103         11         10        103
+list:          1          1          1
+cast:         11 .T. PLAIN,COUNT,SHARED,LIST,RO
+friends:        119        110         10
+error:         42 Scope violation (protected) TA:_RO
+error:         41 Scope violation (hidden) TF:H
+error:         41 Scope violation (hidden) TF:H
+error:         41 Scope violation (hidden) TF:H

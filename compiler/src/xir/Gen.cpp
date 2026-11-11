@@ -4,6 +4,8 @@
 
 #include "xir/Analysis.h"
 
+#include "xbrt.h" // XB_BLOCK_PREFIX
+
 namespace xb::xir {
 
 std::unique_ptr<Module> Generator::run(const xb::Module &ast) {
@@ -42,6 +44,9 @@ void Generator::declareClasses(const xb::Module &ast) {
       cls.parents.push_back({p, it == local.end() ? -1 : it->second});
     }
     for (const ClassVarDecl &v : c->vars) cls.vars.push_back({v.name, v.flags});
+    for (const ClassVarDecl &v : c->classVars) cls.classVars.push_back({v.name, v.flags});
+    cls.friendClasses = c->friendClasses;
+    cls.friendFunctions = c->friendFunctions;
     for (const ClassMethodDecl &m : c->methods)
       if (m.impl) cls.methods.push_back({m.message(), funcs_.at(m.impl->name), m.flags});
     if (c->initValues) cls.init = funcs_.at(c->initValues->name);
@@ -185,7 +190,7 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   cur_.scope = name;
   cur_.function = outer.function;
   cur_.classIndex = outer.classIndex; // a codeblock has the access of the method creating it
-  fn->stackName = "(b)" + outer.function;
+  fn->stackName = XB_BLOCK_PREFIX + outer.function;
   fn->hidden = runtimeLibrary_;
   Builder &b = *cur_.b;
   b.setLine(outer.b->line()); // the line of the statement defining the block

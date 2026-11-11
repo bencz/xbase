@@ -2,7 +2,7 @@
 #include "parser/Parser.h"
 
 #include "common/Text.h"
-#include "xbrt.h" // XB_SCOPE_*, XB_MEMBER_READONLY
+#include "xbrt.h" // XB_SCOPE_*, XB_MEMBER_*
 
 #include <algorithm>
 #include <cstring>
@@ -333,7 +333,9 @@ static int scopeWord(const std::string &w, bool label) {
 
 // [STATIC | CREATE] CLASS name [INHERIT | FROM parent, ...], its members, then ENDCLASS (or END [CLASS]):
 //   EXPORTED: | EXPORT: | VISIBLE: | PROTECTED: | HIDDEN:    the scope of the members that follow
-//   VAR | DATA name, ... [AS type] [INIT expr] [scope] [READONLY | RO]
+//   VAR | DATA name, ... [AS | TYPE type] [INIT | ASSIGN expr] [scope] [READONLY | RO]
+//   CLASSVAR | CLASSDATA | CLASS VAR | CLASS DATA name, ... (as VAR) [SHARED]
+//   FRIEND CLASS name, ... | FRIEND FUNCTION name, ...
 //   METHOD name[( params )] [AS type] [CONSTRUCTOR] [INLINE expr, ...] [scope]
 //   ACCESS name [INLINE expr, ...] [scope], ASSIGN name( param ) [INLINE expr, ...] [scope]
 std::unique_ptr<ClassDecl> Parser::parseClass() {
@@ -358,18 +360,20 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
   }
   endOfStmt();
   uint32_t scope = XB_SCOPE_EXPORTED;
-  auto memberScope = [&](uint32_t &flags, bool var) { // trailing scope words, and READONLY for a variable
+  // Trailing scope words; READONLY for a variable, SHARED for a class variable.
+  auto memberScope = [&](uint32_t &flags, bool var, bool classVar) {
     flags = scope;
     while (at(Tok::Ident)) {
       int s = scopeWord(cur().upper, false);
       if (s >= 0) flags = (flags & ~XB_SCOPE_MASK) | (uint32_t)s;
       else if (var && (cur().upper == "READONLY" || cur().upper == "RO")) flags |= XB_MEMBER_READONLY;
+      else if (classVar && cur().upper == "SHARED") flags |= XB_MEMBER_SHARED;
       else break;
       advance();
     }
   };
-  auto asType = [&] { // AS type: accepted and ignored (the language is untyped)
-    if (at(Tok::Ident) && cur().upper == "AS" && ahead().kind == Tok::Ident) {
+  auto asType = [&] { // AS (or TYPE) type: accepted and ignored (the language is untyped)
+    if (at(Tok::Ident) && (cur().upper == "AS" || cur().upper == "TYPE") && ahead().kind == Tok::Ident) {
       advance();
       advance();
     }
@@ -393,9 +397,13 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
       endOfStmt();
       continue;
     }
-    if (atStmtKw("VAR") || atStmtKw("DATA")) {
+    bool classVar = atStmtKw("CLASSVAR") || atStmtKw("CLASSDATA") ||
+                    (atStmtKw("CLASS") && (isKw(ahead(), "VAR") || isKw(ahead(), "DATA")));
+    if (atStmtKw("VAR") || atStmtKw("DATA") || classVar) {
+      if (atKw("CLASS")) advance();
       advance();
-      size_t first = cls->vars.size();
+      std::vector<ClassVarDecl> &vars = classVar ? cls->classVars : cls->vars;
+      size_t first = vars.size();
       do {
         if (!at(Tok::Ident)) {
           expect(Tok::Ident, "variable name");
@@ -405,23 +413,23 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
         v.loc = cur().loc;
         v.name = cur().upper;
         advance();
-        cls->vars.push_back(std::move(v));
+        vars.push_back(std::move(v));
       } while (accept(Tok::Comma));
       asType();
-      if (at(Tok::Ident) && cur().upper == "INIT") { // each variable of the list gets the expression
+      if (at(Tok::Ident) && (cur().upper == "INIT" || cur().upper == "ASSIGN")) { // each variable gets the expression
         advance();
         size_t at = pos_, after = pos_;
         unsigned errors = diag_.errorCount();
-        for (size_t k = first; k < cls->vars.size() && diag_.errorCount() == errors; ++k) { // errors reported once
+        for (size_t k = first; k < vars.size() && diag_.errorCount() == errors; ++k) { // errors reported once
           pos_ = at;
-          cls->vars[k].init = parseExpr();
+          vars[k].init = parseExpr();
           after = pos_;
         }
         pos_ = after;
       }
       uint32_t flags;
-      memberScope(flags, true);
-      for (size_t k = first; k < cls->vars.size(); ++k) cls->vars[k].flags = flags;
+      memberScope(flags, true, classVar);
+      for (size_t k = first; k < vars.size(); ++k) vars[k].flags = flags;
       endOfStmt();
       continue;
     }
@@ -463,8 +471,23 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
           m.inlineBody = std::move(list);
         }
       }
-      memberScope(m.flags, false);
+      memberScope(m.flags, false, false);
       cls->methods.push_back(std::move(m));
+      endOfStmt();
+      continue;
+    }
+    if (atStmtKw("FRIEND") && (isKw(ahead(), "CLASS") || isKw(ahead(), "FUNCTION"))) {
+      advance();
+      std::vector<std::string> &names = atKw("CLASS") ? cls->friendClasses : cls->friendFunctions;
+      advance();
+      do {
+        if (!at(Tok::Ident)) {
+          expect(Tok::Ident, "a name");
+          break;
+        }
+        names.push_back(cur().upper);
+        advance();
+      } while (accept(Tok::Comma));
       endOfStmt();
       continue;
     }

@@ -150,6 +150,9 @@ typedef struct xb_proc {
  * evaluates a macro, which is not an activation of its own (PRIVATEs it
  * creates belong to the one below it, RELEASE ALL acts there). */
 #define XB_PROC_TRANSPARENT 4u
+/* The start of a codeblock's xb_proc.name, before the name of the function
+ * that made it (what the call stack shows). */
+#define XB_BLOCK_PREFIX "(b)"
 
 /* [ABI] A compiled function's item frame (parameters, LOCALs, temporaries):
  * on the machine stack, linked into its context's chain while the function
@@ -418,22 +421,28 @@ void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv
 /* [ABI] Classes compiled from xBase (types/class.c). A module describes each
  * of its classes (xb_class_def) and registers them when it registers
  * (xb_classes_register; a STATIC class, XB_CLASS_STATIC, is not registered:
- * it is known to its module only). A parent is the module's own class when
- * it has one of that name (`def`), else the class registered under the name,
- * found when the class is first used. A method is a function of the xBase convention whose
- * argv[0] is the object (Self); a variable is read by its name as a message
- * and assigned by "_NAME", an ACCESS method answers "NAME" and an ASSIGN one
- * "_NAME". A member's `flags`: the scope (XB_SCOPE_*), and XB_MEMBER_READONLY
- * for a variable assigned only from the methods of its class and of its
- * subclasses. `init` returns an
- * array with the variables' initial values (INIT), evaluated once, the first
- * time the class is used; each new object gets its own copy of an array or a
- * hash. `runtime` is the runtime's, NULL until then. */
+ * it is known to its module only). A parent is the module's own class when it
+ * has one of that name (`def`), else the class registered under the name,
+ * found when the class is first used. A method is a function of the xBase
+ * convention whose argv[0] is the object (Self); a variable is read by its
+ * name as a message and assigned by "_NAME", an ACCESS method answers "NAME"
+ * and an ASSIGN one "_NAME". A class variable (`classVars`) holds one value
+ * for the class, another for each subclass, unless it is XB_MEMBER_SHARED:
+ * then the class and its subclasses share it. A member's `flags`: the scope
+ * (XB_SCOPE_*), and XB_MEMBER_READONLY for a variable assigned only from the
+ * methods of its class and of its subclasses. The friends (classes, whose own
+ * methods, and functions, which with the codeblocks they make) reach the
+ * class's HIDDEN and PROTECTED members and assign its READONLY ones. `init`
+ * returns an array with the initial values (INIT) of the variables, then of
+ * the class variables, evaluated once, the first time the class is used; each
+ * new object gets its own copy of an array or a hash, each subclass the value
+ * itself. `runtime` is the runtime's, NULL until then. */
 #define XB_SCOPE_EXPORTED   0u
 #define XB_SCOPE_PROTECTED  1u  /* the class's methods and its subclasses' */
 #define XB_SCOPE_HIDDEN     2u  /* the class's own methods */
 #define XB_SCOPE_MASK       3u
 #define XB_MEMBER_READONLY  4u
+#define XB_MEMBER_SHARED    8u  /* a class variable whose subclasses share it */
 #define XB_CLASS_STATIC     1u  /* xb_class_def flags: STATIC CLASS */
 typedef struct xb_class_var_def {
   const char *name;         /* upper-cased */
@@ -456,6 +465,12 @@ typedef struct xb_class_def {
   uint32_t nvars;
   const xb_class_method_def *methods;
   uint32_t nmethods;
+  const xb_class_var_def *classVars;
+  uint32_t nclassVars;
+  const char *const *friendClasses;   /* upper-cased names */
+  uint32_t nfriendClasses;
+  const char *const *friendFunctions;
+  uint32_t nfriendFunctions;
   xb_func init;             /* NULL: every variable starts as NIL */
   uint32_t flags;           /* XB_CLASS_STATIC */
   void *runtime;

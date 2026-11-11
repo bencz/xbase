@@ -386,7 +386,7 @@ struct FuncDecl {
 struct ClassVarDecl {
   SourceLoc loc;
   std::string name;              // upper-cased
-  uint32_t flags = 0;            // XB_SCOPE_*, XB_MEMBER_READONLY
+  uint32_t flags = 0;            // XB_SCOPE_*, XB_MEMBER_READONLY, XB_MEMBER_SHARED
   ExprPtr init;                  // INIT expr, or null
 };
 struct ClassMethodDecl {
@@ -406,7 +406,9 @@ struct ClassDecl {
   bool isStatic = false;         // STATIC CLASS: its class function is the module's own
   std::vector<std::string> parents;
   std::vector<ClassVarDecl> vars;
+  std::vector<ClassVarDecl> classVars;   // CLASSVAR: one value for the class (and its subclasses when SHARED)
   std::vector<ClassMethodDecl> methods;
+  std::vector<std::string> friendClasses, friendFunctions; // upper-cased: they reach its HIDDEN and PROTECTED members
   FuncDecl *initValues = nullptr; // set by Sema: returns the INIT values, or null when there are none
 };
 
