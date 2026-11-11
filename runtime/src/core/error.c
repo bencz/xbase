@@ -28,27 +28,6 @@ void xbf_ERRORNEW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_object(ret, xb_object_new(&error_class));
 }
 
-/* The description of each generic code the runtime raises (Clipper's texts),
- * and of particular subcodes. */
-static const struct {
-  int32_t gencode, subcode; /* subcode 0: any */
-  const char *text;
-} descriptions[] = {
-  {EG_NOMETHOD, 41, "Scope violation (hidden)"}, {EG_NOMETHOD, 42, "Scope violation (protected)"},
-  {EG_ARG, 0, "Argument error"},       {EG_BOUND, 0, "Bound error"},            {EG_STROVERFLOW, 0, "String overflow"},
-  {EG_ZERODIV, 0, "Zero divisor"},     {EG_NOFUNC, 0, "Undefined function"},    {EG_NOMETHOD, 0, "No exported method"},
-  {EG_NOVARMETHOD, 0, "No exported variable"}, {EG_NOVAR, 0, "Variable does not exist"},
-  {EG_CREATE, 0, "Create error"},      {EG_OPEN, 0, "Open error"},              {EG_WRITE, 0, "Write error"},
-  {EG_SYNTAX, 0, "Syntax error"},
-};
-
-static const char *description_of(int32_t gencode, int32_t subcode) {
-  for (size_t i = 0; i < sizeof descriptions / sizeof descriptions[0]; ++i)
-    if (descriptions[i].gencode == gencode && (descriptions[i].subcode == 0 || descriptions[i].subcode == subcode))
-      return descriptions[i].text;
-  return "";
-}
-
 static void set_text(xb_item *it, const char *s) { xb_set_str(it, xb_str_new(s, strlen(s))); }
 
 /* An error the program cannot recover from: reported, and the program ends
@@ -125,7 +104,9 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
     xb_set_array(&e->vars[ERR_ARGS], a);
     xb_gc_write(e);
   }
-  set_text(&e->vars[ERR_DESCRIPTION], f->description ? f->description : description_of(f->gencode, f->subcode));
+  xb_str *description = f->description ? NULL : xb_language_error(ctx, f->gencode, f->subcode);
+  if (description) xb_set_str(&e->vars[ERR_DESCRIPTION], description);
+  else set_text(&e->vars[ERR_DESCRIPTION], f->description ? f->description : "");
   xb_gc_write(e);
   set_text(&e->vars[ERR_OPERATION], f->operation);
   xb_gc_write(e);

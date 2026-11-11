@@ -66,6 +66,7 @@
 #command SET DATE [TO] USA             => _DFSET( "mm-dd-yyyy", "mm-dd-yy" )
 #command SET DATE FORMAT [TO] <f>      => Set( _SET_DATEFORMAT, <f> )
 #command SET CENTURY <x:ON,OFF,&>      => __SetCentury( <(x)> )
+#command SET LANGUAGE TO <x>           => Set( _SET_LANGUAGE, <(x)> )
 #command SET CENTURY (<x>)             => __SetCentury( <x> )
 #command SET EPOCH TO <y>              => Set( _SET_EPOCH, <y> )
 

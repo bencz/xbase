@@ -569,11 +569,12 @@ The check stays valid across `AWAIT`. `QUIT` raises `XB_PENDING_QUIT` with exit 
 
 A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`) makes an `Error` object (see [Objects
 and messages](#objects-and-messages)): subsystem `BASE`, the subcode, the generic code (`error.ch`, shared with xBase
-code like `set.ch`) and its description, the operation, severity `ES_ERROR`, `canSubstitute`, and in `args` the operands
-of an operator or the arguments of a function (NIL when there are none). Then it evaluates the context's error block
-with it (`ErrorBlock( [bNew] )` returns the block and replaces it with a codeblock argument; the block and the `BREAK`
-value are roots of the collector). With no error block (a program's `ErrorSys()` set none) the error is unrecoverable:
-`Unrecoverable error 9002: No ERRORBLOCK() for error`. After the block:
+code like `set.ch`) and its description (in the current language, [Languages](#languages)), the operation, severity
+`ES_ERROR`, `canSubstitute`, and in `args` the operands of an operator or the arguments of a function (NIL when there
+are none). Then it evaluates the context's error block with it (`ErrorBlock( [bNew] )` returns the block and replaces it
+with a codeblock argument; the block and the `BREAK` value are roots of the collector). With no error block (a program's
+`ErrorSys()` set none) the error is unrecoverable: `Unrecoverable error 9002: No ERRORBLOCK() for error`. After the
+block:
 
 - a request to unwind is pending (the block called `Break()`, or quit): the operation fails with it;
 - the error may be retried (`XB_ERR_RETRY`, `xb_error_retry`: `canRetry`, with `tries` counting the attempts from 1;
@@ -752,9 +753,10 @@ Conventions:
 - `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array and the empty date.
 - `Set( n [, x] )` returns the setting before the call. `_SET_EXACT` takes a logical or a string starting with
   `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020);
-  `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more,
-  off otherwise. `__SetCentury( [lOn] )` rewrites that run as `YYYY` or `YY` (or puts it in front when the picture
-  has no `Y`) and the picture in upper case. Other values change nothing.
+  `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more, off
+  otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it in front when the picture
+  has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name ([Languages](#languages)). Other
+  values change nothing.
 - `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector).
 - `AScan( a, xSearch, [nStart], [nCount] )` returns the position of the first element of the range equal to `xSearch`
   (values of one comparable kind, compared like the operators, strings with SET EXACT; two `NIL`s; arrays and blocks
@@ -817,10 +819,10 @@ Each one moved from C is measured against its C version (callgrind).
 - On the call stack they show with line 0, as the C functions do; their `STATIC` functions and codeblocks do not show
   (`XB_PROC_HIDDEN`), though `PCount()` and `PValue()` still read their frames.
 - Primitives for them: `__ConsoleWrite( xValue )` writes the display form of a value ([Display](#display)) to the
-  console (standard output until the terminal layer exists), `__StdWrite( nHandle, xValue )` to the standard output
-  (1) or error (2), flushing the output before writing to the error; `__ArgError( nSubCode )` raises the calling
-  function's argument error (`EG_ARG`, its name as the operation, the arguments it received; not substitutable), as
-  its C counterparts do.
+  console (standard output until the terminal layer exists), `__StdWrite( nHandle, xValue )` to the standard output (1)
+  or error (2), flushing the output before writing to the error; `__ArgError( nSubCode, [lSubstitute] )` raises the
+  calling function's argument error (`EG_ARG`, its name as the operation, the arguments it received), as its C
+  counterparts do: not substitutable, or with `lSubstitute` substitutable, the handler's value its result.
 - Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` and `AScan`
   (`rtl/collections.prg`; they also go through collection objects, those `__IsCollection( xValue )` (`core/control.c`)
   finds `FOR EACH` goes through: an `Enumerable`, a generator's enumerator, from position `nStart`, `nCount` elements;
@@ -830,13 +832,14 @@ Each one moved from C is measured against its C version (callgrind).
   class and the classes of the built-in types (`rtl/collections.prg`, see [Classes](#classes)), `ErrorSys` and the
   default error handler (`rtl/errorsys.prg`), Clipper's time sample functions `Secs`, `TString`, `Days`, `ElapTime`,
   `AMPM`, and `LenNum` (`rtl/time.prg`), `Directory`, `ADir`, `File`, `MemoRead`, `MemoWrit` and `FReadStr`
-  (`rtl/files.prg`, see [Files](#files)). Measured against their C versions (callgrind, x86-64): 200 000
-  `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval` over a million
-  elements with `{| x | n += x }`, 121M (116M). Timed against the C versions they replaced (100,000 elements, 300
-  rounds): `AScan` of a value and with a block 225 ms (170 ms in C), `AFill` with `ACopy` 108 ms (76 ms), `HEval` with
-  `{| k, v | n += v }` 362 ms (290 ms); `HScan` of a value and with a block 347 ms (300 ms), `HMerge` with a filter 807
-  ms (927 ms). `QQOut` keeps its own loop instead of sharing `OutStd`'s: passing the values on through one more call
-  costs `QOut` 13% more cycles.
+  (`rtl/files.prg`, see [Files](#files)), `CDoW` and `CMonth` (`rtl/dates.prg`) and the languages (`rtl/languages.prg`,
+  see [Languages](#languages)). Measured against their C versions (callgrind, x86-64): 200 000 `? i, "abc", .T.` take
+  267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval` over a million elements with
+  `{| x | n += x }`, 121M (116M). Timed against the C versions they replaced (100,000 elements, 300 rounds): `AScan` of
+  a value and with a block 225 ms (170 ms in C), `AFill` with `ACopy` 108 ms (76 ms), `HEval` with `{| k, v | n += v }`
+  362 ms (290 ms); `HScan` of a value and with a block 347 ms (300 ms), `HMerge` with a filter 807 ms (927 ms); `CDoW`
+  with `CMonth`, a million pairs, 103 ms (57 ms). `QQOut` keeps its own loop instead of sharing `OutStd`'s: passing the
+  values on through one more call costs `QOut` 13% more cycles.
 
 ## Dates
 
@@ -855,9 +858,25 @@ go further.
 - `CToD` reads the fields in the order the picture gives them; each run of digits fills a field and the first
   non-digit after it moves to the next. Two-digit years fall in the hundred years starting at SET EPOCH. Invalid
   dates give the empty date.
-- `CDoW`/`CMonth` give English names (`""` for the empty date); `DoW` counts from Sunday = 1. `DoW` works from the
-  day number (0 outside the calendar); `CDoW`, as in Clipper, applies the Gregorian weekday formula to the decoded
-  year, month and day, so it differs from `DoW` in year 0 and gives `Wednesday` for day numbers outside the calendar.
+- `CDoW`/`CMonth` (`rtl/dates.prg`) give the names of the language `SET LANGUAGE` selected ([Languages](#languages);
+  `""` for the empty date, and from `CMonth` outside the calendar); `DoW` counts from Sunday = 1. `DoW` works from the
+  day number (0 outside the calendar); `CDoW`, as in Clipper, applies the Gregorian weekday formula to the decoded year,
+  month and day, so it differs from `DoW` in year 0 and gives Wednesday for day numbers outside the calendar. Something
+  that is no date is their argument error (1117, 1116), whose handler may give the result.
+
+## Languages
+
+`SET LANGUAGE TO <id>` (`Set( _SET_LANGUAGE, cId )`; `_SET_LANGUAGE` is xbase's own setting, numbered from 200 as
+`set.ch` says) selects the language of the runtime's texts: the names of the days and months, and the descriptions of
+the errors it raises. The languages are written in xBase (`rtl/languages.prg`): `__LanguageTexts( cId )` makes the texts
+of `EN` (English, the default), `PT` (Portuguese) or `ES` (Spanish) in the parts `rtl/language.ch` numbers (the same
+file for xBase and C), NIL for any other name. The context keeps the current language's texts (`xb_ctx.language`, a root
+of the collector; English, made when first needed), `__LanguageCurrent()` gives them to xBase code, and
+`core/language.c` gives an error's description to `core/error.c`: the subcode's own text (the part of subcodes: by
+generic code, a hash of subcodes), else the generic code's. `Set( _SET_LANGUAGE )` returns the current language's name;
+a name in any letter case selects, and one the runtime has no language for leaves it as it is. A description an error
+carries itself (a class error's, ...) stays English. `__LanguageCurrent()` hands out the very texts the runtime reads,
+which are never to be changed. The texts are UTF-8 bytes (`Len( "Terça-feira" )` is 12), as the source is.
 
 ## Files
 

@@ -1,8 +1,6 @@
 /* Date functions of the language. */
 #include "xbrt_int.h"
 
-#include <string.h>
-
 static int64_t date_arg(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item *argv, const char *fn, int code,
                         int *ok) {
   if (argc >= 1 && argv[0].type == XB_T_DATE) {
@@ -126,39 +124,4 @@ void xbf_DOW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int ok;
   int64_t jd = date_arg(ctx, ret, argc, argv, "DOW", 1115, &ok);
   if (ok) ret_number(ret, day_of_week(jd), 3);
-}
-
-/* CDoW() takes the weekday from the decoded year, month and day with the
- * Gregorian weekday formula, as Clipper does, so it can differ from DoW() in
- * year 0 and for day numbers outside the calendar (decoded as 0/0/0). In the
- * formula January and February are months 13 and 14 of the previous year and
- * the other months count one more; month 0 counts as 13. Divisions truncate;
- * 1 = Sunday. */
-static int weekday_of_fields(int64_t jd) {
-  int y, m, d;
-  xb_date_decode(jd, &y, &m, &d);
-  int fm = m < 3 ? m + 13 : m + 1;
-  int fy = m < 3 ? y - 1 : y;
-  return (d + 26 * fm / 10 + fy + fy / 4 - fy / 100 + fy / 400 + 6) % 7 + 1;
-}
-
-void xbf_CDOW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  static const char *const names[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-  int ok;
-  int64_t jd = date_arg(ctx, ret, argc, argv, "CDOW", 1117, &ok);
-  if (!ok) return;
-  const char *s = jd ? names[weekday_of_fields(jd) - 1] : "";
-  xb_set_str(ret, xb_str_new(s, strlen(s)));
-}
-
-void xbf_CMONTH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  static const char *const names[] = {"January", "February", "March",     "April",   "May",      "June",
-                                      "July",    "August",   "September", "October", "November", "December"};
-  int ok;
-  int64_t jd = date_arg(ctx, ret, argc, argv, "CMONTH", 1116, &ok);
-  if (!ok) return;
-  int y, m, d;
-  xb_date_decode(jd, &y, &m, &d);
-  const char *s = m ? names[m - 1] : "";
-  xb_set_str(ret, xb_str_new(s, strlen(s)));
 }

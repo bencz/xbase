@@ -41,9 +41,17 @@ struct xb_ctx {
   int32_t  epoch;           /* SET EPOCH */
   int      century;         /* SET CENTURY */
   int32_t  file_error;      /* FError(): the code of the last file function (rtl/files.c) */
+  xb_item  language;        /* SET LANGUAGE: the current language's texts (core/language.c), a root; NIL until used */
 };
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
+
+/* core/language.c: selects a language by name (any letter case): 0 when the runtime has none of that name. The
+ * current language's texts (English when none was selected), NULL only when they cannot be made; an error's
+ * description in it, NULL when it has none. */
+int xb_language_select(xb_ctx *ctx, const char *id, size_t len);
+const xb_array *xb_language(xb_ctx *ctx);
+xb_str *xb_language_error(xb_ctx *ctx, int32_t gencode, int32_t subcode);
 
 typedef struct xb_private {
   uint32_t id;              /* the variable's number (none once CLEAR MEMORY released it, core/memvar.c) */

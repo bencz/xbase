@@ -133,15 +133,17 @@ void xbf_PVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   *ret = *target;
 }
 
-/* __ArgError( nSubCode ): the argument error (EG_ARG, nSubCode) of the
- * runtime function written in xBase that calls it, as its C counterparts raise
- * one: the operation is its name and the arguments are those it received. It
- * cannot be substituted; returns NIL. */
+/* __ArgError( nSubCode, [lSubstitute] ): the argument error (EG_ARG,
+ * nSubCode) of the runtime function written in xBase that calls it, as its C
+ * counterparts raise one: the operation is its name and the arguments are
+ * those it received. With lSubstitute .T. the handler may give a result,
+ * which it returns; else it cannot be substituted, and returns NIL. */
 void xbf___ARGERROR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ret);
   const xb_frame *f = caller_frame(ctx);
   int32_t subcode = argc && xb_is_number(&argv[0]) ? xb_num_wrap_int32(&argv[0]) : 0;
-  xb_error(ctx, NULL, EG_ARG, subcode, f ? f->proc->name : "", 0, f ? f->argc : 0, f ? f->argv : NULL);
+  int substitute = argc > 1 && argv[1].type == XB_T_LOGICAL && argv[1].v.l;
+  xb_error(ctx, substitute ? ret : NULL, EG_ARG, subcode, f ? f->proc->name : "", substitute ? XB_ERR_SUBSTITUTE : 0,
+           f ? f->argc : 0, f ? f->argv : NULL);
 }
 
 /* ErrorLevel( [nNew] ): the program's exit code; an argument replaces it: a

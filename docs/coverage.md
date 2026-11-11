@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 124 of 551 done. Commands (`std.ch` families): 25 of 155 done.
+Functions: 124 of 551 done. Commands (`std.ch` families): 26 of 156 done.
 
 ## Statements (grammar)
 
@@ -32,15 +32,17 @@ BELL*, **SET CENTURY**, *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*,
 DBFLOCKSCHEME*, **SET DECIMALS**, *SET DEFAULT*, *SET DELETED*, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET
 DIRCASE*, *SET DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET
 EXCLUSIVE*, *SET FILECASE*, *SET FILTER*, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*,
-*SET INDEX*, *SET INTENSITY*, *SET KEY*, *SET MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*, *SET MESSAGE*,
-*SET MFILEEXT*, *SET OPTIMIZE*, *SET ORDER*, *SET PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET RELATION*, *SET SAFETY*,
-*SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, *SET SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET
-STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, *SET UNIQUE*, *SET VIDEOMODE*, *SET WRAP*, *SKIP*, *SORT*,
-**STORE**, *SUM*, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*, *USE*, *WAIT*, *ZAP*
+*SET INDEX*, *SET INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET MARGIN*, *SET MBLOCKSIZE*, *SET
+MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, *SET ORDER*, *SET PATH*, *SET PRINTER*, *SET
+PROCEDURE*, *SET RELATION*, *SET SAFETY*, *SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, *SET
+SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, *SET UNIQUE*, *SET
+VIDEOMODE*, *SET WRAP*, *SKIP*, *SORT*, **STORE**, *SUM*, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*,
+*USE*, *WAIT*, *ZAP*
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`, `set.ch`
-(partial), `error.ch` (provided: the severities and generic codes), `fileio.ch`, `box.ch`, `color.ch`, `dbstruct.ch`,
-`directry.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
+(partial), `error.ch` (provided: the severities and generic codes), `fileio.ch` and `directry.ch` (provided), `box.ch`,
+`color.ch`, `dbstruct.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`,
+`blob.ch`.
 
 ## Functions
 

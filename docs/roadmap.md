@@ -61,7 +61,7 @@ Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 
 ### Commands, statements and headers
 
-- `std.ch` has 16 of 155 command families ([coverage.md](coverage.md#commands-stdch)); most of the rest need the
+- `std.ch` has 26 of 156 command families ([coverage.md](coverage.md#commands-stdch)); most of the rest need the
   runtime parts below (screen, GET/READ, files, RDD).
 - `TEXT ... ENDTEXT` is not a command yet and its lines are compiled as statements.
 - Standard headers still to provide: `common.ch`, `inkey.ch`, `box.ch`, `color.ch`, `dbstruct.ch`, `getexit.ch`,
@@ -136,6 +136,9 @@ every exit (normal end, error, `RETURN`, `EXIT`, `LOOP`). Built on the unwind ed
   strings with escapes.
 - Function references `@Name()` and symbol values; `Do()` and `Eval()` on them.
 - Strings indexed like arrays (`s[ i ]`) and negative indexes counting from the end, if they fit Clipper's rules.
+- Done: `SET LANGUAGE TO <id>` ([runtime.md](runtime.md#languages)). Planned: `SET CODEPAGE` with UTF-8 the default, and
+  functions that count and change characters (`Upper`, `Lower`, `IsAlpha`, `Asc`/`Chr`, a length in characters beside
+  `Len`); the database codepage comes with the RDD.
 
 ### Enumeration
 

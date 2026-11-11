@@ -3,6 +3,8 @@
 
 #include "set.ch"
 
+#include "rtl/language.ch"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -68,6 +70,12 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
         else ctx->epoch = n > INT32_MAX ? INT32_MAX : (int32_t)n;
       }
       break;
+    case _SET_LANGUAGE: { /* a name the runtime has no language for leaves it as it is */
+      const xb_array *texts = xb_language(ctx);
+      if (texts && texts->len >= LANG_ID) *ret = texts->items[LANG_ID - 1];
+      if (value && value->type == XB_T_STRING) xb_language_select(ctx, value->v.s->data, value->v.s->len);
+      break;
+    }
     default:
       break;
   }
