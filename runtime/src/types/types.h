@@ -117,8 +117,9 @@ int        xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
                          uint32_t argc, xb_item *argv);
 /* Runs the destructors of the objects the collector found unreachable
  * (xb_gc_next_finalized), each class of the object's line that has one, the
- * object's class first; collections wait meanwhile. An error, BREAK or
- * TRAP in a destructor ends it alone; a QUIT stays. */
+ * object's class first; they may collect. The requests pending before (and
+ * the BREAK value) wait meanwhile; an error, BREAK or TRAP in a destructor
+ * ends it alone, and a QUIT stays and leaves the other objects queued. */
 void       xb_classes_finalize(xb_ctx *ctx);
 /* A message to a value of a type a compiled class is associated with
  * (ClassAssociate): 0 when there is none. xb_class_associate associates the

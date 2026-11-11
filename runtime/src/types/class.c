@@ -350,8 +350,8 @@ static int friend_of(const xb_ctx *ctx, const xb_class_def *owner, const xb_clas
   for (uint32_t k = 0; from && k < owner->nfriendClasses; ++k)
     if (strcmp(owner->friendClasses[k], from->name) == 0) return 1;
   if (!owner->nfriendFunctions) return 0;
-  const xb_frame *fr = ctx->frames;
-  while (fr && !fr->proc) fr = fr->prev;
+  const xb_frame *fr = ctx->frames; /* a macro's frame is its caller's code */
+  while (fr && (!fr->proc || (fr->proc->flags & XB_PROC_TRANSPARENT))) fr = fr->prev;
   if (!fr || from) return 0;
   const char *name = fr->proc->name;
   while (strncmp(name, XB_BLOCK_PREFIX, strlen(XB_BLOCK_PREFIX)) == 0) name += strlen(XB_BLOCK_PREFIX);
@@ -372,12 +372,15 @@ static member *lookup_from(cls *c, cls *f, const char *message) {
   return mc ? mc : mf;
 }
 
-/* The object seen as the class of its line named `message` (also SUPER: its
- * first parent), a cast (see the top of the file); 0 when there is none. */
-static int cast(xb_item *r, const cls *c, const xb_item *self, const char *message) {
+/* The object seen as the class of its line named `message` (also SUPER: the
+ * first parent of the class it is seen as, `view`), a cast (see the top of the
+ * file); 0 when there is none. */
+static int cast(xb_item *r, const cls *c, uint32_t view, const xb_item *self, const char *message) {
   uint32_t k = 0;
   if (strcmp(message, "SUPER") == 0) {
-    k = c->nline > 1 ? 1 : 0; /* the first parent's line comes first after the class */
+    const cls *seen = runtime_of(c->line[view]);
+    if (seen->nline < 2) return 0;
+    k = position(c, seen->line[1]); /* the first parent's line comes first after the class */
   } else {
     while (k < c->nline && strcmp(c->line[k]->name, message) != 0) ++k;
   }
@@ -430,7 +433,7 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
               : related  ? lookup_from(c, f, message)
                          : lookup(c, message);
   if (!m) {
-    if (object && cast(r, c, &argv[0], message)) return;
+    if (object && cast(r, c, view, &argv[0], message)) return;
     if (strcmp(message, "CLASSNAME") == 0) { /* a cast's is the class it sees; Super:ClassName() the parent's */
       const char *name = view ? c->line[view]->name : super && f->nline > 1 ? f->line[1]->name : c->def->name;
       xb_set_str(r, xb_str_new(name, strlen(name)));
@@ -558,6 +561,7 @@ int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a,
   const xb_object *o = a->v.p;
   cls *k = o->cls->compiled;
   if (!k) return 0;
+  if (a->width && a->width < k->nline) k = runtime_of(k->line[a->width]); /* a cast: the class it is seen as */
   const member *m = lookup(k, op);
   if (!m || m->kind != M_METHOD) return 0;
   xb_item argv[3] = {*a};
@@ -571,28 +575,31 @@ int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a,
 }
 
 void xb_classes_finalize(xb_ctx *ctx) {
-  static int running; /* a destructor's own pending tests */
+  static int running; /* a destructor's own pending tests, or a collection it makes */
   if (running) return;
   running = 1;
-  xb_gc_inhibit(1);
-  xb_item obj, self, ret;
+  xb_item obj, self, ret, breakValue;
   xb_set_nil(&obj);
   xb_set_nil(&ret);
   xb_gc_root_push(ctx, &obj);
   xb_gc_root_push(ctx, &ret);
-  while (xb_gc_next_finalized(&obj)) {
+  xb_gc_root_push(ctx, &breakValue);
+  int quit = 0;
+  while (!quit && xb_gc_next_finalized(&obj)) {
     const cls *c = ((const xb_object *)obj.v.p)->cls->compiled;
-    for (uint32_t k = 0; k < c->nline; ++k) {
+    for (uint32_t k = 0; k < c->nline && !quit; ++k) {
       xb_func destructor = c->line[k]->destructor;
       if (!destructor) continue;
-      uint32_t before = ctx->pending;
+      uint32_t before = ctx->pending; /* the requests already pending wait, with their BREAK value */
+      breakValue = ctx->break_value;
+      ctx->pending &= ~(uint32_t)XB_PENDING_UNWIND;
       self = obj;
       destructor(ctx, &ret, 1, &self);
+      quit = (ctx->pending & XB_PENDING_QUIT) != 0;
       ctx->pending = before | (ctx->pending & XB_PENDING_QUIT);
-      if (ctx->pending & XB_PENDING_QUIT) break;
+      ctx->break_value = breakValue;
     }
   }
-  xb_gc_root_pop(ctx, 2);
-  xb_gc_inhibit(0);
+  xb_gc_root_pop(ctx, 3);
   running = 0;
 }

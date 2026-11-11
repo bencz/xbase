@@ -81,6 +81,7 @@ void CodeGen::initTypes() {
   rtAppend_ = rt("xb_op_append", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
   rtPending_ = rt("xb_pending", i32_, {ptrTy_});
+  rtPendingGc_ = rt("xb_pending_gc", i32_, {ptrTy_});
   rtSeqCatch_ = rt("xb_seq_catch", i32_, {ptrTy_});
   rtSeqValue_ = rt("xb_seq_value", voidTy, {ptrTy_, ptrTy_});
   rtSeqWith_ = rt("xb_seq_with", voidTy, {ptrTy_, ptrTy_, ptrTy_});
@@ -446,11 +447,13 @@ void CodeGen::genFunction(const xir::Function &f) {
     for (auto &p : xb->params) cacheWords(p.get());
     for (auto &i : xb->insts) {
       line_ = i->loc.line;
+      emitting_ = i.get();
       emit(*i);
       if (!xir::isTerminator(i->op)) cacheWords(i.get());
     }
   }
   line_ = 0;
+  emitting_ = nullptr;
   b_.SetInsertPoint(fnExit_);
   if (fnMark_) b_.CreateCall(rtMvRelease_, {fnCtx_, fnMark_});
   unlinkFrame(fnFrame_, fnPrev_);
@@ -771,7 +774,11 @@ void CodeGen::checkPending(BasicBlock *unwind) {
   MDBuilder md(ctx_);
   b_.CreateCondBr(isSet, slow, cont, md.createUnlikelyBranchWeights());
   b_.SetInsertPoint(slow);
-  Value *leave = b_.CreateCall(rtPending_, {fnCtx_});
+  // A result the error block may have substituted, in a home the collector does not see: the test must not collect
+  // (xbrt.h), so destructors wait for a later one.
+  bool held = emitting_ && (emitting_->effects() & xir::Substitutes) &&
+              plan_->home(emitting_).kind == Home::Kind::Local;
+  Value *leave = b_.CreateCall(held ? rtPending_ : rtPendingGc_, {fnCtx_});
   b_.CreateCondBr(b_.CreateICmpNE(leave, ConstantInt::get(i32_, 0)), unwind, cont);
   b_.SetInsertPoint(cont);
 }

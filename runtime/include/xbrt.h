@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 29u
+#define XB_ABI_VERSION 30u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -94,20 +94,24 @@ typedef struct xb_item {
 } xb_item;
 
 /* [ABI] `pending` is tested by compiled code after every call that can
- * fail. When it is non-zero the code calls xb_pending(), which serves
- * requests that only need a pause (a GC safepoint) and returns non-zero when
- * the function must unwind (a BREAK or a QUIT; an error that is not recovered
- * ends in one; an error while Type() evaluates its text ends that evaluation,
- * a TRAP no BEGIN SEQUENCE catches). The common case costs one
- * load and one predictable branch, works on every target, and survives AWAIT
- * (unlike setjmp/longjmp). */
+ * fail. When it is non-zero the code calls xb_pending_gc(), which serves
+ * requests that only need a pause (a GC safepoint) and runs the destructors of
+ * the objects to finalize, and returns non-zero when the function must unwind
+ * (a BREAK or a QUIT; an error that is not recovered ends in one; an error
+ * while Type() evaluates its text ends that evaluation, a TRAP no BEGIN
+ * SEQUENCE catches). The destructors may collect, so after an operation whose
+ * error may substitute its result while that result waits where the collector
+ * does not see it, the code calls xb_pending() instead, which never collects
+ * and leaves the destructors to a later test (the runtime's C code calls it
+ * too). The common case costs one load and one predictable branch, works on
+ * every target, and survives AWAIT (unlike setjmp/longjmp). */
 enum {
   XB_PENDING_NONE      = 0,
   XB_PENDING_BREAK     = 1u << 1,
   XB_PENDING_QUIT      = 1u << 2,
   XB_PENDING_SAFEPOINT = 1u << 3,
   XB_PENDING_TRAP      = 1u << 4,
-  XB_PENDING_FINALIZE  = 1u << 5, /* objects to finalize: xb_pending runs their destructors */
+  XB_PENDING_FINALIZE  = 1u << 5, /* objects to finalize: xb_pending_gc runs their destructors */
 };
 #define XB_PENDING_UNWIND (XB_PENDING_BREAK | XB_PENDING_QUIT | XB_PENDING_TRAP)
 
@@ -220,6 +224,7 @@ struct xb_block {
 #endif
 
 int32_t  xb_pending(xb_ctx *ctx);
+int32_t  xb_pending_gc(xb_ctx *ctx);
 
 /* The layout the module was compiled for: offsets of xb_str.data,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals and

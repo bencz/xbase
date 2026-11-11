@@ -5,6 +5,7 @@ kept: O b2 TB TB TM .T.
 methods: TA:a TA who TM:a TM:a TB who TM:a
 inside: a/b2 b2 TA
 args: 2NNUU 0UUUU 3UCLU
+super of a cast: TL1 TL1:Who L1's v TL2:Who
 kind: .T. .T. .F. .F. .T.
 has: .T. .F. .T. .F. .T. .T. .F.
 vars: A,N methods: SHOW,BOTH,GETTER,PARENT,ARGS,WHO error:         14          0

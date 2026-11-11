@@ -169,7 +169,7 @@ use it).
 Finalization: an object registered with `xb_gc_finalizable` (an object whose class has a destructor) that a
 collection does not reach moves, after marking, to a queue of finalized objects, and is marked with what it refers to
 (the queue is a root until `xb_gc_next_finalized` hands it out); the collection then raises `XB_PENDING_FINALIZE` in
-every context. While `xb_gc_inhibit` is in effect, allocation and `xb_gc_collect` collect nothing.
+every context.
 
 ## Hashes
 
@@ -301,47 +301,48 @@ first time it is used (its class function, or a subclass):
   the class that declares it (the value itself: an INIT array is the same array), except a `SHARED` one, which the
   class and its subclasses share; the values are roots of the collector. A cast reads the values of the class it sees.
 - Friends: the methods of a class named by `FRIEND CLASS` (not its subclasses'), and a function named by `FRIEND
-  FUNCTION` with the codeblocks it makes (found from the innermost frame of the call stack, a codeblock's name without
-  its `(b)` prefix, `XB_BLOCK_PREFIX`), reach the HIDDEN and PROTECTED members of the class and assign its READONLY
-  variables.
+  FUNCTION` with the codeblocks it makes and the macros it evaluates (found from the innermost frame of the call stack
+  that is not a macro's, a codeblock's name without its `(b)` prefix, `XB_BLOCK_PREFIX`), reach the HIDDEN and PROTECTED
+  members of the class and assign its READONLY variables.
 - Scopes: HIDDEN members answer F's own methods, PROTECTED ones the methods of their class and its subclasses, a
   READONLY variable is assigned by those only (and by friends); anything else is `BASE/41` `Scope violation (hidden)` or
   `BASE/42` `Scope violation (protected)` (generic code 13, the operation `CLASS:MESSAGE`, no `args`). A message the
   class does not answer is `BASE/1004` (`BASE/1005` to assign) `Message not found`, the operation `CLASS:MESSAGE`, the
   object in `args`, as in the reference; the runtime's own classes keep Clipper's `No exported method`.
 - Casts: a message naming a class of the object's line that no member answers (`o:TParent`; `SUPER`, outside the
-  `Super:` of a method, the first parent) gives the object seen as that class, without allocating: the same item with
-  the class's position in the line in its `width` field. A message to a cast reaches what that class answers (its
-  methods, its variables in their areas), `ClassName()` is that class's name, a method receives the object itself as
-  `Self`, and a cast kept in a variable stays one. A cast is the object: `==` gives `.T.` (the reference makes a new
-  object, so `.F.`).
+  `Super:` of a method, the first parent of the class the object is seen as) gives the object seen as that class,
+  without allocating: the same item with the class's position in the line in its `width` field. A message to a cast
+  reaches what that class answers (its methods, its variables in their areas), `ClassName()` is that class's name, a
+  method receives the object itself as `Self`, and a cast kept in a variable stays one. A cast is the object: `==` gives
+  `.T.` (the reference makes a new object, so `.F.`).
 - A method's frame is marked `XB_PROC_METHOD`: `PCount()` and `PValue()` count the arguments after `Self`.
 - Reflection (`rtl/objects.c`, names in any letter case): `ObjIsKindOf( o, cClass )` (the class or one it inherits
   from), `ObjHasVar( o, cName )` and `ObjHasMethod( o, cName )` (any scope; ACCESS and ASSIGN are methods),
   `ObjVars( o )` and `ObjMethods( o )` (the EXPORTED ones, upper-cased, in table order; anything but an object is
   `BASE/0`), `ObjSend( x, cMessage, ... )` (`x:cMessage( ... )` from outside the class; `_NAME` assigns). The
   runtime's own classes answer with their variables and no methods.
-- Operators (`OPERATOR "op"`, `METHOD name OPERATOR "op"`): a method whose message is the operator
-  (`XB_OPERATOR_*` in `xbrt.h`: `+ - * / % ^ = == != < <= > >= $ ! ++ -- []`; the compiler maps `**`, `<>`, `#`
-  and `.NOT.` to them). The runtime's operator functions ask the class of the left (or only) operand when it is an
-  object, before anything else (`xb_class_operator`; `==` too, even for the same object): the method receives the
-  right operand; `[]` receives the index, and the value when it assigns (`o[i] += x` reads, then assigns). Compiled
-  fast paths never see objects, so they are unchanged. As in the reference, the right operand's class is not asked,
-  and `.AND.`, `.OR.` and unary minus cannot be overloaded (the compiler rejects `.AND.` and `.OR.`, which the
-  reference accepts and never calls).
+- Operators (`OPERATOR "op"`, `METHOD name OPERATOR "op"`): a method whose message is the operator (`XB_OPERATOR_*` in
+  `xbrt.h`: `+ - * / % ^ = == != < <= > >= $ ! ++ -- []`; the compiler maps `**`, `<>`, `#` and `.NOT.` to them). The
+  runtime's operator functions ask the class of the left (or only) operand when it is an object, before anything else
+  (`xb_class_operator`; `==` too, even for the same object; for a cast, the class it shows): the method receives the
+  right operand; `[]` receives the index, and the value when it assigns (`o[i] += x` reads, then assigns). Compiled fast
+  paths never see objects, so they are unchanged. As in the reference, the right operand's class is not asked, and
+  `.AND.`, `.OR.` and unary minus cannot be overloaded (the compiler rejects `.AND.` and `.OR.`, which the reference
+  accepts and never calls).
 - Scalar classes: `ASSOCIATE CLASS name WITH TYPE type` (`std.ch`, `ClassAssociate( name(), "type" )`; a type as
   `ClassName()` names it: `ARRAY`, `BLOCK`, `CHARACTER`, `DATE`, `HASH`, `LOGICAL`, `NIL`, `NUMERIC`) makes values of
   the type answer the class's methods and class variables, the value as `Self`; `ClassName()` is the class's, and its
   errors name it. A class with instance variables is `BASE/3005`. Messages it does not answer are the class's
   `Message not found`; values of other types behave as before.
-- Destructors (`DESTRUCTOR name`, `xb_class_def.destructor`): an object of a class whose line has one is registered
-  with the collector (`xb_gc_finalizable`) when it is made. A collection that finds it unreachable keeps it, and what
-  it refers to, alive in a queue and raises `XB_PENDING_FINALIZE`; the next pending test (`xb_pending`, also right
-  inside `__GcCollect()`) runs the destructor of each class of its line that has one, its own class first, with the
-  object as `Self` (`xb_classes_finalize`). Destructors run with collections inhibited (`xb_gc_inhibit`), so the
-  pending test still never collects; an error is the error block's, and a `BREAK` or an unrecovered error ends the
-  destructor alone, while a `QUIT` stays. When the start function returns, a full collection destroys what it alone
-  kept, before the `EXIT` procedures. A destructor runs once: one that stores its object keeps it alive, without the
+- Destructors (`DESTRUCTOR name`, `xb_class_def.destructor`): an object of a class whose line has one is registered with
+  the collector (`xb_gc_finalizable`) when it is made. A collection that finds it unreachable keeps it, and what it
+  refers to, alive in a queue and raises `XB_PENDING_FINALIZE`; the next pending test of compiled code that may collect
+  (`xb_pending_gc`, also right inside `__GcCollect()`) runs the destructor of each class of its line that has one, its
+  own class first, with the object as `Self` (`xb_classes_finalize`); destructors may allocate and collect. The requests
+  already pending (a `BREAK` on its way, with its value) wait while they run; an error is the error block's, and a
+  `BREAK` or an unrecovered error ends the destructor alone, while a `QUIT` stays and leaves the other queued objects
+  for the end. When the start function returns, a full collection destroys what it alone kept, and what is still queued,
+  before the `EXIT` procedures. A destructor runs once: one that stores its object keeps it alive, without the
   reference's error. Objects die when a collection finds them unreachable (a frame temporary may keep one until its
   function returns), not, as with the reference's reference counts, the moment the last reference goes.
 - Inline caches: each send of compiled code has its own `xb_send_cache`. A message that reaches a member of an object
@@ -511,10 +512,11 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 *frames` and `int32_t set_decimals` (SET DECIMALS, which inline `/` and `%` read). `pending` holds requests. The runtime
 sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`, `XB_PENDING_FINALIZE` when there are
 objects to destroy, and `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro operator](#macro-operator)). Compiled
-code tests the field after each fallible call; when it is set the code calls `xb_pending`, which serves pauses (a
-safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a `BEGIN
-SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)). The check
-stays valid across `AWAIT`. `QUIT` raises `XB_PENDING_QUIT` with exit code 0.
+code tests the field after each fallible call; when it is set the code calls `xb_pending_gc` (or `xb_pending`, which
+never collects, where a substituted result waits unseen: see [compiler.md](compiler.md#xir-to-llvm)), which serves
+pauses (a safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a
+`BEGIN SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)).
+The check stays valid across `AWAIT`. `QUIT` raises `XB_PENDING_QUIT` with exit code 0.
 
 A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`) makes an `Error` object (see [Objects
 and messages](#objects-and-messages)): subsystem `BASE`, the subcode, the generic code (`error.ch`, shared with xBase

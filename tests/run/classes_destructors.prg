@@ -4,8 +4,10 @@
 // and an error in a destructor is the error block's like any other. Deliberate differences: objects are destroyed
 // by the collector (here __GcCollect()) once unreachable, not the moment the last reference goes; a destructor that
 // keeps its object makes it live again, without an error, and it is not destroyed twice. Also many objects, a BREAK
-// in a destructor (it ends the destructor only), and destructors creating objects.
-STATIC aKeep := {}, nDone := 0
+// in a destructor (it ends the destructor only), destructors creating objects, destructors that run while a BREAK
+// is on its way (they run whole, and the BREAK goes on with its value), a destructor that allocates much (it may
+// collect) and one that collects, whose objects are destroyed after it.
+STATIC aKeep := {}, nDone := 0, nRan := 0, nFinished := 0
 
 PROCEDURE Main()
    Make( "TA", "a1" )
@@ -27,6 +29,12 @@ PROCEDURE Main()
    ? "many:", nDone
    Make( "TG", "g1" )
    ? "creating:", Collect()
+   Collect()
+   ? "while breaking:", Breaking(), nRan == nFinished, nRan > 0
+   Make( "THeavy", "h1" )
+   ? "allocating:", Collect()
+   Make( "TCollects", "c2" )
+   ? "collecting:", Collect()
    TA():New( "local at exit" )
    ? "end of main"
 RETURN
@@ -42,6 +50,19 @@ RETURN NIL
 STATIC FUNCTION Collect()
    __GcCollect()
 RETURN "collected"
+
+STATIC FUNCTION Breaking()
+   LOCAL i, e, nCaught := 0
+   ErrorBlock( {| oErr | Break( oErr ) } )
+   FOR i := 1 TO 20000
+      TWork():New()
+      BEGIN SEQUENCE
+         e := Space( 2000 ) + i
+      RECOVER USING e
+         nCaught += IIF( ValType( e ) == "O" .AND. e:operation == "+", 1, 0 )
+      END SEQUENCE
+   NEXT
+RETURN nCaught == 20000
 
 STATIC PROCEDURE Many()
    LOCAL i
@@ -116,4 +137,38 @@ METHOD PROCEDURE Spawn CLASS TG
    ?? " [spawned " + o:name + "]"
 RETURN
 
-REQUEST TA, TB, TC, TD, TE, TF, TG
+CLASS TWork
+   DESTRUCTOR Work
+ENDCLASS
+
+METHOD PROCEDURE Work CLASS TWork
+   LOCAL a := {}
+   nRan++
+   AAdd( a, Space( 10 ) )
+   nFinished++
+RETURN
+
+CLASS THeavy INHERIT TA
+   DESTRUCTOR Heavy
+ENDCLASS
+
+METHOD PROCEDURE Heavy CLASS THeavy
+   LOCAL i, s
+   FOR i := 1 TO 2000
+      s := Space( 1000000 )
+   NEXT
+   ?? " [allocated " + LTrim( Str( i - 1 ) ) + " MB]"
+RETURN
+
+CLASS TCollects INHERIT TA
+   DESTRUCTOR Collects
+ENDCLASS
+
+METHOD PROCEDURE Collects CLASS TCollects
+   Make( "TA", "made by " + ::name )
+   __GcCollect( .T. )
+   __GcCollect()
+   ?? " [collected in " + ::name + "]"
+RETURN
+
+REQUEST TA, TB, TC, TD, TE, TF, TG, THeavy, TCollects

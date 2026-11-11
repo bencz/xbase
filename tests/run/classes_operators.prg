@@ -3,7 +3,8 @@
 // assigned (the index, then the value); only the left operand's class is asked (1 + o is an error), == calls the
 // operator even for the same object, and unary minus has none. ASSOCIATE CLASS ... WITH TYPE: values of the type
 // answer the class's methods and class variables as Self, ClassName() is the class's, an unknown message is the
-// class's error. Deliberate difference: a scope violation names the class (the reference names the type there).
+// class's error. An operator on a cast to a class without it is the plain operator's error. Deliberate difference: a
+// scope violation names the class (the reference names the type there).
 // Also ObjMethods leaving operators out, and ClassAssociate's errors.
 PROCEDURE Main()
    LOCAL a := TV():New( 1 ), b := TV():New( 2 ), c, e
@@ -28,7 +29,8 @@ PROCEDURE Main()
    ? "associate:", ClassAssociate( TStr(), "TIMESTAMP" ), ClassAssociate( TStr(), "character" )
 
    ErrorBlock( {| oErr | QOut( "error:", oErr:subCode, oErr:description, oErr:operation ), Break( oErr ) } )
-   FOR EACH e IN { {|| 1 + a }, {|| -a }, {|| "abc":Nope() }, {|| ( 1 ):Nope() }, {|| "abc":Hidden() }, ;
+   FOR EACH e IN { {|| 1 + a }, {|| -a }, {|| TOpChild():New():TOpBase + 1 }, {|| "abc":Nope() }, ;
+                   {|| ( 1 ):Nope() }, {|| "abc":Hidden() }, ;
                    {|| ClassAssociate( TV():New( 1 ), "DATE" ) }, {|| ClassAssociate( "x", "DATE" ) } }
       BEGIN SEQUENCE
          Eval( e )
@@ -73,6 +75,13 @@ RETURN TV():New( ::n + IIF( ValType( x ) == "O", x:n, x ) )
 
 STATIC FUNCTION Show( x )
 RETURN IIF( x == NIL, "NIL", LTrim( Str( x ) ) )
+
+CLASS TOpBase
+ENDCLASS
+
+CLASS TOpChild INHERIT TOpBase
+   OPERATOR "+" ARG x INLINE "child +"
+ENDCLASS
 
 CLASS TStr
    CLASSVAR Count INIT 5

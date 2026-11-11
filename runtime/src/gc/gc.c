@@ -147,7 +147,6 @@ static struct {
   size_t finalizableLen, finalizableCap;
   xb_item *finalized;              /* found unreachable, kept alive (roots) until they are finalized, in order */
   size_t finalizedHead, finalizedLen, finalizedCap;
-  unsigned inhibit;                /* collections wait while it is not 0 (xb_gc_inhibit) */
 } heap;
 
 static XB_THREAD_LOCAL xb_tlh *tlh;
@@ -297,7 +296,7 @@ static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
     if (*block && take_hole(*block, line_of(*limit - 1) + 1, total, cursor, limit)) continue;
     xb_mutex_lock(&heap.lock);
     report_allocation(t);
-    int collect = heap.allocated >= heap.youngBudget && !heap.inhibit;
+    int collect = heap.allocated >= heap.youngBudget;
     xb_mutex_unlock(&heap.lock);
     if (collect) {
       xb_gc_collect_young(); /* retires every thread's holes */
@@ -320,7 +319,7 @@ static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
 static void *alloc_large(size_t size) {
   xb_mutex_lock(&heap.lock);
   heap.allocated += size;
-  int collect = heap.allocated >= heap.youngBudget && !heap.inhibit;
+  int collect = heap.allocated >= heap.youngBudget;
   xb_mutex_unlock(&heap.lock);
   if (collect) xb_gc_collect_young();
   xb_large *l = xmalloc(sizeof(xb_large) + size);
@@ -788,17 +787,8 @@ static void collect(int full) {
   if (!full && fullNext) collect(1);
 }
 
-void xb_gc_collect(void) {
-  if (!heap.inhibit) collect(1);
-}
+void xb_gc_collect(void) { collect(1); }
 void xb_gc_collect_young(void) { collect(0); }
-
-void xb_gc_inhibit(int on) {
-  xb_mutex_lock(&heap.lock);
-  if (on) ++heap.inhibit;
-  else --heap.inhibit;
-  xb_mutex_unlock(&heap.lock);
-}
 
 void xb_gc_finalizable(void *obj) {
   xb_mutex_lock(&heap.lock);
@@ -817,7 +807,7 @@ int xb_gc_next_finalized(xb_item *out) {
 
 size_t xb_gc_finalizable_count(void) {
   xb_mutex_lock(&heap.lock);
-  size_t n = heap.finalizableLen;
+  size_t n = heap.finalizableLen + (heap.finalizedLen - heap.finalizedHead);
   xb_mutex_unlock(&heap.lock);
   return n;
 }

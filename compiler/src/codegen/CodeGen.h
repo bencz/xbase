@@ -240,7 +240,8 @@ private:
 
   // runtime entry points
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
-  llvm::FunctionCallee rtInc_, rtDec_, rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_;
+  llvm::FunctionCallee rtInc_, rtDec_, rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_,
+      rtPendingGc_;
   llvm::FunctionCallee rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_;
   llvm::FunctionCallee rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArgsRest_;
@@ -279,6 +280,7 @@ private:
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
   llvm::Value *fnMark_ = nullptr; // the PRIVATE mark of an activation that may create PRIVATEs (xb_mv_mark), or null
   uint32_t fnParams_ = 0; // the function's parameters: the arguments past them are what `...` passes on
+  const xir::Instruction *emitting_ = nullptr; // the instruction being lowered (checkPending)
   uint32_t fnSkip_ = 0;   // 1 in a method: its first argument (Self) is not one PCount() and PValue() count
   // `...` passes its arguments on in place (no copy): the function's one args.rest, outside loops, in a call that
   // takes references, in a function that reads its arguments nowhere else (PCount(), PValue()).

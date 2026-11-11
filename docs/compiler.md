@@ -493,12 +493,15 @@ emits the object file.
   store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for references clears its
   own `proc`: the other body shows instead.
 - After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
-  calls `xb_pending` and, if that asks to unwind, goes to the LLVM block of the xIR block's unwind block, or leaves
-  through the function's exit. A runtime operator may also return a value the error block substituted, of any type:
-  the code after it reads the result's type instead of assuming one, unless `subst.check` follows the operation (its
-  types then hold; the check reads the item's own tag and leaves for the generic copy on an unlikely edge, see
-  [xir.md](xir.md#passes)), and a comparison that feeds a condition tests the truth of what its slow path returned.
-  `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
+  calls `xb_pending_gc` (which may run destructors, and so collect) or, right after an operation whose error may
+  substitute its result while that result has a `Local` home the collector does not see (`checkPending`, from the
+  instruction being lowered), `xb_pending`, which never collects; if that asks to unwind, it goes to the LLVM block of
+  the xIR block's unwind block, or leaves through the function's exit. A runtime operator may also return a value the
+  error block substituted, of any type: the code after it reads the result's type instead of assuming one, unless
+  `subst.check` follows the operation (its types then hold; the check reads the item's own tag and leaves for the
+  generic copy on an unlikely edge, see [xir.md](xir.md#passes)), and a comparison that feeds a condition tests the
+  truth of what its slow path returned. `truth` tests the item type inline; a non-logical value calls `xb_cond_error`
+  and leaves.
 - Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
   target `DataLayout`); a `FOR EACH` variable goes through `xb_ref_target`; a `STATIC`, a shared or captured
   variable or a parameter tests its type inline (one unsigned comparison covers `XB_T_CELL` and `XB_T_REF`), follows

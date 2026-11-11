@@ -41,21 +41,24 @@ void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len) {
 
 uint32_t xb_ctx_pending(const xb_ctx *ctx) { return ctx->pending; }
 
-/* Slow path of the pending test in compiled code. A safepoint request only
- * pauses the task (all mutators stopped for a collection); with one mutator
- * thread there is nothing to wait for, so it is simply acknowledged. Objects
- * to finalize have their destructors run here. No collection runs here (the
- * destructors run with collections inhibited): if one could, the lowering of
- * typed continuations would have to change, since a result the error block
- * substituted waits for its check in a home the collector does not see, across
- * this test (docs/xir.md, Passes). */
+/* Slow paths of the pending test (xbrt.h). A safepoint request only pauses
+ * the task (all mutators stopped for a collection); with one mutator thread
+ * there is nothing to wait for, so it is simply acknowledged. xb_pending never
+ * collects: a result the error block substituted may wait across it in a home
+ * the collector does not see (docs/xir.md, Passes), and C callers may hold
+ * items in their own variables. xb_pending_gc also runs destructors, which may
+ * collect. */
 int32_t xb_pending(xb_ctx *ctx) {
   ctx->pending &= ~(uint32_t)XB_PENDING_SAFEPOINT;
-  if (ctx->pending & XB_PENDING_FINALIZE) { /* destructors, with collections inhibited (see above) */
+  return (ctx->pending & XB_PENDING_UNWIND) != 0;
+}
+
+int32_t xb_pending_gc(xb_ctx *ctx) {
+  if (ctx->pending & XB_PENDING_FINALIZE) {
     ctx->pending &= ~(uint32_t)XB_PENDING_FINALIZE;
     xb_classes_finalize(ctx);
   }
-  return (ctx->pending & XB_PENDING_UNWIND) != 0;
+  return xb_pending(ctx);
 }
 void xb_ctx_raise(xb_ctx *ctx, uint32_t what) { ctx->pending |= what; }
 int xb_ctx_exitcode(const xb_ctx *ctx) { return ctx->exitcode; }

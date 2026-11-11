@@ -7,6 +7,9 @@ not twice: collected [divided 0] [destroy TA e1]
 error: collected [break] [destroy TA f1]
 break: collected
 many:       3000 [spawned made by g1] [destroy TA g1]
-creating: collected
-end of main [destroy TA made by g1] [destroy TA local at exit]
+creating: collected [destroy TA made by g1]
+while breaking: .T. .T. .T. [allocated 2000 MB] [destroy TA h1]
+allocating: collected [collected in c2] [destroy TA c2] [destroy TA made by c2]
+collecting: collected
+end of main [destroy TA local at exit]
 exit procedure

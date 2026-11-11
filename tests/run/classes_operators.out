@@ -11,6 +11,7 @@ scalar: ABC! TSTR          6          5.0          5          3 ARRAY C ABC!?
 associate: .F. .T.
 error:       1081 Argument error +
 error:       1080 Argument error -
+error:       1081 Argument error +
 error:       1004 Message not found TSTR:NOPE
 error:       1004 Message not found TNUM:NOPE
 error:         41 Scope violation (hidden) TSTR:HIDDEN

@@ -125,19 +125,19 @@ xIR is an internal error naming the pass. `--dump-xir` writes the result. Implem
 - `remove-dead-code`: instructions whose result is unused and that cannot fail and write nothing (the effects in
   `Ops.*`), and unused block parameters with their arguments, by a worklist.
 - `typed-continuations`, once after the others (then `simplify-cfg` and `remove-dead-code` again): an operation in a
-  loop whose error may substitute its result, whose own types hold no heap reference (numbers, logicals, dates) or
-  are a single type (a string concatenation: a constant tag), and that another operation computes with (an index
-  too) or a branch passes on, ends its block with `subst.check` (its result is not of its own types: only a
-  substituted value can be) and a `cond_br` to a block that takes the value with `subst.value` and enters a generic
-  copy of the function right after the copy of the operation. The copy is made once per function, of at most 500
-  instructions (a larger one doubles code that LLVM unrolls and splits again), with at most 16 checks, those of the
-  most nested loops (`loopDepths` in `Analysis`); not in a function with unwind blocks, which take no parameters. The
-  values that reach the copy are joined to its own by block parameters, built on demand from the uses (Braun et
-  al.), and parameters that receive one value only are removed. The copy's operations keep giving any type, so a
-  substituted value of any type runs correctly, while the original code keeps registers and constant type tags. The
-  lowering reads the item's real tag for `subst.check` and weights its branch unlikely; between the operation and
-  `subst.value` the result may sit in a home the collector does not see, which holds while the pending test after
-  the operation (`xb_pending`) never collects (one mutator).
+  loop whose error may substitute its result, whose own types hold no heap reference (numbers, logicals, dates) or are a
+  single type (a string concatenation: a constant tag), and that another operation computes with (an index too) or a
+  branch passes on, ends its block with `subst.check` (its result is not of its own types: only a substituted value can
+  be) and a `cond_br` to a block that takes the value with `subst.value` and enters a generic copy of the function right
+  after the copy of the operation. The copy is made once per function, of at most 500 instructions (a larger one doubles
+  code that LLVM unrolls and splits again), with at most 16 checks, those of the most nested loops (`loopDepths` in
+  `Analysis`); not in a function with unwind blocks, which take no parameters. The values that reach the copy are joined
+  to its own by block parameters, built on demand from the uses (Braun et al.), and parameters that receive one value
+  only are removed. The copy's operations keep giving any type, so a substituted value of any type runs correctly, while
+  the original code keeps registers and constant type tags. The lowering reads the item's real tag for `subst.check` and
+  weights its branch unlikely; between the operation and `subst.value` the result may sit in a home the collector does
+  not see, which holds because the pending test after such an operation calls `xb_pending`, which never collects (one
+  mutator), and not `xb_pending_gc`.
 
 They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
 with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor

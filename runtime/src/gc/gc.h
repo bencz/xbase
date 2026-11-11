@@ -64,12 +64,10 @@ size_t xb_gc_live_objects(void);           /* found by the last full collection 
  * collection finds unreachable is kept alive, queued, and every context gets
  * XB_PENDING_FINALIZE; xb_gc_next_finalized hands the queued objects out, in
  * the order they were found (1, or 0 when none is left; the caller roots the
- * item, which the queue no longer does). While xb_gc_inhibit(1) is in effect
- * (calls nest, each ended by xb_gc_inhibit(0)), allocation collects nothing. */
+ * item, which the queue no longer does). */
 void   xb_gc_finalizable(void *obj);
 int    xb_gc_next_finalized(xb_item *out);
-size_t xb_gc_finalizable_count(void);
-void   xb_gc_inhibit(int on);
+size_t xb_gc_finalizable_count(void);    /* registered and not yet handed out */
 _Noreturn void xb_gc_fatal(const char *why); /* unrecoverable: reports and ends the process */
 
 #endif
