@@ -65,6 +65,7 @@ typedef struct cls {
   xb_item *classValues;     /* the values of the class variables it holds itself (a root) */
   xb_item **classSlots;     /* where each class variable of the line is: here, or an ancestor's when SHARED */
   cls_state state;
+  int finalized;            /* a class of its line has a destructor */
   uint32_t initsBefore;     /* C_LINE: the INIT evaluations in progress when it began */
 } cls;
 
@@ -180,6 +181,7 @@ static void build_tables(cls *c) {
     }
   }
   if (nclass) xb_gc_add_root(c->classValues, nclass);
+  for (uint32_t k = 0; k < c->nline; ++k) c->finalized |= c->line[k]->destructor != NULL;
   c->base.name = c->def->name;
   c->base.nvars = slots;
   c->base.vars = c->slots;
@@ -295,6 +297,7 @@ void xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def) {
   if (!c) return;
   xb_object *o = xb_object_new(&c->base);
   xb_set_object(r, o); /* rooted there from now on */
+  if (c->finalized) xb_gc_finalizable(o);
   xb_item copy;
   xb_set_nil(&copy);
   xb_gc_root_push(ctx, &copy);
@@ -545,4 +548,31 @@ int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a,
   xb_class_send(ctx, r, op, NULL, 0, argc, argv);
   xb_gc_root_pop(ctx, argc);
   return 1;
+}
+
+void xb_classes_finalize(xb_ctx *ctx) {
+  static int running; /* a destructor's own pending tests */
+  if (running) return;
+  running = 1;
+  xb_gc_inhibit(1);
+  xb_item obj, self, ret;
+  xb_set_nil(&obj);
+  xb_set_nil(&ret);
+  xb_gc_root_push(ctx, &obj);
+  xb_gc_root_push(ctx, &ret);
+  while (xb_gc_next_finalized(&obj)) {
+    const cls *c = ((const xb_object *)obj.v.p)->cls->compiled;
+    for (uint32_t k = 0; k < c->nline; ++k) {
+      xb_func destructor = c->line[k]->destructor;
+      if (!destructor) continue;
+      uint32_t before = ctx->pending;
+      self = obj;
+      destructor(ctx, &ret, 1, &self);
+      ctx->pending = before | (ctx->pending & XB_PENDING_QUIT);
+      if (ctx->pending & XB_PENDING_QUIT) break;
+    }
+  }
+  xb_gc_root_pop(ctx, 2);
+  xb_gc_inhibit(0);
+  running = 0;
 }

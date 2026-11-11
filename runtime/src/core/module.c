@@ -82,6 +82,12 @@ void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
   if (start_up(ctx, argc, argv)) call(ctx, start, argc, argv);
   ctx->pending = XB_PENDING_NONE; /* the request is served: the exit code stays */
   xb_set_nil(&ctx->break_value);
+  if (xb_gc_finalizable_count()) { /* what the start function alone kept: destroyed before the EXIT procedures */
+    xb_gc_collect();
+    ctx->pending = XB_PENDING_NONE;
+    xb_classes_finalize(ctx);
+    ctx->pending = XB_PENDING_NONE;
+  }
   for (const xb_module *m = modules; m; m = m->next)
     for (uint32_t k = 0; k < m->nexit; ++k) {
       call(ctx, m->procs[m->ninit + k], 0, argv); /* no arguments; argv stays a valid address */

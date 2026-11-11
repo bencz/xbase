@@ -47,8 +47,11 @@ void Generator::declareClasses(const xb::Module &ast) {
     for (const ClassVarDecl &v : c->classVars) cls.classVars.push_back({v.name, v.flags});
     cls.friendClasses = c->friendClasses;
     cls.friendFunctions = c->friendFunctions;
-    for (const ClassMethodDecl &m : c->methods)
-      if (m.impl) cls.methods.push_back({m.message(), funcs_.at(m.impl->name), m.flags});
+    for (const ClassMethodDecl &m : c->methods) {
+      if (!m.impl) continue;
+      if (m.destructor) cls.destructor = funcs_.at(m.impl->name);
+      else cls.methods.push_back({m.message(), funcs_.at(m.impl->name), m.flags});
+    }
     if (c->initValues) cls.init = funcs_.at(c->initValues->name);
     mod_->classes.push_back(std::move(cls));
   }

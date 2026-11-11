@@ -143,6 +143,11 @@ static struct {
   xb_gc_hdr **retained;            /* old objects that keep pointing to young ones, with how to record them */
   uint8_t *retainedHow;
   size_t retainedLen, retainedCap;
+  xb_gc_hdr **finalizable;         /* objects to finalize when a collection finds them unreachable */
+  size_t finalizableLen, finalizableCap;
+  xb_item *finalized;              /* found unreachable, kept alive (roots) until they are finalized, in order */
+  size_t finalizedHead, finalizedLen, finalizedCap;
+  unsigned inhibit;                /* collections wait while it is not 0 (xb_gc_inhibit) */
 } heap;
 
 static XB_THREAD_LOCAL xb_tlh *tlh;
@@ -292,7 +297,7 @@ static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
     if (*block && take_hole(*block, line_of(*limit - 1) + 1, total, cursor, limit)) continue;
     xb_mutex_lock(&heap.lock);
     report_allocation(t);
-    int collect = heap.allocated >= heap.youngBudget;
+    int collect = heap.allocated >= heap.youngBudget && !heap.inhibit;
     xb_mutex_unlock(&heap.lock);
     if (collect) {
       xb_gc_collect_young(); /* retires every thread's holes */
@@ -315,7 +320,7 @@ static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
 static void *alloc_large(size_t size) {
   xb_mutex_lock(&heap.lock);
   heap.allocated += size;
-  int collect = heap.allocated >= heap.youngBudget;
+  int collect = heap.allocated >= heap.youngBudget && !heap.inhibit;
   xb_mutex_unlock(&heap.lock);
   if (collect) xb_gc_collect_young();
   xb_large *l = xmalloc(sizeof(xb_large) + size);
@@ -632,6 +637,40 @@ static void mark_roots(void) {
   }
   for (const xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
+  for (size_t i = heap.finalizedHead; i < heap.finalizedLen; ++i) mark_item(&heap.finalized[i]);
+}
+
+/* After marking: the finalizable objects it did not reach move to the queue
+ * of finalized ones, which keeps them, and what they refer to, alive (marked
+ * now, roots later) until xb_gc_next_finalized hands them out. */
+static void find_finalized(void) {
+  size_t kept = 0;
+  for (size_t i = 0; i < heap.finalizableLen; ++i) {
+    xb_gc_hdr *h = heap.finalizable[i];
+    if (h->state & (XB_GC_SEEN | XB_GC_MARKED)) {
+      heap.finalizable[kept++] = h;
+      continue;
+    }
+    if (heap.finalizedLen == heap.finalizedCap) {
+      if (heap.finalizedHead) { /* the handed-out entries make room first */
+        memmove(heap.finalized, heap.finalized + heap.finalizedHead,
+                (heap.finalizedLen - heap.finalizedHead) * sizeof *heap.finalized);
+        heap.finalizedLen -= heap.finalizedHead;
+        heap.finalizedHead = 0;
+      }
+      if (heap.finalizedLen == heap.finalizedCap) {
+        size_t n = heap.finalizedCap ? heap.finalizedCap * 2 : 64;
+        xb_item *q = realloc(heap.finalized, n * sizeof *q);
+        if (!q) out_of_memory();
+        heap.finalized = q;
+        heap.finalizedCap = n;
+      }
+    }
+    xb_item *it = &heap.finalized[heap.finalizedLen++];
+    xb_set_object(it, (xb_object *)(h + 1));
+    mark_item(it);
+  }
+  heap.finalizableLen = kept;
 }
 
 /* Clears the marks of every object and every line, before a full collection.
@@ -714,6 +753,10 @@ static void collect(int full) {
   }
   heap.rememberedLen = 0;
   while (heap.stackLen) trace_queued(heap.stack[--heap.stackLen]);
+  if (heap.finalizableLen) {
+    find_finalized();
+    while (heap.stackLen) trace_queued(heap.stack[--heap.stackLen]);
+  }
   if (!full) settle_young();
 
   for (xb_large **pl = &heap.large; *pl;) {
@@ -739,12 +782,45 @@ static void collect(int full) {
   if (heap.youngBudget < XB_GC_YOUNG_MIN) heap.youngBudget = XB_GC_YOUNG_MIN;
   heap.allocated = 0;
   int fullNext = heap.oldBytes >= heap.fullThreshold;
+  if (heap.finalizedLen > heap.finalizedHead)
+    for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) ctx->pending |= XB_PENDING_FINALIZE;
   xb_mutex_unlock(&heap.lock);
   if (!full && fullNext) collect(1);
 }
 
-void xb_gc_collect(void) { collect(1); }
+void xb_gc_collect(void) {
+  if (!heap.inhibit) collect(1);
+}
 void xb_gc_collect_young(void) { collect(0); }
+
+void xb_gc_inhibit(int on) {
+  xb_mutex_lock(&heap.lock);
+  if (on) ++heap.inhibit;
+  else --heap.inhibit;
+  xb_mutex_unlock(&heap.lock);
+}
+
+void xb_gc_finalizable(void *obj) {
+  xb_mutex_lock(&heap.lock);
+  stack_push(&heap.finalizable, &heap.finalizableLen, &heap.finalizableCap, xb_gc_header(obj));
+  xb_mutex_unlock(&heap.lock);
+}
+
+int xb_gc_next_finalized(xb_item *out) {
+  xb_mutex_lock(&heap.lock);
+  int found = heap.finalizedHead < heap.finalizedLen;
+  if (found) *out = heap.finalized[heap.finalizedHead++];
+  if (heap.finalizedHead == heap.finalizedLen) heap.finalizedHead = heap.finalizedLen = 0;
+  xb_mutex_unlock(&heap.lock);
+  return found;
+}
+
+size_t xb_gc_finalizable_count(void) {
+  xb_mutex_lock(&heap.lock);
+  size_t n = heap.finalizableLen;
+  xb_mutex_unlock(&heap.lock);
+  return n;
+}
 
 size_t xb_gc_live_objects(void) {
   xb_mutex_lock(&heap.lock);

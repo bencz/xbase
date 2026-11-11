@@ -162,8 +162,14 @@ rest of the runtime and compiled code use.
   none. A collection requires every mutator to be stopped at a safepoint (`XB_PENDING_SAFEPOINT`); while tasks run on
   one thread the allocating thread is the only mutator.
 
-`__GcCollect( [lYoung] )` runs a full collection (a young one with `.T.`) and returns the number of live objects the
-last full collection found (tests use it).
+`__GcCollect( [lYoung] )` runs a full collection (a young one with `.T.`), then the destructors of the objects it
+found unreachable ([Classes](#classes)), and returns the number of live objects the last full collection found (tests
+use it).
+
+Finalization: an object registered with `xb_gc_finalizable` (an object whose class has a destructor) that a
+collection does not reach moves, after marking, to a queue of finalized objects, and is marked with what it refers to
+(the queue is a root until `xb_gc_next_finalized` hands it out); the collection then raises `XB_PENDING_FINALIZE` in
+every context. While `xb_gc_inhibit` is in effect, allocation and `xb_gc_collect` collect nothing.
 
 ## Hashes
 
@@ -327,7 +333,17 @@ first time it is used (its class function, or a subclass):
   the type answer the class's methods and class variables, the value as `Self`; `ClassName()` is the class's, and its
   errors name it. A class with instance variables is `BASE/3005`. Messages it does not answer are the class's
   `Message not found`; values of other types behave as before.
-- Not yet: destructors, and the compiled fast paths (see
+- Destructors (`DESTRUCTOR name`, `xb_class_def.destructor`): an object of a class whose line has one is registered
+  with the collector (`xb_gc_finalizable`) when it is made. A collection that finds it unreachable keeps it, and what
+  it refers to, alive in a queue and raises `XB_PENDING_FINALIZE`; the next pending test (`xb_pending`, also right
+  inside `__GcCollect()`) runs the destructor of each class of its line that has one, its own class first, with the
+  object as `Self` (`xb_classes_finalize`). Destructors run with collections inhibited (`xb_gc_inhibit`), so the
+  pending test still never collects; an error is the error block's, and a `BREAK` or an unrecovered error ends the
+  destructor alone, while a `QUIT` stays. When the start function returns, a full collection destroys what it alone
+  kept, before the `EXIT` procedures. A destructor runs once: one that stores its object keeps it alive, without the
+  reference's error. Objects die when a collection finds them unreachable (a frame temporary may keep one until its
+  function returns), not, as with the reference's reference counts, the moment the last reference goes.
+- Not yet: the compiled fast paths (see
   [xir.md](xir.md#classes)).
 
 ## References
@@ -483,14 +499,14 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
 ## Errors and pending requests
 
-`xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t exitcode`,
-`xb_frame *frames` and `int32_t set_decimals` (SET DECIMALS, which inline `/` and `%` read). `pending` holds requests.
-The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`, and `XB_PENDING_TRAP`
-while `Type()` evaluates, see [Macro operator](#macro-operator)). Compiled code tests the
-field after each fallible call; when it is set the code calls `xb_pending`, which serves pauses (a safepoint) and
-returns non-zero when the function must unwind: to a `BEGIN SEQUENCE` handler of the function, or to its caller
-([xir.md](xir.md#control-flow-for-errors-and-exceptions)). The check stays valid across `AWAIT`. `QUIT` raises
-`XB_PENDING_QUIT` with exit code 0.
+`xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t exitcode`, `xb_frame
+*frames` and `int32_t set_decimals` (SET DECIMALS, which inline `/` and `%` read). `pending` holds requests. The runtime
+sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`, `XB_PENDING_FINALIZE` when there are
+objects to destroy, and `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro operator](#macro-operator)). Compiled
+code tests the field after each fallible call; when it is set the code calls `xb_pending`, which serves pauses (a
+safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a `BEGIN
+SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)). The check
+stays valid across `AWAIT`. `QUIT` raises `XB_PENDING_QUIT` with exit code 0.
 
 A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`) makes an `Error` object (see [Objects
 and messages](#objects-and-messages)): subsystem `BASE`, the subcode, the generic code (`error.ch`, shared with xBase

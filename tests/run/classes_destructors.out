@@ -1,0 +1,12 @@
+ [destroy TA a1]
+collect: collected [destroy TA b1]
+inherited: collected [destroy TC c1] [destroy TA c1]
+chained: collected [keep d1] [destroy TA d1]
+kept: collected          1 d1
+not twice: collected [divided 0] [destroy TA e1]
+error: collected [break] [destroy TA f1]
+break: collected
+many:       3000 [spawned made by g1] [destroy TA g1]
+creating: collected
+end of main [destroy TA made by g1] [destroy TA local at exit]
+exit procedure

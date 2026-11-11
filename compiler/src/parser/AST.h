@@ -397,6 +397,7 @@ struct ClassMethodDecl {
   std::vector<Param> params;
   bool variadic = false;
   std::string op;                // OPERATOR: its message (XB_OPERATOR_*), else empty
+  bool destructor = false;       // DESTRUCTOR: run when an object is unreachable, never a message
   ExprPtr inlineBody;            // INLINE expr, or null
   FuncDecl *impl = nullptr;      // set by Sema: the function that implements it
   std::string message() const {

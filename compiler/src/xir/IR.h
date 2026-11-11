@@ -316,6 +316,7 @@ public:
     };
     std::vector<Method> methods;
     Function *init = nullptr;                       // returns the INIT values (vars, then classVars), or null
+    Function *destructor = nullptr;                 // DESTRUCTOR, or null
   };
   std::vector<Class> classes;
 };

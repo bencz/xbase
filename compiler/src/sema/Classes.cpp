@@ -53,9 +53,13 @@ void ClassResolver::run(Module &m) {
           diag_.error(v.loc, "'" + v.name + "' is declared twice in class " + c->name);
         messages.insert("_" + v.name);
       }
-    for (const ClassMethodDecl &d : c->methods)
+    bool destructor = false;
+    for (const ClassMethodDecl &d : c->methods) {
       if (!messages.insert(d.message()).second)
         diag_.error(d.loc, "'" + d.name + "' is declared twice in class " + c->name);
+      if (d.destructor && destructor) diag_.error(d.loc, "class " + c->name + " has a second DESTRUCTOR");
+      destructor = destructor || d.destructor;
+    }
   }
   for (auto &c : m.classes) {
     std::set<const ClassDecl *> seen;

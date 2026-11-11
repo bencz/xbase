@@ -60,6 +60,16 @@ void  xb_gc_unregister(xb_ctx *ctx);
 void  xb_gc_root_push(xb_ctx *ctx, xb_item *it);
 void  xb_gc_root_pop(xb_ctx *ctx, unsigned n);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */
+/* Finalization: an object registered with xb_gc_finalizable that a
+ * collection finds unreachable is kept alive, queued, and every context gets
+ * XB_PENDING_FINALIZE; xb_gc_next_finalized hands the queued objects out, in
+ * the order they were found (1, or 0 when none is left; the caller roots the
+ * item, which the queue no longer does). While xb_gc_inhibit(1) is in effect
+ * (calls nest, each ended by xb_gc_inhibit(0)), allocation collects nothing. */
+void   xb_gc_finalizable(void *obj);
+int    xb_gc_next_finalized(xb_item *out);
+size_t xb_gc_finalizable_count(void);
+void   xb_gc_inhibit(int on);
 _Noreturn void xb_gc_fatal(const char *why); /* unrecoverable: reports and ends the process */
 
 #endif

@@ -156,7 +156,8 @@ bool Parser::atClassStart() const {
 
 // METHOD, ACCESS or ASSIGN name ...: a method's implementation, outside a CLASS.
 bool Parser::atMemberStart() const {
-  return (atStmtKw("METHOD") || atStmtKw("ACCESS") || atStmtKw("ASSIGN")) && ahead().kind == Tok::Ident;
+  return (atStmtKw("METHOD") || atStmtKw("ACCESS") || atStmtKw("ASSIGN") || atStmtKw("DESTRUCTOR")) &&
+         ahead().kind == Tok::Ident;
 }
 
 // EXTERN[AL] FUNCTION: a declaration, at file level like FUNCTION.
@@ -272,11 +273,16 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
     fn->isStatic = true; // the runtime runs it; nothing calls it by name
     advance();
   } else if (atMemberStart()) {
-    fn->member = atKw("METHOD") ? FuncDecl::Member::Method
-                 : atKw("ACCESS") ? FuncDecl::Member::Access
-                                  : FuncDecl::Member::Assign;
+    fn->member = atKw("ACCESS") ? FuncDecl::Member::Access
+                 : atKw("ASSIGN") ? FuncDecl::Member::Assign
+                                  : FuncDecl::Member::Method; // METHOD, DESTRUCTOR
+    fn->isProcedure = atKw("DESTRUCTOR");
+    if ((isKw(ahead(), "PROCEDURE") || isKw(ahead(), "FUNCTION")) && ahead(2).kind == Tok::Ident) {
+      advance(); // METHOD PROCEDURE name, METHOD FUNCTION name
+      fn->isProcedure = atKw("PROCEDURE");
+    }
   }
-  fn->isProcedure = atKw("PROCEDURE");
+  if (fn->member == FuncDecl::Member::None) fn->isProcedure = atKw("PROCEDURE");
   advance();
   if (at(Tok::Ident)) {
     fn->name = cur().upper;
@@ -336,6 +342,7 @@ static int scopeWord(const std::string &w, bool label) {
 //   VAR | DATA name, ... [AS | TYPE type] [INIT | ASSIGN expr] [scope] [READONLY | RO]
 //   CLASSVAR | CLASSDATA | CLASS VAR | CLASS DATA name, ... (as VAR) [SHARED]
 //   FRIEND CLASS name, ... | FRIEND FUNCTION name, ...
+//   DESTRUCTOR name[()]
 //   METHOD name[( params )] [AS type] [CONSTRUCTOR] [INLINE expr, ...] [scope]
 //   ACCESS name [INLINE expr, ...] [scope], ASSIGN name( param ) [INLINE expr, ...] [scope]
 std::unique_ptr<ClassDecl> Parser::parseClass() {
@@ -430,6 +437,18 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
       uint32_t flags;
       memberScope(flags, true, classVar);
       for (size_t k = first; k < vars.size(); ++k) vars[k].flags = flags;
+      endOfStmt();
+      continue;
+    }
+    if (atStmtKw("DESTRUCTOR") && ahead().kind == Tok::Ident) { // DESTRUCTOR name[()]
+      advance();
+      ClassMethodDecl m;
+      m.loc = cur().loc;
+      m.name = cur().upper;
+      m.destructor = true;
+      advance();
+      if (accept(Tok::LParen)) expect(Tok::RParen, "')'");
+      cls->methods.push_back(std::move(m));
       endOfStmt();
       continue;
     }

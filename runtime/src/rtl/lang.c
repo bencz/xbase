@@ -53,10 +53,10 @@ void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* __GcCollect( [lYoung] ): a full collection (or a young one with .T.);
  * returns the live objects found by the last full collection. */
 void xbf___GCCOLLECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
   if (argc > 0 && argv[0].type == XB_T_LOGICAL && argv[0].v.l) xb_gc_collect_young();
   else xb_gc_collect();
   xb_set_int(ret, (int64_t)xb_gc_live_objects());
+  if (ctx->pending) xb_pending(ctx); /* runs the destructors of what it found; the caller tests the rest */
 }
 
 /* The call stack level `n` (0: the function calling, 1: its caller, ...)

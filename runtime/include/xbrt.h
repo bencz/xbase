@@ -107,6 +107,7 @@ enum {
   XB_PENDING_QUIT      = 1u << 2,
   XB_PENDING_SAFEPOINT = 1u << 3,
   XB_PENDING_TRAP      = 1u << 4,
+  XB_PENDING_FINALIZE  = 1u << 5, /* objects to finalize: xb_pending runs their destructors */
 };
 #define XB_PENDING_UNWIND (XB_PENDING_BREAK | XB_PENDING_QUIT | XB_PENDING_TRAP)
 
@@ -436,7 +437,9 @@ void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv
  * returns an array with the initial values (INIT) of the variables, then of
  * the class variables, evaluated once, the first time the class is used; each
  * new object gets its own copy of an array or a hash, each subclass the value
- * itself. `runtime` is the runtime's, NULL until then. */
+ * itself. `destructor` (a method of no arguments) runs once an object of the
+ * class, or of a subclass, is unreachable. `runtime` is the runtime's, NULL
+ * until then. */
 #define XB_SCOPE_EXPORTED   0u
 #define XB_SCOPE_PROTECTED  1u  /* the class's methods and its subclasses' */
 #define XB_SCOPE_HIDDEN     2u  /* the class's own methods */
@@ -472,6 +475,7 @@ typedef struct xb_class_def {
   const char *const *friendFunctions;
   uint32_t nfriendFunctions;
   xb_func init;             /* NULL: every variable starts as NIL */
+  xb_func destructor;       /* DESTRUCTOR, or NULL */
   uint32_t flags;           /* XB_CLASS_STATIC */
   void *runtime;
 } xb_class_def;

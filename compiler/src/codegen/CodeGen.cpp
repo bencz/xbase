@@ -229,7 +229,7 @@ void CodeGen::genClasses(const xir::Module &m) {
   auto *varTy = StructType::get(ctx_, {ptrTy_, i32_});
   auto *methodTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_});
   auto *defTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_,
-                                       ptrTy_, i32_, ptrTy_, i32_, ptrTy_});
+                                       ptrTy_, i32_, ptrTy_, ptrTy_, i32_, ptrTy_});
   auto *ty = ArrayType::get(defTy, m.classes.size());
   classTable_ = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, nullptr, "xb.module.classes");
   auto name = [&](const std::string &s) { return b_.CreateGlobalString(s, ".xb.classname", 0, &mod_); };
@@ -255,7 +255,9 @@ void CodeGen::genClasses(const xir::Module &m) {
     for (const auto &mt : c.methods)
       methods.push_back(ConstantStruct::get(
           methodTy, {name(mt.message), functions_.at(mt.fn), ConstantInt::get(i32_, mt.flags)}));
-    Constant *init = c.init ? static_cast<Constant *>(functions_.at(c.init)) : ConstantPointerNull::get(ptrTy_);
+    auto fnOrNull = [&](xir::Function *f) -> Constant * {
+      return f ? static_cast<Constant *>(functions_.at(f)) : ConstantPointerNull::get(ptrTy_);
+    };
     defs.push_back(ConstantStruct::get(
         defTy, {name(c.name), table(parentTy, parents, "xb.class.parents"), ConstantInt::get(i32_, parents.size()),
                 table(varTy, vars, "xb.class.vars"), ConstantInt::get(i32_, vars.size()),
@@ -263,7 +265,8 @@ void CodeGen::genClasses(const xir::Module &m) {
                 table(varTy, classVars, "xb.class.classvars"), ConstantInt::get(i32_, classVars.size()),
                 table(ptrTy_, friendClasses, "xb.class.friends"), ConstantInt::get(i32_, friendClasses.size()),
                 table(ptrTy_, friendFunctions, "xb.class.friends"), ConstantInt::get(i32_, friendFunctions.size()),
-                init, ConstantInt::get(i32_, c.isStatic ? XB_CLASS_STATIC : 0u), ConstantPointerNull::get(ptrTy_)}));
+                fnOrNull(c.init), fnOrNull(c.destructor), ConstantInt::get(i32_, c.isStatic ? XB_CLASS_STATIC : 0u),
+                ConstantPointerNull::get(ptrTy_)}));
   }
   classTable_->setInitializer(ConstantArray::get(ty, defs));
 }
