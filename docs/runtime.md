@@ -748,15 +748,16 @@ Conventions:
 - `StrTran( c, cSearch, cReplace, nStart, nCount )`: `nStart` or `nCount` of 0 gives `""`; a negative `nStart`
   replaces nothing, a negative `nCount` replaces every occurrence from `nStart`.
 - `Stuff( c, nStart, nDelete, cInsert )`: `nStart` 0 is 1; a negative `nStart` or `nDelete` counts as past the end.
-- Trimming from the left, `Val` and `Empty` skip blanks, tabs, carriage returns and line feeds (`xb_is_blank`);
-  trimming from the right removes spaces only. Case changes affect ASCII letters only.
+- Trimming from the left, `Val` and `Empty` skip blanks, tabs, carriage returns and line feeds (`xb_is_blank`); trimming
+  from the right removes spaces only. Case changes and the character classes (`IsAlpha`, `IsUpper`, `IsLower`) read
+  letters as SET CODEPAGE says ([Codepages](#codepages)); `IsDigit` takes ASCII digits.
 - `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array and the empty date.
 - `Set( n [, x] )` returns the setting before the call. `_SET_EXACT` takes a logical or a string starting with
   `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020);
   `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more, off
   otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it in front when the picture
-  has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name ([Languages](#languages)). Other
-  values change nothing.
+  has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name ([Languages](#languages)),
+  `_SET_CODEPAGE` a codepage's ([Codepages](#codepages)). Other values change nothing.
 - `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector).
 - `AScan( a, xSearch, [nStart], [nCount] )` returns the position of the first element of the range equal to `xSearch`
   (values of one comparable kind, compared like the operators, strings with SET EXACT; two `NIL`s; arrays and blocks
@@ -793,7 +794,8 @@ Conventions:
   (`BitAnd` 9001, `BitOr` 9002, `BitXor` 9003, `BitNor` 9004, `BitNot` 9005, `BitShl` 9006, `BitShr` 9007). The bit
   operators raise the code of their operation: `&` 9001, `|` 9002, `^^` 9003, `~` 9005, `<<` 9006, and `>>`, an
   arithmetic shift (a count past 63 gives 0, or -1 for a negative number), 9008. The function names, operator symbols,
-  operand counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too.
+  operand counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too. The `Char*()`
+  functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)).
 - `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
   program started from a monotonic clock (`xb_platform_elapsed_ms`), for timing: the difference of two calls.
@@ -877,6 +879,34 @@ generic code, a hash of subcodes), else the generic code's. `Set( _SET_LANGUAGE 
 a name in any letter case selects, and one the runtime has no language for leaves it as it is. A description an error
 carries itself (a class error's, ...) stays English. `__LanguageCurrent()` hands out the very texts the runtime reads,
 which are never to be changed. The texts are UTF-8 bytes (`Len( "Terça-feira" )` is 12), as the source is.
+
+## Codepages
+
+Strings are bytes: `Len`, `SubStr`, `Left`, `Right`, `At`, `Asc`, `Chr` and the rest count bytes, as in Clipper.
+`SET CODEPAGE TO <cp>` (`Set( _SET_CODEPAGE, cName )`, xbase's own setting 201) says how the functions that read
+characters take them (`core/codepage.c`, `xb_ctx.codepage`, per task): `UTF8` (the default), or the single-byte `CP437`,
+`CP850` (DOS), `CP1252` and `ISO8859-1` (Windows; other names: `UTF-8`, `IBM437`, `IBM850`, `WINDOWS-1252`,
+`ISO-8859-1`, `LATIN1`, in any letter case). `Set( _SET_CODEPAGE )` returns the current one's name; an unknown name
+leaves it as it is.
+
+- `Upper` and `Lower` change ASCII letters eight bytes at a time and, only when a string has bytes above 0x7F, the
+  other letters as the codepage reads them; a string never changes length: in UTF-8 a letter whose other case takes
+  another number of bytes keeps its case (`ß`, `ı`). `IsAlpha`, `IsUpper` and `IsLower` read the first character.
+- The data (`core/codepage_data.c`, generated: it says how) holds the Unicode 18.0 letters by class (uppercase,
+  lowercase, other) and the simple case mappings that keep the UTF-8 length, as runs of code points, and for each
+  single-byte codepage the code point, the upper and lower case and the class of each of its bytes.
+- In UTF-8 a byte that starts no valid sequence (overlong forms, surrogates and code points past U+10FFFF included) is
+  a character of its own, U+FFFD, and keeps its case.
+- xbase's own functions count characters: `CharLen( c )`, `CharSubStr( c, nStart, [nCount] )` (a negative start counts
+  from the end, as `SubStr`'s), `CharLeft( c, n )`, `CharRight( c, n )`, `CharAt( cSearch, c )`, `CharAsc( c )` (the
+  code point of the first character) and `CharChr( nCode )` (`""` for a code point the codepage has not); `CharAt` takes
+  a match only where a character starts. Their argument errors have the codes 9009 (`CharLen`), 9010 (`CharSubStr`),
+  9011 (`CharLeft`), 9012 (`CharAt`), 9013 (`CharAsc`) and 9014 (`CharChr`); `CharRight`, like `Right`, gives `""`.
+- `CPConvert( cText, cFrom, cTo )` reads the text in one codepage and writes it in another: a character the target has
+  not becomes `?`; between a codepage and itself the text comes back as it is. A byte `CP1252` leaves undefined (0x81,
+  0x8D, 0x8F, 0x90, 0x9D) stands for the code point of its own value, so it converts both ways. An unknown codepage, or
+  an argument that is no string, is its argument error (9015).
+- Comparisons and sorting compare bytes; the console writes the bytes as they are.
 
 ## Files
 

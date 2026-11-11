@@ -1,5 +1,8 @@
-/* String functions of the language. Positions are 1-based. */
+/* String functions of the language. Positions are 1-based and count bytes, as in Clipper; the case functions, the
+ * character classes and the Char*() functions read characters as SET CODEPAGE says (core/codepage.h). */
 #include "xbrt_int.h"
+
+#include "core/codepage.h"
 
 #include <string.h>
 
@@ -19,28 +22,48 @@ static void ret_part(xb_item *ret, const xb_item *whole, size_t from, size_t n) 
   else ret_str(ret, whole->v.s->data + from, n);
 }
 
-/* SubStr( c, nStart [, nCount] ): a negative start counts from the end. */
-void xbf_SUBSTR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  const xb_str *s = str_arg(argv, argc, 0);
-  if (!s || argc < 2 || !xb_is_number(&argv[1]) || (argc > 2 && !xb_is_number(&argv[2]))) {
-    xb_fn_arg_error(ctx, ret, 1110, "SUBSTR", argc, argv);
-    return;
-  }
-  int64_t len = (int64_t)s->len;
+/* SubStr( c, nStart [, nCount] ) of `len` units (bytes or characters): the 0-based first unit of the part and how
+ * many it takes (0: none). A negative start counts from the end. */
+static int64_t substr_range(int64_t len, uint32_t argc, const xb_item *argv, int64_t *first) {
   int64_t start = xb_num_to_i64(&argv[1]);
   if (start < 0) start += len + 1;
   if (start < 1) start = 1;
   int64_t count = argc > 2 ? xb_num_to_i64(&argv[2]) : len;
-  if (start > len || count <= 0) {
+  *first = start - 1;
+  if (start > len || count <= 0) return 0;
+  return count > len - start + 1 ? len - start + 1 : count;
+}
+
+/* SubStr and CharSubStr: in bytes, or in characters as the codepage reads them. */
+static void substr(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int chars, int32_t code, const char *fn) {
+  const xb_str *s = str_arg(argv, argc, 0);
+  if (!s || argc < 2 || !xb_is_number(&argv[1]) || (argc > 2 && !xb_is_number(&argv[2]))) {
+    xb_fn_arg_error(ctx, ret, code, fn, argc, argv);
+    return;
+  }
+  const xb_codepage *cp = xb_codepage_of(ctx);
+  int64_t first, n = substr_range(chars ? (int64_t)xb_cp_count(cp, s->data, s->len) : (int64_t)s->len, argc, argv,
+                                   &first);
+  if (n == 0) {
     ret_str(ret, "", 0);
     return;
   }
-  if (count > len - start + 1) count = len - start + 1;
-  ret_part(ret, &argv[0], (size_t)(start - 1), (size_t)count);
+  if (!chars) {
+    ret_part(ret, &argv[0], (size_t)first, (size_t)n);
+    return;
+  }
+  size_t from = xb_cp_offset(cp, s->data, s->len, (size_t)first);
+  ret_part(ret, &argv[0], from, xb_cp_offset(cp, s->data + from, s->len - from, (size_t)n));
 }
 
-/* Left() needs a string and a count; Right() returns "" for anything else. */
-static void left_right(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int right, int code, const char *fn) {
+void xbf_SUBSTR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  substr(ctx, ret, argc, argv, 0, 1110, "SUBSTR");
+}
+
+/* Left and Right (and CharLeft, CharRight): the first or last `n` bytes, or characters as the codepage reads them.
+ * Left needs a string and a count; Right returns "" for anything else. */
+static void left_right(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int right, int chars, int code,
+                       const char *fn) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s || argc < 2 || !xb_is_number(&argv[1])) {
     if (right) ret_str(ret, "", 0);
@@ -52,15 +75,22 @@ static void left_right(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, 
     ret_str(ret, "", 0);
     return;
   }
-  size_t take = (uint64_t)n > s->len ? s->len : (size_t)n;
-  ret_part(ret, &argv[0], right ? s->len - take : 0, take);
+  const xb_codepage *cp = xb_codepage_of(ctx);
+  size_t units = chars ? xb_cp_count(cp, s->data, s->len) : s->len;
+  size_t take = (uint64_t)n > units ? units : (size_t)n;
+  if (!chars) {
+    ret_part(ret, &argv[0], right ? s->len - take : 0, take);
+    return;
+  }
+  size_t from = right ? xb_cp_offset(cp, s->data, s->len, units - take) : 0;
+  ret_part(ret, &argv[0], from, right ? s->len - from : xb_cp_offset(cp, s->data, s->len, take));
 }
 
 void xbf_LEFT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  left_right(ctx, ret, argc, argv, 0, 1124, "LEFT");
+  left_right(ctx, ret, argc, argv, 0, 0, 1124, "LEFT");
 }
 void xbf_RIGHT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  left_right(ctx, ret, argc, argv, 1, 1124, "RIGHT");
+  left_right(ctx, ret, argc, argv, 1, 0, 1124, "RIGHT");
 }
 
 /* Eight bytes with the ASCII letters of one case changed to the other (to
@@ -85,13 +115,19 @@ static void change_case(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv,
   }
   xb_str *r = xb_str_alloc(s->len);
   size_t i = 0;
+  uint64_t high = 0; /* bytes above 0x7F: characters the codepage reads */
   for (; i + 8 <= s->len; i += 8) {
     uint64_t w;
     memcpy(&w, s->data + i, 8);
+    high |= w;
     w = change_case8(w, upper);
     memcpy(r->data + i, &w, 8);
   }
-  for (; i < s->len; ++i) r->data[i] = upper ? xb_ascii_upper(s->data[i]) : xb_ascii_lower(s->data[i]);
+  for (; i < s->len; ++i) {
+    high |= (unsigned char)s->data[i];
+    r->data[i] = upper ? xb_ascii_upper(s->data[i]) : xb_ascii_lower(s->data[i]);
+  }
+  if (high & UINT64_C(0x8080808080808080)) xb_cp_change_case(xb_codepage_of(ctx), r->data, r->len, upper);
   xb_set_str(ret, r);
 }
 
@@ -300,32 +336,38 @@ void xbf_STUFF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_str(ret, r);
 }
 
-static void char_class(xb_item *ret, uint32_t argc, xb_item *argv, int which) {
+/* Whether the first character is a letter (0), a digit (1), an uppercase (2) or a lowercase letter (3); one with a
+ * byte above 0x7F as the codepage says (digits are ASCII). */
+static void char_class(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int which) {
   const xb_str *s = str_arg(argv, argc, 0);
   char c = s && s->len ? s->data[0] : 0;
   int r = 0;
-  if (which == 0) r = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-  else if (which == 1) r = c >= '0' && c <= '9';
-  else if (which == 2) r = c >= 'A' && c <= 'Z';
-  else r = c >= 'a' && c <= 'z';
+  if ((unsigned char)c >= 0x80) {
+    int kind = xb_cp_kind(xb_codepage_of(ctx), s->data, s->len);
+    r = which == 0 ? kind != XB_CP_NONE : which == 2 ? kind == XB_CP_UPPER : which == 3 && kind == XB_CP_LOWER;
+  } else if (which == 0) {
+    r = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+  } else if (which == 1) {
+    r = c >= '0' && c <= '9';
+  } else if (which == 2) {
+    r = c >= 'A' && c <= 'Z';
+  } else {
+    r = c >= 'a' && c <= 'z';
+  }
   xb_set_logical(ret, r);
 }
 
 void xbf_ISALPHA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
-  char_class(ret, argc, argv, 0);
+  char_class(ctx, ret, argc, argv, 0);
 }
 void xbf_ISDIGIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
-  char_class(ret, argc, argv, 1);
+  char_class(ctx, ret, argc, argv, 1);
 }
 void xbf_ISUPPER(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
-  char_class(ret, argc, argv, 2);
+  char_class(ctx, ret, argc, argv, 2);
 }
 void xbf_ISLOWER(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
-  char_class(ret, argc, argv, 3);
+  char_class(ctx, ret, argc, argv, 3);
 }
 
 /* Empty( x ): NIL, 0, "" or blanks only, .F., an empty array, the empty date. */
@@ -421,4 +463,115 @@ void xbf_SOUNDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     prev = d;
   }
   ret_str(ret, code, sizeof code);
+}
+
+/* The Char*() functions, xbase's own: what Len(), SubStr(), Left(), Right(), At(), Asc() and Chr() do for bytes, for
+ * characters as SET CODEPAGE reads them (one per byte in a single-byte codepage; in UTF-8, a byte that starts no
+ * valid sequence counts as one character, U+FFFD). Their argument errors have xbase's own codes. */
+enum { CODE_CHARLEN = 9009, CODE_CHARSUBSTR, CODE_CHARLEFT, CODE_CHARAT, CODE_CHARASC, CODE_CHARCHR, CODE_CPCONVERT };
+/* (9001 to 9008 are the bit functions', xb_bit_function in xbrt.h.) */
+
+/* CharLen( cString ): its characters. */
+void xbf_CHARLEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_str *s = str_arg(argv, argc, 0);
+  if (!s) {
+    xb_fn_arg_error(ctx, ret, CODE_CHARLEN, "CHARLEN", argc, argv);
+    return;
+  }
+  xb_set_int(ret, (int64_t)xb_cp_count(xb_codepage_of(ctx), s->data, s->len));
+}
+
+/* CharSubStr( cString, nStart, [nCount] ). */
+void xbf_CHARSUBSTR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  substr(ctx, ret, argc, argv, 1, CODE_CHARSUBSTR, "CHARSUBSTR");
+}
+
+/* CharLeft( cString, nCount ), CharRight( cString, nCount ). */
+void xbf_CHARLEFT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  left_right(ctx, ret, argc, argv, 0, 1, CODE_CHARLEFT, "CHARLEFT");
+}
+void xbf_CHARRIGHT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  left_right(ctx, ret, argc, argv, 1, 1, 0, "CHARRIGHT");
+}
+
+/* CharAt( cSearch, cString ): the character where cSearch first starts in cString (a match must start where a
+ * character does), 0 when it does not. */
+void xbf_CHARAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_str *needle = str_arg(argv, argc, 0), *hay = str_arg(argv, argc, 1);
+  if (!needle || !hay) {
+    xb_fn_arg_error(ctx, ret, CODE_CHARAT, "CHARAT", argc, argv);
+    return;
+  }
+  const xb_codepage *cp = xb_codepage_of(ctx);
+  int64_t chars = 1;
+  xb_set_int(ret, 0);
+  if (needle->len == 0) return;
+  for (size_t i = 0; i + needle->len <= hay->len; ++chars) { /* a match starts where a character does */
+    if (memcmp(hay->data + i, needle->data, needle->len) == 0) {
+      xb_set_int(ret, chars);
+      return;
+    }
+    size_t n;
+    xb_cp_decode(cp, hay->data, hay->len, i, &n);
+    i += n;
+  }
+}
+
+/* CharAsc( cString ): the code point of its first character, 0 for "". */
+void xbf_CHARASC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_str *s = str_arg(argv, argc, 0);
+  if (!s) {
+    xb_fn_arg_error(ctx, ret, CODE_CHARASC, "CHARASC", argc, argv);
+    return;
+  }
+  size_t n;
+  xb_set_int(ret, s->len ? (int64_t)xb_cp_decode(xb_codepage_of(ctx), s->data, s->len, 0, &n) : 0);
+}
+
+/* CharChr( nCode ): the character of a code point, "" when the codepage has none (or it is none). */
+void xbf_CHARCHR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1 || !xb_is_number(&argv[0])) {
+    xb_fn_arg_error(ctx, ret, CODE_CHARCHR, "CHARCHR", argc, argv);
+    return;
+  }
+  int64_t code = xb_num_to_i64(&argv[0]);
+  char out[4];
+  size_t n = code >= 0 && code <= 0x10FFFF ? xb_cp_encode(xb_codepage_of(ctx), (uint32_t)code, out) : 0;
+  ret_str(ret, out, n);
+}
+
+/* CPConvert( cText, cFrom, cTo ): the text read in codepage cFrom, written in codepage cTo; a character cTo has not
+ * becomes "?" (an invalid UTF-8 byte reads as U+FFFD). An unknown codepage, or an argument that is no string, is an
+ * argument error. */
+void xbf_CPCONVERT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_str *s = str_arg(argv, argc, 0), *fromName = str_arg(argv, argc, 1), *toName = str_arg(argv, argc, 2);
+  const xb_codepage *from = fromName ? xb_codepage_find(fromName->data, fromName->len) : NULL;
+  const xb_codepage *to = toName ? xb_codepage_find(toName->data, toName->len) : NULL;
+  if (!s || !from || !to) {
+    xb_fn_arg_error(ctx, ret, CODE_CPCONVERT, "CPCONVERT", argc, argv);
+    return;
+  }
+  if (from == to) {
+    *ret = argv[0];
+    return;
+  }
+  uint64_t len = 0; /* the first pass measures (xb_str_alloc checks the length), the second writes */
+  for (int pass = 0; pass < 2; ++pass) {
+    xb_str *r = pass ? xb_str_alloc(len) : NULL;
+    uint64_t at = 0;
+    for (size_t i = 0; i < s->len;) {
+      size_t n;
+      char put[4];
+      size_t m = xb_cp_encode(to, xb_cp_decode(from, s->data, s->len, i, &n), put);
+      if (!m) {
+        put[0] = '?';
+        m = 1;
+      }
+      if (r) memcpy(r->data + (size_t)at, put, m);
+      at += m;
+      i += n;
+    }
+    if (r) xb_set_str(ret, r);
+    len = at;
+  }
 }

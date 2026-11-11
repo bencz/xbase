@@ -28,7 +28,7 @@ textual IR is written (except with the debugging options `--dump-xir` and `--dum
 | Parser | Hand-written recursive descent. |
 | Commands | Preprocessor rules in `std.ch`; the compiler knows the grammar only. |
 | Typing | The language is untyped: any variable holds any value. Types exist only for FFI declarations and structures. |
-| Strings | Immutable byte strings with a codepage; UTF-8 is the default codepage. `Len()` counts bytes. |
+| Strings | Immutable byte strings; `Len()` counts bytes. SET CODEPAGE (UTF-8 by default) says how the functions that read characters take them. |
 | Names | Compiler `xbc`, runtime `xbrt`, C symbols `xb_*`, xBase functions `xbf_<NAME>` (runtime) and `xbp_<NAME>` (program). |
 | Errors | Propagated through the task context's pending flag; no `setjmp`/`longjmp`, no unwinder. |
 | Memory | Tracing GC: precise, non-moving mark-region with an Immix heap (blocks of lines, bump allocation per thread into free lines); no reference counting; two generations (sticky marks, aging, remembered set, write barrier). |

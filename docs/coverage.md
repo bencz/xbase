@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 124 of 551 done. Commands (`std.ch` families): 26 of 156 done.
+Functions: 124 of 551 done. Commands (`std.ch` families): 27 of 157 done.
 
 ## Statements (grammar)
 
@@ -28,16 +28,16 @@ GETS*, **CLEAR MEMORY**, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, *CLOSE*, *CLOSE ALL*
 *LIST*, *LOCATE*, *MENU*, **NEXT**, *PACK*, **QUIT**, *READ*, *READ SAVE*, *RECALL*, *REINDEX*, **RELEASE**, **RELEASE
 ALL**, *RENAME*, *REPLACE*, *REPORT FORM*, **REQUEST**, **RESTORE**, *RESTORE SCREEN*, *RUN*, **SAVE**, **SAVE ALL**,
 *SAVE SCREEN*, **SAVE TO**, *SEEK*, *SELECT*, *SET ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET
-BELL*, **SET CENTURY**, *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET
-DBFLOCKSCHEME*, **SET DECIMALS**, *SET DEFAULT*, *SET DELETED*, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET
-DIRCASE*, *SET DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET
-EXCLUSIVE*, *SET FILECASE*, *SET FILTER*, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*,
-*SET INDEX*, *SET INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET MARGIN*, *SET MBLOCKSIZE*, *SET
-MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, *SET ORDER*, *SET PATH*, *SET PRINTER*, *SET
-PROCEDURE*, *SET RELATION*, *SET SAFETY*, *SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, *SET
-SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, *SET UNIQUE*, *SET
-VIDEOMODE*, *SET WRAP*, *SKIP*, *SORT*, **STORE**, *SUM*, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*,
-*USE*, *WAIT*, *ZAP*
+BELL*, **SET CENTURY**, **SET CODEPAGE** (an xbase command), *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*,
+*SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*, **SET DECIMALS**, *SET DEFAULT*, *SET DELETED*, *SET DELIMITERS*, *SET
+DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET
+EVENTMASK*, **SET EXACT**, *SET EXCLUSIVE*, *SET FILECASE*, *SET FILTER*, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*,
+*SET HARDCOMMIT*, *SET HEADING*, *SET INDEX*, *SET INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET
+MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, *SET ORDER*, *SET
+PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET RELATION*, *SET SAFETY*, *SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*,
+*SET SCOREBOARD*, *SET SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*,
+*SET UNIQUE*, *SET VIDEOMODE*, *SET WRAP*, *SKIP*, *SORT*, **STORE**, *SUM*, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*,
+*UNLOCK*, *UPDATE*, *USE*, *WAIT*, *ZAP*
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`, `set.ch`
 (partial), `error.ch` (provided: the severities and generic codes), `fileio.ch` and `directry.ch` (provided), `box.ch`,
@@ -150,8 +150,10 @@ at link time, never by an environment variable.
 ## xbase functions
 
 Functions of xbase's own runtime, beyond Clipper's: **ElapsedMs** (milliseconds since the program started, from a
-monotonic clock, for timing), the bit functions **BitAnd**, **BitOr**, **BitXor**, **BitNor**, **BitNot**,
-**BitShl**, **BitShr** (see [runtime.md](runtime.md#functions)), **Throw** (`Break()` for `TRY`).
+monotonic clock, for timing), the bit functions **BitAnd**, **BitOr**, **BitXor**, **BitNor**, **BitNot**, **BitShl**,
+**BitShr** (see [runtime.md](runtime.md#functions)), **Throw** (`Break()` for `TRY`), the character functions
+**CharAsc**, **CharAt**, **CharChr**, **CharLeft**, **CharLen**, **CharRight**, **CharSubStr** and **CPConvert** (see
+[runtime.md](runtime.md#codepages)).
 
 Hashes ([runtime.md](runtime.md#hashes)): **Hash**, **HAllocate**, **HCaseMatch**, **HClear**, **HClone**, **HCopy**,
 **HDel**, **HDelAt**, **HEval**, **HFill**, **HGet**, **HGetDef**, **HHasKey**, **HKeyAt**, **HKeys**, **HMerge**,

@@ -3,6 +3,7 @@
 
 #include "set.ch"
 
+#include "core/codepage.h"
 #include "rtl/language.ch"
 
 #include <stdlib.h>
@@ -74,6 +75,15 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       const xb_array *texts = xb_language(ctx);
       if (texts && texts->len >= LANG_ID) *ret = texts->items[LANG_ID - 1];
       if (value && value->type == XB_T_STRING) xb_language_select(ctx, value->v.s->data, value->v.s->len);
+      break;
+    }
+    case _SET_CODEPAGE: { /* a name the runtime has no codepage for leaves it as it is */
+      const xb_codepage *cp = xb_codepage_of(ctx);
+      xb_set_str(ret, xb_str_new(cp->name, strlen(cp->name)));
+      if (value && value->type == XB_T_STRING) {
+        const xb_codepage *chosen = xb_codepage_find(value->v.s->data, value->v.s->len);
+        if (chosen) ctx->codepage = chosen;
+      }
       break;
     }
     default:

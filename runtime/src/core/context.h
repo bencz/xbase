@@ -42,6 +42,7 @@ struct xb_ctx {
   int      century;         /* SET CENTURY */
   int32_t  file_error;      /* FError(): the code of the last file function (rtl/files.c) */
   xb_item  language;        /* SET LANGUAGE: the current language's texts (core/language.c), a root; NIL until used */
+  const struct xb_codepage *codepage; /* SET CODEPAGE (core/codepage.h); NULL: UTF-8 */
 };
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);

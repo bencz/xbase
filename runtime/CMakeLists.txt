@@ -1,4 +1,6 @@
 add_library(xbrt STATIC
+  src/core/codepage.c
+  src/core/codepage_data.c
   src/core/control.c
   src/core/ctx.c
   src/core/display.c
