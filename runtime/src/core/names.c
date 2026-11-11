@@ -51,3 +51,13 @@ int xb_names_find(const xb_names *t, const char *name, size_t len, uint32_t *id)
   *id = s->id;
   return 1;
 }
+
+int xb_names_find_upper(const xb_names *t, const char *name, size_t len, uint32_t *id) {
+  char small[64];
+  char *upper = len <= sizeof small ? small : malloc(len);
+  if (!upper) xb_gc_fatal("out of memory");
+  for (size_t i = 0; i < len; ++i) upper[i] = xb_ascii_upper(name[i]);
+  int found = xb_names_find(t, upper, len, id);
+  if (upper != small) free(upper);
+  return found;
+}

@@ -1,0 +1,31 @@
+
+own private: U
+assigned again:          5
+in the callee: U
+caller's private: U
+public: -
+private hiding a public: U
+public hidden by a private:          3
+no such variable: U
+release all: U N
+only the caller's: N
+like x?1: U N U
+like x: U N
+except ?a*: N N N U
+like *b: U N
+all: U
+the reference sees NIL: NIL
+passed @a: NIL
+parameter: NIL
+PARAMETERS by reference:          1
+after RELEASE ALL:          1
+parameter: NIL
+PARAMETERS, a private by reference:          9
+parameter: NIL
+PARAMETERS, a public by reference:          9
+after RELEASE ALL:         10
+declare:          7          3
+in clear: - -
+private again:          4
+after clear memory: - - - -
+created again: new

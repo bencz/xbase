@@ -4,8 +4,10 @@
 
 #include "xbrt.h"
 
+#include "core/bytes.h"
 #include "core/context.h"
 #include "core/error.h"
+#include "core/memvar.h"
 #include "core/numeric.h"
 #include "core/names.h"
 #include "core/symbols.h"

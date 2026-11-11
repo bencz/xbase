@@ -282,9 +282,11 @@ The two tags are consecutive, so compiled code tests for both with one unsigned 
 
 `PRIVATE` and `PUBLIC` variables (`core/memvar.c`, the `xb_mv_*` entry points in `xbrt.h`) are found by name when the
 code runs, so a function sees and changes the memory variables of the functions that called it, whatever module they
-are in. Each module gives the runtime the names it uses (`xb_memvar`, numbered when it registers); each context keeps,
+are in. Each module gives the runtime the names it uses (`xb_memvar`, numbered when it registers; `RESTORE` numbers
+the names of its file that no module uses, while the program runs, so `xb_ctx.memvars` may grow, and move, whenever
+xBase code runs: C code keeps no pointer into it across an error block); each context keeps,
 by number, the binding visible now (`xb_ctx.memvars`), and the PRIVATEs alive, in creation order, each with the
-binding it hid (`xb_ctx.privates`). Both are roots of the collector.
+frame of the activation that created it and the binding it hid (`xb_ctx.privates`). Both are roots of the collector.
 
 - A binding is a cell (an `XB_T_CELL` item): `@name` passes it, and a codeblock reaches the variable through the name
   when it runs, not through a capture.
@@ -303,6 +305,33 @@ binding it hid (`xb_ctx.privates`). Both are roots of the collector.
   name as the operation, no `args`), which the error block may retry: returning `.T.` looks the name up again (a
   block that created the variable fixes it), anything else ends the program (`Error recovery failure`), as in the
   reference.
+- `RELEASE name, ...` (`__MemRelease()`): the PRIVATE visible by that name holds NIL where it is (what was passed
+  `@name` sees NIL, and so does a memory variable passed by reference to `PARAMETERS`); a `PARAMETERS` one that received
+  a LOCAL, a STATIC or an element by reference lets it go for a NIL of its own. A PUBLIC no longer exists. A name with
+  no variable is skipped.
+- `RELEASE ALL [LIKE | EXCEPT skeleton]` (`__MemReleaseAll()`): the same for the PRIVATEs that the function or
+  codeblock running it created, those whose names match the skeleton (`LIKE`) or do not (`EXCEPT`); PUBLICs and the
+  callers' PRIVATEs stay. In a skeleton `*` stands for any characters and `?` for one, letters match in any case. The
+  reference takes a skeleton that starts with `*` for every name (`*B`); xbase matches the whole skeleton, so it never
+  releases more than the skeleton names.
+- `CLEAR MEMORY` (`__MemClear()`): no PRIVATE or PUBLIC exists any more; the PRIVATEs' records stay until their
+  activations end, restoring nothing.
+- `SAVE TO file [ALL [LIKE | EXCEPT skeleton]]` (also `SAVE ALL LIKE | EXCEPT skeleton TO file`; `__MemSave()`,
+  `rtl/memfile.c`) writes the variables visible, PRIVATE or PUBLIC, whose names match, to a `.mem` file (the extension
+  is added when the name has none): Clipper's format, which `memfile.c` describes, holds strings (65534 bytes of each
+  at most), numbers (with their width and decimals), dates and logicals, and the first 10 characters of each name;
+  other values are left out. The records follow the names' numbers (the reference orders them otherwise; each record
+  is the same). No file name (`SAVE` alone) is error 2008 (`EG_ARG`). A file that cannot be created or written is
+  error 2006 (`EG_CREATE`, or `EG_WRITE`), which the block may retry; the default gives up, leaving a file already
+  created or partly written as it is.
+- `RESTORE FROM file [ADDITIVE]` (`__MemRestore()`) gives each variable of the file its value: the one visible by
+  that name, else a new PRIVATE of the function (or codeblock) running `RESTORE`, which ends it when it returns (its
+  declaration's `PRIVATES` attribute gives that function a mark, see [compiler.md](compiler.md#calls); `Do()` takes
+  one around the function it calls).
+  Numbers without decimals come back as integers. Without `ADDITIVE`, `CLEAR MEMORY` comes first, once the file is
+  open: a file that cannot be opened (error 2005, `EG_OPEN`, which may be retried; the default restores nothing)
+  leaves the variables as they were, where the reference releases them first. No file name is error 2007
+  (`EG_ARG`). Reading stops at the end mark (0x1A), at the end of the file, or at a record it cannot read.
 
 ## Calling convention
 
@@ -353,7 +382,10 @@ value are roots of the collector). With no error block (a program's `ErrorSys()`
 
 - a request to unwind is pending (the block called `Break()`, or quit): the operation fails with it;
 - the error may be retried (`XB_ERR_RETRY`, `xb_error_retry`: `canRetry`, with `tries` counting the attempts from 1;
-  a missing memory variable) and the block returned `.T.`: the operation is tried again;
+  a missing memory variable, a file error) and the block returned `.T.`: the operation is tried again;
+- the error has a default (`XB_ERR_DEFAULT`: `canDefault`; a file error, `xb_error_file`, which also sets `filename`
+  and `osCode`, the `FError()` code of [Files](#files)) and the block returned anything else: the operation does its
+  default, which gives up quietly;
 - the error allows substitution (`XB_ERR_SUBSTITUTE`: operators, `SWITCH`, a non-numeric index, messages, `Eval` and
   the runtime functions, except `ASize`, `AEval`, `AFill`, `Set` and the array dimension): the block's return value
   becomes the operation's result, and the program goes on;
@@ -364,19 +396,19 @@ value are roots of the collector). With no error block (a program's `ErrorSys()`
 Which errors allow substitution, and their `args`, follow Clipper/Harbour. An error raised while the error block runs
 is handled the same way, nested at most 8 deep (`XB_ERROR_MAX_DEPTH`); one more ends the program (`Unrecoverable
 error 9003: Too many recursive error handler calls`). In a `FOR` test, a substituted result stands for the comparison
-`counter > limit` (`<` stepping back): a logical, else the error of a condition. Defaults (`canDefault`) are not used
-by any error yet.
+`counter > limit` (`<` stepping back): a logical, else the error of a condition.
 
 A context starts with no error block. The program's startup calls `ErrorSys()` by name after the `STATIC`
 initializations and before the `INIT` procedures ([Program startup](#program-startup)): the runtime's, in xBase
-(`rtl/errorsys.prg`), unless the program defines its own. It installs `{| oError | DefError( oError ) }`: a division
-by zero gives 0 (as Clipper's default handler does); any other error prints
-`Error <subsystem>/<subcode>  <description>: <operation>` (the file name instead of the operation when there is one;
-`Warning` for a severity below `ES_ERROR`), then a line `Called from NAME(line)  ` for each level of the call
-stack (see [Frames](#frames); the handler's own frames are hidden, so level 0 is where the error happened), to
-standard error (`OutErr()`), and ends the program with `ErrorLevel( 1 )` and `QUIT`. The choice between quitting,
-retrying and the default (Clipper's `Alert()`) waits for the terminal layer. An unrecoverable error lists the levels
-as `Called from NAME(line) in FILE` (without ` in FILE` for a runtime function).
+(`rtl/errorsys.prg`), unless the program defines its own. It installs `{| oError | DefError( oError ) }`: a division by
+zero gives 0 (as Clipper's default handler does); any other error prints
+`Error <subsystem>/<subcode>  <description>: <operation>` (the file name instead of the operation when there is one,
+then ` (DOS Error <osCode>)` when there is a system error code; `Warning` for a severity below `ES_ERROR`), then a line
+`Called from NAME(line)  ` for each level of the call stack (see [Frames](#frames); the handler's own frames are
+hidden, so level 0 is where the error happened), to standard error (`OutErr()`), and ends the program with
+`ErrorLevel( 1 )` and `QUIT`. The choice between quitting, retrying and the default (Clipper's `Alert()`) waits for the
+terminal layer. An unrecoverable error lists the levels as `Called from NAME(line) in FILE` (without ` in FILE` for a
+runtime function).
 
 `Break( [xValue] )` (and the `BREAK [value]` command, `__Break`) stores the value in the context and raises
 `XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only request pending,
@@ -584,19 +616,34 @@ go further.
   day number (0 outside the calendar); `CDoW`, as in Clipper, applies the Gregorian weekday formula to the decoded
   year, month and day, so it differs from `DoW` in year 0 and gives `Wednesday` for day numbers outside the calendar.
 
+## Files
+
+The runtime reaches files through the platform layer (`platform/platform.h`): `xb_platform_file_open` (an existing
+file, for reading), `xb_platform_file_create` (a new or emptied file, for writing), `xb_platform_file_read`,
+`xb_platform_file_write` and `xb_platform_file_close`, on the system's handle as an integer, with paths in UTF-8
+(converted to UTF-16 on Windows). A failure gives the code
+`FError()` reports: a DOS error number (2 file not found, 3 path not found, 5 access denied, ...), which Windows
+reports itself and the POSIX build translates `errno` values to (31, general failure, for those without one).
+`xb_platform_path_separator` tells the characters that separate directories (`/`; also `\` and `:` on Windows).
+Binary fields of the file formats go through the little-endian helpers of `core/bytes.h`. `SAVE` and `RESTORE`
+([Memory variables](#memory-variables)) use this layer; the file functions of the language (`FOpen()`, ...) are not
+written yet.
+
 ## Program startup
 
 Before `main`, the global constructor of every module calls `xb_module_register` (`core/module.c`) with the
 initialization of its `STATIC`s (which become a GC root), its `INIT` and `EXIT` procedures, its public functions by
 name, and the names of its memory variables ([Memory variables](#memory-variables)). These go into the symbol table
-(`core/symbols.c`): upper-cased names numbered by a table of names (`core/names.c`, the one memory variables use too)
+(`core/symbols.c`): upper-cased names numbered by a table of names (`core/names.c`, the one memory variables use too;
+lookups by a name in any letter case upper-case it first, `xb_names_find_upper`)
 and what each designates, which the runtime's own functions join when the program starts (`xb_program_run`), from a
 table generated from `include/rtl.ch` at build time (`runtime/symbols.cmake`, with which parameters take references,
 read from the declarations by `runtime/rtl_declarations.cmake`); a program function hides a runtime function of its
 name. The table refers to every runtime function, so every program links them all in. `Do( cName | bBlock, [args] )`
 calls a function found there (letter case aside; spaces are part of the name, which ends at a NUL) or a codeblock, with
 its arguments: a reference goes on as passed to a compiled function and to a runtime function's parameter declared `@`,
-other runtime parameters receive the value. Do shows as `DO` on the call stack; an unknown name is `BASE/1001`
+other runtime parameters receive the value. Do shows as `DO` on the call stack, and ends the PRIVATEs that a runtime
+function creates for its caller (`RESTORE`), as a compiled caller does; an unknown name is `BASE/1001`
 `Undefined function` (not substitutable), anything else as its first argument `BASE/3012`.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error

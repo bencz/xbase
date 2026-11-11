@@ -151,8 +151,8 @@ void xbf_ERRORLEVEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * arguments; references go on as passed where the function takes them, a
  * runtime function receives the value elsewhere. Do shows on the call stack
  * while it runs, with its own arguments (PCount() and PValue() called through
- * Do see them). */
-#define DO_NAME_MAX 256
+ * Do see them), and ends the PRIVATEs a runtime function created for its
+ * caller (RESTORE), as a compiled caller does. */
 static void do_frame_push(xb_ctx *ctx, xb_frame *frame, uint32_t argc, xb_item *argv) {
   static const xb_proc proc = XB_RUNTIME_PROC("DO", XB_PROC_ARGS);
   xb_frame_push(ctx, frame, &proc);
@@ -164,20 +164,16 @@ void xbf_DO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_frame frame;
   if (argc && argv[0].type == XB_T_STRING) {
     const char *name = argv[0].v.s->data;
-    size_t len = strlen(name);
-    char upper[DO_NAME_MAX];
-    const xb_symbol_entry *e = NULL;
-    if (len < sizeof upper) {
-      for (size_t i = 0; i < len; ++i) upper[i] = xb_ascii_upper(name[i]);
-      e = xb_symbol_find(upper, len);
-    }
+    const xb_symbol_entry *e = xb_symbol_find(name, strlen(name));
     if (!e) {
       xb_error_in(ctx, "DO", NULL, EG_NOFUNC, 1001, name, 0, argc, argv);
       return;
     }
     if (!xb_args_rest(ctx, argv + 1, argv + 1, argc - 1, 0, xb_symbol_refs(e))) return;
     do_frame_push(ctx, &frame, argc, argv);
+    uint32_t mark = xb_mv_mark(ctx);
     e->fn(ctx, ret, argc - 1, argv + 1);
+    xb_mv_release(ctx, mark);
     xb_frame_pop(ctx, &frame);
   } else if (argc && argv[0].type == XB_T_BLOCK) {
     do_frame_push(ctx, &frame, argc, argv);

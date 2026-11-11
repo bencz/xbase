@@ -1,0 +1,4 @@
+
+Error BASE/2005  Open error: memvars_restore_missing (DOS Error 2)
+Called from __MEMRESTORE(0)  
+Called from MAIN(5)  

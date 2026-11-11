@@ -19,4 +19,7 @@ uint32_t xb_names_add(xb_names *t, const char *name, size_t len);
 /* Whether `name` is there, and its number in `*id`. */
 int xb_names_find(const xb_names *t, const char *name, size_t len, uint32_t *id);
 
+/* The same for `name` in any letter case, in a table of upper-cased names. */
+int xb_names_find_upper(const xb_names *t, const char *name, size_t len, uint32_t *id);
+
 #endif

@@ -263,6 +263,7 @@ public:
   bool startup = false;           // an INIT or EXIT procedure: the runtime runs it, nothing calls it
   uint32_t numParams = 0;
   bool readsArgs = false;         // its frame keeps the arguments received (PCount(), PValue())
+  bool callsPrivates = false;     // calls a function that creates PRIVATEs of its caller (PRIVATES in rtl.ch)
   bool hidden = false;            // the call stack does not show it (a STATIC function or codeblock of the runtime)
   bool byRefBody = false;         // the body versioned for references (NAME.byref), reached by call.forward
   bool usesRest = false;          // has an args.rest (`...`)

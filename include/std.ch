@@ -28,6 +28,19 @@
 
 #command REQUEST <vars,...>            => EXTERNAL <vars>
 
+/* Memory variables: a name or a skeleton (* any characters, ? one) is matched when the code runs. */
+#command RELEASE <vars,...>            => __MemRelease( <"vars"> )
+#command RELEASE ALL                   => __MemReleaseAll( "*", .T. )
+#command RELEASE ALL LIKE <skel>       => __MemReleaseAll( #<skel>, .T. )
+#command RELEASE ALL EXCEPT <skel>     => __MemReleaseAll( #<skel>, .F. )
+#command CLEAR MEMORY                  => __MemClear()
+#command SAVE [TO <(f)>] [ALL]         => __MemSave( <(f)>, "*", .T. )
+#command SAVE TO <(f)> ALL LIKE <skel> => __MemSave( <(f)>, #<skel>, .T. )
+#command SAVE TO <(f)> ALL EXCEPT <skel> => __MemSave( <(f)>, #<skel>, .F. )
+#command SAVE ALL LIKE <skel> TO <(f)> => __MemSave( <(f)>, #<skel>, .T. )
+#command SAVE ALL EXCEPT <skel> TO <(f)> => __MemSave( <(f)>, #<skel>, .F. )
+#command RESTORE [FROM <(f)>] [<add: ADDITIVE>] => __MemRestore( <(f)>, <.add.> )
+
 #command ?  [<explist,...>]            => QOut( <explist> )
 #command ?? [<explist,...>]            => QQOut( <explist> )
 

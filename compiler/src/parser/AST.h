@@ -201,6 +201,7 @@ struct BlockExpr : Expr {
   };
   std::vector<Capture> captures; // cells this block holds, in VarExpr::slot order
   bool readsArgs = false;        // calls an ARGS function: its frame keeps the arguments it received
+  bool callsPrivates = false;    // calls a PRIVATES function: ends the PRIVATEs it creates
   explicit BlockExpr(SourceLoc l) : Expr(ExprKind::Block, l) {}
 };
 
@@ -326,6 +327,7 @@ struct FuncDecl {
   uint32_t numLocals = 0;        // params + LOCALs, set by Sema
   std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock or passed by reference (shared)
   bool readsArgs = false;        // set by Sema: calls an ARGS function, so its frame keeps the arguments received
+  bool callsPrivates = false;    // set by Sema: calls a PRIVATES function, so it ends the PRIVATEs created
 };
 
 // EXTERN FUNCTION name( params ) attributes: a function the program calls but
@@ -341,6 +343,7 @@ struct ExternDecl {
   bool native = false;           // NATIVE: written in C to the xBase convention (else another module's function)
   bool args = false;             // ARGS: reads the arguments the function calling it received (PCount)
   bool params = false;           // PARAMS: ARGS, and reads and writes that function's parameters (PValue)
+  bool privates = false;         // PRIVATES: creates PRIVATEs of the function calling it (RESTORE)
   uint32_t abbrev = 0;           // ABBREV n: shortest accepted abbreviation (0: none)
   std::vector<bool> byRef;       // NATIVE: per parameter, `@name`: receives a reference passed to it
   bool restByRef = false;        // NATIVE: `@...`: so do the arguments past the named parameters

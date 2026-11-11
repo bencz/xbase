@@ -35,7 +35,8 @@ static const struct {
 } descriptions[] = {
   {EG_ARG, "Argument error"},          {EG_BOUND, "Bound error"},    {EG_STROVERFLOW, "String overflow"},
   {EG_ZERODIV, "Zero divisor"},        {EG_NOFUNC, "Undefined function"},  {EG_NOMETHOD, "No exported method"},
-  {EG_NOVARMETHOD, "No exported variable"}, {EG_NOVAR, "Variable does not exist"},
+  {EG_NOVARMETHOD, "No exported variable"}, {EG_NOVAR, "Variable does not exist"}, {EG_CREATE, "Create error"},
+  {EG_OPEN, "Open error"},             {EG_WRITE, "Write error"},
 };
 
 static const char *description_of(int32_t gencode) {
@@ -66,10 +67,25 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
   return xb_error_in(ctx, NULL, result, gencode, subcode, operation, flags, argc, args);
 }
 
-/* Raises the error (see xb_error_in); `tries`, for an error that may be
- * retried, counts the attempts. 0: fail; 1: substituted; 2: retry. */
-static int raise(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
-                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args, uint16_t tries) {
+/* An error to raise: what the Error object says, and what the block may do. */
+typedef struct failure {
+  const char *frame;        /* the runtime function the call stack shows while the block runs, or NULL */
+  int32_t gencode, subcode;
+  const char *operation;
+  const char *filename;     /* NULL: none */
+  int32_t oscode;
+  uint32_t flags;           /* XB_ERR_* */
+  uint32_t argc;
+  const xb_item *args;
+  uint16_t tries;           /* the attempt, from 1, of an error that may be retried */
+} failure;
+
+/* Raises the error (see xb_error_in). 0: fail; 1: substituted, or the
+ * default action; 2: retry. */
+static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
+  const char *frame = f->frame;
+  uint32_t flags = f->flags, argc = f->argc;
+  const xb_item *args = f->args;
   xb_proc proc = XB_RUNTIME_PROC(frame, 0);
   xb_frame inside;
   if (frame) xb_frame_push(ctx, &inside, &proc);
@@ -99,18 +115,24 @@ static int raise(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencod
     xb_set_array(&e->vars[ERR_ARGS], a);
     xb_gc_write(e);
   }
-  set_text(&e->vars[ERR_DESCRIPTION], description_of(gencode));
+  set_text(&e->vars[ERR_DESCRIPTION], description_of(f->gencode));
   xb_gc_write(e);
-  set_text(&e->vars[ERR_OPERATION], operation);
+  set_text(&e->vars[ERR_OPERATION], f->operation);
   xb_gc_write(e);
   set_text(&e->vars[ERR_SUBSYSTEM], "BASE");
   xb_gc_write(e);
-  xb_set_int(&e->vars[ERR_GENCODE], gencode);
-  xb_set_int(&e->vars[ERR_SUBCODE], subcode);
+  if (f->filename) {
+    set_text(&e->vars[ERR_FILENAME], f->filename);
+    xb_gc_write(e);
+  }
+  xb_set_int(&e->vars[ERR_GENCODE], f->gencode);
+  xb_set_int(&e->vars[ERR_SUBCODE], f->subcode);
+  xb_set_int(&e->vars[ERR_OSCODE], f->oscode);
   xb_set_int(&e->vars[ERR_SEVERITY], ES_ERROR);
   xb_set_logical(&e->vars[ERR_CANSUBSTITUTE], (flags & XB_ERR_SUBSTITUTE) != 0);
   xb_set_logical(&e->vars[ERR_CANRETRY], (flags & XB_ERR_RETRY) != 0);
-  xb_set_int(&e->vars[ERR_TRIES], tries);
+  xb_set_logical(&e->vars[ERR_CANDEFAULT], (flags & XB_ERR_DEFAULT) != 0);
+  xb_set_int(&e->vars[ERR_TRIES], f->tries);
 
   call[2] = ctx->error_block;
   ++ctx->error_depth;
@@ -124,6 +146,8 @@ static int raise(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencod
     } else if (flags & XB_ERR_SUBSTITUTE) {
       *result = call[1];
       outcome = 1;
+    } else if (flags & XB_ERR_DEFAULT) {
+      outcome = 1;
     } else {
       unrecoverable(ctx, 9001, "Error recovery failure");
     }
@@ -134,11 +158,19 @@ static int raise(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencod
 
 int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
-  return raise(ctx, frame, result, gencode, subcode, operation, flags, argc, args, 0) == 1;
+  const failure f = {frame, gencode, subcode, operation, NULL, 0, flags, argc, args, 0};
+  return raise(ctx, &f, result) == 1;
 }
 
 int xb_error_retry(xb_ctx *ctx, int32_t gencode, int32_t subcode, const char *operation, uint16_t tries) {
-  return raise(ctx, NULL, NULL, gencode, subcode, operation, XB_ERR_RETRY, 0, NULL, tries) == 2;
+  const failure f = {NULL, gencode, subcode, operation, NULL, 0, XB_ERR_RETRY, 0, NULL, tries};
+  return raise(ctx, &f, NULL) == 2;
+}
+
+int xb_error_file(xb_ctx *ctx, const char *frame, int32_t gencode, int32_t subcode, const char *filename,
+                  int32_t oscode, uint16_t tries) {
+  const failure f = {frame, gencode, subcode, "", filename, oscode, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries};
+  return raise(ctx, &f, NULL);
 }
 
 /* ErrorBlock( [bNew] ): the current error block; a codeblock argument

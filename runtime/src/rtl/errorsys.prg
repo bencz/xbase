@@ -25,7 +25,7 @@ STATIC FUNCTION DefError( oError )
 RETURN .F.
 
 // "Error SUBSYSTEM/subcode  description: operation", with the file name instead of the operation when there is one
-// ("Warning" below ES_ERROR).
+// ("Warning" below ES_ERROR), then the system's error code when there is one.
 STATIC FUNCTION ErrorMessage( oError )
    LOCAL cMessage := IIF( oError:severity > ES_WARNING, "Error", "Warning" ) + " "
    cMessage += IIF( ValType( oError:subSystem ) == "C", oError:subSystem, "???" )
@@ -37,5 +37,8 @@ STATIC FUNCTION ErrorMessage( oError )
       cMessage += ": " + oError:fileName
    ELSEIF !Empty( oError:operation )
       cMessage += ": " + oError:operation
+   ENDIF
+   IF !Empty( oError:osCode )
+      cMessage += " (DOS Error " + LTrim( Str( oError:osCode ) ) + ")"
    ENDIF
 RETURN cMessage

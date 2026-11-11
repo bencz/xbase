@@ -42,4 +42,32 @@ void xb_platform_local_date(int *year, int *month, int *day);
 /* The local time of day, to the millisecond. */
 void xb_platform_local_time(int *hour, int *minute, int *second, int *msec);
 
+/* Whether `c` separates the directories of a path ('/', and on Windows '\\'
+ * and the ':' after a drive letter). */
+int xb_platform_path_separator(char c);
+
+/* Files. A file is the system's handle as an integer; `path` is UTF-8. A
+ * function that fails returns 0 (a count: -1) and stores in `*err` the code
+ * that FError() reports: a DOS error number, which Windows reports itself and
+ * the POSIX errno values are translated to (2 file not found, 3 path not
+ * found, 4 too many open files, 5 access denied, 6 invalid handle, 8 not
+ * enough memory, 32 sharing violation, 80 file exists, 87 invalid parameter,
+ * 112 disk full, 206 name too long; 31, general failure, for the others). */
+typedef intptr_t xb_file;
+
+/* Opens an existing file for reading. */
+int xb_platform_file_open(const char *path, xb_file *f, int32_t *err);
+
+/* Creates a file for writing, emptying it when it exists. */
+int xb_platform_file_create(const char *path, xb_file *f, int32_t *err);
+
+/* Reads up to `n` bytes: the count read, 0 at the end of the file. */
+int64_t xb_platform_file_read(xb_file f, void *buf, size_t n, int32_t *err);
+
+/* Writes the `n` bytes: 1 when all of them were written. */
+int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err);
+
+/* Closes the file: 1 when nothing failed. */
+int xb_platform_file_close(xb_file f, int32_t *err);
+
 #endif

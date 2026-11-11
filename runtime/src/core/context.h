@@ -33,12 +33,11 @@ struct xb_ctx {
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 
 typedef struct xb_private {
-  uint32_t id;              /* the variable's number */
+  uint32_t id;              /* the variable's number (none once CLEAR MEMORY released it, core/memvar.c) */
+  uint32_t borrowed;        /* its binding is an argument passed by reference (PARAMETERS) */
+  const xb_frame *owner;    /* the frame of the activation that created it */
   xb_item  hidden;          /* the binding it hid (NIL: none) */
 } xb_private;
-
-/* Numbers the memory variables of a registering module (core/memvar.c). */
-void xb_memvars_add(xb_memvar *memvars, uint32_t n);
 
 /* A runtime function shows on the call stack while what it does can be seen
  * (a codeblock it calls, an error block it runs): a frame without slots,

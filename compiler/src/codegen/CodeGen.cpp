@@ -346,10 +346,11 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnSelf_->setName("self");
   }
   pushFrame(plan.frameSize(), f.numParams, argc, argv, procOf(f), f.readsArgs && argc);
-  fnMark_ = nullptr; // an activation that may create PRIVATEs ends them on its way out, also when it unwinds
+  // An activation that may create PRIVATEs ends them on its way out, also when it unwinds.
+  bool privates = f.callsPrivates;
   for (auto &b : f.blocks)
-    for (auto &i : b->insts)
-      if (!fnMark_ && xir::createsPrivates(i->op)) fnMark_ = b_.CreateCall(rtMvMark_, {fnCtx_}, "mark");
+    for (auto &i : b->insts) privates = privates || xir::createsPrivates(i->op);
+  fnMark_ = privates ? b_.CreateCall(rtMvMark_, {fnCtx_}, "mark") : nullptr;
   fnExit_ = BasicBlock::Create(ctx_, "exit", fn_);
 
   // Blocks in reverse postorder; machine-value block parameters become PHIs.

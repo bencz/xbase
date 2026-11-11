@@ -381,6 +381,10 @@ void Sema::expr(Expr &e, Scope &s) {
   case ExprKind::Call: {
     auto &c = static_cast<CallExpr &>(e);
     for (auto &a : c.args) expr(*a, s);
+    if (c.callee && c.callee->privates) {
+      if (Frame &f = frames_.back(); f.block) f.block->callsPrivates = true;
+      else if (curFunc_) curFunc_->callsPrivates = true;
+    }
     if (!c.callee || !c.callee->args) break;
     // The callee reads the arguments this function or codeblock received, in its frame; one whose parameters it
     // also reads and writes keeps them there, as written (a codeblock's own parameters always stay there).

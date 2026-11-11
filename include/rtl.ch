@@ -17,6 +17,7 @@
 //   FOLD      calls with constant arguments are evaluated at compile time
 //   ARGS      reads the arguments the function calling it received: that function keeps them in its frame
 //   PARAMS    ARGS, and reads and writes that function's parameters: it keeps them in its frame slots
+//   PRIVATES  creates PRIVATEs of the function calling it, which ends them when it returns
 //
 // Every function here exists in the runtime, and every xBase-callable runtime function is declared here (the
 // runtime.declarations test checks both).
@@ -152,6 +153,11 @@ EXTERN FUNCTION __ArgError( nSubCode ) NATIVE ARGS
 EXTERN FUNCTION __Break( [xValue] ) NATIVE
 EXTERN FUNCTION __ConsoleWrite( xValue ) NATIVE
 EXTERN FUNCTION __GcCollect( [lYoung] ) NATIVE
+EXTERN FUNCTION __MemClear() NATIVE
+EXTERN FUNCTION __MemRelease( ... ) NATIVE
+EXTERN FUNCTION __MemReleaseAll( cSkeleton, lLike ) NATIVE
+EXTERN FUNCTION __MemRestore( cFile, [lAdditive] ) NATIVE PRIVATES
+EXTERN FUNCTION __MemSave( cFile, [cSkeleton], [lLike] ) NATIVE
 EXTERN FUNCTION __Quit() NATIVE
 EXTERN FUNCTION __RangeCount( nRest, [nCount] ) NATIVE
 EXTERN FUNCTION __RangeStart( nLen, [nStart] ) NATIVE

@@ -99,3 +99,79 @@ char **xb_platform_args(int argc, char **argv, int *count) {
   *count = n;
   return out;
 }
+
+int xb_platform_path_separator(char c) { return c == '/' || c == '\\' || c == ':'; }
+
+/* The UTF-8 path as UTF-16 (malloc'ed), or NULL with the error code. */
+static wchar_t *wide_path(const char *path, int32_t *err) {
+  int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+  if (n <= 0) { /* not UTF-8 */
+    *err = ERROR_INVALID_NAME;
+    return NULL;
+  }
+  wchar_t *w = malloc((size_t)n * sizeof *w);
+  if (!w) {
+    *err = ERROR_NOT_ENOUGH_MEMORY;
+    return NULL;
+  }
+  MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, w, n);
+  return w;
+}
+
+static int open_as(const char *path, DWORD access, DWORD share, DWORD disposition, xb_file *f, int32_t *err) {
+  wchar_t *w = wide_path(path, err);
+  if (!w) return 0;
+  HANDLE h = CreateFileW(w, access, share, NULL, disposition, FILE_ATTRIBUTE_NORMAL, NULL);
+  DWORD code = GetLastError();
+  free(w);
+  if (h == INVALID_HANDLE_VALUE) {
+    *err = (int32_t)code;
+    return 0;
+  }
+  *f = (xb_file)h;
+  return 1;
+}
+
+int xb_platform_file_open(const char *path, xb_file *f, int32_t *err) {
+  return open_as(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING, f, err);
+}
+
+int xb_platform_file_create(const char *path, xb_file *f, int32_t *err) {
+  return open_as(path, GENERIC_WRITE, 0, CREATE_ALWAYS, f, err);
+}
+
+/* ReadFile and WriteFile move at most this much at a time (a DWORD count). */
+#define FILE_CHUNK ((DWORD)1 << 30)
+
+int64_t xb_platform_file_read(xb_file f, void *buf, size_t n, int32_t *err) {
+  DWORD got = 0;
+  if (!ReadFile((HANDLE)f, buf, n < FILE_CHUNK ? (DWORD)n : FILE_CHUNK, &got, NULL)) {
+    *err = (int32_t)GetLastError();
+    return -1;
+  }
+  return got;
+}
+
+int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
+  const char *p = buf;
+  while (n > 0) {
+    DWORD put = 0;
+    if (!WriteFile((HANDLE)f, p, n < FILE_CHUNK ? (DWORD)n : FILE_CHUNK, &put, NULL)) {
+      *err = (int32_t)GetLastError();
+      return 0;
+    }
+    if (put == 0) {
+      *err = ERROR_DISK_FULL;
+      return 0;
+    }
+    p += put;
+    n -= put;
+  }
+  return 1;
+}
+
+int xb_platform_file_close(xb_file f, int32_t *err) {
+  if (CloseHandle((HANDLE)f)) return 1;
+  *err = (int32_t)GetLastError();
+  return 0;
+}

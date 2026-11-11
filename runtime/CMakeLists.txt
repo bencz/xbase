@@ -25,6 +25,7 @@ add_library(xbrt STATIC
   src/rtl/dates.c
   src/rtl/hashes.c
   src/rtl/lang.c
+  src/rtl/memfile.c
   src/rtl/numbers.c
   src/rtl/strings.c
 )

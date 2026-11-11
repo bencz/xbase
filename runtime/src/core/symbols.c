@@ -36,5 +36,5 @@ void xb_symbols_seal(void) {
 
 const xb_symbol_entry *xb_symbol_find(const char *name, size_t len) {
   uint32_t id;
-  return xb_names_find(&names, name, len, &id) ? &entries[id] : NULL;
+  return xb_names_find_upper(&names, name, len, &id) ? &entries[id] : NULL;
 }

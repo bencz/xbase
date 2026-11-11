@@ -84,7 +84,7 @@ StmtPtr Parser::parseStmtKind() {
       return nullptr;
     }
   }
-  if (atStmtKw("PRIVATE")) return parseDecl(StmtKind::Private);
+  if (atStmtKw("PRIVATE") || atStmtKw("DECLARE")) return parseDecl(StmtKind::Private); // DECLARE: Clipper's PRIVATE
   if (atStmtKw("PUBLIC")) return parseDecl(StmtKind::Public);
   if (atStmtKw("MEMVAR")) return parseDecl(StmtKind::Memvar);
   if (atStmtKw("PARAMETERS")) return parseDecl(StmtKind::Parameters);
@@ -145,7 +145,7 @@ StmtPtr Parser::parseStmtKind() {
   return std::make_unique<ExprStmt>(loc, std::move(e));
 }
 
-// LOCAL, STATIC, PRIVATE and PUBLIC: names, each with an initializer or array
+// LOCAL, STATIC, PRIVATE (or DECLARE) and PUBLIC: names, each with an initializer or array
 // dimensions; MEMVAR and PARAMETERS: names only.
 StmtPtr Parser::parseDecl(StmtKind kind) {
   auto st = std::make_unique<LocalStmt>(cur().loc, kind);

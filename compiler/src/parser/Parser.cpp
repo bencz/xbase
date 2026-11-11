@@ -75,6 +75,7 @@ bool Parser::isKw(const Token &t, const char *kw) const {
       {"PRIVATE", 4}, {"PUBLIC", 4}, {"PARAMETERS", 4}, {"EXTERNAL", 4}, {"CASE", 4}, {"OTHERWISE", 4}, {"ENDCASE", 4},
       {"SWITCH", 4}, {"ENDSWITCH", 5}, {"EACH", 4}, {"IN", 2}, {"DESCEND", 7},
       {"BEGIN", 4},  {"SEQUENCE", 4}, {"RECOVER", 4}, {"USING", 4}, {"INIT", 4}, {"ANNOUNCE", 4},
+      {"DECLARE", 4},
   };
   if (t.kind != Tok::Ident) return false;
   size_t minLen = std::strlen(kw);
@@ -354,6 +355,7 @@ std::optional<ExternDecl> Parser::parseExtern() {
     else if (attr == "FOLD") d.fold = true;
     else if (attr == "ARGS") d.args = true;
     else if (attr == "PARAMS") d.args = d.params = true;
+    else if (attr == "PRIVATES") d.privates = true;
     else if (attr == "ABBREV") {
       advance();
       if (!at(Tok::Number) || !cur().isInt || cur().ival < 1 || (size_t)cur().ival > d.name.size())

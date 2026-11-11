@@ -23,13 +23,12 @@ design of the larger parts.
 
 ### Variables
 
-- Done: `MEMVAR`, `PRIVATE`, `PUBLIC`, `PARAMETERS`, `M->name`, and Clipper's rule for undeclared names (a memory
-  variable at run time, with a warning; `-Wno-undeclared`, `-Werror=undeclared`)
-  ([runtime.md](runtime.md#memory-variables), [compiler.md](compiler.md#semantic-checks)).
-- Missing: `RELEASE` (`ALL`, `LIKE`, `EXCEPT`), `CLEAR MEMORY`, `SAVE`/`RESTORE` (`.mem` files), `Type()` (with the
-  macro operator), a memory variable as the variable of `FOR EACH`, and the field first in the lookup of an undeclared
-  name once work areas exist.
-- `DECLARE` (a synonym of `PRIVATE` with array dimensions).
+- Done: `MEMVAR`, `PRIVATE` (and `DECLARE`), `PUBLIC`, `PARAMETERS`, `M->name`, `RELEASE` (`ALL`, `LIKE`, `EXCEPT`),
+  `CLEAR MEMORY`, `SAVE`/`RESTORE` (`.mem` files), and Clipper's rule for undeclared names (a memory variable at run
+  time, with a warning; `-Wno-undeclared`, `-Werror=undeclared`) ([runtime.md](runtime.md#memory-variables),
+  [compiler.md](compiler.md#semantic-checks)).
+- Missing: `Type()` (with the macro operator), a memory variable as the variable of `FOR EACH`, and the field first in
+  the lookup of an undeclared name once work areas exist.
 
 ### Fields and work areas
 
@@ -241,14 +240,13 @@ per-thread `SET` values, memory variables and work areas, and synchronization (m
 
 ## Order of the work
 
-1. Memory variables: `RELEASE`, `CLEAR MEMORY`, `SAVE`/`RESTORE`, `DECLARE`.
-2. The macro operator.
-3. The rest of the array, string and number functions; the call-stack functions.
-4. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
+1. The macro operator.
+2. The rest of the array, string and number functions; the call-stack functions.
+3. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
    `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks.
-5. Files and directories; the terminal layer; GET/READ and TBrowse.
-6. The RDD layer.
-7. Generators, async/await and threads, sockets and the other libraries.
+4. Files and directories; the terminal layer; GET/READ and TBrowse.
+5. The RDD layer.
+6. Generators, async/await and threads, sockets and the other libraries.
 
 Alongside, the compiler's own track ([xir.md](xir.md#phases)): type inference and unboxed numbers, value numbering,
 statepoints and a moving collector, inlining, loop optimizations, measured with the benchmarks

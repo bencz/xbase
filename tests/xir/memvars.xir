@@ -21,3 +21,17 @@ entry:
   %3 = call QOUT native %1, %2
   ret
 }
+
+function LOAD params 0 privates {
+entry:
+  %0 = call __MEMRESTORE native "saved", .F.
+  %1 = block LOAD.block1
+  %2 = call EVAL native %1
+  ret
+}
+
+block LOAD.block1 internal params 0 privates {
+entry:
+  %0 = call __MEMRESTORE native "saved", .T.
+  ret %0
+}

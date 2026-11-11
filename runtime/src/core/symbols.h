@@ -36,7 +36,7 @@ void xb_symbols_add(const xb_symbol *symbols, uint32_t n);
  * it before anything runs, on the program's one thread. */
 void xb_symbols_seal(void);
 
-/* The entry of `name` (upper-cased, `len` bytes), or NULL. */
+/* The entry of `name` (`len` bytes, in any letter case), or NULL. */
 const xb_symbol_entry *xb_symbol_find(const char *name, size_t len);
 
 /* The positions that receive references as passed (xb_refs_take). */

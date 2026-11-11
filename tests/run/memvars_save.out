@@ -1,0 +1,26 @@
+
+text: hello      65534          3          0          0
+numbers:         42          3.14159         -7.5         42          3.14159         -7.5
+dates: 20240229 .T. logical: .T.
+not saved: - -
+long name: -          1
+public saved as visible: public the visible one: visible
+like c*: C -
+except c*: - N L
+in the callee:         42 C L
+after ADDITIVE in a callee:         42 public -
+in the callee: - - hello
+after RESTORE in a callee: - - -
+after RESTORE in a codeblock: -
+error:         21       2005 Open error memvars_save_none          2 .T. .T. .F.  U
+after a failed RESTORE:          1
+error:         20       2006 Create error memvars_save_no/dir/file          2 .T. .T. .F.  U
+after a failed SAVE
+try          1
+try          2
+try          3
+retried
+no file: 2008 Argument error 2007 Argument error
+through Do(): -
+after RESTORE through Do(): -
+element gone:       1132          1

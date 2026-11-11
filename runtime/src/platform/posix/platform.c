@@ -1,12 +1,15 @@
-/* The POSIX interfaces this file uses (clock_gettime, localtime_r, threads),
- * which a strict C11 build declares only on request. */
+/* The POSIX interfaces this file uses (clock_gettime, localtime_r, threads,
+ * files), which a strict C11 build declares only on request. */
 #define _POSIX_C_SOURCE 200809L
 
 #include "platform/platform.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 
 static struct timespec started;
 
@@ -78,4 +81,73 @@ void xb_platform_local_date(int *year, int *month, int *day) {
 char **xb_platform_args(int argc, char **argv, int *count) {
   *count = argc;
   return argv;
+}
+
+int xb_platform_path_separator(char c) { return c == '/'; }
+
+/* The DOS error number of an errno value (see platform.h). */
+static int32_t dos_error(int e) {
+  static const struct {
+    int errno_value;
+    int32_t dos;
+  } table[] = {
+    {ENOENT, 2},  {ENOTDIR, 3},  {EMFILE, 4},  {ENFILE, 4},   {EACCES, 5}, {EPERM, 5},
+    {EROFS, 5},   {EISDIR, 5},   {EBADF, 6},   {ENOMEM, 8},   {EBUSY, 32}, {ETXTBSY, 32},
+    {EEXIST, 80}, {EINVAL, 87},  {ENOSPC, 112}, {ENAMETOOLONG, 206},
+#ifdef EDQUOT /* macOS declares it only outside strict POSIX */
+    {EDQUOT, 112},
+#endif
+  };
+  for (size_t i = 0; i < sizeof table / sizeof table[0]; ++i)
+    if (table[i].errno_value == e) return table[i].dos;
+  return 31;
+}
+
+static int open_as(const char *path, int flags, xb_file *f, int32_t *err) {
+  int fd;
+  do {
+    fd = open(path, flags | O_CLOEXEC, 0666);
+  } while (fd < 0 && errno == EINTR);
+  if (fd < 0) {
+    *err = dos_error(errno);
+    return 0;
+  }
+  *f = fd;
+  return 1;
+}
+
+int xb_platform_file_open(const char *path, xb_file *f, int32_t *err) { return open_as(path, O_RDONLY, f, err); }
+
+int xb_platform_file_create(const char *path, xb_file *f, int32_t *err) {
+  return open_as(path, O_WRONLY | O_CREAT | O_TRUNC, f, err);
+}
+
+int64_t xb_platform_file_read(xb_file f, void *buf, size_t n, int32_t *err) {
+  ssize_t got;
+  do {
+    got = read((int)f, buf, n);
+  } while (got < 0 && errno == EINTR);
+  if (got < 0) *err = dos_error(errno);
+  return got;
+}
+
+int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
+  const char *p = buf;
+  while (n > 0) {
+    ssize_t put = write((int)f, p, n);
+    if (put < 0 && errno == EINTR) continue;
+    if (put <= 0) {
+      *err = put < 0 ? dos_error(errno) : 112; /* nothing written: no room */
+      return 0;
+    }
+    p += put;
+    n -= (size_t)put;
+  }
+  return 1;
+}
+
+int xb_platform_file_close(xb_file f, int32_t *err) {
+  if (close((int)f) == 0 || errno == EINTR) return 1; /* after EINTR the descriptor is closed, as on Linux */
+  *err = dos_error(errno);
+  return 0;
 }

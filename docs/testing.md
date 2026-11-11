@@ -11,7 +11,9 @@ Tests run through CTest (`ctest --test-dir build --output-on-failure`); `tests/C
 | Code generation | `xb_add_codegen_test` in `tests/CMakeLists.txt` | The IR `xbc --dump-ir` emits for a cross target must match a regular expression. |
 | Declarations | `runtime.declarations` (`tests/declarations_test.cmake`) | `include/rtl.ch` declares exactly the `xbf_` functions defined in `runtime/src`. |
 
-Every test has a 30-second timeout, so a hang or a loop fails instead of stalling the run.
+Every test has a 30-second timeout, so a hang or a loop fails instead of stalling the run. Execution tests run in the
+build's `tests` directory; one that writes files names them after itself (`memvars_save_*.mem`), so tests running in
+parallel do not share them, and each run overwrites them.
 
 Include files used by a test sit next to it (for example `tests/run/commands.ch`). Execution tests are rebuilt when
 `std.ch` or an included file changes (`xbc --depfile`).
