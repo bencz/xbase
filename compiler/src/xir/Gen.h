@@ -49,6 +49,7 @@ private:
   Value *eachInCell(const EachVar &v);
   void genSwitch(const SwitchStmt &s);
   void genSequence(const SequenceStmt &s);
+  void exitCleanups(size_t loops);
   void unwindOnward();
   void genReturn(const ReturnStmt &s);
   void startDeadBlock();
@@ -83,11 +84,18 @@ private:
     Value *inCell;                 // Bool: the loop works inside the variable's cell
     Value *saved;                  // its value before the loop
   };
+  struct Cleanup {                 // what a RETURN, EXIT or LOOP that leaves a sequence does first
+    Value *oldBlock;               // the error block to put back (WITH), or null
+    const Block *always;           // else the ALWAYS code to run
+    BasicBlock *unwind;            // where that code unwinds: the sequence's own unwind block
+    size_t loops;                  // the loops around the sequence (FnState::loops)
+  };
   struct FnState {
     Function *fn = nullptr;
     std::unique_ptr<Builder> b;
     std::vector<Loop> loops;
     std::vector<EachVar> eachVars;
+    std::vector<Cleanup> cleanups;
     std::string scope;             // name prefix for codeblock functions
     std::string function;          // the xBase function being generated (its codeblocks' too)
     std::unordered_map<uint32_t, Var *> paramLocals; // parameter slot -> the LOCAL standing for it

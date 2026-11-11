@@ -58,7 +58,12 @@ one.
   variable, a parameter), the loop's blocks unwind to a cleanup block that restores the variables (`each.leave`).
 - Onward: an unwind block that has done its work branches to the enclosing one, or returns with the request pending.
 
-`TRY` / `CATCH` / `FINALLY` and `ALWAYS` are planned on the same edges.
+- `WITH`: `seq.with` makes the handler the error block and gives the old one, which `seq.restore` puts back at the
+  end of the body and first thing in the handler.
+- `ALWAYS` (`TRY`'s `FINALLY`): the code runs where the body and `RECOVER` join, and in an unwind block of its own,
+  where `RECOVER` unwinds and the handler goes on (without `RECOVER`, every request goes on): `seq.suspend` sets the
+  requests aside, `seq.value` takes the `BREAK` value, the code runs, `seq.resume` puts them back unless the code
+  made one of its own, and unwinding goes on. A function with `seq.suspend` keeps its variables in memory too.
 
 ## Resumable functions
 

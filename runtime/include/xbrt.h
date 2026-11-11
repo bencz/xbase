@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 28u
+#define XB_ABI_VERSION 29u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -554,6 +554,17 @@ int32_t  xb_for_test(xb_ctx *ctx, const xb_item *counter, const xb_item *limit, 
  * into `r` (RECOVER USING). */
 int32_t  xb_seq_catch(xb_ctx *ctx);
 void     xb_seq_value(xb_ctx *ctx, xb_item *r);
+/* BEGIN SEQUENCE WITH handler: xb_seq_with makes the handler (a block; any
+ * other value changes nothing) the error block and gives the one it replaces,
+ * which xb_seq_restore puts back however the body ends. ALWAYS, on the way out
+ * of an unwinding: xb_seq_suspend sets the requests to unwind aside (returned;
+ * the BREAK value is taken with xb_seq_value), and xb_seq_resume makes them
+ * pending again with that value, unless the ALWAYS code made a request of its
+ * own, which replaces them. */
+void     xb_seq_with(xb_ctx *ctx, xb_item *r, const xb_item *handler);
+void     xb_seq_restore(xb_ctx *ctx, const xb_item *old);
+uint32_t xb_seq_suspend(xb_ctx *ctx);
+void     xb_seq_resume(xb_ctx *ctx, uint32_t requests, const xb_item *value);
 
 xb_ctx  *xb_ctx_new(void);
 void     xb_ctx_free(xb_ctx *ctx);

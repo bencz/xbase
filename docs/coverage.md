@@ -12,8 +12,9 @@ Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar
 
 **FUNCTION**, **PROCEDURE**, **LOCAL**, **STATIC**, **RETURN**, **IF**, **DO CASE**, **SWITCH**, **WHILE**, **FOR**,
 **FOR EACH**, **EXIT**, **LOOP**, **DO ... WITH**, **PRIVATE**, **PUBLIC**, **MEMVAR**, *FIELD*, **PARAMETERS**, **INIT
-PROCEDURE**, **EXIT PROCEDURE**, **EXTERN FUNCTION** (an xbase declaration), **BEGIN SEQUENCE**, **DECLARE**,
-**EXTERNAL** (Clipper's name list), **ANNOUNCE**, **CLASS ... ENDCLASS** and **METHOD** (xbase's classes)
+PROCEDURE**, **EXIT PROCEDURE**, **EXTERN FUNCTION** (an xbase declaration), **BEGIN SEQUENCE** (with `WITH` and
+`ALWAYS`), **TRY** (an xbase statement), **DECLARE**, **EXTERNAL** (Clipper's name list), **ANNOUNCE**, **CLASS ...
+ENDCLASS** and **METHOD** (xbase's classes)
 
 ## Commands (std.ch)
 
@@ -148,7 +149,7 @@ at link time, never by an environment variable.
 
 Functions of xbase's own runtime, beyond Clipper's: **ElapsedMs** (milliseconds since the program started, from a
 monotonic clock, for timing), the bit functions **BitAnd**, **BitOr**, **BitXor**, **BitNor**, **BitNot**,
-**BitShl**, **BitShr** (see [runtime.md](runtime.md#functions)).
+**BitShl**, **BitShr** (see [runtime.md](runtime.md#functions)), **Throw** (`Break()` for `TRY`).
 
 Hashes ([runtime.md](runtime.md#hashes)): **Hash**, **HAllocate**, **HCaseMatch**, **HClear**, **HClone**, **HCopy**,
 **HDel**, **HDelAt**, **HEval**, **HFill**, **HGet**, **HGetDef**, **HHasKey**, **HKeyAt**, **HKeys**, **HMerge**,

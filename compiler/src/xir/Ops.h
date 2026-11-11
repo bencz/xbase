@@ -60,6 +60,10 @@ enum class Op : uint8_t {
                   // (PValue()), so it is never merged or moved
   SeqCatch,       // -> Bool: in an unwind block of BEGIN SEQUENCE, the request is a BREAK alone (then taken)
   SeqValue,       // -> Item: the BREAK value (RECOVER USING), moved out of the context
+  SeqWith,        // Item -> Item: BEGIN SEQUENCE WITH: the handler becomes the error block; the one it replaces
+  SeqRestore,     // Item: that error block back
+  SeqSuspend,     // -> I64: in an unwind block, the requests to unwind, set aside (ALWAYS runs without them)
+  SeqResume,      // I64, Item: those requests and the BREAK value back, unless ALWAYS made a request of its own
   SubstCheck,     // operation -> Bool: right after it, its result is not of the types it gives itself (an error's
                   // block substituted it)
   SubstValue,     // operation -> Item: that result, at the start of the block the check leads to

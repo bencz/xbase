@@ -1,0 +1,31 @@
+
+same block? .F. B
+with block Argument error
+recovered O Argument error
+global block Argument error
+         0
+always 1
+in R
+always in R
+r: no
+global block Argument error
+after R          0
+inner with
+inner recover          2
+subst:         42
+body
+always 2
+always 3
+outer got          5
+recover          6
+always 4
+outer got          7
+x
+always 5
+outer got          8
+always 6
+outer got         10
+loop recover          1
+loop recover          2 [always before RETURN]
+recover exits: r1a1a2a3 returned
+end

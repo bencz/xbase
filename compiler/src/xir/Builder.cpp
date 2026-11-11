@@ -182,6 +182,12 @@ Instruction *Builder::argsRest() { return make(Op::ArgsRest, Type::Args); }
 
 Instruction *Builder::seqCatch() { return make(Op::SeqCatch, Type::Bool); }
 Instruction *Builder::seqValue() { return make(Op::SeqValue, Type::Item); }
+Instruction *Builder::seqWith(Value *handler) { return make(Op::SeqWith, Type::Item, {handler}); }
+Instruction *Builder::seqRestore(Value *old) { return make(Op::SeqRestore, Type::Void, {old}); }
+Instruction *Builder::seqSuspend() { return make(Op::SeqSuspend, Type::I64); }
+Instruction *Builder::seqResume(Value *requests, Value *value) {
+  return make(Op::SeqResume, Type::Void, {requests, value});
+}
 Instruction *Builder::substCheck(Value *checked) { return make(Op::SubstCheck, Type::Bool, {checked}); }
 Instruction *Builder::substValue(Value *checked) { return make(Op::SubstValue, Type::Item, {checked}); }
 

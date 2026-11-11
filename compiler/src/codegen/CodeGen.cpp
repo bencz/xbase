@@ -83,6 +83,10 @@ void CodeGen::initTypes() {
   rtPending_ = rt("xb_pending", i32_, {ptrTy_});
   rtSeqCatch_ = rt("xb_seq_catch", i32_, {ptrTy_});
   rtSeqValue_ = rt("xb_seq_value", voidTy, {ptrTy_, ptrTy_});
+  rtSeqWith_ = rt("xb_seq_with", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtSeqRestore_ = rt("xb_seq_restore", voidTy, {ptrTy_, ptrTy_});
+  rtSeqSuspend_ = rt("xb_seq_suspend", i32_, {ptrTy_});
+  rtSeqResume_ = rt("xb_seq_resume", voidTy, {ptrTy_, i32_, ptrTy_});
   rtHashNew_ = rt("xb_hash_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtEachKey_ = rt("xb_each_key", voidTy, {ptrTy_, ptrTy_, ptrTy_, i64_});
   rtArrayNew_ = rt("xb_array_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
@@ -126,8 +130,9 @@ void CodeGen::initTypes() {
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
   for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
-                           rtSeqCatch_, rtSeqValue_, rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_,
-                           rtMvPrivate_, rtMvPublic_, rtMvParam_})
+                           rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_,
+                           rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_, rtMvPrivate_, rtMvPublic_,
+                           rtMvParam_})
     quietCalls_.insert(c.getCallee());
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},

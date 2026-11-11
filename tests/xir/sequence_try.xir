@@ -1,0 +1,105 @@
+module SEQUENCE_TRY
+
+function MAIN params 1 {
+  $f0 = frame 0 "X"
+  $f1 = frame 1 "X"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward MAIN.byref
+  ret %2
+body:
+  %4 = load $f0
+  store $f1, %4
+  %6 = block MAIN.block2
+  %7 = seq.with %6
+  br seq.body
+seq.body unwind seq.unwind:
+  %9 = load $f1
+  %10 = binary add %9, 1:w10
+  store $f1, %10
+  seq.restore %7
+  br seq.join
+seq.unwind unwind seq.always.unwind:
+  seq.restore %7
+  %15 = seq.catch
+  cond_br %15, seq.recover, seq.always.unwind
+seq.always.unwind:
+  %17 = seq.suspend
+  %18 = seq.value
+  %19 = load $f1
+  %20 = call QOUT native %19
+  seq.resume %17, %18
+  ret
+seq.join:
+  %23 = load $f1
+  %24 = call QOUT native %23
+  %25 = load $f1
+  ret %25
+seq.recover unwind seq.always.unwind:
+  %27 = seq.value
+  br seq.always.exit
+seq.always.exit:
+  %29 = load $f1
+  %30 = call QOUT native %29
+  br seq.exit
+seq.exit unwind seq.always.unwind:
+  ret 0:w10
+}
+
+function MAIN.byref internal params 1 {
+  $f0 = frame 0 "X"
+entry:
+  %0 = block MAIN.block1
+  %1 = seq.with %0
+  br seq.body
+seq.body unwind seq.unwind:
+  %3 = load $f0 maybe_ref
+  %4 = binary add %3, 1:w10
+  store $f0 maybe_ref, %4
+  barrier $f0 maybe_ref
+  seq.restore %1
+  br seq.join
+seq.unwind unwind seq.always.unwind:
+  seq.restore %1
+  %10 = seq.catch
+  cond_br %10, seq.recover, seq.always.unwind
+seq.always.unwind:
+  %12 = seq.suspend
+  %13 = seq.value
+  %14 = load $f0 maybe_ref
+  %15 = call QOUT native %14
+  seq.resume %12, %13
+  ret
+seq.join:
+  %18 = load $f0 maybe_ref
+  %19 = call QOUT native %18
+  %20 = load $f0 maybe_ref
+  ret %20
+seq.recover unwind seq.always.unwind:
+  %22 = seq.value
+  br seq.always.exit
+seq.always.exit:
+  %24 = load $f0 maybe_ref
+  %25 = call QOUT native %24
+  br seq.exit
+seq.exit unwind seq.always.unwind:
+  ret 0:w10
+}
+
+block MAIN.block1 internal params 1 {
+  $f0 = frame 0 "E"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = call BREAK native %0
+  ret %1
+}
+
+block MAIN.block2 internal params 1 {
+  $f0 = frame 0 "E"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = call BREAK native %0
+  ret %1
+}

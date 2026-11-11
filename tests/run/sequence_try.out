@@ -1,0 +1,21 @@
+
+body
+caught: O Argument error + .F.
+finally 1
+caught from a function:       1132
+caught: thrown
+no error
+finally 2 [finally in Ret 1] [finally in Ret 2]
+returned: from body from catch
+loop: 1ff3ff          4
+finally without catch
+went on:          1
+catch then error
+error block: Argument error
+finally after catch error
+went on: eb
+replaced:          4
+inner: /
+outer: rethrown
+error block: Argument error
+after: eb

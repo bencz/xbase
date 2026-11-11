@@ -172,8 +172,10 @@ void Folder::stmt(Stmt &s) {
   }
   case StmtKind::Sequence: {
     auto &q = static_cast<SequenceStmt &>(s);
+    if (q.handler) fold(q.handler);
     block(q.body);
     block(q.recover);
+    block(q.always);
     break;
   }
   case StmtKind::Exit:

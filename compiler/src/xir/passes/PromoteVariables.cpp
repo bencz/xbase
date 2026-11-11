@@ -153,12 +153,12 @@ private:
 } // namespace
 
 // A function with BEGIN SEQUENCE keeps its variables in memory: its handlers
-// are reached by unwinding, from inside blocks, where no branch can pass
-// values (FOR EACH cleanups read no promotable variable).
+// (RECOVER, ALWAYS) are reached by unwinding, from inside blocks, where no
+// branch can pass values (FOR EACH cleanups read no promotable variable).
 bool promoteVariables(Function &f) {
   for (auto &b : f.blocks)
     for (auto &i : b->insts)
-      if (i->op == Op::SeqCatch) return false;
+      if (i->op == Op::SeqCatch || i->op == Op::SeqSuspend) return false;
   std::vector<Var *> vars = directLocals(f);
   if (vars.empty()) return false;
   Promoter(f, vars).run();

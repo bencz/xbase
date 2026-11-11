@@ -14,10 +14,10 @@ struct Sema::Scope {
   unsigned switchDepth = 0;
   unsigned blockDepth = 0;       // nesting inside a statement's body
   bool seenExecutable = false;   // declarations must precede executable statements
-  // Inside the body of a BEGIN SEQUENCE: the loops and SWITCHes around it,
-  // which RETURN, EXIT and LOOP may not leave it for (Clipper rule).
-  bool inSequence = false;
-  unsigned sequenceLoops = 0, sequenceSwitches = 0;
+  // Inside a part RETURN, EXIT and LOOP may not leave (a BEGIN SEQUENCE's body, the Clipper rule; ALWAYS and
+  // FINALLY, which run while a request may wait to go on): its name, and the loops and SWITCHes around it.
+  const char *fence = nullptr;
+  unsigned fenceLoops = 0, fenceSwitches = 0;
 };
 
 void Sema::run(Module &m) {
@@ -340,7 +340,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::Return: {
     auto &r = static_cast<ReturnStmt &>(st);
-    if (s.inSequence) diag_.error(r.loc, "RETURN cannot leave a BEGIN SEQUENCE");
+    if (s.fence) diag_.error(r.loc, std::string("RETURN cannot leave ") + s.fence);
     if (r.value) {
       if (curFunc_->isProcedure && !curFunc_->implicit)
         diag_.error(r.loc, "PROCEDURE '" + curFunc_->name + "' cannot return a value");
@@ -378,25 +378,31 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::Sequence: {
     auto &q = static_cast<SequenceStmt &>(st);
-    Scope inner = s;
-    inner.inSequence = true;
-    inner.sequenceLoops = s.loopDepth;
-    inner.sequenceSwitches = s.switchDepth;
-    nestedBlock(q.body, inner);
-    s.next = inner.next;
-    s.seenExecutable = inner.seenExecutable;
+    if (q.handler) expr(*q.handler, s);
+    auto fenced = [&](Block &b, const char *fence) { // b, which RETURN, EXIT and LOOP may not leave
+      Scope inner = s;
+      inner.fence = fence;
+      inner.fenceLoops = s.loopDepth;
+      inner.fenceSwitches = s.switchDepth;
+      nestedBlock(b, inner);
+      s.next = inner.next;
+      s.seenExecutable = inner.seenExecutable;
+    };
+    if (q.isTry) nestedBlock(q.body, s);
+    else fenced(q.body, "a BEGIN SEQUENCE");
     if (q.usingVar) expr(*q.usingVar, s);
     nestedBlock(q.recover, s);
+    if (q.hasAlways) fenced(q.always, q.isTry ? "FINALLY" : "ALWAYS");
     break;
   }
   case StmtKind::Exit: // leaves the innermost loop or SWITCH
     if (!s.loopDepth && !s.switchDepth) diag_.error(st.loc, "EXIT outside of a loop");
-    else if (s.inSequence && s.loopDepth == s.sequenceLoops && s.switchDepth == s.sequenceSwitches)
-      diag_.error(st.loc, "EXIT cannot leave a BEGIN SEQUENCE");
+    else if (s.fence && s.loopDepth == s.fenceLoops && s.switchDepth == s.fenceSwitches)
+      diag_.error(st.loc, std::string("EXIT cannot leave ") + s.fence);
     break;
   case StmtKind::Loop:
     if (!s.loopDepth) diag_.error(st.loc, "LOOP outside of a loop");
-    else if (s.inSequence && s.loopDepth == s.sequenceLoops) diag_.error(st.loc, "LOOP cannot leave a BEGIN SEQUENCE");
+    else if (s.fence && s.loopDepth == s.fenceLoops) diag_.error(st.loc, std::string("LOOP cannot leave ") + s.fence);
     break;
   }
 }

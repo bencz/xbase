@@ -103,10 +103,15 @@ Statements:
 - `FOR EACH v1 [, v2 ...] IN coll1 [, coll2 ...] [DESCEND] ... NEXT | END`, and `FOR EACH k => v IN coll ...` (one
   collection), whose `k` gets the key of each hash entry or the index of each array element or character
 - `EXIT` (leaves the innermost loop or `SWITCH`), `LOOP`
-- `BEGIN SEQUENCE ... [RECOVER [USING v] ...] END` (`std.ch` makes `END SEQUENCE` and `ENDSEQUENCE` an `END`); a
-  `BREAK` in the body, or in what it calls, continues after `RECOVER` (or `END`). `RETURN`, and `EXIT` or `LOOP` for
-  a loop around the sequence, cannot leave its body (Clipper rule); in `RECOVER` they can. `BREAK [value]` is a
-  `std.ch` command (`__Break()`, the same as `Break()`).
+- `BEGIN SEQUENCE [WITH expr] ... [RECOVER [USING v] ...] [ALWAYS ...] END` (`std.ch` makes `END SEQUENCE` and
+  `ENDSEQUENCE` an `END`); a `BREAK` in the body, or in what it calls, continues after `RECOVER` (or `END`; with
+  `ALWAYS` and no `RECOVER`, it goes on after `ALWAYS`). The `WITH` block is the error block while the body runs;
+  `ALWAYS` runs however the body and `RECOVER` end. `RETURN`, and `EXIT` or `LOOP` for a loop around the sequence,
+  cannot leave its body (Clipper rule) nor `ALWAYS`; in `RECOVER` they can (`ALWAYS` runs first). `BREAK [value]` is
+  a `std.ch` command (`__Break()`, the same as `Break()` and `Throw()`).
+- `TRY ... [CATCH [v] ...] [FINALLY ...] END` (`END TRY` too): a sequence whose error block is `{| e | Break( e ) }`,
+  so an error reaches `CATCH` as its `Error` object and a `Throw( x )` as `x`; `FINALLY` is its `ALWAYS`. `RETURN`,
+  `EXIT` and `LOOP` may leave its body and `CATCH` (`FINALLY` runs first), not `FINALLY`.
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
 - Classes ([runtime.md](runtime.md#classes)), at file level: `[STATIC | CREATE] CLASS name [INHERIT | FROM parent,
   ...]`, then members, then `ENDCLASS` (or `END [CLASS]`): `EXPORTED:` (`EXPORT:`, `VISIBLE:`), `PROTECTED:` and
@@ -333,7 +338,12 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   keys as any assignment would: in that loop's element.
 - `BEGIN SEQUENCE` gives the blocks of its body an unwind block, the handler: a `BREAK` (pending after an operation
   of the body, or a call) is taken there and `RECOVER` follows, with the `BREAK` value stored in the `USING`
-  variable; other requests go on unwinding (see [xir.md](xir.md#control-flow-for-errors-and-exceptions)).
+  variable; other requests go on unwinding (see [xir.md](xir.md#control-flow-for-errors-and-exceptions)). `WITH`
+  starts with `seq.with` and puts the error block back (`seq.restore`) at the end of the body and in the handler.
+  `ALWAYS` code is generated where the body and `RECOVER` join, in an unwind block of its own (`seq.suspend` and
+  `seq.value` before it, `seq.resume` after it, then onward), and before each `RETURN`, `EXIT` or `LOOP` that leaves
+  the sequence (`Generator::exitCleanups`, which also puts the error block back), in a block that unwinds where the
+  sequence does. `TRY` is the parser's `SequenceStmt` with the handler block built in.
 - A codeblock becomes an xIR function of its own (`<function>.blockN`) whose frame holds its parameters; `block`
   creates it with the cells of the variables it captures (moving them into cells if they are not yet).
 - `STATIC` initializers form the module initialization function.

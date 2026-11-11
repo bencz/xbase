@@ -159,6 +159,7 @@ EXTERN FUNCTION ErrorBlock( [bNew] ) NATIVE
 EXTERN FUNCTION ErrorLevel( [nNew] ) NATIVE
 EXTERN FUNCTION ErrorNew() NATIVE
 EXTERN FUNCTION ErrorSys() NATIVE
+EXTERN FUNCTION Throw( [xValue] ) NATIVE
 
 // Language, settings and runtime
 EXTERN FUNCTION AMPM( cTime ) NATIVE

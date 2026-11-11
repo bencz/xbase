@@ -498,6 +498,12 @@ void CodeGen::emit(const xir::Instruction &i) {
     values_[&i] = b_.CreateICmpNE(b_.CreateCall(rtSeqCatch_, {fnCtx_}), ConstantInt::get(i32_, 0));
     break;
   case Op::SeqValue: callItemOp(rtSeqValue_, dest(i), {}); break;
+  case Op::SeqWith: callItemOp(rtSeqWith_, dest(i), {addr(ops[0])}); break;
+  case Op::SeqRestore: b_.CreateCall(rtSeqRestore_, {fnCtx_, addr(ops[0])}); break;
+  case Op::SeqSuspend: values_[&i] = b_.CreateZExt(b_.CreateCall(rtSeqSuspend_, {fnCtx_}), i64_); break;
+  case Op::SeqResume:
+    b_.CreateCall(rtSeqResume_, {fnCtx_, b_.CreateTrunc(value(ops[0]), i32_), addr(ops[1])});
+    break;
   case Op::SubstCheck: { // the tag as the item holds it: a substituted value may have any type
     Value *bit = b_.CreateShl(ConstantInt::get(i32_, 1), itemType(addr(ops[0])));
     Value *own = ConstantInt::get(i32_, plan_->types().of(ops[0]));

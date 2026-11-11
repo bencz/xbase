@@ -121,13 +121,10 @@ Missing, from the plan below: polymorphic caches, devirtualization and variables
 
 ### Exceptions
 
-- `BEGIN SEQUENCE WITH bErrorHandler` (the handler applies inside the sequence only) and an `ALWAYS` clause that runs
-  on every exit from the sequence.
-- `TRY` / `CATCH [oErr]` / `FINALLY` / `END`, and `Throw( x )`: `TRY` is a sequence whose handler breaks with the
-  error, so the error reaches `CATCH` as its `Error` object; `FINALLY` runs on every exit (normal end, error,
-  `RETURN`, `EXIT`, `LOOP`).
-- Built on the unwind edges and the pending flag, like `BEGIN SEQUENCE`: no `setjmp`/`longjmp` and no C++
-  exceptions.
+Done ([compiler.md](compiler.md#grammar)): `BEGIN SEQUENCE WITH bErrorHandler` (the handler is the error block while
+the body runs) and `ALWAYS`; `TRY` / `CATCH [oErr]` / `FINALLY` / `END` and `Throw( x )`, where `FINALLY` runs on
+every exit (normal end, error, `RETURN`, `EXIT`, `LOOP`). Built on the unwind edges and the pending flag, like
+`BEGIN SEQUENCE`: no `setjmp`/`longjmp` and no C++ exceptions.
 
 ### Other language features
 

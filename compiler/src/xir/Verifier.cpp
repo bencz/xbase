@@ -224,7 +224,9 @@ private:
         if (!ok) fail("params.ref tests something other than a parameter of this function");
       }
       break;
-    case Op::SeqCatch: case Op::SeqValue: expect(i, 0, {}); break;
+    case Op::SeqCatch: case Op::SeqValue: case Op::SeqSuspend: expect(i, 0, {}); break;
+    case Op::SeqWith: case Op::SeqRestore: expect(i, 1, {Type::Item}); break;
+    case Op::SeqResume: expect(i, 2, {Type::I64, Type::Item}); break;
     case Op::EachKey: expect(i, 2, {Type::Item, Type::I64}); break;
     case Op::SubstCheck: { // nothing between the operation, its check and the subst.value its branch leads to
       expect(i, 1, {Type::Item});

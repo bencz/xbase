@@ -339,14 +339,20 @@ struct SwitchStmt : Stmt {
   explicit SwitchStmt(SourceLoc l, ExprPtr v) : Stmt(StmtKind::Switch, l), value(std::move(v)) {}
 };
 
-// BEGIN SEQUENCE body [RECOVER [USING var] recover] END: a BREAK in the body
-// (in what it calls, too) continues after RECOVER, the BREAK value in `var`;
-// without RECOVER, after END.
+// BEGIN SEQUENCE [WITH handler] body [RECOVER [USING var] recover] [ALWAYS always] END: a BREAK in the body (in what
+// it calls, too) continues after RECOVER, the BREAK value in `var`; without RECOVER, after END (unless there is
+// ALWAYS: then the BREAK goes on after it). The handler is the error block while the body runs. ALWAYS runs however
+// the body and RECOVER end. TRY body [CATCH [var] recover] [FINALLY always] END is one with the handler
+// {| e | Break( e ) }, whose body and CATCH RETURN, EXIT and LOOP may leave (FINALLY runs then too).
 struct SequenceStmt : Stmt {
   Block body;
+  ExprPtr handler;               // WITH expr (TRY: the block that breaks with the error), or null
+  bool isTry = false;
   bool hasRecover = false;
   ExprPtr usingVar;              // a VarExpr, or null
   Block recover;
+  bool hasAlways = false;
+  Block always;
   explicit SequenceStmt(SourceLoc l) : Stmt(StmtKind::Sequence, l) {}
 };
 

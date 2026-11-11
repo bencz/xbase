@@ -32,6 +32,7 @@ void Generator::genStmt(const Stmt &s) {
   case StmtKind::Sequence: genSequence(static_cast<const SequenceStmt &>(s)); break;
   case StmtKind::Exit:
   case StmtKind::Loop:
+    exitCleanups(cur_.loops.size());
     b.br(s.kind == StmtKind::Exit ? cur_.loops.back().exitTo : cur_.loops.back().loopTo);
     startDeadBlock();
     break;
@@ -93,6 +94,7 @@ void Generator::genMemvars(const LocalStmt &s) {
 void Generator::genReturn(const ReturnStmt &r) {
   Builder &b = *cur_.b;
   Value *value = r.value ? genExpr(*r.value) : nullptr;
+  exitCleanups(0);
   for (auto it = cur_.eachVars.rbegin(); it != cur_.eachVars.rend(); ++it) {
     Var *x = varOf(*it->var);
     if (mayBeInCell(*x)) b.eachLeave(x, eachInCell(*it), it->saved);
@@ -274,36 +276,99 @@ void Generator::unwindOnward() {
   else b.ret(nullptr);
 }
 
-// BEGIN SEQUENCE: the body's blocks unwind to a handler, which takes a BREAK
-// (seq.catch) and goes on with RECOVER, storing the BREAK value in the USING
-// variable; any other request (QUIT, an error that ends the program) goes on
-// unwinding. The handler reads variables as the failed operation left them:
-// the function keeps them in memory (promote-variables leaves it alone).
+// BEGIN SEQUENCE (and TRY): the body's blocks unwind to a handler, which puts
+// the WITH handler's error block back, takes a BREAK (seq.catch) and goes on
+// with RECOVER, storing the BREAK value in the USING variable; any other
+// request (QUIT, an error that ends the program) goes on unwinding. With
+// ALWAYS, its code runs on every way out: after the body or RECOVER (once,
+// where they join), on the way out of an unwinding (the request set aside
+// meanwhile, and without RECOVER a BREAK is not taken), and before a RETURN,
+// EXIT or LOOP that leaves them (exitCleanups). The handlers read variables as
+// the failed operation left them: the function keeps them in memory
+// (promote-variables leaves it alone).
 void Generator::genSequence(const SequenceStmt &st) {
   Builder &b = *cur_.b;
   BasicBlock *outer = b.unwindBlock();
+  Value *oldBlock = st.handler ? b.seqWith(genExpr(*st.handler)) : nullptr;
   BasicBlock *body = cur_.fn->addBlock("seq.body");
   BasicBlock *handler = cur_.fn->addBlock("seq.unwind");
+  BasicBlock *always = st.hasAlways ? cur_.fn->addBlock("seq.always.unwind") : nullptr;
+  BasicBlock *join = cur_.fn->addBlock("seq.join");
   BasicBlock *end = cur_.fn->addBlock("seq.end");
+  if (st.hasAlways) cur_.cleanups.push_back({nullptr, &st.always, outer, cur_.loops.size()});
+  if (oldBlock) cur_.cleanups.push_back({oldBlock, nullptr, outer, cur_.loops.size()});
   b.br(body);
   b.setUnwind(handler);
   b.setBlock(body);
   genBlock(st.body);
-  if (!b.terminated()) b.br(end);
+  if (oldBlock) {
+    if (!b.terminated()) b.seqRestore(oldBlock);
+    cur_.cleanups.pop_back();
+  }
+  if (!b.terminated()) b.br(join);
 
-  b.setUnwind(outer);
+  BasicBlock *afterHandler = always ? always : outer; // where RECOVER unwinds, and the handler goes on
+  b.setUnwind(afterHandler);
   b.setBlock(handler);
+  if (oldBlock) b.seqRestore(oldBlock);
   BasicBlock *recover = cur_.fn->addBlock("seq.recover");
   BasicBlock *onward = cur_.fn->addBlock("seq.onward");
-  b.condBr(b.seqCatch(), recover, onward);
+  if (st.hasRecover || !st.hasAlways) b.condBr(b.seqCatch(), recover, onward);
+  else b.br(onward); // ALWAYS without RECOVER: the request goes on after it
   b.setBlock(onward);
-  unwindOnward();
+  if (always) b.br(always);
+  else unwindOnward();
   b.setBlock(recover);
   Value *value = b.seqValue(); // taken even without USING, so the context does not keep it alive
   if (st.usingVar) store(static_cast<const VarExpr &>(*st.usingVar), value);
   genBlock(st.recover);
+  if (!b.terminated()) b.br(join);
+
+  if (st.hasAlways) cur_.cleanups.pop_back();
+  b.setUnwind(outer);
+  if (always) {
+    b.setBlock(always);
+    Value *requests = b.seqSuspend();
+    Value *breakValue = b.seqValue();
+    genBlock(st.always);
+    if (!b.terminated()) {
+      b.seqResume(requests, breakValue);
+      unwindOnward();
+    }
+  }
+  b.setBlock(join);
+  if (st.hasAlways) genBlock(st.always);
   if (!b.terminated()) b.br(end);
   b.setBlock(end);
+}
+
+// Before a RETURN (all of them) or an EXIT or LOOP (those inside its loop, from `loops` on): the error blocks of the
+// WITH handlers it leaves go back and the ALWAYS code it leaves runs, innermost first, each in a block that unwinds
+// where its sequence does.
+void Generator::exitCleanups(size_t loops) {
+  Builder &b = *cur_.b;
+  BasicBlock *unwind = b.unwindBlock();
+  std::vector<Cleanup> all = cur_.cleanups;
+  for (size_t k = all.size(); k-- > 0 && all[k].loops >= loops;) {
+    cur_.cleanups.resize(k); // a RETURN in the ALWAYS code does not run it again
+    if (all[k].oldBlock) {
+      b.seqRestore(all[k].oldBlock);
+      continue;
+    }
+    BasicBlock *code = cur_.fn->addBlock("seq.always.exit");
+    b.br(code);
+    b.setUnwind(all[k].unwind);
+    b.setBlock(code);
+    genBlock(*all[k].always);
+    if (b.terminated()) break;
+  }
+  cur_.cleanups = all;
+  if (!b.terminated()) { // the exit goes on from a block of the right unwind
+    BasicBlock *rest = cur_.fn->addBlock("seq.exit");
+    b.br(rest);
+    b.setUnwind(unwind);
+    b.setBlock(rest);
+  }
 }
 
 // SWITCH: the value is tested against each CASE in order; the bodies follow

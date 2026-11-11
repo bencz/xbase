@@ -554,10 +554,15 @@ hidden, so level 0 is where the error happened), to standard error (`OutErr()`),
 terminal layer. An unrecoverable error lists the levels as `Called from NAME(line) in FILE` (without ` in FILE` for a
 runtime function).
 
-`Break( [xValue] )` (and the `BREAK [value]` command, `__Break`) stores the value in the context and raises
-`XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only request pending,
-and `xb_seq_value` moves the value out (`RECOVER USING`). With no sequence active the `BREAK` reaches the start
-function, and the program ends quietly with exit code 0.
+`Break( [xValue] )` (and the `BREAK [value]` command, `__Break`, and `Throw( [xValue] )`) stores the value in the
+context and raises `XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only
+request pending, and `xb_seq_value` moves the value out (`RECOVER USING`). With no sequence active the `BREAK` reaches
+the start function, and the program ends quietly with exit code 0. `BEGIN SEQUENCE WITH` (and `TRY`) calls
+`xb_seq_with`, which makes its block the error block (`ErrorBlock()` gives it meanwhile) and returns the one it
+replaces, and `xb_seq_restore` puts that back. On the way out of an unwinding through `ALWAYS`, `xb_seq_suspend` sets
+the pending requests aside and `xb_seq_resume` raises them again with the `BREAK` value, unless the `ALWAYS` code raised
+one of its own, which replaces them. An error in the `WITH` block itself goes to that block again, as in the reference,
+until the limit of nested handler calls (error 9003).
 
 ## Operators
 

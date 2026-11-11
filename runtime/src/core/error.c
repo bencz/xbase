@@ -210,6 +210,12 @@ void xbf_BREAK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   request_break(ctx, argc, argv);
 }
 
+/* Throw( [xValue] ): the same, under the name TRY ... CATCH reads best with. */
+void xbf_THROW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  request_break(ctx, argc, argv);
+}
+
 /* The BREAK [xValue] command (std.ch). */
 void xbf___BREAK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
@@ -225,4 +231,23 @@ int32_t xb_seq_catch(xb_ctx *ctx) {
 void xb_seq_value(xb_ctx *ctx, xb_item *r) {
   *r = ctx->break_value;
   xb_set_nil(&ctx->break_value);
+}
+
+void xb_seq_with(xb_ctx *ctx, xb_item *r, const xb_item *handler) {
+  *r = ctx->error_block;
+  if (handler->type == XB_T_BLOCK) ctx->error_block = *handler;
+}
+
+void xb_seq_restore(xb_ctx *ctx, const xb_item *old) { ctx->error_block = *old; }
+
+uint32_t xb_seq_suspend(xb_ctx *ctx) {
+  uint32_t requests = ctx->pending & XB_PENDING_UNWIND;
+  ctx->pending &= ~requests;
+  return requests;
+}
+
+void xb_seq_resume(xb_ctx *ctx, uint32_t requests, const xb_item *value) {
+  if (ctx->pending & XB_PENDING_UNWIND) return; /* ALWAYS made its own: it replaces them */
+  ctx->pending |= requests;
+  ctx->break_value = *value;
 }

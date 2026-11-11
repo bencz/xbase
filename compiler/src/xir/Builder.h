@@ -63,6 +63,10 @@ public:
   Instruction *argsRest();
   Instruction *seqCatch();
   Instruction *seqValue();
+  Instruction *seqWith(Value *handler);
+  Instruction *seqRestore(Value *old);
+  Instruction *seqSuspend();
+  Instruction *seqResume(Value *requests, Value *value);
   Instruction *substCheck(Value *checked);
   Instruction *substValue(Value *checked);
   Instruction *forTest(Value *counter, Value *limit, Value *step);

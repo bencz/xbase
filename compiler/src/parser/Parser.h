@@ -76,6 +76,9 @@ private:
   StmtPtr parseIf();
   StmtPtr parseWhile();
   StmtPtr parseSequence();
+  StmtPtr parseTry();
+  void parseSequenceParts(SequenceStmt &st, const char *recoverWord, const char *alwaysWord, const char *what,
+                          SourceLoc openLoc);
   StmtPtr parseFor();
 
   // Expressions.cpp

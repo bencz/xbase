@@ -38,6 +38,7 @@ StmtPtr Parser::parseStmtKind() {
   if (atStmtKw("IF") && !atInlineIf()) return parseIf();
   if (atStmtKw("WHILE")) return parseWhile();
   if (atStmtKw("BEGIN") && isKw(ahead(), "SEQUENCE")) return parseSequence();
+  if (atStmtKw("TRY") && ahead().kind == Tok::EndOfStmt) return parseTry();
   if (atStmtKw("FOR")) return isKw(ahead(), "EACH") && !isAssignAfterEach() ? parseForEach() : parseFor();
   if (atStmtKw("RETURN")) {
     advance();
@@ -334,32 +335,65 @@ StmtPtr Parser::parseForEach() {
   return st;
 }
 
-// BEGIN SEQUENCE ... [RECOVER [USING var]] ... END (std.ch makes END SEQUENCE
-// and ENDSEQUENCE an END)
+// BEGIN SEQUENCE [WITH expr] ... [RECOVER [USING var]] ... [ALWAYS] ... END (std.ch makes END SEQUENCE and
+// ENDSEQUENCE an END)
 StmtPtr Parser::parseSequence() {
   SourceLoc openLoc = cur().loc;
   advance(); // BEGIN
   advance(); // SEQUENCE
+  auto st = std::make_unique<SequenceStmt>(openLoc);
+  if (at(Tok::Ident) && cur().upper == "WITH") {
+    advance();
+    st->handler = parseExpr();
+  }
+  endOfStmt();
+  parseSequenceParts(*st, "RECOVER", "ALWAYS", "BEGIN SEQUENCE", openLoc);
+  return st;
+}
+
+// TRY ... [CATCH [var]] ... [FINALLY] ... END (std.ch makes END TRY an END): a sequence whose error block breaks
+// with the error, {| e | Break( e ) }.
+StmtPtr Parser::parseTry() {
+  SourceLoc openLoc = cur().loc;
+  advance(); // TRY
   endOfStmt();
   auto st = std::make_unique<SequenceStmt>(openLoc);
-  st->body = parseBlock({"RECOVER", "END"});
-  if (atStmtKw("RECOVER")) {
+  st->isTry = true;
+  auto block = std::make_unique<BlockExpr>(openLoc);
+  block->params.push_back({openLoc, "E"});
+  auto call = std::make_unique<CallExpr>(openLoc, "BREAK");
+  call->args.push_back(std::make_unique<VarExpr>(openLoc, "E"));
+  block->body.push_back(std::move(call));
+  st->handler = std::move(block);
+  parseSequenceParts(*st, "CATCH", "FINALLY", "TRY", openLoc);
+  return st;
+}
+
+// The body, then `recoverWord` [USING] var (CATCH takes the variable alone), then `alwaysWord`, then END.
+void Parser::parseSequenceParts(SequenceStmt &st, const char *recoverWord, const char *alwaysWord, const char *what,
+                                SourceLoc openLoc) {
+  st.body = parseBlock({recoverWord, alwaysWord, "END"});
+  if (atStmtKw(recoverWord)) {
     advance();
-    st->hasRecover = true;
-    if (atKw("USING")) {
+    st.hasRecover = true;
+    bool named = st.isTry ? at(Tok::Ident) : atKw("USING");
+    if (named && !st.isTry) advance(); // USING
+    if (named && at(Tok::Ident)) {
+      st.usingVar = std::make_unique<VarExpr>(cur().loc, cur().upper);
       advance();
-      if (at(Tok::Ident)) {
-        st->usingVar = std::make_unique<VarExpr>(cur().loc, cur().upper);
-        advance();
-      } else {
-        expect(Tok::Ident, "variable name");
-      }
+    } else if (named) {
+      expect(Tok::Ident, "variable name");
     }
     endOfStmt();
-    st->recover = parseBlock({"END"});
+    st.recover = parseBlock({alwaysWord, "END"});
   }
-  closeBlock({"END"}, "BEGIN SEQUENCE", openLoc);
-  return st;
+  if (atStmtKw(alwaysWord)) {
+    advance();
+    endOfStmt();
+    st.hasAlways = true;
+    st.always = parseBlock({"END"});
+  }
+  closeBlock({"END"}, what, openLoc);
 }
 
 StmtPtr Parser::parseWhile() {
