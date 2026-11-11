@@ -457,9 +457,10 @@ emits the object file.
 - Classes ([runtime.md](runtime.md#classes)): a module emits an `xb_class_def` per class (`xb.module.classes`: its
   name, its parents (each one's name, and its entry when the module has the class), its variables with their flags,
   its methods with their functions and flags, its INIT function, `XB_CLASS_STATIC` for a `STATIC CLASS`) and
-  registers them (`xb_classes_register`) with the module. A `send` from a method or one of its codeblocks
-  (`classIndex`, `superSend`) calls `xb_op_send_from` with its class's descriptor; others call `xb_op_send`.
-  `class.new` calls `xb_class_instance`.
+  registers them (`xb_classes_register`) with the module, with the class variables, the friends' names and the
+  destructor. Every `send` calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed
+  `xb_send_cache` of three pointer-sized words) and, from a method or one of its codeblocks (`classIndex`,
+  `superSend`), its class's descriptor (else a null one). `class.new` calls `xb_class_instance`.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
   call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,

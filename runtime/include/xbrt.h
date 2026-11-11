@@ -504,11 +504,21 @@ void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
 #define XB_OPERATOR_INC      "++"
 #define XB_OPERATOR_DEC      "--"
 #define XB_OPERATOR_INDEX    "[]"
-/* A message sent from a method of class `from` (its scope decides what the
- * method may reach, and a variable is first the one `from` sees); with
- * `super`, the method or variable of `from`'s ancestors (Super:message). */
+/* [ABI] A message sent by compiled code: from a method of class `from` (its
+ * scope decides what the method may reach, and a variable is first the one
+ * `from` sees), or from elsewhere (NULL); with `super`, the method or variable
+ * of `from`'s ancestors (Super:message). `cache` is the send's own, zeroed
+ * storage, which the runtime alone reads and writes: the member the message
+ * reached for the class of the last object it went to (a monomorphic inline
+ * cache), so that the next message to an object of that class skips the
+ * lookup and the checks. */
+typedef struct xb_send_cache {
+  const void *cls;
+  const void *member;
+  uintptr_t slot;
+} xb_send_cache;
 void     xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
-                         uint32_t argc, xb_item *argv);
+                         xb_send_cache *cache, uint32_t argc, xb_item *argv);
 
 /* The macro operator (macro/run.c): `text` holds an expression, compiled when
  * the code runs; it sees memory variables and functions by name, never the

@@ -243,7 +243,8 @@ An object (`xb_object` in `types/types.h`, `types/object.c`) is an instance of a
 instance variable. The runtime defines classes of its own in C (`xb_class`: name and variables), and programs define
 theirs in xBase ([Classes](#classes)). `xb_op_send(ctx, ret, message, argc, argv)` sends a message to `argv[0]` with
 the arguments `argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment `o:x := v` sends
-`_X` with `v`.
+`_X` with `v`. Compiled code sends through `xb_op_send_from`, with the send's inline cache and the class of the method
+it is in ([Classes](#classes)).
 
 - An object's variables: `X` returns the variable (arguments are ignored), `_X` assigns it (without an argument, `NIL`).
   A variable's rule (`xb_var_rule`) says what it accepts: any value; only an array, a logical or a string (a value of
@@ -343,8 +344,15 @@ first time it is used (its class function, or a subclass):
   kept, before the `EXIT` procedures. A destructor runs once: one that stores its object keeps it alive, without the
   reference's error. Objects die when a collection finds them unreachable (a frame temporary may keep one until its
   function returns), not, as with the reference's reference counts, the moment the last reference goes.
-- Not yet: the compiled fast paths (see
-  [xir.md](xir.md#classes)).
+- Inline caches: each send of compiled code has its own `xb_send_cache`. A message that reaches a member of an object
+  (not through a cast) stores the object's class, the member and its slot there (a variable's index, a class
+  variable's address); the next message from that send to an object of the same class runs the member at once,
+  without the lookup, the scope checks (which give the same answer for the same class at the same send) or a call to
+  `dispatch` (`perform`). Messages to casts, to values of scalar classes and to the runtime's own classes always look
+  up. The `oop` benchmark (method calls, one through `Super`, variable reads and assignments) went from 292 ms to
+  69 ms. The cache is written without synchronization: when tasks run on several threads, it has to be filled
+  atomically. Not yet: polymorphic caches, and devirtualized calls and variables at known offsets in the generated
+  code ([xir.md](xir.md#classes)).
 
 ## References
 

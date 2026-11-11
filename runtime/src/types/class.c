@@ -387,10 +387,35 @@ static int cast(xb_item *r, const cls *c, const xb_item *self, const char *messa
   return 1;
 }
 
+/* What member `m` does for argv[0] (`slot`: the object's variable, or the
+ * address of a class variable's value). */
+static void perform(xb_ctx *ctx, xb_item *r, const member *m, uintptr_t slot, uint32_t argc, xb_item *argv) {
+  xb_item nil;
+  xb_set_nil(&nil);
+  switch (m->kind) {
+    case M_METHOD: m->fn(ctx, r, argc, argv); return;
+    case M_CLASS_GET: *r = *(xb_item *)slot; return;
+    case M_CLASS_SET: /* a root: no barrier */
+      *(xb_item *)slot = argc > 1 ? argv[1] : nil;
+      *r = *(xb_item *)slot;
+      return;
+    case M_GET: *r = ((xb_object *)argv[0].v.p)->vars[slot]; return; /* arguments are ignored */
+    case M_SET: {
+      xb_object *o = argv[0].v.p;
+      o->vars[slot] = argc > 1 ? argv[1] : nil;
+      xb_gc_write(o);
+      *r = o->vars[slot];
+      return;
+    }
+  }
+}
+
 /* The message to argv[0], an object of class `c` or a value of a type `c` is
- * associated with (see the top of the file). */
+ * associated with (see the top of the file); with `cache`, the member reached
+ * is stored there when the next message to an object of the same class can
+ * take it without looking (not through a cast, nor for a scalar class). */
 static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_class_def *from, uint32_t super,
-                     uint32_t argc, xb_item *argv) {
+                     xb_send_cache *cache, uint32_t argc, xb_item *argv) {
   int object = argv[0].type == XB_T_OBJECT; /* else a value of a scalar class, which has no variables */
   cls *f = from ? runtime_of(from) : NULL;
   uint32_t view = object && argv[0].width < c->nline ? argv[0].width : 0; /* a cast: the class of the line it sees */
@@ -414,8 +439,8 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
     if (strcmp(message, "NEW") == 0) { /* New: Init with the arguments, as the class's own method sends it */
       xb_item self = argv[0];
       xb_gc_root_push(ctx, &self);
-      if (super) dispatch(ctx, r, c, "INIT", from, 1, argc, argv);
-      else dispatch(ctx, r, c, "INIT", c->def, 0, argc, argv);
+      if (super) dispatch(ctx, r, c, "INIT", from, 1, NULL, argc, argv);
+      else dispatch(ctx, r, c, "INIT", c->def, 0, NULL, argc, argv);
       xb_gc_root_pop(ctx, 1);
       if (!(ctx->pending & XB_PENDING_UNWIND)) *r = self;
       return;
@@ -436,38 +461,25 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
     violation(ctx, r, c, message, scope == XB_SCOPE_HIDDEN);
     return;
   }
-  if (m->kind == M_METHOD) {
-    m->fn(ctx, r, argc, argv);
-    return;
-  }
+  uintptr_t slot = 0;
   if (m->kind == M_CLASS_GET || m->kind == M_CLASS_SET) {
     const cls *holder = view ? runtime_of(c->line[view]) : c; /* a cast reads the class it sees */
-    xb_item *v = holder->classSlots[holder->classArea[position(holder, m->owner)] + m->index];
-    if (m->kind == M_CLASS_SET) {
-      xb_item nil;
-      xb_set_nil(&nil);
-      *v = argc > 1 ? argv[1] : nil; /* a root: no barrier */
-    }
-    *r = *v;
-    return;
+    slot = (uintptr_t)holder->classSlots[holder->classArea[position(holder, m->owner)] + m->index];
+  } else if (m->kind != M_METHOD) {
+    slot = c->area[position(c, m->owner)] + m->index;
   }
-  xb_object *o = argv[0].v.p;
-  uint32_t slot = c->area[position(c, m->owner)] + m->index;
-  if (m->kind == M_GET) {
-    *r = o->vars[slot]; /* arguments are ignored */
-  } else {
-    xb_item nil;
-    xb_set_nil(&nil);
-    o->vars[slot] = argc > 1 ? argv[1] : nil;
-    xb_gc_write(o);
-    *r = o->vars[slot];
+  if (cache && object && !view) {
+    cache->cls = ((const xb_object *)argv[0].v.p)->cls;
+    cache->member = m;
+    cache->slot = slot;
   }
+  perform(ctx, r, m, slot, argc, argv);
 }
 
 int xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super, uint32_t argc,
                   xb_item *argv) {
   const xb_object *o = argv[0].v.p;
-  dispatch(ctx, r, o->cls->compiled, message, from, super, argc, argv);
+  dispatch(ctx, r, o->cls->compiled, message, from, super, NULL, argc, argv);
   return 1;
 }
 
@@ -478,7 +490,7 @@ int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
                          uint32_t argc, xb_item *argv) {
   cls *c = argv[0].type < XB_T_COUNT_ ? scalars[argv[0].type] : NULL;
   if (!c) return 0;
-  dispatch(ctx, r, c, message, from, super, argc, argv);
+  dispatch(ctx, r, c, message, from, super, NULL, argc, argv);
   return 1;
 }
 
@@ -496,12 +508,20 @@ int xb_class_associate(const xb_object *o, const char *type) {
   return found;
 }
 
-void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super, uint32_t argc,
-                     xb_item *argv) {
-  if (argv[0].type == XB_T_OBJECT && ((const xb_object *)argv[0].v.p)->cls->compiled)
-    xb_class_send(ctx, r, message, from, super, argc, argv);
-  else if (!xb_class_scalar_send(ctx, r, message, from, super, argc, argv))
-    xb_op_send(ctx, r, message, argc, argv);
+void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
+                     xb_send_cache *cache, uint32_t argc, xb_item *argv) {
+  if (argv[0].type == XB_T_OBJECT) {
+    const xb_object *o = argv[0].v.p;
+    if (o->cls == cache->cls && argv[0].width == 0) { /* the class the cache holds the member for */
+      perform(ctx, r, cache->member, cache->slot, argc, argv);
+      return;
+    }
+    if (o->cls->compiled) {
+      dispatch(ctx, r, o->cls->compiled, message, from, super, cache, argc, argv);
+      return;
+    }
+  }
+  if (!xb_class_scalar_send(ctx, r, message, from, super, argc, argv)) xb_op_send(ctx, r, message, argc, argv);
 }
 
 int xb_class_kind_of(const xb_object *o, const char *name) {

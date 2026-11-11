@@ -53,10 +53,11 @@ Running big-endian programs needs a target sysroot and an emulator (for example 
 `matmul`), sorting in xBase (`qsort`) and with `ASort` (`asort`), strings (`strings`), the bit operators and string
 building (`crc32`), array cells read and changed in place in deeply nested loops (`pi`, digits of pi from a tape-machine
 program; `bench_pi <n>` prints n digits), double arithmetic (`float`, the Mandelbrot set) and integers mixed with
-doubles (`mixed`: `i + 3.14`, `i / 4`, `Int()`, comparisons across both). Each one times its own work with
-`ElapsedMs()`, checks its result against a value computed independently, and prints one line:
-`<name> <milliseconds> ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with
-`-O2` (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every
-program `XB_BENCH_REPEAT` times (a cache variable, default 3), the best time of each in a table, and a failure when one
-does not run or reports `WRONG`. It warns when the build is not Release. Performance changes are measured with it,
-before and after.
+doubles (`mixed`: `i + 3.14`, `i / 4`, `Int()`, comparisons across both), and messages to objects of compiled classes
+(`oop`: method calls, one through `Super`, variable reads and assignments). Each one times its own work with
+`ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name> <milliseconds>
+ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`
+(`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every program
+`XB_BENCH_REPEAT` times (a cache variable, default 3), the best time of each in a table, and a failure when one does not
+run or reports `WRONG`. It warns when the build is not Release. Performance changes are measured with it, before and
+after.

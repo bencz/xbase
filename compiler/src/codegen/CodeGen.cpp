@@ -81,7 +81,6 @@ void CodeGen::initTypes() {
   rtAppend_ = rt("xb_op_append", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNumDefaultDec_ = rt("xb_num_default_dec", voidTy, {ptrTy_, ptrTy_, Type::getDoubleTy(ctx_)});
   rtPending_ = rt("xb_pending", i32_, {ptrTy_});
-  rtSend_ = rt("xb_op_send", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
   rtSeqCatch_ = rt("xb_seq_catch", i32_, {ptrTy_});
   rtSeqValue_ = rt("xb_seq_value", voidTy, {ptrTy_, ptrTy_});
   rtHashNew_ = rt("xb_hash_new", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
@@ -122,7 +121,7 @@ void CodeGen::initTypes() {
   rtMacroPublic_ = rt("xb_macro_public", voidTy, {ptrTy_, ptrTy_});
   rtMacroText_ = rt("xb_macro_text", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtProgramRun_ = rt("xb_program_run", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
-  rtSendFrom_ = rt("xb_op_send_from", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
+  rtSendFrom_ = rt("xb_op_send_from", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_});
   rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
   for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtArrayNew_,

@@ -1,0 +1,7 @@
+
+mixed: A=1 B=2 C=300 A=1 C=300 B=2 A=11 B=12 C=31000 A=11 C=31000 B=12 A=21 B=22 C=3101000 A=21 C=3101000 B=22 
+casts: 32/TB 1/TA 32/TB 1/TA 
+scalar: N5 A N7 A 
+runtime class: U C U 
+scopes: 42 error 41 42 error 41 
+class var:          7         99         99

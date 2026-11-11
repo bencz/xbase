@@ -71,9 +71,10 @@ stay visible to the collector and compatible with statepoints.
 
 Now: a `send` from a method (or a codeblock it makes) names the method's class (`classIndex`, printed `from n`; `super
 n` for `Super:message`), which decides what the message reaches at run time; `class.new` makes an object of a class of
-the module (`Module::classes`). Planned: `send`, `get_field` and `set_field` carry the receiver's class when it is
-known: calls are devirtualized through class hierarchy analysis, polymorphic sites get inline caches, and variables
-are read from known offsets.
+the module (`Module::classes`). Each `send` is lowered with a monomorphic inline cache of its own, which the runtime
+fills ([runtime.md](runtime.md#classes)). Planned: `send`, `get_field` and `set_field` carry the receiver's class when
+it is known: calls are devirtualized through class hierarchy analysis, polymorphic sites get polymorphic caches, and
+variables are read from known offsets.
 
 ## Types
 

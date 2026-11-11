@@ -387,13 +387,15 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *argv = operandGroup(i);
     Value *d = dest(i);
     setNil(d);
+    // The send's own inline cache (xb_send_cache: three pointer-sized words the runtime fills).
+    auto *cacheTy = ArrayType::get(intPtrTy_, 3);
+    auto *cache = new GlobalVariable(mod_, cacheTy, false, GlobalValue::PrivateLinkage,
+                                     ConstantAggregateZero::get(cacheTy), "xb.send.cache");
+    Constant *from = i.classIndex < 0 ? static_cast<Constant *>(ConstantPointerNull::get(ptrTy_))
+                                      : classDef(i.classIndex);
     auto send = [&](Value *n, Value *items) {
-      if (i.classIndex < 0) {
-        b_.CreateCall(rtSend_, {fnCtx_, d, messageName(i.message), n, items});
-        return;
-      }
-      b_.CreateCall(rtSendFrom_, {fnCtx_, d, messageName(i.message), classDef(i.classIndex),
-                                  ConstantInt::get(i32_, i.superSend ? 1 : 0), n, items});
+      b_.CreateCall(rtSendFrom_, {fnCtx_, d, messageName(i.message), from, ConstantInt::get(i32_, i.superSend ? 1 : 0),
+                                  cache, n, items});
     };
     if (i.hasRest()) withRest(i, argv, send);
     else send(ConstantInt::get(i32_, ops.size()), argv);
