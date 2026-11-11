@@ -39,6 +39,7 @@ constexpr OpInfo kOps[] = {
     {Op::SwitchMatch, "switch.match", 0},
     {Op::ParamsRef, "params.ref", ReadsVar},
     {Op::CallForward, "call.forward", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
+    {Op::ClassNew, "class.new", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
     {Op::MvGet, "mv.get", Fails | RunsCode | ReadsHeap | Allocates},
     {Op::MvSet, "mv.set", Fails | RunsCode | WritesHeap | Allocates},
     {Op::MvRef, "mv.ref", Fails | RunsCode | ReadsHeap | Allocates},

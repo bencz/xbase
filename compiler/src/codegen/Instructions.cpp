@@ -333,6 +333,14 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::MvParam: // argument `index` of those received, NIL past them
     b_.CreateCall(rtMvParam_, {fnCtx_, memvars_.at(i.message), argItem(fn_->getArg(2), fn_->getArg(3), i.index)});
     break;
+  case Op::ClassNew: {
+    CallResult r = callResult(dest(i), 0);
+    setNil(r.arg);
+    b_.CreateCall(rtClassInstance_, {fnCtx_, r.arg, classDef(i.classIndex)});
+    callDone(r);
+    checkPending(unwind_);
+    break;
+  }
   case Op::MacroGet:
     callItemOp(rtMacroGet_, dest(i), {addr(ops[0])});
     checkPending(unwind_);
@@ -380,7 +388,12 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     setNil(d);
     auto send = [&](Value *n, Value *items) {
-      b_.CreateCall(rtSend_, {fnCtx_, d, messageName(i.message), n, items});
+      if (i.classIndex < 0) {
+        b_.CreateCall(rtSend_, {fnCtx_, d, messageName(i.message), n, items});
+        return;
+      }
+      b_.CreateCall(rtSendFrom_, {fnCtx_, d, messageName(i.message), classDef(i.classIndex),
+                                  ConstantInt::get(i32_, i.superSend ? 1 : 0), n, items});
     };
     if (i.hasRest()) withRest(i, argv, send);
     else send(ConstantInt::get(i32_, ops.size()), argv);

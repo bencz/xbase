@@ -30,6 +30,7 @@ private:
   void stmt(Stmt &st, Scope &s);
   void expr(Expr &e, Scope &s);
   void codeblock(BlockExpr &b, Scope &s);
+  void superSend(SendExpr &m);
   bool resolve(VarExpr &v);
   bool declaredVariable(const std::string &name) const;
   struct Frame;

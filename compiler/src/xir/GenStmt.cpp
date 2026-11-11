@@ -57,11 +57,11 @@ void Generator::genLocals(const LocalStmt &s) {
 // read the variables visible before it), then each variable is created and
 // gets its value (for a PUBLIC that a visible PRIVATE hides, the PRIVATE
 // does), as in the reference. PARAMETERS: a PRIVATE for each argument, in
-// order.
+// order (in a method, those after Self).
 void Generator::genMemvars(const LocalStmt &s) {
   Builder &b = *cur_.b;
   if (s.kind == StmtKind::Parameters) {
-    uint32_t k = 0;
+    uint32_t k = cur_.classIndex >= 0 ? 1 : 0; // a method's first argument is Self
     for (const LocalDecl &d : s.decls) {
       b.setLoc(d.loc);
       b.memvarParam(d.name, k++);

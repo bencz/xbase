@@ -186,6 +186,7 @@ private:
       if (i.message.empty()) fail("send without a message");
       break;
     case Op::ArrayLit: allItems(i); break;
+    case Op::ClassNew: expect(i, 0, {}); break;
     case Op::MvGet: case Op::MvRef: case Op::MvPrivate: case Op::MvPublic: case Op::MvParam:
       expect(i, 0, {});
       if (i.message.empty()) fail("memory variable without a name");

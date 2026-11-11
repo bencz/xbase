@@ -141,6 +141,12 @@ Instruction *Builder::send(std::string message, Value *object, const std::vector
   return i;
 }
 
+Instruction *Builder::classNew(int32_t classIndex) {
+  Instruction *i = make(Op::ClassNew, Type::Item, {});
+  i->classIndex = classIndex;
+  return i;
+}
+
 Instruction *Builder::hashLit(const std::vector<Value *> &pairs) {
   Instruction *i = make(Op::HashLit, Type::Item);
   for (Value *v : pairs) i->addOperand(v);

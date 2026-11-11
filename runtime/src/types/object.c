@@ -1,5 +1,6 @@
 #include "xbrt_int.h"
 
+#include <stdio.h>
 #include <string.h>
 
 xb_object *xb_object_new(const xb_class *cls) {
@@ -28,24 +29,21 @@ static const char *const type_class_names[XB_T_COUNT_] = {
   [XB_T_HASH] = "HASH",
 };
 
-/* What the call stack shows of a message while its error block runs:
- * "CLASS:MESSAGE" for an object (MESSAGE as sent: "_NAME" to assign), else
- * the message. Longer names are cut. */
-#define MESSAGE_FRAME_SIZE 128
-
-/* `a` then `b` in `buf` (MESSAGE_FRAME_SIZE bytes), cut to fit. */
-static const char *join(char *buf, const char *a, const char *b) {
+const char *xb_message_text(char buf[XB_MESSAGE_TEXT_SIZE], const char *cls, const char *message) {
   size_t n = 0;
-  for (const char *s = a; *s && n + 1 < MESSAGE_FRAME_SIZE; ++s) buf[n++] = *s;
-  for (const char *s = b; *s && n + 1 < MESSAGE_FRAME_SIZE; ++s) buf[n++] = *s;
+  for (const char *s = cls; *s && n + 1 < XB_MESSAGE_TEXT_SIZE; ++s) buf[n++] = *s;
+  if (n + 1 < XB_MESSAGE_TEXT_SIZE) buf[n++] = ':';
+  for (const char *s = message; *s && n + 1 < XB_MESSAGE_TEXT_SIZE; ++s) buf[n++] = *s;
   buf[n] = '\0';
   return buf;
 }
 
-static const char *message_frame(char *buf, const xb_item *self, const char *message) {
+/* What the call stack shows of a message while its error block runs:
+ * "CLASS:MESSAGE" for an object (MESSAGE as sent: "_NAME" to assign), else
+ * the message. */
+static const char *message_frame(char buf[XB_MESSAGE_TEXT_SIZE], const xb_item *self, const char *message) {
   if (self->type != XB_T_OBJECT) return message;
-  char cls[MESSAGE_FRAME_SIZE];
-  return join(buf, join(cls, ((const xb_object *)self->v.p)->cls->name, ":"), message);
+  return xb_message_text(buf, ((const xb_object *)self->v.p)->cls->name, message);
 }
 
 /* Assigns variable `k` of `o`. The result (the value of the assignment
@@ -67,9 +65,9 @@ static void assign_var(xb_ctx *ctx, xb_item *r, const xb_item *self, uint32_t k,
     case XB_VAR_INT32:
     case XB_VAR_UINT16: {
       if (!xb_is_number(value)) {
-        char frame[MESSAGE_FRAME_SIZE], message[MESSAGE_FRAME_SIZE];
-        xb_error_in(ctx, message_frame(frame, self, join(message, "_", var->name)), r, EG_ARG, 0, var->name,
-                    XB_ERR_SUBSTITUTE, 1, value);
+        char frame[XB_MESSAGE_TEXT_SIZE], message[XB_MESSAGE_TEXT_SIZE];
+        snprintf(message, sizeof message, "_%s", var->name);
+        xb_error_in(ctx, message_frame(frame, self, message), r, EG_ARG, 0, var->name, XB_ERR_SUBSTITUTE, 1, value);
         return;
       }
       int64_t i = xb_num_wrap_int32(value);
@@ -89,6 +87,10 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
   if (argv[0].type == XB_T_OBJECT) {
     xb_object *o = argv[0].v.p;
     const xb_class *cls = o->cls;
+    if (cls->compiled) {
+      xb_class_send(ctx, r, message, NULL, 0, argc, argv);
+      return;
+    }
     for (uint32_t k = 0; k < cls->nvars; ++k)
       if (strcmp(cls->vars[k].name, name) == 0) {
         if (!assign) {
@@ -101,6 +103,12 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
         return;
       }
   }
+  xb_object_message(ctx, r, message, argc, argv);
+}
+
+void xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
+  int assign = message[0] == '_';
+  const char *name = message + assign;
   if (!assign && strcmp(message, "CLASSNAME") == 0) {
     const char *cn = argv[0].type == XB_T_OBJECT ? ((const xb_object *)argv[0].v.p)->cls->name
                      : argv[0].type < XB_T_COUNT_ && type_class_names[argv[0].type] ? type_class_names[argv[0].type]
@@ -108,7 +116,7 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
     xb_set_str(r, xb_str_new(cn, strlen(cn)));
     return;
   }
-  char frame[MESSAGE_FRAME_SIZE];
+  char frame[XB_MESSAGE_TEXT_SIZE];
   const char *shown = message_frame(frame, &argv[0], message);
   if (assign) xb_error_in(ctx, shown, r, EG_NOVARMETHOD, 1005, name, XB_ERR_SUBSTITUTE, argc, argv);
   else xb_error_in(ctx, shown, r, EG_NOMETHOD, 1004, name, XB_ERR_SUBSTITUTE, argc, argv);

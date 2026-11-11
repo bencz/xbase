@@ -122,6 +122,9 @@ void CodeGen::initTypes() {
   rtMacroPublic_ = rt("xb_macro_public", voidTy, {ptrTy_, ptrTy_});
   rtMacroText_ = rt("xb_macro_text", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtProgramRun_ = rt("xb_program_run", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtSendFrom_ = rt("xb_op_send_from", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
+  rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
   for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
                            rtSeqCatch_, rtSeqValue_, rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_,
@@ -207,12 +210,61 @@ void CodeGen::run(const xir::Module &m) {
   }
   collectMemvars(m);
   for (auto &f : m.functions) functions_[f.get()] = declare(*f);
+  genClasses(m);
   directEntries(m);
   for (auto &f : m.functions) genFunction(*f);
   for (auto &f : m.functions)
     if (direct_.count(f.get())) genThunk(*f);
   genModuleRegistration(m); // its public functions go into the symbol table
   genRequests(m);
+}
+
+// The module's classes: an xb_class_def each (xbrt.h), in a table the runtime
+// writes (its `runtime` field) and registers when the module does. A parent
+// of the module points at its entry.
+void CodeGen::genClasses(const xir::Module &m) {
+  classTable_ = nullptr;
+  if (m.classes.empty()) return;
+  auto *parentTy = StructType::get(ctx_, {ptrTy_, ptrTy_});
+  auto *varTy = StructType::get(ctx_, {ptrTy_, i32_});
+  auto *methodTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_});
+  auto *defTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_});
+  auto *ty = ArrayType::get(defTy, m.classes.size());
+  classTable_ = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, nullptr, "xb.module.classes");
+  auto name = [&](const std::string &s) { return b_.CreateGlobalString(s, ".xb.classname", 0, &mod_); };
+  // A constant array of `ty` holding `elems`, or a null pointer when there are none.
+  auto table = [&](Type *ety, const std::vector<Constant *> &elems, const char *label) -> Constant * {
+    if (elems.empty()) return ConstantPointerNull::get(ptrTy_);
+    auto *aty = ArrayType::get(ety, elems.size());
+    return new GlobalVariable(mod_, aty, true, GlobalValue::PrivateLinkage, ConstantArray::get(aty, elems), label);
+  };
+  std::vector<Constant *> defs;
+  for (const xir::Module::Class &c : m.classes) {
+    std::vector<Constant *> parents, vars, methods;
+    for (const auto &p : c.parents) {
+      Constant *def = p.local >= 0 ? classDef(p.local) : ConstantPointerNull::get(ptrTy_);
+      parents.push_back(ConstantStruct::get(parentTy, {name(p.name), def}));
+    }
+    for (const auto &v : c.vars)
+      vars.push_back(ConstantStruct::get(varTy, {name(v.name), ConstantInt::get(i32_, v.flags)}));
+    for (const auto &mt : c.methods)
+      methods.push_back(ConstantStruct::get(
+          methodTy, {name(mt.message), functions_.at(mt.fn), ConstantInt::get(i32_, mt.flags)}));
+    Constant *init = c.init ? static_cast<Constant *>(functions_.at(c.init)) : ConstantPointerNull::get(ptrTy_);
+    defs.push_back(ConstantStruct::get(
+        defTy, {name(c.name), table(parentTy, parents, "xb.class.parents"), ConstantInt::get(i32_, parents.size()),
+                table(varTy, vars, "xb.class.vars"), ConstantInt::get(i32_, vars.size()),
+                table(methodTy, methods, "xb.class.methods"), ConstantInt::get(i32_, methods.size()), init,
+                ConstantInt::get(i32_, c.isStatic ? XB_CLASS_STATIC : 0u), ConstantPointerNull::get(ptrTy_)}));
+  }
+  classTable_->setInitializer(ConstantArray::get(ty, defs));
+}
+
+// The xb_class_def of class `index` of the module.
+Constant *CodeGen::classDef(int32_t index) {
+  return ConstantExpr::getInBoundsGetElementPtr(
+      classTable_->getValueType(), classTable_,
+      ArrayRef<Constant *>{ConstantInt::get(i32_, 0), ConstantInt::get(i32_, (uint64_t)index)});
 }
 
 // The module's memory variables: one xb_memvar per name its functions use, in
@@ -519,6 +571,7 @@ void CodeGen::genModuleRegistration(const xir::Module &m) {
   }
   Value *statics = statics_ ? static_cast<Value *>(statics_) : ConstantPointerNull::get(ptrTy_);
   Constant *memvars = memvarTable_ ? static_cast<Constant *>(memvarTable_) : ConstantPointerNull::get(ptrTy_);
+  if (classTable_) b_.CreateCall(rtClassesRegister_, {classTable_, ConstantInt::get(i32_, m.classes.size())});
   b_.CreateCall(rtModuleRegister_, {init, statics, ConstantInt::get(i32_, m.statics.size()), table,
                                     ConstantInt::get(i32_, m.initProcs.size()),
                                     ConstantInt::get(i32_, m.exitProcs.size()), symbolTable,

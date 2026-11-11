@@ -193,6 +193,10 @@ public:
   Callee callee;                      // Call
   std::string message;                // Send: upper-cased, "_NAME" to assign NAME; Mv*: the variable's name
   uint32_t index = 0;                 // MvParam: the argument, from 0
+  // Send from a method: the index of its class in Module::classes (what the send may reach), -1 elsewhere, and
+  // whether it is Super:message; ClassNew: the class.
+  int32_t classIndex = -1;
+  bool superSend = false;
   // Call with `...` (an args.rest operand): the argument positions that receive the arguments passed on as they are,
   // references included (bit k: argument k, bit 31: argument 31 and after; xb_refs_take); the others, and those of
   // a send or an array literal, receive their values.
@@ -289,6 +293,29 @@ public:
   Function *init = nullptr;                         // initializes the STATICs (null: none have initializers)
   std::vector<Function *> initProcs, exitProcs;     // INIT and EXIT procedures, in source order
   std::vector<std::string> requests;                // functions of other modules to link in (EXTERNAL)
+  // The module's classes (xb_class_def in xbrt.h): their methods are functions of the module.
+  struct Class {
+    std::string name;
+    bool isStatic = false;                          // STATIC CLASS: not registered by name
+    struct Parent {
+      std::string name;
+      int32_t local = -1;                           // the module's class of the name, or -1: found by name
+    };
+    std::vector<Parent> parents;
+    struct Variable {
+      std::string name;
+      uint32_t flags;
+    };
+    std::vector<Variable> vars;
+    struct Method {
+      std::string message;
+      Function *fn;
+      uint32_t flags;
+    };
+    std::vector<Method> methods;
+    Function *init = nullptr;                       // returns the INIT values, or null
+  };
+  std::vector<Class> classes;
 };
 
 } // namespace xb::xir

@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 26u
+#define XB_ABI_VERSION 27u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -411,6 +411,61 @@ void     xb_mv_private(xb_ctx *ctx, const xb_memvar *m, uint32_t mark);
 void     xb_mv_public(xb_ctx *ctx, const xb_memvar *m);
 void     xb_mv_param(xb_ctx *ctx, const xb_memvar *m, const xb_item *arg);
 void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv);
+
+/* [ABI] Classes compiled from xBase (types/class.c). A module describes each
+ * of its classes (xb_class_def) and registers them when it registers
+ * (xb_classes_register; a STATIC class, XB_CLASS_STATIC, is not registered:
+ * it is known to its module only). A parent is the module's own class when
+ * it has one of that name (`def`), else the class registered under the name,
+ * found when the class is first used. A method is a function of the xBase convention whose
+ * argv[0] is the object (Self); a variable is read by its name as a message
+ * and assigned by "_NAME", an ACCESS method answers "NAME" and an ASSIGN one
+ * "_NAME". A member's `flags`: the scope (XB_SCOPE_*), and XB_MEMBER_READONLY
+ * for a variable assigned only from the methods of its class and of its
+ * subclasses. `init` returns an
+ * array with the variables' initial values (INIT), evaluated once, the first
+ * time the class is used; each new object gets its own copy of an array or a
+ * hash. `runtime` is the runtime's, NULL until then. */
+#define XB_SCOPE_EXPORTED   0u
+#define XB_SCOPE_PROTECTED  1u  /* the class's methods and its subclasses' */
+#define XB_SCOPE_HIDDEN     2u  /* the class's own methods */
+#define XB_SCOPE_MASK       3u
+#define XB_MEMBER_READONLY  4u
+#define XB_CLASS_STATIC     1u  /* xb_class_def flags: STATIC CLASS */
+typedef struct xb_class_var_def {
+  const char *name;         /* upper-cased */
+  uint32_t flags;
+} xb_class_var_def;
+typedef struct xb_class_method_def {
+  const char *message;      /* upper-cased; "_NAME" for an ASSIGN */
+  xb_func fn;
+  uint32_t flags;
+} xb_class_method_def;
+typedef struct xb_class_parent {
+  const char *name;         /* upper-cased */
+  struct xb_class_def *def; /* the module's own class of the name, else NULL */
+} xb_class_parent;
+typedef struct xb_class_def {
+  const char *name;         /* upper-cased */
+  const xb_class_parent *parents;
+  uint32_t nparents;
+  const xb_class_var_def *vars;
+  uint32_t nvars;
+  const xb_class_method_def *methods;
+  uint32_t nmethods;
+  xb_func init;             /* NULL: every variable starts as NIL */
+  uint32_t flags;           /* XB_CLASS_STATIC */
+  void *runtime;
+} xb_class_def;
+void     xb_classes_register(xb_class_def *defs, uint32_t n);
+/* The class function NAME(): a new object of the class, its variables at their
+ * initial values (:New() then initializes it). */
+void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
+/* A message sent from a method of class `from` (its scope decides what the
+ * method may reach, and a variable is first the one `from` sees); with
+ * `super`, the method or variable of `from`'s ancestors (Super:message). */
+void     xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
+                         uint32_t argc, xb_item *argv);
 
 /* The macro operator (macro/run.c): `text` holds an expression, compiled when
  * the code runs; it sees memory variables and functions by name, never the

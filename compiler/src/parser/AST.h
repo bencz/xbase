@@ -99,6 +99,7 @@ struct VarExpr : Expr {
   VarWhere where = VarWhere::Frame;
   uint32_t slot = 0;
   bool memvarAlias = false;      // written M->name (or MEMVAR->name): a memory variable whatever is declared
+  bool methodSelf = false;       // the Self that :: and Super stand for: valid only in a method
   VarExpr(SourceLoc l, std::string n) : Expr(ExprKind::Var, l), name(std::move(n)) {}
 };
 
@@ -171,6 +172,8 @@ struct SendExpr : Expr {
   std::string message;           // upper-cased
   std::vector<ExprPtr> args;
   bool withArgs = false;         // written object:message( ... )
+  bool super = false;            // Super:message or Self:Super:message (Sema: in a method, Super no variable
+                                 // declared, the ancestors' member sent to Self)
   SendExpr(SourceLoc l, ExprPtr o, std::string m)
       : Expr(ExprKind::Send, l), object(std::move(o)), message(std::move(m)) {}
 };
@@ -351,6 +354,8 @@ struct JumpStmt : Stmt { // EXIT / LOOP
   explicit JumpStmt(SourceLoc l, StmtKind k) : Stmt(k, l) {}
 };
 
+struct ClassDecl;
+
 struct FuncDecl {
   SourceLoc loc;
   std::string name;              // upper-cased
@@ -366,6 +371,43 @@ struct FuncDecl {
   std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock or passed by reference (shared)
   bool readsArgs = false;        // set by Sema: calls an ARGS function, so its frame keeps the arguments received
   bool callsPrivates = false;    // set by Sema: calls a PRIVATES function, so it ends the PRIVATEs created
+  // Classes. A method's implementation (METHOD, ACCESS or ASSIGN name ... CLASS cls) names its class and kind; Sema
+  // makes it a STATIC function "CLS:NAME" whose first parameter is SELF.
+  enum class Member : uint8_t { None, Method, Access, Assign };
+  Member member = Member::None;
+  std::string memberClass;       // upper-cased: the class named, else the last one declared before (empty: none)
+  const ClassDecl *ofClass = nullptr;     // set by Sema: the class of a method (sends there see its members)
+  const ClassDecl *instantiates = nullptr; // set by Sema: the class function NAME(): a new object of the class
+};
+
+// A class: CLASS name [INHERIT parents] ... ENDCLASS. Its methods are
+// functions of the module (implemented, or INLINE), its variables areas of
+// its objects (see xb_class_def in xbrt.h).
+struct ClassVarDecl {
+  SourceLoc loc;
+  std::string name;              // upper-cased
+  uint32_t flags = 0;            // XB_SCOPE_*, XB_MEMBER_READONLY
+  ExprPtr init;                  // INIT expr, or null
+};
+struct ClassMethodDecl {
+  SourceLoc loc;
+  std::string name;              // upper-cased, as declared
+  FuncDecl::Member kind = FuncDecl::Member::Method;
+  uint32_t flags = 0;            // XB_SCOPE_*
+  std::vector<Param> params;
+  bool variadic = false;
+  ExprPtr inlineBody;            // INLINE expr, or null
+  FuncDecl *impl = nullptr;      // set by Sema: the function that implements it
+  std::string message() const { return (kind == FuncDecl::Member::Assign ? "_" : "") + name; }
+};
+struct ClassDecl {
+  SourceLoc loc;
+  std::string name;              // upper-cased
+  bool isStatic = false;         // STATIC CLASS: its class function is the module's own
+  std::vector<std::string> parents;
+  std::vector<ClassVarDecl> vars;
+  std::vector<ClassMethodDecl> methods;
+  FuncDecl *initValues = nullptr; // set by Sema: returns the INIT values, or null when there are none
 };
 
 // EXTERN FUNCTION name( params ) attributes: a function the program calls but
@@ -410,6 +452,7 @@ struct Module {
   std::string name;              // upper-cased source stem
   std::string file;              // the source's file name, without directories (ProcFile())
   std::vector<std::unique_ptr<FuncDecl>> funcs;
+  std::vector<std::unique_ptr<ClassDecl>> classes;
   std::vector<LocalDecl> fileStatics; // STATICs before the first function: visible in the whole file
   std::vector<LocalDecl> fileMemvars; // MEMVARs before the first function: declared in the whole file
   std::vector<LocalDecl *> statics;   // every STATIC of the module, in slot order (set by Sema)

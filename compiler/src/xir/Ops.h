@@ -38,6 +38,7 @@ enum class Op : uint8_t {
   SwitchMatch,    // value, case constant -> Bool
   ParamsRef,      // parameters (captures) -> Bool: one of them holds a reference its caller passed
   CallForward,    // callee -> Item: calls it with this function's own arguments, as received [may fail]
+  ClassNew,       // -> Item: a new object of class `classIndex` (its INIT values run once)  [may fail]
   // Memory variables, by name (`message`): what the name designates is decided at run time, and any call may
   // create, change or end one, so they are read and written like the heap.
   MvGet,          // -> Item: the value of the variable visible; none is error 1003, retried or fatal [may fail]

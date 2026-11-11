@@ -1,0 +1,65 @@
+module CLASSES
+
+function MAIN params 0 {
+entry:
+  %0 = call TFOO
+  %1 = send NEW %0
+  %2 = send GET %1
+  %3 = call QOUT native %2
+  ret
+}
+
+function TFOO:GET internal params 1 {
+  $f0 = frame 0 shared "SELF"
+entry:
+  %0 = block TFOO:GET.block1 $f0
+  %1 = load $f0 maybe_ref
+  %2 = send GET super 0 %1
+  %3 = binary add %0, %2
+  ret %3
+}
+
+function TFOO params 0 {
+entry:
+  %0 = class.new 0
+  ret %0
+}
+
+function TFOO:(INIT) internal params 0 {
+entry:
+  %0 = array 1:w10
+  ret %0
+}
+
+function TBAR:GET internal params 1 {
+  $f0 = frame 0 "SELF"
+  $f1 = frame 1 "SELF"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward TBAR:GET.byref
+  ret %2
+body:
+  ret 2:w10
+}
+
+function TBAR params 0 {
+entry:
+  %0 = class.new 1
+  ret %0
+}
+
+block TFOO:GET.block1 internal params 0 {
+  $c0 = capture 0 "SELF"
+entry:
+  %0 = load $c0 maybe_ref
+  %1 = send A from 0 %0
+  ret %1
+}
+
+function TBAR:GET.byref internal params 1 {
+  $f0 = frame 0 "SELF"
+entry:
+  ret 2:w10
+}

@@ -160,14 +160,7 @@ ExprPtr Parser::parsePostfix() {
         expect(Tok::Ident, "message name");
         return e;
       }
-      auto send = std::make_unique<SendExpr>(loc, std::move(e), cur().upper);
-      advance();
-      if (accept(Tok::LParen)) {
-        send->withArgs = true;
-        send->args = parseArgs(Tok::RParen, false, true);
-        expect(Tok::RParen, "')'");
-      }
-      e = std::move(send);
+      e = parseSend(loc, std::move(e));
     } else {
       break;
     }
@@ -338,10 +331,44 @@ ExprPtr Parser::parseMacro() {
   return call;
 }
 
+// The message (current) sent to `object`, with its arguments. Super:message
+// and ::Super:message (or Self:Super:message) may be the ancestors' member,
+// which Sema decides (SendExpr::super).
+ExprPtr Parser::parseSend(SourceLoc loc, ExprPtr object) {
+  bool super = false;
+  if (object->kind == ExprKind::Var) {
+    auto &v = static_cast<VarExpr &>(*object);
+    super = v.name == "SUPER" && !v.memvarAlias;
+  } else if (object->kind == ExprKind::Send) {
+    auto &inner = static_cast<SendExpr &>(*object);
+    super = inner.message == "SUPER" && !inner.withArgs && inner.object->kind == ExprKind::Var &&
+            static_cast<VarExpr &>(*inner.object).name == "SELF" && !static_cast<VarExpr &>(*inner.object).memvarAlias;
+  }
+  auto send = std::make_unique<SendExpr>(loc, std::move(object), cur().upper);
+  send->super = super;
+  advance();
+  if (accept(Tok::LParen)) {
+    send->withArgs = true;
+    send->args = parseArgs(Tok::RParen, false, true);
+    expect(Tok::RParen, "')'");
+  }
+  return send;
+}
+
 ExprPtr Parser::parsePrimary() {
   const Token &t = cur();
   SourceLoc loc = t.loc;
   if (atMacroName() || atMacroParen()) return parseMacro();
+  if (at(Tok::DoubleColon)) { // ::message is Self:message
+    advance();
+    if (!at(Tok::Ident)) {
+      expect(Tok::Ident, "message name");
+      return std::make_unique<NilExpr>(loc);
+    }
+    auto self = std::make_unique<VarExpr>(loc, "SELF");
+    self->methodSelf = true;
+    return parseSend(loc, std::move(self));
+  }
   switch (t.kind) {
   case Tok::Number: {
     auto e = std::make_unique<NumberExpr>(loc, t.isInt, t.ival, t.dval, t.dec, t.width);

@@ -1,0 +1,21 @@
+
+point: TPOINT O          1          2          6          2 (1,2)
+defaults:          0          0          1          1 A          0 .F.
+own arrays:          1          0          0
+moved:         15          7         25
+plain object: O          0
+block:        115          1
+child:        102 TCHILD child of TPOINT child (2,2)
+init:          7         15 O
+temperature:         32.00
+access:       -273          0       -459.40
+multiple: TA:A A seen from TB: B TA:A seen from TB: B
+static class: local
+error:         13         41 Scope violation (hidden) TPOINT:SECRET U
+error:         13         42 Scope violation (protected) TPOINT:PROT U
+error:         13         42 Scope violation (protected) TPOINT:_RO U
+error:         13       1004 Message not found TPOINT:NOMETHOD A
+error:         16       1005 Message not found TPOINT:_NOVAR A
+error:         13         41 Scope violation (hidden) TCHILD:SECRET U
+readonly kept:          7          8
+after collecting:       2000       2000

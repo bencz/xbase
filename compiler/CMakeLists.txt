@@ -13,6 +13,7 @@ add_executable(xbc
   src/parser/Parser.cpp
   src/parser/Statements.cpp
   src/sema/Calls.cpp
+  src/sema/Classes.cpp
   src/sema/Sema.cpp
   src/opt/Fold.cpp
   src/xir/Analysis.cpp

@@ -63,7 +63,7 @@ Value *Generator::genExpr(const Expr &e) {
     Value *object = genExpr(*m.object);
     std::vector<Value *> args = genArgs(m.args);
     b.setLoc(m.loc);
-    return b.send(m.message, object, args); // a method receives values (restRefs 0)
+    return sendFrom(m.message, object, args, m.super); // a method receives values (restRefs 0)
   }
   case ExprKind::Ref: { // a call argument passed by reference
     const Expr &target = *static_cast<const RefExpr &>(e).target;
@@ -226,13 +226,13 @@ Value *Generator::genSendAssign(const SendExpr &target, const AssignExpr *assign
   if (assign && !assign->compound) {
     Value *value = genExpr(*assign->value);
     b.setLoc(target.loc);
-    return b.send(setter, object, {value});
+    return sendFrom(setter, object, {value}, target.super);
   }
   b.setLoc(target.loc);
-  Value *old = b.send(target.message, object, {});
+  Value *old = sendFrom(target.message, object, {}, target.super);
   Value *now = assign ? b.binary(assign->op, old, genExpr(*assign->value)) : b.stepByOne(incdec->increment, old);
   b.setLoc(target.loc);
-  Value *result = b.send(setter, object, {now});
+  Value *result = sendFrom(setter, object, {now}, target.super);
   return incdec && !incdec->prefix ? old : result;
 }
 

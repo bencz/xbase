@@ -1,0 +1,16 @@
+
+include:          6          3.00
+variables: local super CHARACTER private self CHARACTER private self
+hidden: base secret / base hv leaf secret / leaf hv leaf secret leaf hv
+access:         50         50 set get get 
+init:          9         19         18
+local super:          3
+runtime class: described ERROR
+parameters: NC two
+error:         13         42 Scope violation (protected) TGUARDED:INIT
+error:         13       1004 Message not found TGUARDED:AREA
+error:          1       1081 Argument error +
+error:          1          0 Class used by its own initial values TSELFISH
+error:          1          0 Class used by its own initial values TSELFISH
+error:          1          0 Class used by its own initial values TCHILDMADE
+flaky:          2          2          2

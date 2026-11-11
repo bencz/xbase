@@ -217,6 +217,29 @@ bool Sema::resolve(VarExpr &v) {
   return false;
 }
 
+// Super:message, in a method where no variable is named Super, and
+// Self:Super:message (::Super:message) in a method, send the ancestors'
+// member to Self; elsewhere they are ordinary sends.
+void Sema::superSend(SendExpr &m) {
+  bool inMethod = curFunc_ && curFunc_->ofClass;
+  if (m.object->kind == ExprKind::Var) {
+    auto &object = static_cast<VarExpr &>(*m.object);
+    if (!inMethod || resolve(object) || memvarCreated(object.name)) {
+      m.super = false;
+      return;
+    }
+    auto self = std::make_unique<VarExpr>(object.loc, "SELF");
+    self->methodSelf = true;
+    m.object = std::move(self);
+    return;
+  }
+  if (!inMethod) {
+    m.super = false;
+    return;
+  }
+  m.object = std::move(static_cast<SendExpr &>(*m.object).object);
+}
+
 void Sema::codeblock(BlockExpr &b, Scope &s) {
   frames_.push_back({{}, {}, {}, nullptr, &b}); // parameters only: never captured, and tested for references anyway
   uint32_t n = 0;
@@ -390,6 +413,10 @@ void Sema::expr(Expr &e, Scope &s) {
     break;
   case ExprKind::Var: {
     auto &v = static_cast<VarExpr &>(e);
+    if (v.methodSelf && !(curFunc_ && curFunc_->ofClass)) { // even where a variable is named Self
+      diag_.error(v.loc, "'::' is valid only in a method");
+      break;
+    }
     if (resolve(v)) break;
     v.where = VarWhere::Memvar; // looked up by name when it runs, as in Clipper
     if (memvarCreated(v.name) || undeclared_ == Undeclared::Ignore) break;
@@ -440,6 +467,7 @@ void Sema::expr(Expr &e, Scope &s) {
   }
   case ExprKind::Send: {
     auto &m = static_cast<SendExpr &>(e);
+    if (m.super) superSend(m);
     expr(*m.object, s);
     for (auto &a : m.args) expr(*a, s);
     break;

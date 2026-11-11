@@ -52,6 +52,7 @@ public:
   Instruction *fromBool(Value *b);
   Instruction *call(Callee c, const std::vector<Value *> &args);
   Instruction *send(std::string message, Value *object, const std::vector<Value *> &args);
+  Instruction *classNew(int32_t classIndex);
   Instruction *arrayLit(const std::vector<Value *> &elems);
   Instruction *hashLit(const std::vector<Value *> &pairs);
   Instruction *index(Value *base, Value *idx);

@@ -108,6 +108,17 @@ Statements:
   a loop around the sequence, cannot leave its body (Clipper rule); in `RECOVER` they can. `BREAK [value]` is a
   `std.ch` command (`__Break()`, the same as `Break()`).
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
+- Classes ([runtime.md](runtime.md#classes)), at file level: `[STATIC | CREATE] CLASS name [INHERIT | FROM parent,
+  ...]`, then members, then `ENDCLASS` (or `END [CLASS]`): `EXPORTED:` (`EXPORT:`, `VISIBLE:`), `PROTECTED:` and
+  `HIDDEN:` set the scope of the members after them; `VAR | DATA name, ... [AS type] [INIT expr] [scope] [READONLY |
+  RO]` (`AS` is accepted and ignored; each name gets the INIT expression; `scope` is `EXPORTED`, `VISIBLE`,
+  `PROTECTED` or `HIDDEN`); `METHOD name[( params )] [AS type] [CONSTRUCTOR] [INLINE expr, ...] [scope]`; `ACCESS name
+  [INLINE expr, ...]` and `ASSIGN name( param ) [INLINE expr, ...]` (an `INLINE` list is evaluated in order and returns
+  its last value). A method is implemented with `METHOD name[( params )] [CLASS name]` (also `ACCESS name CLASS ...`
+  and `ASSIGN name( param ) CLASS ...`; without `CLASS`, the last class declared before it in the preprocessed source,
+  an included file's too) and a body, like a function. In a method, `Self` is the object, `::name` is `Self:name`, and
+  `Super:name` (when no variable named `Super` is declared there) or `::Super:name` the member of its class's
+  ancestors. Elsewhere `Self` and `Super` are ordinary names.
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
   other arguments (an element, a variable in parentheses, an expression) by value
 - expression statements; a statement `operand = expr` is an assignment, and `=` inside `expr` compares:
@@ -211,6 +222,15 @@ symbol table has them), their frames keep line 0 (no line is stored before calls
 codeblocks are hidden from the call stack (`xir::Function::hidden`, `XB_PROC_HIDDEN`). No program entry is emitted.
 
 ## Semantic checks
+
+`sema/Classes.*` runs first and makes classes functions: a method's implementation becomes the `STATIC` function
+`CLS:MESSAGE` (what the call stack shows) whose first parameter is `SELF`, an `INLINE` method a function returning its
+expression, the class gets its class function `NAME()` (`FuncDecl::instantiates`: a new object) and, when its
+variables have `INIT` values, `CLS:(INIT)`, which returns them as an array. It reports a class defined twice or with a
+function's name, a class that inherits from itself through the module's classes, a member declared twice (a variable
+and a method of the same message too), an implementation of nothing declared or implemented twice, and a declared
+method without an implementation. Sema decides whether `Super:name` and `::Super:name` are a send to the ancestors
+(`SendExpr::super`); `::` outside a method is an error, even where a variable is named `Self`.
 
 `sema/Sema.*` assigns frame slots to parameters and `LOCAL`s (in declaration order; a `LOCAL`'s initializer is resolved
 before its own name becomes visible). A codeblock has its own frame for its parameters. A variable of the enclosing
@@ -429,6 +449,12 @@ emits the object file.
   may change, are still read from the slot. With the direct entries, against neither (callgrind, x86-64): `fib` 10%
   fewer instructions, `qsort` 17%, `AEval` 15%; `matmul` 2% more (its inner loop has no calls, and the words of the
   outer loops' counters take registers there).
+- Classes ([runtime.md](runtime.md#classes)): a module emits an `xb_class_def` per class (`xb.module.classes`: its
+  name, its parents (each one's name, and its entry when the module has the class), its variables with their flags,
+  its methods with their functions and flags, its INIT function, `XB_CLASS_STATIC` for a `STATIC CLASS`) and
+  registers them (`xb_classes_register`) with the module. A `send` from a method or one of its codeblocks
+  (`classIndex`, `superSend`) calls `xb_op_send_from` with its class's descriptor; others call `xb_op_send`.
+  `class.new` calls `xb_class_instance`.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
   call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,

@@ -30,6 +30,10 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
 int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args);
 
+/* xb_error with a description of its own instead of the generic code's. */
+int xb_error_described(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *description,
+                       const char *operation, uint32_t flags, uint32_t argc, const xb_item *args);
+
 /* An error the operation may retry (canRetry, `tries` the attempt, from 1;
  * no arguments): 1 when the error block returned .T. and the operation is to
  * be tried again; else 0, with a request to unwind pending (the block

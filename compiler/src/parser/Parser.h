@@ -95,6 +95,10 @@ private:
   ExprPtr parseMacroText();
   ExprPtr parseMacro();
   bool atMacroName() const;
+  bool atClassStart() const;
+  ExprPtr parseSend(SourceLoc loc, ExprPtr object);
+  bool atMemberStart() const;
+  std::unique_ptr<ClassDecl> parseClass();
   bool atMacroParen() const;
 
   std::vector<Token> toks_;
@@ -108,6 +112,7 @@ private:
   // are not reported one by one.
   bool quietStmt_ = false;
   bool stopped_ = false;
+  std::string lastClass_;        // the class a METHOD implementation without CLASS belongs to
   // ANNOUNCE and EXTERNAL anywhere in the module, given to it at its end.
   std::optional<Request> announce_;
   std::vector<Request> requests_;

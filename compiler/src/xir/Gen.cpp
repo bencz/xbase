@@ -17,10 +17,44 @@ std::unique_ptr<Module> Generator::run(const xb::Module &ast) {
   }
   std::vector<Function *> fns;
   for (auto &f : ast.funcs) fns.push_back(declare(*f));
+  declareClasses(ast);
   for (size_t i = 0; i < ast.funcs.size(); ++i) genFunction(*ast.funcs[i], fns[i]);
   genModuleInit(ast);
   for (auto &f : mod_->functions) removeUnreachableBlocks(*f);
   return std::move(mod_);
+}
+
+// The classes, with their methods' functions (declared before).
+void Generator::declareClasses(const xb::Module &ast) {
+  std::unordered_map<std::string, int32_t> local;
+  int32_t index = 0;
+  for (auto &c : ast.classes) {
+    classIndex_[c.get()] = index;
+    local.emplace(c->name, index);
+    ++index;
+  }
+  for (auto &c : ast.classes) {
+    Module::Class cls;
+    cls.name = c->name;
+    cls.isStatic = c->isStatic;
+    for (const std::string &p : c->parents) {
+      auto it = local.find(p);
+      cls.parents.push_back({p, it == local.end() ? -1 : it->second});
+    }
+    for (const ClassVarDecl &v : c->vars) cls.vars.push_back({v.name, v.flags});
+    for (const ClassMethodDecl &m : c->methods)
+      if (m.impl) cls.methods.push_back({m.message(), funcs_.at(m.impl->name), m.flags});
+    if (c->initValues) cls.init = funcs_.at(c->initValues->name);
+    mod_->classes.push_back(std::move(cls));
+  }
+}
+
+Instruction *Generator::sendFrom(const std::string &message, Value *object, const std::vector<Value *> &args,
+                                 bool super) {
+  Instruction *i = cur_.b->send(message, object, args);
+  i->classIndex = cur_.classIndex;
+  i->superSend = super && cur_.classIndex >= 0;
+  return i;
 }
 
 Function *Generator::declare(const FuncDecl &f) {
@@ -69,6 +103,7 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   cur_.b = std::make_unique<Builder>(fn);
   cur_.scope = f.name;
   cur_.function = f.name;
+  cur_.classIndex = f.ofClass ? classIndex_.at(f.ofClass) : -1;
   fn->stackName = f.name;
   fn->hidden = runtimeLibrary_ && f.isStatic;
   fn->numParams = (uint32_t)f.params.size();
@@ -96,6 +131,10 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
       b.store(local, Access::Direct, b.load(param, Access::Direct)); // no reference: its own item
       cur_.paramLocals[plain[k]] = local;
     }
+  }
+  if (f.instantiates) { // the class function: a new object
+    b.ret(b.classNew(classIndex_.at(f.instantiates)));
+    return;
   }
   genBlock(f.body);
   if (!b.terminated()) b.ret(nullptr);
@@ -144,6 +183,7 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   cur_.b = std::make_unique<Builder>(fn);
   cur_.scope = name;
   cur_.function = outer.function;
+  cur_.classIndex = outer.classIndex; // a codeblock has the access of the method creating it
   fn->stackName = "(b)" + outer.function;
   fn->hidden = runtimeLibrary_;
   Builder &b = *cur_.b;

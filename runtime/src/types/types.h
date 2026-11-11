@@ -92,11 +92,13 @@ typedef struct xb_class_var {
   xb_var_rule rule;
 } xb_class_var;
 
-/* A class defined by the runtime. */
+/* A class: one the runtime defines in C, or one compiled from xBase
+ * (`compiled`, types/class.c), whose variables all take any value. */
 typedef struct xb_class {
   const char *name;             /* upper-cased, as ClassName() returns it */
   uint32_t nvars;
   const xb_class_var *vars;     /* in the order of an object's items */
+  struct cls *compiled;         /* NULL for the runtime's own classes */
 } xb_class;
 
 /* An instance of a class: one item per variable, each starting as its rule's
@@ -109,6 +111,16 @@ typedef struct xb_object {
 
 xb_object *xb_object_new(const xb_class *cls);
 void       xb_set_object(xb_item *it, xb_object *o);
+/* A message to an object of a compiled class (types/class.c); one it does not
+ * answer is the class's error ("Message not found"). Returns 1. */
+int        xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
+                         uint32_t argc, xb_item *argv);
+/* What every value answers (ClassName), else the error of a message no
+ * class has: BASE/1004, or BASE/1005 for an assignment. */
+void       xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
+/* "CLASS:MESSAGE" in `buf`, cut to fit: how an error names a message to an object. */
+#define XB_MESSAGE_TEXT_SIZE 128
+const char *xb_message_text(char buf[XB_MESSAGE_TEXT_SIZE], const char *cls, const char *message);
 
 /* Hashes: keys (strings, numbers, dates) to values, in insertion order. The
  * entries sit in one array, in the order they came, with a hash of each key;

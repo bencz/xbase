@@ -69,9 +69,11 @@ stay visible to the collector and compatible with statepoints.
 
 ## Classes
 
-`send`, `get_field` and `set_field` carry the class when it is known: calls are devirtualized through class hierarchy
-analysis, polymorphic sites get inline caches, and multiple inheritance uses subobject layouts with `self`
-adjustment, as C++ compilers do.
+Now: a `send` from a method (or a codeblock it makes) names the method's class (`classIndex`, printed `from n`; `super
+n` for `Super:message`), which decides what the message reaches at run time; `class.new` makes an object of a class of
+the module (`Module::classes`). Planned: `send`, `get_field` and `set_field` carry the receiver's class when it is
+known: calls are devirtualized through class hierarchy analysis, polymorphic sites get inline caches, and variables
+are read from known offsets.
 
 ## Types
 

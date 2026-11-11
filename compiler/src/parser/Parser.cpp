@@ -2,6 +2,7 @@
 #include "parser/Parser.h"
 
 #include "common/Text.h"
+#include "xbrt.h" // XB_SCOPE_*, XB_MEMBER_READONLY
 
 #include <algorithm>
 #include <cstring>
@@ -141,9 +142,21 @@ bool Parser::atInlineIf() const {
 
 // FUNCTION or PROCEDURE, after STATIC, INIT or EXIT.
 bool Parser::atFuncStart() const {
-  if (atStmtKw("FUNCTION") || atStmtKw("PROCEDURE")) return true;
+  if (atStmtKw("FUNCTION") || atStmtKw("PROCEDURE") || atClassStart() || atMemberStart()) return true;
   bool qualified = atStmtKw("STATIC") || (at(Tok::Ident) && (isKw(cur(), "INIT") || isKw(cur(), "EXIT")));
   return qualified && (isKw(ahead(), "FUNCTION") || isKw(ahead(), "PROCEDURE"));
+}
+
+// CLASS name, CREATE CLASS name or STATIC CLASS name.
+bool Parser::atClassStart() const {
+  if (atStmtKw("CLASS")) return ahead().kind == Tok::Ident;
+  if (!atStmtKw("CREATE") && !atStmtKw("STATIC")) return false;
+  return ahead().kind == Tok::Ident && isKw(ahead(), "CLASS") && ahead(2).kind == Tok::Ident;
+}
+
+// METHOD, ACCESS or ASSIGN name ...: a method's implementation, outside a CLASS.
+bool Parser::atMemberStart() const {
+  return (atStmtKw("METHOD") || atStmtKw("ACCESS") || atStmtKw("ASSIGN")) && ahead().kind == Tok::Ident;
 }
 
 // EXTERN[AL] FUNCTION: a declaration, at file level like FUNCTION.
@@ -241,7 +254,8 @@ std::unique_ptr<Module> Parser::parseModule(const std::string &moduleName) {
       skipToEndOfStmt();
       continue;
     }
-    mod->funcs.push_back(parseFunc());
+    if (atClassStart()) mod->classes.push_back(parseClass());
+    else mod->funcs.push_back(parseFunc());
   }
   finishModule(*mod);
   return mod;
@@ -257,6 +271,10 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
     fn->startup = atKw("INIT") ? FuncDecl::Startup::Init : FuncDecl::Startup::Exit;
     fn->isStatic = true; // the runtime runs it; nothing calls it by name
     advance();
+  } else if (atMemberStart()) {
+    fn->member = atKw("METHOD") ? FuncDecl::Member::Method
+                 : atKw("ACCESS") ? FuncDecl::Member::Access
+                                  : FuncDecl::Member::Assign;
   }
   fn->isProcedure = atKw("PROCEDURE");
   advance();
@@ -288,9 +306,173 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
     }
     expect(Tok::RParen, "')'");
   }
+  if (fn->member != FuncDecl::Member::None && atKw("CLASS")) { // the class it belongs to
+    advance();
+    if (at(Tok::Ident)) {
+      fn->memberClass = cur().upper;
+      advance();
+    } else {
+      expect(Tok::Ident, "class name");
+    }
+  } else if (fn->member != FuncDecl::Member::None) {
+    fn->memberClass = lastClass_;
+  }
   endOfStmt();
   fn->body = parseBlock({});
   return fn;
+}
+
+// The scope a word after a member names (EXPORTED, VISIBLE, PROTECTED, HIDDEN), or, as a `label:` before members,
+// also EXPORT; -1 for any other word.
+static int scopeWord(const std::string &w, bool label) {
+  if (w == "EXPORTED" || w == "VISIBLE" || (label && w == "EXPORT")) return XB_SCOPE_EXPORTED;
+  if (w == "PROTECTED") return XB_SCOPE_PROTECTED;
+  if (w == "HIDDEN") return XB_SCOPE_HIDDEN;
+  return -1;
+}
+
+// [STATIC | CREATE] CLASS name [INHERIT | FROM parent, ...], its members, then ENDCLASS (or END [CLASS]):
+//   EXPORTED: | EXPORT: | VISIBLE: | PROTECTED: | HIDDEN:    the scope of the members that follow
+//   VAR | DATA name, ... [AS type] [INIT expr] [scope] [READONLY | RO]
+//   METHOD name[( params )] [AS type] [CONSTRUCTOR] [INLINE expr, ...] [scope]
+//   ACCESS name [INLINE expr, ...] [scope], ASSIGN name( param ) [INLINE expr, ...] [scope]
+std::unique_ptr<ClassDecl> Parser::parseClass() {
+  auto cls = std::make_unique<ClassDecl>();
+  cls->loc = cur().loc;
+  if (atKw("STATIC")) cls->isStatic = true;
+  if (!atKw("CLASS")) advance(); // STATIC or CREATE
+  advance();
+  cls->name = cur().upper;
+  lastClass_ = cls->name;
+  advance();
+  if (at(Tok::Ident) && (isKw(cur(), "INHERIT") || isKw(cur(), "FROM"))) {
+    advance();
+    do {
+      if (!at(Tok::Ident)) {
+        expect(Tok::Ident, "a parent class");
+        break;
+      }
+      cls->parents.push_back(cur().upper);
+      advance();
+    } while (accept(Tok::Comma));
+  }
+  endOfStmt();
+  uint32_t scope = XB_SCOPE_EXPORTED;
+  auto memberScope = [&](uint32_t &flags, bool var) { // trailing scope words, and READONLY for a variable
+    flags = scope;
+    while (at(Tok::Ident)) {
+      int s = scopeWord(cur().upper, false);
+      if (s >= 0) flags = (flags & ~XB_SCOPE_MASK) | (uint32_t)s;
+      else if (var && (cur().upper == "READONLY" || cur().upper == "RO")) flags |= XB_MEMBER_READONLY;
+      else break;
+      advance();
+    }
+  };
+  auto asType = [&] { // AS type: accepted and ignored (the language is untyped)
+    if (at(Tok::Ident) && cur().upper == "AS" && ahead().kind == Tok::Ident) {
+      advance();
+      advance();
+    }
+  };
+  while (true) {
+    skipBlankStmts();
+    if (at(Tok::Eof)) {
+      diag_.error(cls->loc, "CLASS " + cls->name + " is not closed by ENDCLASS");
+      break;
+    }
+    if (atStmtKw("ENDCLASS") || atStmtKw("END")) { // END CLASS: std.ch's END rule leaves the END
+      advance();
+      endOfStmt();
+      break;
+    }
+    SourceLoc loc = cur().loc;
+    if (at(Tok::Ident) && scopeWord(cur().upper, true) >= 0 && ahead().kind == Tok::Colon) { // EXPORTED:
+      scope = (uint32_t)scopeWord(cur().upper, true);
+      advance();
+      advance();
+      endOfStmt();
+      continue;
+    }
+    if (atStmtKw("VAR") || atStmtKw("DATA")) {
+      advance();
+      size_t first = cls->vars.size();
+      do {
+        if (!at(Tok::Ident)) {
+          expect(Tok::Ident, "variable name");
+          break;
+        }
+        ClassVarDecl v;
+        v.loc = cur().loc;
+        v.name = cur().upper;
+        advance();
+        cls->vars.push_back(std::move(v));
+      } while (accept(Tok::Comma));
+      asType();
+      if (at(Tok::Ident) && cur().upper == "INIT") { // each variable of the list gets the expression
+        advance();
+        size_t at = pos_, after = pos_;
+        unsigned errors = diag_.errorCount();
+        for (size_t k = first; k < cls->vars.size() && diag_.errorCount() == errors; ++k) { // errors reported once
+          pos_ = at;
+          cls->vars[k].init = parseExpr();
+          after = pos_;
+        }
+        pos_ = after;
+      }
+      uint32_t flags;
+      memberScope(flags, true);
+      for (size_t k = first; k < cls->vars.size(); ++k) cls->vars[k].flags = flags;
+      endOfStmt();
+      continue;
+    }
+    bool method = atStmtKw("METHOD"), access = atStmtKw("ACCESS"), assign = atStmtKw("ASSIGN");
+    if ((method || access || assign) && ahead().kind == Tok::Ident) {
+      advance();
+      ClassMethodDecl m;
+      m.loc = cur().loc;
+      m.name = cur().upper;
+      m.kind = method ? FuncDecl::Member::Method : access ? FuncDecl::Member::Access : FuncDecl::Member::Assign;
+      advance();
+      if (accept(Tok::LParen)) {
+        if (!at(Tok::RParen)) {
+          do {
+            if (accept(Tok::Ellipsis)) {
+              m.variadic = true;
+              break;
+            }
+            if (!at(Tok::Ident)) {
+              expect(Tok::Ident, "parameter name");
+              break;
+            }
+            m.params.push_back({cur().loc, cur().upper});
+            advance();
+          } while (accept(Tok::Comma));
+        }
+        expect(Tok::RParen, "')'");
+      }
+      asType();
+      if (at(Tok::Ident) && cur().upper == "CONSTRUCTOR") advance();
+      if (at(Tok::Ident) && cur().upper == "INLINE") { // expressions evaluated in order, the last one returned
+        SourceLoc inlineLoc = cur().loc;
+        advance();
+        m.inlineBody = parseExpr();
+        if (at(Tok::Comma)) {
+          auto list = std::make_unique<ListExpr>(inlineLoc);
+          list->exprs.push_back(std::move(m.inlineBody));
+          while (accept(Tok::Comma)) list->exprs.push_back(parseExpr());
+          m.inlineBody = std::move(list);
+        }
+      }
+      memberScope(m.flags, false);
+      cls->methods.push_back(std::move(m));
+      endOfStmt();
+      continue;
+    }
+    diag_.error(loc, "expected a VAR, METHOD, ACCESS or ASSIGN declaration, or ENDCLASS, in CLASS " + cls->name);
+    skipToEndOfStmt();
+    accept(Tok::EndOfStmt);
+  }
+  return cls;
 }
 
 // EXTERN FUNCTION name( p1, [p2], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ARGS] [PARAMS] [ABBREV n]

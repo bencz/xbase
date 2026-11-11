@@ -19,7 +19,7 @@ enum {
 };
 _Static_assert(sizeof error_vars / sizeof error_vars[0] == ERR_COUNT_, "one ERR_ index per Error variable");
 
-static const xb_class error_class = {"ERROR", ERR_COUNT_, error_vars};
+static const xb_class error_class = {"ERROR", ERR_COUNT_, error_vars, NULL};
 
 void xbf_ERRORNEW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
@@ -28,20 +28,24 @@ void xbf_ERRORNEW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_object(ret, xb_object_new(&error_class));
 }
 
-/* The description of each generic code the runtime raises (Clipper's texts). */
+/* The description of each generic code the runtime raises (Clipper's texts),
+ * and of particular subcodes. */
 static const struct {
-  int32_t gencode;
+  int32_t gencode, subcode; /* subcode 0: any */
   const char *text;
 } descriptions[] = {
-  {EG_ARG, "Argument error"},          {EG_BOUND, "Bound error"},    {EG_STROVERFLOW, "String overflow"},
-  {EG_ZERODIV, "Zero divisor"},        {EG_NOFUNC, "Undefined function"},  {EG_NOMETHOD, "No exported method"},
-  {EG_NOVARMETHOD, "No exported variable"}, {EG_NOVAR, "Variable does not exist"}, {EG_CREATE, "Create error"},
-  {EG_OPEN, "Open error"},             {EG_WRITE, "Write error"},   {EG_SYNTAX, "Syntax error"},
+  {EG_NOMETHOD, 41, "Scope violation (hidden)"}, {EG_NOMETHOD, 42, "Scope violation (protected)"},
+  {EG_ARG, 0, "Argument error"},       {EG_BOUND, 0, "Bound error"},            {EG_STROVERFLOW, 0, "String overflow"},
+  {EG_ZERODIV, 0, "Zero divisor"},     {EG_NOFUNC, 0, "Undefined function"},    {EG_NOMETHOD, 0, "No exported method"},
+  {EG_NOVARMETHOD, 0, "No exported variable"}, {EG_NOVAR, 0, "Variable does not exist"},
+  {EG_CREATE, 0, "Create error"},      {EG_OPEN, 0, "Open error"},              {EG_WRITE, 0, "Write error"},
+  {EG_SYNTAX, 0, "Syntax error"},
 };
 
-static const char *description_of(int32_t gencode) {
+static const char *description_of(int32_t gencode, int32_t subcode) {
   for (size_t i = 0; i < sizeof descriptions / sizeof descriptions[0]; ++i)
-    if (descriptions[i].gencode == gencode) return descriptions[i].text;
+    if (descriptions[i].gencode == gencode && (descriptions[i].subcode == 0 || descriptions[i].subcode == subcode))
+      return descriptions[i].text;
   return "";
 }
 
@@ -70,6 +74,7 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
 /* An error to raise: what the Error object says, and what the block may do. */
 typedef struct failure {
   const char *frame;        /* the runtime function the call stack shows while the block runs, or NULL */
+  const char *description;  /* NULL: the generic code's */
   int32_t gencode, subcode;
   const char *operation;
   const char *filename;     /* NULL: none */
@@ -120,7 +125,7 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
     xb_set_array(&e->vars[ERR_ARGS], a);
     xb_gc_write(e);
   }
-  set_text(&e->vars[ERR_DESCRIPTION], description_of(f->gencode));
+  set_text(&e->vars[ERR_DESCRIPTION], f->description ? f->description : description_of(f->gencode, f->subcode));
   xb_gc_write(e);
   set_text(&e->vars[ERR_OPERATION], f->operation);
   xb_gc_write(e);
@@ -163,18 +168,25 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
 
 int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
-  const failure f = {frame, gencode, subcode, operation, NULL, 0, flags, argc, args, 0};
+  const failure f = {frame, NULL, gencode, subcode, operation, NULL, 0, flags, argc, args, 0};
+  return raise(ctx, &f, result) == 1;
+}
+
+int xb_error_described(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *description,
+                       const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
+  const failure f = {NULL, description, gencode, subcode, operation, NULL, 0, flags, argc, args, 0};
   return raise(ctx, &f, result) == 1;
 }
 
 int xb_error_retry(xb_ctx *ctx, int32_t gencode, int32_t subcode, const char *operation, uint16_t tries) {
-  const failure f = {NULL, gencode, subcode, operation, NULL, 0, XB_ERR_RETRY, 0, NULL, tries};
+  const failure f = {NULL, NULL, gencode, subcode, operation, NULL, 0, XB_ERR_RETRY, 0, NULL, tries};
   return raise(ctx, &f, NULL) == 2;
 }
 
 int xb_error_file(xb_ctx *ctx, const char *frame, int32_t gencode, int32_t subcode, const char *filename,
                   int32_t oscode, uint16_t tries) {
-  const failure f = {frame, gencode, subcode, "", filename, oscode, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries};
+  const failure f = {frame, NULL, gencode, subcode, "", filename, oscode, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL,
+                     tries};
   return raise(ctx, &f, NULL);
 }
 

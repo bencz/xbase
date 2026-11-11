@@ -233,9 +233,10 @@ code stores the cells. `Eval( bBlock, ... )` and `xb_block_call` run it; the cal
 ## Objects and messages
 
 An object (`xb_object` in `types/types.h`, `types/object.c`) is an instance of a class: its class and one item per
-instance variable. The runtime defines its classes in C (`xb_class`: name and variables); methods and classes written
-in xBase are planned. `xb_op_send(ctx, ret, message, argc, argv)` sends a message to `argv[0]` with the arguments
-`argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment `o:x := v` sends `_X` with `v`.
+instance variable. The runtime defines classes of its own in C (`xb_class`: name and variables), and programs define
+theirs in xBase ([Classes](#classes)). `xb_op_send(ctx, ret, message, argc, argv)` sends a message to `argv[0]` with
+the arguments `argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment `o:x := v` sends
+`_X` with `v`.
 
 - An object's variables: `X` returns the variable (arguments are ignored), `_X` assigns it (without an argument, `NIL`).
   A variable's rule (`xb_var_rule`) says what it accepts: any value; only an array, a logical or a string (a value of
@@ -258,6 +259,44 @@ items and an item).
 The `Error` class (`core/error.c`, `ErrorNew()`) has the variables `args` (an array), `canDefault`, `canRetry`,
 `canSubstitute` (logicals), `cargo` (any value), `description`, `filename`, `operation`, `subSystem` (strings),
 `genCode`, `osCode`, `subCode` (32-bit numbers), and `severity` and `tries` (16-bit numbers).
+
+## Classes
+
+Classes compiled from xBase (`types/class.c`, `xb_class_def` in `xbrt.h`) are described by their module and
+registered with it by name (a `STATIC CLASS` is not: it is known to its module only); the runtime prepares a class the
+first time it is used (its class function, or a subclass):
+
+- A parent is the module's own class of that name when there is one, else the class registered under the name (an
+  unknown one is error 1001, as its class function would give). The class's line is the class, then each parent's
+  line, depth first and left to right, each class once. Each class of the line has an area of the object's variables
+  of its own: two ancestors' variables of the same name are two variables, each seen by its class's methods (the
+  reference keeps one, the first ancestor's). A class met again while its line is built, with no INIT values
+  evaluated meanwhile, inherits from itself (`BASE/0` `Class inherits from itself`, the class's name as the operation;
+  the compiler reports it within a module).
+- The messages it answers are tabled: for each class of the line in order, its methods, then its variables (`NAME`
+  reads, `_NAME` assigns); the first class that has a message takes it. The INIT values are evaluated then, once per
+  class (`CLS:(INIT)`); each new object gets them, an array or a hash copied for each object (`xb_clone_deep`). When
+  evaluating them fails, the class is not usable yet and they are evaluated again the next time it is used; INIT
+  values that need an object of their own class, or of a subclass being prepared, are `BASE/0` `Class used by its own
+  initial values`.
+- `NAME()` returns a new object with its initial values; `:New( ... )` is the class's method, else the default one,
+  which sends `Init` with the arguments as the class's own method would (a PROTECTED or HIDDEN `Init` is reached) and
+  returns the object; `Init` without a method returns the object. A method receives the object as its first argument
+  (`Self`); its `PARAMETERS` name the arguments after it.
+- A message from a method of class F (or a codeblock it made: `xb_op_send_from`) reaches F's own HIDDEN member when
+  F has one; else a method of the object's class (an overriding method wins, and so do a subclass's ACCESS and ASSIGN
+  over a variable F declared); else the variable F sees (F's, or its ancestors', unless HIDDEN there); else what the
+  object's class answers. `Super:message` takes the member of the ancestors after F in F's line; `Super:ClassName()`
+  is F's first parent's name. When `Self` was assigned an object that is not of F's class, `Super:message` is
+  `Message not found`.
+- Scopes: HIDDEN members answer F's own methods, PROTECTED ones the methods of their class and its subclasses, a
+  READONLY variable is assigned by those only; anything else is `BASE/41` `Scope violation (hidden)` or `BASE/42`
+  `Scope violation (protected)` (generic code 13, the operation `CLASS:MESSAGE`, no `args`). A message the class does
+  not answer is `BASE/1004` (`BASE/1005` to assign) `Message not found`, the operation `CLASS:MESSAGE`, the object in
+  `args`, as in the reference; the runtime's own classes keep Clipper's `No exported method`.
+- Not yet: `o:Parent:name` and `o:Super` outside a method (casts to an ancestor's area), class (shared) variables,
+  destructors, `FRIEND`, scalar classes, operator overloading, reflection functions, and the compiled fast paths (see
+  [xir.md](xir.md#classes)). A method's `PCount()` counts `Self`.
 
 ## References
 

@@ -76,6 +76,8 @@ void Instruction::copyData(const Instruction &from) {
   message = from.message;
   index = from.index;
   restRefs = from.restRefs;
+  classIndex = from.classIndex;
+  superSend = from.superSend;
   blockFn = from.blockFn;
   captures = from.captures;
 }

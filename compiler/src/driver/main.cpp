@@ -6,6 +6,7 @@
 #include "parser/Parser.h"
 #include "preprocessor/Preprocessor.h"
 #include "sema/Calls.h"
+#include "sema/Classes.h"
 #include "sema/Sema.h"
 #include "xir/Gen.h"
 #include "xir/PassManager.h"
@@ -345,6 +346,8 @@ static int compile(int argc, char **argv) {
     xb::Parser parser(std::move(tokens), diag);
     auto ast = parser.parseModule(moduleNameFor(input));
     ast->file = llvm::sys::path::filename(input).str();
+    if (diag.errorCount() != errors) continue;
+    xb::ClassResolver(diag).run(*ast);
     if (diag.errorCount() != errors) continue;
     xb::CallResolver(diag, xb::Folder::canEvaluate, runtimeLibrary).run(*ast);
     if (diag.errorCount() != errors) continue;
