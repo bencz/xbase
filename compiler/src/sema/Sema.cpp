@@ -204,12 +204,7 @@ bool Sema::resolve(VarExpr &v) {
       v.slot = slot;
       return true;
     }
-    // Clipper: a codeblock's parameters cannot be captured (an extended codeblock's LOCALs can)
-    if (frames_[fi].block && slot < frames_[fi].block->params.size()) {
-      diag_.error(v.loc, "outer codeblock variable '" + v.name + "' is out of reach");
-      return true;
-    }
-    markBoxed(frames_[fi], slot);
+    markBoxed(frames_[fi], slot); // a codeblock's parameters and LOCALs too (Clipper reaches only a function's)
     BlockExpr::Capture cap{false, slot};
     for (size_t k = fi + 1; k < frames_.size(); ++k) {
       auto &caps = frames_[k].block->captures;
@@ -248,8 +243,8 @@ void Sema::superSend(SendExpr &m) {
   m.object = std::move(static_cast<SendExpr &>(*m.object).object);
 }
 
-// A codeblock's frame: its parameters (never captured, and tested for references anyway), then an extended
-// codeblock's LOCALs, which inner codeblocks capture and references reach like a function's (BlockExpr::boxed).
+// A codeblock's frame: its parameters, then an extended codeblock's LOCALs, which inner codeblocks capture and
+// references reach like a function's (BlockExpr::boxed).
 void Sema::codeblock(BlockExpr &b, Scope &s) {
   frames_.push_back({{}, {}, {}, &b.boxed, &b});
   uint32_t n = 0;
@@ -544,15 +539,13 @@ void Sema::expr(Expr &e, Scope &s) {
     break;
   case ExprKind::Ref: {
     // A variable passed by reference is shared with the callee: a function's
-    // LOCAL or parameter, or an extended codeblock's LOCAL, is marked; a
-    // codeblock's parameters, STATICs and captured variables are reached with
-    // a run-time test anyway.
+    // or a codeblock's LOCAL or parameter is marked; STATICs and captured
+    // variables are reached with a run-time test anyway.
     Expr &target = *static_cast<RefExpr &>(e).target;
     expr(target, s);
     if (target.kind == ExprKind::Var) {
       auto &v = static_cast<VarExpr &>(target);
-      const BlockExpr *blk = frames_.back().block;
-      if (v.where == VarWhere::Frame && (!blk || v.slot >= blk->params.size())) markBoxed(frames_.back(), v.slot);
+      if (v.where == VarWhere::Frame) markBoxed(frames_.back(), v.slot);
     }
     break;
   }

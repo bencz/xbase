@@ -480,10 +480,15 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
   } else if (m->kind != M_METHOD) {
     slot = c->area[position(c, m->owner)] + m->index;
   }
-  if (cache && object && !view) {
-    cache->cls = ((const xb_object *)argv[0].v.p)->cls;
-    cache->member = m;
-    cache->slot = slot;
+  if (cache && object && !view) { /* the newest first; the oldest of a full cache goes */
+    for (size_t k = XB_SEND_CACHE_WAYS - 1; k > 0; --k) {
+      cache->cls[k] = cache->cls[k - 1];
+      cache->member[k] = cache->member[k - 1];
+      cache->slot[k] = cache->slot[k - 1];
+    }
+    cache->cls[0] = ((const xb_object *)argv[0].v.p)->cls;
+    cache->member[0] = m;
+    cache->slot[0] = slot;
   }
   perform(ctx, r, m, slot, argc, argv);
 }
@@ -542,10 +547,12 @@ void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def 
                      xb_send_cache *cache, uint32_t argc, xb_item *argv) {
   if (argv[0].type == XB_T_OBJECT) {
     const xb_object *o = argv[0].v.p;
-    if (o->cls == cache->cls && argv[0].width == 0) { /* the class the cache holds the member for */
-      perform(ctx, r, cache->member, cache->slot, argc, argv);
-      return;
-    }
+    if (argv[0].width == 0) /* a class the cache holds the member for */
+      for (size_t k = 0; k < XB_SEND_CACHE_WAYS && cache->cls[k]; ++k)
+        if (o->cls == cache->cls[k]) {
+          perform(ctx, r, cache->member[k], cache->slot[k], argc, argv);
+          return;
+        }
     if (o->cls->compiled) {
       dispatch(ctx, r, o->cls->compiled, message, from, super, cache, argc, argv);
       return;

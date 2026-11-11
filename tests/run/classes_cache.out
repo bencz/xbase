@@ -5,3 +5,4 @@ scalar: N5 A N7 A
 runtime class: U C U 
 scopes: 42 error 41 42 error 41 
 class var:          7         99         99
+more classes than the cache holds: 121452 121452 121452 

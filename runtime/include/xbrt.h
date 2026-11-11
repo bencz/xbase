@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 32u
+#define XB_ABI_VERSION 33u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -531,14 +531,16 @@ void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
  * scope decides what the method may reach, and a variable is first the one
  * `from` sees), or from elsewhere (NULL); with `super`, the method or variable
  * of `from`'s ancestors (Super:message). `cache` is the send's own, zeroed
- * storage, which the runtime alone reads and writes: the member the message
- * reached for the class of the last object it went to (a monomorphic inline
- * cache), so that the next message to an object of that class skips the
- * lookup and the checks. */
+ * storage, which the runtime alone reads and writes: the members the message
+ * reached for the classes of the last XB_SEND_CACHE_WAYS objects of different
+ * classes it went to, the most recent first (a polymorphic inline cache), so
+ * that the next message to an object of one of those classes skips the lookup
+ * and the checks. */
+#define XB_SEND_CACHE_WAYS 4
 typedef struct xb_send_cache {
-  const void *cls;
-  const void *member;
-  uintptr_t slot;
+  const void *cls[XB_SEND_CACHE_WAYS];
+  const void *member[XB_SEND_CACHE_WAYS];
+  uintptr_t slot[XB_SEND_CACHE_WAYS];
 } xb_send_cache;
 void     xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                          xb_send_cache *cache, uint32_t argc, xb_item *argv);

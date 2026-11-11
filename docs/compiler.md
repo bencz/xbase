@@ -162,16 +162,15 @@ line, then statements, then a line that starts with `}` (the expression goes on 
 (`BlockExpr::extended`, `statements`): `LOCAL`s of its own after the parameters, `RETURN` with its result (`NIL` when it
 ends without one; the procedure rule does not apply), any other statement but `STATIC`, `MEMVAR`, `PRIVATE`, `PUBLIC`
 and `PARAMETERS`. A codeblock inside captures its `LOCAL`s like a function's, and they can be passed by reference
-(`BlockExpr::boxed`; the reference rejects the capture), but not its parameters, as for any codeblock. It is generated
-like any codeblock, with a frame of its own. A call argument `@name` or `@name[i]...` passes a variable or an element by
-reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not supported yet), and so are
-function references `@name()`. `...` as the last argument of a call or a send or the last element of an array literal
-(`SpreadExpr`; once, with nothing after it, not even an empty argument) stands for the arguments the function received
-past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it only in a function
-declared with `...`, outside its codeblocks (which have arguments of their own); a `CHECKED` function's count includes
-the other arguments only, so only too many of them is an error. Variables, elements (`a[i] := v`, `a[i] += v`,
-`a[i]++`), instance variables (`o:x := v`, a message without arguments) and macros can be assigned. `LOCAL a[n1, n2]`
-(or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
+(`BlockExpr::boxed`). It is generated like any codeblock, with a frame of its own. A call argument `@name` or
+`@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is an error (references in
+array literals are not supported yet), and so are function references `@name()`. `...` as the last argument of a call or
+a send or the last element of an array literal (`SpreadExpr`; once, with nothing after it, not even an empty argument)
+stands for the arguments the function received past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ...
+)`, `{ ... }`. Sema accepts it only in a function declared with `...`, outside its codeblocks (which have arguments of
+their own); a `CHECKED` function's count includes the other arguments only, so only too many of them is an error.
+Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`, a message without arguments)
+and macros can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
 
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
 C has them, so a comparison binds tighter than `&`, `^^` and `|`: `x & 1 == 0` is `x & ( 1 == 0 )`, an argument error at
@@ -262,13 +261,14 @@ method without an implementation. Sema decides whether `Super:name` and `::Super
 
 `sema/Sema.*` assigns frame slots to parameters and `LOCAL`s (in declaration order; a `LOCAL`'s initializer is resolved
 before its own name becomes visible). A codeblock has its own frame for its parameters. A variable of the enclosing
-function used inside a codeblock is *captured*: it is marked shared ("boxed") in the function (`FuncDecl::boxed`),
-and each codeblock between the use and the function gets a capture (`BlockExpr::captures`) that passes the cell
-along; the reference resolves to `VarWhere::Capture` with the capture index. Parameters of an enclosing codeblock
-cannot be captured ("outer codeblock variable is out of reach", as in Clipper). A function's `LOCAL` or parameter
-passed by reference (`@x`) is marked shared too, and so are all the parameters of a function that calls a `PARAMS`
-function (`PValue()`), which reads and writes them in the frame. A shared variable moves into a cell only when a
-codeblock captures it or a reference is taken, at run time.
+function used inside a codeblock is *captured*: it is marked shared ("boxed") in the function (`FuncDecl::boxed`), and
+each codeblock between the use and the function gets a capture (`BlockExpr::captures`) that passes the cell along; the
+reference resolves to `VarWhere::Capture` with the capture index. A variable of an enclosing codeblock (a parameter, an
+extended codeblock's `LOCAL`) is captured the same way, marked shared in that codeblock (`BlockExpr::boxed`); Clipper
+and the reference reject that ("outer codeblock variable is out of reach"). A function's or a codeblock's `LOCAL` or
+parameter passed by reference (`@x`) is marked shared too, and so are all the parameters of a function that calls a
+`PARAMS` function (`PValue()`), which reads and writes them in the frame. A shared variable moves into a cell only when
+a codeblock captures it or a reference is taken, at run time.
 
 `STATIC`s get slots in the module's static storage (`Module::statics`, `VarWhere::Static`). File-wide statics are
 visible in every function; a function's statics are visible in that function only. They are never captured: codeblocks
@@ -495,13 +495,13 @@ emits the object file.
   may change, are still read from the slot. With the direct entries, against neither (callgrind, x86-64): `fib` 10%
   fewer instructions, `qsort` 17%, `AEval` 15%; `matmul` 2% more (its inner loop has no calls, and the words of the
   outer loops' counters take registers there).
-- Classes ([runtime.md](runtime.md#classes)): a module emits an `xb_class_def` per class (`xb.module.classes`: its
-  name, its parents (each one's name, and its entry when the module has the class), its variables with their flags,
-  its methods with their functions and flags, its INIT function, `XB_CLASS_STATIC` for a `STATIC CLASS`) and
-  registers them (`xb_classes_register`) with the module, with the class variables, the friends' names and the
-  destructor. Every `send` calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed
-  `xb_send_cache` of three pointer-sized words) and, from a method or one of its codeblocks (`classIndex`,
-  `superSend`), its class's descriptor (else a null one). `class.new` calls `xb_class_instance`.
+- Classes ([runtime.md](runtime.md#classes)): a module emits an `xb_class_def` per class (`xb.module.classes`: its name,
+  its parents (each one's name, and its entry when the module has the class), its variables with their flags, its
+  methods with their functions and flags, its INIT function, `XB_CLASS_STATIC` for a `STATIC CLASS`) and registers them
+  (`xb_classes_register`) with the module, with the class variables, the friends' names and the destructor. Every `send`
+  calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed `xb_send_cache`: three arrays of
+  `XB_SEND_CACHE_WAYS` pointer-sized words) and, from a method or one of its codeblocks (`classIndex`, `superSend`), its
+  class's descriptor (else a null one). `class.new` calls `xb_class_instance`.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
   call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,

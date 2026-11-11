@@ -100,8 +100,8 @@ Done: `CLASS ... ENDCLASS` with `INHERIT` (multiple, an area of variables per an
 (`o:Parent1:name`, `o:Super`), reflection, class variables (`CLASSVAR`, `SHARED`), `FRIEND CLASS`/`FRIEND FUNCTION`
 ([runtime.md](runtime.md#classes)).
 Operator overloading and scalar classes (`ASSOCIATE CLASS`) are done too.
-Destructors and monomorphic inline caches for sends are done.
-Missing, from the plan below: polymorphic caches, devirtualization and variables at known offsets.
+Destructors and polymorphic inline caches for sends are done.
+Missing, from the plan below: devirtualization and variables at known offsets.
 
 - Syntax: `CLASS Name [INHERIT Parent1, Parent2, ...]`, `VAR`/`DATA name [INIT value]`, `METHOD name( params )
   [CONSTRUCTOR | INLINE expr]`, `ACCESS`/`ASSIGN`, `ENDCLASS`; a method's body is `METHOD name( params ) CLASS Name`,

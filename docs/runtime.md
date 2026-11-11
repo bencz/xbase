@@ -382,15 +382,16 @@ first time it is used (its class function, or a subclass):
   before the `EXIT` procedures. A destructor runs once: one that stores its object keeps it alive, without the
   reference's error. Objects die when a collection finds them unreachable (a frame temporary may keep one until its
   function returns), not, as with the reference's reference counts, the moment the last reference goes.
-- Inline caches: each send of compiled code has its own `xb_send_cache`. A message that reaches a member of an object
-  (not through a cast) stores the object's class, the member and its slot there (a variable's index, a class
-  variable's address); the next message from that send to an object of the same class runs the member at once,
-  without the lookup, the scope checks (which give the same answer for the same class at the same send) or a call to
-  `dispatch` (`perform`). Messages to casts, to values of scalar classes and to the runtime's own classes always look
-  up. The `oop` benchmark (method calls, one through `Super`, variable reads and assignments) went from 292 ms to
-  69 ms. The cache is written without synchronization: when tasks run on several threads, it has to be filled
-  atomically. Not yet: polymorphic caches, and devirtualized calls and variables at known offsets in the generated
-  code ([xir.md](xir.md#classes)).
+- Inline caches: each send of compiled code has its own `xb_send_cache`, of `XB_SEND_CACHE_WAYS` (4) ways. A message
+  that reaches a member of an object (not through a cast) stores the object's class, the member and its slot there (a
+  variable's index, a class variable's address) as the newest way (the oldest of a full cache goes); the next message
+  from that send to an object of one of those classes runs the member at once, without the lookup, the scope checks
+  (which give the same answer for the same class at the same send) or a call to `dispatch` (`perform`). Messages to
+  casts, to values of scalar classes and to the runtime's own classes always look up. The `oop` benchmark (method calls,
+  one through `Super`, variable reads and assignments) went from 292 ms to 69 ms; a send that goes to objects of three
+  classes in turn, from 46 ms to 23 ms for 3,000,000 messages once the cache held more than one class. The cache is
+  written without synchronization: when tasks run on several threads, it has to be filled atomically. Not yet:
+  devirtualized calls and variables at known offsets in the generated code ([xir.md](xir.md#classes)).
 
 ## References
 
