@@ -573,6 +573,15 @@ Conventions:
   of a truncated number.
 - `SoundEx` keeps the first letter, then the digits of the next letters, a digit once for neighbors with it (A E I O U
   H W Y have none and part neighbors), skipping anything but a letter, padded with zeros to 4 characters.
+- The memo-line functions (`rtl/memoline.c`) cut a text into lines of a width (79 by default; tab size 4, word wrap on):
+  `MemoLine`, `MLCount`, `MLPos`, `MLCToPos`, `MPosToLC` share one scanner, Clipper's rules and their corner cases (a
+  line ends at a hard return, CR LF, or before the character that would pass the width: with word wrap after the
+  line's last blank; a soft return, the byte 141 and LF, is skipped with word wrap and ends the line without it; a
+  tab takes the columns to the next multiple of the tab size). The reference reads its line end from a setting and
+  takes more arguments; xbase takes Clipper's arguments and CR LF. Compared with the reference over random texts
+  (letters, blanks, tabs, hard and soft returns, lone CR and LF) and arguments, the results are the same. `HardCR`
+  makes soft returns hard; `MemoTran( c, [cHard], [cSoft] )` replaces hard and soft returns by the first character of
+  its arguments (`;` and a blank by default, also for an empty one, where the reference writes a zero byte).
 - `MemVarBlock( cName )` returns a block that reads the memory variable and, called with a value that is not NIL,
   assigns it; NIL when no variable of that name is visible.
 - `StrTran( c, cSearch, cReplace, nStart, nCount )`: `nStart` or `nCount` of 0 gives `""`; a negative `nStart`

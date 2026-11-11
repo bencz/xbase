@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 97 of 551 done. Commands (`std.ch` families): 25 of 155 done.
+Functions: 104 of 551 done. Commands (`std.ch` families): 25 of 155 done.
 
 ## Statements (grammar)
 
@@ -124,12 +124,12 @@ at link time, never by an environment variable.
 **Abs**, **Bin2I**, **Bin2L**, **Bin2W**, **Descend**, **Exp**, **I2Bin**, **Int**, *IsPrinter*, **L2Bin**, **LenNum**,
 **Log**, **Max**, **Min**, **Mod**, **Round**, **Sqrt**, **Str**, **SubStr**, *Transform*, **Val**
 
-### Strings (25 of 33 done)
+### Strings (32 of 33 done)
 
-**AllTrim**, **Asc**, **At**, **Chr**, *HardCR*, **IsAlpha**, **IsDigit**, **IsLower**, **IsUpper**, **Left**, **Len**,
-**Lower**, **LTrim**, *MemoLine*, *MemoTran*, *MLCount*, *MLCToPos*, *MLPos*, *MPosToLC*, **PadC**, **PadL**, **PadR**,
-**RAt**, **Replicate**, **Right**, **RTrim**, **SoundEx**, **Space**, **StrTran**, **StrZero**, **Stuff**, **Upper**,
-*Word*
+**AllTrim**, **Asc**, **At**, **Chr**, **HardCR**, **IsAlpha**, **IsDigit**, **IsLower**, **IsUpper**, **Left**,
+**Len**, **Lower**, **LTrim**, **MemoLine**, **MemoTran**, **MLCount**, **MLCToPos**, **MLPos**, **MPosToLC**, **PadC**,
+**PadL**, **PadR**, **RAt**, **Replicate**, **Right**, **RTrim**, **SoundEx**, **Space**, **StrTran**, **StrZero**,
+**Stuff**, **Upper**, *Word*
 
 ### Language, settings and runtime (17 of 94 done)
 

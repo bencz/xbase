@@ -26,6 +26,7 @@ add_library(xbrt STATIC
   src/rtl/hashes.c
   src/rtl/lang.c
   src/rtl/memfile.c
+  src/rtl/memoline.c
   src/rtl/numbers.c
   src/rtl/strings.c
   src/macro/compile.c

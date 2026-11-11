@@ -67,6 +67,7 @@ EXTERN FUNCTION AllTrim( cString ) NATIVE
 EXTERN FUNCTION Asc( cExp ) NATIVE RESERVED CHECKED
 EXTERN FUNCTION At( cSearch, cTarget ) NATIVE RESERVED CHECKED
 EXTERN FUNCTION Chr( nCode ) NATIVE RESERVED CHECKED
+EXTERN FUNCTION HardCR( cString ) NATIVE
 EXTERN FUNCTION IsAlpha( cString ) NATIVE
 EXTERN FUNCTION IsDigit( cString ) NATIVE
 EXTERN FUNCTION IsLower( cString ) NATIVE
@@ -74,6 +75,12 @@ EXTERN FUNCTION IsUpper( cString ) NATIVE
 EXTERN FUNCTION Left( cString, nCount ) NATIVE RESERVED CHECKED
 EXTERN FUNCTION Lower( cString ) NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION LTrim( cString ) NATIVE RESERVED CHECKED ABBREV 4
+EXTERN FUNCTION MemoLine( cString, [nLineLength], [nLineNumber], [nTabSize], [lWrap] ) NATIVE
+EXTERN FUNCTION MemoTran( cString, [cHardCR], [cSoftCR] ) NATIVE
+EXTERN FUNCTION MLCount( cString, [nLineLength], [nTabSize], [lWrap] ) NATIVE
+EXTERN FUNCTION MLCToPos( cString, nLineLength, nLine, nCol, [nTabSize], [lWrap] ) NATIVE
+EXTERN FUNCTION MLPos( cString, nLineLength, nLine, [nTabSize], [lWrap] ) NATIVE
+EXTERN FUNCTION MPosToLC( cString, nLineLength, nPos, [nTabSize], [lWrap] ) NATIVE
 EXTERN FUNCTION Pad( xValue, nLength, [cFill] ) NATIVE
 EXTERN FUNCTION PadC( xValue, nLength, [cFill] ) NATIVE
 EXTERN FUNCTION PadL( xValue, nLength, [cFill] ) NATIVE
