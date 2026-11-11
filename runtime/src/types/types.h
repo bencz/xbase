@@ -77,9 +77,12 @@ xb_cell *xb_cell_move(xb_item *var);
 /* What an instance variable of a class accepts. A value of another type is
  * ignored by XB_VAR_ARRAY, _LOGICAL and _STRING; the numeric rules raise an
  * argument error for it, and keep a number truncated toward zero, wrapped to
- * 32 bits signed or 16 bits unsigned (0 for a double beyond 64 bits). */
+ * 32 bits signed or 16 bits unsigned (0 for a double beyond 64 bits).
+ * XB_VAR_READ takes no assignment (the message to assign it is not found);
+ * the runtime alone sets it. */
 typedef enum xb_var_rule {
   XB_VAR_ANY,
+  XB_VAR_READ,
   XB_VAR_ARRAY,
   XB_VAR_LOGICAL,
   XB_VAR_STRING,
@@ -128,10 +131,11 @@ void       xb_classes_finalize(xb_ctx *ctx);
 int        xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                                 uint32_t argc, xb_item *argv);
 int        xb_class_associate(const xb_object *o, const char *type);
-/* A message to argv[0] as if it were an object of the class registered as `className` (its methods, Self being
- * argv[0]); 0 when no such class is registered. */
-int        xb_class_send_as(xb_ctx *ctx, xb_item *r, const char *className, const char *message, uint32_t argc,
-                            xb_item *argv);
+/* A message to argv[0] as if it were an object of the class whose objects the class function `classFunction` makes
+ * (its methods, Self being argv[0]); `*def` keeps that class from the first message on (NULL before it). 0 when the
+ * function makes no object of a compiled class, or the class does not answer the message. */
+int        xb_class_send_as(xb_ctx *ctx, xb_item *r, xb_func classFunction, xb_class_def **def, const char *message,
+                            uint32_t argc, xb_item *argv);
 /* The name ClassName() gives values of a type that is not an object's
  * ("NUMERIC", "CHARACTER" ...), NULL for internal types. */
 const char *xb_type_class_name(xb_type type);

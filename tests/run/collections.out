@@ -12,5 +12,9 @@ aeval gen: GENERATOR
 user:          2
 generator msgs:          3          3
 ascan objects:          2          3          3          0          0          0
+non-collections:          0          0 .F. .T. .T. .T. .F. 123
 valtype: .T. .T. .F. .T. .F.
 error: No exported method NOPE
+error: Argument error AEVAL
+error: No exported method NOPE
+error: No exported variable CURRENT

@@ -214,16 +214,14 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   captured variables, the `FOR` test, the `FOR EACH` operations (`each.source`, `each.in_cell`, `each.enter`,
   `each.move`, `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose result is the value the
   `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, the
-  generator operations (`gen.new`, `gen.restore`, `gen.done`, the
-terminator `gen.yield`, and `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame),
-`append`
-  (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps
-  the check right after its operation and the value first in the block only the check leads to), and for parameter
-  versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the
-  function's own arguments, as received).
+  generator operations (`gen.new`, `gen.restore`, `gen.done`, the terminator `gen.yield`, and `box.i64`, `box.bool`,
+  `unbox.i64`, `unbox.bool` for the values kept in the frame), `append` (`var := var + value`, `xb_op_append`),
+  `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right after its operation and
+  the value first in the block only the check leads to), and for parameter versioning `params.ref` (whether parameters
+  hold references their caller passed) and `call.forward` (a call with the function's own arguments, as received).
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
-- Terminators: `br`, `cond_br` (with block arguments), `ret`.
+- Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `ret`.
 - Lowering to LLVM gives every live `item` value that may refer to a heap object a frame slot (a GC root; others are
   `Local`, see [compiler.md](compiler.md#xir-to-llvm)): liveness is computed per value by walking from its uses back to
   its definition, and slots are assigned by linear scan, so slots are reused once their values die. The operands of a

@@ -41,7 +41,8 @@ StmtPtr Parser::parseStmtKind() {
   if (atStmtKw("TRY") && ahead().kind == Tok::EndOfStmt) return parseTry();
   if (atStmtKw("WITH") && isKw(ahead(), "OBJECT")) return parseWithObject();
   if (atStmtKw("FOR")) return isKw(ahead(), "EACH") && !isAssignAfterEach() ? parseForEach() : parseFor();
-  if (atStmtKw("YIELD") && ahead().kind != Tok::EndOfStmt && ahead().kind != Tok::Eof) {
+  // YIELD( ... ) stays a call of a function Yield(), as in Clipper
+  if (atStmtKw("YIELD") && ahead().kind != Tok::EndOfStmt && ahead().kind != Tok::Eof && ahead().kind != Tok::LParen) {
     advance();
     ExprPtr v = parseExpr();
     endOfStmt();

@@ -11,7 +11,7 @@
 /* The variables: CURRENT answers the message; the others, whose names are no message, are the generator's own. */
 enum { GEN_CURRENT, GEN_STATE, GEN_FRAME, GEN_RESUME, GEN_COUNT_ };
 static const xb_class_var gen_vars[] = {
-  {"CURRENT", XB_VAR_ANY}, {"(STATE)", XB_VAR_ANY}, {"(FRAME)", XB_VAR_ANY}, {"(RESUME)", XB_VAR_ANY},
+  {"CURRENT", XB_VAR_READ}, {"(STATE)", XB_VAR_ANY}, {"(FRAME)", XB_VAR_ANY}, {"(RESUME)", XB_VAR_ANY},
 };
 const xb_class xb_generator_class = {"GENERATOR", GEN_COUNT_, gen_vars, NULL};
 
@@ -70,10 +70,18 @@ int xb_gen_move_next(xb_ctx *ctx, const xb_item *gen) {
   xb_item self = *gen, ret; /* the enumerator is the caller's (and slot 0 of the step's frame); the result a logical */
   xb_set_nil(&ret);
   resume(ctx, &ret, 1, &self);
-  return !(ctx->pending & XB_PENDING_UNWIND) && ret.type == XB_T_LOGICAL && ret.v.l;
+  if (ctx->pending & XB_PENDING_UNWIND) { /* a step that fails ends it, as the end of its body does */
+    xb_gen_done(ctx, gen);
+    return 0;
+  }
+  return ret.type == XB_T_LOGICAL && ret.v.l;
 }
 
 const xb_item *xb_gen_current(const xb_item *gen) { return &((const xb_object *)gen->v.p)->vars[GEN_CURRENT]; }
+
+/* The runtime's Enumerable() (runtime/src/rtl/collections.prg): a program's class of that name is another. */
+void xbf_ENUMERABLE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
+static xb_class_def *enumerable;
 
 int xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
   if (strcmp(message, "MOVENEXT") == 0) {
@@ -81,5 +89,5 @@ int xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, 
     return 1;
   }
   if (strcmp(message, "CLASSNAME") == 0) return 0; /* its own: GENERATOR */
-  return xb_class_send_as(ctx, r, "ENUMERABLE", message, argc, argv); /* Select, Where, ToArray ... */
+  return xb_class_send_as(ctx, r, xbf_ENUMERABLE, &enumerable, message, argc, argv); /* Select, Where, ToArray ... */
 }

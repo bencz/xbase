@@ -10,6 +10,7 @@ xb_object *xb_object_new(const xb_class *cls) {
   for (uint32_t i = 0; i < cls->nvars; ++i) {
     switch (cls->vars[i].rule) {
       case XB_VAR_ANY:
+      case XB_VAR_READ:
       case XB_VAR_ARRAY: xb_set_nil(&o->vars[i]); break;
       case XB_VAR_LOGICAL: xb_set_logical(&o->vars[i], 0); break;
       case XB_VAR_STRING: xb_set_str(&o->vars[i], xb_str_empty()); break;
@@ -55,7 +56,8 @@ static void assign_var(xb_ctx *ctx, xb_item *r, const xb_item *self, uint32_t k,
   const xb_class_var *var = &o->cls->vars[k];
   xb_item kept = *value;
   switch (var->rule) {
-    case XB_VAR_ANY: break;
+    case XB_VAR_ANY:
+    case XB_VAR_READ: break; /* not reached: xb_op_send assigns no such variable */
     case XB_VAR_ARRAY: if (value->type != XB_T_ARRAY) return; break;
     case XB_VAR_LOGICAL: if (value->type != XB_T_LOGICAL) return; break;
     case XB_VAR_STRING:
@@ -92,7 +94,7 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
       return;
     }
     for (uint32_t k = 0; k < cls->nvars; ++k)
-      if (strcmp(cls->vars[k].name, name) == 0) {
+      if (strcmp(cls->vars[k].name, name) == 0 && !(assign && cls->vars[k].rule == XB_VAR_READ)) {
         if (!assign) {
           *r = o->vars[k]; /* arguments are ignored */
         } else {

@@ -193,6 +193,7 @@ EXTERN FUNCTION __AScanValue( aTarget, xSearch, nStart, nCount ) NATIVE
 EXTERN FUNCTION __Break( [xValue] ) NATIVE
 EXTERN FUNCTION __ConsoleWrite( xValue ) NATIVE
 EXTERN FUNCTION __GcCollect( [lYoung] ) NATIVE
+EXTERN FUNCTION __IsCollection( xValue ) NATIVE
 EXTERN FUNCTION __MemClear() NATIVE
 EXTERN FUNCTION __MemRelease( ... ) NATIVE
 EXTERN FUNCTION __MemReleaseAll( cSkeleton, lLike ) NATIVE

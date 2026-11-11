@@ -579,6 +579,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateBr(fnExit_);
     break;
   case Op::GenYield: // the frame and the element into the enumerator; the step returns .T.
+    shareOnEdge(i.parent, i.targets[0].block); // the next step enters the target through gen.dispatch
     b_.CreateCall(rtGenYield_, {fnCtx_, rawAddress(*i.var), fnBase_, ConstantInt::get(i32_, plan_->frameSize()),
                                 ConstantInt::get(i32_, i.index), addr(ops[0])});
     storeLogical(fnRet_, b_.getInt1(true));

@@ -18,6 +18,24 @@ static int send0(xb_ctx *ctx, xb_item *r, const xb_item *obj, const char *messag
   return !(ctx->pending && xb_pending(ctx));
 }
 
+/* Whether FOR EACH goes through the object: a generator's enumerator, one with GetEnumerator(), or an enumerator
+ * (MoveNext() and Current). */
+static int is_collection_object(const xb_item *it) {
+  if (xb_is_generator(it) || answers(it, "GETENUMERATOR", 0)) return 1;
+  return answers(it, "MOVENEXT", 0) && answers(it, "CURRENT", 1);
+}
+
+/* __IsCollection( xValue ): whether FOR EACH goes through xValue: an array, a string, a hash or a collection object. */
+void xbf___ISCOLLECTION(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  if (argc < 1) {
+    xb_set_logical(ret, 0);
+    return;
+  }
+  xb_type t = argv[0].type;
+  xb_set_logical(ret, t == XB_T_ARRAY || t == XB_T_STRING || t == XB_T_HASH || is_collection_object(&argv[0]));
+}
+
 /* An enumerator's next element: MoveNext() is .T.; 0 at the end or after an error. */
 static int move_next(xb_ctx *ctx, const xb_item *e) {
   if (xb_is_generator(e)) return xb_gen_move_next(ctx, e);

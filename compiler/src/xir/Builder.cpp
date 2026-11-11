@@ -277,12 +277,6 @@ Instruction *Builder::condBr(Value *cond, BasicBlock *t, BasicBlock *f, const st
   return i;
 }
 
-Instruction *Builder::box(Value *v) {
-  return make(v->type() == Type::Bool ? Op::BoxBool : Op::BoxI64, Type::Item, {v});
-}
-Instruction *Builder::unbox(Value *item, Type to) {
-  return make(to == Type::Bool ? Op::UnboxBool : Op::UnboxI64, to, {item});
-}
 Instruction *Builder::genNew(Function *resume, const std::vector<Value *> &args) {
   Instruction *i = make(Op::GenNew, Type::Item);
   for (Value *a : args) i->addOperand(a);

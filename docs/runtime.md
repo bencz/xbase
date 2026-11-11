@@ -282,16 +282,19 @@ do not change.
 
 ### Generators
 
-`types/generator.c`. A generator's enumerator is an object of the runtime class `GENERATOR`: `Current` (a variable) is
-the last element, `MoveNext()` runs one step (`xb_gen_move_next`), and its own variables, whose names no message can
-spell, hold the state, the resume function (its address as an integer) and the frame between steps (an array).
-`xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the enumerator, the resume
-function's argument); at each step `xb_gen_restore` copies the saved slots into the resume function's frame and returns
-the state, marking the enumerator ended until the step yields (a step that fails, or a `MoveNext` inside the step, ends
-it); `xb_gen_yield` saves the frame (one write barrier per card, `xb_gc_write_items`), the state and the element;
-`xb_gen_done` ends it and drops the frame. `FOR EACH` calls the step and reads `Current` directly; its other messages
-are `Enumerable`'s (`g:Where( ... )`). The `generator` benchmark (3,000,000 steps of one generator feeding another)
-takes about 80 ms.
+`types/generator.c`. A generator's enumerator is an object of the runtime class `GENERATOR`: `Current` (a variable no
+message assigns, `XB_VAR_READ`) is the last element, `MoveNext()` runs one step (`xb_gen_move_next`), and its own
+variables, whose names no message can spell, hold the state, the resume function (its address as an integer) and the
+frame between steps (an array). `xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the
+enumerator, the resume function's argument); at each step `xb_gen_restore` copies the saved slots into the resume
+function's frame and returns the state, marking the enumerator ended until the step yields (a step that fails, or a
+`MoveNext` inside the step, ends it); `xb_gen_yield` saves the frame (one write barrier per card, `xb_gc_write_items`),
+the state and the element; `xb_gen_done` ends it and drops the frame, at the end of the body and after a step that fails
+(`Current` is then NIL). `FOR EACH` calls the step and reads `Current` directly; its other messages are those of the
+runtime's `Enumerable` (`g:Where( ... )`), the class its own class function makes (`xbf_ENUMERABLE`,
+`xb_class_send_as`): a program's class named `Enumerable` is another one. A message neither answers is the usual
+`GENERATOR:message` error. The `generator` benchmark (3,000,000 steps of one generator feeding another) takes about 80
+ms.
 
 ## Classes
 
@@ -810,17 +813,18 @@ Each one moved from C is measured against its C version (callgrind).
   function's argument error (`EG_ARG`, its name as the operation, the arguments it received; not substitutable), as
   its C counterparts do.
 - Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` and `AScan`
-  (`rtl/collections.prg`; they also go through collection objects: an `Enumerable`, a generator's enumerator, from
-  position `nStart`, `nCount` elements; `AScan` finds a value in an array with the primitive `__AScanValue`, and in a
-  collection with `__ValueMatches`, both `xb_value_matches`), `AFill`, `ACopy` and `HEval` (`rtl/collections.prg`), the
-  `Enumerable` class and the classes of the built-in types (`rtl/collections.prg`, see [Classes](#classes)), `ErrorSys`
-  and the default error handler (`rtl/errorsys.prg`), Clipper's time sample functions `Secs`, `TString`, `Days`,
-  `ElapTime`, `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions (callgrind, x86-64): 200 000 `?
-  i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval` over a million elements
-  with `{| x | n += x }`, 121M (116M). Timed against the C versions they replaced (100,000 elements, 300 rounds):
-  `AScan` of a value and with a block 225 ms (170 ms in C), `AFill` with `ACopy` 108 ms (76 ms), `HEval` 145 ms (92 ms).
-  `QQOut` keeps its own loop instead of sharing `OutStd`'s: passing the values on through one more call costs `QOut` 13%
-  more cycles.
+  (`rtl/collections.prg`; they also go through collection objects, those `__IsCollection( xValue )` (`core/control.c`)
+  finds `FOR EACH` goes through: an `Enumerable`, a generator's enumerator, from position `nStart`, `nCount` elements;
+  another object is `AEval`'s argument error and `AScan`'s 0; `AScan` finds a value in an array with the primitive
+  `__AScanValue`, and in a collection with `__ValueMatches`, both `xb_value_matches`), `AFill`, `ACopy` and `HEval`
+  (`rtl/collections.prg`), the `Enumerable` class and the classes of the built-in types (`rtl/collections.prg`, see
+  [Classes](#classes)), `ErrorSys` and the default error handler (`rtl/errorsys.prg`), Clipper's time sample functions
+  `Secs`, `TString`, `Days`, `ElapTime`, `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions
+  (callgrind, x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`);
+  `AEval` over a million elements with `{| x | n += x }`, 121M (116M). Timed against the C versions they replaced
+  (100,000 elements, 300 rounds): `AScan` of a value and with a block 225 ms (170 ms in C), `AFill` with `ACopy` 108 ms
+  (76 ms), `HEval` 145 ms (92 ms). `QQOut` keeps its own loop instead of sharing `OutStd`'s: passing the values on
+  through one more call costs `QOut` 13% more cycles.
 
 ## Dates
 

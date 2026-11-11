@@ -247,26 +247,35 @@ SCALAR CLASS BLOCK
    METHOD Eval( ... ) INLINE Eval( Self, ... )
 ENDCLASS
 
+// The elements of a collection object from position nStart (1 when it is no number or less than 1), nCount of them
+// (all when it is no number), one by one to bVisit( element, position ) until it returns .T.: that position, else 0.
+STATIC FUNCTION VisitRange( oCollection, nStart, nCount, bVisit )
+   LOCAL i := 0, x
+   nStart := IIF( ValType( nStart ) != "N" .OR. nStart < 1, 1, Int( nStart ) )
+   FOR EACH x IN oCollection
+      IF ++i >= nStart
+         IF ValType( nCount ) == "N" .AND. i - nStart >= nCount
+            EXIT
+         ENDIF
+         IF Eval( bVisit, x, i )
+            RETURN i
+         ENDIF
+      ENDIF
+   NEXT
+RETURN 0
+
 // AEval( aArray, bBlock, [nStart], [nCount] ): calls bBlock( element, position ) for each element of the range (the
 // collection functions' rule: __RangeStart, __RangeCount) that still exists when its turn comes; returns the array.
 // For a collection object (an Enumerable, a generator's enumerator), its elements from position nStart, nCount of
-// them.
+// them (VisitRange); any other value is BASE/2017.
 FUNCTION AEval( aArray, bBlock, nStart, nCount )
-   LOCAL nLast, i, x
-   IF ValType( bBlock ) != "B" .OR. ( ValType( aArray ) != "A" .AND. ValType( aArray ) != "O" )
+   LOCAL nLast, i
+   IF ValType( bBlock ) != "B" .OR. ( ValType( aArray ) != "A" .AND. ! ( ValType( aArray ) == "O" .AND. ;
+         __IsCollection( aArray ) ) )
       RETURN __ArgError( 2017 )
    ENDIF
    IF ValType( aArray ) == "O"
-      nStart := IIF( nStart == NIL .OR. nStart < 1, 1, Int( nStart ) )
-      i := 0
-      FOR EACH x IN aArray
-         IF ++i >= nStart
-            IF nCount != NIL .AND. i - nStart >= nCount
-               EXIT
-            ENDIF
-            Eval( bBlock, x, i )
-         ENDIF
-      NEXT
+      VisitRange( aArray, nStart, nCount, {| x, i | Eval( bBlock, x, i ), .F. } )
       RETURN aArray
    ENDIF
    nStart := __RangeStart( Len( aArray ), nStart )
@@ -292,24 +301,13 @@ FUNCTION AScan( aTarget, xSearch, nStart, nCount )
       RETURN 0
    ENDIF
    IF ValType( aTarget ) == "O"
-      nStart := IIF( ValType( nStart ) != "N" .OR. nStart < 1, 1, Int( nStart ) )
-      i := 0
-      FOR EACH x IN aTarget
-         IF ++i >= nStart
-            IF ValType( nCount ) == "N" .AND. i - nStart >= nCount
-               EXIT
-            ENDIF
-            IF lBlock
-               x := Eval( xSearch, x, i )
-               IF ValType( x ) == "L" .AND. x
-                  RETURN i
-               ENDIF
-            ELSEIF __ValueMatches( x, xSearch )
-               RETURN i
-            ENDIF
-         ENDIF
-      NEXT
-      RETURN 0
+      IF ! __IsCollection( aTarget )
+         RETURN 0
+      ENDIF
+      IF lBlock // only .T. finds
+         RETURN VisitRange( aTarget, nStart, nCount, {| x, i | ValType( x := Eval( xSearch, x, i ) ) == "L" .AND. x } )
+      ENDIF
+      RETURN VisitRange( aTarget, nStart, nCount, {| x | __ValueMatches( x, xSearch ) } )
    ENDIF
    IF ValType( aTarget ) != "A"
       RETURN 0

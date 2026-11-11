@@ -63,8 +63,6 @@ public:
   Instruction *argsRest();
   Instruction *seqCatch();
   Instruction *seqValue();
-  Instruction *box(Value *v);                  // a Bool or an I64 as an item
-  Instruction *unbox(Value *item, Type to);    // back to a Bool or an I64
   Instruction *genNew(Function *resume, const std::vector<Value *> &args);
   Instruction *genRestore(Var *gen);
   Instruction *genDone(Var *gen);

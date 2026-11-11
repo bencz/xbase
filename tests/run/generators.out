@@ -10,5 +10,7 @@ tree:  1 2 3 4 6 7
 infinite, exited: 0 1 1 2 3 5 8 13 21 34 55 89 
 blocks:         40         40         40
 error:  1 error +
+after the error: .F. NIL
 args by value:   7 99          7
 sum:          45000150000
+growing:  1 b 2 bcb 3 bcbcb 4 bcbcbcb

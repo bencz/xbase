@@ -519,12 +519,22 @@ int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
   return 1;
 }
 
-int xb_class_send_as(xb_ctx *ctx, xb_item *r, const char *className, const char *message, uint32_t argc,
-                     xb_item *argv) {
-  uint32_t id;
-  if (!xb_names_find(&names, className, strlen(className), &id)) return 0;
-  cls *c = prepare(ctx, byId[id]);
+int xb_class_send_as(xb_ctx *ctx, xb_item *r, xb_func classFunction, xb_class_def **def, const char *message,
+                     uint32_t argc, xb_item *argv) {
+  if (!*def) {
+    xb_item made, none;
+    xb_set_nil(&made);
+    xb_set_nil(&none);
+    xb_gc_root_push(ctx, &made);
+    classFunction(ctx, &made, 0, &none); /* no arguments; a valid address all the same */
+    xb_gc_root_pop(ctx, 1);
+    if (ctx->pending & XB_PENDING_UNWIND) return 1;
+    if (made.type != XB_T_OBJECT || !((const xb_object *)made.v.p)->cls->compiled) return 0;
+    *def = ((const xb_object *)made.v.p)->cls->compiled->def;
+  }
+  cls *c = prepare(ctx, *def);
   if (!c) return 1; /* the error is pending */
+  if (!lookup(c, message)) return 0;
   dispatch(ctx, r, c, message, NULL, 0, NULL, argc, argv);
   return 1;
 }

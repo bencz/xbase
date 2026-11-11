@@ -4,7 +4,9 @@
 // d:Year(), b:Eval()), while ClassName(), ValType() and the functions stay Clipper's, and a message the type's class
 // does not answer keeps Clipper's error. A generator's enumerator answers Enumerable's messages, a class that inherits
 // Enumerable needs only GetEnumerator(), and AEval and AScan go through such collections too (AScan, AFill, ACopy and
-// HEval are written in xBase now; the other tests check them against the reference).
+// HEval are written in xBase now; the other tests check them against the reference): any other object is AScan's 0
+// and AEval's argument error, and a range that is no number takes every element. A generator's enumerator does not
+// answer what Enumerable does not (its own error names GENERATOR) and takes no assignment of Current.
 PROCEDURE Main()
    LOCAL a := { 5, 3, 8, 1 }, h := { "a" => 1, "b" => 2 }, x, c := ""
    ? a:Len(), a:ClassName(), "abc":ClassName(), ValType( a ), Len( a )
@@ -24,10 +26,24 @@ PROCEDURE Main()
    ? "generator msgs:", Gen():ToArray()[ 3 ], Gen():Count()
    ? "ascan objects:", AScan( Gen(), 2 ), AScan( Gen(), {| x | x > 2 } ), AScan( TBag():New(), 3, 2 ), ;
       AScan( Gen(), 1, 2 ), AScan( Gen(), 3, 1, 2 ), AScan( Gen(), "1" )
+   c := ""
+   AEval( Gen(), {| x | c += Str( x, 1 ) }, "a", "b" )
+   ? "non-collections:", AScan( ErrorNew(), 1 ), AScan( 5, 1 ), __IsCollection( ErrorNew() ), __IsCollection( Gen() ), ;
+      __IsCollection( TBag():New() ), __IsCollection( "x" ), __IsCollection( 1 ), c
    ? "valtype:", ValType( a ) == "A", ValType( "x" ) = "C", ValType( 1 ) != "N", "a" == "a", "a" = "b"
    ErrorBlock( {| e | QOut( "error:", e:description, e:operation ), Break( e ) } )
    BEGIN SEQUENCE
       ? a:Nope()
+   END SEQUENCE
+   BEGIN SEQUENCE
+      AEval( ErrorNew(), {|| NIL } )
+   END SEQUENCE
+   BEGIN SEQUENCE
+      ? Gen():Nope()
+   END SEQUENCE
+   x := Gen()
+   BEGIN SEQUENCE
+      x:Current := 42
    END SEQUENCE
 RETURN
 

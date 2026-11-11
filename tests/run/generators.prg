@@ -1,9 +1,9 @@
-// Generators: a function (or method) with YIELD returns an enumerator, a GENERATOR object whose MoveNext runs the
-// body up to the next YIELD and whose Current is that element. FOR EACH goes through it (also DESCEND, which gathers
-// the elements first), and so does a DO WHILE on MoveNext; one generator feeds another; nested loops, FOR and FOR EACH
-// state, LOCALs and codeblocks that capture them survive between steps; a recursive method generator (a tree in
-// order); an endless one left by EXIT; an error in a step ends it and reaches the caller's handler; arguments are
-// taken by value; and many steps in a row.
+// Generators: a function (or method) with YIELD returns an enumerator, a GENERATOR object whose MoveNext runs the body
+// up to the next YIELD and whose Current is that element. FOR EACH goes through it (also DESCEND, which gathers the
+// elements first), and so does a DO WHILE on MoveNext; one generator feeds another; nested loops, FOR and FOR EACH
+// state, LOCALs and codeblocks that capture them survive between steps; a recursive method generator (a tree in order);
+// an endless one left by EXIT; an error in a step ends it (Current NIL) and reaches the caller's handler; arguments are
+// taken by value; many steps in a row; and a string that grows by += on both sides of a YIELD.
 PROCEDURE Main()
    Part1()
    Part2()
@@ -72,6 +72,12 @@ STATIC PROCEDURE Part2()
       c += " error " + e:operation
    END SEQUENCE
    ? "error:", c
+   x := Failing()
+   BEGIN SEQUENCE
+      DO WHILE x:MoveNext()
+      ENDDO
+   END SEQUENCE
+   ? "after the error:", x:MoveNext(), x:Current
    n := 7
    c := ""
    FOR EACH x IN ByValue( @n )
@@ -83,6 +89,22 @@ STATIC PROCEDURE Part2()
       n += x
    NEXT
    ? "sum:", n
+   c := ""
+   FOR EACH x IN Growing()
+      c += " " + iif( ValType( x ) == "N", LTrim( Str( x ) ), x )
+   NEXT
+   ? "growing:", c
+RETURN
+
+FUNCTION Growing()
+   LOCAL s := "", i, t
+   FOR i := 1 TO 4
+      s += "b"
+      YIELD i
+      t := s
+      s += "c"
+      YIELD t
+   NEXT
 RETURN
 
 FUNCTION Range( a, b )
