@@ -56,6 +56,7 @@ typedef struct xb_rdd {
   const char *name;
   const struct xb_memo_format *memo; /* the memos of the tables it creates (rdd/memo.h) */
   const char *indexExt;              /* its order files' extension */
+  const struct xb_index_format *index; /* their format (rdd/index.h); NULL: not yet there */
   int lockScheme;                    /* XB_LOCKS_CLIPPER, XB_LOCKS_FOXPRO */
   /* Whether the driver can make a table of these fields (types, lengths, decimals, sizes), completing them as it
    * stores them (the length of a date, ...); the caller has checked the names. */

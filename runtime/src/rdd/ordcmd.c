@@ -41,13 +41,15 @@ static uint32_t order_or_none(const xb_area *a, uint32_t argc, const xb_item *ar
 
 static void set_text(xb_item *ret, const char *s) { xb_set_str(ret, xb_str_new(s, strlen(s))); }
 
-/* A bag's path: its name with ".ntx" when it has none (malloc'ed). */
-static char *bag_path(const xb_str *name) { return xb_file_path_with_ext(name->data, name->len, XB_NTX_EXT); }
+/* A bag's path: its name with the driver's extension (".ntx") when it has none (malloc'ed). */
+static char *bag_path(const xb_area *a, const xb_str *name) {
+  return xb_file_path_with_ext(name->data, name->len, a->rdd->index->ext);
+}
 
-/* The area's order of bag `path`, 0 for none. */
+/* The area's first order of bag `path`, 0 for none. */
 static uint32_t bag_open(const xb_area *a, const char *path) {
   for (uint32_t i = 0; i < a->norders; ++i)
-    if (strcmp(a->orders[i]->bag, path) == 0) return i + 1;
+    if (strcmp(a->orders[i]->bag->path, path) == 0) return i + 1;
   return 0;
 }
 
@@ -68,10 +70,9 @@ static int close_order(xb_ctx *ctx, xb_area *a, uint32_t n) {
   return xb_order_close(ctx, a, o);
 }
 
-/* Whether the area's driver has the orders made here (NTX; CDX comes with its own code): "Operation not supported"
- * otherwise. */
+/* Whether the area's driver has its order files' format here: "Operation not supported" otherwise. */
 static int orders_known(xb_ctx *ctx, const xb_area *a, const char *fn) {
-  if (strcmp(a->rdd->indexExt, XB_NTX_EXT) == 0) return 1;
+  if (a->rdd->index) return 1;
   xb_error_of(ctx, a->rdd->name, EG_UNSUPPORTED, 1000, fn, NULL, 0, 0, 0, NULL, 0, NULL);
   return 0;
 }
@@ -122,7 +123,7 @@ static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const x
     xb_error_of(ctx, XB_DBCMD, EG_ARG, 1006, fn, NULL, 0, 0, 0, NULL, 0, NULL);
     return;
   }
-  char *path = bag_path(bag);
+  char *path = bag_path(a, bag);
   xb_area_pin(a);
   int ok = xb_area_cold(ctx, a);
   uint32_t same = ok && !a->closed ? bag_open(a, path) : 0;
@@ -130,14 +131,11 @@ static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const x
   xb_order *o = NULL;
   if (ok && !a->closed) { /* built while the other orders are open: USECURRENT, REST, ... walk the controlling one */
     int isUnique = unique && unique->type == XB_T_LOGICAL ? unique->v.l != 0 : ctx->set_unique;
-    o = xb_order_create(ctx, a, path, keyText, keyBlock, isUnique);
+    o = xb_order_create(ctx, a, path, NULL, 1, keyText, keyBlock, isUnique);
   }
   if (o && !a->closed && !a->pending.additive) xb_area_orders_close(ctx, a);
   if (!a->closed) clear_pending(a);
   if (o && a->closed) {
-    int32_t ignored;
-    xb_ntx_close(o->ntx, &ignored);
-    o->ntx = NULL;
     xb_order_close(ctx, a, o);
     o = NULL;
   }
@@ -171,18 +169,19 @@ static void add_bag(xb_ctx *ctx, const char *fn, uint32_t argc, xb_item *argv) {
   xb_area *a = xb_db_used(ctx, fn);
   const xb_str *bag = xb_db_str_arg(argc, argv, 0);
   if (!a || !bag || !bag->len || !orders_known(ctx, a, fn) || !orders_free(ctx, a, fn)) return;
-  char *path = bag_path(bag);
+  char *path = bag_path(a, bag);
   xb_area_pin(a);
   if (!bag_open(a, path) && xb_area_cold(ctx, a) && !a->closed) {
-    xb_order *o = xb_order_open(ctx, a, path);
-    if (o && a->closed) {
-      xb_order_close(ctx, a, o);
-    } else if (o) {
-      add_order(a, o);
-      if (!a->order) {
-        a->order = a->norders;
-        xb_area_top(ctx, a);
-      }
+    xb_order **list = NULL;
+    uint32_t n = xb_order_open(ctx, a, path, &list), first = a->norders + 1;
+    for (uint32_t i = 0; i < n; ++i) {
+      if (a->closed) xb_order_close(ctx, a, list[i]);
+      else add_order(a, list[i]);
+    }
+    free(list);
+    if (n && !a->closed && !a->order) {
+      a->order = first;
+      xb_area_top(ctx, a);
     }
   }
   xb_area_unpin(a);
@@ -334,8 +333,9 @@ void xbf_ORDBAGNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   size_t start, ext;
-  xb_file_name_parts(o->bag, strlen(o->bag), &start, &ext);
-  xb_set_str(ret, xb_str_new(o->bag + start, ext - start));
+  const char *path = o->bag->path;
+  xb_file_name_parts(path, strlen(path), &start, &ext);
+  xb_set_str(ret, xb_str_new(path + start, ext - start));
 }
 
 void xbf_ORDISUNIQUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -440,7 +440,7 @@ void xbf_ORDKEYVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_area *a = xb_db_used(ctx, "ORDKEYVAL");
   xb_order *o = a ? xb_area_order(a) : NULL;
   if (!o || a->eof) return;
-  unsigned char key[XB_NTX_KEY_MAX];
+  unsigned char key[XB_INDEX_KEY_MAX];
   int in = 0;
   xb_area_pin(a);
   int ok = xb_order_record_key(ctx, a, o, key, &in) && !a->closed;

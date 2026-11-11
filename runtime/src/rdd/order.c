@@ -1,7 +1,4 @@
-/* Orders of a work area (rdd/order.h). Keys are made as Clipper's NTX orders make them: a string's bytes (padded
- * with blanks or cut to the key's length), a number's Str( n, len, dec ) with its blanks and sign as '0' and, for a
- * negative number, each digit d as 0x5C - d (so that negative numbers come first, the largest first), a date's
- * DToS() (blanks for the empty date), a logical's T or F. */
+/* Orders of a work area (rdd/order.h): keys made, kept up to date and searched in the order's file (rdd/index.h). */
 #include "rdd/order.h"
 
 #include "core/file.h"
@@ -9,8 +6,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-
-#define NUMBER_FLIP 0x5C /* a negative number's digit d is stored as 0x5C - d */
 
 static char type_of(const xb_item *v) {
   switch (v->type) {
@@ -23,38 +18,8 @@ static char type_of(const xb_item *v) {
   }
 }
 
-/* A number's key: Str() in `len` bytes with `dec` decimals, then as the top of the file says. */
-static void number_key(const xb_item *v, uint32_t len, uint32_t dec, unsigned char *out) {
-  char *s = (char *)out;
-  xb_num_to_field_buf(v, (int)len, (int)dec, s);
-  int neg = memchr(s, '-', len) != NULL;
-  for (uint32_t i = 0; i < len; ++i) {
-    if (s[i] == ' ' || s[i] == '-') s[i] = '0';
-    if (neg && s[i] >= '0' && s[i] <= '9') s[i] = (char)(NUMBER_FLIP - s[i]);
-  }
-}
-
 int xb_order_value_key(const xb_order *o, const xb_item *v, unsigned char *out, size_t *used) {
-  uint32_t len = o->info.keyLen;
-  if (type_of(v) != o->type) return 0;
-  *used = len;
-  switch (o->type) {
-  case 'C': {
-    size_t n = v->v.s->len < len ? v->v.s->len : len;
-    memcpy(out, v->v.s->data, n);
-    memset(out + n, ' ', len - n);
-    *used = n;
-    return 1;
-  }
-  case 'N': number_key(v, len, o->info.keyDec, out); return 1;
-  case 'D': {
-    char digits[XB_DATE_DIGITS_SIZE];
-    xb_date_to_digits(v->v.i, digits);
-    memcpy(out, digits, XB_DATE_DIGITS_SIZE - 1);
-    return 1;
-  }
-  default: out[0] = v->v.l ? 'T' : 'F'; return 1;
-  }
+  return o->format->value_key(&o->info, v, out, used);
 }
 
 /* A key of a type an order cannot have. */
@@ -108,7 +73,7 @@ static int record_key(xb_ctx *ctx, xb_area *a, xb_order *o, unsigned char *out, 
 }
 
 static void order_error(xb_ctx *ctx, xb_area *a, const xb_order *o, int32_t gencode, int32_t subcode, int32_t err) {
-  xb_error_of(ctx, a->rdd->name, gencode, subcode, "", o->bag, err, 0, 0, NULL, 0, NULL);
+  xb_error_of(ctx, a->rdd->name, gencode, subcode, "", o->bag->path, err, 0, 0, NULL, 0, NULL);
 }
 
 /* An order's name: its file's name without directories and extension, upper case, at most XB_ORDER_NAME_MAX
@@ -155,23 +120,27 @@ static int64_t key_field(xb_area *a, const char *text, uint32_t keyLen) {
   return k;
 }
 
-static xb_order *order_new(const char *path) {
+/* An order of bag `bag` (counted there already), named `name` (a tag's, or the file's path). */
+static xb_order *order_new(xb_order_bag *bag, const char *name) {
   xb_order *o = calloc(1, sizeof *o);
   if (!o) xb_gc_fatal("out of memory");
-  o->bag = malloc(strlen(path) + 1);
-  if (!o->bag) xb_gc_fatal("out of memory");
-  strcpy(o->bag, path);
-  o->name = name_of(path);
+  o->bag = bag;
+  o->format = bag->format;
+  o->name = name_of(name);
   xb_set_nil(&o->key);
   xb_set_nil(&o->cond);
   o->field = -1;
   return o;
 }
 
-static void order_free(xb_order *o) {
-  free(o->bag);
+static int bag_release(xb_order_bag *b, int32_t *err);
+
+/* Frees the order and gives up its place in its bag. 0 after the bag's close error (in `err`). */
+static int order_free(xb_order *o, int32_t *err) {
+  int ok = bag_release(o->bag, err);
   free(o->name);
   free(o);
+  return ok;
 }
 
 /* The key entries a build collects: keyLen bytes each, the record numbers beside them. */
@@ -187,27 +156,37 @@ typedef struct sorting {
   uint32_t at;
 } sorting;
 
-/* Whether entry a comes before entry b: by key, then (collected in record order) by record number. */
-static int sorts_before(const sorting *a, const sorting *b, const collected *c, const xb_ntx_info *info) {
+/* What a sort compares: the collection, the order's format and its stored order. */
+typedef struct sorting_by {
+  const collected *c;
+  const xb_index_format *format;
+  const xb_index_info *info; /* descend: as the file stores entries */
+} sorting_by;
+
+/* Whether entry a comes before entry b: by key, then by record number or, as NTX does, in the order collected (a
+ * build that walks another order keeps its order among equal keys, and UNIQUE its first). */
+static int sorts_before(const sorting *a, const sorting *b, const sorting_by *by) {
   if (a->prefix != b->prefix) return a->prefix < b->prefix;
-  uint32_t len = info->keyLen;
+  uint32_t len = by->info->keyLen;
+  const collected *c = by->c;
   if (len > 8) {
-    int d = xb_ntx_compare(info, c->keys + (size_t)a->at * len + 8, c->keys + (size_t)b->at * len + 8, len - 8);
+    int d = by->format->compare(by->info, c->keys + (size_t)a->at * len + 8, c->keys + (size_t)b->at * len + 8,
+                                len - 8);
     if (d) return d < 0;
   }
-  return a->at < b->at;
+  return by->format->tiesByRecord ? c->recnos[a->at] < c->recnos[b->at] : a->at < b->at;
 }
 
 #define SORT_RUN 16 /* entries sorted by insertion before the merges */
 
 /* Sorts the entries: runs by insertion, then merges of runs twice as long each pass. */
-static void sort_entries(sorting *v, uint32_t n, const collected *c, const xb_ntx_info *info) {
+static void sort_entries(sorting *v, uint32_t n, const sorting_by *by) {
   for (uint32_t lo = 0; lo < n; lo += SORT_RUN) {
     uint32_t hi = lo + SORT_RUN < n ? lo + SORT_RUN : n;
     for (uint32_t i = lo + 1; i < hi; ++i) {
       sorting e = v[i];
       uint32_t j = i;
-      for (; j > lo && sorts_before(&e, &v[j - 1], c, info); --j) v[j] = v[j - 1];
+      for (; j > lo && sorts_before(&e, &v[j - 1], by); --j) v[j] = v[j - 1];
       v[j] = e;
     }
   }
@@ -218,7 +197,7 @@ static void sort_entries(sorting *v, uint32_t n, const collected *c, const xb_nt
     for (uint32_t lo = 0; lo < n; lo += 2 * width) {
       uint32_t mid = lo + width < n ? lo + width : n, hi = lo + 2 * width < n ? lo + 2 * width : n;
       uint32_t i = lo, j = mid, k = lo;
-      while (i < mid && j < hi) dst[k++] = sorts_before(&src[j], &src[i], c, info) ? src[j++] : src[i++];
+      while (i < mid && j < hi) dst[k++] = sorts_before(&src[j], &src[i], by) ? src[j++] : src[i++];
       while (i < mid) dst[k++] = src[i++];
       while (j < hi) dst[k++] = src[j++];
     }
@@ -231,8 +210,13 @@ static void sort_entries(sorting *v, uint32_t n, const collected *c, const xb_nt
   free(tmp);
 }
 
-/* Writes the collected entries, sorted (unique: the first of equal keys), as the order's file. */
-static int write_sorted(const char *path, const xb_ntx_info *info, collected *c, int32_t *err) {
+/* Writes the collected entries, sorted as the file stores them (unique: the first of equal keys), as the order's tag
+ * (`fresh`: in a file made anew). */
+static int write_sorted(xb_area *a, xb_order *o, collected *c, int fresh, int32_t *err) {
+  xb_index_info stored = o->info;
+  stored.descend = o->format->stored_descending(&o->info);
+  const xb_index_info *info = &stored;
+  sorting_by by = {c, o->format, info};
   uint32_t len = info->keyLen;
   sorting *order = malloc((size_t)(c->n ? c->n : 1) * sizeof *order);
   unsigned char *keys = malloc((size_t)(c->n ? c->n : 1) * len);
@@ -245,7 +229,7 @@ static int write_sorted(const char *path, const xb_ntx_info *info, collected *c,
     order[i].prefix = info->descend ? ~p : p;
     order[i].at = i;
   }
-  sort_entries(order, c->n, c, info);
+  sort_entries(order, c->n, &by);
   uint32_t n = 0;
   for (uint32_t i = 0; i < c->n; ++i) {
     const unsigned char *k = c->keys + (size_t)order[i].at * len;
@@ -253,7 +237,8 @@ static int write_sorted(const char *path, const xb_ntx_info *info, collected *c,
     memcpy(keys + (size_t)n * len, k, len);
     recnos[n++] = c->recnos[order[i].at];
   }
-  int ok = xb_ntx_create(path, info, keys, recnos, n, err);
+  int ok = o->format->build(&o->bag->bag, o->bag->path, o->name, fresh, &o->info, keys, recnos, n, a->readonly,
+                            !a->shared, &o->tag, err);
   free(order);
   free(keys);
   free(recnos);
@@ -267,20 +252,14 @@ static int key_shape(xb_ctx *ctx, xb_area *a, xb_order *o) {
   xb_set_nil(&v);
   xb_gc_root_push(ctx, &v);
   int ok = eval_in(ctx, a, &o->key, &v) && !a->closed;
-  o->type = ok ? type_of(&v) : 0;
-  if (ok && !o->type) key_type_error(ctx, a);
-  if (o->type == 'C') o->info.keyLen = v.v.s->len < XB_NTX_KEY_MAX ? (uint32_t)v.v.s->len : XB_NTX_KEY_MAX;
-  if (o->type == 'N') {
-    int width = v.width ? v.width : v.type == XB_T_INT ? xb_num_int_width(v.v.i) : xb_num_dbl_width(v.v.d);
-    o->info.keyDec = v.dec;
-    o->info.keyLen = (uint32_t)width + (v.dec ? v.dec + 1u : 0u);
-  }
-  if (o->type == 'D') o->info.keyLen = 8;
-  if (o->type == 'L') o->info.keyLen = 1;
+  o->info.type = ok ? type_of(&v) : 0;
+  if (ok && !o->info.type) key_type_error(ctx, a);
+  if (o->info.type) o->format->key_shape(&v, o->info.type, &o->info.keyLen, &o->info.keyDec);
+  if (o->info.type == 'C' && o->info.keyLen > o->format->keyMax) o->info.keyLen = o->format->keyMax;
   xb_gc_root_pop(ctx, 1);
-  if (!o->type) return 0;
-  if (o->info.keyLen == 0 || o->info.keyLen > XB_NTX_KEY_MAX) {
-    xb_error_of(ctx, a->rdd->name, EG_DATAWIDTH, 1021, "", o->bag, 0, 0, 0, NULL, 0, NULL);
+  if (!o->info.type) return 0;
+  if (o->info.keyLen == 0 || o->info.keyLen > o->format->keyMax) {
+    xb_error_of(ctx, a->rdd->name, EG_DATAWIDTH, 1021, "", o->bag->path, 0, 0, 0, NULL, 0, NULL);
     return 0;
   }
   o->field = key_field(a, o->info.key, o->info.keyLen);
@@ -289,7 +268,7 @@ static int key_shape(xb_ctx *ctx, xb_area *a, xb_order *o) {
 
 /* Adds the current record's entry when it has one; 0 after an error (raised). */
 static int collect_record(xb_ctx *ctx, xb_area *a, xb_order *o, collected *c) {
-  unsigned char key[XB_NTX_KEY_MAX];
+  unsigned char key[XB_INDEX_KEY_MAX];
   int in;
   if (!record_key(ctx, a, o, key, &in)) return 0;
   if (!in) return 1;
@@ -342,7 +321,7 @@ static int collect(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditio
     ok = cond->start <= 0 || xb_area_goto(ctx, a, recno_of(cond->start));
   else if (cond->current) ok = xb_area_edge_raw(ctx, a, 1) >= 0;
   else ok = xb_area_goto(ctx, a, 1); /* the blank record when there is none: it gives the key's type */
-  if (!ok || a->closed || (!o->type && !key_shape(ctx, a, o))) return 0; /* a rebuild keeps the file's shape */
+  if (!ok || a->closed || (!o->info.type && !key_shape(ctx, a, o))) return 0; /* a rebuild keeps the file's shape */
   uint32_t taken = 1; /* in record order, the records go on from the last taken, wherever the blocks move */
   for (int64_t step = cond->every; !a->eof;) {
     if (a->recno > last) { /* appended by the blocks while the build ran: not taken */
@@ -371,13 +350,13 @@ static int collect(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditio
 }
 
 /* Builds the order's file from the records `cond` selects (collect()). */
-static int build(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond) {
+static int build(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond, int fresh) {
   collected c = {NULL, NULL, 0, 0};
   xb_area_pin(a);
   int ok = collect(ctx, a, o, cond, &c) && !a->closed;
   int32_t err = 0;
-  if (ok && !write_sorted(o->bag, &o->info, &c, &err)) {
-    xb_error_of(ctx, a->rdd->name, EG_CREATE, 1004, "", o->bag, err, 0, 0, NULL, 0, NULL);
+  if (ok && !write_sorted(a, o, &c, fresh, &err)) {
+    xb_error_of(ctx, a->rdd->name, EG_CREATE, 1004, "", o->bag->path, err, 0, 0, NULL, 0, NULL);
     ok = 0;
   }
   xb_area_unpin(a);
@@ -386,85 +365,137 @@ static int build(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions
   return ok;
 }
 
-/* Opens the order's file; a file that cannot be is an Open error, which may be retried. */
-static int open_file(xb_ctx *ctx, xb_area *a, xb_order *o) {
-  xb_ntx_info info;
-  for (uint16_t tries = 1;; ++tries) {
-    int32_t err = 0;
-    if (xb_ntx_open(o->bag, a->readonly, !a->shared, &o->ntx, &info, &err)) break;
-    if (xb_error_of(ctx, a->rdd->name, EG_OPEN, 1003, "", o->bag, err, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries,
-                    NULL) != 2)
-      return 0;
+/* The area's bag of file `path`, NULL when none of its orders is in it. */
+static xb_order_bag *bag_of(const xb_area *a, const char *path) {
+  for (uint32_t i = 0; i < a->norders; ++i)
+    if (strcmp(a->orders[i]->bag->path, path) == 0) return a->orders[i]->bag;
+  return NULL;
+}
+
+static xb_order_bag *bag_new(const char *path, const xb_index_format *format) {
+  xb_order_bag *b = calloc(1, sizeof *b);
+  if (!b) xb_gc_fatal("out of memory");
+  b->path = malloc(strlen(path) + 1);
+  if (!b->path) xb_gc_fatal("out of memory");
+  strcpy(b->path, path);
+  b->format = format;
+  return b;
+}
+
+/* One order less in the bag: the file closes with the last. 0 after a close error (in `err`). */
+static int bag_release(xb_order_bag *b, int32_t *err) {
+  if (--b->orders) return 1;
+  int ok = !b->bag || b->format->close(b->bag, err);
+  free(b->path);
+  free(b);
+  return ok;
+}
+
+/* The key's type of an order of a file: its key's value on the current record; its key, condition and field. 0 after
+ * the error (raised: Corruption detected when the key's type is none a key has). */
+static int order_ready(xb_ctx *ctx, xb_area *a, xb_order *o) {
+  xb_gc_root_push(ctx, &o->key);
+  xb_gc_root_push(ctx, &o->cond);
+  block_of(ctx, o->info.key, &o->key);
+  if (o->info.cond[0]) block_of(ctx, o->info.cond, &o->cond);
+  xb_item v;
+  xb_set_nil(&v);
+  xb_gc_root_push(ctx, &v);
+  int ok = o->key.type == XB_T_BLOCK && (!o->info.cond[0] || o->cond.type == XB_T_BLOCK) &&
+           eval_in(ctx, a, &o->key, &v);
+  o->info.type = ok ? type_of(&v) : 0;
+  xb_gc_root_pop(ctx, 3);
+  if (!o->info.type) {
+    if (ok) xb_error_of(ctx, a->rdd->name, EG_CORRUPTION, 1012, "", o->bag->path, 0, 0, 0, NULL, 0, NULL);
+    return 0;
   }
-  o->info = info;
+  o->format->set_type(o->tag, o->info.type);
+  o->field = key_field(a, o->info.key, o->info.keyLen);
   return 1;
 }
 
-xb_order *xb_order_create(xb_ctx *ctx, xb_area *a, const char *path, const xb_str *keyText, const xb_item *keyBlock,
-                          int unique) {
-  xb_order *o = order_new(path);
-  size_t n = keyText->len < XB_NTX_KEY_MAX ? keyText->len : XB_NTX_KEY_MAX;
+xb_order *xb_order_create(xb_ctx *ctx, xb_area *a, const char *path, const char *name, int fresh,
+                          const xb_str *keyText, const xb_item *keyBlock, int unique) {
+  xb_order_bag *bag = bag_of(a, path);
+  if (!bag) bag = bag_new(path, a->rdd->index);
+  ++bag->orders;
+  xb_order *o = order_new(bag, name ? name : path);
+  size_t n = keyText->len < XB_INDEX_KEY_MAX ? keyText->len : XB_INDEX_KEY_MAX;
   memcpy(o->info.key, keyText->data, n);
   o->info.unique = unique;
   o->info.descend = a->pending.descend;
   if (a->pending.cond.type == XB_T_BLOCK) {
     o->cond = a->pending.cond;
     const xb_str *t = a->pending.condText.type == XB_T_STRING ? a->pending.condText.v.s : NULL;
-    size_t m = t ? (t->len < XB_NTX_KEY_MAX ? t->len : XB_NTX_KEY_MAX) : 0;
+    size_t m = t ? (t->len < XB_INDEX_KEY_MAX ? t->len : XB_INDEX_KEY_MAX) : 0;
     if (t) memcpy(o->info.cond, t->data, m);
   }
   if (keyBlock && keyBlock->type == XB_T_BLOCK) o->key = *keyBlock;
   else block_of(ctx, o->info.key, &o->key);
   xb_gc_root_push(ctx, &o->key);
   xb_gc_root_push(ctx, &o->cond);
-  int ok = o->key.type == XB_T_BLOCK && build(ctx, a, o, &a->pending) && open_file(ctx, a, o);
+  int ok = o->key.type == XB_T_BLOCK && build(ctx, a, o, &a->pending, fresh);
   xb_gc_root_pop(ctx, 2);
   if (!ok) {
-    if (o->ntx) {
-      int32_t ignored;
-      xb_ntx_close(o->ntx, &ignored);
-    }
-    order_free(o);
+    int32_t ignored;
+    order_free(o, &ignored);
     return NULL;
   }
   return o;
 }
 
-xb_order *xb_order_open(xb_ctx *ctx, xb_area *a, const char *path) {
-  xb_order *o = order_new(path);
-  if (!open_file(ctx, a, o)) {
-    order_free(o);
-    return NULL;
+uint32_t xb_order_open(xb_ctx *ctx, xb_area *a, const char *path, xb_order ***out) {
+  const xb_index_format *format = a->rdd->index;
+  xb_bag *file = NULL;
+  for (uint16_t tries = 1;; ++tries) {
+    int32_t err = 0;
+    if (format->open(path, a->readonly, !a->shared, &file, &err)) break;
+    if (xb_error_of(ctx, a->rdd->name, EG_OPEN, 1003, "", path, err, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries,
+                    NULL) != 2)
+      return 0;
   }
-  xb_gc_root_push(ctx, &o->key);
-  xb_gc_root_push(ctx, &o->cond);
-  block_of(ctx, o->info.key, &o->key);
-  if (o->info.cond[0]) block_of(ctx, o->info.cond, &o->cond);
-  xb_item v; /* the key's type: the current record's key */
-  xb_set_nil(&v);
-  xb_gc_root_push(ctx, &v);
-  int ok = o->key.type == XB_T_BLOCK && (!o->info.cond[0] || o->cond.type == XB_T_BLOCK) &&
-           eval_in(ctx, a, &o->key, &v);
-  o->type = ok ? type_of(&v) : 0;
-  xb_gc_root_pop(ctx, 3);
-  if (!o->type) {
-    if (ok) xb_error_of(ctx, a->rdd->name, EG_CORRUPTION, 1012, "", o->bag, 0, 0, 0, NULL, 0, NULL);
+  xb_order_bag *bag = bag_new(path, format);
+  bag->bag = file;
+  uint32_t n = format->tag_count(file), made = 0;
+  if (!n) { /* a file of no order */
+    int32_t err = 0;
+    format->close(file, &err);
+    free(bag->path);
+    free(bag);
+    return 0;
+  }
+  xb_order **list = malloc((n ? n : 1) * sizeof *list);
+  if (!list) xb_gc_fatal("out of memory");
+  int ok = 1;
+  for (uint32_t i = 0; ok && i < n && !a->closed; ++i) {
+    const char *name;
+    xb_index_info info;
+    xb_tag *tag = format->tag_at(file, i, &info, &name);
+    ++bag->orders;
+    xb_order *o = order_new(bag, name ? name : path);
+    o->tag = tag;
+    o->info = info;
+    list[made++] = o;
+    ok = order_ready(ctx, a, o);
+  }
+  if (!ok || a->closed) {
     int32_t ignored;
-    xb_ntx_close(o->ntx, &ignored);
-    order_free(o);
-    return NULL;
+    for (uint32_t i = 0; i < made; ++i) order_free(list[i], &ignored);
+    free(list);
+    return 0;
   }
-  o->field = key_field(a, o->info.key, o->info.keyLen);
-  return o;
+  *out = list;
+  return made;
 }
 
 /* Builds an order's file again from the records; 0 (the order with no file) after the error. */
 static int rebuild(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond) {
   int32_t err = 0;
-  int ok = xb_ntx_close(o->ntx, &err);
-  o->ntx = NULL;
+  int ok = !o->bag->bag || o->format->close(o->bag->bag, &err); /* one order per file (NTX): it is made anew */
+  o->bag->bag = NULL;
+  o->tag = NULL;
   if (!ok) order_error(ctx, a, o, EG_WRITE, 1011, err);
-  return ok && build(ctx, a, o, cond) && open_file(ctx, a, o);
+  return ok && build(ctx, a, o, cond, 1);
 }
 
 int xb_area_orders_rebuild(xb_ctx *ctx, xb_area *a, const xb_item *evalBlock, int64_t every) {
@@ -507,9 +538,12 @@ int xb_area_orders_rebuild(xb_ctx *ctx, xb_area *a, const xb_item *evalBlock, in
 
 int xb_order_close(xb_ctx *ctx, xb_area *a, xb_order *o) {
   int32_t err = 0;
-  int ok = !o->ntx || xb_ntx_close(o->ntx, &err);
-  if (!ok) order_error(ctx, a, o, EG_WRITE, 1011, err);
-  order_free(o);
+  char *path = malloc(strlen(o->bag->path) + 1); /* for the error: the bag may go with the order */
+  if (!path) xb_gc_fatal("out of memory");
+  strcpy(path, o->bag->path);
+  int ok = order_free(o, &err);
+  if (!ok) xb_error_of(ctx, a->rdd->name, EG_WRITE, 1011, "", path, err, 0, 0, NULL, 0, NULL);
+  free(path);
   return ok;
 }
 
@@ -517,15 +551,15 @@ int xb_order_close(xb_ctx *ctx, xb_area *a, xb_order *o) {
  * 1, 0 when there is none after it, -1 after an error (raised). */
 static int sync(xb_ctx *ctx, xb_area *a, xb_order *o, uint32_t *found) {
   *found = a->recno;
-  int at = xb_ntx_at(o->ntx, a->recno);
+  int at = o->format->at(o->tag, a->recno);
   if (at && !a->shared) return 1;
-  unsigned char key[XB_NTX_KEY_MAX];
+  unsigned char key[XB_INDEX_KEY_MAX];
   int in;
   if (!record_key(ctx, a, o, key, &in)) return -1;
-  const unsigned char *k = at ? xb_ntx_key(o->ntx) : NULL; /* shared: another program may have changed the key */
+  const unsigned char *k = at ? o->format->key(o->tag) : NULL; /* shared: another program may have changed the key */
   if (k && memcmp(k, key, o->info.keyLen) == 0) return 1;
   int32_t err = 0;
-  int r = xb_ntx_find(o->ntx, key, a->recno, found, &err);
+  int r = o->format->find(o->tag, key, a->recno, found, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
   return r;
 }
@@ -533,10 +567,10 @@ static int sync(xb_ctx *ctx, xb_area *a, xb_order *o, uint32_t *found) {
 /* Where the entry the cursor is on stands against the order's scope: -1 before its top, 1 after its bottom, 0 in it.
  * A bound compares as many bytes as it has, in the order's order. */
 static int scope_place(xb_order *o) {
-  const unsigned char *k = xb_ntx_key(o->ntx);
+  const unsigned char *k = o->format->key(o->tag);
   if (!k) return 0;
-  if (o->scope[0].set && xb_ntx_compare(&o->info, k, o->scope[0].key, o->scope[0].used) < 0) return -1;
-  if (o->scope[1].set && xb_ntx_compare(&o->info, k, o->scope[1].key, o->scope[1].used) > 0) return 1;
+  if (o->scope[0].set && o->format->compare(&o->info, k, o->scope[0].key, o->scope[0].used) < 0) return -1;
+  if (o->scope[1].set && o->format->compare(&o->info, k, o->scope[1].key, o->scope[1].used) > 0) return 1;
   return 0;
 }
 
@@ -573,8 +607,8 @@ static int refresh_scope(xb_ctx *ctx, xb_area *a, xb_order *o) {
   return 1;
 }
 
-/* A bound for the NTX searches from a scope bound: before its first match (`past`: after its last). */
-static const xb_ntx_bound *scope_bound(const xb_order_scope *sc, int past, xb_ntx_bound *b) {
+/* A bound for the format's searches from a scope bound: before its first match (`past`: after its last). */
+static const xb_index_bound *scope_bound(const xb_order_scope *sc, int past, xb_index_bound *b) {
   if (!sc->set) return NULL;
   b->key = sc->key;
   b->len = sc->used;
@@ -588,9 +622,9 @@ static const xb_ntx_bound *scope_bound(const xb_order_scope *sc, int past, xb_nt
 static int edge(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno) {
   int32_t err = 0;
   const xb_order_scope *sc = &o->scope[dir > 0 ? 0 : 1];
-  int r = sc->set ? xb_ntx_seek(o->ntx, sc->key, sc->used, dir < 0, recno, &err)
-          : dir > 0 ? xb_ntx_first(o->ntx, recno, &err)
-                    : xb_ntx_last(o->ntx, recno, &err);
+  int r = sc->set ? o->format->seek(o->tag, sc->key, sc->used, dir < 0, recno, &err)
+          : dir > 0 ? o->format->first(o->tag, recno, &err)
+                    : o->format->last(o->tag, recno, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
   return r > 0 && scope_place(o) ? 0 : r;
 }
@@ -618,13 +652,13 @@ int xb_order_step(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno
     *recno = found;
     return in_scope(ctx, a, o, dir, recno);
   }
-  r = dir > 0 ? xb_ntx_next(o->ntx, recno, &err) : xb_ntx_prev(o->ntx, recno, &err);
+  r = dir > 0 ? o->format->next(o->tag, recno, &err) : o->format->prev(o->tag, recno, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
   return r > 0 ? in_scope(ctx, a, o, dir, recno) : r;
 }
 
 int xb_order_step_raw(xb_ctx *ctx, xb_area *a, xb_order *o, int dir, uint32_t *recno) {
-  if (!a->eof && !xb_ntx_at(o->ntx, a->recno)) {
+  if (!a->eof && !o->format->at(o->tag, a->recno)) {
     uint32_t found;
     int r = sync(ctx, a, o, &found);
     if (r <= 0 || found != a->recno) return r < 0 ? -1 : 0;
@@ -637,7 +671,7 @@ int xb_order_seek(xb_ctx *ctx, xb_area *a, xb_order *o, const unsigned char *key
   *match = 0;
   if (!refresh_scope(ctx, a, o)) return -1;
   int32_t err = 0;
-  int r = xb_ntx_seek(o->ntx, key, used, last, recno, &err);
+  int r = o->format->seek(o->tag, key, used, last, recno, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
   int place = r > 0 ? scope_place(o) : 0;
   if (place) return place < 0 ? edge(ctx, a, o, 1, recno) : 0; /* before the scope: its first entry; past it: none */
@@ -646,7 +680,7 @@ int xb_order_seek(xb_ctx *ctx, xb_area *a, xb_order *o, const unsigned char *key
 }
 
 int xb_order_cursor_matches(xb_order *o, const unsigned char *key, size_t used) {
-  const unsigned char *k = xb_ntx_key(o->ntx);
+  const unsigned char *k = o->format->key(o->tag);
   return k && memcmp(k, key, used) == 0;
 }
 
@@ -660,9 +694,9 @@ void xb_order_mark(xb_order *o, int (*mark)(const xb_item *)) {
 int xb_order_count(xb_ctx *ctx, xb_area *a, xb_order *o, uint64_t *n) {
   *n = 0;
   if (!refresh_scope(ctx, a, o)) return 0;
-  xb_ntx_bound top, bottom;
+  xb_index_bound top, bottom;
   int32_t err = 0;
-  if (xb_ntx_count(o->ntx, scope_bound(&o->scope[0], 0, &top), scope_bound(&o->scope[1], 1, &bottom), n, &err))
+  if (o->format->count(o->tag, scope_bound(&o->scope[0], 0, &top), scope_bound(&o->scope[1], 1, &bottom), n, &err))
     return 1;
   order_error(ctx, a, o, EG_READ, 1010, err);
   return 0;
@@ -675,9 +709,9 @@ int xb_order_position(xb_ctx *ctx, xb_area *a, xb_order *o, uint64_t *n) {
   uint32_t found;
   int r = sync(ctx, a, o, &found);
   if (r <= 0 || found != a->recno || scope_place(o)) return r >= 0; /* no entry, or outside the scope */
-  xb_ntx_bound top;
+  xb_index_bound top;
   int32_t err = 0;
-  if (!xb_ntx_count_before(o->ntx, scope_bound(&o->scope[0], 0, &top), n, &err)) {
+  if (!o->format->count_before(o->tag, scope_bound(&o->scope[0], 0, &top), n, &err)) {
     order_error(ctx, a, o, EG_READ, 1010, err);
     return 0;
   }
@@ -689,9 +723,9 @@ int xb_order_nth(xb_ctx *ctx, xb_area *a, xb_order *o, uint64_t n, uint32_t *rec
   *recno = 0;
   if (!n) return 1;
   if (!refresh_scope(ctx, a, o)) return 0;
-  xb_ntx_bound top;
+  xb_index_bound top;
   int32_t err = 0;
-  int r = xb_ntx_select(o->ntx, scope_bound(&o->scope[0], 0, &top), n - 1, recno, &err);
+  int r = o->format->select(o->tag, scope_bound(&o->scope[0], 0, &top), n - 1, recno, &err);
   if (r < 0) order_error(ctx, a, o, EG_READ, 1010, err);
   if (r <= 0 || scope_place(o)) *recno = 0; /* past the scope's bottom */
   return r >= 0;
@@ -704,13 +738,13 @@ int xb_order_skip_unique(xb_ctx *ctx, xb_area *a, xb_order *o, int dir) {
   int r = a->eof ? 0 : sync(ctx, a, o, &found), out = 0;
   if (r < 0) return 0;
   if (r > 0 && found == a->recno) { /* on the record's entry: past the entries of its key */
-    unsigned char key[XB_NTX_KEY_MAX];
-    const unsigned char *k = xb_ntx_key(o->ntx);
+    unsigned char key[XB_INDEX_KEY_MAX];
+    const unsigned char *k = o->format->key(o->tag);
     if (k) memcpy(key, k, o->info.keyLen);
     while (k) {
-      r = dir > 0 ? xb_ntx_next(o->ntx, &recno, &err) : xb_ntx_prev(o->ntx, &recno, &err);
+      r = dir > 0 ? o->format->next(o->tag, &recno, &err) : o->format->prev(o->tag, &recno, &err);
       if (r > 0 && scope_place(o)) r = 0;
-      k = r > 0 ? xb_ntx_key(o->ntx) : NULL;
+      k = r > 0 ? o->format->key(o->tag) : NULL;
       if (k && memcmp(k, key, o->info.keyLen) != 0) break;
     }
     if (r > 0 && !k) { /* the page under the cursor could not be read */
@@ -739,26 +773,7 @@ int xb_order_record_key(xb_ctx *ctx, xb_area *a, xb_order *o, unsigned char *key
 }
 
 void xb_order_key_value(const xb_order *o, const unsigned char *key, xb_item *r) {
-  uint32_t len = o->info.keyLen;
-  switch (o->type) {
-  case 'C': xb_set_str(r, xb_str_new((const char *)key, len)); return;
-  case 'D': xb_set_date(r, xb_date_from_digits((const char *)key)); return;
-  case 'L': xb_set_logical(r, key[0] == 'T'); return;
-  default: { /* the number's text again: a negative one (its first place, the sign's, a turned 0) turned back */
-    char text[XB_NTX_KEY_MAX + 1];
-    int neg = key[0] == NUMBER_FLIP - '0';
-    text[0] = neg ? '-' : ' ';
-    for (uint32_t i = 0; i < len; ++i) {
-      char c = (char)key[i];
-      text[i + 1] = neg && c != '.' ? (char)(NUMBER_FLIP - c) : c;
-    }
-    xb_num_parse(text, len + 1, r);
-    if (o->info.keyDec) xb_set_double(r, xb_num_value(r), (uint16_t)o->info.keyDec);
-    else if (r->type != XB_T_INT) xb_set_double(r, xb_num_value(r), 0); /* past what an integer holds */
-    r->width = (uint16_t)(o->info.keyDec ? len - o->info.keyDec - 1 : len);
-    return;
-  }
-  }
+  o->format->key_value(&o->info, key, r);
 }
 
 /* The orders' entries for a record that changes: the keys before (`fresh`: a new record, which has none), then,
@@ -781,26 +796,57 @@ int xb_area_hot(xb_ctx *ctx, xb_area *a, int fresh) {
   return ok;
 }
 
+/* Whether order `o`'s entry for the record changed (its key, or whether it has one). */
+static int entry_changed(const xb_order *o) {
+  return o->oldIn != o->nowIn || (o->nowIn && memcmp(o->old, o->now, o->info.keyLen) != 0);
+}
+
+/* The orders of bag `b`, from the k-th of the area on: their entries move, under one hold of the bag's lock. */
+static int apply_bag(xb_ctx *ctx, xb_area *a, uint32_t k, uint32_t evaluated, xb_order_bag *b) {
+  int32_t err = 0;
+  if (!b->format->hold(b->bag, 1, &err)) {
+    order_error(ctx, a, a->orders[k], EG_WRITE, 1011, err);
+    return 0;
+  }
+  xb_order *failed = NULL; /* the error is raised once the lock is let go: its handler may close the area */
+  int32_t failure = 0;
+  for (uint32_t j = k; !failed && j < evaluated; ++j) {
+    xb_order *o = a->orders[j];
+    if (o->bag != b || !entry_changed(o)) continue;
+    if (!o->format->replace(o->tag, o->oldIn ? o->old : NULL, o->nowIn ? o->now : NULL, a->recno, &err)) {
+      failed = o;
+      failure = err;
+    }
+  }
+  if (!b->format->let_go(b->bag, &err) && !failed) {
+    failed = a->orders[k];
+    failure = err;
+  }
+  if (failed) order_error(ctx, a, failed, EG_WRITE, 1011, failure);
+  return !failed;
+}
+
+/* The keys after the change first (blocks run: no lock is held), then each bag's entries that changed, the bags in
+ * the order of their first orders in the area's list. */
 int xb_area_cold(xb_ctx *ctx, xb_area *a) {
   if (!a->hot) return 1;
   a->hot = 0;
   if (a->hotRecno != a->recno) return 1; /* the record of the change is not current: nothing to compare */
   xb_area_pin(a);
-  int ok = 1;
-  unsigned char key[XB_NTX_KEY_MAX];
-  for (uint32_t k = 0; ok && k < a->norders && !a->closed; ++k) {
-    xb_order *o = a->orders[k];
-    int in;
-    if (!record_key(ctx, a, o, key, &in) || a->closed) {
+  uint32_t evaluated = 0; /* the orders whose new key is known: their entries move even when a later key failed */
+  while (evaluated < a->norders && !a->closed && record_key(ctx, a, a->orders[evaluated], a->orders[evaluated]->now,
+                                                            &a->orders[evaluated]->nowIn))
+    ++evaluated;
+  int ok = evaluated == a->norders;
+  for (uint32_t k = 0; !a->closed && k < evaluated; ++k) {
+    xb_order_bag *b = a->orders[k]->bag;
+    int first = 1, changed = 0;
+    for (uint32_t j = 0; j < k && first; ++j) first = a->orders[j]->bag != b;
+    for (uint32_t j = k; first && j < evaluated && !changed; ++j) changed = a->orders[j]->bag == b &&
+                                                                            entry_changed(a->orders[j]);
+    if (changed && !apply_bag(ctx, a, k, evaluated, b)) { /* its handler may have changed the orders: no more */
       ok = 0;
       break;
-    }
-    int same = o->oldIn == in && (!in || memcmp(o->old, key, o->info.keyLen) == 0);
-    if (same) continue;
-    int32_t err = 0;
-    if (!xb_ntx_replace(o->ntx, o->oldIn ? o->old : NULL, in ? key : NULL, a->recno, &err)) {
-      order_error(ctx, a, o, EG_WRITE, 1011, err);
-      ok = 0;
     }
   }
   ok = ok && !a->closed;
@@ -811,7 +857,8 @@ int xb_area_cold(xb_ctx *ctx, xb_area *a) {
 int xb_area_orders_flush(xb_ctx *ctx, xb_area *a) {
   for (uint32_t k = 0; k < a->norders; ++k) {
     int32_t err = 0;
-    if (!xb_ntx_flush(a->orders[k]->ntx, &err)) {
+    const xb_order *o = a->orders[k];
+    if (o->bag->bag && !o->format->flush(o->bag->bag, &err)) {
       order_error(ctx, a, a->orders[k], EG_WRITE, 1011, err);
       return 0;
     }

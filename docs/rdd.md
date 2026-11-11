@@ -38,7 +38,8 @@ touching the rest (SQL engines later), each as a library when it needs one.
 - `field.c`: the field references of compiled code (below) and `__AreaEval( xArea, bBlock )`, which evaluates
   `alias->( expr )`.
 - `dbf.c`: the `DBF` driver, with its memos in `dbt.c` ([Files](#files)).
-- `order.c`, `ntx.c`, `ordcmd.c`: orders, their files and their functions ([Orders](#orders)).
+- `order.c`, `index.h`, `ntx.c`, `ordcmd.c`: orders, the interface of their files' formats, NTX files and the
+  functions ([Orders](#orders)).
 
 Names: `dbUseArea` and `dbCreate` take the table's name with `.dbf` added when it has no extension, and its alias is
 the file name without directories and extension unless one is given. Once the table is open (an `Open error` comes
@@ -110,8 +111,20 @@ opened later (each one has a different `generation`) makes it look up again. The
 ## Orders
 
 An order (an index) keeps the records in the order of a key: `order.c` makes keys and keeps the entries up to date,
-`ntx.c` is the file ([Files](#files)), `ordcmd.c` the functions. An area has a list of orders open and a controlling one
-(`xb_area.order`, 0 for the record order).
+`ordcmd.c` has the functions. An area has a list of orders open and a controlling one (`xb_area.order`, 0 for the
+record order).
+
+An order is a tag of an order file, a bag (`xb_order_bag`, shared by the area's orders in it and closed with the last
+of them), in its driver's format (`xb_rdd.index`, `index.h`): NTX (`ntx.c`, one order per file, named by the file)
+*(planned: CDX, several named orders per file)*. The format has the keys (their length for a value, a value's key
+bytes, a key's value again, their comparison in the order's order, and whether its file stores a descending order
+the other way round), the files (open with their tags, build a tag from sorted entries, flush, close, and a hold of
+the file's lock across several operations) and each tag's cursor (first, last, next, prev, seek, find, the counts
+and the n-th entry, the entry's key, an entry replaced by another); every cursor operation works in the order's own
+order, whatever the file stores. A record's change evaluates every order's new key first, then moves the entries
+that changed bag by bag, each bag's lock held once for all its orders (an order whose new key could not be had stops
+the change for it and the orders after it; an error of the file is raised once the lock is let go, so that its handler
+may do anything, closing the area included).
 
 - `INDEX ON <key> TO <file> [FOR <cond>] [ALL] [WHILE <cond>] [NEXT <n>] [RECORD <n>] [REST] [EVAL <block>]
   [EVERY <n>] [UNIQUE] [DESCENDING] [ADDITIVE] [USECURRENT]` (`ordCondSet()` then `ordCreate()`; Clipper's
@@ -181,7 +194,9 @@ An order (an index) keeps the records in the order of a key: `order.c` makes key
 - Keys (`xb_order_value_key`), as Clipper's NTX makes them: a string's bytes (blanks after it, or cut); a number's
   `Str( n, len, dec )` with blanks and the sign as `0` and, when negative, each digit d as `0x5C - d` (negative numbers
   first, larger ones first); a date's `DToS()` (blanks for the empty date); `T` or `F`. Keys compare as bytes, a
-  descending order's the other way round, equal keys by record number.
+  descending order's the other way round, equal keys by record number (a build that walks another order, with
+  `USECURRENT`, `REST`, ..., keeps among equal keys the order the walk reaches them in, as the reference does, and
+  `UNIQUE` the first of them).
 
 Where xbase does not follow the reference (checked by `tests/run/rdd_index_stress.prg` and the cross runs of
 [Tests](#tests)): equal keys stay in record order through every change; the reference puts a key it adds after the
@@ -311,7 +326,7 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
 - A page is searched by halves over its offsets; a key compares with `memcmp`.
 - Counting (`ordKeyCount()`, `ordKeyNo()`) and `ordKeyGoto()` read the pages' entry counts, never one entry at a
   time: the pages where the bounds fall (`ordKeyNo()`: the current entry's path) are searched, the subtrees between
-  them counted whole (`xb_ntx_count`, `xb_ntx_count_before`, `xb_ntx_select`). An NTX page does not keep the size of
+  them counted whole (`count`, `count_before`, `select` of the format). An NTX page does not keep the size of
   the tree under it, so the cost is the pages between the bounds (`ordKeyGoto( n )`: those before entry n), each read
   once; a count that would read more pages than the file has is a broken file (a loop), `DBFNTX/1010`.
 - Files are read and written at a position in one call (`pread`/`pwrite`, `ReadFile`/`WriteFile` with an offset;
@@ -475,7 +490,7 @@ query (as data a driver can translate), falling back to the record-by-record way
 4. Done: sharing and locks: the shared-file registry, the lock manager, the file protocol (tables, memos, NTX), `SET
    EXCLUSIVE`, `RLock()`, `FLock()`, `dbRLock()`, `dbRUnlock()`, `dbRLockList()`, `UNLOCK`, `NetErr()`. With tasks and
    threads: waiting inside the process, shared page caches, handing areas between tasks.
-5. `DBFCDX`: done: the driver, `FPT` memos, FoxPro's lock scheme; next: `CDX` indexes (the order operations as an
-   interface of the driver, with `NTX` and `CDX` behind it).
+5. `DBFCDX`: done: the driver, `FPT` memos, FoxPro's lock scheme, the order operations as an interface of the driver
+   (`index.h`, NTX behind it); next: `CDX` indexes.
 6. Relations, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `SORT`, `TOTAL`, `UPDATE`, `JOIN`.
 7. `SET DB ENGINE`; then SQL engines as libraries, and queries.

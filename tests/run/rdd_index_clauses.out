@@ -51,3 +51,8 @@ scoped 1:          1
 uc2 count:          1
 empty scope:          0          1
 uc3 count:          0         11
+-- ties
+usecurrent: A6 A4 A2 B7 B5 B3 B1
+descending: B7 B5 B3 B1 A6 A4 A2
+unique: A6 B7
+rest from 5: A4 A2 B5 B3 B1

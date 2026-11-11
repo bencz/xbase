@@ -1,10 +1,10 @@
-// INDEX ON's clauses: WHILE, NEXT and REST start at the current record (ordCondSet()'s start record when it gives
-// one) and RECORD takes one record; USECURRENT starts at the controlling order's first record in its scope; the
-// records are walked in the controlling order (the record order without one), raw: the filter and SET DELETED do not
-// apply, and a record the order has no entry for ends the walk. EVAL runs after the first record and then after
-// every EVERY more, and stops the build, keeping its records, when it returns anything but .T.. ADDITIVE keeps the
-// orders open; without it they close after the build. ordKeyVal() gives the key with the key's type, width and
-// decimals; ordSkipUnique() moves by keys. The files start with "rdd_icl", deleted at the end.
+// INDEX ON's clauses: WHILE, NEXT and REST start at the current record (ordCondSet()'s start record when it gives one)
+// and RECORD takes one record; USECURRENT starts at the controlling order's first record in its scope; the records are
+// walked in the controlling order (the record order without one), raw: the filter and SET DELETED do not apply, and a
+// record the order has no entry for ends the walk. EVAL runs after the first record and then after every EVERY more,
+// and stops the build, keeping its records, when it returns anything but .T.. ADDITIVE keeps the orders open; without
+// it they close after the build. Equal keys keep the order of the walk. ordKeyVal() gives the key with the key's type,
+// width and decimals; ordSkipUnique() moves by keys. The files start with "rdd_icl", deleted at the end.
 FIELD K, N, D
 
 PROCEDURE Main()
@@ -199,6 +199,8 @@ PROCEDURE Main()
    ? "uc3 count:", ordKeyCount(), RecNo()
    CLOSE
    Cleanup()
+   Ties()
+   Cleanup()
 RETURN
 
 STATIC PROCEDURE Cleanup()
@@ -214,6 +216,41 @@ STATIC PROCEDURE Walk( c )
    ? c
    DO WHILE ! Eof()
       ?? " " + LTrim( Str( RecNo() ) ) + Trim( K )
+      SKIP
+   ENDDO
+RETURN
+
+// Equal keys of a build that walks another order keep the order it reaches them in (UNIQUE keeps the first).
+STATIC PROCEDURE Ties()
+   LOCAL c, i := 0
+   ? "-- ties"
+   dbCreate( "rdd_icl", { { "K", "C", 1, 0 }, { "N", "N", 2, 0 } } )
+   USE rdd_icl NEW
+   FOR EACH c IN { "B", "A", "B", "A", "B", "A", "B" }
+      APPEND BLANK
+      REPLACE K WITH c, N WITH ++i
+   NEXT
+   INDEX ON -N TO rdd_icl_n
+   INDEX ON K TO rdd_icl_uc USECURRENT ADDITIVE
+   WalkK( "usecurrent:" )
+   SET ORDER TO 1
+   INDEX ON K TO rdd_icl_ud USECURRENT DESCENDING ADDITIVE
+   WalkK( "descending:" )
+   SET ORDER TO 1
+   INDEX ON K TO rdd_icl_uu USECURRENT UNIQUE ADDITIVE
+   WalkK( "unique:" )
+   SET ORDER TO 1
+   GO 5
+   INDEX ON K TO rdd_icl_ur REST ADDITIVE
+   WalkK( "rest from 5:" )
+   CLOSE
+RETURN
+
+STATIC PROCEDURE WalkK( c )
+   GO TOP
+   ? c
+   DO WHILE ! Eof()
+      ?? " " + K + LTrim( Str( RecNo() ) )
       SKIP
    ENDDO
 RETURN

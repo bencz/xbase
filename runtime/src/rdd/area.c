@@ -541,7 +541,7 @@ int xb_area_skip(xb_ctx *ctx, xb_area *a, int64_t n) {
 
 int xb_area_seek(xb_ctx *ctx, xb_area *a, const xb_item *v, int soft, int last) {
   xb_order *o = xb_area_order(a);
-  unsigned char key[XB_NTX_KEY_MAX];
+  unsigned char key[XB_INDEX_KEY_MAX];
   size_t used;
   if (!o) {
     xb_error_of(ctx, a->rdd->name, EG_NOORDER, 1201, "", NULL, 0, XB_ERR_DEFAULT, 0, NULL, 0, NULL);

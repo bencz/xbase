@@ -12,6 +12,7 @@
  *   0x1A after the last record. */
 #include "rdd/rdd.h"
 
+#include "rdd/index.h"
 #include "rdd/memo.h"
 
 #include "core/bytes.h"
@@ -682,6 +683,7 @@ const xb_rdd xb_rdd_dbf = {
     .name = "DBFNTX",
     .memo = &xb_memo_dbt,
     .indexExt = ".ntx",
+    .index = &xb_index_ntx,
     .lockScheme = XB_LOCKS_CLIPPER,
     .check = dbf_check,
     .create = dbf_create,
