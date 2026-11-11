@@ -402,7 +402,9 @@ An item that designates another item is an `XB_T_CELL` (a variable in a cell: `v
 (an element: `v.p` is an `xb_ref` holding the collection, the 1-based index, for a string the current character, and
 for a hash element taken by `@h[k]` or from a loop the entry's key, see [Hashes](#hashes)).
 The two tags are consecutive, so compiled code tests for both with one unsigned comparison. A cell may hold an
-`XB_T_REF` (a `FOR EACH` variable); an element never holds either.
+`XB_T_REF` (a `FOR EACH` variable); an element never holds either. `xb_ref`, and `xb_hash` with its entries, are part of
+the ABI (`xbrt.h`): compiled code reads an element of an array, or the entry at a position of a hash without holes, in
+place.
 
 - A `FOR EACH` variable holds an `XB_T_REF` during the loop (see [Operators](#operators)).
 - An argument passed by reference: `@x` passes the variable's cell (`xb_ref_of`), or for a `LOCAL` or parameter that
@@ -648,8 +650,9 @@ key of `FOR EACH k => v`: the entry's key for a hash, the index for an array or 
 position raises the bound error. The loop works on a base item: the variable's cell when it is shared at entry
 (`xb_each_shared`; a parameter holding an element passed by reference moves into a cell then), else the variable's own
 item. `xb_each_enter` saves the base's value and puts the loop's reference there, `xb_each_move` points it at the next
-element (taking the variable copies the reference, so the base keeps it), and `xb_each_leave` restores the saved value;
-for a `STATIC` the compiled code tests for a cell at each call, since a reference taken during the loop designates the
+element (taking the variable copies the reference, so the base keeps it; compiled code does it in place for an array or
+a hash without holes, [compiler.md](compiler.md#xir-to-llvm)), and `xb_each_leave` restores the saved value; for a
+`STATIC` the compiled code tests for a cell at each call, since a reference taken during the loop designates the
 `STATIC` itself. `SWITCH` uses `xb_switch_check`, which raises `Argument error: SWITCH` (3104) for a value that is not
 an integer or a string, and `xb_switch_match`.
 
@@ -816,15 +819,17 @@ Each one moved from C is measured against its C version (callgrind).
   (`rtl/collections.prg`; they also go through collection objects, those `__IsCollection( xValue )` (`core/control.c`)
   finds `FOR EACH` goes through: an `Enumerable`, a generator's enumerator, from position `nStart`, `nCount` elements;
   another object is `AEval`'s argument error and `AScan`'s 0; `AScan` finds a value in an array with the primitive
-  `__AScanValue`, and in a collection with `__ValueMatches`, both `xb_value_matches`), `AFill`, `ACopy` and `HEval`
-  (`rtl/collections.prg`), the `Enumerable` class and the classes of the built-in types (`rtl/collections.prg`, see
-  [Classes](#classes)), `ErrorSys` and the default error handler (`rtl/errorsys.prg`), Clipper's time sample functions
-  `Secs`, `TString`, `Days`, `ElapTime`, `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions
-  (callgrind, x86-64): 200 000 `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`);
-  `AEval` over a million elements with `{| x | n += x }`, 121M (116M). Timed against the C versions they replaced
-  (100,000 elements, 300 rounds): `AScan` of a value and with a block 225 ms (170 ms in C), `AFill` with `ACopy` 108 ms
-  (76 ms), `HEval` 145 ms (92 ms). `QQOut` keeps its own loop instead of sharing `OutStd`'s: passing the values on
-  through one more call costs `QOut` 13% more cycles.
+  `__ScanValue`, and in a collection with `__ValueMatches`, both `xb_value_matches`), `AFill`, `ACopy`, `HEval`, `HScan`
+  (a value through `__ScanValue` too) and `HMerge` (without a filter, `HCopy`) (`rtl/collections.prg`), the `Enumerable`
+  class and the classes of the built-in types (`rtl/collections.prg`, see [Classes](#classes)), `ErrorSys` and the
+  default error handler (`rtl/errorsys.prg`), Clipper's time sample functions `Secs`, `TString`, `Days`, `ElapTime`,
+  `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions (callgrind, x86-64): 200 000
+  `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval` over a million
+  elements with `{| x | n += x }`, 121M (116M). Timed against the C versions they replaced (100,000 elements, 300
+  rounds): `AScan` of a value and with a block 225 ms (170 ms in C), `AFill` with `ACopy` 108 ms (76 ms), `HEval` with
+  `{| k, v | n += v }` 362 ms (290 ms); `HScan` of a value and with a block 347 ms (300 ms), `HMerge` with a filter 807
+  ms (927 ms). `QQOut` keeps its own loop instead of sharing `OutStd`'s: passing the values on through one more call
+  costs `QOut` 13% more cycles.
 
 ## Dates
 

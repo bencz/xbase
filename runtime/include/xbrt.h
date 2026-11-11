@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 33u
+#define XB_ABI_VERSION 34u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -214,6 +214,43 @@ typedef struct xb_cell {
   xb_item value;
 } xb_cell;
 
+/* [ABI] What an XB_T_REF item designates: element `index` of `coll`. For a
+ * string, `value` holds the one-character element (assigning it leaves the
+ * string unchanged); for any other value that is no array or hash, `value` is
+ * the element. For a hash, the entry of `key` when it is not NIL (@h[k], the
+ * current element of a loop taken by a block or a reference), else the entry
+ * at position `index` (a FOR EACH loop). `loop`: the reference of a FOR EACH
+ * loop, else an element passed by reference (@a[i]). Compiled code reads the
+ * element of an array, or of a hash without holes, in place, and moves a
+ * loop's reference to the next one (types/ref.c finds the others). */
+typedef struct xb_ref {
+  xb_item coll;
+  int64_t index;
+  xb_item value;
+  xb_item key;
+  uint32_t loop;
+} xb_ref;
+
+/* [ABI] A hash (types/hash.c): its entries in order, in `entries`; without
+ * holes (`used` == `len`), position k is entry k - 1, which compiled code
+ * reads in place. */
+typedef struct xb_hentry {
+  xb_item key;
+  xb_item value;
+} xb_hentry;
+
+typedef struct xb_hash {
+  uint32_t len;       /* live entries */
+  uint32_t used;      /* entries taken, holes included */
+  uint32_t cap;       /* entries that fit */
+  uint32_t flags;
+  uint32_t imask;     /* index slots - 1 */
+  xb_hentry *entries; /* the store; NULL while cap is 0 */
+  uint32_t *hashes;   /* in the store, after the entries */
+  uint32_t *index;    /* in the store, after the hashes */
+  uint32_t *tree;     /* in the store, after the index; NULL while not in use */
+} xb_hash;
+
 /* [ABI] A codeblock: its function and the cells of the variables it captured.
  * The block function receives the block itself. */
 typedef struct xb_block xb_block;
@@ -230,11 +267,12 @@ int32_t  xb_pending(xb_ctx *ctx);
 int32_t  xb_pending_gc(xb_ctx *ctx);
 
 /* The layout the module was compiled for: offsets of xb_str.data,
- * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals and
- * xb_array.items (after len and cap). */
+ * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
+ * xb_array.items (after len and cap), xb_ref.value (after coll and index) and
+ * xb_hash.entries (after its five counts). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
-                      uint32_t array_items_offset);
+                      uint32_t array_items_offset, uint32_t ref_value_offset, uint32_t hash_entries_offset);
 
 void     xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);

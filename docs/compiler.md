@@ -536,13 +536,19 @@ emits the object file.
   truth of what its slow path returned. `truth` tests the item type inline; a non-logical value calls `xb_cond_error`
   and leaves.
 - Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
-  target `DataLayout`); a `FOR EACH` variable goes through `xb_ref_target`; a `STATIC`, a shared or captured
-  variable or a parameter tests its type inline (one unsigned comparison covers `XB_T_CELL` and `XB_T_REF`), follows
-  a cell inline and calls `xb_ref_target` only for an element.
+  target `DataLayout`); a `FOR EACH` variable, a `STATIC`, a shared or captured variable or a parameter tests its type
+  inline (one unsigned comparison covers `XB_T_CELL` and `XB_T_REF`) and follows a cell inline. An element
+  (`XB_T_REF`, `xb_ref` and `xb_hash` mirrored like `xb_array`) is read in place when it is one of an array within its
+  length, the entry at a position of a hash without holes, or the reference's own value for any other collection
+  (`inlineRefTarget`); the rest calls `xb_ref_target`, which finds a hash entry by key or with holes and raises the
+  bound error.
 - `block` obtains the cells first (`xb_cell_of`: the variable's cell, made now if it has none, or a cell holding the
   current element of a `FOR EACH` variable), then creates the block.
   `ref` calls `xb_ref_of` (or builds the `XB_T_CELL` item of a captured variable's cell); `ref.index` calls
-  `xb_ref_elem`. `each.enter`, `each.move` and `each.leave` call `xb_each_enter`, `xb_each_move` and `xb_each_leave`.
+  `xb_ref_elem`. `each.enter` and `each.leave` call `xb_each_enter` and `xb_each_leave`; `each.move` stores the
+  position in the loop's reference and calls `xb_each_move` only when the element is not one `inlineRefTarget` finds
+  in place (a string's character, an enumerator's, a hash with holes, the bound error); `each.key` stores the position
+  for anything but a hash, reads the key of a hash without holes in place, and calls `xb_each_key` for the rest.
 - `barrier` ([runtime.md](runtime.md#garbage-collector)): after a store into a cell, the cell's GC state byte is
   tested inline and `xb_gc_remember` called for an old cell; after a store through an element reference,
   `xb_ref_written` is called. Frame slots and `STATIC` storage are roots and need nothing.

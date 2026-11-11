@@ -126,22 +126,34 @@ static uint32_t common_type(const xb_item *items, size_t first, size_t n) {
 
 static const xb_proc asort_proc = XB_RUNTIME_PROC("ASORT", 0);
 
-/* __AScanValue( aTarget, xSearch, nStart, nCount ): the position of the first
- * of the nCount elements from nStart (1-based, within the array) that matches
- * xSearch as AScan matches (xb_value_matches: values of one comparable kind,
- * with SET EXACT for strings, or two NILs; arrays, blocks and objects never
- * match); 0 when none does. For AScan (rtl/collections.prg). */
-void xbf___ASCANVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+/* __ScanValue( xTarget, xSearch, nStart, nCount ): the position of the first
+ * of the nCount elements of an array (or values of a hash) from nStart
+ * (1-based, within it) that matches xSearch as AScan matches
+ * (xb_value_matches: values of one comparable kind, with SET EXACT for
+ * strings, or two NILs; arrays, blocks and objects never match); 0 when none
+ * does. For AScan and HScan (rtl/collections.prg). */
+void xbf___SCANVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_int(ret, 0);
-  if (argc < 4 || argv[0].type != XB_T_ARRAY || !xb_is_number(&argv[2]) || !xb_is_number(&argv[3])) return;
-  const xb_array *a = argv[0].v.p;
+  if (argc < 4 || !xb_is_number(&argv[2]) || !xb_is_number(&argv[3])) return;
   int64_t start = xb_num_to_i64(&argv[2]), count = xb_num_to_i64(&argv[3]);
   if (start < 1 || count < 1) return;
-  for (size_t i = (size_t)start - 1; i < a->len && i < (size_t)(start - 1 + count); ++i)
-    if (xb_value_matches(ctx, &a->items[i], &argv[1])) {
-      xb_set_int(ret, (int64_t)i + 1);
-      return;
-    }
+  size_t end = (size_t)(start - 1 + count);
+  if (argv[0].type == XB_T_ARRAY) {
+    const xb_array *a = argv[0].v.p;
+    for (size_t i = (size_t)start - 1; i < a->len && i < end; ++i)
+      if (xb_value_matches(ctx, &a->items[i], &argv[1])) {
+        xb_set_int(ret, (int64_t)i + 1);
+        return;
+      }
+  } else if (argv[0].type == XB_T_HASH) {
+    xb_hash *h = argv[0].v.p;
+    xb_hash_compact(h); /* positions are entries */
+    for (size_t i = (size_t)start - 1; i < h->len && i < end; ++i)
+      if (xb_value_matches(ctx, &h->entries[i].value, &argv[1])) {
+        xb_set_int(ret, (int64_t)i + 1);
+        return;
+      }
+  }
 }
 
 /* __ValueMatches( xValue, xSearch ): whether xValue matches xSearch as AScan

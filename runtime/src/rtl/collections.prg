@@ -318,7 +318,7 @@ FUNCTION AScan( aTarget, xSearch, nStart, nCount )
    ENDIF
    nCount := __RangeCount( Len( aTarget ) - nStart + 1, nCount )
    IF ! lBlock
-      RETURN __AScanValue( aTarget, xSearch, nStart, nCount )
+      RETURN __ScanValue( aTarget, xSearch, nStart, nCount )
    ENDIF
    FOR i := nStart TO nStart + nCount - 1
       IF i > Len( aTarget ) // the block may shorten the array
@@ -406,3 +406,54 @@ FUNCTION HEval( hHash, bBlock, nStart, nCount )
       ENDIF
    NEXT
 RETURN hHash
+
+// HScan( hHash, xSearch, [nStart], [nCount] ): the position of the first entry of the range whose value matches xSearch
+// (as AScan matches, __ScanValue), or for which the block xSearch( key, value, position ) returns .T.; 0 when none
+// does, or without xSearch. The range is fixed when it starts: entries a block deletes end it. A hash is required
+// (BASE/1123).
+FUNCTION HScan( hHash, xSearch, nStart, nCount )
+   LOCAL nLast, nPos := 0, k, v, x
+   IF ValType( hHash ) != "H"
+      RETURN __ArgError( 1123 )
+   ENDIF
+   IF PCount() < 2
+      RETURN 0
+   ENDIF
+   nStart := __RangeStart( Len( hHash ), nStart )
+   IF nStart == 0
+      RETURN 0
+   ENDIF
+   nCount := __RangeCount( Len( hHash ) - nStart + 1, nCount )
+   IF ValType( xSearch ) != "B"
+      RETURN __ScanValue( hHash, xSearch, nStart, nCount )
+   ENDIF
+   nLast := nStart + nCount - 1
+   FOR EACH k => v IN hHash
+      IF ++nPos > nLast
+         EXIT
+      ENDIF
+      IF nPos >= nStart .AND. ValType( x := Eval( xSearch, k, v, nPos ) ) == "L" .AND. x // only .T. finds
+         RETURN nPos
+      ENDIF
+   NEXT
+RETURN 0
+
+// HMerge( hDest, hSource, [bFilter] ): adds the entries of hSource to hDest (a key already there takes the new value),
+// those for which bFilter( key, value, position ) returns .T. when given: the entry as it was before the block ran,
+// whatever the block does with its arguments. Each position is checked against hSource as it is, so the entries a
+// block adds are reached. Returns hDest; both must be hashes (BASE/1123).
+FUNCTION HMerge( hDest, hSource, bFilter )
+   LOCAL nPos := 0, k, v, x
+   IF ValType( hDest ) != "H" .OR. ValType( hSource ) != "H"
+      RETURN __ArgError( 1123 )
+   ENDIF
+   IF ValType( bFilter ) != "B"
+      RETURN HCopy( hSource, hDest )
+   ENDIF
+   FOR EACH k => v IN hSource
+      x := Eval( bFilter, k, v, ++nPos )
+      IF ValType( x ) == "L" .AND. x
+         hDest[ k ] := v
+      ENDIF
+   NEXT
+RETURN hDest

@@ -56,6 +56,9 @@ private:
   };
   enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2, CtxDecimals = 3 };
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
+  enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
+  enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 5 };           // xb_hash
+  enum HEntryField : unsigned { HEntryKey = 0, HEntryValue = 1 };                     // xb_hentry
   enum StrField : unsigned { StrFlags = 0, StrHash = 1, StrLen = 2, StrData = 3 }; // xb_str
   // Classes of memory compiled code reaches, which never overlap (TBAA):
   // items outside the heap (frames, Local and scratch items, STATIC storage,
@@ -136,6 +139,8 @@ private:
   llvm::Value *varAddress(const xir::Var &v, xir::Access a, llvm::BasicBlock *unwind);
   llvm::Value *refTarget(llvm::Value *ref, llvm::BasicBlock *unwind);
   llvm::Value *derefIfRef(llvm::Value *item, llvm::BasicBlock *unwind);
+  llvm::Value *inlineRefTarget(llvm::Value *ref, llvm::BasicBlock *miss, bool others);
+  llvm::Value *hashEntryAt(llvm::Value *hash, llvm::Value *pos0, llvm::BasicBlock *miss);
   llvm::BasicBlock *beginUnlikely(llvm::Value *cond, const char *name);
   void endUnlikely(llvm::BasicBlock *join);
   llvm::Value *holdsRef(llvm::Value *item);
@@ -231,6 +236,9 @@ private:
   llvm::FunctionType *initFnTy_ = nullptr;
   llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, ncells, cells[] }
   llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, items } (its items follow)
+  llvm::StructType *refTy_ = nullptr;       // xb_ref: { coll, index, value, key, loop }
+  llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, entries, hashes, index, tree }
+  llvm::StructType *hentryTy_ = nullptr;    // xb_hentry: { key, value }
   llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, exitcode, frames, decimals }
   llvm::GlobalVariable *nilItem_ = nullptr; // a NIL item: missing arguments
   llvm::GlobalVariable *strBytes_ = nullptr; // xb_str_bytes, declared when first used

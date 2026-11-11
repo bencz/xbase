@@ -475,10 +475,19 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtEachEnter_, {fnCtx_, dest(i), rawAddress(*i.var), inCell, callArg(addr(ops[1]), 0)});
     break;
   }
-  case Op::EachMove: {
-    Value *inCell = b_.CreateZExt(value(ops[0]), i32_);
-    b_.CreateCall(rtEachMove_, {fnCtx_, rawAddress(*i.var), inCell, value(ops[1])});
+  case Op::EachMove: { // in place to an element of an array or a hash without holes (xb_each_move for the rest)
+    Value *var = rawAddress(*i.var);
+    Value *base = b_.CreateSelect(value(ops[0]), heapItem(itemPointer(var, "cell")), var, "base"); // a cell's value
+    Value *ref = itemPointer(base, "ref"); // the loop's reference
+    tag(b_.CreateStore(value(ops[1]), b_.CreateStructGEP(refTy_, ref, RefIndex)), Mem::Unknown);
+    BasicBlock *slow = newBlock("each.move"), *join = newBlock("each.moved");
+    inlineRefTarget(ref, slow, false);
+    b_.CreateBr(join);
+    b_.SetInsertPoint(slow);
+    b_.CreateCall(rtEachMove_, {fnCtx_, var, b_.CreateZExt(value(ops[0]), i32_), value(ops[1])});
     checkPending(unwind_);
+    b_.CreateBr(join);
+    b_.SetInsertPoint(join);
     break;
   }
   case Op::EachLeave: {
@@ -486,11 +495,25 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtEachLeave_, {rawAddress(*i.var), inCell, callArg(addr(ops[1]), 0)});
     break;
   }
-  case Op::EachKey: {
-    CallResult r = callResult(dest(i), 0);
-    b_.CreateCall(rtEachKey_, {fnCtx_, r.arg, callArg(addr(ops[0]), 1), value(ops[1])});
+  case Op::EachKey: { // the position itself, or a key read in place from a hash without holes (else xb_each_key)
+    Value *coll = addr(ops[0]), *d = dest(i);
+    BasicBlock *hash = newBlock("each.key.hash"), *other = newBlock("each.key.pos"), *slow = newBlock("each.key");
+    BasicBlock *join = newBlock("each.key.end");
+    b_.CreateCondBr(b_.CreateICmpEQ(typeOf(ops[0], coll), ConstantInt::get(i32_, XB_T_HASH)), hash, other);
+    b_.SetInsertPoint(other);
+    storeInt(d, value(ops[1]));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(hash);
+    Value *entry = hashEntryAt(itemPointer(coll, "hash"), b_.CreateSub(value(ops[1]), ConstantInt::get(i64_, 1)), slow);
+    copyItem(d, heapItem(b_.CreateStructGEP(hentryTy_, entry, HEntryKey)));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(slow);
+    CallResult r = callResult(d, 0);
+    b_.CreateCall(rtEachKey_, {fnCtx_, r.arg, callArg(coll, 1), value(ops[1])});
     callDone(r);
     checkPending(unwind_);
+    b_.CreateBr(join);
+    b_.SetInsertPoint(join);
     break;
   }
   case Op::RefVar: refOf(*i.var, dest(i)); break;

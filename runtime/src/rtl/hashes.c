@@ -161,52 +161,6 @@ void xbf_HVALUES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   hash_column(ctx, ret, argc, argv, "HVALUES", 1);
 }
 
-static const xb_proc hscan_proc = XB_RUNTIME_PROC("HSCAN", 0), hmerge_proc = XB_RUNTIME_PROC("HMERGE", 0),
-                     hsort_proc = XB_RUNTIME_PROC("HSORT", 0);
-
-/* Calls `block` with the entry at `pos` (key, value, position) in call[0..2],
- * its result in call[3]; 0 when the entry is gone or the block unwinds. */
-static int call_with_entry(xb_ctx *ctx, const xb_item *block, xb_item *call, xb_hash *h, int64_t pos) {
-  const xb_hentry *e = xb_hash_at(h, pos);
-  if (!e) return 0;
-  call[0] = e->key;
-  call[1] = e->value;
-  xb_set_int(&call[2], pos);
-  return xb_calls_run(ctx, block, call, 3);
-}
-
-/* HScan( hHash, xValue | bBlock, [nStart], [nCount] ): the position of the
- * first entry in the range whose value matches xValue (as AScan matches), or
- * for which bBlock( key, value, position ) returns .T.; 0 when none does. */
-void xbf_HSCAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  xb_hash *h = hash_arg(ctx, "HSCAN", argc, argv, 0);
-  if (!h) return;
-  xb_set_int(ret, 0);
-  uint64_t start = argc > 1 ? xb_range_start(argc, argv, 2, h->len) : 0;
-  if (!start) return;
-  uint64_t count = xb_range_count(argc, argv, 3, h->len - start + 1);
-  if (argv[1].type == XB_T_BLOCK) {
-    xb_item call[4];
-    xb_frame frame;
-    xb_calls_begin(ctx, call, 4, &frame, &hscan_proc);
-    for (uint64_t pos = start; pos < start + count; ++pos) {
-      if (!call_with_entry(ctx, &argv[1], call, h, (int64_t)pos)) break;
-      if (call[3].type == XB_T_LOGICAL && call[3].v.l) {
-        xb_set_int(ret, (int64_t)pos);
-        break;
-      }
-    }
-    xb_calls_end(ctx, &frame, 4);
-    return;
-  }
-  xb_hash_compact(h);
-  for (uint64_t pos = start; pos < start + count; ++pos)
-    if (xb_value_matches(ctx, &h->entries[pos - 1].value, &argv[1])) {
-      xb_set_int(ret, (int64_t)pos);
-      return;
-    }
-}
-
 /* Room for `n` entries; past the largest hash, the fatal error of a size
  * that cannot be allocated (as for arrays). */
 static void reserve(xb_hash *h, uint64_t n) {
@@ -240,33 +194,6 @@ void xbf_HCOPY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (start) copy_entries(dest, src, start, xb_range_count(argc, argv, 3, src->len - start + 1));
 }
 
-/* HMerge( hDest, hSource, [bFilter] ): adds the entries of hSource to hDest,
- * those for which bFilter( key, value, position ) returns .T. when given;
- * returns hDest. */
-void xbf_HMERGE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  xb_hash *dest = hash_arg(ctx, "HMERGE", argc, argv, 0);
-  xb_hash *src = dest ? hash_arg(ctx, "HMERGE", argc, argv, 1) : NULL;
-  if (!src) return;
-  *ret = argv[0];
-  if (argc < 3 || argv[2].type != XB_T_BLOCK) {
-    copy_entries(dest, src, 1, src->len);
-    return;
-  }
-  /* The block's arguments and result, then the entry as it was before the block ran: the block may replace its
-   * arguments (PValue()), and the entry it was given is the one merged. */
-  xb_item call[6];
-  xb_frame frame;
-  xb_calls_begin(ctx, call, 6, &frame, &hmerge_proc);
-  for (int64_t pos = 1; pos <= (int64_t)src->len; ++pos) {
-    const xb_hentry *e = xb_hash_at(src, pos);
-    if (!e) break;
-    call[4] = e->key;
-    call[5] = e->value;
-    if (!call_with_entry(ctx, &argv[2], call, src, pos)) break;
-    if (call[3].type == XB_T_LOGICAL && call[3].v.l) xb_hash_set(dest, &call[4], &call[5]);
-  }
-  xb_calls_end(ctx, &frame, 6);
-}
 
 typedef struct {
   xb_ctx *ctx;
@@ -294,6 +221,8 @@ static int key_less(void *arg, size_t i, size_t j) {
   }
   return xb_order_answer(&s->call[2]);
 }
+
+static const xb_proc hsort_proc = XB_RUNTIME_PROC("HSORT", 0);
 
 /* HSort( hHash, [bOrder] ): orders the entries by key, stably, by bOrder(
  * key1, key2 ) (whether the first goes first) or as ASort orders values;

@@ -45,20 +45,6 @@ void      xb_array_resize(xb_array *a, uint64_t len); /* new items are NIL; `a` 
 void      xb_set_array(xb_item *it, xb_array *a);
 void      xb_array_bound_error(xb_ctx *ctx, const xb_item *base, const xb_item *idx); /* reading outside 1 .. Len() */
 
-/* What an XB_T_REF item designates: element `index` of `coll`. For a string,
- * `value` holds the one-character element (assigning it leaves the string
- * unchanged). For a hash, the entry of `key` when it is not NIL (@h[k], the
- * current element of a loop taken by a block or a reference), else the entry
- * at position `index` (a FOR EACH loop). `loop`: the reference of a FOR EACH
- * loop, else an element passed by reference (@a[i]). */
-typedef struct xb_ref {
-  xb_item coll;
-  int64_t index;
-  xb_item value;
-  xb_item key;
-  uint32_t loop;
-} xb_ref;
-
 /* Stores in `r` a new reference to element `index` of `coll` (which must stay
  * reachable meanwhile: a frame slot). xb_ref_copy stores in `r` a new
  * reference to the element `ref` (a reachable XB_T_REF item) designates. */
@@ -184,22 +170,7 @@ const char *xb_message_text(char buf[XB_MESSAGE_TEXT_SIZE], const char *cls, con
  * by bytes, or letter case aside. */
 #define XB_HASH_IGNORECASE 0x1u
 #define XB_HASH_MAX_LEN (UINT32_C(1) << 30) /* entries; the index has twice as many slots */
-typedef struct xb_hentry {
-  xb_item key;
-  xb_item value;
-} xb_hentry;
-
-typedef struct xb_hash {
-  uint32_t len;       /* live entries */
-  uint32_t used;      /* entries taken, holes included */
-  uint32_t cap;       /* entries that fit */
-  uint32_t flags;
-  uint32_t imask;     /* index slots - 1 */
-  xb_hentry *entries; /* the store; NULL while cap is 0 */
-  uint32_t *hashes;   /* in the store, after the entries */
-  uint32_t *index;    /* in the store, after the hashes */
-  uint32_t *tree;     /* in the store, after the index; NULL while not in use */
-} xb_hash;
+/* xb_hentry and xb_hash: xbrt.h. */
 
 xb_hash *xb_hash_alloc(void); /* empty, without a store */
 void     xb_set_hash(xb_item *it, xb_hash *h);

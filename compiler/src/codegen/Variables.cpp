@@ -56,6 +56,62 @@ Value *CodeGen::refTarget(Value *ref, BasicBlock *unwind) {
   return target;
 }
 
+// The 0-based entry `pos0` of a hash without holes (xb_hash, `used` == `len`), where position k is entry k - 1;
+// branches to `miss` for one with holes or a position outside it.
+Value *CodeGen::hashEntryAt(Value *hash, Value *pos0, BasicBlock *miss) {
+  Value *len = b_.CreateZExt(loadFrom(i32_, b_.CreateStructGEP(hashTy_, hash, HashLen), Mem::Unknown, "hlen"), i64_);
+  Value *used = b_.CreateZExt(loadFrom(i32_, b_.CreateStructGEP(hashTy_, hash, HashUsed), Mem::Unknown, "hused"), i64_);
+  BasicBlock *in = newBlock("hash.entry");
+  b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(used, len), b_.CreateICmpULT(pos0, len)), in, miss);
+  b_.SetInsertPoint(in);
+  Value *entries = loadFrom(ptrTy_, b_.CreateStructGEP(hashTy_, hash, HashEntries), Mem::Unknown, "entries");
+  return b_.CreateInBoundsGEP(hentryTy_, entries, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "entry");
+}
+
+// The item an xb_ref designates, found in place (see xb_ref in xbrt.h): an array's element within it, the entry at a
+// position of a hash without holes, and with `others` the reference's own value for any other collection; branches
+// to `miss` otherwise, where the runtime finds it or raises the bound error.
+Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss, bool others) {
+  Value *coll = heapItem(b_.CreateStructGEP(refTy_, ref, RefColl));
+  Value *type = itemType(coll);
+  Value *pos0 = b_.CreateSub(loadFrom(i64_, b_.CreateStructGEP(refTy_, ref, RefIndex), Mem::Unknown, "index"),
+                             ConstantInt::get(i64_, 1));
+  BasicBlock *arr = newBlock("ref.array"), *hash = newBlock("ref.hash"), *found = newBlock("ref.found");
+  BasicBlock *own = others ? newBlock("ref.own") : miss;
+  SwitchInst *sw = b_.CreateSwitch(type, own, 2);
+  sw->addCase(ConstantInt::get(i32_, XB_T_ARRAY), arr);
+  sw->addCase(ConstantInt::get(i32_, XB_T_HASH), hash);
+  b_.SetInsertPoint(arr);
+  Value *array = itemPointer(coll, "arr");
+  BasicBlock *arrIn = newBlock("ref.array.in");
+  b_.CreateCondBr(b_.CreateICmpULT(pos0, arrayLength(array)), arrIn, miss);
+  b_.SetInsertPoint(arrIn);
+  Value *items = loadFrom(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayItems), Mem::ArrayHeader, "items");
+  Value *elem = heapItem(b_.CreateInBoundsGEP(itemTy_, items, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "elem"));
+  b_.CreateBr(found);
+  b_.SetInsertPoint(hash);
+  Value *keyType = itemType(heapItem(b_.CreateStructGEP(refTy_, ref, RefKey)));
+  BasicBlock *byPos = newBlock("ref.hash.pos"); // a reference that finds its entry by key goes to the runtime
+  b_.CreateCondBr(b_.CreateICmpEQ(keyType, ConstantInt::get(i32_, XB_T_NIL)), byPos, miss);
+  b_.SetInsertPoint(byPos);
+  Value *value = heapItem(b_.CreateStructGEP(hentryTy_, hashEntryAt(itemPointer(coll, "hash"), pos0, miss),
+                                             HEntryValue));
+  BasicBlock *hashEnd = b_.GetInsertBlock();
+  b_.CreateBr(found);
+  Value *ownValue = nullptr;
+  if (others) {
+    b_.SetInsertPoint(own);
+    ownValue = heapItem(b_.CreateStructGEP(refTy_, ref, RefValue));
+    b_.CreateBr(found);
+  }
+  b_.SetInsertPoint(found);
+  PHINode *phi = b_.CreatePHI(ptrTy_, others ? 3 : 2, "target");
+  phi->addIncoming(elem, arrIn);
+  phi->addIncoming(value, hashEnd);
+  if (others) phi->addIncoming(ownValue, own);
+  return heapItem(phi);
+}
+
 // Branches to a new block when `cond` holds (marked unlikely) and continues
 // there; endUnlikely joins the returned block.
 BasicBlock *CodeGen::beginUnlikely(Value *cond, const char *name) {
@@ -84,8 +140,8 @@ Value *CodeGen::holdsRef(Value *item) {
 // `item` itself, or the item it designates when it holds a reference. A
 // cell is followed inline (its value is at offset 0): a plain branch, since
 // a shared variable, or a parameter passed by reference, holds one all the
-// time; only an element (an XB_T_REF, also inside a cell) needs the runtime,
-// on a cold edge.
+// time; an element (an XB_T_REF, also inside a cell) is found in place when
+// it can be (inlineRefTarget), else by the runtime.
 Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind) {
   BasicBlock *from = b_.GetInsertBlock();
   BasicBlock *join = newBlock("join"), *then = newBlock("ref");
@@ -97,7 +153,19 @@ Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind) {
   Value *innerType = itemType(inner);
   BasicBlock *innerFrom = b_.GetInsertBlock();
   BasicBlock *elemJoin = beginUnlikely(b_.CreateICmpEQ(innerType, ConstantInt::get(i32_, XB_T_REF)), "elem");
-  Value *target = refTarget(inner, unwind);
+  BasicBlock *miss = newBlock("elem.call"), *got = newBlock("elem.got");
+  Value *fast = inlineRefTarget(itemPointer(inner, "ref"), miss, true);
+  BasicBlock *fastEnd = b_.GetInsertBlock();
+  b_.CreateBr(got);
+  b_.SetInsertPoint(miss);
+  Value *slow = refTarget(inner, unwind);
+  BasicBlock *slowEnd = b_.GetInsertBlock();
+  b_.CreateBr(got);
+  b_.SetInsertPoint(got);
+  PHINode *target = b_.CreatePHI(ptrTy_, 2, "elem");
+  target->addIncoming(fast, fastEnd);
+  target->addIncoming(slow, slowEnd);
+  heapItem(target);
   BasicBlock *elemEnd = b_.GetInsertBlock();
   endUnlikely(elemJoin);
   PHINode *followed = b_.CreatePHI(ptrTy_, 2, "followed");

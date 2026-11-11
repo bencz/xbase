@@ -1,0 +1,9 @@
+
+grows:   1  2  3 10 20 30
+assigned:          2         31
+holes:  1 3 4          3
+hash assigned:        200        400
+by reference:       1002       1003
+string: XYZ
+keys: b 200 d 400 
+shrinks: Bound error       1132
