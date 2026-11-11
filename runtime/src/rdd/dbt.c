@@ -24,7 +24,7 @@ static int64_t block_pos(uint32_t block) { return (int64_t)block * DBT_BLOCK; }
 static int write_next(xb_dbt *m, int32_t *err) {
   unsigned char word[4];
   xb_put_le32(word, m->next);
-  return xb_file_write_at(m->f, 0, word, sizeof word, err);
+  return xb_platform_file_write_at(m->f, 0, word, sizeof word, err);
 }
 
 int xb_dbt_create(const char *path, int32_t *err) {
@@ -100,8 +100,11 @@ int xb_dbt_append(xb_dbt *m, const char *p, size_t n, uint32_t *block, int32_t *
   if (end < 0) return 0;
   static const unsigned char zeros[DBT_BLOCK] = {0};
   for (; end < at; end += DBT_BLOCK) /* the rest of the last memo's block */
-    if (!xb_file_write_at(m->f, end, zeros, (size_t)(at - end < DBT_BLOCK ? at - end : DBT_BLOCK), err)) return 0;
-  if (!xb_file_write_at(m->f, at, p, n, err) || !xb_platform_file_write(m->f, ends, sizeof ends, err)) return 0;
+    if (!xb_platform_file_write_at(m->f, end, zeros, (size_t)(at - end < DBT_BLOCK ? at - end : DBT_BLOCK), err))
+      return 0;
+  if (!xb_platform_file_write_at(m->f, at, p, n, err) ||
+      !xb_platform_file_write_at(m->f, at + (int64_t)n, ends, sizeof ends, err))
+    return 0;
   *block = m->next;
   m->next += (uint32_t)blocks;
   return write_next(m, err);
@@ -123,7 +126,8 @@ int xb_dbt_move_down(xb_dbt *m, uint32_t from, int *moved, int32_t *err) {
   int ok = 1;
   for (int64_t done = 0; ok && done < len;) {
     size_t n = (size_t)(len - done < DBT_COPY ? len - done : DBT_COPY);
-    ok = xb_file_read_at(m->f, src + done, buf, n, err) && xb_file_write_at(m->f, DBT_BLOCK + done, buf, n, err);
+    ok = xb_file_read_at(m->f, src + done, buf, n, err) &&
+         xb_platform_file_write_at(m->f, DBT_BLOCK + done, buf, n, err);
     done += (int64_t)n;
   }
   free(buf);

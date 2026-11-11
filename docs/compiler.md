@@ -466,8 +466,9 @@ emits the object file.
   place too. `InlineCalls.cpp` does a few runtime functions in place when their arguments allow it, with their rules:
   `Len()` of a string or an array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n, 1 )` with `n` within `c`
   (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()` whose argument is the `SubStr()` right
-  before it, used nowhere else, reads the byte itself; `Int()` of an integer is it, of a double its truncation when that
-  fits 64 bits (`xb_dbl_fits_i64`; else, NaN too, the runtime keeps a double); `PCount()` is the function's own `argc`
+  before it, used nowhere else, reads the byte itself; `Int()` of an integer is it, of a double with a width of its
+  own its truncation with that width when that fits 64 bits (`xb_dbl_fits_i64`; else, a double with no width, NaN
+  too, the runtime); `PCount()` is the function's own `argc`
   (less `Self` in a method), and `PValue( n )` with an integer `n` copies the parameter's slot or the argument as passed
   (`NIL` outside 1 .. `argc`); `ValType()` of a value is the shared one-byte string of its tag's letter
   (`XB_TYPE_LETTERS`, the runtime's table too; a memo field's value, `XB_STR_MEMO`, calls the function); anything else

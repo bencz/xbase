@@ -13,39 +13,32 @@
 #include <string.h>
 
 #define XB_NUM_PRECISION 16
+#define XB_NUM_DIGITS_LOCAL 64 /* digits a double's text is built in on the stack; more are allocated */
 
-static xb_str *field(int width, int dec) {
-  size_t total = (size_t)width + (dec > 0 ? (size_t)dec + 1 : 0);
-  xb_str *s = xb_str_alloc(total);
-  memset(s->data, ' ', total);
-  return s;
-}
+/* The text of a field: `width` columns, then a dot and `dec` decimals when dec > 0. */
+static size_t field_len(int width, int dec) { return (size_t)width + (dec > 0 ? (size_t)dec + 1 : 0); }
 
-static xb_str *overflow(xb_str *s) {
-  memset(s->data, '*', s->len);
-  return s;
-}
+static void overflow(char *s, size_t len) { memset(s, '*', len); }
 
-/* Writes [sign][int digits] right-aligned in the first `width` columns, then
- * `.frac` (zeros when `frac` is null) when dec > 0. Returns 0 when the integer
- * part does not fit. */
-static int place(xb_str *s, int width, int dec, int neg, const char *intDigits, size_t intLen, const char *frac) {
+/* Writes [sign][int digits] right-aligned in the first `width` columns of `s` (blanks before them), then `.frac`
+ * (zeros when `frac` is null) when dec > 0. Returns 0 when the integer part does not fit. */
+static int place(char *s, int width, int dec, int neg, const char *intDigits, size_t intLen, const char *frac) {
   if (intLen + (neg ? 1u : 0u) > (size_t)width) return 0;
-  char *p = s->data + (size_t)width - intLen;
+  memset(s, ' ', (size_t)width);
+  char *p = s + (size_t)width - intLen;
   memcpy(p, intDigits, intLen);
   if (neg) p[-1] = '-';
   if (dec > 0) {
-    s->data[width] = '.';
+    s[width] = '.';
     if (frac)
-      memcpy(s->data + width + 1, frac, (size_t)dec);
+      memcpy(s + width + 1, frac, (size_t)dec);
     else
-      memset(s->data + width + 1, '0', (size_t)dec);
+      memset(s + width + 1, '0', (size_t)dec);
   }
   return 1;
 }
 
-static xb_str *format_int(int64_t v, int width, int dec) {
-  xb_str *s = field(width, dec);
+static void format_int(char *s, int64_t v, int width, int dec) {
   char digits[24];
   uint64_t mag = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
   size_t n = 0;
@@ -55,12 +48,14 @@ static xb_str *format_int(int64_t v, int width, int dec) {
     mag /= 10u;
   } while (mag);
   for (size_t i = 0; i < n; ++i) digits[i] = rev[n - 1 - i];
-  return place(s, width, dec, v < 0, digits, n, NULL) ? s : overflow(s);
+  if (!place(s, width, dec, v < 0, digits, n, NULL)) overflow(s, field_len(width, dec));
 }
 
-static xb_str *format_double(double v, int width, int dec) {
-  xb_str *s = field(width, dec);
-  if (!xb_dbl_finite(v)) return overflow(s);
+static void format_double(char *s, double v, int width, int dec) {
+  if (!xb_dbl_finite(v)) {
+    overflow(s, field_len(width, dec));
+    return;
+  }
 
   /* Significant digits m[0..15] of |v|, where m[k] has decimal exponent e - k. */
   char sci[48];
@@ -74,7 +69,8 @@ static xb_str *format_double(double v, int width, int dec) {
    * (positions in 64 bits: dec may be near INT_MAX). */
   int hi = (e > 0 ? e : 0) + 1; /* one spare column for a rounding carry */
   size_t n = (size_t)hi + (size_t)dec + 1;
-  char *digits = malloc(n);
+  char local[XB_NUM_DIGITS_LOCAL];
+  char *digits = n <= sizeof local ? local : malloc(n);
   if (!digits) xb_gc_fatal("out of memory");
   memset(digits, '0', n);
   int roundUp = 0;
@@ -103,25 +99,34 @@ static xb_str *format_double(double v, int width, int dec) {
   for (size_t i = 0; i < n; ++i) nonZero |= digits[i] != '0';
 
   int ok = place(s, width, dec, v < 0 && nonZero, digits + first, intEnd - first, digits + intEnd);
-  free(digits);
-  return ok ? s : overflow(s);
+  if (digits != local) free(digits);
+  if (!ok) overflow(s, field_len(width, dec));
+}
+
+static void format(char *s, const xb_item *it, int width, int dec) {
+  if (it->type == XB_T_INT) format_int(s, it->v.i, width, dec);
+  else format_double(s, it->v.d, width, dec);
 }
 
 xb_str *xb_num_to_str(const xb_item *it, int width, int dec) {
   if (dec < 0) dec = 0;
-  return it->type == XB_T_INT ? format_int(it->v.i, width, dec) : format_double(it->v.d, width, dec);
+  xb_str *s = xb_str_alloc(field_len(width, dec));
+  format(s->data, it, width, dec);
+  return s;
+}
+
+void xb_num_to_field_buf(const xb_item *it, int width, int dec, char *out) {
+  if (dec > 0 && dec >= width) {
+    memset(out, '*', (size_t)width);
+    return;
+  }
+  format(out, it, dec > 0 ? width - dec - 1 : width, dec < 0 ? 0 : dec);
 }
 
 xb_str *xb_num_to_field(const xb_item *it, int width, int dec) {
-  if (dec > 0) {
-    if (dec >= width) {
-      xb_str *s = xb_str_alloc((size_t)width);
-      memset(s->data, '*', (size_t)width);
-      return s;
-    }
-    width -= dec + 1;
-  }
-  return xb_num_to_str(it, width, dec);
+  xb_str *s = xb_str_alloc((size_t)width);
+  xb_num_to_field_buf(it, width, dec, s->data);
+  return s;
 }
 
 void xb_num_parse(const char *s, size_t len, xb_item *r) {

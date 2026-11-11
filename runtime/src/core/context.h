@@ -48,6 +48,8 @@ struct xb_ctx {
   struct xb_area **areas;
   uint32_t areaCap, areaCurrent;
   int      set_deleted;
+  int      set_softseek;   /* SET SOFTSEEK: a SEEK that finds nothing stops on the next key */
+  int      set_unique;     /* SET UNIQUE: orders made keep one entry per key */
   const struct xb_rdd *rddDefault;
   int      netErr;
 };

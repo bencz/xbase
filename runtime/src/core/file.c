@@ -18,14 +18,17 @@ int64_t xb_file_read_up_to(xb_file f, void *buf, size_t n, int32_t *err) {
 }
 
 int xb_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err) {
-  if (xb_platform_file_seek(f, pos, FS_SET, err) != pos) return 0;
-  int64_t got = xb_file_read_up_to(f, buf, n, err);
-  if (got >= 0 && (size_t)got < n) *err = XB_FERR_FAILURE;
-  return got >= 0 && (size_t)got == n;
-}
-
-int xb_file_write_at(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err) {
-  return xb_platform_file_seek(f, pos, FS_SET, err) == pos && xb_platform_file_write(f, buf, n, err);
+  size_t got = 0;
+  while (got < n) {
+    int64_t r = xb_platform_file_read_at(f, pos + (int64_t)got, (char *)buf + got, n - got, err);
+    if (r < 0) return 0;
+    if (r == 0) {
+      *err = XB_FERR_FAILURE;
+      return 0;
+    }
+    got += (size_t)r;
+  }
+  return 1;
 }
 
 void xb_file_name_parts(const char *name, size_t len, size_t *start, size_t *ext) {

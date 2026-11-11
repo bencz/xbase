@@ -373,16 +373,19 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     copyItem(d, src);
     break;
   }
-  case Inline::Int: { // an integer as it is; a double truncated, an integer when it fits 64 bits (xb_dbl_fits_i64)
+  case Inline::Int: { // an integer as it is; a double with a width of its own truncated, an integer with that width
+    // when it fits 64 bits (xb_dbl_fits_i64); the rest (a double's width computed, NaN): the runtime
     BasicBlock *isInt = newBlock("int.int"), *other = newBlock("int.other"), *dbl = newBlock("int.double");
     BasicBlock *fits = newBlock("int.fits");
     Value *t = argType(0);
     branchLikely(isType(t, XB_T_INT), isInt, other);
     b_.SetInsertPoint(isInt);
-    storeInt(d, intValue(arg(0)));
+    copyItem(d, arg(0));
     b_.CreateBr(join);
     b_.SetInsertPoint(other);
-    branchLikely(isType(t, XB_T_DOUBLE), dbl, slow);
+    Value *widthMask = ConstantInt::get(i64_, (uint64_t)0xFFFF << headerShift(FWidth));
+    Value *width = b_.CreateAnd(loadHeader(arg(0)), widthMask, "width");
+    branchLikely(b_.CreateAnd(isType(t, XB_T_DOUBLE), b_.CreateICmpNE(width, ConstantInt::get(i64_, 0))), dbl, slow);
     b_.SetInsertPoint(dbl);
     Type *f64 = b_.getDoubleTy();
     Value *tr = b_.CreateUnaryIntrinsic(Intrinsic::trunc, b_.CreateBitCast(intValue(arg(0)), f64));
@@ -390,7 +393,7 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
                                   b_.CreateFCmpOLT(tr, ConstantFP::get(f64, 9223372036854775808.0)));
     branchLikely(inRange, fits, slow); // NaN and the rest: the runtime keeps them doubles
     b_.SetInsertPoint(fits);
-    storeInt(d, b_.CreateFPToSI(tr, i64_));
+    storeWords(d, b_.CreateOr(headerWord(XB_T_INT, 0, 0), width), b_.CreateFPToSI(tr, i64_));
     break;
   }
   case Inline::None: break;

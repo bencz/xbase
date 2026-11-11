@@ -10,6 +10,8 @@ xb_str *xb_num_to_str(const xb_item *it, int width, int dec);
 /* Str( n, nWidth, nDec ): the number in `width` characters in all, `dec` of them decimals (stars when it does not
  * fit, or when dec >= width); a database's numeric field holds this text. */
 xb_str *xb_num_to_field(const xb_item *it, int width, int dec);
+/* The same text written to `out` (`width` bytes; no NUL), nothing allocated for a number of up to 60 digits. */
+void xb_num_to_field_buf(const xb_item *it, int width, int dec, char *out);
 /* Val( c ) of the `len` bytes at `s`: the number, with the width and decimals its text gives. */
 void xb_num_parse(const char *s, size_t len, xb_item *r);
 

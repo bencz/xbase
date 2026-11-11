@@ -1,0 +1,41 @@
+
+after index:          2 apple             1 NAME NAME .F. .F.
+  2:apple 5:apple 8:banana 6:date 3:fig 4:kiwi 7:lime 1:pear 
+bottom:          1 pear    
+skip -1:          7 lime    
+skip past:          9 .T. [        ]
+back:          1 pear    
+goto 3, skip:          4 kiwi    
+seek apple: .T.          2 .F.
+next:          5 apple   
+seek ki: .T.          4 kiwi    
+seek zzz: .F.          9 .T.
+seek c: .F.          9 .T.
+softseek c: .F.          6 date     .F.
+softseek zzz: .F.          9 .T.
+dbseek last: .T.          5
+dbseek soft: .F.          6 date    
+seek empty: .T.          2
+exact on seek ki: .T.          4
+replaced:          1 aaa     
+skip after replace:          2 apple   
+top:          1 aaa     
+appended:          9 [        ]
+top after append:          9 [        ]
+         1 aaa     
+  9: 1:aaa 5:apple 8:banana 6:date 3:fig 4:kiwi 7:lime 
+num index:          1 N N 
+  8:banana 7:lime 6:date 5:apple 9: 4:kiwi 3:fig 2:apple 1:aaa 
+seek 1.5: .T.          4   1.5
+seek -3: .T.          7  -3.0
+seek 0: .T.          5
+set index:          1 NAME          9
+order 2:          2 N          9
+top n:          8  -4.5
+order 0:          0          1
+  1:aaa 2:apple 3:fig 4:kiwi 5:apple 6:date 7:lime 8:banana 9: 
+seek date desc: .T.          4 20240105
+  9: 1:aaa 2:apple 8:banana 6:date 3:fig 4:kiwi 7:lime 
+use index:          1 NAME          9         
+reindex:          2          8
+  8:banana 7:lime 6:date 5:apple 9: 4:kiwi 3:fig 2:apple 1:aaa 

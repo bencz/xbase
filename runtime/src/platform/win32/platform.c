@@ -187,11 +187,35 @@ int64_t xb_platform_file_read(xb_file f, void *buf, size_t n, int32_t *err) {
   return got;
 }
 
-int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
+
+/* An OVERLAPPED that gives a synchronous handle's read or write its offset. */
+static OVERLAPPED at_offset(int64_t pos) {
+  OVERLAPPED o;
+  memset(&o, 0, sizeof o);
+  o.Offset = (DWORD)((uint64_t)pos & 0xFFFFFFFFu);
+  o.OffsetHigh = (DWORD)((uint64_t)pos >> 32);
+  return o;
+}
+
+int64_t xb_platform_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err) {
+  OVERLAPPED o = at_offset(pos);
+  DWORD got = 0;
+  if (!ReadFile((HANDLE)f, buf, n < FILE_CHUNK ? (DWORD)n : FILE_CHUNK, &got, &o)) {
+    DWORD e = GetLastError();
+    if (e == ERROR_HANDLE_EOF) return 0;
+    *err = (int32_t)e;
+    return -1;
+  }
+  return got;
+}
+
+/* Writes all `n` bytes at `pos` (-1: at the file's position). */
+static int write_all(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err) {
   const char *p = buf;
   while (n > 0) {
+    OVERLAPPED o = at_offset(pos);
     DWORD put = 0;
-    if (!WriteFile((HANDLE)f, p, n < FILE_CHUNK ? (DWORD)n : FILE_CHUNK, &put, NULL)) {
+    if (!WriteFile((HANDLE)f, p, n < FILE_CHUNK ? (DWORD)n : FILE_CHUNK, &put, pos < 0 ? NULL : &o)) {
       *err = (int32_t)GetLastError();
       return 0;
     }
@@ -200,9 +224,18 @@ int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
       return 0;
     }
     p += put;
+    if (pos >= 0) pos += put;
     n -= put;
   }
   return 1;
+}
+
+int xb_platform_file_write_at(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err) {
+  return write_all(f, pos, buf, n, err);
+}
+
+int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
+  return write_all(f, -1, buf, n, err);
 }
 
 int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *err) {

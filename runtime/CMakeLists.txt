@@ -29,6 +29,9 @@ add_library(xbrt STATIC
   src/rdd/dbcmd.c
   src/rdd/dbf.c
   src/rdd/dbt.c
+  src/rdd/ntx.c
+  src/rdd/ordcmd.c
+  src/rdd/order.c
   src/rdd/field.c
   src/rtl/arrays.c
   src/rtl/collections.c

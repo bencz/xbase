@@ -152,19 +152,38 @@ int64_t xb_platform_file_read(xb_file f, void *buf, size_t n, int32_t *err) {
   return got;
 }
 
-int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
+int64_t xb_platform_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err) {
+  ssize_t got;
+  do {
+    got = pread((int)f, buf, n, (off_t)pos);
+  } while (got < 0 && errno == EINTR);
+  if (got < 0) *err = dos_error(errno);
+  return got;
+}
+
+/* Writes all `n` bytes at `pos` (-1: at the file's position). */
+static int write_all(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err) {
   const char *p = buf;
   while (n > 0) {
-    ssize_t put = write((int)f, p, n);
+    ssize_t put = pos < 0 ? write((int)f, p, n) : pwrite((int)f, p, n, (off_t)pos);
     if (put < 0 && errno == EINTR) continue;
     if (put <= 0) {
-      *err = put < 0 ? dos_error(errno) : 112; /* nothing written: no room */
+      *err = put < 0 ? dos_error(errno) : XB_FERR_DISK_FULL; /* nothing written: no room */
       return 0;
     }
     p += put;
+    if (pos >= 0) pos += put;
     n -= (size_t)put;
   }
   return 1;
+}
+
+int xb_platform_file_write_at(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err) {
+  return write_all(f, pos, buf, n, err);
+}
+
+int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
+  return write_all(f, -1, buf, n, err);
 }
 
 int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *err) {

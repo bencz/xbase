@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 164 of 551 done. Commands (`std.ch` families): 48 of 157 done.
+Functions: 187 of 551 done. Commands (`std.ch` families): 57 of 157 done.
 
 ## Statements (grammar)
 
@@ -22,23 +22,23 @@ Grouped by their leading words; each group covers every variant of the command.
 
 *!*, **?**, **??**, *@*, *ACCEPT*, *APPEND*, **APPEND BLANK**, *AVERAGE*, *CALL*, **CANCEL**, *CLEAR*, *CLEAR ALL*,
 *CLEAR GETS*, **CLEAR MEMORY**, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, **CLOSE**, **CLOSE ALL**, *CLOSE ALTERNATE*, **CLOSE
-DATABASES**, *CLOSE FORMAT*, *CLOSE INDEXES*, *CLOSE PROCEDURE*, *CLS*, **COMMIT**, **CONTINUE**, *COPY*, *COPY FILE*,
+DATABASES**, *CLOSE FORMAT*, **CLOSE INDEXES**, *CLOSE PROCEDURE*, *CLS*, **COMMIT**, **CONTINUE**, *COPY*, *COPY FILE*,
 **COUNT**, *CREATE*, **DELETE**, *DELETE FILE*, *DELETE TAG*, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**, **ENDCASE**,
-**ENDDO**, **ENDFOR**, **ENDIF**, **ENDSEQUENCE**, *ERASE*, *FIND*, **GO**, **GOTO**, *INDEX ON*, *INPUT*, *JOIN*,
+**ENDDO**, **ENDFOR**, **ENDIF**, **ENDSEQUENCE**, *ERASE*, **FIND**, **GO**, **GOTO**, **INDEX ON**, *INPUT*, *JOIN*,
 *KEYBOARD*, *LABEL FORM*, *LIST*, **LOCATE**, *MENU*, **NEXT**, **PACK**, **QUIT**, *READ*, *READ SAVE*, **RECALL**,
-*REINDEX*, **RELEASE**, **RELEASE ALL**, *RENAME*, **REPLACE**, *REPORT FORM*, **REQUEST**, **RESTORE**, *RESTORE
-SCREEN*, *RUN*, **SAVE**, **SAVE ALL**, *SAVE SCREEN*, **SAVE TO**, *SEEK*, **SELECT**, *SET ALTERNATE*, *SET AUTOPEN*,
-*SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET CENTURY**, **SET CODEPAGE** (an xbase command), *SET COLOR*, *SET
-COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*, **SET DECIMALS**, *SET DEFAULT*,
-**SET DELETED**, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET DIRSEPARATOR*, *SET ECHO*, *SET
-EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET EXCLUSIVE*, *SET FILECASE*, **SET FILTER**, *SET
-FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, *SET INDEX*, *SET INTENSITY*, *SET KEY*, **SET
-LANGUAGE** (an xbase command), *SET MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET
-MFILEEXT*, *SET OPTIMIZE*, *SET ORDER*, *SET PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET RELATION*, *SET SAFETY*, *SET
-SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, *SET SOFTSEEK*, *SET STATUS*, *SET STEP*, *SET STRICTREAD*,
-*SET TALK*, *SET TIME*, *SET TYPEAHEAD*, *SET UNIQUE*, *SET VIDEOMODE*, *SET WRAP*, **SKIP**, *SORT*, **STORE**,
-**SUM**, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*, **USE** (without `INDEX`, which comes with the
-indexes), *WAIT*, **ZAP**
+**REINDEX**, **RELEASE**, **RELEASE ALL**, *RENAME*, **REPLACE**, *REPORT FORM*, **REQUEST**, **RESTORE**, *RESTORE
+SCREEN*, *RUN*, **SAVE**, **SAVE ALL**, *SAVE SCREEN*, **SAVE TO**, **SEEK**, **SELECT**, *SET ALTERNATE*, *SET
+AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET CENTURY**, **SET CODEPAGE** (an xbase command), *SET
+COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*, **SET DECIMALS**,
+*SET DEFAULT*, **SET DELETED**, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET DIRSEPARATOR*,
+*SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, *SET EXCLUSIVE*, *SET FILECASE*,
+**SET FILTER**, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, **SET INDEX**, *SET
+INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET MARGIN*, *SET MBLOCKSIZE*, *SET MEMOBLOCK*, *SET MENU*,
+*SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, **SET ORDER**, *SET PATH*, *SET PRINTER*, *SET PROCEDURE*, *SET
+RELATION*, *SET SAFETY*, *SET SCOPE*, *SET SCOPEBOTTOM*, *SET SCOPETOP*, *SET SCOREBOARD*, **SET SOFTSEEK**, *SET
+STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, **SET UNIQUE**, *SET VIDEOMODE*, *SET
+WRAP*, **SKIP**, *SORT*, **STORE**, **SUM**, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, *UNLOCK*, *UPDATE*, **USE**, *WAIT*,
+**ZAP**
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`, `set.ch`
 (partial), `error.ch` (provided: the severities and generic codes), `fileio.ch`, `directry.ch` and `dbstruct.ch`
@@ -47,21 +47,22 @@ Other standard headers, each to be provided with the matching runtime support: `
 
 ## Functions
 
-### Databases (RDD core) (40 of 112 done)
+### Databases (RDD core) (63 of 112 done)
 
-*AFields*, **Alias**, **Bof**, **dbAppend**, **dbClearFilter**, *dbClearIndex*, *dbClearRelation*, **dbCloseAll**,
-**dbCloseArea**, **dbCommit**, **dbCommitAll**, **dbCreate**, *dbCreateIndex*, **dbDelete**, **dbEval**, *Dbf*,
+*AFields*, **Alias**, **Bof**, **dbAppend**, **dbClearFilter**, **dbClearIndex**, *dbClearRelation*, **dbCloseAll**,
+**dbCloseArea**, **dbCommit**, **dbCommitAll**, **dbCreate**, **dbCreateIndex**, **dbDelete**, **dbEval**, *Dbf*,
 *DBFBLOB*, *DBFDBT*, *dbFieldInfo*, *dbFileGet*, *dbFilePut*, **dbFilter**, *DBFSMT*, **dbGoBottom**, **dbGoto**,
-**dbGoTop**, *dbInfo*, *dbOrderInfo*, **dbRecall**, *dbRecordInfo*, *dbReindex*, *dbRelation*, *dbRLock*, *dbRLockList*,
-*dbRSelect*, *dbRUnlock*, *dbSeek*, **dbSelectArea**, *dbSetDriver*, **dbSetFilter**, *dbSetIndex*, *dbSetOrder*,
-*dbSetRelation*, **dbSkip**, **dbStruct**, *dbTableExt*, *dbUnlock*, *dbUnlockAll*, **dbUseArea**, **Deleted**, *Delim*,
-**Eof**, **FCount**, **FieldGet**, **FieldName**, **FieldPos**, **FieldPut**, *FLock*, **Found**, **Header**,
-*IndexExt*, *IndexKey*, *IndexOrd*, **LastRec**, *Lock*, **LUpdate**, **NetErr**, *ordBagClear*, *ordBagExt*,
-*ordBagName*, *ordCondSet*, *ordCount*, *ordCreate*, *ordCustom*, *ordDescend*, *ordDestroy*, *ordFindRec*, *ordFor*,
-*ordIsUnique*, *ordKey*, *ordKeyAdd*, *ordKeyCount*, *ordKeyDel*, *ordKeyGoto*, *ordKeyNo*, *ordKeyRelPos*, *ordKeyVal*,
-*ordListAdd*, *ordListClear*, *ordListRebuild*, *ordName*, *ordNumber*, *ordScope*, *ordSetFocus*, *ordSetRelation*,
-*ordSkipRaw*, *ordSkipUnique*, *ordWildSeek*, *rddList*, **rddName**, *rddRegister*, **rddSetDefault**, *RDDSYS*,
-**RecCount**, **RecNo**, **RecSize**, *RLock*, *SDF*, **Select**, **Used**, *_DBF*, *_dtxCondSet*
+**dbGoTop**, *dbInfo*, *dbOrderInfo*, **dbRecall**, *dbRecordInfo*, **dbReindex**, *dbRelation*, *dbRLock*,
+*dbRLockList*, *dbRSelect*, *dbRUnlock*, **dbSeek**, **dbSelectArea**, *dbSetDriver*, **dbSetFilter**, **dbSetIndex**,
+**dbSetOrder**, *dbSetRelation*, **dbSkip**, **dbStruct**, *dbTableExt*, *dbUnlock*, *dbUnlockAll*, **dbUseArea**,
+**Deleted**, *Delim*, **Eof**, **FCount**, **FieldGet**, **FieldName**, **FieldPos**, **FieldPut**, *FLock*, **Found**,
+**Header**, **IndexExt**, **IndexKey**, **IndexOrd**, **LastRec**, *Lock*, **LUpdate**, **NetErr**, *ordBagClear*,
+**ordBagExt**, **ordBagName**, **ordCondSet** (FOR, DESCENDING, ADDITIVE), *ordCount*, **ordCreate**, *ordCustom*,
+**ordDescend**, *ordDestroy*, *ordFindRec*, **ordFor**, **ordIsUnique**, **ordKey**, *ordKeyAdd*, *ordKeyCount*,
+*ordKeyDel*, *ordKeyGoto*, *ordKeyNo*, *ordKeyRelPos*, *ordKeyVal*, **ordListAdd**, **ordListClear**,
+**ordListRebuild**, **ordName**, **ordNumber**, *ordScope*, **ordSetFocus**, *ordSetRelation*, *ordSkipRaw*,
+*ordSkipUnique*, *ordWildSeek*, *rddList*, **rddName**, *rddRegister*, **rddSetDefault**, *RDDSYS*, **RecCount**,
+**RecNo**, **RecSize**, *RLock*, *SDF*, **Select**, **Used**, *_DBF*, *_dtxCondSet*
 
 ### Databases (SIx/HiPer-SEEK extensions) (0 of 115 done)
 

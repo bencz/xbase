@@ -719,6 +719,8 @@ Conventions:
 - `Str( n [, nWidth [, nDec]] )`: `nWidth` is the whole field; without it the number's own field is used (at most 90
   columns), and a `nWidth` below 1 means 10 columns. A field with no room for its decimals (`nDec >= nWidth`, or no
   integer column left) is all `*`. `StrZero` is `Str` with leading blanks as zeros.
+- `Int( n )` is the integer part with `n`'s display width: a field's integer columns (`N(6,2)`: 3), a number's own
+  width otherwise; an integer comes back as it is.
 - `Round` rounds half away from zero; a negative number of decimals rounds to tens, hundreds, ... As in Clipper, the
   half is added to ten times the scaled value and the result, divided back, is multiplied by `1 + DBL_EPSILON`
   (about one unit in the last place) before truncating, so decimal halves stored just below `.5` (`2.675`) round up
@@ -768,7 +770,8 @@ Conventions:
 - `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array and the empty date.
 - `Set( n [, x] )` returns the setting before the call. `_SET_EXACT` takes a logical or a string starting with
   `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020);
-  `_SET_DELETED` takes a logical or `ON`/`OFF` as `_SET_EXACT` does ([rdd.md](rdd.md#work-areas));
+  `_SET_DELETED`, `_SET_SOFTSEEK` and `_SET_UNIQUE` take a logical or `ON`/`OFF` as `_SET_EXACT` does
+  ([rdd.md](rdd.md#orders));
   `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more, off
   otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it in front when the picture
   has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name ([Languages](#languages)),
@@ -927,15 +930,16 @@ leaves it as it is.
 
 The runtime reaches files through the platform layer (`platform/platform.h`): files are opened with an `FOpen()` mode
 (`xb_platform_file_open`), created (`xb_platform_file_create`, open for reading and writing, with `FCreate()`'s
-attributes), read, written, moved in (`xb_platform_file_seek`) and closed on the system's handle as an integer, deleted
-and renamed; the layer also tells a file's entry (`xb_platform_file_info`), lists a directory (`xb_platform_dir_open`,
-`_next`, `_close`: name, size, attributes, time of last change in local time), whether names differ by letter case,
-the current directory, the free space of a drive and an environment variable (for `GetEnv()` only). Paths are UTF-8
-(UTF-16 on Windows). A failure gives the code `FError()` reports: a DOS error number (2 file not found, 3 path not
-found, 5 access denied, 25 seek error, ...), which Windows reports itself and the POSIX build translates `errno` values
-to (31, general failure, for those without one). `xb_platform_path_separator` tells the characters that separate
-directories (`/`; also `\` and `:` on Windows). Binary fields of the file formats go through the little-endian
-helpers of `core/bytes.h`. `SAVE` and `RESTORE` ([Memory variables](#memory-variables)) use this layer too.
+attributes), read, written (also at a position, in one call: `xb_platform_file_read_at`, `_write_at`, which tables and
+indexes use), moved in (`xb_platform_file_seek`) and closed on the system's handle as an integer, deleted and renamed;
+the layer also tells a file's entry (`xb_platform_file_info`), lists a directory (`xb_platform_dir_open`, `_next`,
+`_close`: name, size, attributes, time of last change in local time), whether names differ by letter case, the current
+directory, the free space of a drive and an environment variable (for `GetEnv()` only). Paths are UTF-8 (UTF-16 on
+Windows). A failure gives the code `FError()` reports: a DOS error number (2 file not found, 3 path not found, 5 access
+denied, 25 seek error, ...), which Windows reports itself and the POSIX build translates `errno` values to (31, general
+failure, for those without one). `xb_platform_path_separator` tells the characters that separate directories (`/`; also
+`\` and `:` on Windows). Binary fields of the file formats go through the little-endian helpers of `core/bytes.h`.
+`SAVE` and `RESTORE` ([Memory variables](#memory-variables)) use this layer too.
 
 - `include/fileio.ch` (`FO_*` modes, `FS_*` origins, `FC_*` attributes, `F_ERROR`) is included by the runtime's C as
   well, as `set.ch` is; `include/directry.ch` names the positions of a `Directory()` entry.

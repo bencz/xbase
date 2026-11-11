@@ -4,24 +4,24 @@
 #include "rdd/rdd.h"
 
 #include "core/file.h"
+#include "rdd/order.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-static const xb_str *str_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
+const xb_str *xb_db_str_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
   return argc > k && argv[k].type == XB_T_STRING ? argv[k].v.s : NULL;
 }
 
-static int64_t num_arg(uint32_t argc, const xb_item *argv, uint32_t k, int64_t dflt) {
+int64_t xb_db_num_arg(uint32_t argc, const xb_item *argv, uint32_t k, int64_t dflt) {
   return argc > k && xb_is_number(&argv[k]) ? xb_num_to_i64(&argv[k]) : dflt;
 }
 
-static int logical_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
+int xb_db_logical_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
   return argc > k && argv[k].type == XB_T_LOGICAL && argv[k].v.l;
 }
 
-/* The current area, or NULL after "Workarea not in use" for the function `fn`. */
-static xb_area *used(xb_ctx *ctx, const char *fn) {
+xb_area *xb_db_used(xb_ctx *ctx, const char *fn) {
   xb_area *a = xb_area_current(ctx);
   if (!a) xb_area_unused_error(ctx, fn);
   return a;
@@ -36,7 +36,7 @@ static void default_alias(const xb_str *name, const char **p, size_t *len) {
 }
 
 static const xb_rdd *driver_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv, uint32_t k) {
-  const xb_str *name = str_arg(argc, argv, k);
+  const xb_str *name = xb_db_str_arg(argc, argv, k);
   if (!name || name->len == 0) return xb_rdd_default(ctx);
   return xb_rdd_find(name->data, name->len);
 }
@@ -64,15 +64,16 @@ static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str 
 /* dbUseArea( [lNewArea], [cDriver], cName, [cAlias], [lShared], [lReadOnly] ). */
 void xbf_DBUSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  const xb_str *name = str_arg(argc, argv, 2);
+  const xb_str *name = xb_db_str_arg(argc, argv, 2);
   const xb_rdd *rdd = driver_arg(ctx, argc, argv, 1);
   ctx->netErr = 0;
   if (!name || !rdd) {
-    if (logical_arg(argc, argv, 0)) ctx->areaCurrent = xb_area_free(ctx);
+    if (xb_db_logical_arg(argc, argv, 0)) ctx->areaCurrent = xb_area_free(ctx);
     xb_fn_arg_error(ctx, NULL, 1005, "DBUSEAREA", argc, argv);
     return;
   }
-  open_table(ctx, logical_arg(argc, argv, 0), rdd, name, str_arg(argc, argv, 3), logical_arg(argc, argv, 5));
+  open_table(ctx, xb_db_logical_arg(argc, argv, 0), rdd, name, xb_db_str_arg(argc, argv, 3),
+             xb_db_logical_arg(argc, argv, 5));
 }
 
 void xbf_DBCLOSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -94,8 +95,8 @@ void xbf_DBCLOSEALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * string that names no area is BASE/1002, which may be tried again. */
 void xbf_DBSELECTAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  const xb_str *alias = str_arg(argc, argv, 0);
-  int64_t n = num_arg(argc, argv, 0, -1);
+  const xb_str *alias = xb_db_str_arg(argc, argv, 0);
+  int64_t n = xb_db_num_arg(argc, argv, 0, -1);
   for (uint16_t tries = 1; alias && (n = xb_area_named(ctx, alias->data, alias->len)) < 0; ++tries)
     if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, alias->data, NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2)
       return;
@@ -105,14 +106,14 @@ void xbf_DBSELECTAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* Select( [cAlias] ): the current area's number, or the one a name gives as xb_area_named reads it (0 for none). */
 void xbf_SELECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  const xb_str *alias = str_arg(argc, argv, 0);
+  const xb_str *alias = xb_db_str_arg(argc, argv, 0);
   int64_t n = alias ? xb_area_named(ctx, alias->data, alias->len) : ctx->areaCurrent;
   xb_set_int(ret, n > 0 ? n : 0);
 }
 
 /* Alias( [nArea] ): the alias of the area (the current one), "" when none is open there. */
 void xbf_ALIAS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  int64_t n = num_arg(argc, argv, 0, 0);
+  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
   const xb_area *a = n > 0 && n <= UINT32_MAX ? xb_area_at(ctx, (uint32_t)n) : xb_area_current(ctx);
   xb_set_str(ret, a ? xb_str_new(a->alias, strlen(a->alias)) : xb_str_empty());
 }
@@ -125,8 +126,8 @@ void xbf_USED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_DBGOTO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = used(ctx, "DBGOTO");
-  int64_t n = num_arg(argc, argv, 0, 0);
+  xb_area *a = xb_db_used(ctx, "DBGOTO");
+  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
   if (a) xb_area_goto(ctx, a, n < 1 || n > UINT32_MAX ? 0 : (uint32_t)n);
 }
 
@@ -134,7 +135,7 @@ void xbf_DBGOTOP(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = used(ctx, "DBGOTOP");
+  xb_area *a = xb_db_used(ctx, "DBGOTOP");
   if (a) xb_area_top(ctx, a);
 }
 
@@ -142,14 +143,14 @@ void xbf_DBGOBOTTOM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = used(ctx, "DBGOBOTTOM");
+  xb_area *a = xb_db_used(ctx, "DBGOBOTTOM");
   if (a) xb_area_bottom(ctx, a);
 }
 
 void xbf_DBSKIP(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = used(ctx, "DBSKIP");
-  if (a) xb_area_skip(ctx, a, num_arg(argc, argv, 0, 1));
+  xb_area *a = xb_db_used(ctx, "DBSKIP");
+  if (a) xb_area_skip(ctx, a, xb_db_num_arg(argc, argv, 0, 1));
 }
 
 void xbf_BOF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -204,7 +205,7 @@ void xbf_FCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* The 0-based field of argument `k` (1-based in the language), or -1. */
 static int64_t field_arg(const xb_area *a, uint32_t argc, const xb_item *argv, uint32_t k) {
-  int64_t n = num_arg(argc, argv, k, 0);
+  int64_t n = xb_db_num_arg(argc, argv, k, 0);
   return a && n >= 1 && n <= a->nfields ? n - 1 : -1;
 }
 
@@ -224,7 +225,7 @@ void xbf_FIELDPUT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 void xbf_FIELDPOS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_area *a = xb_area_current(ctx);
-  const xb_str *name = str_arg(argc, argv, 0);
+  const xb_str *name = xb_db_str_arg(argc, argv, 0);
   xb_set_int(ret, a && name ? xb_area_field_index(a, name->data, name->len) + 1 : 0);
 }
 
@@ -261,7 +262,7 @@ void xbf_DBSTRUCT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * one, or one the driver cannot make, is DBCMD/1014. */
 void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  const xb_str *name = str_arg(argc, argv, 0);
+  const xb_str *name = xb_db_str_arg(argc, argv, 0);
   const xb_rdd *rdd = driver_arg(ctx, argc, argv, 2);
   const xb_array *spec = argc > 1 && argv[1].type == XB_T_ARRAY ? argv[1].v.p : NULL;
   size_t n = spec ? spec->len : 0;
@@ -303,7 +304,8 @@ void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   free(path);
   free(fields);
   uint32_t before = ctx->areaCurrent;
-  if (argc > 3 && argv[3].type == XB_T_LOGICAL && !open_table(ctx, argv[3].v.l, rdd, name, str_arg(argc, argv, 4), 0))
+  if (argc > 3 && argv[3].type == XB_T_LOGICAL &&
+      !open_table(ctx, argv[3].v.l, rdd, name, xb_db_str_arg(argc, argv, 4), 0))
     ctx->areaCurrent = before; /* unlike dbUseArea(), the area current before stays */
 }
 
@@ -311,22 +313,30 @@ void xbf_DBAPPEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = used(ctx, "DBAPPEND");
+  xb_area *a = xb_db_used(ctx, "DBAPPEND");
   if (!a || !xb_area_writable(ctx, a)) return;
   int32_t err = 0;
   ctx->netErr = 0;
   a->found = 0;
-  if (!a->rdd->append(a, &err)) {
+  xb_area_pin(a);
+  int ok = xb_area_cold(ctx, a) && !a->closed;
+  if (ok && !a->rdd->append(a, &err)) {
     xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
-    return;
+    ok = 0;
   }
-  a->recno = a->rdd->lastrec(a);
-  a->bof = a->eof = 0;
+  if (ok) {
+    a->recno = a->rdd->lastrec(a);
+    a->bof = a->eof = 0;
+    xb_area_hot(ctx, a, 1); /* a new record: its keys go in when it is written */
+  }
+  xb_area_unpin(a);
 }
 
 static void mark_deleted(xb_ctx *ctx, const char *fn, int deleted) {
-  xb_area *a = used(ctx, fn);
-  if (a && xb_area_writable(ctx, a) && !a->eof) a->rdd->set_deleted(a, deleted);
+  xb_area *a = xb_db_used(ctx, fn);
+  if (a && xb_area_writable(ctx, a) && !a->eof && xb_area_hot(ctx, a, 0) && !a->closed && xb_area_load(ctx, a) &&
+      !a->closed)
+    a->rdd->set_deleted(a, deleted);
 }
 void xbf_DBDELETE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
@@ -345,21 +355,28 @@ void xbf_DELETED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   xb_area *a = xb_area_current(ctx);
-  xb_set_logical(ret, a && a->rdd->deleted(a));
+  xb_set_logical(ret, a && xb_area_load(ctx, a) && xb_area_current(ctx) == a && a->rdd->deleted(a));
 }
 
 /* __dbPack(), __dbZap(): the deleted records, or all of them, go; then the first record. */
 static void shrink(xb_ctx *ctx, const char *fn, int all) {
-  xb_area *a = used(ctx, fn);
+  xb_area *a = xb_db_used(ctx, fn);
   if (!a || !xb_area_writable(ctx, a)) return;
   int32_t err = 0;
+  xb_area_pin(a);
+  int cold = xb_area_cold(ctx, a) && !a->closed;
+  xb_area_unpin(a);
+  if (!cold) return;
   if (!(all ? a->rdd->zap(a, &err) : a->rdd->pack(a, &err))) {
     a->recno = a->rdd->lastrec(a) + 1; /* where the driver is left */
     a->bof = a->eof = 1;
     xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
     return;
   }
-  xb_area_top(ctx, a);
+  xb_area_pin(a);
+  xb_area_orders_rebuild(ctx, a);
+  if (!a->closed) xb_area_top(ctx, a);
+  xb_area_unpin(a);
 }
 void xbf___DBPACK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
@@ -376,13 +393,16 @@ void xbf___DBZAP(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 static void commit(xb_ctx *ctx, xb_area *a) {
   int32_t err = 0;
-  if (!a->rdd->flush(a, 1, &err)) xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
+  xb_area_pin(a);
+  if (xb_area_cold(ctx, a) && !a->closed && xb_area_orders_flush(ctx, a) && !a->rdd->flush(a, 1, &err))
+    xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
+  xb_area_unpin(a);
 }
 void xbf_DBCOMMIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = used(ctx, "DBCOMMIT");
+  xb_area *a = xb_db_used(ctx, "DBCOMMIT");
   if (a) commit(ctx, a);
 }
 void xbf_DBCOMMITALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -417,11 +437,11 @@ void xbf_LUPDATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* dbSetFilter( bCondition, [cText] ), dbClearFilter(), dbFilter(): the records the block rejects do not show. */
 void xbf_DBSETFILTER(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = used(ctx, "DBSETFILTER");
+  xb_area *a = xb_db_used(ctx, "DBSETFILTER");
   if (!a) return;
   if (argc > 0 && argv[0].type == XB_T_BLOCK) a->filter = argv[0];
   else xb_set_nil(&a->filter);
-  if (str_arg(argc, argv, 1)) a->filter_text = argv[1];
+  if (xb_db_str_arg(argc, argv, 1)) a->filter_text = argv[1];
   else xb_set_str(&a->filter_text, xb_str_empty());
 }
 
@@ -464,8 +484,8 @@ static int scope_run(xb_ctx *ctx, xb_area *a, uint32_t argc, const xb_item *argv
   const xb_item *forBlock = argc > k ? &argv[k] : NULL, *whileBlock = argc > k + 1 ? &argv[k + 1] : NULL;
   int hasWhile = whileBlock && whileBlock->type == XB_T_BLOCK;
   int hasNext = argc > k + 2 && xb_is_number(&argv[k + 2]);
-  int64_t next = num_arg(argc, argv, k + 2, 0), record = num_arg(argc, argv, k + 3, 0);
-  int rest = logical_arg(argc, argv, k + 4);
+  int64_t next = xb_db_num_arg(argc, argv, k + 2, 0), record = xb_db_num_arg(argc, argv, k + 3, 0);
+  int rest = xb_db_logical_arg(argc, argv, k + 4);
   if (record > 0) {
     if (!xb_area_goto(ctx, a, record > UINT32_MAX ? 0 : (uint32_t)record)) return 0;
     if (a->eof) return 1;
@@ -503,7 +523,7 @@ static int stop_here(xb_ctx *ctx, xb_area *a, void *arg) {
  * takes (Found() .T.), else to the end of the scope (Found() .F.); __dbContinue() goes on from the next record. */
 void xbf___DBLOCATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = used(ctx, "__DBLOCATE");
+  xb_area *a = xb_db_used(ctx, "__DBLOCATE");
   if (!a) return;
   if (argc > 0) a->locate = argv[0];
   int hit = 0;
@@ -517,7 +537,7 @@ void xbf___DBCONTINUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = used(ctx, "__DBCONTINUE");
+  xb_area *a = xb_db_used(ctx, "__DBCONTINUE");
   if (!a || a->locate.type != XB_T_BLOCK) return;
   xb_item scope[5] = {a->locate}; /* rooted: the block may LOCATE again */
   for (int k = 1; k < 5; ++k) xb_set_nil(&scope[k]);
@@ -544,7 +564,7 @@ static int eval_block(xb_ctx *ctx, xb_area *a, void *arg) {
 /* dbEval( bBlock, [bFor], [bWhile], [nNext], [nRecord], [lRest] ): evaluates bBlock on each record of the scope. */
 void xbf_DBEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = used(ctx, "DBEVAL");
+  xb_area *a = xb_db_used(ctx, "DBEVAL");
   if (!a || argc < 1 || argv[0].type != XB_T_BLOCK) return;
   xb_area_pin(a);
   scope_run(ctx, a, argc, argv, 1, eval_block, &argv[0]);
@@ -561,7 +581,7 @@ void xbf_NETERR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_RDDSETDEFAULT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_rdd *now = xb_rdd_default(ctx);
   xb_set_str(ret, xb_str_new(now->name, strlen(now->name)));
-  const xb_str *name = str_arg(argc, argv, 0);
+  const xb_str *name = xb_db_str_arg(argc, argv, 0);
   const xb_rdd *chosen = name && name->len ? xb_rdd_find(name->data, name->len) : NULL;
   if (chosen) ctx->rddDefault = chosen;
 }
@@ -569,6 +589,6 @@ void xbf_RDDSETDEFAULT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) 
 void xbf_RDDNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  const xb_area *a = used(ctx, "RDDNAME");
+  const xb_area *a = xb_db_used(ctx, "RDDNAME");
   if (a) xb_set_str(ret, xb_str_new(a->rdd->name, strlen(a->rdd->name)));
 }

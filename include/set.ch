@@ -14,6 +14,8 @@
 #define _SET_DECIMALS   3
 #define _SET_DATEFORMAT 4
 #define _SET_EPOCH      5
+#define _SET_SOFTSEEK   9
+#define _SET_UNIQUE     10
 #define _SET_DELETED    11
 
 #define _SET_LANGUAGE   200 /* the language of the runtime's texts: "EN" (the default), "PT", "ES" */

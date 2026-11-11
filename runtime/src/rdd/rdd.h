@@ -19,6 +19,7 @@ typedef struct xb_field_info {
 } xb_field_info;
 
 typedef struct xb_area xb_area;
+typedef struct xb_order xb_order;
 
 /* Field writes: done, a value of the wrong type (nothing written), a number too wide (stars written), a file that
  * could not be written (a memo; the error's code given). */
@@ -47,7 +48,7 @@ typedef struct xb_rdd {
   /* Writes what is pending and frees the state. */
   int (*close)(xb_area *a, int32_t *err);
   uint32_t (*lastrec)(xb_area *a);
-  /* Makes record `recno` current (outside 1 .. lastrec: the blank record after the last). */
+  /* Makes record `recno` current (outside 1 .. lastrec: the blank record after the last), its bytes unread. */
   int (*go)(xb_area *a, uint32_t recno, int32_t *err);
   /* Writes the current record when it changed; with `header`, the header too when the table changed (COMMIT). */
   int (*flush)(xb_area *a, int header, int32_t *err);
@@ -55,6 +56,11 @@ typedef struct xb_rdd {
   int (*append)(xb_area *a, int32_t *err);
   int (*get)(xb_area *a, uint32_t field, xb_item *r, int32_t *err);
   int (*put)(xb_area *a, uint32_t field, const xb_item *v, int32_t *err);
+  /* The bytes of a field in the current record, as stored (`len` of them; after load). */
+  const unsigned char *(*field_bytes)(xb_area *a, uint32_t field);
+  /* Reads the current record, which navigation leaves unread until it is used: before deleted(), set_deleted() and
+   * field_bytes() (get() and put() read it themselves). A record that cannot be read leaves the blank one. */
+  int (*load)(xb_area *a, int32_t *err);
   int (*deleted)(xb_area *a);
   void (*set_deleted)(xb_area *a, int deleted);
   /* Removes the deleted records; removes every record. */
@@ -66,6 +72,7 @@ typedef struct xb_rdd {
 } xb_rdd;
 
 struct xb_area {
+  uint32_t number;          /* in the task's table of areas, from 1 */
   char *alias;              /* upper case, malloc'ed */
   const xb_rdd *rdd;
   void *state;              /* the driver's */
@@ -80,6 +87,14 @@ struct xb_area {
   xb_item filter;           /* SET FILTER: a codeblock or NIL (a root) */
   xb_item filter_text;      /* its text, "" without one (a root) */
   xb_item locate;           /* the FOR block of the last LOCATE, for CONTINUE (a root) */
+  xb_order **orders;        /* the orders open (rdd/order.h), malloc'ed */
+  uint32_t norders, order;  /* order: the controlling one, from 1; 0 for the record order */
+  int hot;                  /* the current record changes: the orders keep its keys from before (xb_area_hot) */
+  uint32_t hotRecno;
+  xb_item pendingCond;      /* ordCondSet(): the FOR block and its text (roots), for the next order made */
+  xb_item pendingCondText;
+  int pendingDescend, pendingAdditive;
+  uint32_t keying;          /* key or condition blocks running: the orders may not change meanwhile */
 };
 
 /* The drivers by name ("DBF", "DBFNTX"); NULL for an unknown one. The default (RddSetDefault()). */
@@ -114,6 +129,21 @@ void xb_area_unpin(xb_area *a);
 /* Whether the table can be written; "Write not allowed" (raised) when it was opened READONLY. */
 int xb_area_writable(xb_ctx *ctx, xb_area *a);
 
+/* The current record is about to change (`fresh`: it is a new one): its keys now, for the orders (rdd/order.c);
+ * the change is done: entries move where keys changed. Before the driver writes the record. 0 after an error
+ * (raised). */
+int xb_area_hot(xb_ctx *ctx, xb_area *a, int fresh);
+int xb_area_cold(xb_ctx *ctx, xb_area *a);
+/* Writes the orders' pages; closes them all (the record order is controlling then). 0 after an error (raised). */
+int xb_area_orders_flush(xb_ctx *ctx, xb_area *a);
+int xb_area_orders_close(xb_ctx *ctx, xb_area *a);
+/* SEEK in the controlling order: to the first record (`last`: the last) whose key starts with the value's, skipping
+ * those that do not show; else, with `soft`, the first after where it would be, or the end. Found() tells. 0 after
+ * an error (raised). */
+int xb_area_seek(xb_ctx *ctx, xb_area *a, const xb_item *v, int soft, int last);
+/* The controlling order, NULL for the record order. */
+xb_order *xb_area_order(xb_area *a);
+
 /* Navigation as the language sees it: deleted records skipped under SET DELETED, records the filter rejects skipped;
  * Found() false; 0 after an error (raised), or when the filter closed the area. */
 int xb_area_goto(xb_ctx *ctx, xb_area *a, uint32_t recno);
@@ -124,6 +154,8 @@ int xb_area_skip(xb_ctx *ctx, xb_area *a, int64_t n);
  * area (pinned by the caller). */
 int xb_area_visible(xb_ctx *ctx, xb_area *a);
 
+/* Reads the current record's bytes when navigation left them unread: 0 after the error (DBFNTX/1010, raised). */
+int xb_area_load(xb_ctx *ctx, xb_area *a);
 /* Reading a field (a memo that cannot be read: DBFNTX/1010, NIL); writing one, with the errors raised (READONLY, a
  * wrong type, a number too wide, a memo that cannot be written). */
 int xb_area_field_get(xb_ctx *ctx, xb_area *a, uint32_t field, xb_item *r);
@@ -141,6 +173,13 @@ void xb_area_unused_error(xb_ctx *ctx, const char *fn);
  * expr )): 1, with the area current before in `before`; 0 after the error (BASE/1002, raised; the error block did not
  * ask to try again). */
 int xb_area_enter(xb_ctx *ctx, const xb_item *area, uint32_t *before);
+
+/* The database functions' arguments (rdd/dbcmd.c): argument `k` as a string (NULL otherwise), a number (`dflt`
+ * otherwise), whether it is .T.; the current area, or NULL after "Workarea not in use" for the function `fn`. */
+const xb_str *xb_db_str_arg(uint32_t argc, const xb_item *argv, uint32_t k);
+int64_t xb_db_num_arg(uint32_t argc, const xb_item *argv, uint32_t k, int64_t dflt);
+int xb_db_logical_arg(uint32_t argc, const xb_item *argv, uint32_t k);
+xb_area *xb_db_used(xb_ctx *ctx, const char *fn);
 
 /* Marks the work areas' items for the collector. */
 void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *));

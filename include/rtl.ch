@@ -198,7 +198,9 @@ EXTERN FUNCTION dbCloseAll() NATIVE
 EXTERN FUNCTION dbCloseArea() NATIVE
 EXTERN FUNCTION dbCommit() NATIVE
 EXTERN FUNCTION dbCommitAll() NATIVE
+EXTERN FUNCTION dbClearIndex() NATIVE
 EXTERN FUNCTION dbCreate( cFile, aStruct, [cDriver], [lNewArea], [cAlias] ) NATIVE
+EXTERN FUNCTION dbCreateIndex( cFile, cKey, [bKey], [lUnique] ) NATIVE
 EXTERN FUNCTION dbDelete() NATIVE
 EXTERN FUNCTION dbEval( bBlock, [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
 EXTERN FUNCTION dbFilter() NATIVE
@@ -206,8 +208,12 @@ EXTERN FUNCTION dbGoBottom() NATIVE
 EXTERN FUNCTION dbGoTo( nRecord ) NATIVE
 EXTERN FUNCTION dbGoTop() NATIVE
 EXTERN FUNCTION dbRecall() NATIVE
+EXTERN FUNCTION dbReindex() NATIVE
+EXTERN FUNCTION dbSeek( xKey, [lSoftSeek], [lLast] ) NATIVE
 EXTERN FUNCTION dbSelectArea( xArea ) NATIVE
 EXTERN FUNCTION dbSetFilter( bCondition, [cCondition] ) NATIVE
+EXTERN FUNCTION dbSetIndex( cFile ) NATIVE
+EXTERN FUNCTION dbSetOrder( nOrder ) NATIVE
 EXTERN FUNCTION dbSkip( [nRecords] ) NATIVE
 EXTERN FUNCTION dbStruct() NATIVE
 EXTERN FUNCTION dbUseArea( [lNewArea], [cDriver], [cName], [xAlias], [lShared], [lReadOnly] ) NATIVE
@@ -220,9 +226,27 @@ EXTERN FUNCTION FieldPos( cField ) NATIVE
 EXTERN FUNCTION FieldPut( nField, xValue ) NATIVE
 EXTERN FUNCTION Found() NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION Header() NATIVE
+EXTERN FUNCTION IndexExt() NATIVE
+EXTERN FUNCTION IndexKey( [nOrder] ) NATIVE
+EXTERN FUNCTION IndexOrd() NATIVE
 EXTERN FUNCTION LastRec() NATIVE RESERVED CHECKED ABBREV 5
 EXTERN FUNCTION LUpdate() NATIVE
 EXTERN FUNCTION NetErr( [lNewError] ) NATIVE
+EXTERN FUNCTION ordBagExt() NATIVE
+EXTERN FUNCTION ordBagName( [xOrder] ) NATIVE
+EXTERN FUNCTION ordCondSet( [cFor], [bFor], [lAll], [bWhile], [bEval], [nInterval], [nStart], [nNext], [nRecord], ;
+   [lRest], [lDescend], [lCompound], [lAdditive] ) NATIVE
+EXTERN FUNCTION ordCreate( [cBag], [cOrder], [cKey], [bKey], [lUnique] ) NATIVE
+EXTERN FUNCTION ordDescend( [xOrder] ) NATIVE
+EXTERN FUNCTION ordFor( [xOrder] ) NATIVE
+EXTERN FUNCTION ordIsUnique( [xOrder] ) NATIVE
+EXTERN FUNCTION ordKey( [xOrder] ) NATIVE
+EXTERN FUNCTION ordListAdd( cBag ) NATIVE
+EXTERN FUNCTION ordListClear() NATIVE
+EXTERN FUNCTION ordListRebuild() NATIVE
+EXTERN FUNCTION ordName( [nOrder] ) NATIVE
+EXTERN FUNCTION ordNumber( cOrder ) NATIVE
+EXTERN FUNCTION ordSetFocus( [xOrder] ) NATIVE
 EXTERN FUNCTION RddName() NATIVE
 EXTERN FUNCTION RddSetDefault( [cDriver] ) NATIVE
 EXTERN FUNCTION RecCount() NATIVE RESERVED CHECKED ABBREV 4

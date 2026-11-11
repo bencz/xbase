@@ -1,0 +1,20 @@
+
+ERR DBFNTX         36       1201 Workarea not indexed [] [] .T. .F.
+empty:          1          1 .T. .T.          0
+all: 5=2.00000 4=1.00000 3=0.00000 2=-1.00000 1=-2.00000
+seek number on C: .F. .T.          6
+seek date on C: .F. .T.          6
+n: 1=-2.00000 2=-1.00000 3=0.00000 4=1.00000 5=2.00000
+seek string on N: .F. .T.
+long key:        320          1
+ERR DBFNTX         33       1026 Data type error [] [] .F. .F.
+         2 RDD_INDEX_ RDD_INDEX_           1          1          0
+rdd_index_funcs_name Rdd_Index_Funcs_Num rdd_index_funcs_name .ntx .ntx
+N NAME NAME N > 0  .F. .T. .F.
+RDD_INDEX_ RDD_INDEX_ RDD_INDEX_ RDD_INDEX_          1          5
+RDD_INDEX_          0          1
+         0            1
+listadd:          1          5
+listadd 2:          1          5
+setindex again:          1           5
+ERR DBFNTX         21       1003 Open error [] [rdd_index_funcs_none.ntx] .T. .T.

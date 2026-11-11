@@ -72,18 +72,21 @@ void xbf_VAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_num_parse(argv[0].v.s->data, argv[0].v.s->len, ret);
 }
 
+/* Int( n ): the integer part, with n's display width (a field's integer columns, a computed number's own). */
 void xbf_INT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1 || !xb_is_number(&argv[0])) {
     xb_fn_arg_error(ctx, ret, 1090, "INT", argc, argv);
     return;
   }
   if (argv[0].type == XB_T_INT) {
-    xb_set_int(ret, argv[0].v.i);
+    *ret = argv[0];
     return;
   }
   double t = trunc(argv[0].v.d);
+  uint16_t width = argv[0].width ? argv[0].width : xb_num_dbl_width(argv[0].v.d);
   if (xb_dbl_fits_i64(t)) xb_set_int(ret, (int64_t)t);
   else xb_set_double(ret, t, 0);
+  ret->width = width;
 }
 
 void xbf_ABS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

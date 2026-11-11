@@ -62,6 +62,7 @@ int xb_platform_path_separator(char c);
  * disk full, 206 name too long; 31, general failure, for the others). */
 typedef intptr_t xb_file;
 #define XB_FERR_FAILURE 31
+#define XB_FERR_DISK_FULL 112
 
 /* File attributes, as DOS numbers them: those FCreate() takes (fileio.ch),
  * and those Directory() tells besides. */
@@ -86,6 +87,11 @@ int64_t xb_platform_file_read(xb_file f, void *buf, size_t n, int32_t *err);
 
 /* Writes the `n` bytes: 1 when all of them were written. */
 int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err);
+
+/* The same at `pos` from the start, in one call (the position after is not specified): the reads and writes of
+ * tables, memos and indexes. */
+int64_t xb_platform_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err);
+int xb_platform_file_write_at(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err);
 
 /* Moves to `offset` from the start (0), the current position (1) or the end
  * (2): the new position; before the start is 25. */

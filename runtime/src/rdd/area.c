@@ -1,6 +1,8 @@
 /* Work areas: the table of each task's areas, aliases, and navigation as the language sees it (see rdd.h). */
 #include "rdd/rdd.h"
 
+#include "rdd/order.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,9 +112,29 @@ static void close_table(xb_ctx *ctx, xb_area *a) {
 void xb_area_close(xb_ctx *ctx, uint32_t n) {
   xb_area *a = xb_area_at(ctx, n);
   if (!a) return;
+  xb_area_pin(a); /* the keys of a changed record are evaluated in the area, which they may close */
+  xb_area_orders_close(ctx, a);
+  int still = !a->closed && xb_area_at(ctx, n) == a;
+  xb_area_unpin(a);
+  if (!still) return;
   ctx->areas[n - 1] = NULL;
   close_table(ctx, a);
 }
+
+int xb_area_orders_close(xb_ctx *ctx, xb_area *a) {
+  int ok = xb_area_cold(ctx, a);
+  if (a->closed) return 0;
+  while (a->norders) {
+    xb_order *o = a->orders[--a->norders];
+    ok = xb_order_close(ctx, a, o) && ok;
+  }
+  free(a->orders);
+  a->orders = NULL;
+  a->order = 0;
+  return ok;
+}
+
+xb_order *xb_area_order(xb_area *a) { return a->order ? a->orders[a->order - 1] : NULL; }
 
 void xb_area_close_all(xb_ctx *ctx) {
   for (uint32_t n = 1; n <= ctx->areaCap; ++n) xb_area_close(ctx, n);
@@ -133,9 +155,12 @@ int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, c
   xb_area_close(ctx, n);
   xb_area *a = calloc(1, sizeof *a);
   if (!a) xb_gc_fatal("out of memory");
+  a->number = n;
   a->rdd = rdd;
   a->readonly = readonly;
   a->generation = ++generations;
+  xb_set_nil(&a->pendingCond);
+  xb_set_nil(&a->pendingCondText);
   for (uint16_t tries = 1;; ++tries) {
     xb_open_failure why = {0, EG_OPEN, 1001, NULL};
     if (rdd->open(a, path, readonly, &why)) break;
@@ -185,6 +210,9 @@ void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *)) {
       mark(&ctx->areas[k]->filter);
       mark(&ctx->areas[k]->filter_text);
       mark(&ctx->areas[k]->locate);
+      mark(&ctx->areas[k]->pendingCond);
+      mark(&ctx->areas[k]->pendingCondText);
+      for (uint32_t i = 0; i < ctx->areas[k]->norders; ++i) xb_order_mark(ctx->areas[k]->orders[i], mark);
     }
 }
 
@@ -192,6 +220,7 @@ void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *)) {
  * be read leaves the area there too. */
 static int go_raw(xb_ctx *ctx, xb_area *a, uint32_t recno) {
   int32_t err = 0;
+  if (!xb_area_cold(ctx, a) || a->closed) return 0;
   uint32_t last = a->rdd->lastrec(a);
   a->found = 0;
   if (!a->rdd->flush(a, 0, &err)) {
@@ -207,6 +236,7 @@ static int go_raw(xb_ctx *ctx, xb_area *a, uint32_t recno) {
 }
 
 int xb_area_visible(xb_ctx *ctx, xb_area *a) {
+  if (ctx->set_deleted && (!xb_area_load(ctx, a) || a->closed)) return -1;
   if (ctx->set_deleted && a->rdd->deleted(a)) return 0;
   if (a->filter.type != XB_T_BLOCK) return 1;
   xb_item r, block = a->filter;
@@ -219,6 +249,33 @@ int xb_area_visible(xb_ctx *ctx, xb_area *a) {
   return r.type != XB_T_LOGICAL || r.v.l;
 }
 
+/* The record after (`dir` 1) or before (-1) the current one in the controlling order (the record order when there
+ * is none; from the blank record after the last, the last one): 1 with it in `recno`, 0 for none, -1 after an error
+ * (raised). */
+static int step(xb_ctx *ctx, xb_area *a, int dir, uint32_t *recno) {
+  xb_order *o = xb_area_order(a);
+  if (o) return xb_order_step(ctx, a, o, dir, recno);
+  uint32_t last = a->rdd->lastrec(a);
+  if (a->eof) *recno = dir < 0 ? last : 0;
+  else *recno = dir < 0 ? a->recno - 1 : a->recno + 1;
+  return *recno >= 1 && *recno <= last;
+}
+
+/* The first (`dir` 1) or last (-1) record of the controlling order, as step(). */
+static int edge(xb_ctx *ctx, xb_area *a, int dir, uint32_t *recno) {
+  xb_order *o = xb_area_order(a);
+  if (o) return xb_order_edge(ctx, a, o, dir, recno);
+  uint32_t last = a->rdd->lastrec(a);
+  *recno = dir > 0 ? 1 : last;
+  return last > 0;
+}
+
+/* Goes to the record a step() or edge() gave (`r` its result): the blank record after the last for none. */
+static int arrive(xb_ctx *ctx, xb_area *a, int r, uint32_t recno) {
+  if (r < 0 || a->closed) return -1;
+  return go_raw(ctx, a, r ? recno : 0) ? r : -1;
+}
+
 /* From the current record, the first that shows going `dir` (+1 or -1), the record itself included: 1 found, 0 none
  * (left on the blank record after the last), -1 after an error. */
 static int seek_visible(xb_ctx *ctx, xb_area *a, int dir) {
@@ -226,8 +283,10 @@ static int seek_visible(xb_ctx *ctx, xb_area *a, int dir) {
     if (a->eof) return 0;
     int v = xb_area_visible(ctx, a);
     if (v) return v;
-    if (dir < 0 && a->recno == 1) return go_raw(ctx, a, 0) ? 0 : -1;
-    if (!go_raw(ctx, a, dir > 0 ? a->recno + 1 : a->recno - 1)) return -1;
+    uint32_t recno;
+    int r = step(ctx, a, dir, &recno);
+    r = arrive(ctx, a, r, recno);
+    if (r <= 0) return r;
   }
 }
 
@@ -237,9 +296,12 @@ int xb_area_goto(xb_ctx *ctx, xb_area *a, uint32_t recno) {
   return 1;
 }
 
-/* The first (`dir` +1) or last (-1) record that shows; `a` pinned. */
+/* The first (`dir` 1) or last (-1) record that shows; `a` pinned. */
 static int go_end(xb_ctx *ctx, xb_area *a, int dir) {
-  if (!go_raw(ctx, a, dir > 0 ? 1 : a->rdd->lastrec(a))) return 0;
+  if (!xb_area_cold(ctx, a) || a->closed) return 0; /* the record's entries before the order is read */
+  uint32_t recno;
+  int e = edge(ctx, a, dir, &recno);
+  if (arrive(ctx, a, e, recno) < 0) return 0;
   int r = seek_visible(ctx, a, dir);
   if (r < 0) return 0;
   a->bof = a->eof;
@@ -263,26 +325,21 @@ int xb_area_bottom(xb_ctx *ctx, xb_area *a) {
 /* xb_area_skip with `a` pinned. */
 static int skip(xb_ctx *ctx, xb_area *a, int64_t n) {
   if (n == 0) return go_raw(ctx, a, a->recno);
+  if (!xb_area_cold(ctx, a) || a->closed) return 0; /* the record's entries before the order is read */
+  uint32_t recno;
   if (n > 0) {
     a->bof = 0;
     for (; n > 0 && !a->eof; --n) {
-      if (!go_raw(ctx, a, a->recno + 1)) return 0;
+      int r = step(ctx, a, 1, &recno);
+      if (arrive(ctx, a, r, recno) < 0) return 0;
       if (seek_visible(ctx, a, 1) < 0) return 0;
     }
     return 1;
   }
   for (; n < 0; ++n) {
-    uint32_t from = a->recno;
-    int r;
-    if (a->eof) { /* from the blank record after the last: the last that shows */
-      if (!go_raw(ctx, a, a->rdd->lastrec(a))) return 0;
-      r = a->eof ? 0 : seek_visible(ctx, a, -1);
-    } else if (from == 1) {
-      r = 0;
-    } else {
-      if (!go_raw(ctx, a, from - 1)) return 0;
-      r = seek_visible(ctx, a, -1);
-    }
+    int r = step(ctx, a, -1, &recno);
+    r = arrive(ctx, a, r, recno);
+    if (r > 0) r = seek_visible(ctx, a, -1);
     if (r < 0) return 0;
     if (r == 0) { /* none before: BOF, on the first record that shows */
       if (!go_end(ctx, a, 1)) return 0;
@@ -301,10 +358,49 @@ int xb_area_skip(xb_ctx *ctx, xb_area *a, int64_t n) {
   return ok;
 }
 
+int xb_area_seek(xb_ctx *ctx, xb_area *a, const xb_item *v, int soft, int last) {
+  xb_order *o = xb_area_order(a);
+  unsigned char key[XB_NTX_KEY_MAX];
+  size_t used;
+  if (!o) {
+    xb_error_of(ctx, a->rdd->name, EG_NOORDER, 1201, "", NULL, 0, XB_ERR_DEFAULT, 0, NULL, 0, NULL);
+    return 0;
+  }
+  if (!xb_order_value_key(o, v, key, &used)) { /* a value of another type than the key's finds nothing */
+    if (!go_raw(ctx, a, 0)) return 0;
+    a->bof = 0;
+    return 1;
+  }
+  xb_area_pin(a);
+  int ok = 0, match = 0;
+  uint32_t recno;
+  if (xb_area_cold(ctx, a) && !a->closed) { /* LAST: the last entry at or before the key, the end for none */
+    int r = xb_order_seek(ctx, a, o, key, used, last, &recno, &match);
+    r = arrive(ctx, a, r, recno);
+    if (r > 0) r = seek_visible(ctx, a, last ? -1 : 1);
+    ok = r >= 0;
+    match = r > 0 && xb_order_cursor_matches(o, key, used);
+    if (ok && !match && (!soft || (last && r == 0))) ok = go_raw(ctx, a, 0);
+    a->bof = 0;
+    a->found = ok && match;
+  }
+  xb_area_unpin(a);
+  return ok;
+}
+
 int64_t xb_area_field_index(const xb_area *a, const char *name, size_t len) {
   for (uint32_t k = 0; k < a->nfields; ++k)
     if (same_upper(name, len, a->fields[k].name)) return k;
   return -1;
+}
+
+int xb_area_load(xb_ctx *ctx, xb_area *a) {
+  int32_t err = 0;
+  if (a->rdd->load(a, &err)) return 1;
+  a->recno = a->rdd->lastrec(a) + 1; /* the driver is on the blank record after the last */
+  a->bof = a->eof = 1;
+  xb_area_error(ctx, a, EG_READ, 1010, "", err);
+  return 0;
 }
 
 int xb_area_field_get(xb_ctx *ctx, xb_area *a, uint32_t field, xb_item *r) {
@@ -316,7 +412,7 @@ int xb_area_field_get(xb_ctx *ctx, xb_area *a, uint32_t field, xb_item *r) {
 }
 
 int xb_area_field_put(xb_ctx *ctx, xb_area *a, uint32_t field, const xb_item *v) {
-  if (!xb_area_writable(ctx, a)) return 0;
+  if (!xb_area_writable(ctx, a) || !xb_area_hot(ctx, a, 0) || a->closed) return 0;
   int32_t err = 0;
   int r = a->rdd->put(a, field, v, &err);
   if (r == XB_PUT_OK) return 1;

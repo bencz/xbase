@@ -8,6 +8,7 @@
 # <reserved> 1 for a RESERVED declaration, else 0.
 function(xb_rtl_functions file out_names out_byref)
   file(READ ${file} text)
+  string(REGEX REPLACE ";[ \t]*\r?\n[ \t]*" " " text "${text}") # a line ended by ';' goes on in the next one
   string(REGEX MATCHALL "\nEXTERN FUNCTION [^\n]*" lines "\n${text}") # declarations start a line
   set(names "")
   set(masks "")

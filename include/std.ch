@@ -47,8 +47,10 @@
 
 /* Work areas and tables (docs/rdd.md). A later rule wins: the plain forms come after the general ones. */
 #command USE                           => dbCloseArea()
-#command USE <(db)> [VIA <rdd>] [ALIAS <a>] [<new: NEW>] [<ex: EXCLUSIVE>] [<sh: SHARED>] [<ro: READONLY>] => ;
-         dbUseArea( <.new.>, <rdd>, <(db)>, <(a)>, iif( <.sh.> .or. <.ex.>, !<.ex.>, NIL ), <.ro.> )
+#command USE <(db)> [VIA <rdd>] [ALIAS <a>] [<new: NEW>] [<ex: EXCLUSIVE>] [<sh: SHARED>] [<ro: READONLY>] ;
+            [INDEX <(index1)> [, <(indexN)>]] => ;
+         dbUseArea( <.new.>, <rdd>, <(db)>, <(a)>, iif( <.sh.> .or. <.ex.>, !<.ex.>, NIL ), <.ro.> ) ;
+         [; dbSetIndex( <(index1)> )] [; dbSetIndex( <(indexN)> )]
 #command SELECT <whatever>             => dbSelectArea( <(whatever)> )
 #command SELECT <f>( [<list,...>] )    => dbSelectArea( <f>( <list> ) )
 #command CLOSE <alias>                 => <alias>->( dbCloseArea() )
@@ -71,10 +73,31 @@
 #command SKIP <n> ALIAS <a>            => <a>->( dbSkip( <n> ) )
 #command SET DELETED <x:ON,OFF,&>      => Set( _SET_DELETED, <(x)> )
 #command SET DELETED (<x>)             => Set( _SET_DELETED, <x> )
+#command SET SOFTSEEK <x:ON,OFF,&>     => Set( _SET_SOFTSEEK, <(x)> )
+#command SET SOFTSEEK (<x>)            => Set( _SET_SOFTSEEK, <x> )
+#command SET UNIQUE <x:ON,OFF,&>       => Set( _SET_UNIQUE, <(x)> )
+#command SET UNIQUE (<x>)              => Set( _SET_UNIQUE, <x> )
 #command SET FILTER TO                 => dbClearFilter()
 #command SET FILTER TO <xpr>           => dbSetFilter( <{xpr}>, <"xpr"> )
 #command SET FILTER TO <x:&>           => if ( Empty( <(x)> ) ) ; dbClearFilter() ; ;
                                           else ; dbSetFilter( <{x}>, <(x)> ) ; end
+
+/* Orders (indexes). */
+#command INDEX ON <key> [TAG <(tag)>] TO <(file)> [FOR <for>] [<u: UNIQUE>] [<asc: ASCENDING>] ;
+            [<d: DESCENDING>] [<a: ADDITIVE>] => ;
+         ordCondSet( <"for">, <{for}>, , , , , , , , , <.d.>, , <.a.> ) ;
+         ; ordCreate( <(file)>, <(tag)>, <"key">, <{key}>, iif( <.u.>, .T., NIL ) )
+#command SET INDEX TO                  => ordListClear()
+#command SET INDEX TO <(index1)> [, <(indexN)>] [<a: ADDITIVE>] => ;
+         if ! <.a.> ; ordListClear() ; end ; ordListAdd( <(index1)> ) [; ordListAdd( <(indexN)> )]
+#command SET ORDER TO                  => ordSetFocus( 0 )
+#command SET ORDER TO <n>              => ordSetFocus( <n> )
+#command SET ORDER TO TAG <(tag)>      => ordSetFocus( <(tag)> )
+#command SEEK <key> [<soft: SOFTSEEK>] [<last: LAST>] => ;
+         dbSeek( <key>, iif( <.soft.>, .T., NIL ), iif( <.last.>, .T., NIL ) )
+#command FIND <*text*>                 => dbSeek( <(text)> )
+#command REINDEX                       => ordListRebuild()
+#command CLOSE INDEXES                 => ordListClear()
 
 /* Commands over a scope of records: FOR, WHILE, NEXT, RECORD, REST, ALL (dbEval). */
 #command DELETE [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] [<rest: REST>] [ALL] => ;

@@ -1,0 +1,15 @@
+
+ERR DBCMD          1       1001 Argument error [DBSEEK] .F. .F. .F.
+last bb: .T.          6 bb
+soft last bz: .F.          6 bb
+soft last zz: .F.          5 dd
+soft last 0: .F.          8 .T.
+last zz: .F.          8 .T.
+soft last aa, deleted: .T.          7 aa
+order 0: RDD_INDEX_ K rdd_index_seek_d  .F.
+additive 13th:          3 RDD_INDEX_ RDD_INDEX_
+ties: 1A 3C 4D 5Z 2Z
+after 5:          2 .F.
+before 2:          5
+5 to B: 1A 5B 3C 4D 2Z
+2 to E: 1A 5B 3C 4D 2E

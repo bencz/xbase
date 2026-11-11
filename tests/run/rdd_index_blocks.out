@@ -1,0 +1,5 @@
+
+after a failed reindex:          0 RDD_INDEX_  1d 2b 3a 4c
+closed by a FOR block: .F.          1
+ERR DBCMD         30       1050 Operation not supported [ORDLISTCLEAR]
+orders kept:          1 RDD_INDEX_

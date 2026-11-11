@@ -59,8 +59,9 @@ Running big-endian programs needs a target sysroot and an emulator (for example 
 building (`crc32`), array cells read and changed in place in deeply nested loops (`pi`, digits of pi from a tape-machine
 program; `bench_pi <n>` prints n digits), double arithmetic (`float`, the Mandelbrot set) and integers mixed with
 doubles (`mixed`: `i + 3.14`, `i / 4`, `Int()`, comparisons across both), and messages to objects of compiled classes
-(`oop`: method calls, one through `Super`, variable reads and assignments), and generators (`generator`: one feeding
-another). Each one times its own work with
+(`oop`: method calls, one through `Super`, variable reads and assignments), generators (`generator`: one feeding
+another), and an order over a table (`index`: built, searched with SEEK, walked, kept up to date as records are
+appended; its files are deleted at the end). Each one times its own work with
 `ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name> <milliseconds>
 ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`
 (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every program

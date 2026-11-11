@@ -12,8 +12,6 @@ int64_t xb_file_read_up_to(xb_file f, void *buf, size_t n, int32_t *err);
 
 /* Reads `n` bytes at `pos`: whether all of them were there (a file that ends early is XB_FERR_FAILURE). */
 int xb_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err);
-/* Writes `n` bytes at `pos` (past the end, the file grows). */
-int xb_file_write_at(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err);
 
 /* Where the last component of `len` bytes of `name` starts (`*start`) and where its extension, the part from its last
  * '.', starts (`*ext`; `len` when it has none). */

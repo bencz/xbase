@@ -32,18 +32,22 @@
 #define DBF_MAX_NUMBER 255       /* the length byte of a number */
 #define DBF_DATE_LEN 8           /* YYYYMMDD */
 #define DBF_MEMO_LEN 10          /* a memo's block number */
+#define DBF_AHEAD 65536          /* bytes of records read at once when records are read in order */
 
 typedef struct dbf {
   xb_file f;
   uint32_t count;          /* records */
   uint32_t headerLen, recordLen;
   unsigned char header[DBF_HEADER];
-  unsigned char *record;   /* the current record */
+  unsigned char *record;   /* the current record, and the end mark after it (written with the last record) */
   uint32_t recno;          /* its number (count + 1: the blank record after the last) */
+  int loaded;              /* the record's bytes are read (navigation reads them when they are first used) */
   int dirty;               /* the record changed since it was read */
   int changed;             /* the table changed: the header gets the date and count */
   int hasMemo;             /* the table has memo fields, and `memo` is open */
   xb_dbt memo;
+  unsigned char *ahead;    /* records read ahead: aheadCount of them from aheadFirst */
+  uint32_t aheadFirst, aheadCount, lastRead;
 } dbf;
 
 static dbf *state(xb_area *a) { return a->state; }
@@ -217,8 +221,12 @@ static int dbf_open(xb_area *a, const char *path, int readonly, xb_open_failure 
     free(memoPath);
     d->hasMemo = 1;
   }
-  d->record = malloc(d->recordLen);
+  d->record = malloc(d->recordLen + 1u);
   if (!d->record) xb_gc_fatal("out of memory");
+  d->record[d->recordLen] = DBF_EOF;
+  memset(d->record, ' ', d->recordLen);
+  d->recno = d->count + 1;
+  d->loaded = 1;
   free(h);
   a->state = d;
   a->fields = fields;
@@ -238,7 +246,7 @@ fail:
 static int write_header(dbf *d, int32_t *err) {
   put_today(d->header + 1);
   xb_put_le32(d->header + 4, d->count);
-  if (!xb_file_write_at(d->f, 0, d->header, DBF_HEADER, err)) return 0;
+  if (!xb_platform_file_write_at(d->f, 0, d->header, DBF_HEADER, err)) return 0;
   d->changed = 0;
   return 1;
 }
@@ -246,11 +254,10 @@ static int write_header(dbf *d, int32_t *err) {
 static int dbf_flush(xb_area *a, int header, int32_t *err) {
   dbf *d = state(a);
   if (d->dirty) {
-    if (!xb_file_write_at(d->f, record_pos(d, d->recno), d->record, d->recordLen, err)) return 0;
-    if (d->recno == d->count) { /* the last record: the end mark after it */
-      unsigned char eof = DBF_EOF;
-      if (!xb_platform_file_write(d->f, &eof, 1, err)) return 0;
-    }
+    size_t n = d->recordLen + (d->recno == d->count ? 1u : 0u); /* the last record: the end mark after it */
+    if (!xb_platform_file_write_at(d->f, record_pos(d, d->recno), d->record, n, err)) return 0;
+    if (d->recno - d->aheadFirst < d->aheadCount) /* the copy read ahead too */
+      memcpy(d->ahead + (size_t)(d->recno - d->aheadFirst) * d->recordLen, d->record, d->recordLen);
     d->dirty = 0;
   }
   return !header || !d->changed || write_header(d, err);
@@ -269,6 +276,7 @@ static int dbf_close(xb_area *a, int32_t *err) {
     ok = 0;
   }
   free(d->record);
+  free(d->ahead);
   free(d);
   free(a->fields);
   a->state = NULL;
@@ -278,15 +286,53 @@ static int dbf_close(xb_area *a, int32_t *err) {
 
 static uint32_t dbf_lastrec(xb_area *a) { return state(a)->count; }
 
+/* Reads record `recno` into the record buffer: from the records read ahead, or with the ones after it when the
+ * records are read in order. */
+static int read_record(dbf *d, uint32_t recno, int32_t *err) {
+  if (recno - d->aheadFirst < d->aheadCount) {
+    memcpy(d->record, d->ahead + (size_t)(recno - d->aheadFirst) * d->recordLen, d->recordLen);
+    return 1;
+  }
+  uint32_t n = DBF_AHEAD / d->recordLen;
+  if (recno != d->lastRead + 1 || n < 2)
+    return xb_file_read_at(d->f, record_pos(d, recno), d->record, d->recordLen, err);
+  if (n > d->count - recno + 1) n = d->count - recno + 1;
+  if (!d->ahead && !(d->ahead = malloc(DBF_AHEAD))) xb_gc_fatal("out of memory");
+  d->aheadCount = 0;
+  if (!xb_file_read_at(d->f, record_pos(d, recno), d->ahead, (size_t)n * d->recordLen, err)) return 0;
+  d->aheadFirst = recno;
+  d->aheadCount = n;
+  memcpy(d->record, d->ahead, d->recordLen);
+  return 1;
+}
+
+/* Makes record `recno` current; its bytes are read when first used (dbf_load). */
 static int dbf_go(xb_area *a, uint32_t recno, int32_t *err) {
+  XB_UNUSED(err);
   dbf *d = state(a);
-  if (recno >= 1 && recno <= d->count && xb_file_read_at(d->f, record_pos(d, recno), d->record, d->recordLen, err)) {
+  if (recno >= 1 && recno <= d->count) {
+    if (recno != d->recno) d->loaded = 0;
     d->recno = recno;
     return 1;
   }
-  d->recno = d->count + 1; /* the blank record after the last, also when the record cannot be read */
+  d->recno = d->count + 1; /* the blank record after the last */
   memset(d->record, ' ', d->recordLen);
-  return recno < 1 || recno > d->count;
+  d->loaded = 1;
+  return 1;
+}
+
+static int dbf_load(xb_area *a, int32_t *err) {
+  dbf *d = state(a);
+  if (d->loaded) return 1;
+  if (!read_record(d, d->recno, err)) { /* the blank record after the last instead */
+    d->recno = d->count + 1;
+    memset(d->record, ' ', d->recordLen);
+    d->loaded = 1;
+    return 0;
+  }
+  d->lastRead = d->recno;
+  d->loaded = 1;
+  return 1;
 }
 
 static int dbf_append(xb_area *a, int32_t *err) {
@@ -294,7 +340,7 @@ static int dbf_append(xb_area *a, int32_t *err) {
   if (!dbf_flush(a, 0, err)) return 0;
   d->recno = ++d->count;
   memset(d->record, ' ', d->recordLen);
-  d->dirty = d->changed = 1;
+  d->loaded = d->dirty = d->changed = 1;
   return 1;
 }
 
@@ -315,6 +361,7 @@ static void put_memo_block(char *p, uint32_t block) {
 
 static int dbf_get(xb_area *a, uint32_t field, xb_item *r, int32_t *err) {
   dbf *d = state(a);
+  if (!dbf_load(a, err)) return 0;
   const xb_field_info *fi = &a->fields[field];
   const char *p = (const char *)d->record + fi->offset;
   switch (fi->type) {
@@ -358,6 +405,7 @@ static int dbf_get(xb_area *a, uint32_t field, xb_item *r, int32_t *err) {
 
 static int dbf_put(xb_area *a, uint32_t field, const xb_item *v, int32_t *err) {
   dbf *d = state(a);
+  if (!dbf_load(a, err)) return XB_PUT_FAILED;
   const xb_field_info *fi = &a->fields[field];
   char *p = (char *)d->record + fi->offset;
   int r = XB_PUT_OK;
@@ -371,14 +419,9 @@ static int dbf_put(xb_area *a, uint32_t field, const xb_item *v, int32_t *err) {
   }
   case 'D': {
     if (v->type != XB_T_DATE) return XB_PUT_TYPE;
-    int y, m, day;
-    if (v->v.i == 0) {
-      memset(p, ' ', fi->len);
-      break;
-    }
-    xb_date_decode(v->v.i, &y, &m, &day);
-    int digits[DBF_DATE_LEN] = {y / 1000 % 10, y / 100 % 10, y / 10 % 10, y % 10, m / 10, m % 10, day / 10, day % 10};
-    for (int i = 0; i < DBF_DATE_LEN; ++i) p[i] = (char)('0' + digits[i]);
+    char digits[XB_DATE_DIGITS_SIZE]; /* blanks for the empty date */
+    xb_date_to_digits(v->v.i, digits);
+    memcpy(p, digits, DBF_DATE_LEN);
     break;
   }
   case 'L':
@@ -404,6 +447,10 @@ static int dbf_put(xb_area *a, uint32_t field, const xb_item *v, int32_t *err) {
   return r;
 }
 
+static const unsigned char *dbf_field_bytes(xb_area *a, uint32_t field) {
+  return state(a)->record + a->fields[field].offset;
+}
+
 static int dbf_deleted(xb_area *a) { return state(a)->record[0] == DBF_DELETED; }
 
 static void dbf_set_deleted(xb_area *a, int deleted) {
@@ -417,7 +464,7 @@ static int cut(dbf *d, int32_t *err) {
   int64_t end = record_pos(d, d->count + 1);
   unsigned char eof = DBF_EOF;
   d->changed = 1;
-  return xb_platform_file_truncate(d->f, end, err) && xb_file_write_at(d->f, end, &eof, 1, err);
+  return xb_platform_file_truncate(d->f, end, err) && xb_platform_file_write_at(d->f, end, &eof, 1, err);
 }
 
 /* Copies the memos of the current record after the last memo: the block of each copy in `blocks`, one per memo
@@ -474,7 +521,7 @@ static int pack(xb_area *a, int32_t *err) {
     if (!ok || d->record[0] == DBF_DELETED) continue;
     if (memos) set_memos(a, blocks + (size_t)kept * memos, 0);
     ++kept;
-    if (kept != k || memos) ok = xb_file_write_at(d->f, record_pos(d, kept), d->record, d->recordLen, err);
+    if (kept != k || memos) ok = xb_platform_file_write_at(d->f, record_pos(d, kept), d->record, d->recordLen, err);
   }
   free(blocks);
   if (!ok) return 0;
@@ -485,23 +532,29 @@ static int pack(xb_area *a, int32_t *err) {
   for (uint32_t k = 1; moved && k <= d->count; ++k) {
     if (!xb_file_read_at(d->f, record_pos(d, k), d->record, d->recordLen, err)) return 0;
     set_memos(a, NULL, from - 1);
-    if (!xb_file_write_at(d->f, record_pos(d, k), d->record, d->recordLen, err)) return 0;
+    if (!xb_platform_file_write_at(d->f, record_pos(d, k), d->record, d->recordLen, err)) return 0;
   }
   return !moved || xb_dbt_cut(&d->memo, from, err);
 }
 
 static int dbf_pack(xb_area *a, int32_t *err) {
   dbf *d = state(a);
+  d->aheadCount = 0;
   int ok = dbf_flush(a, 0, err) && pack(a, err);
   d->recno = d->count + 1; /* the record read last is no longer the current one */
   memset(d->record, ' ', d->recordLen);
+  d->loaded = 1;
   return ok;
 }
 
 static int dbf_zap(xb_area *a, int32_t *err) {
   dbf *d = state(a);
+  d->aheadCount = 0;
   d->dirty = 0;
   d->count = 0;
+  d->recno = 1; /* the blank record after the last */
+  memset(d->record, ' ', d->recordLen);
+  d->loaded = 1;
   return cut(d, err) && (!d->hasMemo || xb_dbt_zap(&d->memo, err));
 }
 
@@ -525,6 +578,8 @@ const xb_rdd xb_rdd_dbf = {
     .append = dbf_append,
     .get = dbf_get,
     .put = dbf_put,
+    .field_bytes = dbf_field_bytes,
+    .load = dbf_load,
     .deleted = dbf_deleted,
     .set_deleted = dbf_set_deleted,
     .pack = dbf_pack,
