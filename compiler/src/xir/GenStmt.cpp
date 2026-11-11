@@ -237,17 +237,24 @@ void Generator::genForEach(const ForEachStmt &st) {
   auto index = [&](size_t k) -> Value * {
     return st.descend ? b.intSub(last[k], step) : b.intAdd(step, b.i64(1));
   };
+  // Ascending, the collections are tested in order and the first one at its end stops the loop: an enumerator after
+  // it is not moved (its length test sends MoveNext).
   Value *inRange = nullptr;
   for (size_t k = 0; k < n; ++k) {
     Value *i = index(k); // emitted before the length: one statement per instruction keeps the order fixed
-    Value *ok;
     if (st.descend) {
-      ok = b.intCmp(IntPred::Ge, i, b.i64(1));
-    } else {
-      Value *len = b.enumLen(colls[k]);
-      ok = b.intCmp(IntPred::Le, i, len);
+      Value *ok = b.intCmp(IntPred::Ge, i, b.i64(1));
+      inRange = inRange ? b.boolAnd(inRange, ok) : ok;
+      continue;
     }
-    inRange = inRange ? b.boolAnd(inRange, ok) : ok;
+    Value *ok = b.intCmp(IntPred::Le, i, b.enumLen(colls[k]));
+    if (k + 1 == n) {
+      inRange = ok;
+      break;
+    }
+    BasicBlock *more = cur_.fn->addBlock("each.test.more");
+    b.condBr(ok, more, end);
+    b.setBlock(more);
   }
   b.condBr(inRange, body, end);
 
@@ -366,11 +373,15 @@ void Generator::exitCleanups(size_t loops, bool leaveEach) {
   BasicBlock *unwind = b.unwindBlock();
   std::vector<Cleanup> all = cur_.cleanups;
   size_t each = cur_.eachVars.size();
+  // When ALWAYS code runs on the way, it sees the function's variables: every loop variable gets its value back;
+  // otherwise only those others may see.
+  bool everyOne = false;
+  for (size_t k = all.size(); k-- > 0 && all[k].loops >= loops;) everyOne |= all[k].always != nullptr;
   auto leaveDownTo = [&](size_t depth) {
     for (; leaveEach && each > depth; --each) {
       const EachVar &v = cur_.eachVars[each - 1];
       Var *x = varOf(*v.var);
-      if (mayBeInCell(*x)) b.eachLeave(x, eachInCell(v), v.saved);
+      if (everyOne || mayBeInCell(*x)) b.eachLeave(x, eachInCell(v), v.saved);
     }
   };
   for (size_t k = all.size(); k-- > 0 && all[k].loops >= loops;) {
@@ -384,7 +395,10 @@ void Generator::exitCleanups(size_t loops, bool leaveEach) {
     b.br(code);
     b.setUnwind(all[k].unwind);
     b.setBlock(code);
+    std::vector<EachVar> loopVars = cur_.eachVars;
+    cur_.eachVars.resize(each); // the loops already left: their variables hold their own values again
     genBlock(*all[k].always);
+    cur_.eachVars = std::move(loopVars);
     if (b.terminated()) break;
   }
   cur_.cleanups = all;

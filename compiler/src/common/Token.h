@@ -42,7 +42,7 @@ enum class Tok : uint8_t {
   Hash,        // # starting a directive or a dumb-stringify result marker
   Backslash,   // \ (escape in rule definitions)
   Other,       // any other character; rejected by the parser
-  BlockBody,   // inside the preprocessor only: the statements of an extended codeblock, as one token
+  BlockBody,   // inside the preprocessor only: the statements of an extended codeblock, as one token (`ival`: which)
 };
 
 const char *tokName(Tok t);

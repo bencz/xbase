@@ -53,7 +53,22 @@ PROCEDURE Main()
       c += "[" + x + "]"
    NEXT
    ? "words:", c
+   e := TRangeEnum():New( 1, 3 )
+   FOR EACH x, y IN { "a" }, e
+   NEXT
+   c := ""
+   FOR EACH y IN e
+      c += Str( y, 2 )
+   NEXT
+   ? "not moved past the end of another:", c
    ErrorBlock( {| oErr | Break( oErr ) } )
+   y := TForm():New()
+   BEGIN SEQUENCE
+      FOR EACH x IN y
+      NEXT
+   RECOVER USING e
+      ? "not an enumerator:", e:subCode, y:data
+   END SEQUENCE
    FOR EACH e IN { TBroken():New(), TNoEnum():New() }
       BEGIN SEQUENCE
          FOR EACH x IN e
@@ -107,4 +122,10 @@ ENDCLASS
 
 CLASS TNoEnum
    VAR v
+ENDCLASS
+
+// Not an enumerator, though it has a Reset(): FOR EACH must not call it.
+CLASS TForm
+   VAR data INIT "kept"
+   METHOD Reset() INLINE ::data := ""
 ENDCLASS

@@ -35,7 +35,7 @@ void xb_each_source(xb_ctx *ctx, xb_item *r, const xb_item *coll, uint32_t desce
   if (coll->type != XB_T_OBJECT) return;
   if (answers(coll, "GETENUMERATOR", 0)) {
     if (!send0(ctx, r, coll, "GETENUMERATOR")) return;
-  } else if (answers(coll, "RESET", 0)) {
+  } else if (answers(coll, "MOVENEXT", 0) && answers(coll, "CURRENT", 1) && answers(coll, "RESET", 0)) {
     xb_item ignored;
     xb_set_nil(&ignored);
     xb_gc_root_push(ctx, &ignored);

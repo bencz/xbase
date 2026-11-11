@@ -186,6 +186,7 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   for (uint32_t s = 0; s < blk.numLocals; ++s) { // the parameters, then an extended codeblock's LOCALs
     Var *v = fn->addVar(Var::Kind::Frame, s, s < fn->numParams ? blk.params[s].name : "");
     v->param = s < fn->numParams;
+    v->shared = s < blk.boxed.size() && blk.boxed[s];
   }
   for (uint32_t k = 0; k < blk.captures.size(); ++k) fn->addVar(Var::Kind::Capture, k, "");
 

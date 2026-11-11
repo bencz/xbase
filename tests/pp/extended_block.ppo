@@ -11,3 +11,7 @@ RETURN x + y
 }, c := {||
 QOut( "second" )
 }
+d := {||
+RETURN 2
+}
+QOut( "{|| RETURN 1}" )

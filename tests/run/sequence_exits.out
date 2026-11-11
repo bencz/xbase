@@ -8,5 +8,6 @@ finally sees orig
 restored: orig
 finally sees orig
 caught: f
-restored after a throw: orig
+restored after a throw: orig finally sees orig always sees orig
+plain variable: NIL          1 NIL          1
 always while quitting

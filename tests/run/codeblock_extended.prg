@@ -1,7 +1,8 @@
 // Extended codeblocks, compared with the reference: {| params | at the end of a line, then statements, then a line
 // starting with }: LOCALs of their own, RETURN (anywhere; NIL without one), loops and IF, the enclosing function's
 // LOCALs captured and changed, inside a command (?) and as an argument, nested ones, and one evaluated many times.
-// Also FOR EACH, TRY and WITH OBJECT inside one.
+// Also FOR EACH, TRY and WITH OBJECT inside one. Beyond the reference (which rejects them): a codeblock inside one
+// capturing its LOCALs (also WITH OBJECT's), and its LOCALs passed by reference.
 PROCEDURE Main()
    LOCAL n := 10, b, c, a := { 3, 1, 2 }
    b := {| x, y |
@@ -54,9 +55,35 @@ PROCEDURE Main()
       END
       RETURN NIL
    }, ErrorNew() )
+   ? "by reference:", Eval( {| p |
+      LOCAL z := 1
+      Bump( @z )
+      RETURN Str( z, 2 ) + Str( z + p, 4 )
+   }, 100 )
+   ? "captured:", Eval( {| p |
+      LOCAL k := p * 2, inner
+      inner := {|| k++ }
+      Eval( inner )
+      RETURN k + Eval( inner )
+   }, 5 )
+   ? "with object:", Eval( {| o |
+      LOCAL r
+      WITH OBJECT o
+         r := Eval( {|| :cargo } )
+      END
+      RETURN r
+   }, TCargo():New() )
    n := 0
    FOR c := 1 TO 1000
       Eval( b, 0, 0 )
    NEXT
    ? "many:", n
 RETURN
+
+STATIC PROCEDURE Bump( v )
+   v++
+RETURN
+
+CLASS TCargo
+   VAR cargo INIT 5
+ENDCLASS

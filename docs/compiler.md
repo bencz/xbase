@@ -112,8 +112,9 @@ Statements:
   cannot leave its body (Clipper rule) nor `ALWAYS`; in `RECOVER` they can (`ALWAYS` runs first). `BREAK [value]` is
   a `std.ch` command (`__Break()`, the same as `Break()` and `Throw()`).
 - `WITH OBJECT expr ... END` (`END WITH` too): inside, `:name` (also `:name( args )`, assigned, `++`) is a message to
-  the object, evaluated once into a `LOCAL` of its own (`WithObjectStmt::hidden`, a name no program can write), so a
-  codeblock made there keeps sending to that object, even after `END` (the reference sends to the `WITH OBJECT`
+  the object, evaluated once into a `LOCAL` of its own (`WithObjectStmt::hidden`, a name no program can write). A
+  codeblock made there captures that variable, as it would any `LOCAL`: it sends to the object the statement holds,
+  also after `END`, and to the next one when the statement runs again (the reference sends to the `WITH OBJECT`
   running when the block is evaluated). The innermost `WITH OBJECT` wins; `:name` outside one is an error.
 - `TRY ... [CATCH [v] ...] [FINALLY ...] END` (`END TRY` too): a sequence whose error block is `{| e | Break( e ) }`,
   so an error reaches `CATCH` as its `Error` object and a `Throw( x )` as `x`; `FINALLY` is its `ALWAYS`. `RETURN`,
@@ -153,7 +154,8 @@ elements pass `NIL`; a codeblock body has at least one expression. An extended c
 line, then statements, then a line that starts with `}` (the expression goes on after it), has statements for a body
 (`BlockExpr::extended`, `statements`): `LOCAL`s of its own after the parameters, `RETURN` with its result (`NIL` when it
 ends without one; the procedure rule does not apply), any other statement but `STATIC`, `MEMVAR`, `PRIVATE`, `PUBLIC`
-and `PARAMETERS`; as in the reference, a codeblock inside cannot capture its `LOCAL`s or parameters. It is generated
+and `PARAMETERS`. A codeblock inside captures its `LOCAL`s like a function's, and they can be passed by reference
+(`BlockExpr::boxed`; the reference rejects the capture), but not its parameters, as for any codeblock. It is generated
 like any codeblock, with a frame of its own. A call argument `@name` or `@name[i]...` passes a variable or an element by
 reference (`RefExpr`); `@` anywhere else is an error (references in array literals are not supported yet), and so are
 function references `@name()`. `...` as the last argument of a call or a send or the last element of an array literal
@@ -335,17 +337,19 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   shortest collection and sees elements added by the body; a descending one stops when an index reaches 0. The variables
   get their saved values back at the end (`each.leave`, also through `EXIT`), and on `RETURN` and when unwinding leaves
   the loop those others can see (a `STATIC`, a shared variable, a parameter), all of them when the unwinding stops at a
-  `BEGIN SEQUENCE` of the function. One reference per variable serves the loop and is moved to each element
-  (`each.move`). A variable shared when the loop starts (in a cell, or a parameter that received an element by
-  reference; `each.in_cell`) holds it inside its cell, so everyone sharing the variable sees the current element and,
-  after the loop, the restored value. A codeblock or reference that takes a `LOCAL` or parameter while it holds a loop's
-  reference gets the current element instead of the variable, which stays the loop's: later iterations, inner loops on
-  the same variable (here or in a callee) and the restore do not change what it designates. A `STATIC` is one variable
-  for everyone: a reference to it designates it, and the loop follows its cell from the moment one is made. In `FOR EACH
-  k => v`, `k` is an ordinary variable, other than `v` (the parser rejects `FOR EACH x => x`): before each iteration
-  `each.key` stores into it the key of the current hash entry, or the index for an array or a string, so assigning it
-  changes nothing else, and after the loop it keeps the last key stored (the one `EXIT` left). A `k` that is the
-  variable of an enclosing `FOR EACH` receives the keys as any assignment would: in that loop's element.
+  `BEGIN SEQUENCE` of the function or a `RETURN` runs `ALWAYS` code (before that code, the loops inside its sequence).
+  An ascending loop over several collections stops at the first one at its end, so an enumerator after it is not moved.
+  One reference per variable serves the loop and is moved to each element (`each.move`). A variable shared when the loop
+  starts (in a cell, or a parameter that received an element by reference; `each.in_cell`) holds it inside its cell, so
+  everyone sharing the variable sees the current element and, after the loop, the restored value. A codeblock or
+  reference that takes a `LOCAL` or parameter while it holds a loop's reference gets the current element instead of the
+  variable, which stays the loop's: later iterations, inner loops on the same variable (here or in a callee) and the
+  restore do not change what it designates. A `STATIC` is one variable for everyone: a reference to it designates it,
+  and the loop follows its cell from the moment one is made. In `FOR EACH k => v`, `k` is an ordinary variable, other
+  than `v` (the parser rejects `FOR EACH x => x`): before each iteration `each.key` stores into it the key of the
+  current hash entry, or the index for an array or a string, so assigning it changes nothing else, and after the loop it
+  keeps the last key stored (the one `EXIT` left). A `k` that is the variable of an enclosing `FOR EACH` receives the
+  keys as any assignment would: in that loop's element.
 - `BEGIN SEQUENCE` gives the blocks of its body an unwind block, the handler: a `BREAK` (pending after an operation
   of the body, or a call) is taken there and `RECOVER` follows, with the `BREAK` value stored in the `USING`
   variable; other requests go on unwinding (see [xir.md](xir.md#control-flow-for-errors-and-exceptions)). `WITH`

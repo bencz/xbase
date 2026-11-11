@@ -106,16 +106,17 @@ void Preprocessor::joinBlocks(Lexer &lex, Toks &line) {
     bool closed = false;
     while (!diag_.limitReached() && lex.nextLine(next)) {
       if (next.empty()) continue;
+      if (next[0].kind == Tok::Hash) {
+        directive(next);
+        continue;
+      }
+      if (!active()) continue; // a skipped #if part: its } lines close nothing
       if (next[0].kind == Tok::RBrace) {
         closed = true;
         break;
       }
-      if (next[0].kind == Tok::Hash) {
-        directive(next);
-      } else if (active()) {
-        joinBlocks(lex, next);
-        processLine(next);
-      }
+      joinBlocks(lex, next);
+      processLine(next);
     }
     std::swap(out_, body);
     if (!closed) {
@@ -125,7 +126,7 @@ void Preprocessor::joinBlocks(Lexer &lex, Toks &line) {
     Token t;
     t.kind = Tok::BlockBody;
     t.loc = open;
-    t.text = std::to_string(blockBodies_.size());
+    t.ival = (int64_t)blockBodies_.size();
     blockBodies_.push_back(std::move(body));
     line.push_back(std::move(t));
     line.insert(line.end(), next.begin(), next.end());
@@ -206,7 +207,7 @@ void Preprocessor::emit(const Toks &st) {
     }
     eos.loc = t.loc; // the line that opens the codeblock ends, then its statements (each with its end)
     out_.push_back(eos);
-    const Toks &body = blockBodies_.at(std::stoul(t.text));
+    const Toks &body = blockBodies_.at((size_t)t.ival);
     out_.insert(out_.end(), body.begin(), body.end());
   }
   eos.loc = st.back().loc;
@@ -346,7 +347,7 @@ std::string Preprocessor::quoteString(const std::string &value) {
   return s + '"' + value.substr(start) + '"';
 }
 
-std::string Preprocessor::render(const std::vector<Token> &toks, size_t from, size_t to) {
+std::string Preprocessor::render(const std::vector<Token> &toks, size_t from, size_t to) const {
   std::string s;
   to = std::min(to, toks.size());
   for (size_t i = from; i < to; ++i) {
@@ -356,6 +357,13 @@ std::string Preprocessor::render(const std::vector<Token> &toks, size_t from, si
       s += quoteString(t.text);
     } else if (t.kind == Tok::EndOfStmt) {
       s += '\n';
+    } else if (t.kind == Tok::BlockBody) { // the codeblock's statements on one line, separated by ;
+      std::string body = render(blockBodies_.at((size_t)t.ival));
+      for (size_t at = 0, end; at < body.size(); at = end + 1) {
+        end = body.find('\n', at);
+        if (end == std::string::npos) end = body.size();
+        s += (at ? "; " : " ") + body.substr(at, end - at);
+      }
     } else {
       s += t.text;
     }

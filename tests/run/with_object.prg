@@ -1,8 +1,8 @@
 // WITH OBJECT, compared with the reference: :name reads, assigns (also :name++ and :name += x) and calls on the
 // object, evaluated once (assigning the variable it came from changes nothing), nested ones (the innermost wins), a
-// codeblock made inside and evaluated there, and END WITH. Deliberate difference: a codeblock keeps the object it was
-// made with, also when it is evaluated after END (the reference sends to whatever WITH OBJECT runs then, and fails
-// outside one).
+// codeblock made inside and evaluated there, and END WITH. Deliberate difference: a codeblock captures the object the
+// statement holds, also when it is evaluated after END (the reference sends to whatever WITH OBJECT runs then, and
+// fails outside one).
 PROCEDURE Main()
    LOCAL o := TP():New(), b, p := TP():New(), a := { TP():New(), TP():New() }, x
    WITH OBJECT o
@@ -30,6 +30,15 @@ PROCEDURE Main()
       END
    NEXT
    ? "loop:", a[ 1 ]:x, a[ 2 ]:x
+   b := {}
+   a[ 1 ]:x := "one"
+   a[ 2 ]:x := "two"
+   FOR EACH x IN a
+      WITH OBJECT x
+         AAdd( b, {|| :x } )
+      END
+   NEXT
+   ? "blocks made in a loop:", Eval( b[ 1 ] ), Eval( b[ 2 ] )
 RETURN
 
 CLASS TP

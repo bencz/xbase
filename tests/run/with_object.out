@@ -8,3 +8,4 @@ compound:         11        120
 objects:          5          5
 block after END:         12
 loop:          7          7
+blocks made in a loop: two two

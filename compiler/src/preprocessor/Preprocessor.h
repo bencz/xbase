@@ -48,7 +48,7 @@ public:
   // Terminates the stream with Tok::Eof and hands it over.
   std::vector<Token> takeOutput();
   // Text form of a token stream (.ppo files, stringification).
-  static std::string render(const std::vector<Token> &toks, size_t from = 0, size_t to = SIZE_MAX);
+  std::string render(const std::vector<Token> &toks, size_t from = 0, size_t to = SIZE_MAX) const;
 
 private:
   using Toks = std::vector<Token>;

@@ -334,7 +334,7 @@ static int compile(int argc, char **argv) {
     if (diag.errorCount() != errors) continue;
 
     if (ppOnly || ppFile) {
-      std::string text = xb::Preprocessor::render(tokens, prelude);
+      std::string text = pp.render(tokens, prelude);
       if (ppOnly) {
         std::fputs(text.c_str(), stdout);
         continue;

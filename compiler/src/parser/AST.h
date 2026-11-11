@@ -237,6 +237,8 @@ struct BlockExpr : Expr {
   // parameters in its frame, and RETURN gives its result (NIL without one).
   bool extended = false;
   std::vector<std::unique_ptr<Stmt>> statements;
+  std::vector<bool> boxed;       // set by Sema: by frame slot, an extended codeblock's LOCAL captured or passed by
+                                 // reference
   // Set by Sema:
   uint32_t numLocals = 0;        // frame slots (the parameters)
   struct Capture {

@@ -7,5 +7,7 @@ nested:  11 21 22 31 32 33
 two: 1a 2b 
 unchanged:  1 2 3 4
 words: [one][two][three]
+not moved past the end of another:  2 3
+not an enumerator:       1068 kept
 error:       1081 Argument error +
 error:       1068 Argument error array access
