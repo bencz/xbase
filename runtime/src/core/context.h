@@ -40,6 +40,7 @@ struct xb_ctx {
   char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
   int32_t  epoch;           /* SET EPOCH */
   int      century;         /* SET CENTURY */
+  int32_t  file_error;      /* FError(): the code of the last file function (rtl/files.c) */
 };
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);

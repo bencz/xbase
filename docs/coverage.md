@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 105 of 551 done. Commands (`std.ch` families): 25 of 155 done.
+Functions: 124 of 551 done. Commands (`std.ch` families): 25 of 155 done.
 
 ## Statements (grammar)
 
@@ -88,11 +88,11 @@ Other standard headers, each to be provided with the matching runtime support: `
 **AAdd**, **AClone**, **ACopy**, **ADel**, **AEval**, **AFill**, **AIns**, **Array**, **AScan**, **ASize**, **ASort**,
 **ATail**
 
-### Files, directories and environment (0 of 23 done)
+### Files, directories and environment (19 of 23 done)
 
-*ADir*, *CurDir*, *DirChange*, *Directory*, *DiskChange*, *DiskName*, *DiskSpace*, *FClose*, *FCreate*, *FErase*,
-*FError*, *File*, *FOpen*, *FRead*, *FReadStr*, *FRename*, *FSeek*, *FSetDevMod*, *FWrite*, *GetEnv*, *IsDisk*,
-*MemoRead*, *MemoWrit*
+**ADir**, **CurDir**, **DirChange**, **Directory**, *DiskChange*, *DiskName*, **DiskSpace**, **FClose**, **FCreate**,
+**FErase**, **FError**, **File**, **FOpen**, **FRead**, **FReadStr**, **FRename**, **FSeek**, *FSetDevMod*, **FWrite**,
+**GetEnv**, *IsDisk*, **MemoRead**, **MemoWrit** ([runtime.md](runtime.md#files))
 
 ### Screen, keyboard, mouse and UI (2 of 124 done)
 

@@ -829,7 +829,8 @@ Each one moved from C is measured against its C version (callgrind).
   (a value through `__ScanValue` too) and `HMerge` (without a filter, `HCopy`) (`rtl/collections.prg`), the `Enumerable`
   class and the classes of the built-in types (`rtl/collections.prg`, see [Classes](#classes)), `ErrorSys` and the
   default error handler (`rtl/errorsys.prg`), Clipper's time sample functions `Secs`, `TString`, `Days`, `ElapTime`,
-  `AMPM`, and `LenNum` (`rtl/time.prg`). Measured against their C versions (callgrind, x86-64): 200 000
+  `AMPM`, and `LenNum` (`rtl/time.prg`), `Directory`, `ADir`, `File`, `MemoRead`, `MemoWrit` and `FReadStr`
+  (`rtl/files.prg`, see [Files](#files)). Measured against their C versions (callgrind, x86-64): 200 000
   `? i, "abc", .T.` take 267M instructions (220M in C; about 6% more time to `/dev/null`); `AEval` over a million
   elements with `{| x | n += x }`, 121M (116M). Timed against the C versions they replaced (100,000 elements, 300
   rounds): `AScan` of a value and with a block 225 ms (170 ms in C), `AFill` with `ACopy` 108 ms (76 ms), `HEval` with
@@ -860,16 +861,47 @@ go further.
 
 ## Files
 
-The runtime reaches files through the platform layer (`platform/platform.h`): `xb_platform_file_open` (an existing
-file, for reading), `xb_platform_file_create` (a new or emptied file, for writing), `xb_platform_file_read`,
-`xb_platform_file_write` and `xb_platform_file_close`, on the system's handle as an integer, with paths in UTF-8
-(converted to UTF-16 on Windows). A failure gives the code
-`FError()` reports: a DOS error number (2 file not found, 3 path not found, 5 access denied, ...), which Windows
-reports itself and the POSIX build translates `errno` values to (31, general failure, for those without one).
-`xb_platform_path_separator` tells the characters that separate directories (`/`; also `\` and `:` on Windows).
-Binary fields of the file formats go through the little-endian helpers of `core/bytes.h`. `SAVE` and `RESTORE`
-([Memory variables](#memory-variables)) use this layer; the file functions of the language (`FOpen()`, ...) are not
-written yet.
+The runtime reaches files through the platform layer (`platform/platform.h`): files are opened with an `FOpen()` mode
+(`xb_platform_file_open`), created (`xb_platform_file_create`, open for reading and writing, with `FCreate()`'s
+attributes), read, written, moved in (`xb_platform_file_seek`) and closed on the system's handle as an integer, deleted
+and renamed; the layer also tells a file's entry (`xb_platform_file_info`), lists a directory (`xb_platform_dir_open`,
+`_next`, `_close`: name, size, attributes, time of last change in local time), whether names differ by letter case,
+the current directory, the free space of a drive and an environment variable (for `GetEnv()` only). Paths are UTF-8
+(UTF-16 on Windows). A failure gives the code `FError()` reports: a DOS error number (2 file not found, 3 path not
+found, 5 access denied, 25 seek error, ...), which Windows reports itself and the POSIX build translates `errno` values
+to (31, general failure, for those without one). `xb_platform_path_separator` tells the characters that separate
+directories (`/`; also `\` and `:` on Windows). Binary fields of the file formats go through the little-endian
+helpers of `core/bytes.h`. `SAVE` and `RESTORE` ([Memory variables](#memory-variables)) use this layer too.
+
+- `include/fileio.ch` (`FO_*` modes, `FS_*` origins, `FC_*` attributes, `F_ERROR`) is included by the runtime's C as
+  well, as `set.ch` is; `include/directry.ch` names the positions of a `Directory()` entry.
+- `rtl/files.c`: `FOpen`, `FCreate`, `FRead`, `FWrite`, `FSeek`, `FClose`, `FError`, `FErase`, `FRename`, `CurDir`,
+  `DirChange`, `DiskSpace`, `GetEnv` and `__DirScan`. A handle is the system's handle as a number. Each function stores
+  the code of its outcome for `FError()` (`xb_ctx.file_error`, 0 after a success); an argument of the wrong type gives
+  the function's failure value and leaves `FError()` alone, but a name that is not a string is `FOpen()`'s `BASE/2021`,
+  and an access of 3 is 5. `FRead( nHandle, @cBuffer, nBytes )` replaces the first bytes of the buffer, which keeps its
+  length; without the buffer passed by reference, or with `nBytes` below 1 or past its length, it reads nothing.
+  `FWrite` writes the whole buffer for a count past its length or below 0, and writes nothing, successfully, for a count
+  of 0. A seek before the start is 25 from any origin (an unknown origin is the start) and leaves the position, which
+  `FSeek` returns. `CurDir()` gives the current drive's directory without its drive and leading separators (its argument
+  is not used); `DiskSpace( [nDrive] )` counts the drive on Windows only. `__DirScan( cSpec )` gives
+  `{ cName, nSize, dDate, cTime, cAttributes }` for each entry, of any attributes (letters in the order `RHSDA`), whose
+  name matches the mask of `cSpec` (`*` and `?`; a mask ending in `.*` also takes a name without a dot, so `*.*` takes
+  every name, as in DOS; letter case counts where the file system tells it, and is folded for ASCII letters only); a
+  mask without wildcards names one entry, and none (a directory's name with its separator) every entry of the directory.
+  A link that leads nowhere is listed as the link itself.
+- `rtl/files.prg`: `Directory( [cSpec], [cAttributes] )` lists the files without the attributes D, H and S, and those
+  whose such attributes `cAttributes` all names (`V`, the volume label, gives none); `ADir` fills its arrays from it
+  (directories, hidden and system files too when the attributes' array is given; 0 without `cSpec`); `File()` is whether
+  a file, hidden or system too but not a directory, matches; `MemoRead` reads a whole file without the end mark
+  (`Chr( 26 )`) that ends it, `MemoWrit` writes the text and that mark; `FReadStr` reads and stops at the first NUL (the
+  file position past all the bytes read).
+- Safer than the reference on POSIX systems, as DOS and Windows behave: a directory cannot be opened (`FOpen`) or
+  deleted (`FErase`): 5; `FRename` never replaces another existing file: 5; a read-only file shows `R`. POSIX systems
+  have no sharing modes (the sharing bits of `FOpen()` are ignored there), and they mark names starting with a dot
+  hidden, which `Directory()` lists only with `H`, whatever the mask. `MemoRead` and `MemoWrit` leave the failure's code
+  in `FError()`. On Windows, `FCreate` of an existing hidden or system file keeps those attributes. File offsets are 64
+  bits everywhere.
 
 ## Program startup
 

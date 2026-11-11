@@ -64,16 +64,15 @@ Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 - `std.ch` has 16 of 155 command families ([coverage.md](coverage.md#commands-stdch)); most of the rest need the
   runtime parts below (screen, GET/READ, files, RDD).
 - `TEXT ... ENDTEXT` is not a command yet and its lines are compiled as statements.
-- Standard headers still to provide: `common.ch`, `inkey.ch`, `error.ch`, `fileio.ch`, `box.ch`, `color.ch`,
-  `dbstruct.ch`, `directry.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`,
-  `simpleio.ch`, `blob.ch`.
+- Standard headers still to provide: `common.ch`, `inkey.ch`, `box.ch`, `color.ch`, `dbstruct.ch`, `getexit.ch`,
+  `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
 
 ### Runtime library
 
-105 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
+124 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
 
-1. Files and directories: `FOpen` and the low-level file functions, `File`, `Directory`, `MemoRead`/`MemoWrit`,
-   `GetEnv`.
+1. Files and directories: done ([runtime.md](runtime.md#files)) but the drive functions (`DiskChange`, `DiskName`,
+   `IsDisk`) and `FSetDevMod`.
 2. The terminal layer: screen, cursor, colors and keyboard, with drivers for plain standard output, ncurses and the
    Windows console; then `@ ... SAY/GET`, `READ`, `AChoice`, `MemoEdit`, `TBrowse`, `dbEdit`, menus.
 3. The RDD layer and the database functions and commands.

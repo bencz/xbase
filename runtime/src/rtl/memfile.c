@@ -139,7 +139,7 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_file f;
     int32_t err = 0;
     int32_t gencode = EG_CREATE;
-    if (xb_platform_file_create(path, &f, &err)) {
+    if (xb_platform_file_create(path, FC_NORMAL, &f, &err)) {
       int written = xb_platform_file_write(f, out.p, out.len, &err);
       int32_t closeErr = 0;
       int closed = xb_platform_file_close(f, &closeErr);
@@ -227,7 +227,7 @@ void xbf___MEMRESTORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int opened = 0;
   for (uint16_t tries = 1; !opened; ++tries) {
     int32_t err = 0;
-    opened = xb_platform_file_open(path, &f, &err);
+    opened = xb_platform_file_open(path, FO_READ, &f, &err);
     if (!opened && xb_error_file(ctx, "__MEMRESTORE", EG_OPEN, 2005, argv[0].v.s->data, err, tries) != 2) break;
   }
   free(path);

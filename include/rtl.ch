@@ -181,6 +181,27 @@ EXTERN FUNCTION TString( nSeconds ) NATIVE
 EXTERN FUNCTION Type( cExpression ) NATIVE RESERVED CHECKED PRIVATES
 EXTERN FUNCTION ValType( xValue ) NATIVE RESERVED CHECKED ABBREV 4
 
+// Files, directories and environment
+EXTERN FUNCTION ADir( cSpec, [aNames], [aSizes], [aDates], [aTimes], [aAttributes] ) NATIVE
+EXTERN FUNCTION CurDir( [cDrive] ) NATIVE
+EXTERN FUNCTION DirChange( cDirectory ) NATIVE
+EXTERN FUNCTION Directory( [cSpec], [cAttributes] ) NATIVE
+EXTERN FUNCTION DiskSpace( [nDrive] ) NATIVE
+EXTERN FUNCTION FClose( nHandle ) NATIVE
+EXTERN FUNCTION FCreate( cFile, [nAttribute] ) NATIVE
+EXTERN FUNCTION FErase( cFile ) NATIVE
+EXTERN FUNCTION FError() NATIVE
+EXTERN FUNCTION File( cSpec ) NATIVE
+EXTERN FUNCTION FOpen( cFile, [nMode] ) NATIVE
+EXTERN FUNCTION FRead( nHandle, @cBuffer, nBytes ) NATIVE
+EXTERN FUNCTION FReadStr( nHandle, nBytes ) NATIVE
+EXTERN FUNCTION FRename( cOld, cNew ) NATIVE
+EXTERN FUNCTION FSeek( nHandle, nOffset, [nOrigin] ) NATIVE
+EXTERN FUNCTION FWrite( nHandle, cBuffer, [nBytes] ) NATIVE
+EXTERN FUNCTION GetEnv( [cName] ) NATIVE
+EXTERN FUNCTION MemoRead( cFile ) NATIVE
+EXTERN FUNCTION MemoWrit( cFile, cText ) NATIVE
+
 // Console and standard streams
 EXTERN FUNCTION OutErr( ... ) NATIVE
 EXTERN FUNCTION OutStd( ... ) NATIVE
@@ -191,6 +212,7 @@ EXTERN FUNCTION QQOut( ... ) NATIVE
 EXTERN FUNCTION __ArgError( nSubCode ) NATIVE ARGS
 EXTERN FUNCTION __Break( [xValue] ) NATIVE
 EXTERN FUNCTION __ConsoleWrite( xValue ) NATIVE
+EXTERN FUNCTION __DirScan( [cSpec] ) NATIVE
 EXTERN FUNCTION __GcCollect( [lYoung] ) NATIVE
 EXTERN FUNCTION __IsCollection( xValue ) NATIVE
 EXTERN FUNCTION __MemClear() NATIVE

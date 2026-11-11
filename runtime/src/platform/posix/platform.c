@@ -1,13 +1,24 @@
 /* The POSIX interfaces this file uses (clock_gettime, localtime_r, threads,
- * files), which a strict C11 build declares only on request. */
+ * files, directories), which a strict C11 build declares only on request;
+ * 64-bit file offsets on 32-bit systems too; on macOS, the case sensitivity
+ * of a volume (pathconf). */
 #define _POSIX_C_SOURCE 200809L
+#define _FILE_OFFSET_BITS 64
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#endif
 
 #include "platform/platform.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -103,10 +114,10 @@ static int32_t dos_error(int e) {
   return 31;
 }
 
-static int open_as(const char *path, int flags, xb_file *f, int32_t *err) {
+static int open_as(const char *path, int flags, mode_t perms, xb_file *f, int32_t *err) {
   int fd;
   do {
-    fd = open(path, flags | O_CLOEXEC, 0666);
+    fd = open(path, flags | O_CLOEXEC, perms);
   } while (fd < 0 && errno == EINTR);
   if (fd < 0) {
     *err = dos_error(errno);
@@ -116,10 +127,20 @@ static int open_as(const char *path, int flags, xb_file *f, int32_t *err) {
   return 1;
 }
 
-int xb_platform_file_open(const char *path, xb_file *f, int32_t *err) { return open_as(path, O_RDONLY, f, err); }
+int xb_platform_file_open(const char *path, int32_t mode, xb_file *f, int32_t *err) {
+  static const int access[] = {O_RDONLY, O_WRONLY, O_RDWR};
+  if (!open_as(path, access[mode & (FO_WRITE | FO_READWRITE)], 0, f, err)) return 0;
+  struct stat st;
+  if (fstat((int)*f, &st) == 0 && S_ISDIR(st.st_mode)) { /* a directory opens for reading on POSIX systems only */
+    close((int)*f);
+    *err = 5;
+    return 0;
+  }
+  return 1;
+}
 
-int xb_platform_file_create(const char *path, xb_file *f, int32_t *err) {
-  return open_as(path, O_WRONLY | O_CREAT | O_TRUNC, f, err);
+int xb_platform_file_create(const char *path, int32_t attr, xb_file *f, int32_t *err) {
+  return open_as(path, O_RDWR | O_CREAT | O_TRUNC, attr & XB_FA_READONLY ? 0444 : 0666, f, err);
 }
 
 int64_t xb_platform_file_read(xb_file f, void *buf, size_t n, int32_t *err) {
@@ -146,8 +167,185 @@ int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
   return 1;
 }
 
+int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *err) {
+  static const int whence[] = {SEEK_SET, SEEK_CUR, SEEK_END};
+  if ((off_t)offset != offset) { /* past what this system's offsets hold */
+    *err = 25;
+    return -1;
+  }
+  off_t pos = lseek((int)f, (off_t)offset, whence[origin]);
+  if (pos < 0) *err = errno == EINVAL ? 25 : dos_error(errno);
+  return pos;
+}
+
 int xb_platform_file_close(xb_file f, int32_t *err) {
   if (close((int)f) == 0 || errno == EINTR) return 1; /* after EINTR the descriptor is closed, as on Linux */
   *err = dos_error(errno);
   return 0;
+}
+
+int xb_platform_file_erase(const char *path, int32_t *err) {
+  struct stat st;
+  if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+    *err = 5;
+    return 0;
+  }
+  if (unlink(path) == 0) return 1;
+  *err = dos_error(errno);
+  return 0;
+}
+
+int xb_platform_file_rename(const char *from, const char *to, int32_t *err) {
+  struct stat target, source;
+  if (lstat(to, &target) == 0 &&
+      (lstat(from, &source) != 0 || source.st_dev != target.st_dev || source.st_ino != target.st_ino)) {
+    *err = 5;
+    return 0;
+  }
+  if (rename(from, to) == 0) return 1;
+  *err = dos_error(errno);
+  return 0;
+}
+
+/* The entry of a file whose status is `st` and whose name is `name`. */
+static void fill_entry(xb_dir_entry *e, const char *name, const struct stat *st) {
+  e->name = name;
+  e->size = S_ISREG(st->st_mode) ? (int64_t)st->st_size : 0;
+  e->attrs = 0;
+  if (S_ISDIR(st->st_mode)) e->attrs |= XB_FA_DIRECTORY;
+  if (S_ISREG(st->st_mode)) e->attrs |= XB_FA_ARCHIVE;
+  if (!(st->st_mode & S_IWUSR)) e->attrs |= XB_FA_READONLY;
+  if (name[0] == '.' && strcmp(name, ".") != 0 && strcmp(name, "..") != 0) e->attrs |= XB_FA_HIDDEN;
+  struct tm tm;
+  time_t t = st->st_mtime;
+  localtime_r(&t, &tm);
+  e->year = tm.tm_year + 1900;
+  e->month = tm.tm_mon + 1;
+  e->day = tm.tm_mday;
+  e->hour = tm.tm_hour;
+  e->minute = tm.tm_min;
+  e->second = tm.tm_sec;
+}
+
+/* The status of a path, or of the link itself when it leads nowhere. */
+static int status_of(const char *path, struct stat *st) { return stat(path, st) == 0 || lstat(path, st) == 0; }
+
+int xb_platform_file_info(const char *path, const char *name, xb_dir_entry *e, int32_t *err) {
+  struct stat st;
+  if (!status_of(path, &st)) {
+    *err = dos_error(errno);
+    return 0;
+  }
+  fill_entry(e, name, &st);
+  return 1;
+}
+
+struct xb_dir_impl {
+  DIR *dir;
+  char *path; /* the directory, then the name of the entry being read */
+  size_t dirLen, cap;
+};
+
+int xb_platform_dir_open(const char *path, xb_dir *d, int32_t *err) {
+  const char *dirPath = path[0] ? path : ".";
+  DIR *dir = opendir(dirPath);
+  if (!dir) {
+    *err = dos_error(errno);
+    return 0;
+  }
+  xb_dir out = malloc(sizeof *out);
+  size_t len = strlen(dirPath);
+  char *buf = out ? malloc(len + 2) : NULL;
+  if (!buf) {
+    free(out);
+    closedir(dir);
+    *err = 8;
+    return 0;
+  }
+  memcpy(buf, dirPath, len);
+  if (buf[len - 1] != '/') buf[len++] = '/';
+  buf[len] = '\0';
+  out->dir = dir;
+  out->path = buf;
+  out->dirLen = len;
+  out->cap = len + 2;
+  *d = out;
+  return 1;
+}
+
+int xb_platform_dir_next(xb_dir d, xb_dir_entry *e) {
+  for (;;) {
+    struct dirent *de = readdir(d->dir);
+    if (!de) return 0;
+    size_t len = strlen(de->d_name);
+    if (d->dirLen + len + 1 > d->cap) {
+      char *grown = realloc(d->path, d->dirLen + len + 1);
+      if (!grown) return 0;
+      d->path = grown;
+      d->cap = d->dirLen + len + 1;
+    }
+    memcpy(d->path + d->dirLen, de->d_name, len + 1);
+    struct stat st;
+    if (status_of(d->path, &st)) { /* one that vanished since it was listed is left out */
+      fill_entry(e, d->path + d->dirLen, &st);
+      return 1;
+    }
+  }
+}
+
+void xb_platform_dir_close(xb_dir d) {
+  closedir(d->dir);
+  free(d->path);
+  free(d);
+}
+
+int xb_platform_names_case_sensitive(const char *dir) {
+#if defined(_PC_CASE_SENSITIVE)
+  return pathconf(dir[0] ? dir : ".", _PC_CASE_SENSITIVE) != 0;
+#else
+  (void)dir;
+  return 1;
+#endif
+}
+
+char *xb_platform_cwd(int32_t *err) {
+  for (size_t cap = 256;; cap *= 2) {
+    char *buf = malloc(cap);
+    if (!buf) {
+      *err = 8;
+      return NULL;
+    }
+    if (getcwd(buf, cap)) return buf;
+    free(buf);
+    if (errno != ERANGE) {
+      *err = dos_error(errno);
+      return NULL;
+    }
+  }
+}
+
+int xb_platform_chdir(const char *path, int32_t *err) {
+  if (chdir(path) == 0) return 1;
+  *err = dos_error(errno);
+  return 0;
+}
+
+int xb_platform_disk_free(int drive, int64_t *bytes, int32_t *err) {
+  struct statvfs fs;
+  (void)drive;
+  if (statvfs(".", &fs) != 0) {
+    *err = dos_error(errno);
+    return 0;
+  }
+  *bytes = (int64_t)fs.f_bavail * (int64_t)fs.f_frsize;
+  return 1;
+}
+
+char *xb_platform_getenv(const char *name) {
+  const char *v = getenv(name);
+  if (!v) return NULL;
+  size_t len = strlen(v);
+  char *copy = malloc(len + 1);
+  if (copy) memcpy(copy, v, len + 1);
+  return copy;
 }

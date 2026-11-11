@@ -4,6 +4,7 @@
 #include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <windows.h>
 
@@ -118,26 +119,60 @@ static wchar_t *wide_path(const char *path, int32_t *err) {
   return w;
 }
 
-static int open_as(const char *path, DWORD access, DWORD share, DWORD disposition, xb_file *f, int32_t *err) {
+/* UTF-16 as UTF-8 (malloc'ed), or NULL. */
+static char *utf8_of(const wchar_t *w) {
+  int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+  char *out = n > 0 ? malloc((size_t)n) : NULL;
+  if (out && WideCharToMultiByte(CP_UTF8, 0, w, -1, out, n, NULL, NULL) != n) {
+    free(out);
+    out = NULL;
+  }
+  return out;
+}
+
+/* The codes the platform layer gives the same on every system (platform.h). */
+static int32_t common_code(DWORD code) {
+  if (code == ERROR_NEGATIVE_SEEK) return 25;
+  if (code == ERROR_ALREADY_EXISTS) return 5;
+  return (int32_t)code;
+}
+
+static int open_as(const char *path, DWORD access, DWORD share, DWORD disposition, DWORD attrs, xb_file *f,
+                   int32_t *err) {
   wchar_t *w = wide_path(path, err);
   if (!w) return 0;
-  HANDLE h = CreateFileW(w, access, share, NULL, disposition, FILE_ATTRIBUTE_NORMAL, NULL);
+  HANDLE h = CreateFileW(w, access, share, NULL, disposition, attrs, NULL);
   DWORD code = GetLastError();
   free(w);
   if (h == INVALID_HANDLE_VALUE) {
-    *err = (int32_t)code;
+    *err = common_code(code);
     return 0;
   }
   *f = (xb_file)h;
   return 1;
 }
 
-int xb_platform_file_open(const char *path, xb_file *f, int32_t *err) {
-  return open_as(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING, f, err);
+int xb_platform_file_open(const char *path, int32_t mode, xb_file *f, int32_t *err) {
+  static const DWORD access[] = {GENERIC_READ, GENERIC_WRITE, GENERIC_READ | GENERIC_WRITE};
+  DWORD share;
+  switch (mode & (FO_EXCLUSIVE | FO_DENYWRITE | FO_DENYREAD | FO_DENYNONE)) {
+  case FO_EXCLUSIVE: share = 0; break;
+  case FO_DENYWRITE: share = FILE_SHARE_READ; break;
+  case FO_DENYREAD: share = FILE_SHARE_WRITE; break;
+  default: share = FILE_SHARE_READ | FILE_SHARE_WRITE; break; /* compatibility mode and deny none */
+  }
+  return open_as(path, access[mode & (FO_WRITE | FO_READWRITE)], share, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, f, err);
 }
 
-int xb_platform_file_create(const char *path, xb_file *f, int32_t *err) {
-  return open_as(path, GENERIC_WRITE, 0, CREATE_ALWAYS, f, err);
+int xb_platform_file_create(const char *path, int32_t attr, xb_file *f, int32_t *err) {
+  DWORD attrs = (DWORD)attr & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+  wchar_t *w = wide_path(path, err);
+  if (!w) return 0;
+  DWORD existing = GetFileAttributesW(w); /* CREATE_ALWAYS refuses a hidden or system file unless asked to keep it */
+  free(w);
+  if (existing != INVALID_FILE_ATTRIBUTES) attrs |= existing & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+  return open_as(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, CREATE_ALWAYS,
+                 attrs ? attrs : FILE_ATTRIBUTE_NORMAL, f, err);
 }
 
 /* ReadFile and WriteFile move at most this much at a time (a DWORD count). */
@@ -170,8 +205,189 @@ int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
   return 1;
 }
 
+int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *err) {
+  static const DWORD method[] = {FILE_BEGIN, FILE_CURRENT, FILE_END};
+  LARGE_INTEGER to, pos;
+  to.QuadPart = offset;
+  if (!SetFilePointerEx((HANDLE)f, to, &pos, method[origin])) {
+    *err = common_code(GetLastError());
+    return -1;
+  }
+  return pos.QuadPart;
+}
+
 int xb_platform_file_close(xb_file f, int32_t *err) {
   if (CloseHandle((HANDLE)f)) return 1;
   *err = (int32_t)GetLastError();
   return 0;
+}
+
+int xb_platform_file_erase(const char *path, int32_t *err) {
+  wchar_t *w = wide_path(path, err);
+  if (!w) return 0;
+  BOOL ok = DeleteFileW(w); /* a directory is ERROR_ACCESS_DENIED */
+  DWORD code = GetLastError();
+  free(w);
+  if (!ok) *err = common_code(code);
+  return ok != 0;
+}
+
+int xb_platform_file_rename(const char *from, const char *to, int32_t *err) {
+  wchar_t *wf = wide_path(from, err);
+  if (!wf) return 0;
+  wchar_t *wt = wide_path(to, err);
+  if (!wt) {
+    free(wf);
+    return 0;
+  }
+  BOOL ok = MoveFileW(wf, wt); /* never replaces: an existing name is ERROR_ALREADY_EXISTS */
+  DWORD code = GetLastError();
+  free(wf);
+  free(wt);
+  if (!ok) *err = common_code(code);
+  return ok != 0;
+}
+
+/* The fields of an entry from its attributes, size and time of last change. */
+static void fill_entry(xb_dir_entry *e, DWORD attrs, DWORD sizeHigh, DWORD sizeLow, const FILETIME *written) {
+  e->attrs = attrs & (XB_FA_READONLY | XB_FA_HIDDEN | XB_FA_SYSTEM | XB_FA_DIRECTORY | XB_FA_ARCHIVE);
+  e->size = attrs & FILE_ATTRIBUTE_DIRECTORY ? 0 : (int64_t)(((uint64_t)sizeHigh << 32) | sizeLow);
+  SYSTEMTIME utc, local;
+  if (!FileTimeToSystemTime(written, &utc) || !SystemTimeToTzSpecificLocalTime(NULL, &utc, &local))
+    memset(&local, 0, sizeof local);
+  e->year = local.wYear;
+  e->month = local.wMonth;
+  e->day = local.wDay;
+  e->hour = local.wHour;
+  e->minute = local.wMinute;
+  e->second = local.wSecond;
+}
+
+int xb_platform_file_info(const char *path, const char *name, xb_dir_entry *e, int32_t *err) {
+  wchar_t *w = wide_path(path, err);
+  if (!w) return 0;
+  WIN32_FILE_ATTRIBUTE_DATA data;
+  BOOL ok = GetFileAttributesExW(w, GetFileExInfoStandard, &data);
+  DWORD code = GetLastError();
+  free(w);
+  if (!ok) {
+    *err = common_code(code);
+    return 0;
+  }
+  e->name = name;
+  fill_entry(e, data.dwFileAttributes, data.nFileSizeHigh, data.nFileSizeLow, &data.ftLastWriteTime);
+  return 1;
+}
+
+struct xb_dir_impl {
+  HANDLE find;
+  WIN32_FIND_DATAW data;
+  int pending; /* `data` holds an entry not given yet (the first one) */
+  char *name;  /* the last entry's name */
+};
+
+int xb_platform_dir_open(const char *path, xb_dir *d, int32_t *err) {
+  size_t len = strlen(path);
+  char *pattern = malloc(len + 3);
+  if (!pattern) {
+    *err = ERROR_NOT_ENOUGH_MEMORY;
+    return 0;
+  }
+  memcpy(pattern, path, len);
+  if (len && !xb_platform_path_separator(path[len - 1])) pattern[len++] = '\\';
+  pattern[len++] = '*';
+  pattern[len] = '\0';
+  wchar_t *w = wide_path(pattern, err);
+  free(pattern);
+  xb_dir out = w ? calloc(1, sizeof *out) : NULL;
+  if (!out) {
+    if (w) *err = ERROR_NOT_ENOUGH_MEMORY;
+    free(w);
+    return 0;
+  }
+  out->find = FindFirstFileW(w, &out->data);
+  DWORD code = GetLastError();
+  free(w);
+  if (out->find == INVALID_HANDLE_VALUE) {
+    free(out);
+    *err = common_code(code);
+    return 0;
+  }
+  out->pending = 1;
+  *d = out;
+  return 1;
+}
+
+int xb_platform_dir_next(xb_dir d, xb_dir_entry *e) {
+  if (!d->pending && !FindNextFileW(d->find, &d->data)) return 0;
+  d->pending = 0;
+  free(d->name);
+  d->name = utf8_of(d->data.cFileName);
+  if (!d->name) return 0;
+  e->name = d->name;
+  fill_entry(e, d->data.dwFileAttributes, d->data.nFileSizeHigh, d->data.nFileSizeLow, &d->data.ftLastWriteTime);
+  return 1;
+}
+
+void xb_platform_dir_close(xb_dir d) {
+  FindClose(d->find);
+  free(d->name);
+  free(d);
+}
+
+int xb_platform_names_case_sensitive(const char *dir) {
+  (void)dir;
+  return 0;
+}
+
+char *xb_platform_cwd(int32_t *err) {
+  DWORD n = GetCurrentDirectoryW(0, NULL);
+  wchar_t *w = n ? malloc(n * sizeof *w) : NULL;
+  if (!w || GetCurrentDirectoryW(n, w) == 0) {
+    *err = w ? (int32_t)GetLastError() : ERROR_NOT_ENOUGH_MEMORY;
+    free(w);
+    return NULL;
+  }
+  char *out = utf8_of(w);
+  free(w);
+  if (!out) *err = ERROR_NOT_ENOUGH_MEMORY;
+  return out;
+}
+
+int xb_platform_chdir(const char *path, int32_t *err) {
+  wchar_t *w = wide_path(path, err);
+  if (!w) return 0;
+  BOOL ok = SetCurrentDirectoryW(w);
+  DWORD code = GetLastError();
+  free(w);
+  if (!ok) *err = common_code(code);
+  return ok != 0;
+}
+
+int xb_platform_disk_free(int drive, int64_t *bytes, int32_t *err) {
+  if (drive < 0 || drive > 26) {
+    *err = 15;
+    return 0;
+  }
+  wchar_t root[4] = {(wchar_t)(L'A' + drive - 1), L':', L'\\', 0};
+  ULARGE_INTEGER avail;
+  if (!GetDiskFreeSpaceExW(drive ? root : NULL, &avail, NULL, NULL)) {
+    *err = drive ? 15 : (int32_t)GetLastError();
+    return 0;
+  }
+  *bytes = (int64_t)avail.QuadPart;
+  return 1;
+}
+
+char *xb_platform_getenv(const char *name) {
+  int32_t err;
+  wchar_t *w = wide_path(name, &err);
+  if (!w) return NULL;
+  DWORD n = GetEnvironmentVariableW(w, NULL, 0);
+  wchar_t *value = n ? malloc(n * sizeof *value) : NULL;
+  char *out = NULL;
+  if (value && GetEnvironmentVariableW(w, value, n) < n) out = utf8_of(value);
+  free(value);
+  free(w);
+  return out;
 }
