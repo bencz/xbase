@@ -62,8 +62,9 @@ links it into its context's chain (`xb_ctx.frames`) at entry, with the parameter
 slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors return normally (the pending flag),
 so the chain is always right. The collector scans the frames of every context's chain. A frame dies with its function:
 nothing keeps a pointer to a slot (a variable that outlives it moves into a heap cell first). The program runs on a
-thread whose stack is reserved at 256 MB (`XB_PROGRAM_STACK_SIZE` in `core/main.c`; pages are committed as used), so
-deep recursion has room; running past it is not detected yet and ends the process.
+thread whose stack is reserved at 1 GB on 64-bit targets and 256 MB on 32-bit ones (`XB_PROGRAM_STACK_SIZE` in
+`core/main.c`; pages are committed as used), so deep recursion has room; running past it is not detected yet and
+ends the process.
 
 The frames also make the call stack. A frame's `proc` (an `xb_proc` constant the compiler emits per function: its name,
 `(b)NAME` for a codeblock written in the function NAME, also inside another codeblock, where Harbour names one run by
@@ -1097,9 +1098,10 @@ function creates for its caller (`RESTORE`), as a compiled caller does; an unkno
 in binary mode so programs write the same bytes everywhere), notes the start of the `ElapsedMs` clock and takes
 the command-line arguments in UTF-8 (`xb_platform_args`: as `main` received them on POSIX systems, converted from the
 wide command line on Windows). Then, on the program's thread (started with `xb_thread_start` and a stack reserved at
-256 MB; the process's first thread when it cannot be started), it creates the context, makes the arguments after the
-program's name strings in a frame of its own linked into the context's chain (so the collector sees them), calls
-`xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes output and returns the exit code.
+`XB_PROGRAM_STACK_SIZE`; the process's first thread when it cannot be started), it creates the context, makes the
+arguments after the program's name strings in a frame of its own linked into the context's chain (so the collector
+sees them), calls `xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes output and returns the
+exit code.
 `xb_app_main` checks the ABI and calls `xb_program_run`, which runs, in this order:
 
 1. the modules' `STATIC` initializations, in registration order;

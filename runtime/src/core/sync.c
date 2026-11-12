@@ -110,6 +110,7 @@ void xb_rlock_lock(xb_rlock *l) {
 }
 
 void xb_rlock_unlock(xb_rlock *l) {
+  if (xb_atomic_load32(&l->owner, XB_RELAXED) != xb_thread_self()) abort(); /* only its holder releases it */
   if (--l->depth) return;
   xb_atomic_store32(&l->owner, 0, XB_RELEASE);
   xb_park_wake(&l->owner, 0);

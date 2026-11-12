@@ -6,8 +6,11 @@
 
 /* The program's stack: compiled functions keep their item frames on it, so
  * deep recursion needs more than the default of a process's first thread
- * (1 MB on Windows). Reserved, not committed: unused pages cost nothing. */
-#define XB_PROGRAM_STACK_SIZE ((size_t)256 << 20)
+ * (1 MB on Windows). Reserved, not committed: unused pages cost nothing, so a
+ * 64-bit target, whose calls may take twice the stack of others (the ppc64
+ * ELF ABI's), reserves 1 GB; a 32-bit one, whose address space is small,
+ * 256 MB. */
+#define XB_PROGRAM_STACK_SIZE (sizeof(void *) >= 8 ? (size_t)1 << 30 : (size_t)256 << 20)
 
 static int64_t started; /* the monotonic clock when main began */
 

@@ -52,6 +52,9 @@ static void block_fn(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb
 static const xb_proc expression_proc = XB_RUNTIME_PROC("&", XB_PROC_HIDDEN | XB_PROC_TRANSPARENT);
 static const xb_proc block_proc = XB_RUNTIME_PROC("&", XB_PROC_HIDDEN);
 
+/* The items of a frame kept in run's own stack frame; a larger one is allocated. */
+#define LOCAL_SLOTS 32u
+
 /* Runs a compiled function. Its frame (the stack machine's items, and in slot
  * 0 the function itself) is linked into the context's chain, so the
  * collector sees every item. */
@@ -60,8 +63,15 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
   const unsigned char *pc = (const unsigned char *)fa->items[0].v.s->data;
   uint32_t nparams = word(&pc), nslots = word(&pc);
   const unsigned char *ops = pc;
-  xb_frame *frame = malloc(sizeof(xb_frame) + (1 + (size_t)nslots) * sizeof(xb_item));
-  if (!frame) xb_gc_fatal("out of memory");
+  union {
+    xb_frame frame;
+    unsigned char room[sizeof(xb_frame) + LOCAL_SLOTS * sizeof(xb_item)];
+  } local;
+  xb_frame *frame = &local.frame;
+  if (1 + (size_t)nslots > LOCAL_SLOTS) {
+    frame = malloc(sizeof(xb_frame) + (1 + (size_t)nslots) * sizeof(xb_item));
+    if (!frame) xb_gc_fatal("out of memory");
+  }
   xb_item *s = frame->slots;
   s[0] = *code;
   for (uint32_t k = 0; k < nslots; ++k) {
@@ -307,7 +317,7 @@ out:
   if (areas) ctx->areaCurrent = areaBefore; /* an error or a BREAK left alias->( expr ) */
   if (self) xb_mv_release(ctx, mark);
   xb_frame_pop(ctx, frame);
-  free(frame);
+  if (frame != &local.frame) free(frame);
 }
 
 static void block_fn(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self) {
