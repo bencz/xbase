@@ -1,6 +1,7 @@
 # Concurrency: tasks, async/await and threads
 
-*Planned.* Nothing in this document is implemented yet; it is the design the work follows, in the order of
+*Planned*, except phase 1 (the platform's threads and synchronization,
+[runtime.md](runtime.md#threads-and-synchronization)): the design the work follows, in the order of
 [Phases](#phases). The goal is a runtime where one process serves hundreds of thousands of concurrent requests (a web
 server with as many connections, each awaiting the network and the database), on every core, without a data race
 ever corrupting memory, and where Clipper code that knows nothing of tasks keeps working inside them.
@@ -260,9 +261,9 @@ on POSIX, Schannel on Windows, the system's on macOS), JSON, and clients for Pos
 
 Each phase ends with its tests, its benchmarks measured before and after, the docs updated and a commit.
 
-1. **Platform**: threads (create, join, identity), condition variables, reader-writer locks, one-time initialization,
-   atomics (C11 `stdatomic.h`, behind macros of the platform layer where a compiler lacks it), a parking primitive,
-   monotonic nanoseconds.
+1. **Platform** (done): threads (create, join, identity), condition variables, reader-writer locks, one-time
+   initialization, atomics on ordinary fields (the compilers' builtins and intrinsics), waiting on an address (a
+   parking lot), monotonic nanoseconds.
 2. **A thread-safe runtime**: the context split and environments (ABI); stop-the-world collections with back-edge
    polls (ABI), every stack scanned, atomic headers, per-thread remembered sets, the finalizer task; the runtime caches
    and global state made thread-safe; shared objects (header bit, publication, sequence counters and locks, compiled

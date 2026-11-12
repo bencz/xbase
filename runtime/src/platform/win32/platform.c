@@ -10,43 +10,56 @@
 
 #include <shellapi.h>
 
-static LARGE_INTEGER started, frequency;
-
 /* Program output is byte-exact on every platform: no CRLF translation. */
 void xb_platform_init(void) {
   _setmode(_fileno(stdout), _O_BINARY);
   _setmode(_fileno(stderr), _O_BINARY);
+}
+
+/* The counter's frequency is fixed at boot (asked each time, which costs a read of memory the system shares); whole
+ * seconds and the remainder are scaled apart, so the product cannot overflow. */
+int64_t xb_platform_monotonic_ns(void) {
+  LARGE_INTEGER now, frequency;
   QueryPerformanceFrequency(&frequency);
-  QueryPerformanceCounter(&started);
-}
-
-/* The counter's frequency is fixed at boot; whole seconds and the remainder
- * are scaled apart, so the product cannot overflow. */
-int64_t xb_platform_elapsed_ms(void) {
-  LARGE_INTEGER now;
   QueryPerformanceCounter(&now);
-  int64_t ticks = now.QuadPart - started.QuadPart, hz = frequency.QuadPart;
-  return ticks / hz * 1000 + ticks % hz * 1000 / hz;
+  int64_t ticks = now.QuadPart, hz = frequency.QuadPart;
+  return ticks / hz * XB_NS_PER_SEC + ticks % hz * XB_NS_PER_SEC / hz;
 }
 
-typedef struct {
+unsigned xb_platform_cpu_count(void) {
+  DWORD n = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+  return n ? (unsigned)n : 1u;
+}
+
+struct xb_thread_impl {
+  HANDLE thread;
   void (*fn)(void *);
   void *arg;
-} thread_start;
+};
 
 static DWORD WINAPI run_thread(LPVOID p) {
-  thread_start *start = p;
-  start->fn(start->arg);
+  xb_thread t = p;
+  t->fn(t->arg);
   return 0;
 }
 
-int xb_platform_run_on_stack(size_t stack_size, void (*fn)(void *), void *arg) {
-  thread_start start = {fn, arg};
-  HANDLE thread = CreateThread(NULL, stack_size, run_thread, &start, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
-  if (!thread) return 0;
-  WaitForSingleObject(thread, INFINITE);
-  CloseHandle(thread);
-  return 1;
+int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *arg) {
+  *t = malloc(sizeof **t);
+  if (!*t) return 0;
+  (*t)->fn = fn;
+  (*t)->arg = arg;
+  (*t)->thread = CreateThread(NULL, stack_size, run_thread, *t, stack_size ? STACK_SIZE_PARAM_IS_A_RESERVATION : 0,
+                              NULL);
+  if ((*t)->thread) return 1;
+  free(*t);
+  *t = NULL;
+  return 0;
+}
+
+void xb_thread_join(xb_thread t) {
+  WaitForSingleObject(t->thread, INFINITE);
+  CloseHandle(t->thread);
+  free(t);
 }
 
 struct xb_mutex_impl {
@@ -60,8 +73,54 @@ int xb_mutex_init(xb_mutex *m) {
   return 1;
 }
 
+void xb_mutex_destroy(xb_mutex *m) { free(*m); }
 void xb_mutex_lock(xb_mutex *m) { AcquireSRWLockExclusive(&(*m)->lock); }
+int xb_mutex_trylock(xb_mutex *m) { return TryAcquireSRWLockExclusive(&(*m)->lock) != 0; }
 void xb_mutex_unlock(xb_mutex *m) { ReleaseSRWLockExclusive(&(*m)->lock); }
+
+struct xb_cond_impl {
+  CONDITION_VARIABLE c;
+};
+
+int xb_cond_init(xb_cond *c) {
+  *c = malloc(sizeof **c);
+  if (!*c) return 0;
+  InitializeConditionVariable(&(*c)->c);
+  return 1;
+}
+
+void xb_cond_destroy(xb_cond *c) { free(*c); }
+void xb_cond_wait(xb_cond *c, xb_mutex *m) { SleepConditionVariableSRW(&(*c)->c, &(*m)->lock, INFINITE, 0); }
+
+/* The system waits in whole milliseconds, rounded up so that the wait is never shorter than asked, and for less than
+ * INFINITE: a longer wait that ends is no timeout (the waiter tests its condition, and waits again). */
+int xb_cond_wait_ns(xb_cond *c, xb_mutex *m, int64_t ns) {
+  if (ns > XB_WAIT_NS_MAX) ns = XB_WAIT_NS_MAX;
+  int64_t ms = ns <= 0 ? 0 : (ns + XB_NS_PER_MS - 1) / XB_NS_PER_MS;
+  int cut = ms >= INFINITE;
+  if (cut) ms = INFINITE - 1;
+  return SleepConditionVariableSRW(&(*c)->c, &(*m)->lock, (DWORD)ms, 0) || cut || GetLastError() != ERROR_TIMEOUT;
+}
+
+void xb_cond_signal(xb_cond *c) { WakeConditionVariable(&(*c)->c); }
+void xb_cond_broadcast(xb_cond *c) { WakeAllConditionVariable(&(*c)->c); }
+
+struct xb_rwlock_impl {
+  SRWLOCK lock;
+};
+
+int xb_rwlock_init(xb_rwlock *l) {
+  *l = malloc(sizeof **l);
+  if (!*l) return 0;
+  InitializeSRWLock(&(*l)->lock);
+  return 1;
+}
+
+void xb_rwlock_destroy(xb_rwlock *l) { free(*l); }
+void xb_rwlock_read_lock(xb_rwlock *l) { AcquireSRWLockShared(&(*l)->lock); }
+void xb_rwlock_read_unlock(xb_rwlock *l) { ReleaseSRWLockShared(&(*l)->lock); }
+void xb_rwlock_write_lock(xb_rwlock *l) { AcquireSRWLockExclusive(&(*l)->lock); }
+void xb_rwlock_write_unlock(xb_rwlock *l) { ReleaseSRWLockExclusive(&(*l)->lock); }
 
 void xb_platform_local_time(int *hour, int *minute, int *second, int *msec) {
   SYSTEMTIME st;

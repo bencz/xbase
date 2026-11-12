@@ -1,8 +1,11 @@
 /* The POSIX interfaces this file uses (clock_gettime, localtime_r, threads,
  * files, directories), which a strict C11 build declares only on request;
  * 64-bit file offsets on 32-bit systems too; on macOS, the case sensitivity
- * of a volume (pathconf). */
+ * of a volume (pathconf); on Linux, the thread's processor affinity. */
 #define _POSIX_C_SOURCE 200809L
+#if defined(__linux__)
+#define _GNU_SOURCE
+#endif
 #define _FILE_OFFSET_BITS 64
 #if defined(__APPLE__)
 #define _DARWIN_C_SOURCE
@@ -13,7 +16,11 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
+#if defined(__linux__)
+#include <sched.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,37 +30,63 @@
 #include <time.h>
 #include <unistd.h>
 
-static struct timespec started;
-
-void xb_platform_init(void) { clock_gettime(CLOCK_MONOTONIC, &started); }
-
-int64_t xb_platform_elapsed_ms(void) {
+int64_t xb_platform_monotonic_ns(void) {
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
-  int64_t ns = (int64_t)(now.tv_sec - started.tv_sec) * 1000000000 + (now.tv_nsec - started.tv_nsec);
-  return ns / 1000000; /* the total is never negative: whole milliseconds, rounded down */
+  return (int64_t)now.tv_sec * XB_NS_PER_SEC + now.tv_nsec;
 }
 
-typedef struct {
+void xb_platform_init(void) {}
+
+unsigned xb_platform_cpu_count(void) {
+#if defined(__linux__)
+  cpu_set_t set;
+  if (sched_getaffinity(0, sizeof set, &set) == 0 && CPU_COUNT(&set) > 0) return (unsigned)CPU_COUNT(&set);
+#endif
+  long n = sysconf(_SC_NPROCESSORS_ONLN);
+  return n > 0 ? (unsigned)n : 1u;
+}
+
+struct xb_thread_impl {
+  pthread_t thread;
   void (*fn)(void *);
   void *arg;
-} thread_start;
+};
 
 static void *run_thread(void *p) {
-  thread_start *start = p;
-  start->fn(start->arg);
+  xb_thread t = p;
+  t->fn(t->arg);
   return NULL;
 }
 
-int xb_platform_run_on_stack(size_t stack_size, void (*fn)(void *), void *arg) {
+int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *arg) {
   pthread_attr_t attr;
-  pthread_t thread;
-  thread_start start = {fn, arg};
-  if (pthread_attr_init(&attr) != 0) return 0;
-  int ok = pthread_attr_setstacksize(&attr, stack_size) == 0 && pthread_create(&thread, &attr, run_thread, &start) == 0;
-  pthread_attr_destroy(&attr);
-  if (ok) pthread_join(thread, NULL);
+  *t = malloc(sizeof **t);
+  if (!*t) return 0;
+  (*t)->fn = fn;
+  (*t)->arg = arg;
+  if (stack_size) { /* systems refuse a size below their minimum, and some one that is no whole number of pages */
+    long page = sysconf(_SC_PAGESIZE);
+    size_t unit = page > 0 ? (size_t)page : 4096u;
+    if (stack_size < (size_t)PTHREAD_STACK_MIN) stack_size = (size_t)PTHREAD_STACK_MIN;
+    stack_size = (stack_size + unit - 1) / unit * unit;
+  }
+  int ok = pthread_attr_init(&attr) == 0;
+  if (ok) {
+    ok = (!stack_size || pthread_attr_setstacksize(&attr, stack_size) == 0) &&
+         pthread_create(&(*t)->thread, &attr, run_thread, *t) == 0;
+    pthread_attr_destroy(&attr);
+  }
+  if (!ok) {
+    free(*t);
+    *t = NULL;
+  }
   return ok;
+}
+
+void xb_thread_join(xb_thread t) {
+  pthread_join(t->thread, NULL);
+  free(t);
 }
 
 struct xb_mutex_impl {
@@ -62,11 +95,105 @@ struct xb_mutex_impl {
 
 int xb_mutex_init(xb_mutex *m) {
   *m = malloc(sizeof **m);
-  return *m && pthread_mutex_init(&(*m)->m, NULL) == 0;
+  if (*m && pthread_mutex_init(&(*m)->m, NULL) == 0) return 1;
+  free(*m);
+  *m = NULL;
+  return 0;
+}
+
+void xb_mutex_destroy(xb_mutex *m) {
+  pthread_mutex_destroy(&(*m)->m);
+  free(*m);
 }
 
 void xb_mutex_lock(xb_mutex *m) { pthread_mutex_lock(&(*m)->m); }
+int xb_mutex_trylock(xb_mutex *m) { return pthread_mutex_trylock(&(*m)->m) == 0; }
 void xb_mutex_unlock(xb_mutex *m) { pthread_mutex_unlock(&(*m)->m); }
+
+/* Timed waits measure the monotonic clock: the condition is bound to it where the system can (not macOS, which waits
+ * for a relative time instead). */
+struct xb_cond_impl {
+  pthread_cond_t c;
+};
+
+int xb_cond_init(xb_cond *c) {
+  pthread_condattr_t attr;
+  *c = malloc(sizeof **c);
+  if (!*c || pthread_condattr_init(&attr) != 0) {
+    free(*c);
+    *c = NULL;
+    return 0;
+  }
+#if !defined(__APPLE__)
+  int ok = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) == 0 && pthread_cond_init(&(*c)->c, &attr) == 0;
+#else
+  int ok = pthread_cond_init(&(*c)->c, &attr) == 0;
+#endif
+  pthread_condattr_destroy(&attr);
+  if (!ok) {
+    free(*c);
+    *c = NULL;
+  }
+  return ok;
+}
+
+void xb_cond_destroy(xb_cond *c) {
+  pthread_cond_destroy(&(*c)->c);
+  free(*c);
+}
+
+void xb_cond_wait(xb_cond *c, xb_mutex *m) { pthread_cond_wait(&(*c)->c, &(*m)->m); }
+
+int xb_cond_wait_ns(xb_cond *c, xb_mutex *m, int64_t ns) {
+  if (ns < 0) ns = 0;
+  if (ns > XB_WAIT_NS_MAX) ns = XB_WAIT_NS_MAX;
+#if !defined(__APPLE__)
+  int64_t deadline = xb_platform_monotonic_ns() + ns;
+  struct timespec at = {(time_t)(deadline / XB_NS_PER_SEC), (long)(deadline % XB_NS_PER_SEC)};
+  return pthread_cond_timedwait(&(*c)->c, &(*m)->m, &at) != ETIMEDOUT;
+#else
+  struct timespec in = {(time_t)(ns / XB_NS_PER_SEC), (long)(ns % XB_NS_PER_SEC)};
+  return pthread_cond_timedwait_relative_np(&(*c)->c, &(*m)->m, &in) != ETIMEDOUT;
+#endif
+}
+
+void xb_cond_signal(xb_cond *c) { pthread_cond_signal(&(*c)->c); }
+void xb_cond_broadcast(xb_cond *c) { pthread_cond_broadcast(&(*c)->c); }
+
+/* glibc's default lets readers that keep coming starve a waiting writer: its writer-preferring kind is asked for. */
+struct xb_rwlock_impl {
+  pthread_rwlock_t l;
+};
+
+int xb_rwlock_init(xb_rwlock *l) {
+  pthread_rwlockattr_t attr;
+  *l = malloc(sizeof **l);
+  if (!*l || pthread_rwlockattr_init(&attr) != 0) {
+    free(*l);
+    *l = NULL;
+    return 0;
+  }
+#if defined(__GLIBC__)
+  pthread_rwlockattr_setkind_np(&attr, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
+#endif
+  int ok = pthread_rwlock_init(&(*l)->l, &attr) == 0;
+  pthread_rwlockattr_destroy(&attr);
+  if (!ok) {
+    free(*l);
+    *l = NULL;
+  }
+  return ok;
+}
+
+void xb_rwlock_destroy(xb_rwlock *l) {
+  pthread_rwlock_destroy(&(*l)->l);
+  free(*l);
+}
+
+void xb_rwlock_read_lock(xb_rwlock *l) { pthread_rwlock_rdlock(&(*l)->l); }
+void xb_rwlock_read_unlock(xb_rwlock *l) { pthread_rwlock_unlock(&(*l)->l); }
+void xb_rwlock_write_lock(xb_rwlock *l) { pthread_rwlock_wrlock(&(*l)->l); }
+void xb_rwlock_write_unlock(xb_rwlock *l) { pthread_rwlock_unlock(&(*l)->l); }
 
 void xb_platform_local_time(int *hour, int *minute, int *second, int *msec) {
   struct timespec ts;

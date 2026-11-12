@@ -168,6 +168,21 @@ add_test(NAME runtime.declarations
   COMMAND ${CMAKE_COMMAND} -DRTL=${PROJECT_SOURCE_DIR}/include/rtl.ch -DRUNTIME_SRC=${PROJECT_SOURCE_DIR}/runtime/src
           -P ${CMAKE_CURRENT_SOURCE_DIR}/declarations_test.cmake)
 
+# Platform tests: C programs that exercise the runtime's own services (threads, locks, atomics, waiting) directly,
+# linked with the runtime; each one exits with 0 when every check passed.
+file(GLOB XB_PLATFORM_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/platform ${CMAKE_CURRENT_SOURCE_DIR}/platform/*.c)
+foreach(t ${XB_PLATFORM_TESTS})
+  get_filename_component(name ${t} NAME_WE)
+  add_executable(p_${name} platform/${t})
+  xb_target_warnings(p_${name})
+  if(MSVC)
+    target_compile_options(p_${name} PRIVATE /volatile:ms)
+  endif()
+  target_include_directories(p_${name} PRIVATE ${PROJECT_SOURCE_DIR}/runtime/src ${PROJECT_SOURCE_DIR}/include)
+  target_link_libraries(p_${name} PRIVATE xbrt)
+  add_test(NAME platform.${name} COMMAND p_${name})
+endforeach()
+
 # A test that hangs or loops must fail quickly instead of exhausting the machine.
 get_property(XB_ALL_TESTS DIRECTORY PROPERTY TESTS)
 set_tests_properties(${XB_ALL_TESTS} PROPERTIES TIMEOUT 30)

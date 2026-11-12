@@ -19,27 +19,66 @@
 #define XB_NOINLINE __attribute__((noinline))
 #endif
 
-/* Locks. */
+/* Synchronization between threads. Each kind is created by its init function (0: no memory or no system object
+ * available; the handle is then NULL) and freed by its destroy function, which nothing may be waiting on. The lock
+ * functions never fail. No lock is recursive: the thread holding one never asks for it again (not even a second read
+ * lock of a reader-writer lock, which waits behind a waiting writer). */
+
+#define XB_NS_PER_SEC INT64_C(1000000000)
+#define XB_NS_PER_MS INT64_C(1000000)
+
+/* A mutex. */
 typedef struct xb_mutex_impl *xb_mutex;
-int xb_mutex_init(xb_mutex *m); /* 0: no memory or no lock available */
+int xb_mutex_init(xb_mutex *m);
+void xb_mutex_destroy(xb_mutex *m);
 void xb_mutex_lock(xb_mutex *m);
+int xb_mutex_trylock(xb_mutex *m); /* 1: taken, without waiting */
 void xb_mutex_unlock(xb_mutex *m);
 
-/* One-time process setup; it also starts the clock of xb_platform_elapsed_ms. */
+/* A condition variable, waited on with a mutex the waiter holds, which is released while it waits and taken again
+ * before the wait returns. A wait may also return without a signal: the waiter tests its condition again.
+ * xb_cond_wait_ns gives up after `ns` nanoseconds of the monotonic clock: 0 when it timed out. */
+typedef struct xb_cond_impl *xb_cond;
+#define XB_WAIT_NS_MAX ((int64_t)1 << 60) /* a longer timed wait is this long (about 36 years) */
+int xb_cond_init(xb_cond *c);
+void xb_cond_destroy(xb_cond *c);
+void xb_cond_wait(xb_cond *c, xb_mutex *m);
+int xb_cond_wait_ns(xb_cond *c, xb_mutex *m, int64_t ns);
+void xb_cond_signal(xb_cond *c);    /* wakes one waiter, if any */
+void xb_cond_broadcast(xb_cond *c); /* wakes them all */
+
+/* A reader-writer lock: many readers, or one writer. Where the system lets the kind be chosen (glibc), a waiting
+ * writer goes before readers that come after it; elsewhere the system's own policy decides. */
+typedef struct xb_rwlock_impl *xb_rwlock;
+int xb_rwlock_init(xb_rwlock *l);
+void xb_rwlock_destroy(xb_rwlock *l);
+void xb_rwlock_read_lock(xb_rwlock *l);
+void xb_rwlock_read_unlock(xb_rwlock *l);
+void xb_rwlock_write_lock(xb_rwlock *l);
+void xb_rwlock_write_unlock(xb_rwlock *l);
+
+/* Threads. xb_thread_start runs fn(arg) on a new thread whose stack can grow to `stack_size` bytes (reserved, committed
+ * as it is used; rounded up to the system's page and minimum; 0: the system's default): 0 when it could not be
+ * created. xb_thread_join waits for the thread to end
+ * and frees it; every thread started is joined once. */
+typedef struct xb_thread_impl *xb_thread;
+int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *arg);
+void xb_thread_join(xb_thread t);
+
+/* The processors the program may run on (at least 1): those of its affinity where the system tells it (Linux), else
+ * every processor online. */
+unsigned xb_platform_cpu_count(void);
+
+/* One-time process setup, first thing in main. */
 void xb_platform_init(void);
 
-/* Milliseconds since xb_platform_init, from a monotonic clock (never set back,
- * unaffected by changes of the date and time). */
-int64_t xb_platform_elapsed_ms(void);
+/* Nanoseconds of a monotonic clock (never set back, unaffected by changes of the date and time), from an origin of its
+ * own: for intervals and deadlines. Usable before xb_platform_init too. */
+int64_t xb_platform_monotonic_ns(void);
 
 /* Calls fn(arg) with the thread's registers saved on its stack first, so a scan of the stack from inside fn sees every
  * pointer the thread holds (the collector's scan for pinned objects). The stack grows down on every target. */
 void xb_platform_with_registers(void (*fn)(void *), void *arg);
-
-/* Runs fn(arg) on a new thread whose stack can grow to `stack_size` bytes
- * (reserved, committed as it is used) and waits for it; returns 0 when the
- * thread could not be created. */
-int xb_platform_run_on_stack(size_t stack_size, void (*fn)(void *), void *arg);
 
 /* The program's command-line arguments in UTF-8 (argv[0], the program, first):
  * the array main() received where it already is UTF-8, else a converted copy

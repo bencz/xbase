@@ -16,6 +16,7 @@ add_library(xbrt STATIC
   src/core/ops.c
   src/core/set.c
   src/core/shared_file.c
+  src/core/sync.c
   src/gc/gc.c
   src/types/array.c
   src/types/block.c
@@ -64,6 +65,22 @@ else()
   target_sources(xbrt PRIVATE src/platform/posix/platform.c)
   find_package(Threads REQUIRED)
   target_link_libraries(xbrt PUBLIC m Threads::Threads)
+  # Atomic operations of every size the runtime uses (platform/atomic.h); a target without native ones for some size
+  # (older ARM, some 32-bit systems) gets them from libatomic.
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("
+    #include <stddef.h>
+    #include <stdint.h>
+    uint8_t b; uint32_t w; size_t s; void *p;
+    int main(void) {
+      void *e = 0;
+      return (int)(__atomic_fetch_or(&b, 1, __ATOMIC_ACQ_REL) + __atomic_fetch_add(&w, 1, __ATOMIC_ACQ_REL) +
+                   __atomic_fetch_add(&s, 1, __ATOMIC_ACQ_REL) +
+                   __atomic_compare_exchange_n(&p, &e, &p, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+    }" XB_ATOMICS_NATIVE)
+  if(NOT XB_ATOMICS_NATIVE)
+    target_link_libraries(xbrt PUBLIC atomic)
+  endif()
 endif()
 
 # The runtime's functions written in xBase, compiled by the xbc of this build as modules of the runtime
@@ -91,3 +108,7 @@ target_include_directories(xbrt PUBLIC include PRIVATE src)
 # set.ch is shared with xBase code, so setting numbers are defined once.
 target_include_directories(xbrt PRIVATE ${PROJECT_SOURCE_DIR}/include)
 xb_target_warnings(xbrt)
+# Volatile loads acquire and volatile stores release on every architecture (platform/atomic.h).
+if(MSVC)
+  target_compile_options(xbrt PRIVATE /volatile:ms)
+endif()

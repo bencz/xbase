@@ -849,7 +849,7 @@ Conventions:
   functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)).
 - `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
-  program started from a monotonic clock (`xb_platform_elapsed_ms`), for timing: the difference of two calls.
+  program started from a monotonic clock (`xb_program_elapsed_ms`), for timing: the difference of two calls.
 
 Settings live in the task context (start: `SET EXACT OFF`, `SET DECIMALS TO 2`, date format `mm/dd/yy`,
 `SET EPOCH TO 1900`, `SET CENTURY OFF`). Their numbers come from `include/set.ch`, shared with xBase code.
@@ -1029,6 +1029,35 @@ reference: the `generation` of the table it found the field in and the field's p
 `__AreaEval( xArea, bBlock )` (`alias->( expr )`) and the macro machine's `MO_AREA` make an area current through
 `xb_area_enter`, which raises the alias error.
 
+## Threads and synchronization
+
+The program's code runs on one thread today; the services below are what tasks and threads are built on
+([concurrency.md](concurrency.md)).
+
+- Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
+  reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`), mutexes (`xb_mutex`, with
+  `trylock`), condition variables (`xb_cond`, with waits timed on the monotonic clock: POSIX binds the condition to
+  it, macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks (`xb_rwlock`;
+  on glibc of the kind where a waiting writer goes before readers that come after it, elsewhere with the system's
+  policy), the number of processors the program may run on (its affinity on Linux, else every processor online), and
+  a monotonic clock in nanoseconds (`xb_platform_monotonic_ns`), which `ElapsedMs` counts from the start of `main`
+  (`xb_program_elapsed_ms`). Each object is made by its `init` function, which fails only for lack of memory or system
+  objects, and freed by its `destroy` function. No lock is recursive: the thread holding one never asks for it again,
+  not even for a second read lock, which would wait behind a waiting writer.
+- Atomic operations (`platform/atomic.h`) on ordinary 8-bit, 32-bit, `size_t` and pointer fields, so that memory
+  read plainly where no other thread sees it (an object header, a field compiled code reads) is also changed
+  atomically where one may: loads, stores, add, or, and, exchange and compare-and-swap with an explicit order. GCC and
+  Clang use their `__atomic` builtins (with libatomic on a target that lacks native atomics of some size, found when
+  the build is configured); MSVC builds the runtime with `/volatile:ms` (volatile loads acquire, stores release, on
+  every architecture; a build with `/volatile:iso` stops) and its `Interlocked` intrinsics.
+- On top of them, the same everywhere (`core/sync.c`): `xb_thread_self` (a number per thread, never 0, no other
+  thread's until 2^32 threads have asked), `xb_once` (a function run once whatever threads ask at the same time, the
+  others waiting until it returns), and a parking lot: `xb_park_wait` sleeps while a 32-bit value at an address is the
+  one expected (with an optional limit in nanoseconds, which its own deadline decides), `xb_park_wake` wakes the
+  waiter of the address that came first, or every one. Waiters queue in arrival order in one of 256 buckets chosen by
+  the address (each made when first used) and sleep on a condition of their own, so a wake reaches only the waiters
+  it marks; the value is tested under the bucket's lock, which the waker takes after changing it, so no wake is lost.
+
 ## Program startup
 
 Before `main`, the global constructor of every module calls `xb_module_register` (`core/module.c`) with the
@@ -1047,9 +1076,10 @@ function creates for its caller (`RESTORE`), as a compiled caller does; an unkno
 `Undefined function` (not substitutable), anything else as its first argument `BASE/3012`.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
-in binary mode so programs write the same bytes everywhere; everywhere, the start of the `ElapsedMs` clock) and takes
+in binary mode so programs write the same bytes everywhere), notes the start of the `ElapsedMs` clock and takes
 the command-line arguments in UTF-8 (`xb_platform_args`: as `main` received them on POSIX systems, converted from the
-wide command line on Windows). Then, on the program's thread, it creates the context, makes the arguments after the
+wide command line on Windows). Then, on the program's thread (started with `xb_thread_start` and a stack reserved at
+256 MB; the process's first thread when it cannot be started), it creates the context, makes the arguments after the
 program's name strings in a frame of its own linked into the context's chain (so the collector sees them), calls
 `xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes output and returns the exit code.
 `xb_app_main` checks the ABI and calls `xb_program_run`, which runs, in this order:

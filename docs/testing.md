@@ -10,6 +10,7 @@ Tests run through CTest (`ctest --test-dir build --output-on-failure`); `tests/C
 | xIR | `tests/xir/<name>.prg`, `<name>.xir` | The xIR `xbc --dump-xir` writes (after the xIR passes, at the default `-O2`) must equal `<name>.xir`. |
 | Code generation | `xb_add_codegen_test` in `tests/CMakeLists.txt` | The IR `xbc --dump-ir` emits for a cross target must match a regular expression. |
 | Declarations | `runtime.declarations` (`tests/declarations_test.cmake`) | `include/rtl.ch` declares exactly the `xbf_` functions defined in `runtime/src`. |
+| Platform | `tests/platform/<name>.c` | A C program linked with `xbrt` exercises the runtime's own services (threads, locks, atomics, waiting on an address) under contention, and exits with 0 when every check passed (`check.h`). |
 
 Every test has a 30-second timeout, so a hang or a loop fails instead of stalling the run. Execution tests run in the
 build's `tests` directory; one that writes files names them after itself (`memvars_save_*.mem`), so tests running in

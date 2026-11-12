@@ -52,7 +52,7 @@ void xbf_ELAPSEDMS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_set_int(ret, xb_platform_elapsed_ms());
+  xb_set_int(ret, xb_program_elapsed_ms());
 }
 
 void xbf_CTOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

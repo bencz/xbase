@@ -9,6 +9,10 @@
  * (1 MB on Windows). Reserved, not committed: unused pages cost nothing. */
 #define XB_PROGRAM_STACK_SIZE ((size_t)256 << 20)
 
+static int64_t started; /* the monotonic clock when main began */
+
+int64_t xb_program_elapsed_ms(void) { return (xb_platform_monotonic_ns() - started) / XB_NS_PER_MS; }
+
 typedef struct program {
   int argc;
   char **argv;
@@ -50,8 +54,11 @@ static void run_program(void *arg) {
 
 int main(int argc, char **argv) {
   xb_platform_init();
+  started = xb_platform_monotonic_ns();
   program p = {0, NULL, 0};
   p.argv = xb_platform_args(argc, argv, &p.argc);
-  if (!xb_platform_run_on_stack(XB_PROGRAM_STACK_SIZE, run_program, &p)) run_program(&p);
+  xb_thread thread;
+  if (xb_thread_start(&thread, XB_PROGRAM_STACK_SIZE, run_program, &p)) xb_thread_join(thread);
+  else run_program(&p);
   return p.exitcode;
 }
