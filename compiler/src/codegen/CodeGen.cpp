@@ -422,7 +422,7 @@ void CodeGen::genFunction(const xir::Function &f) {
         restBlock = b.get();
       }
   // Once per call: in a loop, a callee's change (PValue()) would reach the next pass.
-  forwardInPlace_ = rests == 1 && !f.readsArgs && !xir::loopDepths(plan.cfg()).count(restBlock);
+  forwardInPlace_ = rests == 1 && !f.readsArgs && !xir::Loops(plan.cfg()).innermost(restBlock);
   Value *argc = nullptr, *argv = nullptr;
   if (f.kind != xir::Function::Kind::ModuleInit) {
     fnRet_ = fn_->getArg(1);

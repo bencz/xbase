@@ -2,7 +2,9 @@
 
 #include "xir/IR.h"
 
+#include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace xb::xir {
@@ -35,11 +37,39 @@ private:
 using Frontiers = std::unordered_map<const BasicBlock *, std::vector<BasicBlock *>>;
 Frontiers dominanceFrontiers(const CFG &cfg);
 
-// The blocks of loops, with the number of loops each is in (1 for the body of
-// an outermost loop): a loop is a block that dominates the source of an edge
-// to it, with the blocks from which that source is reached without passing it.
-using LoopDepths = std::unordered_map<const BasicBlock *, unsigned>;
-LoopDepths loopDepths(const CFG &cfg);
+// A natural loop: a header that dominates the source of an edge to it, with the blocks from which that source is
+// reached without passing the header; the loops of one header are one. Unwind edges count: an unwind block reached
+// from inside a loop that leads back to its header is in it.
+class Loop {
+public:
+  BasicBlock *header = nullptr;
+  std::vector<BasicBlock *> blocks; // in reverse postorder: the header first
+  Loop *parent = nullptr;           // the innermost loop around it
+  unsigned depth = 1;               // 1 for an outermost loop
+
+  bool contains(const BasicBlock *b) const { return set_.count(b) != 0; }
+
+private:
+  friend class Loops;
+  std::unordered_set<const BasicBlock *> set_;
+};
+
+// The natural loops of a function, outermost first (a loop before those inside it), and the innermost loop of each
+// block.
+class Loops {
+public:
+  explicit Loops(const CFG &cfg);
+  const std::vector<std::unique_ptr<Loop>> &all() const { return loops_; }
+  const Loop *innermost(const BasicBlock *b) const; // null outside every loop
+  unsigned depth(const BasicBlock *b) const {       // the loops around it, 0 outside every loop
+    const Loop *l = innermost(b);
+    return l ? l->depth : 0;
+  }
+
+private:
+  std::vector<std::unique_ptr<Loop>> loops_;
+  std::unordered_map<const BasicBlock *, Loop *> innermost_;
+};
 
 // The LOCALs that are not shared, not parameters, and only loaded and stored
 // directly (a FOR EACH variable is not: it holds the loop's reference): what

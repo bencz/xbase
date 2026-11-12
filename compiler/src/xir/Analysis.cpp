@@ -110,26 +110,51 @@ Frontiers dominanceFrontiers(const CFG &cfg) {
   return df;
 }
 
-LoopDepths loopDepths(const CFG &cfg) {
-  std::unordered_map<const BasicBlock *, std::unordered_set<const BasicBlock *>> bodies; // by loop header
+Loops::Loops(const CFG &cfg) {
+  std::unordered_map<const BasicBlock *, Loop *> byHeader;
   for (BasicBlock *b : cfg.order())
     for (size_t k = 0; k < b->numSuccessors(); ++k) {
       BasicBlock *head = b->successor(k);
       if (!cfg.dominates(head, b)) continue;
-      std::unordered_set<const BasicBlock *> &body = bodies[head];
-      body.insert(head);
+      Loop *&loop = byHeader[head];
+      if (!loop) {
+        loops_.push_back(std::make_unique<Loop>());
+        loop = loops_.back().get();
+        loop->header = head;
+        loop->set_.insert(head);
+      }
       std::vector<const BasicBlock *> work{b};
       while (!work.empty()) {
         const BasicBlock *x = work.back();
         work.pop_back();
-        if (!body.insert(x).second) continue;
+        if (!loop->set_.insert(x).second) continue;
         for (const BasicBlock *p : cfg.preds(x)) work.push_back(p);
       }
     }
-  LoopDepths depth;
-  for (auto &[head, body] : bodies)
-    for (const BasicBlock *b : body) ++depth[b];
-  return depth;
+  // Blocks in reverse postorder; a loop's parent is the smallest other loop holding its header.
+  std::unordered_map<const BasicBlock *, size_t> position;
+  for (size_t i = 0; i < cfg.order().size(); ++i) position[cfg.order()[i]] = i;
+  for (auto &l : loops_) {
+    for (BasicBlock *b : cfg.order())
+      if (l->set_.count(b)) l->blocks.push_back(b);
+  }
+  for (auto &l : loops_)
+    for (auto &other : loops_)
+      if (other != l && other->contains(l->header) && (!l->parent || l->parent->blocks.size() > other->blocks.size()))
+        l->parent = other.get();
+  // Outermost first: by depth, then by the header's position.
+  for (auto &l : loops_)
+    for (Loop *p = l->parent; p; p = p->parent) ++l->depth;
+  std::stable_sort(loops_.begin(), loops_.end(), [&](const std::unique_ptr<Loop> &a, const std::unique_ptr<Loop> &b) {
+    return a->depth != b->depth ? a->depth < b->depth : position.at(a->header) < position.at(b->header);
+  });
+  for (auto &l : loops_) // a deeper loop comes later and wins
+    for (BasicBlock *b : l->blocks) innermost_[b] = l.get();
+}
+
+const Loop *Loops::innermost(const BasicBlock *b) const {
+  auto it = innermost_.find(b);
+  return it == innermost_.end() ? nullptr : it->second;
 }
 
 bool CFG::dominates(const BasicBlock *a, const BasicBlock *b) const {

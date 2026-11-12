@@ -135,7 +135,7 @@ xIR is an internal error naming the pass. `--dump-xir` writes the result. Implem
   branch passes on, ends its block with `subst.check` (its result is not of its own types: only a substituted value can
   be) and a `cond_br` to a block that takes the value with `subst.value` and enters a generic copy of the function right
   after the copy of the operation. The copy is made once per function, of at most 500 instructions (a larger one doubles
-  code that LLVM unrolls and splits again), with at most 16 checks, those of the most nested loops (`loopDepths` in
+  code that LLVM unrolls and splits again), with at most 16 checks, those of the most nested loops (`Loops` in
   `Analysis`); not in a function with unwind blocks, which take no parameters. The values that reach the copy are joined
   to its own by block parameters, built on demand from the uses (Braun et al.), and parameters that receive one value
   only are removed. The copy's operations keep giving any type, so a substituted value of any type runs correctly, while
@@ -144,6 +144,13 @@ xIR is an internal error naming the pass. `--dump-xir` writes the result. Implem
   not see, which holds because the pending test after such an operation calls `xb_pending`, which never collects nor
   parks the thread for another thread's collection (the request waits for the next poll), and not `xb_pending_gc`.
 
+Shared changes of shape are in `Transform.*`: `splitAfter` (the rest of a block into a new one it jumps to),
+`copyBlocks` (blocks copied inside their function, with the map from each original block and value to its copy; values
+from outside the copied blocks stay), `SSAUpdater` (SSA form rebuilt for a value that gets more definitions, given at
+the end of blocks: the value reaching a block, through block parameters made on demand where definitions meet, as in
+Braun et al.) and `removeTrivialParams` (a parameter made so whose arguments are one value is that value).
+`typed-continuations` uses them.
+
 They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
 with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor
 terminators of every block (`Analysis.h`), computed once per round. Constants compare by value (`sameValue`):
@@ -151,12 +158,11 @@ each use of a literal may be its own constant. The lowering then elides copies (
 
 Still to build for the passes that follow:
 
-- Mutation: moving instructions, splitting blocks, cloning blocks and functions (inlining, unrolling,
-  unswitching) as shared utilities; `typed-continuations` splits blocks and copies a function on its own for now.
+- Mutation: moving instructions, cloning whole functions (inlining, specialization), on top of `Transform.*`.
 - Attributes of external functions in their declarations (pure, no allocation, reads its arguments only), next to
   `FOLD`, so calls such as `Len` can be moved, merged and removed.
-- Cached analyses with invalidation: natural loops and their nesting, post-dominators and dominance frontiers
-  (mem2reg), liveness.
+- Cached analyses with invalidation (the CFG, loops, dominance frontiers, types: each pass computes its own now);
+  post-dominators, liveness.
 - Types on operations: the type sets ([Types](#types)) are computed for the lowering only; passes need them on the
   values, refined by the operations that test them, and branch weights (error paths are cold before LLVM sees them).
 
@@ -183,10 +189,11 @@ heap, depends on SET values, runs xBase code, allocates, ends a block, is commut
 substituted the result, changes the context's state; `Instruction::effects` adds those of reading references to a list
 with `...`, which may fail and run the error block; `mayFail`, the passes and the frame plan consult it), `Builder`,
 `Verifier`, `Printer`, control flow analyses (`Analysis`: reverse postorder, dominators and the dominator tree,
-dominance frontiers, loops and their depths, the predecessor terminators of every block, removal of unreachable blocks),
-and the lowering from the syntax tree (`Gen*.cpp`). Block names are unique in a function (`while.body.2`).
-`PassManager.*` and `passes/` optimize it (see [Passes](#passes)). `compiler/src/codegen/` lowers xIR to LLVM
-(`FramePlan` assigns the frame).
+dominance frontiers, natural loops (`Loops`: each loop's header, blocks, parent and depth, outermost first, and the
+innermost loop of each block), the predecessor terminators of every block, removal of unreachable blocks), shared
+changes of shape (`Transform`), and the lowering from the syntax tree (`Gen*.cpp`). Block names are unique in a function
+(`while.body.2`). `PassManager.*` and `passes/` optimize it (see [Passes](#passes)). `compiler/src/codegen/` lowers xIR
+to LLVM (`FramePlan` assigns the frame).
 
 ## Phase 1 in detail
 
