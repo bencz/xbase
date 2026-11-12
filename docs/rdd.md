@@ -655,17 +655,19 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
 
 ### Tasks, threads and async/await
 
-- *(Planned with tasks)*: a work area belongs to one task context (`ctx->areas`, already so), like its `SET` values; a
-  task that resumes on another thread takes its areas with it. An area is never used by two tasks at once, so it needs
-  no lock of its own. Handing an area from one task to another is explicit (planned: a function of xbase's own, the area
-  closed in the first task and open in the second with its position and locks).
+*(Planned, [concurrency.md](concurrency.md#database))*:
+
+- A work area belongs to the flow that opened it (its table of areas, today `ctx->areas`), like its `SET` values; a
+  task that resumes on another thread takes its areas with it. Concurrent branches of one flow share its areas, and
+  each area serializes its operations; a new flow (`TaskRun`, `ThreadStart`) starts with none open. Handing an area
+  from one flow to another is explicit (a function of xbase's own, the area closed in the first and open in the second
+  with its position and locks).
 - What the runtime shares between threads is only the shared-file registry and the files' lock tables (one mutex) and,
   when they come, the shared page caches (reader-writer locks); no other global state in the database code.
-- Disk I/O and waits for locks are synchronous calls; under `async`/`await` they run on the blocking pool, so a task
-  awaiting a table operation frees its thread. Planned awaitable forms (for example, waiting for a record lock with a
-  timeout and a `CancellationToken`) are xbase extensions on top of the same lock manager.
-- The platform layer gains byte-range locks (`fcntl` / `LockFileEx`), the sharing lock (`flock` / share modes) and file
-  identities; with threads, a condition variable and a reader-writer lock beside `xb_mutex`.
+- The synchronous operations stay as they are and block only their thread (the scheduler gives its place to another).
+  Awaitable forms (`dbSkipAsync()`, `dbSeekAsync()`, `RLockAsync( [nRecord], [nTimeout], [oToken] )`, cursors as
+  asynchronous enumerators, `AWAIT` forms of the commands) run first on the blocking pool, then from the shared page
+  cache with asynchronous read-ahead; a lock held inside the process is then awaited instead of refused.
 
 ## Text and codepages
 

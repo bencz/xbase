@@ -34,7 +34,7 @@ textual IR is written (except with the debugging options `--dump-xir` and `--dum
 | Memory | Tracing GC: precise mark-region with an Immix heap (blocks of lines, bump allocation per thread into free lines; size-class blocks for medium objects); full collections move objects out of fragmented blocks, pinning what the machine stack points to; no reference counting; two generations (sticky marks, aging, remembered set, write barrier). |
 | Macros `&` | Compiled by the runtime's own expression compiler into code for a small stack machine, cached per text; no JIT. |
 | Classes | Native in the compiler, Clipper-style syntax (`CLASS`/`ENDCLASS`, `METHOD ... CLASS`). *(planned)* |
-| async/await | .NET task model on stackless coroutines and a thread pool. *(planned)* |
+| async/await | .NET task model on stackless resumable functions and an M:N work-stealing pool; races never corrupt memory. *(planned)* |
 
 ## Portability
 
@@ -147,18 +147,11 @@ ASYNC FUNCTION FetchOrders( cUrl )
    RETURN ParseOrders( cJson )
 ```
 
-- `ASYNC FUNCTION`/`ASYNC METHOD` return a `Task` and run synchronously until the first `AWAIT` of an incomplete task;
-  a task that completes synchronously allocates no frame.
-- Runtime library: `Task`, `Task.Run`, `Task.Delay`, `WhenAll`, `WhenAny`, `CancellationToken`, `TaskCompletionSource`.
-- Stackless coroutines (LLVM coroutine intrinsics, target-independent lowering): a suspended task costs only its frame,
-  so hundreds of thousands of concurrent requests fit in memory.
-- Continuations run on a work-stealing thread pool; a task may resume on another thread.
-- Per-task state (`PRIVATE`/`PUBLIC`, current work area, `SET` values, `ErrorBlock`) lives in the task context and
-  flows with the task.
-- I/O: io_uring with an epoll fallback on Linux, kqueue on BSD/macOS, IOCP on Windows. Work without real asynchronous
-  I/O (DBF/NTX, locks) runs on a separate blocking pool.
-- Arrays and hashes shared between threads: races are the program's responsibility, but the runtime never corrupts
-  memory (a light per-object lock guards structural operations such as `AAdd`, `ASize`, hash insertion).
+*(Planned, [concurrency.md](concurrency.md))*: .NET's task model on stackless resumable functions (the generators'
+machinery, [xir.md](xir.md#resumable-functions)), so that a suspended task costs only its frame; an M:N scheduler with
+work stealing over every core, which hands a blocked worker's place to another thread; one heap, where objects
+reachable by two flows are shared objects whose accesses the runtime makes safe; reactors over io_uring or epoll,
+kqueue and IOCP; awaitable database operations for every driver.
 
 ## Roadmap
 

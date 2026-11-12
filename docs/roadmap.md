@@ -162,8 +162,9 @@ the machinery `ASYNC` will use.
 
 ### async/await and threads
 
-`ASYNC FUNCTION`, `AWAIT`, tasks and a thread pool ([architecture.md](architecture.md#asyncawait)); threads with
-per-thread `SET` values, memory variables and work areas, and synchronization (mutexes, conditions).
+`ASYNC FUNCTION`, `AWAIT`, asynchronous generators and `AWAIT FOR EACH`, `USING`/`AWAIT USING`, tasks on an M:N
+pool, threads sharing memory safely, channels and synchronization, asynchronous I/O and awaitable database operations,
+in the phases of [concurrency.md](concurrency.md#phases).
 
 ### Libraries
 

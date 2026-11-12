@@ -7,6 +7,7 @@ Find the task, read the doc it points to, then the code.
 | Overall design, decisions, planned design (classes, async/await, FFI, GC) | [architecture.md](architecture.md) |
 | What is missing compared with Clipper, planned extensions (classes, exceptions, enumerators, generators, async, sockets), order of the work | [roadmap.md](roadmap.md) |
 | The planned mid-level IR (xIR): form, GC, exceptions, coroutines, classes, passes | [xir.md](xir.md) |
+| Tasks, async/await, threads, the scheduler, asynchronous I/O and database operations (planned) | [concurrency.md](concurrency.md) |
 | Directives, `#command`/`#translate` rules, `std.ch`, tokenization, comments, string literals | [preprocessor.md](preprocessor.md) |
 | Grammar, keywords, name resolution, code generation, object emission, cross-compilation, driver options | [compiler.md](compiler.md) |
 | Values (`xb_item`), frames, calling convention, error propagation, operators, the ABI shared with the compiler | [runtime.md](runtime.md) |
