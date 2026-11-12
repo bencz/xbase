@@ -15,8 +15,9 @@ PROCEDURE Main()
 RETURN
 
 // What another area wrote is what a lock gives: the record read again once locked (no lost update), records read
-// ahead dropped when the file lock goes, an index's cursor placed from the record's key as it is now; a table opened
-// and closed many times while another area keeps it open; locks of a shared READONLY table; dbRLock() with no record.
+// ahead dropped when the file lock goes, an index's cursor placed from the record's key as it is now (read again); a
+// table opened and closed many times while another area keeps it open; locks of a shared READONLY table; dbRLock()
+// with no record.
 STATIC PROCEDURE Fresh()
    LOCAL i, c
    dbCreate( "rdd_shared_r", { { "F1", "C", 3, 0 }, { "F2", "C", 3, 0 } } )
@@ -95,6 +96,14 @@ STATIC PROCEDURE Fresh()
    kb->( dbUnlock() )
    ka->( dbGoTo( 3 ) )
    ? "ordKeyNo after the key moved:", ka->( ordKeyNo() )
+   ka->( dbGoTo( 7 ) )
+   ? "read before the key moved:", ka->K
+   kb->( dbGoTo( 7 ) )
+   kb->( RLock() )
+   REPLACE kb->K WITH "Z07"
+   kb->( dbUnlock() )
+   ka->( dbSkip() )
+   ? "skip from a record read before:", ka->( RecNo() ), ka->( Eof() )
    CLOSE ALL
    AEval( Directory( "rdd_shared_*.*" ), {| a | FErase( a[ 1 ] ) } )
 RETURN

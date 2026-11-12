@@ -1,5 +1,5 @@
-/* Order files of the DBF driver: NTX (Clipper's, one order per file; rdd/ntx.c) and, planned, CDX (FoxPro's, orders
- * as the tags of one file), one interface. A file is a bag; each order in it a tag, which keeps a cursor on one
+/* Order files of the DBF drivers: NTX (Clipper's, one order per file; rdd/ntx.c) and CDX (FoxPro's, orders as the
+ * tags of one file; rdd/cdx.c), one interface. A file is a bag; each order in it a tag, which keeps a cursor on one
  * entry that navigation moves without searching again. Every operation works in the order's own order (a descending
  * order's first entry is its greatest key), whatever the file stores. */
 #ifndef XB_INDEX_H
@@ -8,6 +8,7 @@
 #include "xbrt_int.h"
 
 #define XB_INDEX_KEY_MAX 256  /* bytes of a key, and of the key and condition expressions' text */
+#define XB_INDEX_NAME_MAX 10  /* characters of an order's name, as NTX and CDX keep them */
 
 typedef struct xb_bag xb_bag;
 typedef struct xb_tag xb_tag;
@@ -19,6 +20,7 @@ typedef struct xb_index_info {
   char type;                       /* 0 until the key was evaluated */
   uint32_t keyLen, keyDec;
   int unique, descend;
+  int partial;                     /* built from some records only (NEXT, RECORD, REST, USECURRENT): CDX notes it */
 } xb_index_info;
 
 /* A place among the entries: before the first whose key's first `len` bytes come at or after `key` (`past`: after
@@ -32,30 +34,34 @@ typedef struct xb_index_bound {
 
 typedef struct xb_index_format {
   const char *ext;    /* ".ntx" */
+  int tagged;         /* a file holds several orders, named: REINDEX makes the file anew with all of them */
   uint32_t keyMax;    /* the longest key */
   int tiesByRecord;   /* a bulk build orders equal keys by record number, not in the order they were collected */
 
   /* Keys. The length and decimals of a key of value `v` (its type known); a value's key (`*used`: the bytes a SEEK
-   * compares, fewer for a shorter string), 0 when its type is not the order's; a key's value again; keys compared
-   * in the order's order (the first `len` bytes). */
+   * compares, fewer for a shorter string), 0 when its type is not the order's; a key's value again (a number with
+   * `dec` decimals when the key keeps none); keys compared in the order's order (the first `len` bytes). */
   void (*key_shape)(const xb_item *v, char type, uint32_t *len, uint32_t *dec);
   int (*value_key)(const xb_index_info *info, const xb_item *v, unsigned char *out, size_t *used);
-  void (*key_value)(const xb_index_info *info, const unsigned char *key, xb_item *r);
+  void (*key_value)(const xb_index_info *info, const unsigned char *key, uint16_t dec, xb_item *r);
   int (*compare)(const xb_index_info *info, const unsigned char *a, const unsigned char *b, size_t len);
   /* The order of a bulk build's entries: whether `info`'s file keeps them by key the other way round (an NTX
    * descending order) rather than ascending. */
   int (*stored_descending)(const xb_index_info *info);
 
   /* Files. Opening gives the bag and its tags (tag_at: in the bag's order, with their names; NULL: the file's name).
-   * Building makes tag `name` from `count` entries sorted as stored_descending says (unique already applied): in
-   * `*bag` when it is open, else in the file at `path`, opened (`fresh`: made anew, else the tag is added or
-   * replaced); the tag in `*tag`. */
+   * Building makes tag `name` (upper case, at most XB_INDEX_NAME_MAX characters) from `count` entries sorted as
+   * stored_descending says (unique already applied), of a table of `records` records: in `*bag` when it is open,
+   * else in the file at `path`, opened (`fresh`: made anew, else the tag is added or replaced); the tag in `*tag`.
+   * Removing takes a tag out of its bag (ordDestroy()); a bag left without tags, and an untagged format's, is the
+   * caller's to erase once closed. */
   int (*open)(const char *path, int readonly, int exclusive, xb_bag **out, int32_t *err);
   uint32_t (*tag_count)(const xb_bag *b);
   xb_tag *(*tag_at)(xb_bag *b, uint32_t i, xb_index_info *info, const char **name);
   int (*build)(xb_bag **bag, const char *path, const char *name, int fresh, const xb_index_info *info,
-               const unsigned char *keys, const uint32_t *recnos, uint32_t count, int readonly, int exclusive,
-               xb_tag **tag, int32_t *err);
+               const unsigned char *keys, const uint32_t *recnos, uint32_t count, uint32_t records, int readonly,
+               int exclusive, xb_tag **tag, int32_t *err);
+  int (*remove)(xb_bag *b, xb_tag *t, int32_t *err);
   /* The key type, once the order's key was evaluated on opening (CDX trims keys by it). */
   void (*set_type)(xb_tag *t, char type);
   /* Holds the bag's lock (shared: `write` or read) across several operations of its tags, which then take it no
@@ -93,5 +99,6 @@ typedef struct xb_index_format {
 } xb_index_format;
 
 extern const xb_index_format xb_index_ntx;
+extern const xb_index_format xb_index_cdx;
 
 #endif

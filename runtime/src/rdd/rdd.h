@@ -23,9 +23,13 @@ typedef struct xb_order xb_order;
 
 /* Clipper's file protocol of shared tables and NTX indexes (docs/rdd.md): record n's lock is the byte XB_DB_LOCK + n,
  * the file lock the XB_DB_LOCK bytes after XB_DB_LOCK, and XB_DB_LOCK itself a table's append lock and an index's
- * read and write lock. FoxPro's (DBFCDX) places a table's locks from XB_FOX_LOCK by the records' offsets. */
+ * read and write lock. FoxPro's (DBFCDX) places a table's locks from XB_FOX_LOCK by the records' offsets; while the
+ * table's production order file is open, below XB_FOX_HIGH_LOCK: record n's is the byte XB_FOX_HIGH_LOCK - n, the
+ * file lock the XB_FOX_HIGH_FILE bytes before XB_FOX_HIGH_LOCK, which is the append lock (and a CDX file's lock). */
 #define XB_DB_LOCK 1000000000u
 #define XB_FOX_LOCK 0x40000000u
+#define XB_FOX_HIGH_LOCK 0x7FFFFFFEu
+#define XB_FOX_HIGH_FILE 0x07FFFFFFu
 enum { XB_LOCKS_CLIPPER, XB_LOCKS_FOXPRO };
 
 /* ordCondSet()'s settings for the next order made in an area: the condition (block and text), WHILE, the EVAL block
@@ -55,7 +59,6 @@ typedef struct xb_open_failure {
 typedef struct xb_rdd {
   const char *name;
   const struct xb_memo_format *memo; /* the memos of the tables it creates (rdd/memo.h) */
-  const char *indexExt;              /* its order files' extension */
   const struct xb_index_format *index; /* their format (rdd/index.h); NULL: not yet there */
   int lockScheme;                    /* XB_LOCKS_CLIPPER, XB_LOCKS_FOXPRO */
   /* Whether the driver can make a table of these fields (types, lengths, decimals, sizes), completing them as it
@@ -87,6 +90,9 @@ typedef struct xb_rdd {
   /* Reads the current record, which navigation leaves unread until it is used: before deleted(), set_deleted() and
    * field_bytes() (get() and put() read it themselves). A record that cannot be read leaves the blank one. */
   int (*load)(xb_area *a, int32_t *err);
+  /* Shared: the current record is read again at its next use (another program may have changed it), unless it has
+   * changes not yet written. */
+  void (*refresh)(xb_area *a);
   int (*deleted)(xb_area *a);
   void (*set_deleted)(xb_area *a, int deleted);
   /* Removes the deleted records; removes every record. */
@@ -95,6 +101,8 @@ typedef struct xb_rdd {
   uint32_t (*header_size)(xb_area *a);
   uint32_t (*record_size)(xb_area *a);
   int64_t (*last_update)(xb_area *a); /* a day number, 0 when the table says none */
+  /* Marks in the table's header whether it has a production order file (FoxPro's flag), written at once. */
+  int (*set_production)(xb_area *a, int on, int32_t *err);
 } xb_rdd;
 
 struct xb_area {
@@ -123,6 +131,8 @@ struct xb_area {
   uint32_t hotRecno;
   xb_order_conditions pending; /* ordCondSet()'s, for the next order made */
   uint32_t keying;          /* key or condition blocks running: the orders may not change meanwhile */
+  char *production;         /* a tagged order format's: the table's production order file, named as the table and
+                               opened with it (malloc'ed); NULL for none */
 };
 
 /* The drivers by name ("DBF", "DBFNTX"); NULL for an unknown one. The default (RddSetDefault()). */
@@ -181,6 +191,8 @@ int xb_area_cold(xb_ctx *ctx, xb_area *a);
 /* Writes the orders' pages; closes them all (the record order is controlling then). 0 after an error (raised). */
 int xb_area_orders_flush(xb_ctx *ctx, xb_area *a);
 int xb_area_orders_close(xb_ctx *ctx, xb_area *a);
+/* Whether the table's production order file is open. */
+int xb_area_production_open(const xb_area *a);
 /* SEEK in the controlling order: to the first record (`last`: the last) whose key starts with the value's, skipping
  * those that do not show; else, with `soft`, the first after where it would be, or the end. Found() tells. 0 after
  * an error (raised). */

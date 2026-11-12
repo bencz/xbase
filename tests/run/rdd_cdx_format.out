@@ -1,0 +1,8 @@
+
+read: NAME NAME  .F. 9 4 8 3 6 2 5 7 1 10 
+read: AMT AMT AMT > 0 .T. 10 9 8 7 6 5 4 
+same bytes: .T.
+exclusive:       2282          6
+  cdx:     162816  115775649
+shared:       2282          6
+  cdx:     252928  816124178

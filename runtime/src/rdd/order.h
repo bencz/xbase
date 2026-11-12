@@ -7,14 +7,13 @@
 #include "rdd/index.h"
 #include "rdd/rdd.h"
 
-#define XB_ORDER_NAME_MAX 10 /* characters of an order's name, as NTX and CDX keep them */
-
 /* An order file the area has open, shared by its orders. */
 typedef struct xb_order_bag {
   char *path;                    /* malloc'ed */
   const xb_index_format *format;
   xb_bag *bag;
   uint32_t orders;               /* the area's orders in it */
+  int production;                /* the table's production file (a tagged format's, named as the table) */
 } xb_order_bag;
 
 /* A bound of an order's scope: the value as given (a root; a codeblock gives it when evaluated) and its key (`used`
@@ -31,7 +30,7 @@ struct xb_order {
   xb_tag *tag;
   const xb_index_format *format; /* the bag's */
   char *name;              /* the order's name: its tag's, or the file's name without directories and extension;
-                              upper case, its first XB_ORDER_NAME_MAX characters */
+                              upper case, its first XB_INDEX_NAME_MAX characters */
   xb_index_info info;      /* info.type: the key's type, C N D L */
   xb_item key;             /* the key expression's codeblock (a root) */
   xb_item cond;            /* the FOR condition's codeblock, NIL without one (a root) */
@@ -56,11 +55,27 @@ xb_order *xb_order_create(xb_ctx *ctx, xb_area *a, const char *path, const char 
 /* Opens an order file: its orders in `*out` (malloc'ed), their count returned; 0 after the error (raised). */
 uint32_t xb_order_open(xb_ctx *ctx, xb_area *a, const char *path, xb_order ***out);
 /* Builds every order's file of the area again from all the records, as each describes itself, with an EVAL block
- * run as a new order's (NULL: none); the first one that cannot be is closed (its error raised), and the ones after
- * it stay as they were. 0 after an error. */
+ * run as a new order's (NULL: none); the first one that cannot be is closed (its error raised), with the orders
+ * after it in its file when that is a file of tags (made anew, it holds them no more), and the others after it stay
+ * as they were. 0 after an error. */
 int xb_area_orders_rebuild(xb_ctx *ctx, xb_area *a, const xb_item *evalBlock, int64_t every);
 /* Writes what is pending and frees the order. 0 after the error (raised). */
 int xb_order_close(xb_ctx *ctx, xb_area *a, xb_order *o);
+
+/* ordDestroy(): takes the order out of its file and closes it; a file left without orders is erased, and the table's
+ * header no longer tells of a production file when it was that. 0 after an error (raised). */
+int xb_order_destroy(xb_ctx *ctx, xb_area *a, xb_order *o);
+/* Closes the area's orders but those of the production file and of bag `keep` (NULL: none); none is controlling then.
+ * 0 after an error (raised). */
+int xb_area_orders_clear(xb_ctx *ctx, xb_area *a, const xb_order_bag *keep);
+/* Adds an order to the area's list: after the others of its file, else a production file's first and another's
+ * last. Its position, from 1. */
+uint32_t xb_area_add_order(xb_area *a, xb_order *o);
+/* USE: opens the table's production order file when there is one (no order controlling; an error raised). */
+void xb_area_open_production(xb_ctx *ctx, xb_area *a);
+/* The area's order named by `len` bytes of `name` (any letter case; the name an order gets from them), in the file at
+ * `path` (NULL: any): its position from 1, 0 for none. */
+uint32_t xb_area_order_named(const xb_area *a, const char *name, size_t len, const char *path);
 
 /* The first (`dir` 1) or last (-1) record of the order, or the one after (before) the current record: 1 with it in
  * `recno`, 0 for none, -1 after an error (raised). */
@@ -90,8 +105,9 @@ int xb_order_nth(xb_ctx *ctx, xb_area *a, xb_order *o, uint64_t n, uint32_t *rec
 int xb_order_skip_unique(xb_ctx *ctx, xb_area *a, xb_order *o, int dir);
 /* The current record's key (`*in`: whether it has an entry); 0 after an error (raised). */
 int xb_order_record_key(xb_ctx *ctx, xb_area *a, xb_order *o, unsigned char *key, int *in);
-/* A key's value: a string of the key's length, a number with the key's width and decimals, a date, a logical. */
-void xb_order_key_value(const xb_order *o, const unsigned char *key, xb_item *r);
+/* A key's value: a string of the key's length, a number (with the key's width and decimals, or `dec` decimals when the
+ * format keeps none), a date, a logical. */
+void xb_order_key_value(const xb_order *o, const unsigned char *key, uint16_t dec, xb_item *r);
 
 /* Marks the order's items for the collector. */
 void xb_order_mark(xb_order *o, int (*mark)(const xb_item *));

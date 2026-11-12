@@ -134,7 +134,7 @@ int xb_platform_file_open(const char *path, int32_t mode, xb_file *f, int32_t *e
   struct stat st;
   if (fstat((int)*f, &st) == 0 && S_ISDIR(st.st_mode)) { /* a directory opens for reading on POSIX systems only */
     close((int)*f);
-    *err = 5;
+    *err = XB_FERR_ACCESS;
     return 0;
   }
   return 1;
@@ -288,7 +288,7 @@ int xb_platform_file_close(xb_file f, int32_t *err) {
 int xb_platform_file_erase(const char *path, int32_t *err) {
   struct stat st;
   if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
-    *err = 5;
+    *err = XB_FERR_ACCESS;
     return 0;
   }
   if (unlink(path) == 0) return 1;
@@ -300,7 +300,7 @@ int xb_platform_file_rename(const char *from, const char *to, int32_t *err) {
   struct stat target, source;
   if (lstat(to, &target) == 0 &&
       (lstat(from, &source) != 0 || source.st_dev != target.st_dev || source.st_ino != target.st_ino)) {
-    *err = 5;
+    *err = XB_FERR_ACCESS;
     return 0;
   }
   if (rename(from, to) == 0) return 1;

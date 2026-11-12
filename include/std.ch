@@ -86,7 +86,13 @@
 #command SET FILTER TO <x:&>           => if ( Empty( <(x)> ) ) ; dbClearFilter() ; ;
                                           else ; dbSetFilter( <{x}>, <(x)> ) ; end
 
-/* Orders (indexes). */
+/* Orders (indexes). INDEX ON without TO makes tag <tag> of the production file (CDX). */
+#command INDEX ON <key> TAG <(tag)> [FOR <for>] [<all: ALL>] [WHILE <while>] [NEXT <next>] ;
+            [RECORD <rec>] [<rest: REST>] [EVAL <eval>] [EVERY <every>] [<u: UNIQUE>] [<asc: ASCENDING>] ;
+            [<d: DESCENDING>] [<a: ADDITIVE>] [<cur: USECURRENT>] => ;
+         ordCondSet( <"for">, <{for}>, <.all.>, <{while}>, <{eval}>, <every>, RecNo(), <next>, <rec>, <.rest.>, ;
+                     <.d.>, , <.a.>, <.cur.> ) ;
+         ; ordCreate( , <(tag)>, <"key">, <{key}>, iif( <.u.>, .T., NIL ) )
 #command INDEX ON <key> [TAG <(tag)>] TO <(file)> [FOR <for>] [<all: ALL>] [WHILE <while>] [NEXT <next>] ;
             [RECORD <rec>] [<rest: REST>] [EVAL <eval>] [EVERY <every>] [<u: UNIQUE>] [<asc: ASCENDING>] ;
             [<d: DESCENDING>] [<a: ADDITIVE>] [<cur: USECURRENT>] => ;
@@ -102,6 +108,8 @@
 #command SEEK <key> [<soft: SOFTSEEK>] [<last: LAST>] => ;
          dbSeek( <key>, iif( <.soft.>, .T., NIL ), iif( <.last.>, .T., NIL ) )
 #command FIND <*text*>                 => dbSeek( <(text)> )
+#command DELETE TAG <(tag)> [IN <(bag)>] [, <(tagN)> [IN <(bagN)>]] => ;
+         ordDestroy( <(tag)>, <(bag)> ) [; ordDestroy( <(tagN)>, <(bagN)> )]
 #command REINDEX [EVAL <eval>] [EVERY <every>] => ordCondSet( , , , , <{eval}>, <every> ) ; ordListRebuild()
 #command REINDEX                       => ordListRebuild()
 #command SET SCOPETOP TO               => ordScope( 0, NIL )

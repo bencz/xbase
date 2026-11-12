@@ -245,8 +245,10 @@ EXTERN FUNCTION ordBagExt() NATIVE
 EXTERN FUNCTION ordBagName( [xOrder] ) NATIVE
 EXTERN FUNCTION ordCondSet( [cFor], [bFor], [lAll], [bWhile], [bEval], [nInterval], [nStart], [nNext], [nRecord], ;
    [lRest], [lDescend], [lCompound], [lAdditive], [lCurrent] ) NATIVE
+EXTERN FUNCTION ordCount( [cBag] ) NATIVE
 EXTERN FUNCTION ordCreate( [cBag], [cOrder], [cKey], [bKey], [lUnique] ) NATIVE
 EXTERN FUNCTION ordDescend( [xOrder] ) NATIVE
+EXTERN FUNCTION ordDestroy( xOrder, [cBag] ) NATIVE
 EXTERN FUNCTION ordFor( [xOrder] ) NATIVE
 EXTERN FUNCTION ordIsUnique( [xOrder] ) NATIVE
 EXTERN FUNCTION ordKey( [xOrder] ) NATIVE

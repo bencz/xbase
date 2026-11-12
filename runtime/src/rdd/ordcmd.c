@@ -17,17 +17,7 @@ static uint32_t order_arg(const xb_area *a, uint32_t argc, const xb_item *argv, 
     return n >= 1 && n <= a->norders ? (uint32_t)n : 0;
   }
   if (argv[k].type != XB_T_STRING) return 0;
-  const xb_str *s = argv[k].v.s;
-  size_t len = s->len;
-  while (len > 0 && s->data[len - 1] == ' ') --len;
-  if (len > XB_ORDER_NAME_MAX) len = XB_ORDER_NAME_MAX; /* names are kept that long */
-  for (uint32_t i = 0; i < a->norders; ++i) {
-    const char *name = a->orders[i]->name;
-    size_t j = 0;
-    while (j < len && name[j] && xb_ascii_upper(s->data[j]) == name[j]) ++j;
-    if (j == len && !name[j]) return i + 1;
-  }
-  return 0;
+  return xb_area_order_named(a, argv[k].v.s->data, argv[k].v.s->len, NULL);
 }
 
 static xb_order *order_at(xb_area *a, uint32_t n) { return n ? a->orders[n - 1] : NULL; }
@@ -51,13 +41,6 @@ static uint32_t bag_open(const xb_area *a, const char *path) {
   for (uint32_t i = 0; i < a->norders; ++i)
     if (strcmp(a->orders[i]->bag->path, path) == 0) return i + 1;
   return 0;
-}
-
-static void add_order(xb_area *a, xb_order *o) {
-  xb_order **grown = realloc(a->orders, (a->norders + 1) * sizeof *grown);
-  if (!grown) xb_gc_fatal("out of memory");
-  a->orders = grown;
-  a->orders[a->norders++] = o;
 }
 
 /* Closes order number `n` (1-based) of the area. */
@@ -112,55 +95,121 @@ void xbf_ORDCONDSET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, 1);
 }
 
-/* ordCreate( cBag, [cOrder], cKey, [bKey], [lUnique] ): builds the order's file from the records and opens it as the
- * controlling order, the others closed unless ordCondSet() asked to keep them; then the first record. lUnique
- * defaults to SET UNIQUE. */
-static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const xb_str *keyText, const xb_item *keyBlock,
-                         const xb_item *unique) {
+/* ordCreate( [cBag], [cOrder], cKey, [bKey], [lUnique] ): builds the order from the records and opens it as the
+ * controlling order, the others closed (but the production file's and its own file's) unless ordCondSet() asked to
+ * keep them; then the first record. lUnique defaults to SET UNIQUE. One order per file (NTX): the file is cBag, else
+ * cOrder, made anew. A tagged format (CDX): tag cOrder of file cBag (no cBag: the production file, named as the
+ * table), added or replacing the tag of the name; without cOrder, file cBag made anew with one tag named as the
+ * file. A production file made here is noted in the table's header. */
+static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const xb_str *tag, const xb_str *keyText,
+                         const xb_item *keyBlock, const xb_item *unique) {
   xb_area *a = xb_db_used(ctx, fn);
   if (!a || !orders_known(ctx, a, fn) || !orders_free(ctx, a, fn)) return;
-  if (!bag || !bag->len || !keyText || !keyText->len) {
+  int tagged = a->rdd->index->tagged, named = tag && tag->len;
+  if (bag && !bag->len) bag = NULL;
+  if ((!bag && !named) || !keyText || !keyText->len) {
     xb_error_of(ctx, XB_DBCMD, EG_ARG, 1006, fn, NULL, 0, 0, 0, NULL, 0, NULL);
     return;
   }
-  char *path = bag_path(a, bag);
+  char *path = !tagged ? bag_path(a, bag ? bag : tag) : bag ? bag_path(a, bag) : NULL;
+  if (!path) {
+    path = malloc(strlen(a->production) + 1);
+    if (!path) xb_gc_fatal("out of memory");
+    strcpy(path, a->production);
+  }
+  char *name = NULL;
+  if (tagged && named) {
+    name = malloc(tag->len + 1);
+    if (!name) xb_gc_fatal("out of memory");
+    memcpy(name, tag->data, tag->len);
+    name[tag->len] = '\0';
+  }
+  int fresh = !name;
   xb_area_pin(a);
   int ok = xb_area_cold(ctx, a);
   uint32_t same = ok && !a->closed ? bag_open(a, path) : 0;
-  if (same) ok = close_order(ctx, a, same); /* the file is made again */
+  int wasOpen = same != 0;
+  if (same && fresh) { /* the file is made anew: its orders go */
+    while (ok && !a->closed && (same = bag_open(a, path)) != 0) ok = close_order(ctx, a, same);
+  } else if (same) { /* a tag of the name is replaced */
+    uint32_t old = xb_area_order_named(a, name, strlen(name), a->orders[same - 1]->bag->path);
+    if (old) ok = close_order(ctx, a, old);
+  }
   xb_order *o = NULL;
   if (ok && !a->closed) { /* built while the other orders are open: USECURRENT, REST, ... walk the controlling one */
     int isUnique = unique && unique->type == XB_T_LOGICAL ? unique->v.l != 0 : ctx->set_unique;
-    o = xb_order_create(ctx, a, path, NULL, 1, keyText, keyBlock, isUnique);
+    o = xb_order_create(ctx, a, path, name, fresh, keyText, keyBlock, isUnique);
   }
-  if (o && !a->closed && !a->pending.additive) xb_area_orders_close(ctx, a);
+  if (o && !a->closed && !a->pending.additive) xb_area_orders_clear(ctx, a, o->bag);
   if (!a->closed) clear_pending(a);
   if (o && a->closed) {
     xb_order_close(ctx, a, o);
     o = NULL;
   }
   if (o) {
-    add_order(a, o);
-    a->order = a->norders;
-    xb_area_top(ctx, a);
+    a->order = xb_area_add_order(a, o);
+    int32_t err = 0;
+    if (o->bag->production && !wasOpen && !a->rdd->set_production(a, 1, &err))
+      xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
+    if (!a->closed) xb_area_top(ctx, a);
   }
   xb_area_unpin(a);
+  free(name);
   free(path);
 }
 
 void xbf_ORDCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  const xb_str *bag = xb_db_str_arg(argc, argv, 0);
-  if (!bag || !bag->len) bag = xb_db_str_arg(argc, argv, 1); /* no bag: the order's name is the file's */
-  create_order(ctx, "ORDCREATE", bag, xb_db_str_arg(argc, argv, 2), argc > 3 ? &argv[3] : NULL,
-               argc > 4 ? &argv[4] : NULL);
+  create_order(ctx, "ORDCREATE", xb_db_str_arg(argc, argv, 0), xb_db_str_arg(argc, argv, 1),
+               xb_db_str_arg(argc, argv, 2), argc > 3 ? &argv[3] : NULL, argc > 4 ? &argv[4] : NULL);
 }
 
 /* dbCreateIndex( cFile, cKey, [bKey], [lUnique] ): ordCreate( cFile, , cKey, bKey, lUnique ). */
 void xbf_DBCREATEINDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  create_order(ctx, "DBCREATEINDEX", xb_db_str_arg(argc, argv, 0), xb_db_str_arg(argc, argv, 1),
+  create_order(ctx, "DBCREATEINDEX", xb_db_str_arg(argc, argv, 0), NULL, xb_db_str_arg(argc, argv, 1),
                argc > 2 ? &argv[2] : NULL, argc > 3 ? &argv[3] : NULL);
+}
+
+/* ordDestroy( xOrder, [cBag] ): the order (in file cBag when given) leaves its file and closes; a file left without
+ * orders is erased. Nothing when there is no such order. */
+void xbf_ORDDESTROY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  xb_area *a = xb_db_used(ctx, "ORDDESTROY");
+  if (!a || !orders_known(ctx, a, "ORDDESTROY") || !orders_free(ctx, a, "ORDDESTROY") || argc == 0 ||
+      argv[0].type == XB_T_NIL)
+    return;
+  if (!xb_area_writable(ctx, a)) return;
+  const xb_str *bag = xb_db_str_arg(argc, argv, 1);
+  char *path = bag && bag->len ? bag_path(a, bag) : NULL;
+  xb_area_pin(a);
+  uint32_t n = 0;
+  if (xb_area_cold(ctx, a) && !a->closed) /* the order found once the change is written: its handler may close it */
+    n = path && argv[0].type == XB_T_STRING ? xb_area_order_named(a, argv[0].v.s->data, argv[0].v.s->len, path)
+                                             : order_arg(a, argc, argv, 0);
+  free(path);
+  if (n) {
+    xb_order *o = a->orders[n - 1];
+    memmove(&a->orders[n - 1], &a->orders[n], (a->norders - n) * sizeof *a->orders);
+    --a->norders;
+    if (a->order == n) a->order = 0;
+    else if (a->order > n) --a->order;
+    xb_order_destroy(ctx, a, o);
+  }
+  xb_area_unpin(a);
+}
+
+/* ordCount( [cBag] ): the orders open in the current area (in file cBag when given). */
+void xbf_ORDCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_area *a = xb_area_current(ctx);
+  const xb_str *bag = xb_db_str_arg(argc, argv, 0);
+  int64_t n = 0;
+  if (a && a->rdd->index) {
+    char *path = bag && bag->len ? bag_path(a, bag) : NULL;
+    for (uint32_t i = 0; i < a->norders; ++i) n += !path || strcmp(a->orders[i]->bag->path, path) == 0;
+    free(path);
+  }
+  xb_set_int(ret, n);
 }
 
 /* ordListAdd( cBag ), dbSetIndex( cBag ): opens the order of a file (not again when it is open); when no order was
@@ -173,10 +222,11 @@ static void add_bag(xb_ctx *ctx, const char *fn, uint32_t argc, xb_item *argv) {
   xb_area_pin(a);
   if (!bag_open(a, path) && xb_area_cold(ctx, a) && !a->closed) {
     xb_order **list = NULL;
-    uint32_t n = xb_order_open(ctx, a, path, &list), first = a->norders + 1;
+    uint32_t n = xb_order_open(ctx, a, path, &list), first = 0;
     for (uint32_t i = 0; i < n; ++i) {
       if (a->closed) xb_order_close(ctx, a, list[i]);
-      else add_order(a, list[i]);
+      else if (!first) first = xb_area_add_order(a, list[i]);
+      else xb_area_add_order(a, list[i]);
     }
     free(list);
     if (n && !a->closed && !a->order) {
@@ -198,12 +248,12 @@ void xbf_DBSETINDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   add_bag(ctx, "DBSETINDEX", argc, argv);
 }
 
-/* ordListClear(), dbClearIndex(): the orders closed; the record order is controlling. */
+/* ordListClear(), dbClearIndex(): the orders closed but the production file's; the record order is controlling. */
 static void clear_orders(xb_ctx *ctx, const char *fn) {
   xb_area *a = xb_area_current(ctx);
   if (!a || !orders_free(ctx, a, fn)) return;
   xb_area_pin(a);
-  xb_area_orders_close(ctx, a);
+  xb_area_orders_clear(ctx, a, NULL);
   xb_area_unpin(a);
 }
 
@@ -356,7 +406,8 @@ void xbf_ORDBAGEXT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   const xb_area *a = xb_area_current(ctx);
-  set_text(ret, (a ? a->rdd : xb_rdd_default(ctx))->indexExt);
+  const xb_index_format *f = (a ? a->rdd : xb_rdd_default(ctx))->index;
+  set_text(ret, f ? f->ext : "");
 }
 
 void xbf_INDEXEXT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf_ORDBAGEXT(ctx, ret, argc, argv); }
@@ -445,7 +496,7 @@ void xbf_ORDKEYVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_area_pin(a);
   int ok = xb_order_record_key(ctx, a, o, key, &in) && !a->closed;
   xb_area_unpin(a);
-  if (ok && in) xb_order_key_value(o, key, ret);
+  if (ok && in) xb_order_key_value(o, key, xb_decimals(ctx), ret);
 }
 
 /* ordSkipUnique( [nDirection] ): to the next key's first record (nDirection below 0: the previous key's last) in the

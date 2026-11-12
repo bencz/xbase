@@ -76,17 +76,38 @@ static void order_error(xb_ctx *ctx, xb_area *a, const xb_order *o, int32_t genc
   xb_error_of(ctx, a->rdd->name, gencode, subcode, "", o->bag->path, err, 0, 0, NULL, 0, NULL);
 }
 
-/* An order's name: its file's name without directories and extension, upper case, at most XB_ORDER_NAME_MAX
- * characters (malloc'ed). */
-static char *name_of(const char *path) {
-  size_t start, ext, len = strlen(path);
-  xb_file_name_parts(path, len, &start, &ext);
-  if (ext - start > XB_ORDER_NAME_MAX) ext = start + XB_ORDER_NAME_MAX;
-  char *n = malloc(ext - start + 1);
-  if (!n) xb_gc_fatal("out of memory");
-  for (size_t i = start; i < ext; ++i) n[i - start] = xb_ascii_upper(path[i]);
-  n[ext - start] = '\0';
-  return n;
+/* An order's name from `len` bytes of text: upper case, its first XB_INDEX_NAME_MAX characters, without trailing
+ * blanks (malloc'ed). */
+static size_t name_into(const char *text, size_t len, char out[XB_INDEX_NAME_MAX + 1]) {
+  if (len > XB_INDEX_NAME_MAX) len = XB_INDEX_NAME_MAX;
+  while (len && text[len - 1] == ' ') --len;
+  for (size_t i = 0; i < len; ++i) out[i] = xb_ascii_upper(text[i]);
+  out[len] = '\0';
+  return len;
+}
+
+static char *order_name(const char *text, size_t len) {
+  char n[XB_INDEX_NAME_MAX + 1];
+  size_t got = name_into(text, len, n);
+  char *copy = malloc(got + 1);
+  if (!copy) xb_gc_fatal("out of memory");
+  memcpy(copy, n, got + 1);
+  return copy;
+}
+
+uint32_t xb_area_order_named(const xb_area *a, const char *name, size_t len, const char *path) {
+  char n[XB_INDEX_NAME_MAX + 1];
+  name_into(name, len, n);
+  for (uint32_t i = 0; i < a->norders; ++i)
+    if (strcmp(a->orders[i]->name, n) == 0 && (!path || strcmp(a->orders[i]->bag->path, path) == 0)) return i + 1;
+  return 0;
+}
+
+/* The name of a file's order: the file's name without directories and extension. */
+static char *file_order_name(const char *path) {
+  size_t start, ext;
+  xb_file_name_parts(path, strlen(path), &start, &ext);
+  return order_name(path + start, ext - start);
 }
 
 /* A codeblock from an expression's text: NIL after the error (raised). */
@@ -120,13 +141,13 @@ static int64_t key_field(xb_area *a, const char *text, uint32_t keyLen) {
   return k;
 }
 
-/* An order of bag `bag` (counted there already), named `name` (a tag's, or the file's path). */
-static xb_order *order_new(xb_order_bag *bag, const char *name) {
+/* An order of bag `bag` (counted there already), named `name` (order_name(), which it keeps). */
+static xb_order *order_new(xb_order_bag *bag, char *name) {
   xb_order *o = calloc(1, sizeof *o);
   if (!o) xb_gc_fatal("out of memory");
   o->bag = bag;
   o->format = bag->format;
-  o->name = name_of(name);
+  o->name = name;
   xb_set_nil(&o->key);
   xb_set_nil(&o->cond);
   o->field = -1;
@@ -237,8 +258,8 @@ static int write_sorted(xb_area *a, xb_order *o, collected *c, int fresh, int32_
     memcpy(keys + (size_t)n * len, k, len);
     recnos[n++] = c->recnos[order[i].at];
   }
-  int ok = o->format->build(&o->bag->bag, o->bag->path, o->name, fresh, &o->info, keys, recnos, n, a->readonly,
-                            !a->shared, &o->tag, err);
+  int ok = o->format->build(&o->bag->bag, o->bag->path, o->name, fresh, &o->info, keys, recnos, n,
+                            a->rdd->lastrec(a), a->readonly, !a->shared, &o->tag, err);
   free(order);
   free(keys);
   free(recnos);
@@ -352,6 +373,7 @@ static int collect(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditio
 /* Builds the order's file from the records `cond` selects (collect()). */
 static int build(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond, int fresh) {
   collected c = {NULL, NULL, 0, 0};
+  o->info.partial = cond->next > 0 || cond->record > 0 || cond->rest || cond->current;
   xb_area_pin(a);
   int ok = collect(ctx, a, o, cond, &c) && !a->closed;
   int32_t err = 0;
@@ -372,13 +394,19 @@ static xb_order_bag *bag_of(const xb_area *a, const char *path) {
   return NULL;
 }
 
-static xb_order_bag *bag_new(const char *path, const xb_index_format *format) {
+/* Whether `path` names the table's production order file. */
+static int production_path(const xb_area *a, const char *path) {
+  return a->production && strcmp(a->production, path) == 0; /* as bag_of() tells files apart */
+}
+
+static xb_order_bag *bag_new(const xb_area *a, const char *path) {
   xb_order_bag *b = calloc(1, sizeof *b);
   if (!b) xb_gc_fatal("out of memory");
   b->path = malloc(strlen(path) + 1);
   if (!b->path) xb_gc_fatal("out of memory");
   strcpy(b->path, path);
-  b->format = format;
+  b->format = a->rdd->index;
+  b->production = production_path(a, path);
   return b;
 }
 
@@ -417,9 +445,9 @@ static int order_ready(xb_ctx *ctx, xb_area *a, xb_order *o) {
 xb_order *xb_order_create(xb_ctx *ctx, xb_area *a, const char *path, const char *name, int fresh,
                           const xb_str *keyText, const xb_item *keyBlock, int unique) {
   xb_order_bag *bag = bag_of(a, path);
-  if (!bag) bag = bag_new(path, a->rdd->index);
+  if (!bag) bag = bag_new(a, path);
   ++bag->orders;
-  xb_order *o = order_new(bag, name ? name : path);
+  xb_order *o = order_new(bag, name ? order_name(name, strlen(name)) : file_order_name(path));
   size_t n = keyText->len < XB_INDEX_KEY_MAX ? keyText->len : XB_INDEX_KEY_MAX;
   memcpy(o->info.key, keyText->data, n);
   o->info.unique = unique;
@@ -454,7 +482,7 @@ uint32_t xb_order_open(xb_ctx *ctx, xb_area *a, const char *path, xb_order ***ou
                     NULL) != 2)
       return 0;
   }
-  xb_order_bag *bag = bag_new(path, format);
+  xb_order_bag *bag = bag_new(a, path);
   bag->bag = file;
   uint32_t n = format->tag_count(file), made = 0;
   if (!n) { /* a file of no order */
@@ -472,7 +500,7 @@ uint32_t xb_order_open(xb_ctx *ctx, xb_area *a, const char *path, xb_order ***ou
     xb_index_info info;
     xb_tag *tag = format->tag_at(file, i, &info, &name);
     ++bag->orders;
-    xb_order *o = order_new(bag, name ? name : path);
+    xb_order *o = order_new(bag, name ? order_name(name, strlen(name)) : file_order_name(path));
     o->tag = tag;
     o->info = info;
     list[made++] = o;
@@ -488,14 +516,37 @@ uint32_t xb_order_open(xb_ctx *ctx, xb_area *a, const char *path, xb_order ***ou
   return made;
 }
 
-/* Builds an order's file again from the records; 0 (the order with no file) after the error. */
-static int rebuild(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond) {
+/* Builds an order again from the records: an untagged format's file made anew; a tagged one's file made anew with
+ * its first order (`first`), the others added after it in their order. 0 (the order with no file) after the
+ * error. */
+static int rebuild(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond, int first) {
   int32_t err = 0;
-  int ok = !o->bag->bag || o->format->close(o->bag->bag, &err); /* one order per file (NTX): it is made anew */
+  if (o->format->tagged) return build(ctx, a, o, cond, first);
+  int ok = !o->bag->bag || o->format->close(o->bag->bag, &err);
   o->bag->bag = NULL;
   o->tag = NULL;
   if (!ok) order_error(ctx, a, o, EG_WRITE, 1011, err);
   return ok && build(ctx, a, o, cond, 1);
+}
+
+/* Closes the area's orders of bag `b` from position `from` (from 0) on (out of the list first: handlers may close the
+ * area). */
+static void close_bag_orders(xb_ctx *ctx, xb_area *a, xb_order_bag *b, uint32_t from) {
+  xb_order **gone = malloc((a->norders ? a->norders : 1) * sizeof *gone);
+  if (!gone) xb_gc_fatal("out of memory");
+  uint32_t kept = 0, n = 0;
+  for (uint32_t i = 0; i < a->norders; ++i) {
+    if (i < from || a->orders[i]->bag != b) {
+      if (a->order == i + 1) a->order = kept + 1;
+      a->orders[kept++] = a->orders[i];
+    } else {
+      if (a->order == i + 1) a->order = 0;
+      gone[n++] = a->orders[i];
+    }
+  }
+  a->norders = kept;
+  for (uint32_t i = 0; i < n; ++i) xb_order_close(ctx, a, gone[i]);
+  free(gone);
 }
 
 int xb_area_orders_rebuild(xb_ctx *ctx, xb_area *a, const xb_item *evalBlock, int64_t every) {
@@ -510,6 +561,8 @@ int xb_area_orders_rebuild(xb_ctx *ctx, xb_area *a, const xb_item *evalBlock, in
     /* While its file is made again the order is out of the area's list (blocks that run meanwhile see it closed),
      * its items rooted here. */
     xb_order *o = a->orders[k];
+    int first = 1;
+    for (uint32_t j = 0; j < k && first; ++j) first = a->orders[j]->bag != o->bag;
     uint32_t focus = a->order;
     memmove(&a->orders[k], &a->orders[k + 1], (a->norders - k - 1) * sizeof *a->orders);
     --a->norders;
@@ -518,10 +571,11 @@ int xb_area_orders_rebuild(xb_ctx *ctx, xb_area *a, const xb_item *evalBlock, in
     xb_gc_root_push(ctx, &o->cond);
     xb_gc_root_push(ctx, &o->scope[0].value);
     xb_gc_root_push(ctx, &o->scope[1].value);
-    int built = rebuild(ctx, a, o, &cond);
+    int built = rebuild(ctx, a, o, &cond, first);
     xb_gc_root_pop(ctx, 4);
-    if (!built || a->closed) { /* not made again: closed; the ones after it stay as they were */
+    if (!built || a->closed) { /* not made again: closed; the ones after it stay as they were but in its file */
       ok = built;
+      if (o->format->tagged && !a->closed) close_bag_orders(ctx, a, o->bag, k); /* not made again: their tags went */
       xb_order_close(ctx, a, o);
       break;
     }
@@ -547,12 +601,88 @@ int xb_order_close(xb_ctx *ctx, xb_area *a, xb_order *o) {
   return ok;
 }
 
+int xb_order_destroy(xb_ctx *ctx, xb_area *a, xb_order *o) {
+  int32_t err = 0;
+  xb_order_bag *b = o->bag;
+  if (!o->format->remove(b->bag, o->tag, &err)) {
+    order_error(ctx, a, o, EG_WRITE, 1011, err);
+    xb_order_close(ctx, a, o);
+    return 0;
+  }
+  int erase = !o->format->tagged || !o->format->tag_count(b->bag), production = b->production;
+  char *path = malloc(strlen(b->path) + 1);
+  if (!path) xb_gc_fatal("out of memory");
+  strcpy(path, b->path);
+  int ok = xb_order_close(ctx, a, o);
+  if (ok && erase) {
+    xb_platform_file_erase(path, &err); /* closed: a file another user still has open stays */
+    if (production && !a->closed && !a->rdd->set_production(a, 0, &err)) {
+      xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
+      ok = 0;
+    }
+  }
+  free(path);
+  return ok;
+}
+
+int xb_area_orders_clear(xb_ctx *ctx, xb_area *a, const xb_order_bag *keep) {
+  int ok = xb_area_cold(ctx, a);
+  if (a->closed) return 0;
+  xb_order **gone = malloc((a->norders ? a->norders : 1) * sizeof *gone);
+  if (!gone) xb_gc_fatal("out of memory");
+  uint32_t kept = 0, n = 0;
+  for (uint32_t i = 0; i < a->norders; ++i) {
+    xb_order *o = a->orders[i];
+    if (o->bag->production || o->bag == keep) a->orders[kept++] = o;
+    else gone[n++] = o;
+  }
+  a->norders = kept;
+  a->order = 0;
+  for (uint32_t i = 0; i < n; ++i) ok = xb_order_close(ctx, a, gone[i]) && ok; /* out of the list first: */
+  free(gone);                                                                  /* handlers may close the area */
+  return ok;
+}
+
+uint32_t xb_area_add_order(xb_area *a, xb_order *o) {
+  uint32_t at = o->bag->production ? 0 : a->norders;
+  for (uint32_t i = 0; i < a->norders; ++i)
+    if (a->orders[i]->bag == o->bag) at = i + 1;
+  xb_order **grown = realloc(a->orders, (a->norders + 1) * sizeof *grown);
+  if (!grown) xb_gc_fatal("out of memory");
+  a->orders = grown;
+  memmove(&a->orders[at + 1], &a->orders[at], (a->norders - at) * sizeof *a->orders);
+  a->orders[at] = o;
+  ++a->norders;
+  if (a->order > at) ++a->order;
+  return at + 1;
+}
+
+int xb_area_production_open(const xb_area *a) {
+  for (uint32_t i = 0; i < a->norders; ++i)
+    if (a->orders[i]->bag->production) return 1;
+  return 0;
+}
+
+void xb_area_open_production(xb_ctx *ctx, xb_area *a) {
+  xb_file_id id;
+  int32_t err = 0;
+  if (!a->production || !xb_platform_path_id(a->production, &id, &err)) return;
+  xb_order **list = NULL;
+  uint32_t n = xb_order_open(ctx, a, a->production, &list);
+  for (uint32_t i = 0; i < n; ++i) {
+    if (a->closed) xb_order_close(ctx, a, list[i]);
+    else xb_area_add_order(a, list[i]);
+  }
+  free(list);
+}
+
 /* Puts the cursor on the current record's entry, or on the first after where it would be (its record in `found`):
  * 1, 0 when there is none after it, -1 after an error (raised). */
 static int sync(xb_ctx *ctx, xb_area *a, xb_order *o, uint32_t *found) {
   *found = a->recno;
   int at = o->format->at(o->tag, a->recno);
   if (at && !a->shared) return 1;
+  if (a->shared) a->rdd->refresh(a); /* the key as the record is now */
   unsigned char key[XB_INDEX_KEY_MAX];
   int in;
   if (!record_key(ctx, a, o, key, &in)) return -1;
@@ -772,8 +902,8 @@ int xb_order_record_key(xb_ctx *ctx, xb_area *a, xb_order *o, unsigned char *key
   return record_key(ctx, a, o, key, in);
 }
 
-void xb_order_key_value(const xb_order *o, const unsigned char *key, xb_item *r) {
-  o->format->key_value(&o->info, key, r);
+void xb_order_key_value(const xb_order *o, const unsigned char *key, uint16_t dec, xb_item *r) {
+  o->format->key_value(&o->info, key, dec, r);
 }
 
 /* The orders' entries for a record that changes: the keys before (`fresh`: a new record, which has none), then,

@@ -35,6 +35,8 @@
 #define DBF_MEMO_LEN 10          /* a memo's block number, in digits */
 #define DBF_MEMO_BINARY 4        /* the same as a 32-bit little-endian number (FPT tables) */
 #define DBF_AHEAD 65536          /* bytes of records read at once when records are read in order */
+#define DBF_FLAGS 28             /* the header's flags byte */
+#define DBF_HAS_PRODUCTION 0x01  /* the table has a production order file (FoxPro's) */
 
 typedef struct dbf {
   xb_shared *s;
@@ -386,7 +388,12 @@ static int dbf_load(xb_area *a, int32_t *err) {
 }
 
 /* The bytes of record `recno`'s lock (0: the file lock's) and of the append lock, by the driver's scheme. */
-static void lock_range(const xb_area *a, const dbf *d, uint32_t recno, uint64_t *pos, uint64_t *len) {
+static void lock_range(const xb_area *a, const dbf *d, uint32_t recno, int high, uint64_t *pos, uint64_t *len) {
+  if (a->rdd->lockScheme == XB_LOCKS_FOXPRO && high) {
+    *pos = (uint64_t)XB_FOX_HIGH_LOCK - (recno ? recno : XB_FOX_HIGH_FILE);
+    *len = recno ? 1 : XB_FOX_HIGH_FILE;
+    return;
+  }
   if (a->rdd->lockScheme == XB_LOCKS_FOXPRO) {
     *pos = recno ? XB_FOX_LOCK + (uint64_t)(recno - 1) * d->recordLen + d->headerLen : XB_FOX_LOCK + 1u;
     *len = recno ? 1 : XB_FOX_LOCK - 3u;
@@ -397,7 +404,8 @@ static void lock_range(const xb_area *a, const dbf *d, uint32_t recno, uint64_t 
 }
 
 static uint64_t append_lock(const xb_area *a) {
-  return a->rdd->lockScheme == XB_LOCKS_FOXPRO ? XB_FOX_LOCK : XB_DB_LOCK;
+  if (a->rdd->lockScheme != XB_LOCKS_FOXPRO) return XB_DB_LOCK;
+  return xb_area_production_open(a) ? XB_FOX_HIGH_LOCK : XB_FOX_LOCK;
 }
 
 /* Shared: under the append lock, the record written at once after the last one in the file now, locked (unless the
@@ -412,7 +420,7 @@ static int append_shared(xb_area *a, dbf *d, int32_t *err) {
     ok = 0;
   }
   uint64_t pos, len;
-  lock_range(a, d, recno, &pos, &len);
+  lock_range(a, d, recno, xb_area_production_open(a), &pos, &len);
   ok = ok && (!locked || xb_shared_lock(d->s, pos, len, XB_LOCK_WRITE, 0, err));
   if (ok) {
     blank(a, d);
@@ -449,6 +457,11 @@ static int dbf_append(xb_area *a, uint32_t *recno, int32_t *err) {
   return 1;
 }
 
+static void dbf_refresh(xb_area *a) {
+  dbf *d = state(a);
+  if (d->shared && !d->dirty && d->recno <= d->count) d->loaded = 0;
+}
+
 /* Record `recno`'s lock (0: the file's), taken (`on`) or released; held by nobody else: 1, else 0 with 33. A lock
  * had on the current record (or the file) makes it read again: what was read before may be another program's past.
  * Records read ahead are dropped when the file lock comes or goes. */
@@ -456,9 +469,16 @@ static int dbf_lock(xb_area *a, uint32_t recno, int on, int32_t *err) {
   dbf *d = state(a);
   if (!d->shared || d->readonly) return 1;
   uint64_t pos, len;
-  lock_range(a, d, recno, &pos, &len);
+  int high = xb_area_production_open(a);
+  lock_range(a, d, recno, high, &pos, &len);
   if (!recno) d->aheadCount = 0;
-  if (!on) return xb_shared_unlock(d->s, pos, len, err);
+  if (!on) { /* FoxPro's: the production file may have opened or closed since the lock was taken; a range not held is
+                nothing to release */
+    int ok = xb_shared_unlock(d->s, pos, len, err);
+    if (a->rdd->lockScheme != XB_LOCKS_FOXPRO) return ok;
+    lock_range(a, d, recno, !high, &pos, &len);
+    return xb_shared_unlock(d->s, pos, len, err) && ok;
+  }
   int ok = xb_shared_lock(d->s, pos, len, XB_LOCK_WRITE, 0, err);
   if (ok && (!recno || recno == d->recno) && d->recno <= d->count) d->loaded = 0;
   return ok;
@@ -679,10 +699,27 @@ static int64_t dbf_last_update(xb_area *a) {
   return xb_date_encode(1900 + h[1], h[2], h[3]);
 }
 
+/* The flag is written with the header (its date and count too) in an exclusive table, alone in a shared one. */
+static int dbf_set_production(xb_area *a, int on, int32_t *err) {
+  dbf *d = state(a);
+  unsigned char flags = (unsigned char)(on ? d->header[DBF_FLAGS] | DBF_HAS_PRODUCTION
+                                           : d->header[DBF_FLAGS] & ~DBF_HAS_PRODUCTION);
+  if (flags == d->header[DBF_FLAGS] || d->readonly || a->readonly) return 1;
+  d->header[DBF_FLAGS] = flags;
+  if (!d->shared) return write_header(d, err);
+  if (!xb_shared_lock(d->s, append_lock(a), 1, XB_LOCK_WRITE, 1, err)) return 0; /* the header's lock */
+  int ok = xb_platform_file_write_at(d->f, DBF_FLAGS, &flags, 1, err);
+  int32_t unlockErr = 0;
+  if (!xb_shared_unlock(d->s, append_lock(a), 1, &unlockErr) && ok) {
+    *err = unlockErr;
+    ok = 0;
+  }
+  return ok;
+}
+
 const xb_rdd xb_rdd_dbf = {
     .name = "DBFNTX",
     .memo = &xb_memo_dbt,
-    .indexExt = ".ntx",
     .index = &xb_index_ntx,
     .lockScheme = XB_LOCKS_CLIPPER,
     .check = dbf_check,
@@ -698,6 +735,7 @@ const xb_rdd xb_rdd_dbf = {
     .put = dbf_put,
     .field_bytes = dbf_field_bytes,
     .load = dbf_load,
+    .refresh = dbf_refresh,
     .deleted = dbf_deleted,
     .set_deleted = dbf_set_deleted,
     .pack = dbf_pack,
@@ -705,12 +743,13 @@ const xb_rdd xb_rdd_dbf = {
     .header_size = dbf_header_size,
     .record_size = dbf_record_size,
     .last_update = dbf_last_update,
+    .set_production = dbf_set_production,
 };
 
 const xb_rdd xb_rdd_dbfcdx = {
     .name = "DBFCDX",
     .memo = &xb_memo_fpt,
-    .indexExt = ".cdx",
+    .index = &xb_index_cdx,
     .lockScheme = XB_LOCKS_FOXPRO,
     .check = dbf_check,
     .create = dbf_create,
@@ -725,6 +764,7 @@ const xb_rdd xb_rdd_dbfcdx = {
     .put = dbf_put,
     .field_bytes = dbf_field_bytes,
     .load = dbf_load,
+    .refresh = dbf_refresh,
     .deleted = dbf_deleted,
     .set_deleted = dbf_set_deleted,
     .pack = dbf_pack,
@@ -732,4 +772,5 @@ const xb_rdd xb_rdd_dbfcdx = {
     .header_size = dbf_header_size,
     .record_size = dbf_record_size,
     .last_update = dbf_last_update,
+    .set_production = dbf_set_production,
 };

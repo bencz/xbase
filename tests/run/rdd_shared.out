@@ -44,3 +44,5 @@ readonly shared: .T. .T.          0
 skip after the key moved:         11 .T.
 skip back after the key moved:         10
 ordKeyNo after the key moved:          9
+read before the key moved: A07
+skip from a record read before:         11 .T.

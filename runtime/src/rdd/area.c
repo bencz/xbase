@@ -3,6 +3,8 @@
 
 #include "rdd/order.h"
 
+#include "core/file.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -231,6 +233,7 @@ void xb_area_pin(xb_area *a) { ++a->pins; }
 
 static void area_free(xb_area *a) {
   free(a->alias);
+  free(a->production);
   free(a->locks);
   free(a);
 }
@@ -350,6 +353,14 @@ int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, c
     ctx->areaCap = cap;
   }
   ctx->areas[n - 1] = a;
+  if (rdd->index && rdd->index->tagged) {
+    a->production = xb_file_path_replace_ext(path, rdd->index->ext);
+    xb_area_pin(a);
+    xb_area_open_production(ctx, a);
+    int closed = a->closed;
+    xb_area_unpin(a);
+    if (closed) return 0;
+  }
   return xb_area_top(ctx, a);
 }
 

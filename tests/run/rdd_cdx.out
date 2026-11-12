@@ -1,0 +1,37 @@
+
+flag:          0 .F.
+         1          1 NAME rdd_cdx
+         2          2 NAME AMT AMT
+walk: AMT 1 2 3 4 5 6 7 8 
+closed:          1  4608/868791860
+reopened:          2          0 NAME AMT
+walk: AMT 1 2 3 4 5 6 7 8 
+key value:        -27.50 N
+replaced:          2          2 AMT NAME NAME + "x"
+other:          3          3 RDD_CDX_OT rdd_cdx_other
+cleared:          2          0
+set index:          3          3 AMT RDD_CDX_OT
+descending:          3          3 AMT NAME BIG 
+walk: BIG 8 7 6 5 4 3 2 1 9 
+seek: .T.          7          2
+soft seek: .F.          3          6
+key goto:          6          3          9
+scope:          4
+crossed:          0
+reindex:          3          3
+closed:          1  6144/344111577 3072/658361419
+destroyed:          2 NAME BIG
+closed:          1  6144/636299078 3072/658361419
+all destroyed:          0 .F.
+closed:          0
+delete tag:          1 N2
+closed:          1  4608/209403226 3072/658361419
+made anew:          2          2 N2 RDD_CDX_OT
+closed:          1  4608/209403226 3072/278260170
+long name:          2 ABCDEFGHI AMT ABCDEFGHI          2
+partial:          3          3
+closed:          1  8192/293997598 3072/278260170
+ntx destroyed:          0 .F.
+reindex failed
+after:          1          0 A
+walk: ADAMS BAKER BROWN CLARK JONES MILLER SMITH ZED ZZ 

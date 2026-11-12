@@ -114,17 +114,17 @@ An order (an index) keeps the records in the order of a key: `order.c` makes key
 `ordcmd.c` has the functions. An area has a list of orders open and a controlling one (`xb_area.order`, 0 for the
 record order).
 
-An order is a tag of an order file, a bag (`xb_order_bag`, shared by the area's orders in it and closed with the last
-of them), in its driver's format (`xb_rdd.index`, `index.h`): NTX (`ntx.c`, one order per file, named by the file)
-*(planned: CDX, several named orders per file)*. The format has the keys (their length for a value, a value's key
-bytes, a key's value again, their comparison in the order's order, and whether its file stores a descending order
-the other way round), the files (open with their tags, build a tag from sorted entries, flush, close, and a hold of
-the file's lock across several operations) and each tag's cursor (first, last, next, prev, seek, find, the counts
-and the n-th entry, the entry's key, an entry replaced by another); every cursor operation works in the order's own
-order, whatever the file stores. A record's change evaluates every order's new key first, then moves the entries
-that changed bag by bag, each bag's lock held once for all its orders (an order whose new key could not be had stops
-the change for it and the orders after it; an error of the file is raised once the lock is let go, so that its handler
-may do anything, closing the area included).
+An order is a tag of an order file, a bag (`xb_order_bag`, shared by the area's orders in it and closed with the last of
+them), in its driver's format (`xb_rdd.index`, `index.h`): NTX (`ntx.c`, one order per file, named by the file) or CDX
+(`cdx.c`, the named tags of one file). The format has the keys (their length for a value, a value's key bytes, a key's
+value again, their comparison in the order's order, and whether its file stores a descending order the other way round),
+the files (open with their tags, build a tag from sorted entries, remove a tag, flush, close, and a hold of the file's
+lock across several operations) and each tag's cursor (first, last, next, prev, seek, find, the counts and the n-th
+entry, the entry's key, an entry replaced by another); every cursor operation works in the order's own order, whatever
+the file stores. A record's change evaluates every order's new key first, then moves the entries that changed bag by
+bag, each bag's lock held once for all its orders (an order whose new key could not be had stops the change for it and
+the orders after it; an error of the file is raised once the lock is let go, so that its handler may do anything,
+closing the area included).
 
 - `INDEX ON <key> TO <file> [FOR <cond>] [ALL] [WHILE <cond>] [NEXT <n>] [RECORD <n>] [REST] [EVAL <block>]
   [EVERY <n>] [UNIQUE] [DESCENDING] [ADDITIVE] [USECURRENT]` (`ordCondSet()` then `ordCreate()`; Clipper's
@@ -147,6 +147,23 @@ may do anything, closing the area included).
   [bWhile], [bEval], [nEvery], [nStart], [nNext], [nRecord], [lRest], [lDescend], [lCompound], [lAdditive],
   [lCurrent] )` keeps these settings (`xb_order_conditions`) for the next order made in the area; `lCompound` is
   NTX's one order per file.
+- Files of tags (CDX): `INDEX ON <key> TAG <name> [TO <file>]` (`ordCreate( [cFile], cTag, ... )`) adds tag
+  `<name>` to the file, replacing a tag of that name (its order closed, the new one in its place in the list); without
+  `TO` the file is the table's production file, its name with `.cdx` in its directory. `INDEX ON <key> TO <file>`
+  without `TAG` makes the file anew (its orders open in the area closed first) with one tag named as the file. A tag
+  left alone in its file by the replacement makes the file anew. A production file made in an area that did not have
+  it open sets the flag of byte 28 of the table's header (bit `0x01`); `USE` opens the production file with the table
+  when it exists (first in the list, no order controlling), and `ordListClear()`, `CLOSE INDEXES`, `SET INDEX TO` and
+  `INDEX ON` without `ADDITIVE` keep its orders open. An order added to a file the area has open comes after that
+  file's other orders. `ordDestroy( xOrder, [cFile] )` and `DELETE TAG <name> [IN <file>] [, ...]` take a tag out of
+  its file and close its order; a file left without tags (an NTX file always) is erased, and the production file's
+  erasure clears the header's flag. `ordCount( [cFile] )` counts the area's orders (in the file). `REINDEX` makes
+  each CDX file anew with its tags in their order (the first one makes the file, the others are added), each as it
+  was described (its conditions, the partial flag cleared); when one fails, the orders after it in its file close
+  with it (the file holds them no more; the reference keeps them open on tags its file no longer has). A tag is
+  partial when built with `NEXT`, `RECORD`, `REST` or `USECURRENT`. A tag is added to an existing file only when it is
+  a CDX file this reader takes; an empty file is made anew, another one is an error (the reference makes any file it
+  cannot read anew, losing what it holds).
 - `SET INDEX TO <files>` (`ordListClear()` and `ordListAdd()`), `USE ... INDEX <files>` (`dbSetIndex()`): an order
   opened when none is controlling becomes the controlling one, and the first record current; a file open already is
   not opened again; one that cannot be is `DBFNTX/1003` `Open error`, which may be retried. The key's type is the
@@ -167,11 +184,11 @@ may do anything, closing the area included).
   scope's first record when the key comes before the scope, at the end when after it.
 - Positions in the scope, the filter and `SET DELETED` not counted: `ordKeyCount( [xOrder] )` the entries,
   `ordKeyNo( [xOrder] )` the current record's position (0 when it has no entry there), `ordKeyGoto( nKeyNo )` goes to
-  the record of entry n of the controlling order (then forward to the first that shows; past the last: the end; below
-  1: `.F.`), `ordKeyVal()` the current record's key as a value (a number with the key's width and decimals, a date, a
-  logical; `NIL` when it has no entry). `ordSkipUnique( [nDirection] )` goes to the next key's first record, or back
-  to the previous key's last one (back from the first key: the first record with `Bof()`). With no order they are
-  `LastRec()`, `RecNo()`, `GO n`, `NIL` and `SKIP n`.
+  the record of entry n of the controlling order (then forward to the first that shows; past the last: the end; below 1:
+  `.F.`), `ordKeyVal()` the current record's key as a value (a number with the key's width and decimals; a CDX key's,
+  which keeps none, with `SET DECIMALS`; a date, a logical; `NIL` when it has no entry). `ordSkipUnique( [nDirection] )`
+  goes to the next key's first record, or back to the previous key's last one (back from the first key: the first record
+  with `Bof()`). With no order they are `LastRec()`, `RecNo()`, `GO n`, `NIL` and `SKIP n`.
 - `SEEK <value> [SOFTSEEK] [LAST]` (`dbSeek( xKey, [lSoft], [lLast] )`, `FIND`): the first record whose key starts
   with the value's key (a string is compared for its own length: a partial key; `SET EXACT` does not change that), the
   last one with `LAST`, skipping records that do not show (`SET DELETED`, the filter); `Found()` tells whether it is
@@ -185,18 +202,21 @@ may do anything, closing the area included).
   is now. While an order's key, condition, `WHILE`, `EVAL` or scope block runs, the area's orders may not change:
   making, opening, closing them or `ordCondSet()` there is `DBCMD/1050` `Operation not supported` (closing the area
   stops what the block was for).
-- Names: an order's name (`ordName()`, `ordSetFocus()`) is its file's name without directories and extension, upper
-  case, its first 10 characters (NTX's names), and so are the names functions take; `ordBagName()` is the file's name
-  as given. `IndexKey()`, `ordKey()`, `ordFor()`, `IndexOrd()`, `ordNumber()`, `ordIsUnique()`, `ordDescend()`,
-  `ordBagExt()` and `IndexExt()` (`.ntx`) tell the rest; an order that is not there gives the empty value. An order
-  named 0 is the controlling one for `ordName()`, `ordKey()`, `ordFor()`, `ordBagName()` and `IndexKey()`, none for
-  `ordIsUnique()`, `ordDescend()` and `ordSetFocus()`, as in the reference.
+- Names: an order's name (`ordName()`, `ordSetFocus()`) is its tag's name, or its file's without directories and
+  extension: upper case, its first 10 characters, without trailing blanks (`XB_INDEX_NAME_MAX`), and so are the names
+  functions take; `ordBagName()` is the file's name as given. `IndexKey()`, `ordKey()`, `ordFor()`, `IndexOrd()`,
+  `ordNumber()`, `ordIsUnique()`, `ordDescend()`, `ordBagExt()` and `IndexExt()` (`.ntx`, `.cdx`) tell the rest; an
+  order that is not there gives the empty value. An order named 0 is the controlling one for `ordName()`, `ordKey()`,
+  `ordFor()`, `ordBagName()` and `IndexKey()`, none for `ordIsUnique()`, `ordDescend()` and `ordSetFocus()`, as in the
+  reference.
 - Keys (`xb_order_value_key`), as Clipper's NTX makes them: a string's bytes (blanks after it, or cut); a number's
   `Str( n, len, dec )` with blanks and the sign as `0` and, when negative, each digit d as `0x5C - d` (negative numbers
   first, larger ones first); a date's `DToS()` (blanks for the empty date); `T` or `F`. Keys compare as bytes, a
   descending order's the other way round, equal keys by record number (a build that walks another order, with
   `USECURRENT`, `REST`, ..., keeps among equal keys the order the walk reaches them in, as the reference does, and
-  `UNIQUE` the first of them).
+  `UNIQUE` the first of them). CDX keys: a string's bytes as NTX's; a number (and a date's day number) as a
+  big-endian double, its sign bit set when not negative and every bit turned when negative (minus zero is zero); `T`
+  or `F`; a descending tag is stored ascending and walked from its end; equal keys by record number always.
 
 Where xbase does not follow the reference (checked by `tests/run/rdd_index_stress.prg` and the cross runs of
 [Tests](#tests)): equal keys stay in record order through every change; the reference puts a key it adds after the
@@ -206,7 +226,10 @@ entry looked for by key and record that is not where record order puts it is loo
 would change its orders, is handled as above (`rdd_index_blocks.prg`, `rdd_index_eval.prg`); the reference fails or
 reads freed memory then. `ordKeyCount()` with a codeblock bound counts for the block's value now; the reference may
 give a count it made for an earlier value (`rdd_index_scope.prg`). `REINDEX EVAL` takes the pending `ordCondSet()`
-`EVAL` and `EVERY` and clears the pending settings; the reference keeps them for the next order made.
+`EVAL` and `EVERY` and clears the pending settings; the reference keeps them for the next order made. The order
+rules above are the same for every format: the reference's CDX driver differs from its own NTX one in some of them
+(it counts `EVAL` calls and walks `REST` otherwise, its `ordKeyCount()` and `ordKeyNo()` leave out filtered and
+deleted records, its `ordKeyGoto( 0 )` gives `.T.`), and xbase keeps NTX's rules there.
 
 ## Drivers
 
@@ -215,26 +238,25 @@ the table or a file of its own): check a structure (the types, lengths and sizes
 names), create, open, close, the record count, go to a record (the blank one after the last outside the table; the
 record's bytes are read when first used: `load`, which `get` and `put` do themselves), flush (the record, and on
 `COMMIT` the header), append, read and write a field, a field's bytes, the deletion flag, pack, zap, and the header's
-sizes and date. Operations that fail give the
+sizes and date, the production-file flag of the header (`set_production`), and reading the current record again in
+shared mode before an order is placed from it (`refresh`). Operations that fail give the
 `FError()` code of the failure; the work area raises the error. `RddSetDefault()` and `USE ... VIA` choose the driver:
 
 - `DBFNTX` (the default, as in Clipper; `DBF` is the same): new tables get `DBT` memos, orders are `NTX`, shared tables
   are locked by Clipper's scheme.
 - `DBFCDX`: the same `DBF` code (`xb_rdd_dbfcdx`); new tables get `FPT` memos, shared tables are locked by FoxPro's
-  scheme. Its orders are `CDX` files *(planned: until they come, making or opening an order in a `DBFCDX` area is
-  `DBFCDX/1000` `Operation not supported`)*.
+  scheme. Its orders are `CDX` files.
 
-A driver tells its memo format (`memo`, rdd/memo.h), its order files' extension (`indexExt`, `ordBagExt()`) and its
-lock scheme (`lockScheme`). A table's memo format comes from its version byte, whatever driver opens it (`0x83` DBT,
-`0xF5` FPT; a table of plain fields, `0x03`, its driver's), so either driver reads and writes the other's tables.
-`DBFNTX()` and `DBFCDX()` are functions only so that `REQUEST DBFCDX` links as in Clipper programs.
+A driver tells its memo format (`memo`, rdd/memo.h), its order files' format (`index`, rdd/index.h, whose `ext` is
+`ordBagExt()`'s) and its lock scheme (`lockScheme`). A table's memo format comes from its version byte, whatever driver
+opens it (`0x83` DBT, `0xF5` FPT; a table of plain fields, `0x03`, its driver's), so either driver reads and writes the
+other's tables. `DBFNTX()` and `DBFCDX()` are functions only so that `REQUEST DBFCDX` links as in Clipper programs.
 
-*(Planned)*: the order operations in the driver when a second index format comes; `SDF` and
-`DELIM` (text files, for `COPY TO` and `APPEND FROM`); `SET DB ENGINE TO <name>` (xbase's own command, over
-`RddSetDefault()`); later, as libraries in `libs/`, SQL engines (SQLite, PostgreSQL), among them an SQLite driver that
-behaves as `DBF` does (the row id as `RecNo()`, navigation in the order of an index, `Deleted()` a column). The
-language's other commands come with them: `SET RELATION`, `SET EXCLUSIVE`, `COPY`, `APPEND FROM`, `SORT`,
-`TOTAL`, `AVERAGE`, `UPDATE`, `JOIN`, `LIST`, `DISPLAY`.
+*(Planned)*: `SDF` and `DELIM` (text files, for `COPY TO` and `APPEND FROM`); `SET DB ENGINE TO <name>` (xbase's own
+command, over `RddSetDefault()`); later, as libraries in `libs/`, SQL engines (SQLite, PostgreSQL), among them an SQLite
+driver that behaves as `DBF` does (the row id as `RecNo()`, navigation in the order of an index, `Deleted()` a column).
+The language's other commands come with them: `SET RELATION`, `SET EXCLUSIVE`, `COPY`, `APPEND FROM`, `SORT`, `TOTAL`,
+`AVERAGE`, `UPDATE`, `JOIN`, `LIST`, `DISPLAY`.
 
 ## Files
 
@@ -309,12 +331,41 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
     only page.
   - The counter of changes goes up once each time pages are written; the reference counts its changes otherwise
     (sharing, step 4, reads it).
-- **CDX**: 512-byte pages; a compound index of tags, each a B-tree whose leaf pages keep keys compressed (the record
-  number, duplicate and trailing counts packed in bits); numbers and dates as big-endian sortable doubles.
+- **CDX** (`cdx.c`, FoxPro's compound index as the reference writes it): 512-byte pages, every pointer a byte offset.
+  A tag has a 1024-byte header (its root's offset, the key's length, its options: unique, partial, FOR condition,
+  compact and compound always; `DESCENDING`; the key's and the condition's texts); the header at offset 0 is the
+  directory's, a tag whose keys are the other tags' names (10 bytes, blanks after) and whose record numbers are their
+  headers' offsets; it alone holds the `RCHB` mark, the free list's head (offset 4, little-endian) and a change counter
+  (offset 8, big-endian). Tags are numbered in the order of their headers. A page: its kind (root, leaf), entry count
+  and left and right neighbours on its level (every level linked). A branch holds whole entries (the key, then the
+  record number and the child's offset, big-endian), each the last entry of its child's tree, at most
+  `(512 - 12) / (key + 8)`; bytes past its last entry are left as the steps that changed it left them. A leaf holds its
+  free bytes, the masks and bit widths of a descriptor's three fields and its byte length (3 to 8), one descriptor per
+  entry (the record number, the bytes it repeats of the entry before it, the trailing blanks or zeros it leaves out,
+  little-endian) and the rest of each key packed from the page's end down; its record numbers' width is the tag's
+  default, widened a byte at a time as they need. Freed pages hold the next free page's offset; pages are taken from
+  that list first, else from the end of the file (a tag's header always from the end, zeros written at once).
+  - The build sorts the keys (then by record) and fills pages in one pass, every leaf as wide as the table's record
+    count needs, a new page taken before the parent entry of the page it ends; the header is written last.
+  - Adding and removing an entry recompute its and its neighbour's compression; the levels above keep their entries
+    of the child up to date and balance it with its neighbours: a leaf that overflows spills into new pages or in front
+    of its right neighbour, leaves with a page's room to spare between them merge (a page left empty unlinked and
+    freed), branches share their entries evenly over as many pages as they need, and a full root moves its entries to
+    a new page and stays where it is over it (a tag's header never changes). Removing a tag frees its pages, children
+    before their branch, then its header's two halves (in a shared file they are left).
+  - The free list's head is not read when a file is opened exclusive (pages freed by earlier sessions are not taken
+    again), and is written when it changed; shared, it is read with the counter under every lock.
+
+  The files are the reference's bytes after the same operations (`rdd_cdx_format.prg`: random changes of thousands of
+  records, exclusive and shared, against its checksums; outside the tests, runs of tens of thousands of changes with
+  keys of 1 to 240 bytes compared file by file). The pages kept in memory (512 per file, found by a hash of their
+  offsets, made as pages come) are decoded when first read only as far as their header; their entries when a key is
+  needed; a changed leaf's bytes are made from its entries once, when they are written. A tag that leaves its file
+  (replaced, removed, its file made anew) finds no page any more, even if an order still names it.
 
 Every format is checked against the reference's files: what one writes, the other reads, and after the same operations
 the files are the same bytes (but the date of the last update). `tests/run/rdd_format.prg`, `rdd_memo_format.prg` and
-`rdd_index_format.prg` keep files the reference wrote and check both ways.
+`rdd_index_format.prg` and `rdd_cdx_format.prg` keep files the reference wrote and check both ways.
 
 ## Performance
 
@@ -365,19 +416,29 @@ Offsets are bytes of the file; POSIX takes them with `fcntl` locks, Windows with
   are written. FPT: the same lock around every memo write, the header and the free list read again under it; a read
   lock on it while the header is read at opening.
 - `DBFCDX` locks a table by FoxPro's scheme instead: record r's lock at byte `0x40000000 + (r-1) * record length +
-  header length`, the file lock on `0x40000001` to `0x7FFFFFFD`, the append lock on `0x40000000` *(planned with
-  `CDX`: other bytes while the table's structural index is open)*.
+  header length`, the file lock on `0x40000001` to `0x7FFFFFFD`, the append lock on `0x40000000`; while the table's
+  production order file is open in the area, record r's at `0x7FFFFFFE - r`, the file lock on `0x77FFFFFF` to
+  `0x7FFFFFFD`, the append lock on `0x7FFFFFFE` (programs that disagree on whether it is open lock different bytes,
+  as the reference's do). A lock is released at both places, so that one taken before the production file opened or
+  closed goes too. The header's flag of a production file is written under the append lock in a shared table.
+- Index read and change (CDX): a read or write lock on byte `0x7FFFFFFE` of the file (waiting), then the free list's
+  head and the change counter (8 bytes at offset 4) read: either changed, the pages kept are stale and the end of the
+  file is found again. A change is written before the write lock goes, with the head and the counter plus one. The
+  tags themselves are read at opening: a tag another program adds, removes or makes anew meanwhile is not seen until
+  the file is opened again (as with the reference).
 - Index read (NTX): a read lock on byte 1,000,000,000 of the index (waiting); the header is read, and a counter
   (bytes 2-3) other than the last one seen means pages kept from before are stale.
 - Index change (NTX): a write lock on the same byte (waiting); the pages are written, then the header with the counter
   plus one. A changed key's old entry goes and the new one comes under one lock.
-- An order's cursor is placed from the current record's key as it is now (read from the record), so `SKIP` and
-  `ordKeyNo()` follow a key another program changed.
+- An order's cursor is placed from the current record's key as it is now (the record read again, unless it has
+  changes not yet written), so `SKIP` and `ordKeyNo()` follow a key another program changed.
 
 - Records are read without locks. In shared mode the record count is the file's size (the header's may lag), and a
   record is read from the file each time it becomes current, and again when its lock (or the file lock) is had: a
   change is made to the record as it is then, never to what was read before (no update of another program is lost).
   Records read ahead serve only under the file lock, and go when it does.
+- The shared append writes the new record with the end mark `0x1A` after it (under the append lock, so it is always
+  the file's end); the reference leaves the mark out of shared tables.
 - Writing a record in shared mode needs its lock or the file lock: otherwise `DBFNTX/1022` `Lock required`. A changed
   record is written when the record changes, is unlocked, or at `COMMIT`; its index entries then change under the
   index write lock.
@@ -431,8 +492,8 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
 - **Records**: each area keeps its current record's bytes and its own changes until they are written; nothing of a
   record is shared between areas, so no record lock is needed to read.
 - **Where**: the lock list of an area and the commands in `area.c` and `dbcmd.c` (`xb_area_lock`, `xb_area_unlock`,
-  `xb_area_append`, `xb_area_record_writable`, `xb_area_exclusive`); the driver's `lock` operation and its shared
-  reads, appends and header in `dbf.c`; the memo lock in `dbt.c`; the index lock (`begin`, `finish`) in `ntx.c`.
+  `xb_area_append`, `xb_area_record_writable`, `xb_area_exclusive`); the driver's `lock` operation and its shared reads,
+  appends and header in `dbf.c`; the memo lock in `dbt.c`; the index lock (`begin`, `finish`) in `ntx.c` and `cdx.c`.
 - **Cost**: an exclusive table takes no lock and makes no extra call (the index benchmark is unchanged). Shared, each
   index operation is a lock, a read of the header's first 12 bytes and an unlock, each navigation a look at the table's
   size and the current key read from its record, each record read from the file; measured once on one machine, the index
@@ -470,7 +531,9 @@ query (as data a driver can translate), falling back to the record-by-record way
   the expected results taken from the reference running the same programs.
 - Cross tests: files the reference wrote (kept in the tests) read by xbase, and files xbase writes compared with the
   reference's bytes. Orders were also kept by both in turn (each changing the other's files) and checked by the other,
-  the trees checked page by page (fill, order, every page reachable once, the free list).
+  the trees checked page by page (fill, order, every page reachable once, the free list). CDX files were also kept
+  at once by programs of both, shared, each appending and changing keys while the others did, then walked by both
+  (every tag's entries in order, one per record, each the record's key).
 - Big-endian: the formats are cross-compiled for a big-endian target and, where an emulator is available, run there
   against the same files.
 - SQL engines *(planned)*, each in three ways: as SQL alone (`CREATE TABLE`, `INSERT`, `SELECT` with conditions, joins
@@ -491,6 +554,6 @@ query (as data a driver can translate), falling back to the record-by-record way
    EXCLUSIVE`, `RLock()`, `FLock()`, `dbRLock()`, `dbRUnlock()`, `dbRLockList()`, `UNLOCK`, `NetErr()`. With tasks and
    threads: waiting inside the process, shared page caches, handing areas between tasks.
 5. `DBFCDX`: done: the driver, `FPT` memos, FoxPro's lock scheme, the order operations as an interface of the driver
-   (`index.h`, NTX behind it); next: `CDX` indexes.
+   (`index.h`, NTX behind it), `CDX` indexes (tags, the production file, `ordDestroy()`, sharing).
 6. Relations, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `SORT`, `TOTAL`, `UPDATE`, `JOIN`.
 7. `SET DB ENGINE`; then SQL engines as libraries, and queries.

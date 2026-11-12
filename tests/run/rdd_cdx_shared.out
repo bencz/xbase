@@ -1,0 +1,12 @@
+
+counter:          0
+two on: b                   2
+lock b: .T. .F.
+counter:          1
+two after b moved:                     7
+back: g                   2
+counter:          2
+two sees:          7          7
+two walks: a bb c d e f g 
+file lock: .T. .F. .F.
+after unlock: .T.

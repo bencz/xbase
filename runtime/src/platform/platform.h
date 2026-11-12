@@ -61,6 +61,7 @@ int xb_platform_path_separator(char c);
  * seek error, 32 sharing violation, 80 file exists, 87 invalid parameter, 112
  * disk full, 206 name too long; 31, general failure, for the others). */
 typedef intptr_t xb_file;
+#define XB_FERR_ACCESS 5
 #define XB_FERR_FAILURE 31
 #define XB_FERR_DISK_FULL 112
 

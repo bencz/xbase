@@ -1295,12 +1295,21 @@ static xb_tag *ntx_tag_at(xb_bag *b, uint32_t i, xb_index_info *info, const char
 
 /* A new file each time (one order per file: the caller closed one of the name). */
 static int ntx_build(xb_bag **bag, const char *path, const char *name, int fresh, const xb_index_info *info,
-                     const unsigned char *keys, const uint32_t *recnos, uint32_t count, int readonly, int exclusive,
-                     xb_tag **tag, int32_t *err) {
+                     const unsigned char *keys, const uint32_t *recnos, uint32_t count, uint32_t records,
+                     int readonly, int exclusive, xb_tag **tag, int32_t *err) {
   (void)name;
   (void)fresh;
+  (void)records;
   if (!create_file(path, info, keys, recnos, count, err) || !ntx_open(path, readonly, exclusive, bag, err)) return 0;
   *tag = (*bag)->tag;
+  return 1;
+}
+
+/* The file's one order: the file goes with it. */
+static int ntx_remove(xb_bag *b, xb_tag *t, int32_t *err) {
+  (void)b;
+  (void)t;
+  (void)err;
   return 1;
 }
 
@@ -1372,7 +1381,8 @@ static int ntx_value_key(const xb_index_info *info, const xb_item *v, unsigned c
   }
 }
 
-static void ntx_key_value(const xb_index_info *info, const unsigned char *key, xb_item *r) {
+static void ntx_key_value(const xb_index_info *info, const unsigned char *key, uint16_t dec, xb_item *r) {
+  (void)dec; /* a number's key keeps its decimals */
   uint32_t len = info->keyLen;
   switch (info->type) {
   case 'C': xb_set_str(r, xb_str_new((const char *)key, len)); return;
@@ -1399,6 +1409,7 @@ static int ntx_stored_descending(const xb_index_info *info) { return info->desce
 
 const xb_index_format xb_index_ntx = {
     .ext = ".ntx",
+    .tagged = 0,
     .keyMax = XB_INDEX_KEY_MAX,
     .tiesByRecord = 0,
     .key_shape = ntx_key_shape,
@@ -1410,6 +1421,7 @@ const xb_index_format xb_index_ntx = {
     .tag_count = ntx_tag_count,
     .tag_at = ntx_tag_at,
     .build = ntx_build,
+    .remove = ntx_remove,
     .set_type = ntx_set_type,
     .hold = ntx_hold,
     .let_go = ntx_let_go,
