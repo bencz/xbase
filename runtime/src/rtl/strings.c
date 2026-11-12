@@ -191,9 +191,15 @@ void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int64_t n = xb_num_to_i64(&argv[1]);
   uint64_t count = n > 0 && s->len ? (uint64_t)n : 0;
   if (!result_fits(ctx, ret, argc, argv, xb_mul_sat_u64(count, s->len), "REPLICATE")) return;
-  size_t times = (size_t)count;
-  xb_str *r = xb_str_alloc(s->len * times);
-  for (size_t i = 0; i < times; ++i) memcpy(r->data + i * s->len, s->data, s->len);
+  size_t total = s->len * (size_t)count;
+  xb_str *r = xb_str_alloc(total);
+  if (s->len == 1) {
+    memset(r->data, s->data[0], total);
+  } else if (total) { /* the text once, then what is written so far copied after itself: log2(count) copies */
+    memcpy(r->data, s->data, s->len);
+    for (size_t done = s->len; done < total; done *= 2)
+      memcpy(r->data + done, r->data, done < total - done ? done : total - done);
+  }
   xb_set_str(ret, r);
 }
 

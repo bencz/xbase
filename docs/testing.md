@@ -60,7 +60,8 @@ building (`crc32`), array cells read and changed in place in deeply nested loops
 program; `bench_pi <n>` prints n digits), double arithmetic (`float`, the Mandelbrot set) and integers mixed with
 doubles (`mixed`: `i + 3.14`, `i / 4`, `Int()`, comparisons across both), and messages to objects of compiled classes
 (`oop`: method calls, one through `Super`, variable reads and assignments), generators (`generator`: one feeding
-another), and an order over a table (`index`: built, searched with SEEK, walked, kept up to date as records are
+another), the collector (`gc`: strings and small arrays of many sizes replaced at random among others that stay, the
+heap's fragmentation; its memory is read with `/usr/bin/time`), and an order over a table (`index`: built, searched with SEEK, walked, kept up to date as records are
 appended; its files are deleted at the end). Each one times its own work with
 `ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name> <milliseconds>
 ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`

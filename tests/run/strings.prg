@@ -7,6 +7,8 @@ PROCEDURE Main()
    ? "[" + LTrim( "  ab  " ) + "]", "[" + RTrim( "  ab  " ) + "]", "[" + Trim( "  ab  " ) + "]", "[" + AllTrim( "  ab  " ) + "]"
    ? "[" + AllTrim( Chr( 9 ) + "x" + Chr( 9 ) ) + "]", "[" + LTrim( Chr( 13 ) + Chr( 10 ) + "x" ) + "]", "[" + RTrim( "x" + Chr( 9 ) ) + "]"
    ? "[" + Space( 3 ) + "]", "[" + Space( -1 ) + "]", Replicate( "ab", 3 ), "[" + Replicate( "ab", 0 ) + "]"
+   ? Replicate( "xyz", 7 ), Replicate( "q", 5 ), Len( Replicate( "abc", 1000001 ) ), ;
+      Right( Replicate( "abc", 1000001 ), 4 ), Replicate( "1234567", 1 )
    ? At( "o", s ), At( "xyz", s ), At( "", s ), RAt( "o", s ), RAt( "", s ), At( "World", s )
    ? Chr( 65 ), Chr( 321 ), Asc( "A" ), Asc( "" ), Asc( "abc" )
    ? StrTran( "a,b,c,b", "b", "X" ), StrTran( "a,b,c,b", "b" ), StrTran( "aaaa", "a", "b", 2 ), StrTran( "aaaa", "a", "b", 2, 1 ), StrTran( "abc", "" )
