@@ -152,6 +152,7 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
   Value *itemBytes = b_.CreateMul(b_.CreateZExt(total, intPtrTy_), ConstantInt::get(intPtrTy_, itemSize_));
   AllocaInst *frame = b_.CreateAlloca(i8_, b_.CreateAdd(itemBytes, ConstantInt::get(intPtrTy_, header)), "list.frame");
   frame->setAlignment(std::max(itemAlign_, dl_.getPointerABIAlignment(0)));
+  checkStack(frame, unwind_, save); // a long list near the limit: the error, not a write past the stack's end
   Value *items = b_.CreateStructGEP(ty, frame, FrameSlots, "list.items");
   b_.CreateMemSet(items, b_.getInt8(0), itemBytes, itemAlign_); // NIL until filled
   linkFrame(frame, total, ConstantPointerNull::get(ptrTy_));

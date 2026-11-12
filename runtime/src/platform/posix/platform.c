@@ -1,7 +1,7 @@
 /* The POSIX interfaces this file uses (clock_gettime, localtime_r, threads,
  * files, directories), which a strict C11 build declares only on request;
  * 64-bit file offsets on 32-bit systems too; on macOS, the case sensitivity
- * of a volume (pathconf); on Linux, the thread's processor affinity. */
+ * of a volume (pathconf); on Linux, the thread's processor affinity and stack. */
 #define _POSIX_C_SOURCE 200809L
 #if defined(__linux__)
 #define _GNU_SOURCE
@@ -21,6 +21,9 @@
 #if defined(__linux__)
 #include <sched.h>
 #endif
+#if defined(__FreeBSD__) || defined(__DragonFly__)
+#include <pthread_np.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +40,32 @@ int64_t xb_platform_monotonic_ns(void) {
 }
 
 void xb_platform_init(void) {}
+
+const char *xb_platform_stack_low(void) {
+#if defined(__APPLE__)
+  pthread_t self = pthread_self();
+  return (const char *)pthread_get_stackaddr_np(self) - pthread_get_stacksize_np(self); /* the address is the top */
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__DragonFly__)
+  pthread_attr_t attr;
+#if defined(__linux__)
+  if (pthread_getattr_np(pthread_self(), &attr) != 0) return NULL;
+#else
+  if (pthread_attr_init(&attr) != 0) return NULL;
+  if (pthread_attr_get_np(pthread_self(), &attr) != 0) {
+    pthread_attr_destroy(&attr);
+    return NULL;
+  }
+#endif
+  void *addr = NULL;
+  size_t size = 0, guard = 0;
+  int ok = pthread_attr_getstack(&attr, &addr, &size) == 0;
+  pthread_attr_getguardsize(&attr, &guard); /* systems that report the stack with its guard: above it either way */
+  pthread_attr_destroy(&attr);
+  return ok ? (const char *)addr + guard : NULL;
+#else
+  return NULL;
+#endif
+}
 
 unsigned xb_platform_cpu_count(void) {
 #if defined(__linux__)

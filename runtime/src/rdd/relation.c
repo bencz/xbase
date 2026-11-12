@@ -158,7 +158,7 @@ void xb_area_relations_clear(xb_ctx *ctx, xb_area *a) {
 }
 
 void xb_area_relations_detach(xb_ctx *ctx, xb_area *a) {
-  for (uint32_t n = 1; n <= ctx->areaCap && a->parents; ++n) {
+  for (uint32_t n = 1; n <= ctx->env->areaCap && a->parents; ++n) {
     xb_area *p = xb_area_at(ctx, n);
     for (uint32_t k = p ? p->nrelations : 0; k-- > 0;)
       if (p->relations[k]->child == a->number) remove_at(ctx, p, k);

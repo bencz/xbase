@@ -69,13 +69,14 @@ void CodeGen::initTypes() {
     MDNode *type = md.createTBAAScalarTypeNode(name, root);
     tbaa_[(size_t)m] = md.createTBAAStructTagNode(type, type, 0);
   }
-  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, i32_}, "xb_ctx_head"); // the [ABI] fields of xb_ctx
+  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, ptrTy_}, "xb_ctx_head"); // the [ABI] fields of xb_ctx
   nilItem_ = new GlobalVariable(mod_, itemTy_, true, GlobalValue::InternalLinkage, Constant::getNullValue(itemTy_),
                                 "xb.nil");
   nilItem_->setAlignment(itemAlign_);
   rtCondError_ = rt("xb_cond_error", i32_, {ptrTy_, ptrTy_});
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
-  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
+  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
+  rtStackOverflow_ = rt("xb_stack_overflow", voidTy, {ptrTy_});
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtBitNot_ = rt("xb_op_bitnot", voidTy, {ptrTy_, ptrTy_, ptrTy_});
@@ -454,6 +455,7 @@ void CodeGen::genFunction(const xir::Function &f) {
         values_[p.get()] = b_.CreatePHI(p->type() == xir::Type::Bool ? b_.getInt1Ty() : (Type *)i64_, 2);
   }
   b_.SetInsertPoint(entry);
+  checkStack(fnFrame_, fnExit_, nullptr); // the frame is linked: the function returns through its exit
   b_.CreateBr(blocks_.at(f.entry()));
   for (xir::BasicBlock *xb : plan.cfg().order()) {
     b_.SetInsertPoint(blocks_.at(xb));
@@ -564,6 +566,19 @@ void CodeGen::linkFrame(Value *frame, Value *nslots, Value *proc, Value *prev) {
   tag(b_.CreateStore(frame, frames), Mem::Ctx);
 }
 
+// A frame below the context's stack limit raises the stack error (xb_stack_overflow) before anything is written into
+// it, and the code goes on at `exit`, unwinding as after any error (with the stack restored to `stackSave`, when
+// given, first).
+void CodeGen::checkStack(Value *frame, BasicBlock *exit, Value *stackSave) {
+  Value *limit = loadFrom(ptrTy_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxStackLimit), Mem::Ctx, "stack.limit");
+  Value *below = b_.CreateICmpULT(b_.CreatePtrToInt(frame, intPtrTy_), b_.CreatePtrToInt(limit, intPtrTy_));
+  BasicBlock *join = beginUnlikely(below, "stack.overflow");
+  if (stackSave) b_.CreateStackRestore(stackSave);
+  b_.CreateCall(rtStackOverflow_, {fnCtx_});
+  b_.CreateBr(exit);
+  b_.SetInsertPoint(join);
+}
+
 void CodeGen::unlinkFrame(Value *frame, Value *prev) {
   if (!prev) prev = loadFrom(ptrTy_, b_.CreateStructGEP(frameType(0), frame, FramePrev), Mem::FrameLink, "prev");
   tag(b_.CreateStore(prev, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
@@ -630,13 +645,15 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t frameSlots = dl_.getStructLayout(frameType(0))->getElementOffset(FrameSlots);
   uint64_t ctxFrames = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxFrames);
   uint64_t ctxDecimals = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxDecimals);
+  uint64_t ctxStackLimit = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxStackLimit);
   uint64_t arrayItems = dl_.getStructLayout(arrayTy_)->getElementOffset(ArrayItems);
   uint64_t refValue = dl_.getStructLayout(refTy_)->getElementOffset(RefValue);
   uint64_t hashEntries = dl_.getStructLayout(hashTy_)->getElementOffset(HashEntries);
   b_.CreateCall(rtAbiCheck_, {ConstantInt::get(i32_, XB_ABI_VERSION), ConstantInt::get(i32_, itemSize_),
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
                               ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
-                              ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, arrayItems),
+                              ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, ctxStackLimit),
+                              ConstantInt::get(i32_, arrayItems),
                               ConstantInt::get(i32_, refValue), ConstantInt::get(i32_, hashEntries)});
   b_.CreateCall(rtProgramRun_, {ctx, functions_.at(&start), fn->getArg(1), fn->getArg(2)});
   b_.CreateRetVoid();

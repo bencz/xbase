@@ -51,7 +51,7 @@ const xb_rdd *xb_db_driver_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv, 
  * without directories and extension). Returns 1, or 0 after the error (raised). */
 static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str *name, const xb_str *alias,
                        int readonly, int exclusive) {
-  if (newArea) ctx->areaCurrent = xb_area_free(ctx);
+  if (newArea) ctx->env->areaCurrent = xb_area_free(ctx);
   const char *aliasText;
   size_t aliasLen;
   if (alias && alias->len) {
@@ -61,7 +61,7 @@ static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str 
     default_alias(name, &aliasText, &aliasLen);
   }
   char *path = xb_file_path_with_ext(name->data, name->len, rdd->ext);
-  int ok = xb_area_open(ctx, ctx->areaCurrent, rdd, path, aliasText, aliasLen, readonly, exclusive);
+  int ok = xb_area_open(ctx, ctx->env->areaCurrent, rdd, path, aliasText, aliasLen, readonly, exclusive);
   free(path);
   return ok;
 }
@@ -72,13 +72,13 @@ void xbf_DBUSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   const xb_str *name = xb_db_str_arg(argc, argv, 2);
   const xb_rdd *rdd = xb_db_driver_arg(ctx, argc, argv, 1);
-  ctx->netErr = 0;
+  ctx->env->netErr = 0;
   if (!name || !rdd) {
-    if (xb_db_logical_arg(argc, argv, 0)) ctx->areaCurrent = xb_area_free(ctx);
+    if (xb_db_logical_arg(argc, argv, 0)) ctx->env->areaCurrent = xb_area_free(ctx);
     xb_fn_arg_error(ctx, NULL, 1005, "DBUSEAREA", argc, argv);
     return;
   }
-  int shared = argc > 4 && argv[4].type == XB_T_LOGICAL ? argv[4].v.l != 0 : ctx->set_shared;
+  int shared = argc > 4 && argv[4].type == XB_T_LOGICAL ? argv[4].v.l != 0 : ctx->env->set_shared;
   open_table(ctx, xb_db_logical_arg(argc, argv, 0), rdd, name, xb_db_str_arg(argc, argv, 3),
              xb_db_logical_arg(argc, argv, 5), !shared);
 }
@@ -87,7 +87,7 @@ void xbf_DBCLOSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area_close(ctx, ctx->areaCurrent);
+  xb_area_close(ctx, ctx->env->areaCurrent);
 }
 
 void xbf_DBCLOSEALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -95,7 +95,7 @@ void xbf_DBCLOSEALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   xb_area_close_all(ctx);
-  ctx->areaCurrent = 1;
+  ctx->env->areaCurrent = 1;
 }
 
 /* dbSelectArea( nArea | cArea ): a number, or a string as xb_area_named reads it; 0 is the lowest free area. A
@@ -107,14 +107,14 @@ void xbf_DBSELECTAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   for (uint16_t tries = 1; alias && (n = xb_area_named(ctx, alias->data, alias->len)) < 0; ++tries)
     if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, alias->data, NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2)
       return;
-  if (n == 0) ctx->areaCurrent = xb_area_free(ctx);
-  else if (xb_area_number(n)) ctx->areaCurrent = xb_area_number(n);
+  if (n == 0) ctx->env->areaCurrent = xb_area_free(ctx);
+  else if (xb_area_number(n)) ctx->env->areaCurrent = xb_area_number(n);
 }
 
 /* Select( [cAlias] ): the current area's number, or the one a name gives as xb_area_named reads it (0 for none). */
 void xbf_SELECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *alias = xb_db_str_arg(argc, argv, 0);
-  int64_t n = alias ? xb_area_named(ctx, alias->data, alias->len) : ctx->areaCurrent;
+  int64_t n = alias ? xb_area_named(ctx, alias->data, alias->len) : ctx->env->areaCurrent;
   xb_set_int(ret, n > 0 ? n : 0);
 }
 
@@ -324,10 +324,10 @@ void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   free(path);
   free(fields);
   if (!created) return;
-  uint32_t before = ctx->areaCurrent;
+  uint32_t before = ctx->env->areaCurrent;
   if (argc > 3 && argv[3].type == XB_T_LOGICAL &&
-      !open_table(ctx, argv[3].v.l, rdd, name, xb_db_str_arg(argc, argv, 4), 0, !ctx->set_shared))
-    ctx->areaCurrent = before; /* unlike dbUseArea(), the area current before stays */
+      !open_table(ctx, argv[3].v.l, rdd, name, xb_db_str_arg(argc, argv, 4), 0, !ctx->env->set_shared))
+    ctx->env->areaCurrent = before; /* unlike dbUseArea(), the area current before stays */
 }
 
 void xbf_DBAPPEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -336,7 +336,7 @@ void xbf_DBAPPEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argv);
   xb_area *a = xb_db_used(ctx, "DBAPPEND");
   if (!a || !xb_area_writable(ctx, a)) return;
-  ctx->netErr = 0;
+  ctx->env->netErr = 0;
   a->found = 0;
   xb_area_append(ctx, a, !(argc > 0 && argv[0].type == XB_T_LOGICAL && !argv[0].v.l));
 }
@@ -418,7 +418,7 @@ void xbf_DBCOMMITALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  for (uint32_t n = 1; n <= ctx->areaCap; ++n)
+  for (uint32_t n = 1; n <= ctx->env->areaCap; ++n)
     if (xb_area_at(ctx, n)) commit(ctx, xb_area_at(ctx, n));
 }
 
@@ -630,7 +630,7 @@ void xbf_DBUNLOCKALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  for (uint32_t n = 1; n <= ctx->areaCap; ++n)
+  for (uint32_t n = 1; n <= ctx->env->areaCap; ++n)
     if (xb_area_at(ctx, n)) xb_area_unlock(ctx, xb_area_at(ctx, n), 0);
 }
 
@@ -648,8 +648,8 @@ void xbf_DBRLOCKLIST(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* NetErr( [lNew] ): whether the last USE or APPEND failed for another user's lock; lNew sets it. */
 void xbf_NETERR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  xb_set_logical(ret, ctx->netErr);
-  if (argc > 0 && argv[0].type == XB_T_LOGICAL) ctx->netErr = argv[0].v.l != 0;
+  xb_set_logical(ret, ctx->env->netErr);
+  if (argc > 0 && argv[0].type == XB_T_LOGICAL) ctx->env->netErr = argv[0].v.l != 0;
 }
 
 /* RddSetDefault( [cDriver] ): the default driver's name before the call; an unknown name changes nothing. */
@@ -658,7 +658,7 @@ void xbf_RDDSETDEFAULT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) 
   xb_set_str(ret, xb_str_new(now->name, strlen(now->name)));
   const xb_str *name = xb_db_str_arg(argc, argv, 0);
   const xb_rdd *chosen = name && name->len ? xb_rdd_find(name->data, name->len) : NULL;
-  if (chosen) ctx->rddDefault = chosen;
+  if (chosen) ctx->env->rddDefault = chosen;
 }
 
 void xbf_RDDNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

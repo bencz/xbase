@@ -57,14 +57,27 @@ typedef struct xb_item {
 
 Parameters, `LOCAL`s and temporaries of a compiled function live in its item frame (`xb_frame`: link, what the call
 stack shows, slot count, current line, the arguments as received, items), an `alloca` on the machine stack. The function
-links it into its context's chain (`xb_ctx.frames`) at entry, with the parameters copied into the first slots (from
-`argv`, `NIL` past `argc`, or from registers in a direct entry, [compiler.md](compiler.md#xir-to-llvm)) and the other
-slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors return normally (the pending flag),
-so the chain is always right. The collector scans the frames of every context's chain. A frame dies with its function:
-nothing keeps a pointer to a slot (a variable that outlives it moves into a heap cell first). The program runs on a
-thread whose stack is reserved at 1 GB on 64-bit targets and 256 MB on 32-bit ones (`XB_PROGRAM_STACK_SIZE` in
-`core/main.c`; pages are committed as used), so deep recursion has room; running past it is not detected yet and
-ends the process.
+links it into its thread context's chain (`xb_ctx.frames`) at entry, with the parameters copied into the first slots
+(from `argv`, `NIL` past `argc`, or from registers in a direct entry, [compiler.md](compiler.md#xir-to-llvm)) and the
+other slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors return normally (the pending
+flag), so the chain is always right. The collector scans the frames of every context's chain. A frame dies with its
+function: nothing keeps a pointer to a slot (a variable that outlives it moves into a heap cell first). The program runs
+on a thread whose stack is reserved at 1 GB on 64-bit targets and 256 MB on 32-bit ones (`XB_PROGRAM_STACK_SIZE` in
+`core/main.c`; pages are committed as used), so deep recursion has room.
+
+Running out of it is an error, not the end of the process: the context knows the lowest address of its thread's
+stack the program may use (`xb_ctx_set_stack`, from `xb_platform_stack_low`: the system's bounds of the thread's
+stack, above its guard pages; none on a system that does not tell, where the error is never raised), and its
+`stack_limit` lies 1 MB above it. Every place where xBase code goes deeper tests it: a compiled function (a
+codeblock's too) compares its frame's address with the limit after linking the frame, and below it, before its body
+runs, calls `xb_stack_overflow` and returns through its exit, unwinding; the macro evaluator does the same for each
+evaluation (a codeblock made from text), and a list of arguments forwarded with `...` is tested before it is written.
+That raises `EG_LIMIT` (`Stack overflow`, the function's name as the operation; it cannot be substituted), whose
+handler runs in the reserve, the limit lowered to 64 KB above the lowest address meanwhile: a `BEGIN SEQUENCE` or
+`TRY` recovers from it and the program goes on, the default handler reports it and ends the program; a handler that
+runs out of the reserve too ends the process with `xbrt: stack overflow` (the reference's program crashes). Pages of
+the stack used once stay committed. The test costs a load, a comparison and a branch per call: on the `fib`
+benchmark, which does little but call, 2.9% more instructions and 1.3% more cycles (perf stat, x86-64).
 
 The frames also make the call stack. A frame's `proc` (an `xb_proc` constant the compiler emits per function: its name,
 `(b)NAME` for a codeblock written in the function NAME, also inside another codeblock, where Harbour names one run by
@@ -474,12 +487,12 @@ place.
 `PRIVATE` and `PUBLIC` variables (`core/memvar.c`, the `xb_mv_*` entry points in `xbrt.h`) are found by name when the
 code runs, so a function sees and changes the memory variables of the functions that called it, whatever module they
 are in. Each module gives the runtime the names it uses (`xb_memvar`, numbered when it registers; `RESTORE` numbers
-the names of its file that no module uses, while the program runs, so `xb_ctx.memvars` may grow, and move, whenever
+the names of its file that no module uses, while the program runs, so `xb_env.memvars` may grow, and move, whenever
 xBase code runs: C code keeps no pointer into it across an error block). The table of names is the process's: a name
 is found under a reader-writer lock and added under its write lock, so a macro or `RESTORE` may number a new name on
-any thread; a number's spelling is read without a lock, from chunks of entries that never move. Each context keeps,
-by number, the binding visible now (`xb_ctx.memvars`), and the PRIVATEs alive, in creation order, each with the
-frame of the activation that created it and the binding it hid (`xb_ctx.privates`). Both are roots of the collector.
+any thread; a number's spelling is read without a lock, from chunks of entries that never move. Each environment keeps,
+by number, the binding visible now (`xb_env.memvars`), and the PRIVATEs alive, in creation order, each with the
+frame of the activation that created it and the binding it hid (`xb_env.privates`). Both are roots of the collector.
 
 - A binding is a cell (an `XB_T_CELL` item): `@name` passes it, and a codeblock reaches the variable through the name
   when it runs, not through a capture.
@@ -548,14 +561,16 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
 - `compile.c` parses the text into a tree, then generates code for a stack machine: a function is an array, its
   code (a string of bytes) and its constants. `run.c` runs it with the runtime's operators (`xb_op_*`, as compiled code
   calls them); nothing is folded, so `&( "7 % 3" )` is `1.00`, as `n % m` is (the reference folds some constants). The
-  machine's items live in a frame linked into the context's chain (the collector sees them). The frame of an
+  machine's items live in a frame linked into the context's chain (the collector sees them): up to 32 items in the
+  evaluator's own stack frame (an allocation per evaluation would cost about a quarter of a macro block's `Eval()`), a
+  larger one allocated. The frame of an
   expression's evaluation is not an activation (`XB_PROC_TRANSPARENT`): a PRIVATE the macro creates (`&c := 1` with no
   variable of that name) belongs to the function running it, which takes a mark for it (see
   [compiler.md](compiler.md#xir-to-llvm)), and `RELEASE ALL` there reaches it. A codeblock from text is an activation
   of its own, which ends its PRIVATEs.
 - What a text compiles to depends on the text alone (the symbol table is complete before the program runs, names keep
-  their numbers), so each context keeps the last texts compiled and their functions (`xb_ctx.macro_cache`, 64 entries
-  chosen by a hash of the text, roots of the collector): a macro in a loop is compiled once.
+  their numbers), so each thread context keeps the last texts compiled and their functions (`xb_ctx.macro_cache`, 64
+  entries chosen by a hash of the text, roots of the collector): a macro in a loop is compiled once.
 - Before it is compiled, the text goes through Clipper's text substitution, as a string literal with `&name` does
   (`xb_macro_text`): each `&name` or `&name.` whose name is a memory variable holding a string becomes that string, and
   the scan goes on at the start of what was inserted, so a name may run on past its end (`c := "&d"` then `&c`
@@ -613,15 +628,16 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
 ## Errors and pending requests
 
-`xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t exitcode`, `xb_frame
-*frames` and `int32_t set_decimals` (SET DECIMALS, which inline `/` and `%` read). `pending` holds requests. The runtime
-sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`, `XB_PENDING_FINALIZE` when there are
-objects to destroy, and `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro operator](#macro-operator)). Compiled
-code tests the field after each fallible call; when it is set the code calls `xb_pending_gc` (or `xb_pending`, which
-never collects, where a substituted result waits unseen: see [compiler.md](compiler.md#xir-to-llvm)), which serves
-pauses (a safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a
-`BEGIN SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)).
-The check stays valid across `AWAIT`. `QUIT` raises `XB_PENDING_QUIT` with exit code 0.
+`xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t set_decimals` (SET DECIMALS,
+which inline `/` and `%` read), `xb_frame *frames` and `const char *stack_limit` ([Frames](#frames)). `pending` holds
+requests. The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`,
+`XB_PENDING_FINALIZE` when there are objects to destroy, and `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro
+operator](#macro-operator)). Compiled code tests the field after each fallible call; when it is set the code calls
+`xb_pending_gc` (or `xb_pending`, which never collects, where a substituted result waits unseen: see
+[compiler.md](compiler.md#xir-to-llvm)), which serves pauses (a safepoint) and destructors ([Classes](#classes)) and
+returns non-zero when the function must unwind: to a `BEGIN SEQUENCE` handler of the function, or to its caller
+([xir.md](xir.md#control-flow-for-errors-and-exceptions)). The check stays valid across `AWAIT`. `QUIT` raises
+`XB_PENDING_QUIT` with exit code 0.
 
 A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`; `xb_error_of` for one with another
 subsystem, a file name or a system code) makes an `Error` object (see [Objects and messages](#objects-and-messages)):
@@ -663,7 +679,9 @@ then ` (DOS Error <osCode>)` when there is a system error code; `Warning` for a 
 hidden, so level 0 is where the error happened), to standard error (`OutErr()`), and ends the program with
 `ErrorLevel( 1 )` and `QUIT`. The choice between quitting, retrying and the default (Clipper's `Alert()`) waits for the
 terminal layer. An unrecoverable error lists the levels as `Called from NAME(line) in FILE` (without ` in FILE` for a
-runtime function).
+runtime function). Both list the innermost `XB_CALLS_SHOWN` (100) levels and then, when there are more, the line
+`(further calls not shown)` (`include/error.ch`): the reference lists every level, which after a runaway recursion
+means millions of lines.
 
 `Break( [xValue] )` (and the `BREAK [value]` command, `__Break`, and `Throw( [xValue] )`) stores the value in the
 context and raises `XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only
@@ -863,8 +881,10 @@ Conventions:
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
   program started from a monotonic clock (`xb_program_elapsed_ms`), for timing: the difference of two calls.
 
-Settings live in the task context (start: `SET EXACT OFF`, `SET DECIMALS TO 2`, date format `mm/dd/yy`,
-`SET EPOCH TO 1900`, `SET CENTURY OFF`). Their numbers come from `include/set.ch`, shared with xBase code.
+Settings live in the environment of the flow ([Threads and synchronization](#threads-and-synchronization); start: `SET
+EXACT OFF`, `SET DECIMALS TO 2`, date format `mm/dd/yy`, `SET EPOCH TO 1900`, `SET CENTURY OFF`), but for `SET
+DECIMALS`, which compiled code reads from the thread context, where it is kept. Their numbers come from
+`include/set.ch`, shared with xBase code.
 
 ## Functions written in xBase
 
@@ -935,7 +955,7 @@ go further.
 `set.ch` says) selects the language of the runtime's texts: the names of the days and months, and the descriptions of
 the errors it raises. The languages are written in xBase (`rtl/languages.prg`): `__LanguageTexts( cId )` makes the texts
 of `EN` (English, the default), `PT` (Portuguese) or `ES` (Spanish) in the parts `rtl/language.ch` numbers (the same
-file for xBase and C), NIL for any other name. The context keeps the current language's texts (`xb_ctx.language`, a root
+file for xBase and C), NIL for any other name. The context keeps the current language's texts (`xb_env.language`, a root
 of the collector; English, made when first needed), `__LanguageCurrent()` gives them to xBase code, and
 `core/language.c` gives an error's description to `core/error.c`: the subcode's own text (the part of subcodes: by
 generic code, a hash of subcodes), else the generic code's. `Set( _SET_LANGUAGE )` returns the current language's name;
@@ -945,9 +965,9 @@ which are never to be changed. The texts are UTF-8 bytes (`Len( "Terça-feira" )
 
 ## Codepages
 
-Strings are bytes: `Len`, `SubStr`, `Left`, `Right`, `At`, `Asc`, `Chr` and the rest count bytes, as in Clipper.
-`SET CODEPAGE TO <cp>` (`Set( _SET_CODEPAGE, cName )`, xbase's own setting 201) says how the functions that read
-characters take them (`core/codepage.c`, `xb_ctx.codepage`, per task): `UTF8` (the default), or the single-byte `CP437`,
+Strings are bytes: `Len`, `SubStr`, `Left`, `Right`, `At`, `Asc`, `Chr` and the rest count bytes, as in Clipper. `SET
+CODEPAGE TO <cp>` (`Set( _SET_CODEPAGE, cName )`, xbase's own setting 201) says how the functions that read characters
+take them (`core/codepage.c`, `xb_env.codepage`, per environment): `UTF8` (the default), or the single-byte `CP437`,
 `CP850` (DOS), `CP1252` and `ISO8859-1` (Windows; other names: `UTF-8`, `IBM437`, `IBM850`, `WINDOWS-1252`,
 `ISO-8859-1`, `LATIN1`, in any letter case). `Set( _SET_CODEPAGE )` returns the current one's name; an unknown name
 leaves it as it is.
@@ -997,7 +1017,7 @@ variables](#memory-variables)) use this layer too.
   well, as `set.ch` is; `include/directry.ch` names the positions of a `Directory()` entry.
 - `rtl/files.c`: `FOpen`, `FCreate`, `FRead`, `FWrite`, `FSeek`, `FClose`, `FError`, `FErase`, `FRename`, `CurDir`,
   `DirChange`, `DiskSpace`, `GetEnv` and `__DirScan`. A handle is the system's handle as a number. Each function stores
-  the code of its outcome for `FError()` (`xb_ctx.file_error`, 0 after a success); an argument of the wrong type gives
+  the code of its outcome for `FError()` (`xb_env.file_error`, 0 after a success); an argument of the wrong type gives
   the function's failure value and leaves `FError()` alone, but a name that is not a string is `FOpen()`'s `BASE/2021`,
   and an access of 3 is 5. `FRead( nHandle, @cBuffer, nBytes )` replaces the first bytes of the buffer, which keeps its
   length; without the buffer passed by reference, or with `nBytes` below 1 or past its length, it reads nothing.
@@ -1026,8 +1046,8 @@ variables](#memory-variables)) use this layer too.
 
 ## Work areas
 
-The work areas, their tables and the database functions are in `runtime/src/rdd/` ([rdd.md](rdd.md)). Each context
-has its own (`xb_ctx.areas`, `areaCurrent`, `set_deleted`, `rddDefault`, `netErr`). Compiled code reaches fields
+The work areas, their tables and the database functions are in `runtime/src/rdd/` ([rdd.md](rdd.md)). Each environment
+has its own (`xb_env.areas`, `areaCurrent`, `set_deleted`, `rddDefault`, `netErr`). Compiled code reaches fields
 through three entry points of `xbrt.h`, each call with a cache of its own (`xb_field_cache`, a zeroed static of the
 reference: the `generation` of the table it found the field in, from a process-wide atomic 64-bit counter, and the
 field's position, in one 64-bit word read and written atomically, so threads find either their table's entry whole or
@@ -1048,6 +1068,13 @@ each time):
 
 The program's code runs on one thread today; the services below are what tasks and threads are built on
 ([concurrency.md](concurrency.md)).
+
+- Contexts (`core/context.h`): a thread context (`xb_ctx`) holds what the code running on its thread uses (the
+  `[ABI]` head compiled code reads: pending requests, `SET DECIMALS`, the chain of frames, the stack
+  limit; the C roots, a `BREAK` on its way, the error blocks running, `Type()`'s trap) and caches of its own (the macro
+  cache), and points at the environment of the flow it runs (`xb_env`): `ErrorBlock()`, the memory variables, the `SET`
+  values, `FError()`, the language and the codepage, the work areas and their settings. Today each thread context has
+  one environment, made with it; the program's exit code is the process's.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`), mutexes (`xb_mutex`, with
@@ -1115,8 +1142,8 @@ exit code.
 
 A request to unwind (a `QUIT`, a `BREAK` with no sequence, an error that ended the program) stops steps 1 to 4; the
 request is then dropped (with a `BREAK` value) and step 5 runs, a new request stopping it. Then every table open is
-written and closed ([Work areas](#work-areas)), whatever ended the program. The exit code is kept
-throughout: `ErrorLevel( [nNew] )` returns it and sets it from an argument, a number wrapped to 32 bits, anything else
-0 (the default error handler sets 1). Registration order follows the global constructors,
-which is the link order on the usual toolchains. Inside an `EXIT` procedure the call stack starts with it (the
-reference shows the function that ended the program, such as `__QUIT`, under it).
+written and closed ([Work areas](#work-areas)), whatever ended the program. The exit code is the process's (any thread's
+code sets the same one) and kept throughout: `ErrorLevel( [nNew] )` returns it and sets it from an argument, a number
+wrapped to 32 bits, anything else 0 (the default error handler sets 1). Registration order follows the global
+constructors, which is the link order on the usual toolchains. Inside an `EXIT` procedure the call stack starts with it
+(the reference shows the function that ended the program, such as `__QUIT`, under it).

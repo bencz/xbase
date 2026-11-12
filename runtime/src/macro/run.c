@@ -83,6 +83,10 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
   uint32_t mark = self ? xb_mv_mark(ctx) : 0; /* a codeblock ends the PRIVATEs it creates */
   size_t sp = nparams; /* the top item; the stack starts above the parameters */
   uint32_t areas = 0, areaBefore = 0; /* alias->( expr ) entered, and the work area current before the first */
+  if ((const char *)&local < ctx->stack_limit) { /* as compiled code tests its frame: a macro block recursing */
+    xb_stack_overflow(ctx);
+    goto out;
+  }
 #define FAILED() (ctx->pending && xb_pending(ctx))
   for (;;) {
     mop op = (mop)*pc++;
@@ -302,7 +306,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       break;
     }
     case MO_AREA_END:
-      ctx->areaCurrent = (uint32_t)xb_num_to_i64(&s[sp - 1]);
+      ctx->env->areaCurrent = (uint32_t)xb_num_to_i64(&s[sp - 1]);
       --areas;
       s[sp - 1] = s[sp];
       --sp;
@@ -314,7 +318,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
   }
 #undef FAILED
 out:
-  if (areas) ctx->areaCurrent = areaBefore; /* an error or a BREAK left alias->( expr ) */
+  if (areas) ctx->env->areaCurrent = areaBefore; /* an error or a BREAK left alias->( expr ) */
   if (self) xb_mv_release(ctx, mark);
   xb_frame_pop(ctx, frame);
   if (frame != &local.frame) free(frame);

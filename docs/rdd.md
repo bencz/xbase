@@ -14,15 +14,15 @@ touching the rest (SQL engines later), each as a library when it needs one.
 
 `runtime/src/rdd/` (portable C; `rdd.h` declares what the files share):
 
-- `area.c`: each task's table of work areas (`xb_ctx.areas`, by number from 1, growing as needed; `xb_ctx.areaCurrent`
-  starts at 1), aliases (upper case; any letter case finds them), and the navigation the language sees on top of a
-  driver's raw records: records that are deleted (under `SET DELETED`, `Set( _SET_DELETED )`) or that the filter rejects
-  are skipped; `BOF` and `EOF`; going to a record that is not there (0, past the last) leaves the blank record after the
-  last current with both `Bof()` and `Eof()` true; a record that cannot be read leaves it there too. The order of
-  navigation is the controlling order's when there is one ([Orders](#orders)), the record order otherwise. Any move, and
-  `dbAppend`, makes `Found()` false. The filter, its text and the last `LOCATE`'s condition are roots of the collector
-  (`xb_areas_mark`). Every table is written and closed when the program ends (`xb_program_run`), whatever ended it; an
-  area is free before the error of a close that failed is raised.
+- `area.c`: each environment's table of work areas (`xb_env.areas`, by number from 1, growing as needed;
+  `xb_env.areaCurrent` starts at 1), aliases (upper case; any letter case finds them), and the navigation the language
+  sees on top of a driver's raw records: records that are deleted (under `SET DELETED`, `Set( _SET_DELETED )`) or that
+  the filter rejects are skipped; `BOF` and `EOF`; going to a record that is not there (0, past the last) leaves the
+  blank record after the last current with both `Bof()` and `Eof()` true; a record that cannot be read leaves it there
+  too. The order of navigation is the controlling order's when there is one ([Orders](#orders)), the record order
+  otherwise. Any move, and `dbAppend`, makes `Found()` false. The filter, its text and the last `LOCATE`'s condition are
+  roots of the collector (`xb_areas_mark`). Every table is written and closed when the program ends (`xb_program_run`),
+  whatever ended it; an area is free before the error of a close that failed is raised.
 - Code that runs blocks over an area (navigation through a filter, the scope walk, `LOCATE`, `CONTINUE`, `dbEval`)
   pins it (`xb_area_pin`): a block that closes the area, or closes it and opens another table there, ends the command
   where it is, and the area's memory lives until the command lets go of it.
@@ -657,7 +657,7 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
 
 *(Planned, [concurrency.md](concurrency.md#database))*:
 
-- A work area belongs to the flow that opened it (its table of areas, today `ctx->areas`), like its `SET` values; a
+- A work area belongs to the flow that opened it (its table of areas, `xb_env.areas`), like its `SET` values; a
   task that resumes on another thread takes its areas with it. Concurrent branches of one flow share its areas, and
   each area serializes its operations; a new flow (`TaskRun`, `ThreadStart`) starts with none open. Handing an area
   from one flow to another is explicit (a function of xbase's own, the area closed in the first and open in the second

@@ -26,6 +26,13 @@ int64_t xb_platform_monotonic_ns(void) {
   return ticks / hz * XB_NS_PER_SEC + ticks % hz * XB_NS_PER_SEC / hz;
 }
 
+/* The low limit is the reservation's start, its guard pages included: the stack error's reserve lies above them. */
+const char *xb_platform_stack_low(void) {
+  ULONG_PTR low = 0, high = 0;
+  GetCurrentThreadStackLimits(&low, &high);
+  return low ? (const char *)low : NULL;
+}
+
 unsigned xb_platform_cpu_count(void) {
   DWORD n = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
   return n ? (unsigned)n : 1u;

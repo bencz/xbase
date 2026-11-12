@@ -14,7 +14,7 @@ xb_str *xb_item_display(const xb_ctx *ctx, const xb_item *it) {
       return it->v.s;
     case XB_T_DATE: {
       char out[XB_DATE_TEXT_SIZE];
-      size_t n = xb_date_format(it->v.i, ctx->date_format, out);
+      size_t n = xb_date_format(it->v.i, ctx->env->date_format, out);
       return xb_str_new(out, n);
     }
     case XB_T_ARRAY:

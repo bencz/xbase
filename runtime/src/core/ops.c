@@ -222,7 +222,7 @@ int xb_compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
     return (a->v.i > b->v.i) - (a->v.i < b->v.i);
   if (xb_is_number(a) && xb_is_number(b)) return xb_order_double(xb_num_value(a), xb_num_value(b));
   if (a->type == XB_T_STRING && b->type == XB_T_STRING)
-    return str_cmp(a->v.s, b->v.s, ctx->set_exact);
+    return str_cmp(a->v.s, b->v.s, ctx->env->set_exact);
   if (a->type == XB_T_LOGICAL && b->type == XB_T_LOGICAL)
     return (a->v.l != 0) - (b->v.l != 0);
   if (a->type == XB_T_DATE && b->type == XB_T_DATE)

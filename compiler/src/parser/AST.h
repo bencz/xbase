@@ -275,8 +275,8 @@ struct IIfExpr : Expr {
 };
 
 enum class StmtKind : uint8_t {
-  Expr, Local, Static, Private, Public, Parameters, Memvar, Field, Return, If, While, For, ForEach, Switch, Sequence, Exit,
-  Loop, WithObject, Yield
+  Expr, Local, Static, Private, Public, Parameters, Memvar, Field, Return, If, While, For, ForEach, Switch, Sequence,
+  Exit, Loop, WithObject, Yield
 };
 
 struct Stmt {

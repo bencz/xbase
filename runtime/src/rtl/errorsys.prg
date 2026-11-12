@@ -7,9 +7,10 @@ PROCEDURE ErrorSys()
    ErrorBlock( {| oError | DefError( oError ) } )
 RETURN
 
-// A division by zero gives 0; any other error is reported to the standard error with the call stack, and ends the
-// program with exit code 1. (The choice between quitting, retrying and the default comes with the terminal layer's
-// Alert().) This function and the block are hidden from the call stack: level 0 is where the error happened.
+// A division by zero gives 0; any other error is reported to the standard error with the call stack (its innermost
+// XB_CALLS_SHOWN calls), and ends the program with exit code 1. (The choice between quitting, retrying and the
+// default comes with the terminal layer's Alert().) This function and the block are hidden from the call stack: level
+// 0 is where the error happened.
 STATIC FUNCTION DefError( oError )
    LOCAL n := 0
    IF oError:genCode == EG_ZERODIV .AND. oError:canSubstitute
@@ -24,6 +25,10 @@ STATIC FUNCTION DefError( oError )
    ENDIF
    OutErr( Chr( 10 ) + ErrorMessage( oError ) )
    DO WHILE !Empty( ProcName( n ) )
+      IF n == XB_CALLS_SHOWN
+         OutErr( Chr( 10 ) + XB_CALLS_NOT_SHOWN )
+         EXIT
+      ENDIF
       OutErr( Chr( 10 ) + "Called from " + ProcName( n ) + "(" + LTrim( Str( ProcLine( n ) ) ) + ")  " )
       n++
    ENDDO

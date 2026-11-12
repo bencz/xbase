@@ -54,7 +54,7 @@ private:
     FrameArgc = 5,
     FrameSlots = 6
   };
-  enum CtxField : unsigned { CtxPending = 0, CtxExitCode = 1, CtxFrames = 2, CtxDecimals = 3 };
+  enum CtxField : unsigned { CtxPending = 0, CtxDecimals = 1, CtxFrames = 2, CtxStackLimit = 3 };
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
   enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
   enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 5 };           // xb_hash
@@ -86,6 +86,7 @@ private:
   void placeLines();
   // `prev`: the frame the chain has now, when known (else it is read from the context).
   void linkFrame(llvm::Value *frame, llvm::Value *nslots, llvm::Value *proc, llvm::Value *prev = nullptr);
+  void checkStack(llvm::Value *frame, llvm::BasicBlock *exit, llvm::Value *stackSave);
   void unlinkFrame(llvm::Value *frame, llvm::Value *prev = nullptr);
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
   void addAbiAttributes(llvm::Function *f);
@@ -242,7 +243,7 @@ private:
   llvm::StructType *refTy_ = nullptr;       // xb_ref: { coll, index, value, key, loop }
   llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, entries, hashes, index, tree }
   llvm::StructType *hentryTy_ = nullptr;    // xb_hentry: { key, value }
-  llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, exitcode, frames, decimals }
+  llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, decimals, frames, stack limit }
   llvm::GlobalVariable *nilItem_ = nullptr; // a NIL item: missing arguments
   llvm::GlobalVariable *strBytes_ = nullptr; // xb_str_bytes, declared when first used
   uint64_t itemSize_ = 0;
@@ -250,7 +251,7 @@ private:
   uint64_t unionSize_ = 0;
 
   // runtime entry points
-  llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_;
+  llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_, rtStackOverflow_;
   llvm::FunctionCallee rtInc_, rtDec_, rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_,
       rtPendingGc_;
   llvm::FunctionCallee rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_;

@@ -38,7 +38,7 @@ enum { XB_CP_NONE, XB_CP_UPPER, XB_CP_LOWER, XB_CP_LETTER };
 const xb_codepage *xb_codepage_find(const char *name, size_t len);
 const xb_codepage *xb_codepage_utf8(void);
 /* The codepage of a context (SET CODEPAGE). */
-#define xb_codepage_of(ctx) ((ctx)->codepage ? (ctx)->codepage : xb_codepage_utf8())
+#define xb_codepage_of(ctx) ((ctx)->env->codepage ? (ctx)->env->codepage : xb_codepage_utf8())
 
 /* The character at byte `at` of `s` (`len` bytes): its code point (U+FFFD for a byte that starts no valid UTF-8
  * sequence, which counts as a character of its own), and in `*n` its length in bytes. */

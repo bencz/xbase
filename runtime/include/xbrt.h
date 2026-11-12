@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 38u
+#define XB_ABI_VERSION 39u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -193,11 +193,14 @@ struct xb_frame {
 };
 #endif
 
-/* [ABI] Per-task context. Compiled code uses its first fields, which the
- * context starts with in this order: `uint32_t pending` (requests tested after
- * every operation that can fail), `int32_t exitcode`, `xb_frame *frames` (the
- * innermost frame of the chain), `int32_t set_decimals` (SET DECIMALS, the
- * decimals of `/` and `%`, as 16 bits). */
+/* [ABI] A thread's context (core/context.h). Compiled code uses its first
+ * fields, which the context starts with in this order: `uint32_t pending`
+ * (requests tested after every operation that can fail), `int32_t
+ * set_decimals` (SET DECIMALS, the decimals of `/` and `%`, as 16 bits),
+ * `xb_frame *frames` (the innermost frame of the chain), `const char
+ * *stack_limit` (a function whose frame lies below it calls
+ * xb_stack_overflow before its body runs, then returns unwinding; NULL: no
+ * limit). */
 typedef struct xb_ctx xb_ctx;
 
 /* [ABI] dynamic calling convention used by every xBase-callable function:
@@ -273,11 +276,15 @@ int32_t  xb_pending_gc(xb_ctx *ctx);
 
 /* The layout the module was compiled for: offsets of xb_str.data,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
- * xb_array.items (after len and cap), xb_ref.value (after coll and index) and
+ * xb_ctx.stack_limit, xb_array.items (after len and cap), xb_ref.value (after coll and index) and
  * xb_hash.entries (after its five counts). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
-                      uint32_t array_items_offset, uint32_t ref_value_offset, uint32_t hash_entries_offset);
+                      uint32_t ctx_stack_limit_offset, uint32_t array_items_offset, uint32_t ref_value_offset,
+                      uint32_t hash_entries_offset);
+/* The stack error (EG_LIMIT, "Stack overflow"): raised by compiled code whose
+ * frame lies below the context's stack_limit (core/ctx.c). */
+void     xb_stack_overflow(xb_ctx *ctx);
 
 void     xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
@@ -680,9 +687,7 @@ void     xb_seq_resume(xb_ctx *ctx, uint32_t requests, const xb_item *value);
 
 xb_ctx  *xb_ctx_new(void);
 void     xb_ctx_free(xb_ctx *ctx);
-uint32_t xb_ctx_pending(const xb_ctx *ctx);
 void     xb_ctx_raise(xb_ctx *ctx, uint32_t what);
-int      xb_ctx_exitcode(const xb_ctx *ctx);
 
 /* [ABI] The 256 strings of one byte, never collected (XB_STR_STATIC): what
  * xb_str_new and xb_str_concat return for a one-byte result (Chr(),

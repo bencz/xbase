@@ -20,15 +20,15 @@ static int select_language(xb_ctx *ctx, const char *id, size_t len, int onlyFirs
   xbf___LANGUAGETEXTS(ctx, &texts, 1, &arg);
   xb_gc_root_pop(ctx, 2);
   if ((ctx->pending & XB_PENDING_UNWIND) || texts.type != XB_T_ARRAY) return 0;
-  if (!onlyFirst || ctx->language.type != XB_T_ARRAY) ctx->language = texts;
+  if (!onlyFirst || ctx->env->language.type != XB_T_ARRAY) ctx->env->language = texts;
   return 1;
 }
 
 int xb_language_select(xb_ctx *ctx, const char *id, size_t len) { return select_language(ctx, id, len, 0); }
 
 const xb_array *xb_language(xb_ctx *ctx) {
-  if (ctx->language.type != XB_T_ARRAY) select_language(ctx, "EN", 2, 1);
-  return ctx->language.type == XB_T_ARRAY ? ctx->language.v.p : NULL;
+  if (ctx->env->language.type != XB_T_ARRAY) select_language(ctx, "EN", 2, 1);
+  return ctx->env->language.type == XB_T_ARRAY ? ctx->env->language.v.p : NULL;
 }
 
 /* The value of numeric key `key` in a hash item, or NULL (not a hash, or no such key). */
@@ -56,5 +56,5 @@ xb_str *xb_language_error(xb_ctx *ctx, int32_t gencode, int32_t subcode) {
 void xbf___LANGUAGECURRENT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  if (xb_language(ctx)) *ret = ctx->language;
+  if (xb_language(ctx)) *ret = ctx->env->language;
 }

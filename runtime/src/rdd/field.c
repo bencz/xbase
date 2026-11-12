@@ -91,7 +91,7 @@ static uint32_t area_number(xb_ctx *ctx, const xb_item *area, const char *alias,
     return xb_area_number(xb_area_named(ctx, alias, strlen(alias)));
   }
   if (area) return 0;
-  return ctx->areaCurrent;
+  return ctx->env->areaCurrent;
 }
 
 /* The position of field `name` in `a`, through the reference's cache; -1 when the table has none. The cache is one
@@ -161,8 +161,8 @@ int xb_area_lookup(xb_ctx *ctx, const xb_item *area, uint32_t *n) {
 int xb_area_enter(xb_ctx *ctx, const xb_item *area, uint32_t *before) {
   uint32_t n;
   if (!xb_area_lookup(ctx, area, &n)) return 0;
-  *before = ctx->areaCurrent;
-  ctx->areaCurrent = n;
+  *before = ctx->env->areaCurrent;
+  ctx->env->areaCurrent = n;
   return 1;
 }
 
@@ -172,5 +172,5 @@ void xbf___AREAEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   uint32_t before;
   if (argc < 2 || argv[1].type != XB_T_BLOCK || !xb_area_enter(ctx, &argv[0], &before)) return;
   xb_block_call(ctx, ret, &argv[1], 0, ret);
-  ctx->areaCurrent = before;
+  ctx->env->areaCurrent = before;
 }

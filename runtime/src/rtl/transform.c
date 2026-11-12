@@ -53,7 +53,7 @@ static void put(out *o, char c) {
 static size_t date_template(const xb_ctx *ctx, char c, char out_[XB_DATE_TEXT_SIZE]) {
   char digits[8];
   memset(digits, c, sizeof digits);
-  return xb_date_format_digits(digits, ctx->date_format, out_);
+  return xb_date_format_digits(digits, ctx->env->date_format, out_);
 }
 
 static int string_placeholder(char c) { return strchr("!#9aAlLnNxXyY", c) != NULL && c; }
@@ -244,8 +244,8 @@ static size_t transform_number(xb_ctx *ctx, const xb_item *value, const char *pi
  * day, month, year (DDMMYYYY with SET CENTURY, DDMMYY without), its other
  * characters kept. */
 static void british_format(const xb_ctx *ctx, char fmt[XB_DATE_TEXT_SIZE]) {
-  const char *order = ctx->century ? "DDMMYYYY" : "DDMMYY";
-  const char *f = ctx->date_format;
+  const char *order = ctx->env->century ? "DDMMYYYY" : "DDMMYY";
+  const char *f = ctx->env->date_format;
   char last = 'x';
   size_t n = 0;
   while (n < XB_DATE_TEXT_SIZE - 1) {
@@ -270,9 +270,9 @@ static void transform_date(xb_ctx *ctx, const xb_item *value, unsigned flags, ou
   if (flags & P_BRITISH) {
     british_format(ctx, fmt);
   } else { /* the picture's first 10 characters, all a date's text takes */
-    size_t n = strlen(ctx->date_format);
+    size_t n = strlen(ctx->env->date_format);
     if (n > sizeof fmt - 1) n = sizeof fmt - 1;
-    memcpy(fmt, ctx->date_format, n);
+    memcpy(fmt, ctx->env->date_format, n);
     fmt[n] = '\0';
   }
   size_t n = xb_date_format(value->v.i, fmt, text);

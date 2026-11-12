@@ -1190,7 +1190,7 @@ uint32_t xb_macro_compile(xb_ctx *ctx, xb_item *code, const char *text, size_t l
     free_arena(p.arena);
     return XB_MACRO_SYNTAX;
   }
-  gen g = {ctx, e->kind == N_BLOCK ? XB_MACRO_BLOCK : 0u, ctx->areaCurrent};
+  gen g = {ctx, e->kind == N_BLOCK ? XB_MACRO_BLOCK : 0u, ctx->env->areaCurrent};
   fn top;
   if (goal == MG_ASSIGN) { /* `target := the function's argument` */
     fn_init(&g, &top, NULL);

@@ -31,13 +31,13 @@ const xb_rdd *xb_rdd_find(const char *name, size_t len) {
   return NULL;
 }
 
-const xb_rdd *xb_rdd_default(xb_ctx *ctx) { return ctx->rddDefault ? ctx->rddDefault : &xb_rdd_dbf; }
+const xb_rdd *xb_rdd_default(xb_ctx *ctx) { return ctx->env->rddDefault ? ctx->env->rddDefault : &xb_rdd_dbf; }
 
 xb_area *xb_area_at(xb_ctx *ctx, uint32_t n) {
-  return n >= 1 && n <= ctx->areaCap ? ctx->areas[n - 1] : NULL;
+  return n >= 1 && n <= ctx->env->areaCap ? ctx->env->areas[n - 1] : NULL;
 }
 
-xb_area *xb_area_current(xb_ctx *ctx) { return xb_area_at(ctx, ctx->areaCurrent); }
+xb_area *xb_area_current(xb_ctx *ctx) { return xb_area_at(ctx, ctx->env->areaCurrent); }
 
 xb_area *xb_area_settled(xb_ctx *ctx, uint32_t n) {
   xb_area *a = xb_area_at(ctx, n);
@@ -46,16 +46,16 @@ xb_area *xb_area_settled(xb_ctx *ctx, uint32_t n) {
   return xb_area_at(ctx, n); /* the relation's expression may close it */
 }
 
-xb_area *xb_area_record(xb_ctx *ctx) { return xb_area_settled(ctx, ctx->areaCurrent); }
+xb_area *xb_area_record(xb_ctx *ctx) { return xb_area_settled(ctx, ctx->env->areaCurrent); }
 
 int xb_area_eval(xb_ctx *ctx, xb_area *a, const xb_item *block, xb_item *r) {
-  uint32_t before = ctx->areaCurrent;
-  ctx->areaCurrent = a->number;
+  uint32_t before = ctx->env->areaCurrent;
+  ctx->env->areaCurrent = a->number;
   xb_item b = *block;
   xb_gc_root_push(ctx, &b);
   xb_block_call(ctx, r, &b, 0, r);
   xb_gc_root_pop(ctx, 1);
-  if (ctx->areaCurrent == a->number) ctx->areaCurrent = before;
+  if (ctx->env->areaCurrent == a->number) ctx->env->areaCurrent = before;
   return !(ctx->pending && xb_pending(ctx));
 }
 
@@ -64,8 +64,8 @@ uint32_t xb_area_number(int64_t n) { return n >= 1 && n <= XB_AREA_MAX ? (uint32
 /* The area of an alias (any letter case, `len` bytes), 0 for none. */
 static uint32_t area_of_alias(xb_ctx *ctx, const char *alias, size_t len) {
   if (len == 0) return 0; /* the areas of the copies between files have no alias */
-  for (uint32_t k = 0; k < ctx->areaCap; ++k)
-    if (ctx->areas[k] && same_upper(alias, len, ctx->areas[k]->alias)) return k + 1;
+  for (uint32_t k = 0; k < ctx->env->areaCap; ++k)
+    if (ctx->env->areas[k] && same_upper(alias, len, ctx->env->areas[k]->alias)) return k + 1;
   return 0;
 }
 
@@ -292,7 +292,7 @@ void xb_area_close(xb_ctx *ctx, uint32_t n) {
   int still = !a->closed && xb_area_at(ctx, n) == a;
   xb_area_unpin(a);
   if (!still) return;
-  ctx->areas[n - 1] = NULL;
+  ctx->env->areas[n - 1] = NULL;
   close_table(ctx, a);
 }
 
@@ -312,7 +312,7 @@ int xb_area_orders_close(xb_ctx *ctx, xb_area *a) {
 xb_order *xb_area_order(xb_area *a) { return a->order ? a->orders[a->order - 1] : NULL; }
 
 void xb_area_close_all(xb_ctx *ctx) {
-  for (uint32_t n = 1; n <= ctx->areaCap; ++n) xb_area_close(ctx, n);
+  for (uint32_t n = 1; n <= ctx->env->areaCap; ++n) xb_area_close(ctx, n);
 }
 
 /* Whether `s` is a name an alias can be: a letter or `_`, then letters, digits and `_`. */
@@ -378,16 +378,16 @@ static int area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *pat
   xb_set_str(&a->filter_text, xb_str_empty());
   xb_set_nil(&a->locate);
   xb_area_close(ctx, n); /* what an error block opened there meanwhile */
-  if (n > ctx->areaCap) {
-    uint32_t cap = ctx->areaCap ? ctx->areaCap : 16;
+  if (n > ctx->env->areaCap) {
+    uint32_t cap = ctx->env->areaCap ? ctx->env->areaCap : 16;
     while (cap < n) cap *= 2;
-    xb_area **grown = realloc(ctx->areas, cap * sizeof *grown);
+    xb_area **grown = realloc(ctx->env->areas, cap * sizeof *grown);
     if (!grown) xb_gc_fatal("out of memory");
-    memset(grown + ctx->areaCap, 0, (cap - ctx->areaCap) * sizeof *grown);
-    ctx->areas = grown;
-    ctx->areaCap = cap;
+    memset(grown + ctx->env->areaCap, 0, (cap - ctx->env->areaCap) * sizeof *grown);
+    ctx->env->areas = grown;
+    ctx->env->areaCap = cap;
   }
-  ctx->areas[n - 1] = a;
+  ctx->env->areas[n - 1] = a;
   if (rdd->index && rdd->index->tagged) {
     a->production = xb_file_path_replace_ext(path, rdd->index->ext);
     xb_area_pin(a);
@@ -410,20 +410,20 @@ int xb_area_open_with(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *pa
 }
 
 void xb_areas_mark(xb_ctx *ctx, int (*mark)(xb_item *)) {
-  for (uint32_t k = 0; k < ctx->areaCap; ++k)
-    if (ctx->areas[k]) {
-      mark(&ctx->areas[k]->filter);
-      mark(&ctx->areas[k]->filter_text);
-      mark(&ctx->areas[k]->locate);
-      xb_order_conditions *c = &ctx->areas[k]->pending;
+  for (uint32_t k = 0; k < ctx->env->areaCap; ++k)
+    if (ctx->env->areas[k]) {
+      mark(&ctx->env->areas[k]->filter);
+      mark(&ctx->env->areas[k]->filter_text);
+      mark(&ctx->env->areas[k]->locate);
+      xb_order_conditions *c = &ctx->env->areas[k]->pending;
       mark(&c->cond);
       mark(&c->condText);
       mark(&c->whileBlock);
       mark(&c->evalBlock);
-      for (uint32_t i = 0; i < ctx->areas[k]->norders; ++i) xb_order_mark(ctx->areas[k]->orders[i], mark);
-      for (uint32_t i = 0; i < ctx->areas[k]->nrelations; ++i) {
-        mark(&ctx->areas[k]->relations[i]->block);
-        mark(&ctx->areas[k]->relations[i]->text);
+      for (uint32_t i = 0; i < ctx->env->areas[k]->norders; ++i) xb_order_mark(ctx->env->areas[k]->orders[i], mark);
+      for (uint32_t i = 0; i < ctx->env->areas[k]->nrelations; ++i) {
+        mark(&ctx->env->areas[k]->relations[i]->block);
+        mark(&ctx->env->areas[k]->relations[i]->text);
       }
     }
 }
@@ -449,8 +449,8 @@ static int go_raw(xb_ctx *ctx, xb_area *a, uint32_t recno) {
 }
 
 int xb_area_visible(xb_ctx *ctx, xb_area *a) {
-  if (ctx->set_deleted && (!xb_area_load(ctx, a) || a->closed)) return -1;
-  if (ctx->set_deleted && a->rdd->deleted(a)) return 0;
+  if (ctx->env->set_deleted && (!xb_area_load(ctx, a) || a->closed)) return -1;
+  if (ctx->env->set_deleted && a->rdd->deleted(a)) return 0;
   if (a->filter.type != XB_T_BLOCK) return 1;
   xb_item r, block = a->filter;
   xb_set_nil(&r);

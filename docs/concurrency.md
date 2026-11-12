@@ -97,16 +97,15 @@ Classes and functions, listed in [coverage.md](coverage.md) as each one comes:
 
 ### Contexts and flows
 
-Today `xb_ctx` is both the running state of the program's only thread and the program's state. It splits in two:
+The context is split in two (done, [runtime.md](runtime.md#threads-and-synchronization)):
 
 - The **thread context** (`xb_ctx`, one per worker or program thread): what compiled code uses (`pending`, the chain
-  of frames on the machine stack, the C roots), per-thread caches (the macro cache), and a pointer to the current
-  flow's environment.
-- The **environment** of a flow of execution (`xb_env`): the `SET` values, `ErrorBlock`, the `PRIVATE` stack, the
-  current work area number, `SET LANGUAGE` and `SET CODEPAGE`, `FError()`, the default RDD; and a reference to the
-  flow's table of work areas. A worker running a task points its context at the task's environment; switching tasks
-  is a pointer store. `SET DECIMALS`, which compiled code reads directly, moves from the context to the environment
-  (an ABI change).
+  of frames on the machine stack, the stack limit, `SET DECIMALS`), the C roots, per-thread caches (the
+  macro cache), and a pointer to the current flow's environment.
+- The **environment** of a flow of execution (`xb_env`): the `SET` values, `ErrorBlock`, the memory variables, the
+  current work area number, `SET LANGUAGE` and `SET CODEPAGE`, `FError()`, the default RDD, and the flow's work areas.
+  *(Planned)*: a worker running a task points its context at the task's environment, and `SET DECIMALS` moves into the
+  environment, copied into the context when it does; switching tasks is a pointer store and that copy.
 
 Environments are copied on write: sequential code shares one and sees every `SET` as Clipper does; where execution
 forks (a task started with `TaskRun`, an `ASYNC` call that suspends while its caller goes on without awaiting it), both
@@ -265,11 +264,11 @@ Each phase ends with its tests, its benchmarks measured before and after, the do
 1. **Platform** (done): threads (create, join, identity), condition variables, reader-writer locks, one-time
    initialization, atomics on ordinary fields (the compilers' builtins and intrinsics), waiting on an address (a
    parking lot), monotonic nanoseconds.
-2. **A thread-safe runtime**: the context split and environments (ABI); stop-the-world collections with back-edge
-   polls (ABI), every stack scanned, atomic headers, per-thread remembered sets, the finalizer task; the runtime caches
-   and global state made thread-safe; shared objects (header bit, publication, sequence counters and locks, compiled
-   fast paths); line-atomic console output; `ThreadStart`, `Mutex`, `Condition`, `Semaphore`, `AtomicInt`,
-   `SYNCHRONIZED`. The first visible feature: threads sharing memory safely.
+2. **A thread-safe runtime**: the runtime caches and global state made thread-safe (done), the context split and
+   environments with the stack error (done); stop-the-world collections with back-edge polls (ABI), every stack scanned,
+   atomic headers, per-thread remembered sets, the finalizer task; shared objects (header bit, publication, sequence
+   counters and locks, compiled fast paths); line-atomic console output; `ThreadStart`, `Mutex`, `Condition`,
+   `Semaphore`, `AtomicInt`, `SYNCHRONIZED`. The first visible feature: threads sharing memory safely.
 3. **Scheduler and tasks**: workers, deques, stealing, parking, blocking handoff and its monitor, timers, the
    blocking pool; `Task`, `TaskRun`, `TaskDelay`, `TaskWhenAll`/`Any`, `TaskCompletionSource`, cancellation,
    `Channel`, usable from synchronous code (`Wait()`, `ContinueWith`).

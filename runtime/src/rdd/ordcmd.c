@@ -137,7 +137,7 @@ static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const x
   }
   xb_order *o = NULL;
   if (ok && !a->closed) { /* built while the other orders are open: USECURRENT, REST, ... walk the controlling one */
-    int isUnique = unique && unique->type == XB_T_LOGICAL ? unique->v.l != 0 : ctx->set_unique;
+    int isUnique = unique && unique->type == XB_T_LOGICAL ? unique->v.l != 0 : ctx->env->set_unique;
     o = xb_order_create(ctx, a, path, name, fresh, keyText, keyBlock, isUnique);
   }
   if (o && !a->closed && !a->pending.additive) xb_area_orders_clear(ctx, a, o->bag);
@@ -325,7 +325,7 @@ void xbf_DBSEEK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_error_of(ctx, XB_DBCMD, EG_ARG, 1001, "DBSEEK", NULL, 0, 0, 0, NULL, 0, NULL);
     return;
   }
-  int soft = argc > 1 && argv[1].type == XB_T_LOGICAL ? argv[1].v.l : ctx->set_softseek;
+  int soft = argc > 1 && argv[1].type == XB_T_LOGICAL ? argv[1].v.l : ctx->env->set_softseek;
   xb_item nil;
   xb_set_nil(&nil);
   if (!xb_area_seek(ctx, a, argc > 0 ? &argv[0] : &nil, soft, xb_db_logical_arg(argc, argv, 2))) return;

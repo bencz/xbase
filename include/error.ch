@@ -52,4 +52,9 @@
 #define EG_APPENDLOCK   40
 #define EG_LOCK         41
 
+/* xbase's own: the calls an error report lists (the innermost ones; a deeper
+ * stack, a runaway recursion's, ends the list with XB_CALLS_NOT_SHOWN) */
+#define XB_CALLS_SHOWN     100
+#define XB_CALLS_NOT_SHOWN "(further calls not shown)"
+
 #endif

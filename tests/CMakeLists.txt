@@ -44,6 +44,10 @@ function(xb_add_run_test name)
       -DEXPECTED_RC=${rc}
       -DEXPECTED_ERR=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.err
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
+  # A test that commits much memory (a recursion to the end of the stack) runs alone, never beside another.
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.serial)
+    set_tests_properties(run.${name} PROPERTIES RUN_SERIAL TRUE)
+  endif()
 endfunction()
 
 file(GLOB XB_RUN_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/run ${CMAKE_CURRENT_SOURCE_DIR}/run/*.prg)

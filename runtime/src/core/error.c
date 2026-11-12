@@ -30,18 +30,23 @@ void xbf_ERRORNEW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 static void set_text(xb_item *it, const char *s) { xb_set_str(it, xb_str_new(s, strlen(s))); }
 
-/* An error the program cannot recover from: reported, and the program ends
+/* An error the program cannot recover from: reported (with the innermost XB_CALLS_SHOWN calls), and the program ends
  * with exit code 1. */
 static void unrecoverable(xb_ctx *ctx, int code, const char *text) {
   fflush(stdout);
   fprintf(stderr, "\nUnrecoverable error %d: %s", code, text);
+  uint32_t shown = 0;
   for (const xb_frame *f = ctx->frames; f; f = f->prev) {
     if (!xb_frame_shown(f)) continue;
+    if (shown++ == XB_CALLS_SHOWN) {
+      fprintf(stderr, "\n%s", XB_CALLS_NOT_SHOWN);
+      break;
+    }
     fprintf(stderr, "\nCalled from %s(%u)", f->proc->name, (unsigned)f->line);
     if (f->proc->file) fprintf(stderr, " in %s", f->proc->file);
   }
   fputc('\n', stderr);
-  ctx->exitcode = 1;
+  xb_exit_code_set(1);
   ctx->pending |= XB_PENDING_QUIT;
 }
 
@@ -79,8 +84,8 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
   xb_proc proc = XB_RUNTIME_PROC(frame, 0);
   xb_frame inside;
   if (frame) xb_frame_push(ctx, &inside, &proc);
-  if (ctx->error_block.type != XB_T_BLOCK || ctx->error_depth >= XB_ERROR_MAX_DEPTH) {
-    if (ctx->error_block.type != XB_T_BLOCK) unrecoverable(ctx, 9002, "No ERRORBLOCK() for error");
+  if (ctx->env->error_block.type != XB_T_BLOCK || ctx->error_depth >= XB_ERROR_MAX_DEPTH) {
+    if (ctx->env->error_block.type != XB_T_BLOCK) unrecoverable(ctx, 9002, "No ERRORBLOCK() for error");
     else unrecoverable(ctx, 9003, "Too many recursive error handler calls");
     if (frame) xb_frame_pop(ctx, &inside);
     return 0;
@@ -126,7 +131,7 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
   xb_set_logical(&e->vars[ERR_CANDEFAULT], (flags & XB_ERR_DEFAULT) != 0);
   xb_set_int(&e->vars[ERR_TRIES], f->tries);
 
-  call[2] = ctx->error_block;
+  call[2] = ctx->env->error_block;
   ++ctx->error_depth;
   xb_block_call(ctx, &call[1], &call[2], 1, &call[0]);
   --ctx->error_depth;
@@ -182,8 +187,8 @@ int xb_error_of(xb_ctx *ctx, const char *subsystem, int32_t gencode, int32_t sub
 /* ErrorBlock( [bNew] ): the current error block; a codeblock argument
  * replaces it. */
 void xbf_ERRORBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  *ret = ctx->error_block;
-  if (argc >= 1 && argv[0].type == XB_T_BLOCK) ctx->error_block = argv[0];
+  *ret = ctx->env->error_block;
+  if (argc >= 1 && argv[0].type == XB_T_BLOCK) ctx->env->error_block = argv[0];
 }
 
 /* Break( [xValue] ): unwinds to the innermost BEGIN SEQUENCE, whose RECOVER
@@ -223,11 +228,11 @@ void xb_seq_value(xb_ctx *ctx, xb_item *r) {
 }
 
 void xb_seq_with(xb_ctx *ctx, xb_item *r, const xb_item *handler) {
-  *r = ctx->error_block;
-  if (handler->type == XB_T_BLOCK) ctx->error_block = *handler;
+  *r = ctx->env->error_block;
+  if (handler->type == XB_T_BLOCK) ctx->env->error_block = *handler;
 }
 
-void xb_seq_restore(xb_ctx *ctx, const xb_item *old) { ctx->error_block = *old; }
+void xb_seq_restore(xb_ctx *ctx, const xb_item *old) { ctx->env->error_block = *old; }
 
 uint32_t xb_seq_suspend(xb_ctx *ctx) {
   uint32_t requests = ctx->pending & XB_PENDING_UNWIND;

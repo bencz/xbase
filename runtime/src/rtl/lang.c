@@ -150,8 +150,9 @@ void xbf___ARGERROR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* ErrorLevel( [nNew] ): the program's exit code; an argument replaces it: a
  * number wrapped to 32 bits, anything else 0. */
 void xbf_ERRORLEVEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  xb_set_int(ret, ctx->exitcode);
-  if (argc) ctx->exitcode = xb_is_number(&argv[0]) ? xb_num_wrap_int32(&argv[0]) : 0;
+  XB_UNUSED(ctx);
+  xb_set_int(ret, xb_exit_code());
+  if (argc) xb_exit_code_set(xb_is_number(&argv[0]) ? xb_num_wrap_int32(&argv[0]) : 0);
 }
 
 /* Do( cName | bBlock, [xArgs...] ): the result of the function named cName

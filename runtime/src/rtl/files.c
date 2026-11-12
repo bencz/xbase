@@ -27,13 +27,13 @@ static int64_t num_or(uint32_t argc, const xb_item *argv, uint32_t k, int64_t df
 }
 
 /* The outcome of a file function: 0 after a success. */
-static void set_error(xb_ctx *ctx, int ok, int32_t err) { ctx->file_error = ok ? 0 : err; }
+static void set_error(xb_ctx *ctx, int ok, int32_t err) { ctx->env->file_error = ok ? 0 : err; }
 
 /* FError(): the code of the last file function's outcome (platform.h lists them), 0 after a success. */
 void xbf_FERROR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_set_int(ret, ctx->file_error);
+  xb_set_int(ret, ctx->env->file_error);
 }
 
 /* FOpen( cFile, [nMode] ): the handle of an existing file opened with nMode (FO_READ by default, fileio.ch), -1 when
@@ -91,7 +91,7 @@ void xbf_FREAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int64_t n = xb_num_to_i64(&argv[2]);
   size_t len = target->v.s->len;
   if (n < 1 || (uint64_t)n > len) {
-    ctx->file_error = 0;
+    ctx->env->file_error = 0;
     return;
   }
   xb_str *buf = xb_str_alloc(len);

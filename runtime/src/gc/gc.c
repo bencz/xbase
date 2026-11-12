@@ -959,12 +959,12 @@ static void mark_roots(void) {
     for (xb_frame *f = ctx->frames; f; f = f->prev)
       for (uint32_t i = 0; i < f->nslots; ++i) mark_item(&f->slots[i]);
     for (unsigned i = 0; i < ctx->rootLen; ++i) mark_item(ctx->roots[i]);
-    mark_item(&ctx->error_block);
+    mark_item(&ctx->env->error_block);
     mark_item(&ctx->break_value);
-    mark_item(&ctx->language);
+    mark_item(&ctx->env->language);
     xb_areas_mark(ctx, mark_item);
-    for (uint32_t i = 0; i < ctx->memvarCap; ++i) mark_item(&ctx->memvars[i]);
-    for (uint32_t i = 0; i < ctx->privateLen; ++i) mark_item(&ctx->privates[i].hidden);
+    for (uint32_t i = 0; i < ctx->env->memvarCap; ++i) mark_item(&ctx->env->memvars[i]);
+    for (uint32_t i = 0; i < ctx->env->privateLen; ++i) mark_item(&ctx->env->privates[i].hidden);
     for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) mark_item(&ctx->macro_cache[i]);
   }
   for (const xb_root *r = heap.roots; r; r = r->next)

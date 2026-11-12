@@ -25,13 +25,13 @@ void xbf___DBUSED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static uint32_t open_other(xb_ctx *ctx, const xb_str *name, const xb_rdd *rdd, int create, xb_field_info *fields,
                            uint32_t count, const xb_item *delimiter) {
   char *path = xb_file_path_with_ext(name->data, name->len, rdd->ext);
-  uint32_t n = xb_area_free(ctx), before = ctx->areaCurrent;
+  uint32_t n = xb_area_free(ctx), before = ctx->env->areaCurrent;
   xb_text_open text = {fields, count, create, delimiter};
   int ok;
   if (rdd->text) ok = xb_area_open_with(ctx, n, rdd, path, !create, create, &text);
   else ok = (!create || xb_db_create(ctx, rdd, path, fields, count)) &&
             xb_area_open_with(ctx, n, rdd, path, !create, create, NULL);
-  ctx->areaCurrent = before;
+  ctx->env->areaCurrent = before;
   free(path);
   return ok ? n : 0;
 }

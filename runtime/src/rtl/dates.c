@@ -60,7 +60,7 @@ void xbf_CTOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1119, "CTOD", argc, argv);
     return;
   }
-  xb_set_date(ret, xb_date_parse(argv[0].v.s->data, argv[0].v.s->len, ctx->date_format, ctx->epoch));
+  xb_set_date(ret, xb_date_parse(argv[0].v.s->data, argv[0].v.s->len, ctx->env->date_format, ctx->env->epoch));
 }
 
 void xbf_DTOC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -68,7 +68,7 @@ void xbf_DTOC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int64_t jd = date_arg(ctx, ret, argc, argv, "DTOC", 1118, &ok);
   if (!ok) return;
   char out[XB_DATE_TEXT_SIZE];
-  size_t n = xb_date_format(jd, ctx->date_format, out);
+  size_t n = xb_date_format(jd, ctx->env->date_format, out);
   xb_set_str(ret, xb_str_new(out, n));
 }
 

@@ -1,4 +1,4 @@
-/* Task contexts. */
+/* Thread contexts and the environments of flows. */
 #ifndef XB_CONTEXT_H
 #define XB_CONTEXT_H
 
@@ -6,36 +6,19 @@
 
 #define XB_MACRO_CACHE 64
 
-struct xb_ctx {
-  uint32_t  pending;        /* [ABI] the first four fields, in this order (see xbrt.h) */
-  int32_t   exitcode;
-  xb_frame *frames;         /* innermost frame of compiled code; frames are GC roots */
-  int32_t   set_decimals;   /* SET DECIMALS: compiled code reads it for / and % */
-  xb_ctx  *gcNext, *gcPrev; /* registered root sets */
-  xb_item **roots;          /* temporary C roots (xb_gc_root_push) */
-  unsigned rootLen, rootCap;
-  /* ErrorBlock(): a codeblock, NIL until ErrorSys() runs (a root of the collector, like the next one) */
+/* The environment of a flow of execution: what a program sets and sees as its state (the SET values, ErrorBlock(),
+ * memory variables, work areas), apart from the thread that runs it. A thread context points at the environment of
+ * the flow it runs (docs/concurrency.md). */
+typedef struct xb_env {
+  /* ErrorBlock(): a codeblock, NIL until ErrorSys() runs (a root of the collector) */
   xb_item  error_block;
-  xb_item  break_value;     /* the value of a pending BREAK */
-  uint32_t error_depth;     /* error blocks running */
-  /* Type() evaluating (error_trap > 0): an error runs no block, it ends the
-   * evaluation (XB_PENDING_TRAP, which no BEGIN SEQUENCE catches) and sets
-   * error_trapped to its generic code (never 0). */
-  uint32_t error_trap;
-  int32_t  error_trapped;
   /* Memory variables (core/memvar.c): by number, the binding visible (an
    * XB_T_CELL item, NIL for none); the PRIVATEs alive, each with the binding
-   * it hid, in creation order. Roots of the collector. Per task, like the
-   * SETs, so they travel with a task across threads. */
+   * it hid, in creation order. Roots of the collector. */
   xb_item  *memvars;
   uint32_t  memvarCap;
   struct xb_private *privates;
   uint32_t  privateLen, privateCap;
-  /* Macros compiled lately (macro/run.c): per entry, chosen by a hash of the
-   * text, the text and its compiled function (roots of the collector), and
-   * what the text was compiled as (mgoal). */
-  xb_item  macro_cache[2 * XB_MACRO_CACHE];
-  uint8_t  macro_cache_goal[XB_MACRO_CACHE];
   int      set_exact;
   char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
   int32_t  epoch;           /* SET EPOCH */
@@ -53,9 +36,45 @@ struct xb_ctx {
   int      set_unique;     /* SET UNIQUE: orders made keep one entry per key */
   const struct xb_rdd *rddDefault;
   int      netErr;
+} xb_env;
+
+/* A thread's context: what compiled code reaches (the [ABI] head), the state of the code running on the thread now
+ * (its frames, C roots, a BREAK on its way, the error blocks running), caches of the thread's own, and the
+ * environment of the flow it runs. */
+struct xb_ctx {
+  uint32_t  pending;        /* [ABI] the first four fields, in this order (see xbrt.h) */
+  int32_t   set_decimals;   /* SET DECIMALS: compiled code reads it for / and % (the thread's until tasks switch) */
+  xb_frame *frames;         /* innermost frame of compiled code; frames are GC roots */
+  const char *stack_limit;  /* compiled code raises the stack error below it (core/ctx.c) */
+  xb_env   *env;
+  const char *stack_low;    /* the lowest address of the thread's stack the program may use (NULL: unknown) */
+  xb_ctx  *gcNext, *gcPrev; /* registered root sets */
+  xb_item **roots;          /* temporary C roots (xb_gc_root_push) */
+  unsigned rootLen, rootCap;
+  xb_item  break_value;     /* the value of a pending BREAK (a root of the collector) */
+  uint32_t error_depth;     /* error blocks running */
+  /* Type() evaluating (error_trap > 0): an error runs no block, it ends the
+   * evaluation (XB_PENDING_TRAP, which no BEGIN SEQUENCE catches) and sets
+   * error_trapped to its generic code (never 0). */
+  uint32_t error_trap;
+  int32_t  error_trapped;
+  /* Macros compiled lately (macro/run.c): per entry, chosen by a hash of the
+   * text, the text and its compiled function (roots of the collector), and
+   * what the text was compiled as (mgoal). The compiled function depends on
+   * the text alone, so the cache is the thread's. */
+  xb_item  macro_cache[2 * XB_MACRO_CACHE];
+  uint8_t  macro_cache_goal[XB_MACRO_CACHE];
 };
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
+
+/* The lowest address of the stack of the context's thread that the program may use: compiled code raises the stack
+ * error a reserve above it (core/ctx.c); NULL: unknown, no limit. */
+void xb_ctx_set_stack(xb_ctx *ctx, const char *low);
+
+/* The program's exit code (ErrorLevel(), an unrecoverable error): the process's, whatever thread sets it. */
+int32_t xb_exit_code(void);
+void xb_exit_code_set(int32_t code);
 
 /* core/language.c: selects a language by name (any letter case): 0 when the runtime has none of that name. The
  * current language's texts (English when none was selected), NULL only when they cannot be made; an error's

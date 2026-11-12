@@ -65,6 +65,10 @@ typedef struct xb_thread_impl *xb_thread;
 int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *arg);
 void xb_thread_join(xb_thread t);
 
+/* The lowest address of the calling thread's stack that code may use (above its guard pages), NULL when the system
+ * does not tell: the limit under which the stack error is raised (core/ctx.c). */
+const char *xb_platform_stack_low(void);
+
 /* The processors the program may run on (at least 1): those of its affinity where the system tells it (Linux), else
  * every processor online. */
 unsigned xb_platform_cpu_count(void);
