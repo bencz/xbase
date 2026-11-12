@@ -40,6 +40,7 @@ add_executable(xbc
   src/codegen/InlineCalls.cpp
   src/codegen/Instructions.cpp
   src/codegen/Literals.cpp
+  src/codegen/LoopPolls.cpp
   src/codegen/LoopSplit.cpp
   src/codegen/Variables.cpp
   src/codegen/Emit.cpp

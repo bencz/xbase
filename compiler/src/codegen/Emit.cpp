@@ -1,5 +1,6 @@
 #include "codegen/Emit.h"
 
+#include "codegen/LoopPolls.h"
 #include "codegen/LoopSplit.h"
 
 #include <llvm/IR/LegacyPassManager.h>
@@ -98,20 +99,25 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   ModulePassManager mpm = optLevel == 0 ? pb.buildO0DefaultPipeline(lvl) : pb.buildPerModuleDefaultPipeline(lvl);
   mpm.run(m, mam);
   if (optLevel == 0) return;
-  // Loops whose slow paths leave for a generic copy (LoopSplit.h), then the
-  // function simplification pipeline again on the functions that changed.
-  std::vector<Function *> split;
-  for (Function &f : m)
-    if (!f.isDeclaration() && splitColdLoopPaths(f)) split.push_back(&f);
-  if (split.empty()) return;
-  std::string err;
-  raw_string_ostream os(err);
-  if (verifyModule(m, &os)) report_fatal_error(Twine("xbc: internal error: loop splitting broke the module:\n") + err);
+  // Loops whose slow paths leave for a generic copy (LoopSplit.h), then fewer polls on the back edges of the fast
+  // loops that leaves (LoopPolls.h); after each, the function simplification pipeline again on the functions it
+  // changed.
   FunctionPassManager fpm = pb.buildFunctionSimplificationPipeline(lvl, ThinOrFullLTOPhase::None);
-  for (Function *f : split) {
-    fam.invalidate(*f, PreservedAnalyses::none());
-    fpm.run(*f, fam);
-  }
+  auto again = [&](bool (*change)(Function &, FunctionAnalysisManager &), const char *what) {
+    std::vector<Function *> changed;
+    for (Function &f : m)
+      if (!f.isDeclaration() && change(f, fam)) {
+        changed.push_back(&f);
+        fam.invalidate(f, PreservedAnalyses::none());
+      }
+    if (changed.empty()) return;
+    std::string err;
+    raw_string_ostream os(err);
+    if (verifyModule(m, &os)) report_fatal_error(Twine("xbc: internal error: ") + what + " broke the module:\n" + err);
+    for (Function *f : changed) fpm.run(*f, fam);
+  };
+  again([](Function &f, FunctionAnalysisManager &) { return splitColdLoopPaths(f); }, "loop splitting");
+  again(placeLoopPolls, "loop polls");
 }
 
 // Code generation runs on the legacy pass manager: in LLVM 22 it is the one

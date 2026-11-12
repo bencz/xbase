@@ -654,16 +654,17 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
 ## Errors and pending requests
 
-`xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t set_decimals` (SET DECIMALS,
-which inline `/` and `%` read), `xb_frame *frames` and `const char *stack_limit` ([Frames](#frames)). `pending` holds
-requests. The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`,
+`xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t set_decimals` (SET
+DECIMALS, which inline `/` and `%` read), `xb_frame *frames` and `const char *stack_limit` ([Frames](#frames)).
+`pending` holds requests. The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`,
 `XB_PENDING_FINALIZE` when there are objects to destroy, and `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro
 operator](#macro-operator)). Compiled code tests the field after each fallible call; when it is set the code calls
 `xb_pending_gc` (or `xb_pending`, which never collects nor parks the thread, where a substituted result waits unseen:
 see [compiler.md](compiler.md#xir-to-llvm)), which serves a collection another thread makes (the thread parks: a
 safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a `BEGIN
-SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)); a loop's
-back edge tests the field the same way, and the macro evaluator after each operation that can fail (with
+SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)); a loop
+tests the field the same way on its back edge, once every 1024 passes in an innermost loop without calls
+([compiler.md](compiler.md#object-emission)), and the macro evaluator after each operation that can fail (with
 `xb_pending_gc`: its values are all in its frame). Other threads set bits there, so every change is an atomic
 read-modify-write (`xb_pending_set`, `xb_pending_clear` in `core/context.h`), and code that sets requests aside or ends
 them touches only the flow's own (`XB_PENDING_UNWIND`). The check stays valid across `AWAIT`. `QUIT` raises

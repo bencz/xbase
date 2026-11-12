@@ -102,7 +102,8 @@ typedef struct xb_item {
 } xb_item;
 
 /* [ABI] `pending` is tested by compiled code after every call that can
- * fail and on every loop's back edge, with an atomic load: other threads set
+ * fail and in every loop (on each back edge, or once every 1024 passes of an
+ * innermost loop without calls), with an atomic load: other threads set
  * bits there (a collection's safepoint request, objects to finalize), and
  * every change is an atomic read-modify-write. When it is non-zero the code
  * calls xb_pending_gc(), which parks the thread while another thread's

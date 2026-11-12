@@ -1,5 +1,6 @@
 // Types, runtime declarations, the module, functions and their frames, item and basic block helpers.
 #include "codegen/CodeGen.h"
+#include "codegen/LoopPolls.h"
 
 #include "xbrt.h" // constants only (type tags, ABI version) - never layouts
 
@@ -820,6 +821,9 @@ void CodeGen::checkPending(BasicBlock *unwind, bool collects) {
   // (xbrt.h), so destructors wait for a later one.
   bool held = !collects && emitting_ && (emitting_->effects() & xir::Substitutes) &&
               plan_->home(emitting_).kind == Home::Kind::Local;
+  // What the loop polls pass (LoopPolls.h) sees: a back edge's poll, or a test that serves a safepoint.
+  if (collects || !held)
+    cast<LoadInst>(pending)->setMetadata(collects ? kPollMetadata : kSafepointMetadata, MDNode::get(ctx_, {}));
   Value *leave = b_.CreateCall(held ? rtPending_ : rtPendingGc_, {fnCtx_});
   b_.CreateCondBr(b_.CreateICmpNE(leave, ConstantInt::get(i32_, 0)), unwind, cont);
   b_.SetInsertPoint(cont);

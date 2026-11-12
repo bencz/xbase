@@ -163,6 +163,10 @@ xb_add_codegen_test(loop_back_edge_poll x86_64-linux-gnu
   "@xb\\.direct\\.SUM\\(.*load atomic i32, ptr %ctx monotonic" loop_poll)
 # Every function tests its frame against the stack limit before its body.
 xb_add_codegen_test(stack_limit_check x86_64-linux-gnu "@xb\\.direct\\.SUM\\(.*call void @xb_stack_overflow" loop_poll)
+# A counted loop polls when it reaches a stop, in its exit test's branch; a loop whose end depends on its data counts
+# its passes down between polls (LoopPolls).
+xb_add_codegen_test(loop_strip_mined x86_64-linux-gnu "\npoll\\.reached[0-9]*:" loop_stops)
+xb_add_codegen_test(loop_count_down x86_64-linux-gnu "%poll\\.left[0-9.a-z]* = phi i32" loop_stops)
 # A loop's generic copy goes back on its back edge to a second fast copy of the loop, through a preheader of its own.
 xb_add_codegen_test(loop_reenter x86_64-linux-gnu "\n[A-Za-z0-9._]*\\.reenter:" loop_reenter)
 
@@ -182,11 +186,17 @@ add_test(NAME runtime.declarations
           -P ${CMAKE_CURRENT_SOURCE_DIR}/declarations_test.cmake)
 
 # Platform tests: C programs that exercise the runtime's own services (threads, locks, atomics, waiting) directly,
-# linked with the runtime; each one exits with 0 when every check passed.
+# linked with the runtime (and with platform/<name>.prg, compiled with --no-entry, when the test calls xBase code);
+# each one exits with 0 when every check passed.
 file(GLOB XB_PLATFORM_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/platform ${CMAKE_CURRENT_SOURCE_DIR}/platform/*.c)
 foreach(t ${XB_PLATFORM_TESTS})
   get_filename_component(name ${t} NAME_WE)
-  add_executable(p_${name} platform/${t})
+  set(prg)
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/platform/${name}.prg) # xBase functions the test calls
+    set(prg ${CMAKE_CURRENT_BINARY_DIR}/p_${name}.prg.o)
+    xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/platform/${name}.prg ${prg} --no-entry)
+  endif()
+  add_executable(p_${name} platform/${t} ${prg})
   xb_target_warnings(p_${name})
   if(MSVC)
     target_compile_options(p_${name} PRIVATE /volatile:ms)

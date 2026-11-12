@@ -230,7 +230,8 @@ in the phases of [concurrency.md](concurrency.md#phases).
   double index; inline double and mixed `+`, `-`, `*`, `/`, `%` and comparisons; type sets, with values that hold no
   heap pointer kept in registers; parameter versioning). Next, in order:
   1. Loops without slow paths: done at the LLVM level for innermost loops (`codegen/LoopSplit.*`,
-     [compiler.md](compiler.md#object-emission)), with alias information (TBAA) on the accesses whose memory is known.
+     [compiler.md](compiler.md#object-emission)), with alias information (TBAA) on the accesses whose memory is known,
+     and their safepoint polls placed once every 1024 passes (`codegen/LoopPolls.*`).
      Still to do: outer loops; loads of array headers moved out of fast loops (they follow a test that can leave the
      loop: loop rotation or dereferenceability facts); frame slot stores of values only an inline operation uses (they
      are there for the collector: statepoints); typed operations in xIR with sparse conditional propagation over the
@@ -242,7 +243,6 @@ in the phases of [concurrency.md](concurrency.md#phases).
 
 ### Runtime
 
-- A stack limit checked in function prologues (deep recursion is a crash today).
 - The ABI check for every module, not only the start module.
 - One table of type properties (heap object, `ValType` letter, sort order, `Empty`, display), with an abort on an
   unknown tag while marking.

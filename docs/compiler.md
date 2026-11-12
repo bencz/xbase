@@ -549,18 +549,18 @@ emits the object file.
   own `proc`: the other body shows instead.
 - After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
   `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
-  load stays in a loop without calls instead of leaving it); when it is set (marked unlikely, so the loop splitting
-  below moves the call to the generic copy: the fast loop keeps a load, a test and a branch, which cost 9% of the cycles
-  of the `loops` benchmark, a loop of two additions, 8% of `pi`'s, whose loops are a few instructions each, and 3% or
-  less elsewhere, perf stat on x86-64) it calls `xb_pending_gc` (which may park the thread for another thread's
-  collection, or run destructors, and so collect) or, right after an operation whose error may substitute its result
-  while that result has a `Local` home the collector does not see (`checkPending`, from the instruction being lowered),
-  `xb_pending`, which never collects nor parks; if that asks to unwind, it goes to the LLVM block of the xIR block's
-  unwind block, or leaves through the function's exit. A runtime operator may also return a value the error block
-  substituted, of any type: the code after it reads the result's type instead of assuming one, unless `subst.check`
-  follows the operation (its types then hold; the check reads the item's own tag and leaves for the generic copy on an
-  unlikely edge, see [xir.md](xir.md#passes)), and a comparison that feeds a condition tests the truth of what its slow
-  path returned. `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
+  load stays in a loop without calls instead of leaving it; the loads carry the metadata `xb.poll`, on a back edge, or
+  `xb.safepoint`, after an operation, for the loop polls pass below); when it is set (marked unlikely, so the loop
+  splitting below moves the call to the generic copy) it calls `xb_pending_gc` (which may park the thread for another
+  thread's collection, or run destructors, and so collect) or, right after an operation whose error may substitute its
+  result while that result has a `Local` home the collector does not see (`checkPending`, from the instruction being
+  lowered), `xb_pending`, which never collects nor parks; if that asks to unwind, it goes to the LLVM block of the xIR
+  block's unwind block, or leaves through the function's exit. A runtime operator may also return a value the error
+  block substituted, of any type: the code after it reads the result's type instead of assuming one, unless
+  `subst.check` follows the operation (its types then hold; the check reads the item's own tag and leaves for the
+  generic copy on an unlikely edge, see [xir.md](xir.md#passes)), and a comparison that feeds a condition tests the
+  truth of what its slow path returned. `truth` tests the item type inline; a non-logical value calls `xb_cond_error`
+  and leaves.
 - Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
   target `DataLayout`); a `FOR EACH` variable, a `STATIC`, a shared or captured variable or a parameter tests its type
   inline (one unsigned comparison covers `XB_T_CELL` and `XB_T_REF`) and follows a cell inline. An element
@@ -640,7 +640,8 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 
 `codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
 host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), then, from `-O1` on, splits the
-loops whose fast paths have cold edges (`LoopSplit.*`, below) and runs the pipeline again when it did, and writes the
+loops whose fast paths have cold edges (`LoopSplit.*`, below), places the polls of the loops' back edges (`LoopPolls.*`,
+below), each followed by the function simplification pipeline on the functions it changed, and writes the
 object with the target's object writer (code generation runs on the legacy pass manager: in LLVM 22 it is the one every
 target implements). Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names
 one, so programs run on any CPU of the target (a processor that keeps doubles with more precision than 64 bits between
@@ -665,3 +666,27 @@ loop again computes what it hoisted in its preheader, after the generic iteratio
 instructions or 64 cold edges is left as it is, and the copies grow a function by at most twice its own size
 (`kMaxLoopInstructions`, `kMaxColdEdges`). The module is verified after the split (an invalid module is an internal
 error).
+
+Loop polls (`codegen/LoopPolls.*`), on the loops the splitting left (its fast loops among them): a back edge's poll is a
+load and a branch on every pass, which in a loop of a few instructions costs as much as its work. A loop where a test
+that serves a safepoint (`xb.safepoint`, after a call) runs on every pass (its block dominates the latches) needs no
+poll: its polls go. Of the others, only an innermost loop polls less than once a pass (an outer loop's pass runs its
+inner loops, whose polls start anew on each entry, so its own poll bounds the passes between two of them). A counted
+loop, whose header's exit test compares an induction variable of constant step (scalar evolution) with a value the loop
+does not change (`ne`, or `<`, `<=` going up, `>`, `>=` going down, signed or not), polls in that test's branch (strip
+mining): the test compares with a stop, the exit's value or the variable's value `kPassesPerPoll` (1024) passes ahead
+(the stride must fit the variable's type; for `ne`, the exit's value only when the step divides the distance to it, or
+the variable would step over it and never poll again), kept in a PHI of the header; reaching it, a rare block tells the
+exit from a poll, which loads the pending requests and, when one is set, enters the old poll's slow path (in the generic
+copy) as if the previous pass's back edge had polled, with the header's values (the values computed after the header and
+used on that path must be ones the header's PHIs carry over; their uses are rewritten); then a new stop is computed and
+the header runs again (it must compute nothing that running again would change: no call, no atomic access, stores only
+of what it does not load; the slow path must be outside the loop, and the header's own values must not be used on it,
+being the next pass's there). A loop whose count is known and below the stride ends up with no poll at all (the stop is
+the exit's value). Another loop counts its passes down in a register (`poll.left`) and loads the pending requests once
+every 1024 passes. So a thread in loops without calls reaches a safepoint within 1024 passes of an innermost loop or one
+pass of another, at the cost of the counted loop's own test, or a decrement and a branch. Measured against the code
+before stop-the-world collections (perf stat, x86-64, the best of 5 runs): `loops` 2% more cycles (9% with a load on
+each pass), `pi` 2% (8%), `qsort`, `sieve` and `asort` 1 to 2%, the others within 1%; `crc32` and `mixed` are 29% and 7%
+faster (their loops back on fast paths after a slow one), `index` 8% (the index page cache,
+[rdd.md](rdd.md#performance)).
