@@ -15,6 +15,7 @@
  * A page holds at most floor(1022 / (entry size + 2)) - 1 entries, made even; the tree keeps every page but the root
  * at half of that or more. */
 #include "rdd/index.h"
+#include "rdd/pages.h"
 
 #include "rdd/rdd.h"
 
@@ -43,17 +44,12 @@
 #define NTX_DESCEND 280
 #define NTX_COND_TEXT 282
 #define NTX_ENTRY_HEAD 8 /* the page offset and the record number before the key */
-#define NTX_CACHE 128    /* pages kept in memory per file */
-#define NTX_BUCKET_BITS 8 /* the cache's hash table: page number to slot */
-#define NTX_BUCKETS (1u << NTX_BUCKET_BITS)
-#define NTX_NONE 0xFFFF
+#define NTX_CACHE 512    /* pages kept in memory per file (rdd/pages.h), made as pages come */
 #define NTX_DEPTH 40     /* levels a tree may have: past what 4 GB of pages holds */
 #define NTX_CHILDREN (NTX_PAGE / NTX_ENTRY_HEAD + 1) /* more than a page's entries and the page after them */
 
 typedef struct page {
-  uint32_t offset; /* in the file; 0: a slot with no page */
-  uint16_t next;   /* the next slot of its hash bucket, NTX_NONE at the end */
-  uint32_t used;   /* the clock of its last use */
+  uint16_t self;   /* its slot in the cache (its offset is the slot's) */
   uint32_t pins;   /* uses in progress: never evicted then */
   int dirty;
   unsigned char b[NTX_PAGE];
@@ -70,9 +66,8 @@ struct xb_tag {
   uint16_t version;
   int headerDirty;
   int changed;                        /* since the last flush: the counter goes up once per flush */
-  page *cache;
-  uint16_t buckets[NTX_BUCKETS];      /* the first slot of each hash bucket, NTX_NONE for none */
-  uint32_t clock, hint;               /* hint: the slot used last */
+  xb_pages pages;
+  page **cache;                       /* each slot's page, by its number - 1 (NULL until the slot is made) */
   unsigned char *scratch;             /* 2 * max + 4 entries, for splits, shifts and merges */
   /* The cursor: path[0] is the root; the last level holds the page and index of the entry, the others the page and
    * the index of the child descended. */
@@ -160,47 +155,37 @@ static int page_valid(const xb_tag *x, const unsigned char *b) {
   return 1;
 }
 
+static uint32_t offset_of(const xb_tag *x, const page *p) { return x->pages.slot[p->self].offset; }
+
 static int write_page(xb_tag *x, page *p, int32_t *err) {
-  if (!xb_platform_file_write_at(x->f, p->offset, p->b, NTX_PAGE, err)) return 0;
+  if (!xb_platform_file_write_at(x->f, offset_of(x, p), p->b, NTX_PAGE, err)) return 0;
   p->dirty = 0;
   return 1;
 }
 
-static uint32_t bucket(uint32_t offset) { return (offset / NTX_PAGE * 2654435761u) >> (32 - NTX_BUCKET_BITS); }
-
-/* Takes slot `p` out of its hash bucket. */
-static void unhash(xb_tag *x, page *p) {
-  uint16_t slot = (uint16_t)(p - x->cache), *link = &x->buckets[bucket(p->offset)];
-  while (*link != NTX_NONE && *link != slot) link = &x->cache[*link].next;
-  if (*link == slot) *link = p->next;
-}
-
-/* Gives slot `p` the page at `offset`. */
-static void rehash(xb_tag *x, page *p, uint32_t offset) {
-  if (p->offset) unhash(x, p);
-  p->offset = offset;
-  uint32_t b = bucket(offset);
-  p->next = x->buckets[b];
-  x->buckets[b] = (uint16_t)(p - x->cache);
-}
-
-/* A slot of the cache for a page: a free one, else the one unused longest (written first when it changed). */
+/* A slot of the cache for a page, free: a free one, else a new one, else the one unused longest that no operation
+ * holds (written first when it changed). */
 static page *victim(xb_tag *x, int32_t *err) {
-  page *best = NULL;
-  for (uint32_t i = 0; i < NTX_CACHE; ++i) {
-    page *p = &x->cache[i];
-    if (p->pins) continue;
-    if (!p->offset) return p;
-    if (!best || p->used < best->used) best = p;
+  uint16_t s = xb_pages_spare(&x->pages);
+  if (s) {
+    if (!x->cache[s - 1]) {
+      page *p = calloc(1, sizeof *p);
+      if (!p) xb_gc_fatal("out of memory");
+      p->self = s;
+      x->cache[s - 1] = p;
+    }
+    return x->cache[s - 1];
   }
-  if (!best) { /* every page pinned: an operation never holds that many */
+  s = xb_pages_oldest(&x->pages);
+  while (s && x->cache[s - 1]->pins) s = xb_pages_newer(&x->pages, s);
+  if (!s) { /* every page pinned: an operation never holds that many */
     *err = XB_FERR_FAILURE;
     return NULL;
   }
-  if (best->dirty && !write_page(x, best, err)) return NULL;
-  unhash(x, best);
-  best->offset = 0;
-  return best;
+  page *p = x->cache[s - 1];
+  if (p->dirty && !write_page(x, p, err)) return NULL;
+  xb_pages_place(&x->pages, s, 0);
+  return p;
 }
 
 /* The page at `offset`, pinned (release it). */
@@ -209,20 +194,12 @@ static page *get(xb_tag *x, uint32_t offset, int32_t *err) {
     *err = XB_FERR_FAILURE;
     return NULL;
   }
-  page *hint = &x->cache[x->hint];
-  if (hint->offset == offset) { /* the page used last: navigation stays on a leaf */
-    hint->used = ++x->clock;
-    ++hint->pins;
-    return hint;
+  uint16_t s = xb_pages_find(&x->pages, offset);
+  if (s) {
+    xb_pages_use(&x->pages, s);
+    ++x->cache[s - 1]->pins;
+    return x->cache[s - 1];
   }
-  for (uint16_t i = x->buckets[bucket(offset)]; i != NTX_NONE; i = x->cache[i].next)
-    if (x->cache[i].offset == offset) {
-      page *p = &x->cache[i];
-      x->hint = i;
-      p->used = ++x->clock;
-      ++p->pins;
-      return p;
-    }
   page *p = victim(x, err);
   if (!p) return NULL;
   if (!xb_file_read_at(x->f, offset, p->b, NTX_PAGE, err)) return NULL;
@@ -230,11 +207,10 @@ static page *get(xb_tag *x, uint32_t offset, int32_t *err) {
     *err = XB_FERR_FAILURE;
     return NULL;
   }
-  rehash(x, p, offset);
-  p->used = ++x->clock;
+  xb_pages_place(&x->pages, p->self, offset);
+  xb_pages_use(&x->pages, p->self);
   p->pins = 1;
   p->dirty = 0;
-  x->hint = (uint32_t)(p - x->cache);
   return p;
 }
 
@@ -259,9 +235,9 @@ static page *new_page(xb_tag *x, int32_t *err) {
     }
     p = victim(x, err);
     if (!p) return NULL;
-    rehash(x, p, x->end);
+    xb_pages_place(&x->pages, p->self, x->end);
+    xb_pages_use(&x->pages, p->self);
     x->end += NTX_PAGE;
-    p->used = ++x->clock;
     p->pins = 1;
   }
   clear_page(x, p->b);
@@ -273,7 +249,7 @@ static page *new_page(xb_tag *x, int32_t *err) {
 static void free_page(xb_tag *x, page *p) {
   clear_page(x, p->b);
   xb_put_le32(entry(p->b, 0), x->freeList);
-  x->freeList = p->offset;
+  x->freeList = offset_of(x, p);
   touched(x, p);
   x->headerDirty = 1;
 }
@@ -518,18 +494,18 @@ static int open_tag(const char *path, int readonly, int exclusive, xb_tag **out,
   x->root = xb_get_le32(h + NTX_ROOT);
   x->freeList = xb_get_le32(h + NTX_FREE);
   x->end = (uint32_t)(end / NTX_PAGE * NTX_PAGE);
+  xb_pages_init(&x->pages, NTX_CACHE);
   x->cache = calloc(NTX_CACHE, sizeof *x->cache);
   x->scratch = malloc((size_t)(2 * max + 4) * entrySize);
   if (!x->cache || !x->scratch) xb_gc_fatal("out of memory");
-  for (uint32_t i = 0; i < NTX_BUCKETS; ++i) x->buckets[i] = NTX_NONE;
   *info = x->info;
   *out = x;
   return 1;
 }
 
 static int flush_tag(xb_tag *x, int32_t *err) {
-  for (uint32_t i = 0; i < NTX_CACHE; ++i)
-    if (x->cache[i].offset && x->cache[i].dirty && !write_page(x, &x->cache[i], err)) return 0;
+  for (uint32_t i = 0; i < x->pages.count; ++i)
+    if (offset_of(x, x->cache[i]) && x->cache[i]->dirty && !write_page(x, x->cache[i], err)) return 0;
   if (!x->changed && !x->headerDirty) return 1;
   if (x->changed) ++x->version;
   unsigned char h[NTX_PAGE];
@@ -546,7 +522,9 @@ static int close_tag(xb_tag *x, int32_t *err) {
     *err = closeErr;
     ok = 0;
   }
+  for (uint32_t i = 0; i < x->pages.count; ++i) free(x->cache[i]);
   free(x->cache);
+  xb_pages_free(&x->pages);
   free(x->scratch);
   free(x);
   return ok;
@@ -957,8 +935,8 @@ static int insert_at(xb_tag *x, uint32_t d, uint32_t pos, unsigned char *e, uint
   memset(leftEnd + 4, 0, es - 4); /* the left half's last: the page before the entry that goes up */
   store(x, p->b, all, left);
   touched(x, p);
-  xb_put_le32(mid, p->offset);
-  uint32_t rightOffset = r->offset;
+  xb_put_le32(mid, offset_of(x, p));
+  uint32_t rightOffset = offset_of(x, r);
   release(r);
   release(p);
   if (d > 0) return insert_at(x, d - 1, x->path[d - 1].pos, mid, rightOffset, err);
@@ -968,7 +946,7 @@ static int insert_at(xb_tag *x, uint32_t d, uint32_t pos, unsigned char *e, uint
   memset(all + es, 0, es);
   xb_put_le32(all + es, rightOffset);
   store(x, root->b, all, 1);
-  x->root = root->offset;
+  x->root = offset_of(x, root);
   x->headerDirty = 1;
   release(root);
   return 1;
@@ -1065,7 +1043,7 @@ static int rebalance_up(xb_tag *x, uint32_t d, int32_t *err) {
     }
     store(x, lp->b, all, total); /* joined into the left page; the right one is free */
     touched(x, lp);
-    uint32_t leftOffset = lp->offset;
+    uint32_t leftOffset = offset_of(x, lp);
     free_page(x, rp);
     xb_put_le32(entry(parent->b, si + 1), leftOffset);
     remove_entry(x, parent, si);
@@ -1124,11 +1102,9 @@ static int delete_entry(xb_tag *x, const unsigned char *key, uint32_t recno, int
 
 /* Drops the pages kept (none is changed between operations of a shared index). */
 static void forget_pages(xb_tag *x) {
-  for (uint32_t i = 0; i < NTX_CACHE; ++i) {
-    page *p = &x->cache[i];
-    if (p->offset) unhash(x, p);
-    p->offset = 0;
-    p->dirty = 0;
+  for (uint32_t i = 0; i < x->pages.count; ++i) {
+    xb_pages_place(&x->pages, x->cache[i]->self, 0);
+    x->cache[i]->dirty = 0;
   }
 }
 

@@ -23,6 +23,7 @@
  * with its sign bit flipped (a negative one wholly inverted); a logical T or F. The directory tag's keys are the tag
  * names (10 bytes), its record numbers the tags' header offsets. */
 #include "rdd/index.h"
+#include "rdd/pages.h"
 
 #include "rdd/rdd.h"
 
@@ -42,8 +43,7 @@
 #define CDX_BRANCH_HEAD 12
 #define CDX_BRANCH_TAIL 8         /* a branch entry's record number and child after its key */
 #define CDX_ENTRIES 170           /* more than a page holds (one over while it is split) */
-#define CDX_CACHE 512             /* pages kept per file */
-#define CDX_HASH 1024             /* buckets finding a kept page by its offset */
+#define CDX_CACHE 512             /* pages kept per file (rdd/pages.h), made as pages come */
 #define CDX_ROOT 1
 #define CDX_LEAF 2
 #define CDX_OPT_UNIQUE 0x01
@@ -79,9 +79,7 @@ static const char cdx_mark[4] = {'R', 'C', 'H', 'B'};
 /* A page in memory: its bytes, and decoded its entries. */
 typedef struct node {
   uint32_t offset;           /* 0: a free slot */
-  uint32_t used;             /* the clock of its last use */
-  uint16_t next;             /* the next slot (from 1; 0: none) of its offset's hash bucket */
-  uint16_t self;             /* its own (from 1) */
+  uint16_t self;             /* its slot in the cache (rdd/pages.h; 0: a page outside it, being built) */
   int dirty;
   int pending;               /* a leaf's entries changed since its bytes were made from them */
   int full;                  /* its entries are decoded (else only its header: the bytes hold the entries) */
@@ -129,10 +127,8 @@ struct xb_bag {
   uint32_t ntags;
   xb_tag **dead;             /* tags removed while orders may still name them: freed with the bag */
   uint32_t ndead;
-  node *cache[CDX_CACHE];    /* the first `slots` made, as pages came */
-  uint32_t slots;
-  uint16_t buckets[CDX_HASH]; /* the first slot (from 1; 0: none) of the pages whose offsets hash there */
-  uint32_t clock;
+  xb_pages pages;
+  node *cache[CDX_CACHE];    /* each slot's page, by its number - 1: the first pages.count made, as pages came */
   uint32_t changes;          /* changes of any of its tags: cursors placed before are placed again */
   uint32_t held;
   int heldOk;
@@ -283,28 +279,16 @@ static void encode(node *p) {
   }
 }
 
-static uint32_t bucket_of(uint32_t offset) { return offset / CDX_PAGE % CDX_HASH; }
-
 static node *kept(xb_bag *b, uint32_t offset) {
-  for (uint16_t i = b->buckets[bucket_of(offset)]; i; i = b->cache[i - 1]->next)
-    if (b->cache[i - 1]->offset == offset) return b->cache[i - 1];
-  return NULL;
+  uint16_t s = xb_pages_find(&b->pages, offset);
+  return s ? b->cache[s - 1] : NULL;
 }
 
-/* Gives slot `p` page `offset` (0: none), in the hash buckets. */
+/* Gives slot `p` page `offset` (0: none, the slot free); a page given is used now (an operation works on it). */
 static void rehome(xb_bag *b, node *p, uint32_t offset) {
-  uint16_t self = p->self;
-  if (p->offset) {
-    uint16_t *link = &b->buckets[bucket_of(p->offset)];
-    while (*link != self) link = &b->cache[*link - 1]->next;
-    *link = p->next;
-  }
   p->offset = offset;
-  p->next = 0;
-  if (!offset) return;
-  uint16_t *head = &b->buckets[bucket_of(offset)];
-  p->next = *head;
-  *head = self;
+  xb_pages_place(&b->pages, p->self, offset);
+  if (offset) xb_pages_use(&b->pages, p->self);
 }
 
 /* A page's bytes as its entries now are (a leaf's are made when they are needed). */
@@ -320,17 +304,15 @@ static void bytes_now(node *p) {
 static node *slot(xb_bag *b, uint32_t offset, int32_t *err) {
   node *victim = offset ? kept(b, offset) : NULL;
   if (victim) return victim;
-  for (uint32_t i = 0; i < b->slots; ++i) {
-    node *p = b->cache[i];
-    if (!victim || (victim->offset && (!p->offset || p->used < victim->used))) victim = p;
-  }
-  if ((!victim || victim->offset) && b->slots < CDX_CACHE) {
+  uint16_t s = xb_pages_spare(&b->pages);
+  if (s && !b->cache[s - 1]) {
     victim = calloc(1, sizeof *victim);
     if (!victim) xb_gc_fatal("out of memory");
-    victim->self = (uint16_t)(b->slots + 1);
-    b->cache[b->slots++] = victim;
+    victim->self = s;
+    b->cache[s - 1] = victim;
     return victim;
   }
+  victim = b->cache[(s ? s : xb_pages_oldest(&b->pages)) - 1];
   if (victim->offset && victim->dirty) {
     bytes_now(victim);
     if (!xb_platform_file_write_at(b->f, victim->offset, victim->raw, CDX_PAGE, err)) return NULL;
@@ -370,7 +352,7 @@ static node *fetch(xb_bag *b, const xb_tag *t, uint32_t offset, int whole, int32
     *err = XB_FERR_FAILURE;
     return NULL;
   }
-  p->used = ++b->clock;
+  xb_pages_use(&b->pages, p->self);
   return p;
 }
 
@@ -856,10 +838,11 @@ static void bag_free(xb_bag *b) {
   free(b->tags);
   for (uint32_t i = 0; i < b->ndead; ++i) free(b->dead[i]);
   free(b->dead);
-  for (uint32_t i = 0; i < b->slots; ++i) {
+  for (uint32_t i = 0; i < b->pages.count; ++i) {
     free(b->cache[i]->keys);
     free(b->cache[i]);
   }
+  xb_pages_free(&b->pages);
   free(b);
 }
 
@@ -883,15 +866,13 @@ static void cdx_set_type(xb_tag *t, char type) {
  * found again. A change is written before the lock goes, the counter one higher. An exclusive file skips all of it
  * and writes the free list's head when it is flushed. */
 static void forget(xb_bag *b) {
-  for (uint32_t i = 0; i < b->slots; ++i) {
+  for (uint32_t i = 0; i < b->pages.count; ++i) {
     node *p = b->cache[i];
-    p->offset = 0;
-    p->next = 0;
+    rehome(b, p, 0);
     p->dirty = 0;
     p->pending = 0;
     p->tag = NULL;
   }
-  memset(b->buckets, 0, sizeof b->buckets);
 }
 
 static int unlock(xb_bag *b, int ok, int32_t *err) {
@@ -924,7 +905,7 @@ static int begin(xb_bag *b, int kind, int32_t *err) {
 }
 
 static int write_pages(xb_bag *b, int32_t *err) {
-  for (uint32_t i = 0; i < b->slots; ++i) {
+  for (uint32_t i = 0; i < b->pages.count; ++i) {
     node *p = b->cache[i];
     if (p->offset && p->dirty) {
       bytes_now(p);
@@ -1115,7 +1096,6 @@ static node *new_page(xb_bag *b, const xb_tag *t, int leaf, int32_t *err) {
   memset(p->raw, 0, sizeof p->raw);
   rehome(b, p, offset);
   p->tag = t;
-  p->used = ++b->clock;
   p->kind = leaf ? CDX_LEAF : 0;
   p->n = 0;
   p->full = 1;
@@ -1137,7 +1117,6 @@ static int free_page(xb_bag *b, uint32_t offset, int32_t *err) {
   p->kind = 0;
   p->n = 0;
   p->full = 1;
-  p->used = ++b->clock;
   p->dirty = 1;
   b->freeHead = offset;
   b->wrote = 1;
@@ -2093,6 +2072,7 @@ static int add_tag(xb_bag *b, const char *name, const xb_index_info *info, const
 static xb_bag *bag_new(xb_shared *s, int readonly, int exclusive) {
   xb_bag *b = calloc(1, sizeof *b);
   if (!b) xb_gc_fatal("out of memory");
+  xb_pages_init(&b->pages, CDX_CACHE);
   b->s = s;
   b->f = xb_shared_handle(s);
   b->readonly = readonly;

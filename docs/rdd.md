@@ -40,8 +40,9 @@ touching the rest (SQL engines later), each as a library when it needs one.
 - `field.c`: the field references of compiled code (below) and `__AreaEval( xArea, bBlock )`, which evaluates
   `alias->( expr )`.
 - `dbf.c`: the `DBF` driver, with its memos in `dbt.c` ([Files](#files)).
-- `order.c`, `index.h`, `ntx.c`, `ordcmd.c`: orders, the interface of their files' formats, NTX files and the
-  functions ([Orders](#orders)).
+- `order.c`, `index.h`, `ntx.c`, `cdx.c`, `pages.c`, `ordcmd.c`: orders, the interface of their files' formats, NTX
+  and CDX files, the pages of index files kept in memory ([Performance](#performance)) and the functions
+  ([Orders](#orders)).
 - `relation.c`: relations between areas and their functions ([Relations](#relations)).
 - `transfer.c`, `transfer.prg`, `text.c`: the copies between files and the text file drivers ([Copies between
   files](#copies-between-files)).
@@ -503,9 +504,9 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
 
   The files are the reference's bytes after the same operations (`rdd_cdx_format.prg`: random changes of thousands of
   records, exclusive and shared, against its checksums; outside the tests, runs of tens of thousands of changes with
-  keys of 1 to 240 bytes compared file by file). The pages kept in memory (512 per file, found by a hash of their
-  offsets, made as pages come) are decoded when first read only as far as their header; their entries when a key is
-  needed; a changed leaf's bytes are made from its entries once, when they are written. A tag that leaves its file
+  keys of 1 to 240 bytes compared file by file). The pages kept in memory ([Performance](#performance)) are decoded
+  when first read only as far as their header; their entries when a key is needed; a changed leaf's bytes are made
+  from its entries once, when they are written. A tag that leaves its file
   (replaced, removed, its file made anew) finds no page any more, even if an order still names it.
 
 Every format is checked against the reference's files: what one writes, the other reads, and after the same operations
@@ -517,8 +518,11 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
 - Navigation reads no record: `GO`, `SKIP` and `SEEK` set the record number, and the driver reads the record when a
   field, its deletion flag or a key is first used (`load`). In order, a `SKIP` moves the order's cursor (the path from
   the root to the entry, kept from one call to the next while the order does not change) to the next entry.
-- Each open order keeps 128 pages (a hash from page to slot, the page used last checked first); pages changed are
-  written on `COMMIT`, at closing, or when the cache needs their slot.
+- Each index file keeps up to 512 pages in memory (`pages.c`, for both index drivers): slots made as pages come, found
+  by a hash of the page's offset (the page used last checked first), and kept in the order of their last use (a list,
+  updated in constant time), so a page read takes a free slot, else a new one, else the one used longest ago (NTX: that
+  no operation holds; CDX: the pages an operation works on are its latest); pages changed are written on `COMMIT`, at
+  closing, or when the cache needs their slot.
 - A page is searched by halves over its offsets; a key compares with `memcmp`.
 - Counting (`ordKeyCount()`, `ordKeyNo()`) and `ordKeyGoto()` read the pages' entry counts, never one entry at a
   time: the pages where the bounds fall (`ordKeyNo()`: the current entry's path) are searched, the subtrees between

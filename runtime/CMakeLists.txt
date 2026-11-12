@@ -40,6 +40,7 @@ add_library(xbrt STATIC
   src/rdd/text.c
   src/rdd/transfer.c
   src/rdd/order.c
+  src/rdd/pages.c
   src/rdd/field.c
   src/rtl/arrays.c
   src/rtl/collections.c
