@@ -52,6 +52,9 @@ void xb_platform_local_time(int *hour, int *minute, int *second, int *msec);
  * and the ':' after a drive letter). */
 int xb_platform_path_separator(char c);
 
+/* The system's end of a line of text ("\n"; "\r\n" on Windows): the lines of the text files tables are copied to. */
+const char *xb_platform_eol(void);
+
 /* Files. A file is the system's handle as an integer; paths are UTF-8. A
  * function that fails returns 0 (a count or position: -1) and stores in
  * `*err` the code that FError() reports: a DOS error number, which Windows

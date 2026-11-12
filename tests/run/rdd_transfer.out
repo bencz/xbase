@@ -1,0 +1,93 @@
+
+copy all: 5 NAMEC10.0 AMTN8.2 DD8.0 LL1.0  [ Alpha        12.5020240131T] [ Beta      ********19991231F] [*Gamma      1000.00         ] [                            ] [ Ep"s,il xy99999.9920000229T] .T.          6
+fields: 5 AMTN8.2 NAMEC10.0 DD8.0 LL1.0  [    12.50Alpha     20240131T] [     0.00Beta      19991231F] [* 1000.00Gamma             F] [     0.00                  F] [ 99999.99Ep"s,il xy20000229T]
+next from deleted: 2 NAMEC10.0 AMTN8.2 DD8.0 LL1.0  [*Gamma      1000.00         ] [                            ]          4
+for: 1 NAMEC10.0 AMTN8.2 DD8.0 LL1.0  [ Ep"s,il xy99999.9920000229T]
+record: 1 NAMEC10.0 AMTN8.2 DD8.0 LL1.0  [ Beta      ********19991231F]          2
+ERR DBFNTX         33       1020 Data type error D
+ERR DBFNTX         33       1020 Data type error D
+ERR DBFNTX         33       1020 Data type error D
+append:          3          3 TGT          1
+         1 [Alpha]    12.5000 [        ] [] .F.
+         2 [Gamma]  1000.0000 [        ] [] .T.
+         3 [Ep"s,] 99999.9900 [        ] [] .F.
+missing: DBFNTX         21       1001 rdd_transfer_none.dbf
+no table: DBCMD         35       2001 COPY TO
+sdf: Alpha        12.5020240131T<EOL>Beta      ********19991231F<EOL>Gamma      1000.00         <EOL>  lead sp                  <EOL>Ep"s,il xy99999.9920000229T<EOL><26>
+sdf fields: T20240131   12.50Alpha     <EOL>F19991231    0.00Beta      <EOL>F         1000.00Gamma     <EOL>F            0.00  lead sp <EOL>T2000022999999.99Ep"s,il xy<EOL><26>
+delimited: "Alpha",12.50,20240131,T<EOL>"Beta",********,19991231,F<EOL>"Gamma",1000.00,,F<EOL>"  lead sp",0.00,,F<EOL>"Ep"s,il xy",99999.99,20000229,T<EOL><26>
+blank: Alpha 12.50 20240131 T<EOL>Beta ******** 19991231 F<EOL>Gamma 1000.00  F<EOL>  lead sp 0.00  F<EOL>Ep"s,il xy 99999.99 20000229 T<EOL><26>
+tab: Alpha<9>12.50<9>20240131<9>T<EOL>Beta<9>********<9>19991231<9>F<EOL>Gamma<9>1000.00<9><9>F<EOL>  lead sp<9>0.00<9><9>F<EOL>Ep"s,il xy<9>99999.99<9>20000229<9>T<EOL><26>
+bar: |Alpha|,12.50,20240131,T<EOL>|Beta|,********,19991231,F<EOL>|Gamma|,1000.00,,F<EOL>|  lead sp|,0.00,,F<EOL>|Ep"s,il xy|,99999.99,20000229,T<EOL><26>
+array: Alpha;12.50;20240131;T<EOL>Beta;********;19991231;F<EOL>Gamma;1000.00;;F<EOL>  lead sp;0.00;;F<EOL>Ep"s,il xy;99999.99;20000229;T<EOL><26>
+deleted, for: "Alpha",12.50,20240131,T<EOL>"Ep"s,il xy",99999.99,20000229,T<EOL><26>
+none: <26>
+sdf in:          7          7
+           1 [Line one  |   12.50|01/31/24|T|]
+           2 [Short     |    0.00|  /  /  |F|]
+           3 [          |    0.00|  /  /  |F|]
+           4 [Lf cr     | 1000.00|  /  /  |F|]
+           5 [Too long  |99999.90|  /  /  |F|]
+           6 [Middle    |    3.00|  /  /  |T|]
+           7 [Last      |    0.00|  /  /  |F|]
+delimited in:         14
+           1 [Alpha     |   12.50|01/31/24|T|]
+           2 [Lead      |   -3.25|12/31/99|T|]
+           3 [Unq uoted |    7.00|02/29/24|T|]
+           4 [Has,comma |    1.00|  /  /  |F|]
+           5 [Emb       |    2.00|  /  /  |T|]
+           6 [VeryLongNa|12345.00|01/31/24|T|]
+           7 [Short     |    0.00|  /  /  |F|]
+           8 [          |    0.00|  /  /  |F|]
+           9 [A         |    5.00|01/01/24|T|]
+          10 [          |    0.00|  /  /  |F|]
+          11 [Open quote|    0.00|  /  /  |F|]
+          12 [y         |   12.00|01/01/24|F|]
+          13 [z         |    0.00|01/01/24|T|]
+          14 [last      |   -0.01|01/01/24|F|]
+           1 [Two       |    0.00|  /  /  |F|]
+           2 [Ab        |    4.00|01/01/24|T|]
+for in the text:
+           1 [Alpha     |   12.50|01/31/24|T|]
+           2 [Beta      |    0.00|12/31/99|F|]
+           3 [  lead sp |    0.00|  /  /  |F|]
+next:          2
+bytes: 21
+[ Line one     12.5020240131T]
+[ Short                      ]
+[                            ]
+[ Lf cr      1000.00        F]
+[ Too long  99999.90        F]
+[ Middle        3.00        T]
+[ Last                       ]
+[ Alpha        12.5020240131T]
+[ Lead         -3.2519991231T]
+[ Unq uoted     7.0020240229T]
+[ Has,comma     1.00        F]
+[ Emb           2.00        T]
+[ VeryLongNa12345.0020240131T]
+[ Short                      ]
+[                            ]
+[ A             5.0020240101T]
+[               0.00        F]
+[ Open quote                 ]
+[ y            12.0020240101F]
+[ z         ********20240101T]
+[ last         -0.0120240101F]
+memo sdf: n1           1.5                                                                                                                                                                                                                                                                                                            <EOL>n2           3.0                                                                                                                                                                                                                                                                                                            <EOL>n3           4.5                                                                                                                                                                                                                                                                                                            <EOL>n4           6.0                                                                                                                                                                                                                                                                                                            <EOL><26>
+with, then next: n2 3.0 <EOL>n3 4.5 <EOL><26>          3
+cdx copy: DBFCDX          3 n2         mm .T.
+structure:          0          3 NOTE AMT NAME
+  NAME       C  10   0
+  AMT        N   6   1
+  NOTE       M  10   0
+  BIG        C  44   1
+create from: RDD_TRANSFER_F          4        300          0          2
+create: RDD_TRANSFER_G          4 FIELD_NAME          0
+table extension: .dbf
+itself:          8
+unknown driver: DBCMD          1       1015 .F.
+ERR       1021 Data width error 
+source closed by the error block: RDD_TRANSFER_N          1   0 .T.
+too big for a text file: DBCMD       1014 .F.
+a NUL in the delimiter: 12345<EOL>7<EOL><26>

@@ -2,8 +2,9 @@
 
 The work areas and the database drivers (RDDs, Clipper's replaceable database drivers): tables, memos, indexes, locking,
 and the commands and functions over them. Done: work areas, the driver interface, `DBF` tables with `DBT` and `FPT`
-memos and `NTX` orders (indexes), sharing and locks, the compiler's field references and the commands over them. The
-rest of this document marked *(planned)* is the plan the work follows.
+memos, `NTX` and `CDX` orders (indexes), relations, copies to and from tables and text files, sharing and locks, the
+compiler's field references and the commands over them. The rest of this document marked *(planned)* is the plan the
+work follows.
 
 Goals: Clipper's behavior, and files that Clipper programs and the reference read and write at the same time as xbase
 programs (the same bytes on disk, the same locks), on every platform and byte order; drivers that can be added without
@@ -30,9 +31,10 @@ touching the rest (SQL engines later), each as a library when it needs one.
   neutral value (`RecNo()` 0, `Eof()` and `Bof()` `.T.`, `FieldGet()` NIL, `Alias()` `""`, `FieldPut()` nothing); those
   that move or change are `DBCMD/2001` `Workarea not in use` (generic code `EG_NOTABLE`).
   `dbEval( bBlock, [bFor], [bWhile], [nNext], [nRecord], [lRest] )` and the commands with a scope (`DELETE`, `RECALL`,
-  `REPLACE`, `LOCATE`, `COUNT`, `SUM`) share one scope walk: from the top, unless `WHILE`, `NEXT n` or `REST` start it
-  at the current record or `RECORD n` names the one record; `WHILE` stops at the first record that fails it, `NEXT n`
-  on the last record it took (none for `n` below 1).
+  `REPLACE`, `LOCATE`, `COUNT`, `SUM`, `AVERAGE`) share one scope walk: from the top, unless `WHILE`, `NEXT n` or
+  `REST` start it at the current record or `RECORD n` names the one record; `WHILE` stops at the first record that
+  fails it, `NEXT n` on the last record it took (none for `n` below 1). `AVERAGE` counts the records in the memory
+  variable `__Avg`, as Clipper's does (no record: the averages are 0, the zero divisor's default).
 - A table opened `READONLY` takes no write: `FieldPut`, assignments to fields, `dbDelete`, `dbRecall`, `dbAppend`,
   `__dbPack` and `__dbZap` are `DBFNTX/1025` `Write not allowed` (generic code `EG_READONLY`), and nothing changes.
 - `field.c`: the field references of compiled code (below) and `__AreaEval( xArea, bBlock )`, which evaluates
@@ -40,6 +42,9 @@ touching the rest (SQL engines later), each as a library when it needs one.
 - `dbf.c`: the `DBF` driver, with its memos in `dbt.c` ([Files](#files)).
 - `order.c`, `index.h`, `ntx.c`, `ordcmd.c`: orders, the interface of their files' formats, NTX files and the
   functions ([Orders](#orders)).
+- `relation.c`: relations between areas and their functions ([Relations](#relations)).
+- `transfer.c`, `transfer.prg`, `text.c`: the copies between files and the text file drivers ([Copies between
+  files](#copies-between-files)).
 
 Names: `dbUseArea` and `dbCreate` take the table's name with `.dbf` added when it has no extension, and its alias is
 the file name without directories and extension unless one is given. Once the table is open (an `Open error` comes
@@ -231,32 +236,140 @@ rules above are the same for every format: the reference's CDX driver differs fr
 (it counts `EVAL` calls and walks `REST` otherwise, its `ordKeyCount()` and `ordKeyNo()` leave out filtered and
 deleted records, its `ordKeyGoto( 0 )` gives `.T.`), and xbase keeps NTX's rules there.
 
+## Relations
+
+`SET RELATION TO <expr> INTO <alias> [SCOPED] [, ...] [ADDITIVE]` (`dbSetRelation( xArea, bExpr, [cExpr], [lScoped] )`,
+`ordSetRelation( xArea, bKey, [cKey] )` for a scoped one) makes the area's child follow it; without `ADDITIVE` the
+area's relations go first (`dbClearRelation()`, `SET RELATION TO`). An area holds its relations in the order they were
+set (`xb_area.relations`, `xb_relation`: the child's number, the block and its text, roots of the collector);
+`dbRelation( [n] )` gives relation n's text and `dbRSelect( [n] )` its child's number (0 or no `n`: the first; `""` and
+0 for none).
+
+- Where the child goes: at the parent's end, to its own end; else the expression is evaluated with the parent current
+  and its value sought in the child's controlling order, without soft seek (deleted and filtered records skipped,
+  `Found()` telling), within a scope of that value (both bounds) for a scoped relation; a child without an order goes
+  to the record of that number (`Found()` whether it is there; a value that is not a number: the end).
+- The child moves lazily, as Clipper's drivers move it: a change of the parent's record (each step of a navigation
+  included) only marks the child's move pending (`xb_area.relPending`, `relParent`), and its children's; the child
+  makes it (`xb_area_settle`, the parent's own pending move first) before anything reads or changes its record: its
+  position (`RecNo()`, `Eof()`, `Bof()`, `Found()`), fields, deleted mark, locks, filter, a `SKIP`, a scope walk, an
+  order build, `ordKeyNo()`, `ordKeyVal()`, `ordSkipUnique()` (`xb_area_record`, `xb_db_record`, field references).
+  Functions about the area itself (`Used()`, `Alias()`, `SET ORDER`, `IndexOrd()`, ...) do not make it, so a move
+  pending when the controlling order changes seeks in the new one. The expression runs once per move, with the
+  parent's record as it is then (a key written in the parent before the child is read moves the child there).
+  `APPEND` in the parent does not move the children.
+- A move of the child that does not start from its record (`GO`, `GO TOP`, `GO BOTTOM`, `SEEK`, `APPEND`) drops the
+  pending move. A scoped relation's pending move is made first, there and wherever the child's scope is read or bounds
+  a navigation (`ordScope()`, `ordKeyCount()`; `xb_area_settle_scoped`).
+- Ending a relation (`dbClearRelation()`, closing the parent) makes the move it left pending and clears a scoped
+  child's scope. Closing the child removes the relations into it (`xb_area.parents` counts them); while an area closes
+  (`closing`), no relation is set from or into it.
+- What an expression does to the relations it stands on is checked, not trusted: a relation is found again by its id
+  after each evaluation (one an expression removed moves nothing more), the expression's own moves of its parent make
+  no second move of the child (`settling`), and a relation is freed only where the children's pending moves that name
+  it are dropped.
+- Errors: no table in the current area, `DBCMD/2001`; an alias that names no area, `BASE/1002`, which may be retried;
+  no area at the number, one closing, or no block, `DBCMD/1004`; the area itself, or a child whose relations lead back
+  to it, `DBCMD/1013` (the reference refuses only the area itself; a longer cycle crashes it once the parent moves).
+- The expression is evaluated with the parent current (`xb_area_eval`, as order keys are), and the area current before
+  comes back also after an error in it (the reference leaves the parent current then). A relation set without text
+  gives `""` to `dbRelation()` (the reference gives NIL).
+
 ## Drivers
 
 A driver is a table of operations on the raw table (`xb_rdd` in `rdd.h`; an open failure names the file that failed,
 the table or a file of its own): check a structure (the types, lengths and sizes it can make; `dbCreate` checks the
 names), create, open, close, the record count, go to a record (the blank one after the last outside the table; the
 record's bytes are read when first used: `load`, which `get` and `put` do themselves), flush (the record, and on
-`COMMIT` the header), append, read and write a field, a field's bytes, the deletion flag, pack, zap, and the header's
-sizes and date, the production-file flag of the header (`set_production`), and reading the current record again in
-shared mode before an order is placed from it (`refresh`). Operations that fail give the
-`FError()` code of the failure; the work area raises the error. `RddSetDefault()` and `USE ... VIA` choose the driver:
+`COMMIT` the header), append, read and write a field, a field's bytes, the record's fields' bytes and their
+replacement at once (`record_bytes`, `put_record_bytes`: a copy between tables of the same fields), the deletion flag,
+pack, zap, and the header's sizes and date, the production-file flag of the header (`set_production`), and reading the
+current record again in shared mode before an order is placed from it (`refresh`). Operations that fail give the
+`FError()` code of the failure; the work area raises the error. A field's value is read from and written into the bytes
+a table stores by one rule for every driver (`xb_field_decode`, `xb_field_encode` in `field.c`; memos are the
+driver's). `RddSetDefault()` and `USE ... VIA` choose the driver:
 
 - `DBFNTX` (the default, as in Clipper; `DBF` is the same): new tables get `DBT` memos, orders are `NTX`, shared tables
   are locked by Clipper's scheme.
 - `DBFCDX`: the same `DBF` code (`xb_rdd_dbfcdx`); new tables get `FPT` memos, shared tables are locked by FoxPro's
   scheme. Its orders are `CDX` files.
+- `SDF` and `DELIM` (`text.c`): text files, for the copies between files ([Text files](#text-files)).
 
-A driver tells its memo format (`memo`, rdd/memo.h), its order files' format (`index`, rdd/index.h, whose `ext` is
-`ordBagExt()`'s) and its lock scheme (`lockScheme`). A table's memo format comes from its version byte, whatever driver
-opens it (`0x83` DBT, `0xF5` FPT; a table of plain fields, `0x03`, its driver's), so either driver reads and writes the
-other's tables. `DBFNTX()` and `DBFCDX()` are functions only so that `REQUEST DBFCDX` links as in Clipper programs.
+A driver tells its tables' extension (`ext`, `dbTableExt()`'s), its memo format (`memo`, rdd/memo.h), its order files'
+format (`index`, rdd/index.h, whose `ext` is `ordBagExt()`'s) and its lock scheme (`lockScheme`). A table's memo format
+comes from its version byte, whatever driver opens it (`0x83` DBT, `0xF5` FPT; a table of plain fields, `0x03`, its
+driver's), so either driver reads and writes the other's tables. `DBFNTX()`, `DBFCDX()`, `SDF()` and `DELIM()` are
+functions only so that `REQUEST DBFCDX` links as in Clipper programs.
 
-*(Planned)*: `SDF` and `DELIM` (text files, for `COPY TO` and `APPEND FROM`); `SET DB ENGINE TO <name>` (xbase's own
-command, over `RddSetDefault()`); later, as libraries in `libs/`, SQL engines (SQLite, PostgreSQL), among them an SQLite
-driver that behaves as `DBF` does (the row id as `RecNo()`, navigation in the order of an index, `Deleted()` a column).
-The language's other commands come with them: `SET RELATION`, `SET EXCLUSIVE`, `COPY`, `APPEND FROM`, `SORT`, `TOTAL`,
-`AVERAGE`, `UPDATE`, `JOIN`, `LIST`, `DISPLAY`.
+*(Planned)*: `SET DB ENGINE TO <name>` (xbase's own command, over `RddSetDefault()`); later, as libraries in `libs/`,
+SQL engines (SQLite, PostgreSQL), among them an SQLite driver that behaves as `DBF` does (the row id as `RecNo()`,
+navigation in the order of an index, `Deleted()` a column). The language's other commands come with them: `SORT`,
+`TOTAL`, `UPDATE`, `JOIN`, `LIST`, `DISPLAY`.
+
+## Copies between files
+
+`COPY TO`, `APPEND FROM` (`... SDF`, `... DELIMITED [WITH ...]`, `VIA <driver>`), `COPY STRUCTURE [FIELDS ...]`,
+`COPY STRUCTURE EXTENDED` and `CREATE <file> [FROM <file>]` are `std.ch` rules over functions written in xBase
+(`transfer.prg`: `__dbCopy`, `__dbApp`, `__dbSDF`, `__dbDelim`, `__dbCopyStruct`, `__dbCopyXStruct`, `__dbCreate`),
+which use three primitives (`transfer.c`): `__dbUsed( cOperation )` (`DBCMD/2001` for the command without a table),
+`__dbTransOpen( cFile, [cDriver], lCreate, [aStruct], [xDelimiter] )`, which opens the other file in the lowest free
+area, without an alias (`xb_area_open_with`; the current area stays current), and `__dbTrans( nTarget, aFields, [bFor],
+[bWhile], [nNext], [nRecord], [lRest] )`, which copies the records of the current area's scope.
+
+- `COPY TO` creates the file (the driver's extension added to a name without one; one there is emptied) with the
+  current area's fields the `FIELDS` list names, in its order (every field without it; names in any letter case, after
+  `alias->`, `FIELD->` or `_FIELD->`; unknown names and names given again left out), copies the records of the scope
+  (as `dbEval`'s: `SET DELETED` and the filter apply, the starting record of `NEXT`, `REST`, `WHILE` and `RECORD` taken
+  as it is) and closes it; the area stays where the scope left it.
+- `APPEND FROM` opens the file (a table shared and read-only; a text file with the current area's fields the list
+  names) and appends the records of its scope, whose blocks run with the file's area current (they read its fields),
+  to the current area, the fields of the same names; the area stays current, on the last record appended.
+- A record is copied whole, its bytes as they are (blanks and stars kept), when both have the same fields in the same
+  places and no memo; else field by field (`copy_fields`): a field of the same kind and size whose bytes are a value as
+  a table stores it is copied as it is, others are read and written as values (a blank number becomes 0, a blank logical
+  `.F.`, as in the reference; a value of another type is `DBFNTX/1020`, which the copy goes on after when defaulted; too
+  wide, stars and `1021`). A deleted record's copy is deleted; one whose copy failed (an error not defaulted) stays,
+  deleted, and the copy ends with the error, the other file closed first.
+- From a text file, a field the line leaves blank stays blank and stars stay stars; others are read as the table stores
+  values: a date that is not one is blank, a logical is `T` or `F`, a number is written in the field's form (the
+  reference copies the text's bytes into the table as they are, unchecked, when the structures match).
+- The source is read in order (`xb_area.snapshot`: a shared table's records read ahead and counted once, as under the
+  file lock), and its records past the count it had when the copy started are not copied: `APPEND FROM` the table
+  itself copies the records it had (the reference goes on without end).
+- `COPY STRUCTURE` creates an empty table of the chosen fields (no table, or no field chosen: `DBCMD/1014`; the
+  reference creates a table of no fields); `COPY STRUCTURE EXTENDED` a table of `FIELD_NAME C10`, `FIELD_TYPE C1`,
+  `FIELD_LEN N3`, `FIELD_DEC N3` with a record for each field (a character field longer than 255 bytes keeps its
+  length's low byte as `FIELD_LEN` and the high byte as `FIELD_DEC`); `CREATE <file>` creates and opens such a table,
+  `CREATE <file> FROM <file>` a table of the structure the records of the second describe, in the current area or with
+  `NEW` a new one, under `ALIAS`.
+- `DELIMITED WITH` takes an expression or a name (`BLANK`, `TAB`, `PIPE`), and clauses may follow it; Clipper's rule,
+  tried after it, takes the rest of the command as the delimiter's text. An unknown driver is `DBCMD/1015` (the
+  reference's `COPY TO` uses the default driver, its `APPEND FROM` crashes). `CODEPAGE` is accepted and not used.
+
+### Text files
+
+`SDF` and `DELIM` keep no structure: the copy gives them the table's fields (`open_with`), checked as a `DBF` table's
+(`xb_dbf_check`). Without one a text file cannot be opened: `USE ... VIA "SDF"` is an `Open error` (`FError()` 5), and
+`dbCreate( ..., "SDF" )` creates an empty file, which it then cannot open. A record is a line; a text
+file is created and written in record order, or read: it is read once to find where its lines start (8 bytes a line
+kept), then a line is read, through a window of 64 KB, when its record is used.
+
+- Lines end at the system's newline when written (`xb_platform_eol`: LF, CR LF on Windows; the reference's default),
+  and a Ctrl-Z (`0x1A`) ends the file. Read, a line ends at CR or LF, the other one right after it belonging to the
+  same end; a Ctrl-Z is dropped wherever it is; an empty line is a blank record, the end of the file after a line's
+  end none.
+- `SDF`: the fields' bytes side by side as a table stores them (a memo has none); a line shorter than the record is
+  blank to the end, a longer one cut.
+- `DELIM`: character fields without trailing blanks between delimiters, numbers without leading blanks (a blank one
+  `0` with its decimals), dates' digits (an empty date nothing), logicals `T` or `F`, memos left out with their
+  separators; nothing is escaped. The delimiter and separator are `"` and `,`; `WITH BLANK`, `TAB` and `PIPE` give no
+  delimiter and a space, tab or bar; another text its first character as the delimiter; an array `{ cDelimiter,
+  cSeparator }` each element's first character. Read, blanks before a field are skipped (so runs of blanks separate a
+  `BLANK` line's fields); a field that starts with the delimiter ends at the next one, what follows up to the
+  separator dropped; a character field takes its text cut to its length, a number its value (stars when it does not
+  fit), a date eight digits of a date, a logical `T` when the text starts with `T` or `Y`; the fields a line does not
+  reach stay blank. The reference drops the separator after a first field that writes nothing (an empty date first),
+  which shifts that line's columns; xbase writes every separator.
 
 ## Files
 
@@ -382,13 +495,21 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
   once; a count that would read more pages than the file has is a broken file (a loop), `DBFNTX/1010`.
 - Files are read and written at a position in one call (`pread`/`pwrite`, `ReadFile`/`WriteFile` with an offset;
   `xb_platform_file_read_at`), the last record with the end mark after it in one write. Records read in order come
-  64 KB at a time.
+  64 KB at a time (a shared table's under the file lock, or while a copy reads it: `snapshot`).
+- An exclusive table keeps the records written at its end behind (`behind`, up to 64 KB of them) and writes them in
+  one call when the chunk is full, before the file is read where they are or past them, and on `COMMIT`, `PACK`,
+  `ZAP` and closing; reading one of them takes it from there. Appending costs a write a chunk instead of one a record;
+  an error writing them is raised by the operation that wrote the chunk.
+- Copies between files copy a record's bytes whole when the fields are the same, else a field's bytes when they are a
+  value in the stored form; values are read and written only for the other fields ([Copies between
+  files](#copies-between-files)).
 - The build: the keys in one array (a key that is a character field alone is copied from the record, no block run),
   one sort, one pass of writes. Keeping orders up to date costs the keys' evaluation before and after a change, and
   the entries only of keys that changed.
 - `bench/index.prg` times a build over 200,000 records, 100,000 SEEKs, a SKIP through and 20,000 appends with the
   order open. Measured once against the reference on one machine, the same program: the build and SEEK about as
-  fast, SKIP and appends with an order open faster.
+  fast, SKIP and appends with an order open faster. Copies (`COPY TO`, `APPEND FROM` of tables, SDF and DELIMITED
+  files, 200,000 records) take a third or less of the reference's time.
 
 ## Sharing, locks and concurrency
 
@@ -555,5 +676,6 @@ query (as data a driver can translate), falling back to the record-by-record way
    threads: waiting inside the process, shared page caches, handing areas between tasks.
 5. `DBFCDX`: done: the driver, `FPT` memos, FoxPro's lock scheme, the order operations as an interface of the driver
    (`index.h`, NTX behind it), `CDX` indexes (tags, the production file, `ordDestroy()`, sharing).
-6. Relations, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `SORT`, `TOTAL`, `UPDATE`, `JOIN`.
+6. Done: relations (`SET RELATION`), `AVERAGE`, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `CREATE`. Next: `SORT`,
+   `TOTAL`, `UPDATE`, `JOIN`; `LIST` and `DISPLAY` with the console's redirections (`SET ALTERNATE`, `SET PRINTER`).
 7. `SET DB ENGINE`; then SQL engines as libraries, and queries.

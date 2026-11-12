@@ -103,7 +103,7 @@ void xbf_ORDCONDSET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * file. A production file made here is noted in the table's header. */
 static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const xb_str *tag, const xb_str *keyText,
                          const xb_item *keyBlock, const xb_item *unique) {
-  xb_area *a = xb_db_used(ctx, fn);
+  xb_area *a = xb_db_record(ctx, fn);
   if (!a || !orders_known(ctx, a, fn) || !orders_free(ctx, a, fn)) return;
   int tagged = a->rdd->index->tagged, named = tag && tag->len;
   if (bag && !bag->len) bag = NULL;
@@ -175,7 +175,7 @@ void xbf_DBCREATEINDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) 
  * orders is erased. Nothing when there is no such order. */
 void xbf_ORDDESTROY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = xb_db_used(ctx, "ORDDESTROY");
+  xb_area *a = xb_db_record(ctx, "ORDDESTROY");
   if (!a || !orders_known(ctx, a, "ORDDESTROY") || !orders_free(ctx, a, "ORDDESTROY") || argc == 0 ||
       argv[0].type == XB_T_NIL)
     return;
@@ -273,7 +273,7 @@ void xbf_DBCLEARINDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* ordListRebuild(), dbReindex(): every order's file made again from the records; then the first record. */
 static void rebuild(xb_ctx *ctx, const char *fn) {
-  xb_area *a = xb_db_used(ctx, fn);
+  xb_area *a = xb_db_record(ctx, fn);
   if (!a || !xb_area_writable(ctx, a) || !xb_area_exclusive(ctx, a) || !orders_free(ctx, a, fn)) return;
   xb_area_pin(a);
   if (xb_area_cold(ctx, a) && !a->closed) xb_area_orders_rebuild(ctx, a, &a->pending.evalBlock, a->pending.every);
@@ -415,8 +415,15 @@ void xbf_INDEXEXT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf
 /* ordScope( nScope, [xValue] ): the controlling order's scope bound before (0 top, 1 bottom; NIL for none);
  * xValue sets it (a codeblock: evaluated again before each navigation), NIL clears it. nScope 2 sets both bounds
  * (NIL or no xValue: clears them) and gives NIL. The record stays where it is. */
+/* The current area for a function on its scope: a scoped relation's pending move made, which sets it. */
+static xb_area *scope_area(xb_ctx *ctx, const char *fn) {
+  xb_area *a = xb_db_used(ctx, fn);
+  if (!a || xb_area_settle_scoped(ctx, a)) return xb_area_current(ctx);
+  return NULL;
+}
+
 void xbf_ORDSCOPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  xb_area *a = xb_db_used(ctx, "ORDSCOPE");
+  xb_area *a = scope_area(ctx, "ORDSCOPE");
   xb_order *o = a ? xb_area_order(a) : NULL;
   if (!o) return;
   int64_t which = xb_db_num_arg(argc, argv, 0, 0);
@@ -438,7 +445,7 @@ void xbf_ORDSCOPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * order, LastRec(). */
 void xbf_ORDKEYCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_int(ret, 0);
-  xb_area *a = xb_db_used(ctx, "ORDKEYCOUNT");
+  xb_area *a = scope_area(ctx, "ORDKEYCOUNT");
   if (!a) return;
   xb_order *o = order_at(a, order_arg(a, argc, argv, 0));
   uint64_t n = a->rdd->lastrec(a);
@@ -452,7 +459,7 @@ void xbf_ORDKEYCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * there; with no order, RecNo(). */
 void xbf_ORDKEYNO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_int(ret, 0);
-  xb_area *a = xb_db_used(ctx, "ORDKEYNO");
+  xb_area *a = xb_db_record(ctx, "ORDKEYNO");
   if (!a) return;
   xb_order *o = order_at(a, order_arg(a, argc, argv, 0));
   uint64_t n = a->recno;
@@ -488,7 +495,7 @@ void xbf_ORDKEYGOTO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_ORDKEYVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = xb_db_used(ctx, "ORDKEYVAL");
+  xb_area *a = xb_db_record(ctx, "ORDKEYVAL");
   xb_order *o = a ? xb_area_order(a) : NULL;
   if (!o || a->eof) return;
   unsigned char key[XB_INDEX_KEY_MAX];
@@ -503,7 +510,7 @@ void xbf_ORDKEYVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * controlling order (xb_order_skip_unique); with no order, SKIP nDirection. .T. but after an error. */
 void xbf_ORDSKIPUNIQUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, 0);
-  xb_area *a = xb_db_used(ctx, "ORDSKIPUNIQUE");
+  xb_area *a = xb_db_record(ctx, "ORDSKIPUNIQUE");
   if (!a) return;
   int64_t n = argc > 0 && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 1;
   xb_order *o = xb_area_order(a);

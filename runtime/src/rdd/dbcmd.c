@@ -27,6 +27,11 @@ xb_area *xb_db_used(xb_ctx *ctx, const char *fn) {
   return a;
 }
 
+xb_area *xb_db_record(xb_ctx *ctx, const char *fn) {
+  xb_area *a = xb_db_used(ctx, fn);
+  return a ? xb_area_record(ctx) : NULL;
+}
+
 /* The alias a table gets by default: its file name without directories and extension. */
 static void default_alias(const xb_str *name, const char **p, size_t *len) {
   size_t start, ext;
@@ -35,15 +40,15 @@ static void default_alias(const xb_str *name, const char **p, size_t *len) {
   *len = ext - start;
 }
 
-static const xb_rdd *driver_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv, uint32_t k) {
+const xb_rdd *xb_db_driver_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv, uint32_t k) {
   const xb_str *name = xb_db_str_arg(argc, argv, k);
   if (!name || name->len == 0) return xb_rdd_default(ctx);
   return xb_rdd_find(name->data, name->len);
 }
 
-/* Opens table `name` (".dbf" added when it has no extension) in the lowest free area (`newArea`, which becomes current
- * even when the table cannot be opened) or the current one, under `alias` (NULL or empty: the file name without
- * directories and extension). Returns 1, or 0 after the error (raised). */
+/* Opens table `name` (the driver's extension added when it has none) in the lowest free area (`newArea`, which becomes
+ * current even when the table cannot be opened) or the current one, under `alias` (NULL or empty: the file name
+ * without directories and extension). Returns 1, or 0 after the error (raised). */
 static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str *name, const xb_str *alias,
                        int readonly, int exclusive) {
   if (newArea) ctx->areaCurrent = xb_area_free(ctx);
@@ -55,7 +60,7 @@ static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str 
   } else {
     default_alias(name, &aliasText, &aliasLen);
   }
-  char *path = xb_file_path_with_ext(name->data, name->len, ".dbf");
+  char *path = xb_file_path_with_ext(name->data, name->len, rdd->ext);
   int ok = xb_area_open(ctx, ctx->areaCurrent, rdd, path, aliasText, aliasLen, readonly, exclusive);
   free(path);
   return ok;
@@ -66,7 +71,7 @@ static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str 
 void xbf_DBUSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   const xb_str *name = xb_db_str_arg(argc, argv, 2);
-  const xb_rdd *rdd = driver_arg(ctx, argc, argv, 1);
+  const xb_rdd *rdd = xb_db_driver_arg(ctx, argc, argv, 1);
   ctx->netErr = 0;
   if (!name || !rdd) {
     if (xb_db_logical_arg(argc, argv, 0)) ctx->areaCurrent = xb_area_free(ctx);
@@ -158,28 +163,28 @@ void xbf_DBSKIP(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_BOF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  const xb_area *a = xb_area_current(ctx);
+  const xb_area *a = xb_area_record(ctx);
   xb_set_logical(ret, !a || a->bof);
 }
 
 void xbf_EOF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  const xb_area *a = xb_area_current(ctx);
+  const xb_area *a = xb_area_record(ctx);
   xb_set_logical(ret, !a || a->eof);
 }
 
 void xbf_FOUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  const xb_area *a = xb_area_current(ctx);
+  const xb_area *a = xb_area_record(ctx);
   xb_set_logical(ret, a && a->found);
 }
 
 void xbf_RECNO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  const xb_area *a = xb_area_current(ctx);
+  const xb_area *a = xb_area_record(ctx);
   xb_set_int(ret, a ? a->recno : 0);
 }
 
@@ -212,14 +217,14 @@ static int64_t field_arg(const xb_area *a, uint32_t argc, const xb_item *argv, u
 }
 
 void xbf_FIELDGET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  xb_area *a = xb_area_current(ctx);
+  xb_area *a = xb_area_record(ctx);
   int64_t f = field_arg(a, argc, argv, 0);
   if (f >= 0) xb_area_field_get(ctx, a, (uint32_t)f, ret);
 }
 
 /* FieldPut( nField, xValue ): the value written, NIL when nothing was (NIL itself writes nothing). */
 void xbf_FIELDPUT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  xb_area *a = xb_area_current(ctx);
+  xb_area *a = xb_area_record(ctx);
   int64_t f = field_arg(a, argc, argv, 0);
   if (f < 0 || argc < 2 || argv[1].type == XB_T_NIL || a->eof) return;
   if (xb_area_field_put(ctx, a, (uint32_t)f, &argv[1])) *ret = argv[1];
@@ -259,20 +264,14 @@ void xbf_DBSTRUCT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
 }
 
-/* dbCreate( cFile, aStruct, [cDriver], [lNewArea], [cAlias] ): creates the table; with lNewArea (.T. a new area,
- * .F. the current one) opens it; when it cannot, the area current before stays current. A structure that is not
- * one, or one the driver cannot make, is DBCMD/1014. */
-void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ret);
-  const xb_str *name = xb_db_str_arg(argc, argv, 0);
-  const xb_rdd *rdd = driver_arg(ctx, argc, argv, 2);
-  const xb_array *spec = argc > 1 && argv[1].type == XB_T_ARRAY ? argv[1].v.p : NULL;
-  size_t n = spec ? spec->len : 0;
-  int ok = name && rdd && n > 0 && n == (uint32_t)n;
+int xb_db_struct(const xb_item *spec, xb_field_info **out, uint32_t *count) {
+  const xb_array *list = spec && spec->type == XB_T_ARRAY ? spec->v.p : NULL;
+  size_t n = list ? list->len : 0;
+  int ok = n > 0 && n == (uint32_t)n;
   xb_field_info *fields = calloc(n ? n : 1, sizeof *fields);
   if (!fields) xb_gc_fatal("out of memory");
   for (size_t k = 0; ok && k < n; ++k) {
-    const xb_array *row = spec->items[k].type == XB_T_ARRAY ? spec->items[k].v.p : NULL;
+    const xb_array *row = list->items[k].type == XB_T_ARRAY ? list->items[k].v.p : NULL;
     ok = row && row->len >= 3 && row->items[0].type == XB_T_STRING && row->items[1].type == XB_T_STRING &&
          row->items[1].v.s->len > 0 && xb_is_number(&row->items[2]);
     if (!ok) break;
@@ -287,24 +286,44 @@ void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     fi->dec = ok ? (uint32_t)dec : 0;
     for (size_t j = 0; ok && j < k; ++j) ok = strcmp(fields[j].name, fi->name) != 0; /* names are unique */
   }
-  if (!ok || !rdd->check(rdd, fields, (uint32_t)n)) {
+  if (!ok) {
+    free(fields);
+    return 0;
+  }
+  *out = fields;
+  *count = (uint32_t)n;
+  return 1;
+}
+
+int xb_db_create(xb_ctx *ctx, const xb_rdd *rdd, const char *path, const xb_field_info *fields, uint32_t count) {
+  for (uint16_t tries = 1;; ++tries) {
+    int32_t err = 0;
+    if (rdd->create(rdd, path, fields, count, &err)) return 1;
+    if (xb_error_of(ctx, rdd->name, EG_CREATE, 1004, "", path, err, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries,
+                    NULL) != 2)
+      return 0;
+  }
+}
+
+/* dbCreate( cFile, aStruct, [cDriver], [lNewArea], [cAlias] ): creates the table (the driver's extension added to a
+ * name without one); with lNewArea (.T. a new area, .F. the current one) opens it; when it cannot, the area current
+ * before stays current. A structure that is not one, or one the driver cannot make, is DBCMD/1014. */
+void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  const xb_str *name = xb_db_str_arg(argc, argv, 0);
+  const xb_rdd *rdd = xb_db_driver_arg(ctx, argc, argv, 2);
+  xb_field_info *fields = NULL;
+  uint32_t n = 0;
+  if (!name || !rdd || !xb_db_struct(argc > 1 ? &argv[1] : NULL, &fields, &n) || !rdd->check(rdd, fields, n)) {
     free(fields);
     xb_error_of(ctx, XB_DBCMD, EG_ARG, 1014, "DBCREATE", NULL, 0, 0, argc, argv, 0, NULL);
     return;
   }
-  char *path = xb_file_path_with_ext(name->data, name->len, ".dbf");
-  for (uint16_t tries = 1;; ++tries) {
-    int32_t err = 0;
-    if (rdd->create(rdd, path, fields, (uint32_t)n, &err)) break;
-    if (xb_error_of(ctx, rdd->name, EG_CREATE, 1004, "", path, err, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries,
-                    NULL) != 2) {
-      free(path);
-      free(fields);
-      return;
-    }
-  }
+  char *path = xb_file_path_with_ext(name->data, name->len, rdd->ext);
+  int created = xb_db_create(ctx, rdd, path, fields, n);
   free(path);
   free(fields);
+  if (!created) return;
   uint32_t before = ctx->areaCurrent;
   if (argc > 3 && argv[3].type == XB_T_LOGICAL &&
       !open_table(ctx, argv[3].v.l, rdd, name, xb_db_str_arg(argc, argv, 4), 0, !ctx->set_shared))
@@ -323,7 +342,7 @@ void xbf_DBAPPEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 static void mark_deleted(xb_ctx *ctx, const char *fn, int deleted) {
-  xb_area *a = xb_db_used(ctx, fn);
+  xb_area *a = xb_db_record(ctx, fn);
   if (a && xb_area_record_writable(ctx, a) && !a->eof && xb_area_hot(ctx, a, 0) && !a->closed && xb_area_load(ctx, a) &&
       !a->closed)
     a->rdd->set_deleted(a, deleted);
@@ -344,13 +363,13 @@ void xbf_DBRECALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_DELETED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = xb_area_current(ctx);
+  xb_area *a = xb_area_record(ctx);
   xb_set_logical(ret, a && xb_area_load(ctx, a) && xb_area_current(ctx) == a && a->rdd->deleted(a));
 }
 
 /* __dbPack(), __dbZap(): the deleted records, or all of them, go; then the first record. */
 static void shrink(xb_ctx *ctx, const char *fn, int all) {
-  xb_area *a = xb_db_used(ctx, fn);
+  xb_area *a = xb_db_record(ctx, fn);
   if (!a || !xb_area_writable(ctx, a) || !xb_area_exclusive(ctx, a)) return;
   int32_t err = 0;
   xb_area_pin(a);
@@ -427,7 +446,7 @@ void xbf_LUPDATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* dbSetFilter( bCondition, [cText] ), dbClearFilter(), dbFilter(): the records the block rejects do not show. */
 void xbf_DBSETFILTER(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = xb_db_used(ctx, "DBSETFILTER");
+  xb_area *a = xb_db_record(ctx, "DBSETFILTER");
   if (!a) return;
   if (argc > 0 && argv[0].type == XB_T_BLOCK) a->filter = argv[0];
   else xb_set_nil(&a->filter);
@@ -439,7 +458,7 @@ void xbf_DBCLEARFILTER(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) 
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = xb_area_current(ctx);
+  xb_area *a = xb_area_record(ctx);
   if (!a) return;
   xb_set_nil(&a->filter);
   xb_set_str(&a->filter_text, xb_str_empty());
@@ -465,12 +484,8 @@ static int test(xb_ctx *ctx, const xb_item *block) {
   return r.type == XB_T_LOGICAL && r.v.l;
 }
 
-/* The scope of a command (FOR, WHILE, NEXT, RECORD, REST: the arguments from `k`): `visit` for each record of it
- * that the FOR block takes, until it returns 0 (stop) or -1 (error). The scope starts at the top unless WHILE, NEXT,
- * RECORD or REST says otherwise; NEXT n ends on its last record (none for n below 1). It is 0 after an error, or when
- * a block closed the area (`a` pinned by the caller). */
-static int scope_run(xb_ctx *ctx, xb_area *a, uint32_t argc, const xb_item *argv, uint32_t k,
-                     int (*visit)(xb_ctx *, xb_area *, void *), void *arg) {
+int xb_db_scope(xb_ctx *ctx, xb_area *a, uint32_t argc, const xb_item *argv, uint32_t k,
+                int (*visit)(xb_ctx *, xb_area *, void *), void *arg) {
   const xb_item *forBlock = argc > k ? &argv[k] : NULL, *whileBlock = argc > k + 1 ? &argv[k + 1] : NULL;
   int hasWhile = whileBlock && whileBlock->type == XB_T_BLOCK;
   int hasNext = argc > k + 2 && xb_is_number(&argv[k + 2]);
@@ -513,12 +528,12 @@ static int stop_here(xb_ctx *ctx, xb_area *a, void *arg) {
  * takes (Found() .T.), else to the end of the scope (Found() .F.); __dbContinue() goes on from the next record. */
 void xbf___DBLOCATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = xb_db_used(ctx, "__DBLOCATE");
+  xb_area *a = xb_db_record(ctx, "__DBLOCATE");
   if (!a) return;
   if (argc > 0) a->locate = argv[0];
   int hit = 0;
   xb_area_pin(a);
-  scope_run(ctx, a, argc, argv, 0, stop_here, &hit);
+  xb_db_scope(ctx, a, argc, argv, 0, stop_here, &hit);
   a->found = hit;
   xb_area_unpin(a);
 }
@@ -527,7 +542,7 @@ void xbf___DBCONTINUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_area *a = xb_db_used(ctx, "__DBCONTINUE");
+  xb_area *a = xb_db_record(ctx, "__DBCONTINUE");
   if (!a || a->locate.type != XB_T_BLOCK) return;
   xb_item scope[5] = {a->locate}; /* rooted: the block may LOCATE again */
   for (int k = 1; k < 5; ++k) xb_set_nil(&scope[k]);
@@ -535,7 +550,7 @@ void xbf___DBCONTINUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_gc_root_push(ctx, &scope[0]);
   int hit = 0;
   xb_area_pin(a);
-  if (xb_area_skip(ctx, a, 1) && !a->closed) scope_run(ctx, a, 5, scope, 0, stop_here, &hit);
+  if (xb_area_skip(ctx, a, 1) && !a->closed) xb_db_scope(ctx, a, 5, scope, 0, stop_here, &hit);
   a->found = hit;
   xb_area_unpin(a);
   xb_gc_root_pop(ctx, 1);
@@ -554,10 +569,10 @@ static int eval_block(xb_ctx *ctx, xb_area *a, void *arg) {
 /* dbEval( bBlock, [bFor], [bWhile], [nNext], [nRecord], [lRest] ): evaluates bBlock on each record of the scope. */
 void xbf_DBEVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  xb_area *a = xb_db_used(ctx, "DBEVAL");
+  xb_area *a = xb_db_record(ctx, "DBEVAL");
   if (!a || argc < 1 || argv[0].type != XB_T_BLOCK) return;
   xb_area_pin(a);
-  scope_run(ctx, a, argc, argv, 1, eval_block, &argv[0]);
+  xb_db_scope(ctx, a, argc, argv, 1, eval_block, &argv[0]);
   xb_area_unpin(a);
 }
 
@@ -568,7 +583,7 @@ void xbf_RLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   xb_set_logical(ret, 0);
-  xb_area *a = xb_db_used(ctx, "RLOCK");
+  xb_area *a = xb_db_record(ctx, "RLOCK");
   if (a) xb_set_logical(ret, xb_area_lock(ctx, a, a->recno, 0));
 }
 
@@ -576,7 +591,7 @@ void xbf_LOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf_RLO
 
 void xbf_DBRLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, 0);
-  xb_area *a = xb_db_used(ctx, "DBRLOCK");
+  xb_area *a = xb_db_record(ctx, "DBRLOCK");
   if (!a) return;
   int64_t n = xb_db_num_arg(argc, argv, 0, 0);
   int given = n > 0 && n <= UINT32_MAX;
@@ -587,7 +602,7 @@ void xbf_FLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   xb_set_logical(ret, 0);
-  xb_area *a = xb_db_used(ctx, "FLOCK");
+  xb_area *a = xb_db_record(ctx, "FLOCK");
   if (a) xb_set_logical(ret, xb_area_lock(ctx, a, 0, 0));
 }
 
@@ -653,8 +668,8 @@ void xbf_RDDNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (a) xb_set_str(ret, xb_str_new(a->rdd->name, strlen(a->rdd->name)));
 }
 
-/* DBFNTX(), DBFCDX(): the drivers' names as functions, which REQUEST links in as Clipper's programs do; they do
- * nothing (every driver is always there). */
+/* DBFNTX(), DBFCDX(), SDF(), DELIM(): the drivers' names as functions, which REQUEST links in as Clipper's programs
+ * do; they do nothing (every driver is always there). */
 void xbf_DBFNTX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   XB_UNUSED(ret);
@@ -663,3 +678,14 @@ void xbf_DBFNTX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 void xbf_DBFCDX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf_DBFNTX(ctx, ret, argc, argv); }
+void xbf_SDF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf_DBFNTX(ctx, ret, argc, argv); }
+void xbf_DELIM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { xbf_DBFNTX(ctx, ret, argc, argv); }
+
+/* dbTableExt(): the extension of the tables of the current area's driver (none open: the default driver's). */
+void xbf_DBTABLEEXT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  const xb_area *a = xb_area_current(ctx);
+  const char *ext = (a ? a->rdd : xb_rdd_default(ctx))->ext;
+  xb_set_str(ret, xb_str_new(ext, strlen(ext)));
+}

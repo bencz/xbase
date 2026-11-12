@@ -1,7 +1,7 @@
 // The database commands: USE (NEW, ALIAS), APPEND BLANK, REPLACE, assignments to alias->field and FIELD->field
-// (also with +=), alias->( expr ) and (n)->field, GO TOP/BOTTOM, GOTO, SKIP, COUNT, SUM, LOCATE, DELETE and RECALL
-// with a scope, SET DELETED, REPLACE ALL, SET FILTER, SELECT, PACK, CLOSE and ZAP. The table is "rdd_commands.dbf",
-// deleted at the end.
+// (also with +=), alias->( expr ) and (n)->field, GO TOP/BOTTOM, GOTO, SKIP, COUNT, SUM, AVERAGE, LOCATE, DELETE and
+// RECALL with a scope, SET DELETED, REPLACE ALL, SET FILTER, SELECT, PACK, CLOSE and ZAP. The table is
+// "rdd_commands.dbf", deleted at the end.
 FIELD NAME, AGE, BORN, OK
 
 PROCEDURE Main()
@@ -34,6 +34,13 @@ PROCEDURE Main()
    ? "count:", n, RecNo(), Eof()
    SUM AGE TO n FOR AGE > 5
    ? "sum:", n
+   AVERAGE AGE, AGE * 2 TO n, a
+   ? "average:", n, a, Eof()
+   GOTO 2
+   AVERAGE AGE TO n NEXT 2
+   ? "average next:", n, RecNo()
+   AVERAGE AGE TO n FOR AGE > 1000
+   ? "average of none:", n, Type( "M->__Avg" )
    LOCATE FOR NAME = "Cid"
    ? "locate:", Found(), RecNo()
    DELETE ALL FOR AGE < 10

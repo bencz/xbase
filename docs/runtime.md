@@ -945,8 +945,9 @@ reports: a DOS error number (2 file not found, 3 path not found, 5 access denied
 reports itself and the POSIX build translates `errno` values to (31, general failure, for those without one). A name
 that is missing is 2 and a directory on its way that is missing is 3, on POSIX systems as on Windows, where `errno`
 alone does not tell them apart.
-`xb_platform_path_separator` tells the characters that separate directories (`/`; also `\` and `:` on Windows). Binary
-fields of the file formats go through the little-endian helpers of `core/bytes.h`. `SAVE` and `RESTORE` ([Memory
+`xb_platform_path_separator` tells the characters that separate directories (`/`; also `\` and `:` on Windows), and
+`xb_platform_eol` the end of a line of text (LF; CR LF on Windows: the lines of the text files tables are copied to).
+Binary fields of the file formats go through the little-endian helpers of `core/bytes.h`. `SAVE` and `RESTORE` ([Memory
 variables](#memory-variables)) use this layer too.
 
 - `include/fileio.ch` (`FO_*` modes, `FS_*` origins, `FC_*` attributes, `F_ERROR`) is included by the runtime's C as

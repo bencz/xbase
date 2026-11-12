@@ -223,6 +223,8 @@ void    xb_str_share(xb_str *s);
 #define XB_DATE_DIGITS_SIZE 9
 #define XB_DATE_TEXT_SIZE   11
 int64_t xb_date_encode(int year, int month, int day);   /* 0 if invalid */
+int     xb_date_valid(int year, int month, int day);    /* a date of the calendar, years 0 to 9999 */
+int     xb_date_digits_valid(const char *digits);       /* "YYYYMMDD" of such a date */
 void    xb_date_decode(int64_t jd, int *year, int *month, int *day);
 void    xb_set_date(xb_item *it, int64_t jd);
 void    xb_date_to_digits(int64_t jd, char out[XB_DATE_DIGITS_SIZE]);

@@ -13,7 +13,11 @@
 static const struct {
   const char *alias;
   const xb_rdd *rdd;
-} driver_names[] = {{"DBF", &xb_rdd_dbf}, {"DBFNTX", &xb_rdd_dbf}, {"DBFCDX", &xb_rdd_dbfcdx}};
+} driver_names[] = {{"DBF", &xb_rdd_dbf},
+                    {"DBFNTX", &xb_rdd_dbf},
+                    {"DBFCDX", &xb_rdd_dbfcdx},
+                    {"SDF", &xb_rdd_sdf},
+                    {"DELIM", &xb_rdd_delim}};
 
 static int same_upper(const char *a, size_t len, const char *upper) {
   for (size_t i = 0; i < len; ++i)
@@ -35,10 +39,31 @@ xb_area *xb_area_at(xb_ctx *ctx, uint32_t n) {
 
 xb_area *xb_area_current(xb_ctx *ctx) { return xb_area_at(ctx, ctx->areaCurrent); }
 
+xb_area *xb_area_settled(xb_ctx *ctx, uint32_t n) {
+  xb_area *a = xb_area_at(ctx, n);
+  if (!a || !a->relPending) return a;
+  xb_area_settle(ctx, a);
+  return xb_area_at(ctx, n); /* the relation's expression may close it */
+}
+
+xb_area *xb_area_record(xb_ctx *ctx) { return xb_area_settled(ctx, ctx->areaCurrent); }
+
+int xb_area_eval(xb_ctx *ctx, xb_area *a, const xb_item *block, xb_item *r) {
+  uint32_t before = ctx->areaCurrent;
+  ctx->areaCurrent = a->number;
+  xb_item b = *block;
+  xb_gc_root_push(ctx, &b);
+  xb_block_call(ctx, r, &b, 0, r);
+  xb_gc_root_pop(ctx, 1);
+  if (ctx->areaCurrent == a->number) ctx->areaCurrent = before;
+  return !(ctx->pending && xb_pending(ctx));
+}
+
 uint32_t xb_area_number(int64_t n) { return n >= 1 && n <= XB_AREA_MAX ? (uint32_t)n : 0; }
 
 /* The area of an alias (any letter case, `len` bytes), 0 for none. */
 static uint32_t area_of_alias(xb_ctx *ctx, const char *alias, size_t len) {
+  if (len == 0) return 0; /* the areas of the copies between files have no alias */
   for (uint32_t k = 0; k < ctx->areaCap; ++k)
     if (ctx->areas[k] && same_upper(alias, len, ctx->areas[k]->alias)) return k + 1;
   return 0;
@@ -203,7 +228,8 @@ int xb_area_unlock(xb_ctx *ctx, xb_area *a, uint32_t recno) {
 int xb_area_append(xb_ctx *ctx, xb_area *a, int release) {
   int32_t err = 0;
   xb_area_pin(a);
-  int ok = xb_area_cold(ctx, a) && !a->closed && (!a->shared || !release || xb_area_unlock_records(ctx, a));
+  int ok = xb_area_drop_pending(ctx, a) && !a->closed && xb_area_cold(ctx, a) && !a->closed &&
+           (!a->shared || !release || xb_area_unlock_records(ctx, a));
   uint32_t recno = 0;
   if (ok && !a->rdd->append(a, &recno, &err)) {
     if (a->shared && err == XB_FERR_LOCKED) xb_error_of(ctx, a->rdd->name, EG_APPENDLOCK, 1024, "", NULL, err,
@@ -232,6 +258,8 @@ void xb_order_conditions_clear(xb_order_conditions *c) {
 void xb_area_pin(xb_area *a) { ++a->pins; }
 
 static void area_free(xb_area *a) {
+  for (uint32_t k = 0; k < a->nrelations; ++k) free(a->relations[k]);
+  free(a->relations);
   free(a->alias);
   free(a->production);
   free(a->locks);
@@ -255,8 +283,12 @@ static void close_table(xb_ctx *ctx, xb_area *a) {
 void xb_area_close(xb_ctx *ctx, uint32_t n) {
   xb_area *a = xb_area_at(ctx, n);
   if (!a) return;
-  xb_area_pin(a); /* the keys of a changed record are evaluated in the area, which they may close */
-  xb_area_orders_close(ctx, a);
+  xb_area_pin(a); /* the keys of a changed record, the relations' expressions, may close the area */
+  a->closing = 1;
+  a->relPending = NULL;
+  xb_area_relations_clear(ctx, a);
+  if (!a->closed) xb_area_relations_detach(ctx, a);
+  if (!a->closed) xb_area_orders_close(ctx, a);
   int still = !a->closed && xb_area_at(ctx, n) == a;
   xb_area_unpin(a);
   if (!still) return;
@@ -300,13 +332,14 @@ static void alias_error(xb_ctx *ctx, const char *alias, size_t aliasLen, int leg
               NULL, 0, NULL);
 }
 
-int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, const char *alias, size_t aliasLen,
-                 int readonly, int exclusive) {
+/* xb_area_open, and xb_area_open_with without an alias (`alias` NULL). */
+static int area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, const char *alias, size_t aliasLen,
+                     int readonly, int exclusive, const xb_text_open *text) {
   static uint32_t generations;
   xb_area_close(ctx, n);
-  aliasLen = without_trailing_blanks(alias, aliasLen);
-  int legal = alias_name(alias, aliasLen);
-  uint32_t taken = legal ? area_of_alias(ctx, alias, aliasLen) : 0;
+  aliasLen = alias ? without_trailing_blanks(alias, aliasLen) : 0;
+  int legal = !alias || alias_name(alias, aliasLen);
+  uint32_t taken = alias && legal ? area_of_alias(ctx, alias, aliasLen) : 0;
   if (taken && taken != n) { /* before the file is opened: the area using it would refuse the opening otherwise */
     alias_error(ctx, alias, aliasLen, 1);
     return 0;
@@ -320,8 +353,10 @@ int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, c
   a->generation = ++generations;
   xb_order_conditions_clear(&a->pending);
   for (uint16_t tries = 1;; ++tries) {
-    xb_open_failure why = {0, EG_OPEN, 1001, NULL};
-    if (rdd->open(a, path, readonly, exclusive, &why)) break;
+    xb_open_failure why = {0, text && text->create ? EG_CREATE : EG_OPEN, text && text->create ? 1004 : 1001, NULL};
+    if (text ? rdd->open_with(a, path, text->fields, text->count, text->create, text->delimiter, &why)
+             : rdd->open(a, path, readonly, exclusive, &why))
+      break;
     int r = xb_error_of(ctx, rdd->name, why.gencode, why.subcode, "", why.file ? why.file : path, why.oscode,
                         XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL, tries, NULL);
     free(why.file);
@@ -330,7 +365,7 @@ int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, c
       return 0;
     }
   }
-  if (!legal || letter_area(alias, aliasLen) || same_upper(alias, aliasLen, "M")) {
+  if (alias && (!legal || letter_area(alias, aliasLen) || same_upper(alias, aliasLen, "M"))) {
     close_table(ctx, a);
     alias_error(ctx, alias, aliasLen, legal);
     return 0;
@@ -364,6 +399,16 @@ int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, c
   return xb_area_top(ctx, a);
 }
 
+int xb_area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, const char *alias, size_t aliasLen,
+                 int readonly, int exclusive) {
+  return area_open(ctx, n, rdd, path, alias, aliasLen, readonly, exclusive, NULL);
+}
+
+int xb_area_open_with(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, int readonly, int exclusive,
+                      const xb_text_open *text) {
+  return area_open(ctx, n, rdd, path, NULL, 0, readonly, exclusive, text);
+}
+
 void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *)) {
   for (uint32_t k = 0; k < ctx->areaCap; ++k)
     if (ctx->areas[k]) {
@@ -376,6 +421,10 @@ void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *)) {
       mark(&c->whileBlock);
       mark(&c->evalBlock);
       for (uint32_t i = 0; i < ctx->areas[k]->norders; ++i) xb_order_mark(ctx->areas[k]->orders[i], mark);
+      for (uint32_t i = 0; i < ctx->areas[k]->nrelations; ++i) {
+        mark(&ctx->areas[k]->relations[i]->block);
+        mark(&ctx->areas[k]->relations[i]->text);
+      }
     }
 }
 
@@ -394,6 +443,7 @@ static int go_raw(xb_ctx *ctx, xb_area *a, uint32_t recno) {
   int ok = a->rdd->go(a, recno, &err);
   a->recno = ok ? recno : last + 1;
   a->eof = a->recno > last;
+  if (a->nrelations) xb_area_sync_children(ctx, a);
   if (!ok) xb_area_error(ctx, a, EG_READ, 1010, "", err);
   return ok;
 }
@@ -469,13 +519,14 @@ int xb_area_step_raw(xb_ctx *ctx, xb_area *a, int dir) {
 }
 
 int xb_area_goto(xb_ctx *ctx, xb_area *a, uint32_t recno) {
-  if (!go_raw(ctx, a, recno)) return 0;
+  if (!xb_area_drop_pending(ctx, a) || !go_raw(ctx, a, recno)) return 0;
   a->bof = a->eof; /* a record that is not there: both */
   return 1;
 }
 
 /* The first (`dir` 1) or last (-1) record that shows; `a` pinned. */
 static int go_end(xb_ctx *ctx, xb_area *a, int dir) {
+  if (!xb_area_drop_pending(ctx, a) || a->closed) return 0;
   if (!xb_area_cold(ctx, a) || a->closed) return 0; /* the record's entries before the order is read */
   uint32_t recno;
   int e = edge(ctx, a, dir, &recno);
@@ -502,7 +553,7 @@ int xb_area_bottom(xb_ctx *ctx, xb_area *a) {
 
 int xb_area_arrive(xb_ctx *ctx, xb_area *a, uint32_t recno, int dir) {
   xb_area_pin(a);
-  int r = go_raw(ctx, a, recno) ? seek_visible(ctx, a, dir) : -1;
+  int r = xb_area_drop_pending(ctx, a) && !a->closed && go_raw(ctx, a, recno) ? seek_visible(ctx, a, dir) : -1;
   int ok = r >= 0;
   if (r == 0 && dir < 0 && recno) { /* none shows before it: BOF, on the first record that shows */
     ok = go_end(ctx, a, 1);
@@ -516,6 +567,7 @@ int xb_area_arrive(xb_ctx *ctx, xb_area *a, uint32_t recno, int dir) {
 
 /* xb_area_skip with `a` pinned. */
 static int skip(xb_ctx *ctx, xb_area *a, int64_t n) {
+  if (!xb_area_settle(ctx, a) || a->closed) return 0;
   if (n == 0) return go_raw(ctx, a, a->recno);
   if (!xb_area_cold(ctx, a) || a->closed) return 0; /* the record's entries before the order is read */
   uint32_t recno;
@@ -550,7 +602,8 @@ int xb_area_skip(xb_ctx *ctx, xb_area *a, int64_t n) {
   return ok;
 }
 
-int xb_area_seek(xb_ctx *ctx, xb_area *a, const xb_item *v, int soft, int last) {
+/* xb_area_seek with `a` pinned, its pending relational move dropped and its record written. */
+static int seek(xb_ctx *ctx, xb_area *a, const xb_item *v, int soft, int last) {
   xb_order *o = xb_area_order(a);
   unsigned char key[XB_INDEX_KEY_MAX];
   size_t used;
@@ -563,19 +616,23 @@ int xb_area_seek(xb_ctx *ctx, xb_area *a, const xb_item *v, int soft, int last) 
     a->bof = 0;
     return 1;
   }
-  xb_area_pin(a);
-  int ok = 0, match = 0;
   uint32_t recno;
-  if (xb_area_cold(ctx, a) && !a->closed) { /* LAST: the last entry at or before the key, the end for none */
-    int r = xb_order_seek(ctx, a, o, key, used, last, &recno, &match);
-    r = arrive(ctx, a, r, recno);
-    if (r > 0) r = seek_visible(ctx, a, last ? -1 : 1);
-    ok = r >= 0;
-    match = r > 0 && xb_order_cursor_matches(o, key, used);
-    if (ok && !match && (!soft || (last && r == 0))) ok = go_raw(ctx, a, 0);
-    a->bof = 0;
-    a->found = ok && match;
-  }
+  int match = 0;
+  int r = xb_order_seek(ctx, a, o, key, used, last, &recno, &match); /* LAST: the last entry at or before the key */
+  r = arrive(ctx, a, r, recno);
+  if (r > 0) r = seek_visible(ctx, a, last ? -1 : 1);
+  int ok = r >= 0;
+  match = r > 0 && xb_order_cursor_matches(o, key, used);
+  if (ok && !match && (!soft || (last && r == 0))) ok = go_raw(ctx, a, 0);
+  a->bof = 0;
+  a->found = ok && match;
+  return ok;
+}
+
+int xb_area_seek(xb_ctx *ctx, xb_area *a, const xb_item *v, int soft, int last) {
+  xb_area_pin(a);
+  int ok = xb_area_drop_pending(ctx, a) && !a->closed && xb_area_cold(ctx, a) && !a->closed;
+  ok = ok && seek(ctx, a, v, soft, last);
   xb_area_unpin(a);
   return ok;
 }

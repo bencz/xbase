@@ -34,6 +34,9 @@ add_library(xbrt STATIC
   src/rdd/fpt.c
   src/rdd/ntx.c
   src/rdd/ordcmd.c
+  src/rdd/relation.c
+  src/rdd/text.c
+  src/rdd/transfer.c
   src/rdd/order.c
   src/rdd/field.c
   src/rtl/arrays.c
@@ -66,7 +69,7 @@ endif()
 # The runtime's functions written in xBase, compiled by the xbc of this build as modules of the runtime
 # (xbc --runtime) for XB_TARGET (top-level CMakeLists.txt).
 set(XB_RUNTIME_PRG src/rtl/collections.prg src/rtl/console.prg src/rtl/dates.prg src/rtl/errorsys.prg
-    src/rtl/files.prg src/rtl/languages.prg src/rtl/time.prg)
+    src/rtl/files.prg src/rtl/languages.prg src/rtl/time.prg src/rdd/transfer.prg)
 foreach(prg ${XB_RUNTIME_PRG})
   get_filename_component(stem ${prg} NAME_WE)
   set(obj ${CMAKE_CURRENT_BINARY_DIR}/${stem}_prg.o)

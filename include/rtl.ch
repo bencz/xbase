@@ -199,6 +199,7 @@ EXTERN FUNCTION dbCloseArea() NATIVE
 EXTERN FUNCTION dbCommit() NATIVE
 EXTERN FUNCTION dbCommitAll() NATIVE
 EXTERN FUNCTION dbClearIndex() NATIVE
+EXTERN FUNCTION dbClearRelation() NATIVE
 EXTERN FUNCTION dbCreate( cFile, aStruct, [cDriver], [lNewArea], [cAlias] ) NATIVE
 EXTERN FUNCTION dbCreateIndex( cFile, cKey, [bKey], [lUnique] ) NATIVE
 EXTERN FUNCTION dbDelete() NATIVE
@@ -211,20 +212,25 @@ EXTERN FUNCTION dbGoTo( nRecord ) NATIVE
 EXTERN FUNCTION dbGoTop() NATIVE
 EXTERN FUNCTION dbRecall() NATIVE
 EXTERN FUNCTION dbReindex() NATIVE
+EXTERN FUNCTION dbRelation( [nRelation] ) NATIVE
 EXTERN FUNCTION dbRLock( [nRecord] ) NATIVE
 EXTERN FUNCTION dbRLockList() NATIVE
+EXTERN FUNCTION dbRSelect( [nRelation] ) NATIVE
 EXTERN FUNCTION dbRUnlock( [nRecord] ) NATIVE
 EXTERN FUNCTION dbSeek( xKey, [lSoftSeek], [lLast] ) NATIVE
 EXTERN FUNCTION dbSelectArea( xArea ) NATIVE
 EXTERN FUNCTION dbSetFilter( bCondition, [cCondition] ) NATIVE
 EXTERN FUNCTION dbSetIndex( cFile ) NATIVE
 EXTERN FUNCTION dbSetOrder( nOrder ) NATIVE
+EXTERN FUNCTION dbSetRelation( xArea, bExpr, [cExpr], [lScoped] ) NATIVE
 EXTERN FUNCTION dbSkip( [nRecords] ) NATIVE
 EXTERN FUNCTION dbStruct() NATIVE
+EXTERN FUNCTION dbTableExt() NATIVE
 EXTERN FUNCTION dbUnlock() NATIVE
 EXTERN FUNCTION dbUnlockAll() NATIVE
 EXTERN FUNCTION dbUseArea( [lNewArea], [cDriver], [cName], [xAlias], [lShared], [lReadOnly] ) NATIVE
 EXTERN FUNCTION Deleted() NATIVE RESERVED CHECKED ABBREV 4
+EXTERN FUNCTION Delim() NATIVE
 EXTERN FUNCTION Eof() NATIVE RESERVED CHECKED
 EXTERN FUNCTION FCount() NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION FieldGet( nField ) NATIVE
@@ -262,6 +268,7 @@ EXTERN FUNCTION ordListRebuild() NATIVE
 EXTERN FUNCTION ordName( [nOrder] ) NATIVE
 EXTERN FUNCTION ordNumber( cOrder ) NATIVE
 EXTERN FUNCTION ordScope( nScope, [xValue] ) NATIVE
+EXTERN FUNCTION ordSetRelation( xArea, bKey, [cKey] ) NATIVE
 EXTERN FUNCTION ordSetFocus( [xOrder] ) NATIVE
 EXTERN FUNCTION ordSkipUnique( [nDirection] ) NATIVE
 EXTERN FUNCTION RddName() NATIVE
@@ -270,12 +277,26 @@ EXTERN FUNCTION RecCount() NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION RecNo() NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION RecSize() NATIVE
 EXTERN FUNCTION RLock() NATIVE RESERVED CHECKED ABBREV 4
+EXTERN FUNCTION SDF() NATIVE
 EXTERN FUNCTION Select( [xAlias] ) NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION Used() NATIVE
 EXTERN FUNCTION __AreaEval( xArea, bBlock ) NATIVE
+EXTERN FUNCTION __dbApp( cFile, [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cDriver], [nConnection], ;
+   [cCodePage], [xDelimiter] ) NATIVE
 EXTERN FUNCTION __dbContinue() NATIVE
+EXTERN FUNCTION __dbCopy( cFile, [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cDriver], [nConnection], ;
+   [cCodePage], [xDelimiter] ) NATIVE
+EXTERN FUNCTION __dbCopyStruct( cFile, [aFields] ) NATIVE
+EXTERN FUNCTION __dbCopyXStruct( cFile ) NATIVE
+EXTERN FUNCTION __dbCreate( cFile, [cFrom], [cDriver], [lNew], [cAlias] ) NATIVE
+EXTERN FUNCTION __dbDelim( lExport, cFile, [xDelimiter], [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], ;
+   [cCodePage] ) NATIVE
 EXTERN FUNCTION __dbLocate( [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
 EXTERN FUNCTION __dbPack() NATIVE
+EXTERN FUNCTION __dbSDF( lExport, cFile, [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cCodePage] ) NATIVE
+EXTERN FUNCTION __dbTrans( nTarget, aFields, [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
+EXTERN FUNCTION __dbTransOpen( cFile, [cDriver], [lCreate], [aStruct], [xDelimiter] ) NATIVE
+EXTERN FUNCTION __dbUsed( cOperation ) NATIVE
 EXTERN FUNCTION __dbZap() NATIVE
 
 // Files, directories and environment

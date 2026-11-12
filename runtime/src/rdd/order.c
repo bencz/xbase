@@ -27,19 +27,13 @@ static void key_type_error(xb_ctx *ctx, xb_area *a) {
   xb_error_of(ctx, a->rdd->name, EG_DATATYPE, 1026, "", NULL, 0, 0, 0, NULL, 0, NULL);
 }
 
-/* Evaluates `block` with area `a` current: 1 with its value in `r` (rooted by the caller), 0 after an error. While
- * it runs, the area's orders may not change (`keying`; ordcmd.c refuses it). */
+/* xb_area_eval of a key, condition or scope block: while it runs, the area's orders may not change (`keying`;
+ * ordcmd.c refuses it). */
 static int eval_in(xb_ctx *ctx, xb_area *a, const xb_item *block, xb_item *r) {
-  uint32_t before = ctx->areaCurrent;
-  ctx->areaCurrent = a->number;
-  xb_item b = *block;
-  xb_gc_root_push(ctx, &b);
   ++a->keying;
-  xb_block_call(ctx, r, &b, 0, r);
+  int ok = xb_area_eval(ctx, a, block, r);
   --a->keying;
-  xb_gc_root_pop(ctx, 1);
-  if (ctx->areaCurrent == a->number) ctx->areaCurrent = before;
-  return !(ctx->pending && xb_pending(ctx));
+  return ok;
 }
 
 /* The key of the current record: 1 with it in `out` and in `*in` whether the record has an entry (the condition's),

@@ -97,6 +97,8 @@ char **xb_platform_args(int argc, char **argv, int *count) {
 
 int xb_platform_path_separator(char c) { return c == '/'; }
 
+const char *xb_platform_eol(void) { return "\n"; }
+
 /* The DOS error number of an errno value (see platform.h). */
 static int32_t dos_error(int e) {
   static const struct {

@@ -10,11 +10,30 @@
 #define XB_DATE_FIRST 1721060 /* day number of 0000-01-01 */
 #define XB_DATE_DECODE_LAST INT32_MAX /* keeps the formulas far from overflowing */
 
-int64_t xb_date_encode(int year, int month, int day) {
+int xb_date_valid(int year, int month, int day) {
   static const int days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   if (year < 0 || year > 9999 || month < 1 || month > 12 || day < 1) return 0;
   int leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-  if (day > days[month - 1] && !(month == 2 && day == 29 && leap)) return 0;
+  return day <= days[month - 1] || (month == 2 && day == 29 && leap);
+}
+
+/* The year, month and day "YYYYMMDD" gives: 0 when it is not eight digits. */
+static int digits_ymd(const char *s, int *year, int *month, int *day) {
+  for (int i = 0; i < XB_DATE_DIGITS_SIZE - 1; ++i)
+    if (s[i] < '0' || s[i] > '9') return 0;
+  *year = (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 + (s[3] - '0');
+  *month = (s[4] - '0') * 10 + (s[5] - '0');
+  *day = (s[6] - '0') * 10 + (s[7] - '0');
+  return 1;
+}
+
+int xb_date_digits_valid(const char *s) {
+  int y, m, d;
+  return digits_ymd(s, &y, &m, &d) && xb_date_valid(y, m, d);
+}
+
+int64_t xb_date_encode(int year, int month, int day) {
+  if (!xb_date_valid(year, month, day)) return 0;
   int64_t a = month < 3 ? -1 : 0;
   return (a + 4800 + year) * 1461 / 4 + (month - 2 - a * 12) * 367 / 12 - (a + 4900 + year) / 100 * 3 / 4 + day -
          32075;
@@ -40,12 +59,8 @@ void xb_date_decode(int64_t jd, int *year, int *month, int *day) {
 void xb_set_date(xb_item *it, int64_t jd) { xb_put(it, xb_header_word(XB_T_DATE, 0, 0), (uint64_t)jd); }
 
 int64_t xb_date_from_digits(const char *s) {
-  int v[XB_DATE_DIGITS_SIZE - 1];
-  for (int i = 0; i < XB_DATE_DIGITS_SIZE - 1; ++i) {
-    if (s[i] < '0' || s[i] > '9') return 0;
-    v[i] = s[i] - '0';
-  }
-  return xb_date_encode(v[0] * 1000 + v[1] * 100 + v[2] * 10 + v[3], v[4] * 10 + v[5], v[6] * 10 + v[7]);
+  int y, m, d;
+  return digits_ymd(s, &y, &m, &d) ? xb_date_encode(y, m, d) : 0;
 }
 
 /* "YYYYMMDD" with the last four digits of the year: spaces for the empty

@@ -2,8 +2,75 @@
  * (__AreaEval). */
 #include "rdd/rdd.h"
 
+#include "core/numeric.h"
+
 #include <stdio.h>
 #include <string.h>
+
+void xb_field_decode(const xb_field_info *fi, const char *p, xb_item *r) {
+  switch (fi->type) {
+  case 'C':
+    xb_set_str(r, xb_str_new(p, fi->len));
+    return;
+  case 'D':
+    xb_set_date(r, xb_date_from_digits(p));
+    return;
+  case 'L':
+    xb_set_logical(r, xb_field_true(p[0]));
+    return;
+  default: { /* N, F: the text's number, with the field's width and decimals */
+    xb_num_parse(p, fi->len, r);
+    if (fi->dec == 0 && r->type == XB_T_INT) {
+      xb_put(r, xb_header_word(XB_T_INT, (uint16_t)fi->len, 0), (uint64_t)r->v.i);
+      return;
+    }
+    double v = r->type == XB_T_INT ? (double)r->v.i : r->v.d;
+    uint64_t bits;
+    memcpy(&bits, &v, 8);
+    uint32_t width = fi->dec ? (fi->len > fi->dec + 1 ? fi->len - fi->dec - 1 : 1) : fi->len;
+    xb_put(r, xb_header_word(XB_T_DOUBLE, (uint16_t)width, (uint16_t)fi->dec), bits);
+    return;
+  }
+  }
+}
+
+int xb_field_number_text(const char *s, size_t n, uint32_t dec) {
+  size_t i = n && s[0] == '-' ? 1 : 0, digits = i;
+  while (i < n && s[i] >= '0' && s[i] <= '9') ++i;
+  if (i == digits) return 0;
+  if (!dec) return i == n;
+  if (i >= n || s[i] != '.' || n - i - 1 != dec) return 0;
+  for (++i; i < n; ++i)
+    if (s[i] < '0' || s[i] > '9') return 0;
+  return 1;
+}
+
+int xb_field_encode(const xb_field_info *fi, char *p, const xb_item *v) {
+  switch (fi->type) {
+  case 'C': {
+    if (v->type != XB_T_STRING) return XB_PUT_TYPE;
+    size_t n = v->v.s->len < fi->len ? v->v.s->len : fi->len;
+    memcpy(p, v->v.s->data, n);
+    memset(p + n, ' ', fi->len - n);
+    return XB_PUT_OK;
+  }
+  case 'D': {
+    if (v->type != XB_T_DATE) return XB_PUT_TYPE;
+    char digits[XB_DATE_DIGITS_SIZE]; /* blanks for the empty date */
+    xb_date_to_digits(v->v.i, digits);
+    memcpy(p, digits, XB_DATE_DIGITS_SIZE - 1);
+    return XB_PUT_OK;
+  }
+  case 'L':
+    if (v->type != XB_T_LOGICAL) return XB_PUT_TYPE;
+    p[0] = v->v.l ? 'T' : 'F';
+    return XB_PUT_OK;
+  default:
+    if (!xb_is_number(v)) return XB_PUT_TYPE;
+    xb_num_to_field_buf(v, (int)fi->len, (int)fi->dec, p);
+    return p[0] == '*' ? XB_PUT_WIDTH : XB_PUT_OK; /* the stars stay, as in Clipper */
+  }
+}
 
 /* The number of the work area an alias names: the item `area` (a name as xb_area_named reads it, or a number from
  * 1; either names its area open or not), else the C string `alias` (NULL: the current area). 0 when it names none;
@@ -44,7 +111,7 @@ static int find(xb_ctx *ctx, const xb_item *area, const char *alias, const char 
   for (uint16_t tries = 1;; ++tries) {
     char what[32];
     uint32_t n = area_number(ctx, area, alias, what);
-    *a = xb_area_at(ctx, n);
+    *a = xb_area_settled(ctx, n);
     int64_t k = *a ? field_of(*a, name, cache) : -1;
     if (k >= 0) {
       *field = (uint32_t)k;
@@ -74,17 +141,25 @@ void xb_field_set(xb_ctx *ctx, const xb_item *area, const char *alias, const cha
 void xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache *cache) {
   xb_area *a = xb_area_current(ctx);
   int64_t k = a ? field_of(a, m->name, cache) : -1;
+  if (k >= 0) { /* a field: the record's pending relational move first, which may close the area */
+    a = xb_area_record(ctx);
+    k = a ? field_of(a, m->name, cache) : -1;
+  }
   if (k >= 0) xb_area_field_get(ctx, a, (uint32_t)k, r);
   else xb_mv_get(ctx, r, m);
 }
 
-int xb_area_enter(xb_ctx *ctx, const xb_item *area, uint32_t *before) {
-  uint32_t n;
+int xb_area_lookup(xb_ctx *ctx, const xb_item *area, uint32_t *n) {
   for (uint16_t tries = 1;; ++tries) {
     char what[32];
-    if ((n = area_number(ctx, area, NULL, what)) != 0) break;
+    if ((*n = area_number(ctx, area, NULL, what)) != 0) return 1;
     if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, what, NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2) return 0;
   }
+}
+
+int xb_area_enter(xb_ctx *ctx, const xb_item *area, uint32_t *before) {
+  uint32_t n;
+  if (!xb_area_lookup(ctx, area, &n)) return 0;
   *before = ctx->areaCurrent;
   ctx->areaCurrent = n;
   return 1;

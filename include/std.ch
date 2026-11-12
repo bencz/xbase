@@ -61,6 +61,37 @@
 #command UNLOCK                        => dbUnlock()
 #command UNLOCK ALL                    => dbUnlockAll()
 #command APPEND BLANK                  => dbAppend()
+
+/* Copies between files (rdd/transfer.prg). DELIMITED WITH takes an expression or a name (BLANK, TAB, PIPE); in the
+ * rule tried after it, Clipper's, the rest of the command as text. */
+#command COPY [STRUCTURE] [EXTENDED] [TO <(f)>] => __dbCopyXStruct( <(f)> )
+#command COPY [STRUCTURE] [TO <(f)>] [FIELDS <fields,...>] => __dbCopyStruct( <(f)>, { <(fields)> } )
+#command COPY [TO <(f)>] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [CODEPAGE <cp>] [DELIMITED [WITH <*delim*>]] => ;
+         __dbDelim( .T., <(f)>, <(delim)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <cp> )
+#command COPY [TO <(f)>] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [CODEPAGE <cp>] [DELIMITED [WITH <(delim)>]] => ;
+         __dbDelim( .T., <(f)>, <(delim)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <cp> )
+#command COPY [TO <(f)>] [SDF] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [CODEPAGE <cp>] => ;
+         __dbSDF( .T., <(f)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <cp> )
+#command COPY [TO <(f)>] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [VIA <rdd>] [CODEPAGE <cp>] => ;
+         __dbCopy( <(f)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <rdd>, , <cp> )
+#command APPEND [FROM <(f)>] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [CODEPAGE <cp>] [DELIMITED [WITH <*delim*>]] => ;
+         __dbDelim( .F., <(f)>, <(delim)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <cp> )
+#command APPEND [FROM <(f)>] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [CODEPAGE <cp>] [DELIMITED [WITH <(delim)>]] => ;
+         __dbDelim( .F., <(f)>, <(delim)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <cp> )
+#command APPEND [FROM <(f)>] [SDF] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [CODEPAGE <cp>] => ;
+         __dbSDF( .F., <(f)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <cp> )
+#command APPEND [FROM <(f)>] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [VIA <rdd>] [CODEPAGE <cp>] => ;
+         __dbApp( <(f)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <rdd>, , <cp> )
+#command CREATE <(db)> [FROM <(src)>] [VIA <rdd>] [ALIAS <a>] [<new: NEW>] [CODEPAGE <cp>] => ;
+         __dbCreate( <(db)>, <(src)>, <rdd>, <.new.>, <(a)> )
 #command PACK                          => __dbPack()
 #command ZAP                           => __dbZap()
 #command GOTO <n>                      => dbGoTo( <n> )
@@ -81,6 +112,12 @@
 #command SET SOFTSEEK (<x>)            => Set( _SET_SOFTSEEK, <x> )
 #command SET UNIQUE <x:ON,OFF,&>       => Set( _SET_UNIQUE, <(x)> )
 #command SET UNIQUE (<x>)              => Set( _SET_UNIQUE, <x> )
+#command SET RELATION TO               => dbClearRelation()
+#command SET RELATION [<add:ADDITIVE>] [TO <exp1> INTO <(alias1)> [<scp1:SCOPED>] ;
+            [, [TO] <expN> INTO <(aliasN)> [<scpN:SCOPED>]]] => ;
+         if ( ! <.add.> ) ; dbClearRelation() ; end ;
+         ; dbSetRelation( <(alias1)>, <{exp1}>, <"exp1">, <.scp1.> ) ;
+         [ ; dbSetRelation( <(aliasN)>, <{expN}>, <"expN">, <.scpN.> ) ]
 #command SET FILTER TO                 => dbClearFilter()
 #command SET FILTER TO <xpr>           => dbSetFilter( <{xpr}>, <"xpr"> )
 #command SET FILTER TO <x:&>           => if ( Empty( <(x)> ) ) ; dbClearFilter() ; ;
@@ -142,6 +179,13 @@
              [<rest: REST>] [ALL] => ;
          <v1> := [ <vN> := ] 0 ; ;
          dbEval( {|| <v1> := <v1> + <x1> [, <vN> := <vN> + <xN>] }, <{for}>, <{while}>, <next>, <rec>, <.rest.> )
+/* AVERAGE counts the records in the memory variable __Avg, as Clipper's does (a PRIVATE of the function). */
+#command AVERAGE <x1> [, <xN>] TO <v1> [, <vN>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+             [<rest: REST>] [ALL] => ;
+         M->__Avg := <v1> := [ <vN> := ] 0 ; ;
+         dbEval( {|| M->__Avg := M->__Avg + 1, <v1> := <v1> + <x1> [, <vN> := <vN> + <xN>] }, ;
+                 <{for}>, <{while}>, <next>, <rec>, <.rest.> ) ; ;
+         <v1> := <v1> / M->__Avg [ ; <vN> := <vN> / M->__Avg ]
 
 #command ?  [<explist,...>]            => QOut( <explist> )
 #command ?? [<explist,...>]            => QQOut( <explist> )

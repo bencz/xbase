@@ -103,6 +103,8 @@ char **xb_platform_args(int argc, char **argv, int *count) {
 
 int xb_platform_path_separator(char c) { return c == '/' || c == '\\' || c == ':'; }
 
+const char *xb_platform_eol(void) { return "\r\n"; }
+
 /* The UTF-8 path as UTF-16 (malloc'ed), or NULL with the error code. */
 static wchar_t *wide_path(const char *path, int32_t *err) {
   int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);

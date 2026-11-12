@@ -8,6 +8,9 @@ skip past:          4 .F. .T. [          ]   0.0
 goto 2:          2 Bob       
 count:          3          4 .T.
 sum:        112.3
+average:         38.43         76.87 .T.
+average next:         51.50          3
+average of none:          0 N
 locate: .T.          3
 deleted 3: .T.
 count deleted on:          2
