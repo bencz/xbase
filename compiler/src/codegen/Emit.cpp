@@ -1,5 +1,6 @@
 #include "codegen/Emit.h"
 
+#include "codegen/LoopGuards.h"
 #include "codegen/LoopPolls.h"
 #include "codegen/LoopSplit.h"
 
@@ -80,6 +81,10 @@ std::unique_ptr<TargetMachine> createTargetMachine(const TargetConfig &cfg, std:
   return tm;
 }
 
+// Rounds of moving loops' invariant tests out (LoopGuards.h): an array of arrays indexed by invariant positions takes
+// one per level.
+constexpr unsigned kGuardRounds = 3;
+
 void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   LoopAnalysisManager lam;
   FunctionAnalysisManager fam;
@@ -118,6 +123,9 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   };
   again([](Function &f, FunctionAnalysisManager &) { return splitColdLoopPaths(f); }, "loop splitting");
   again(placeLoopPolls, "loop polls");
+  // On the loops the simplification has rotated: a guard out of a loop makes what it guarded invariant, whose own test
+  // may then go out too.
+  for (unsigned round = 0; round < kGuardRounds; ++round) again(hoistLoopGuards, "loop guards");
 }
 
 // Code generation runs on the legacy pass manager: in LLVM 22 it is the one

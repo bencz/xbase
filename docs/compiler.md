@@ -641,13 +641,13 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 `codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
 host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), then, from `-O1` on, splits the
 loops whose fast paths have cold edges (`LoopSplit.*`, below), places the polls of the loops' back edges (`LoopPolls.*`,
-below), each followed by the function simplification pipeline on the functions it changed, and writes the
-object with the target's object writer (code generation runs on the legacy pass manager: in LLVM 22 it is the one every
-target implements). Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names
-one, so programs run on any CPU of the target (a processor that keeps doubles with more precision than 64 bits between
-operations, as some 32-bit processors do, can give a different last digit in rounding edge cases; xbase does not change
-a processor's floating-point mode); `--cpu=native` (host target only) uses the CPU and features of the machine xbc runs
-on.
+below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds), each followed by the function
+simplification pipeline on the functions it changed, and writes the object with the target's object writer (code
+generation runs on the legacy pass manager: in LLVM 22 it is the one every target implements). Code is position
+independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one, so programs run on any CPU of the
+target (a processor that keeps doubles with more precision than 64 bits between operations, as some 32-bit processors
+do, can give a different last digit in rounding edge cases; xbase does not change a processor's floating-point mode);
+`--cpu=native` (host target only) uses the CPU and features of the machine xbc runs on.
 
 Loops without slow paths (`codegen/LoopSplit.*`): every inline fast path keeps a call to the runtime for the other
 cases, behind an edge weighted unlikely (`branchLikely`: edges to runtime calls, and to the rare double index; a choice
@@ -690,3 +690,14 @@ before stop-the-world collections (perf stat, x86-64, the best of 5 runs): `loop
 each pass), `pi` 2% (8%), `qsort`, `sieve` and `asort` 1 to 2%, the others within 1%; `crc32` and `mixed` are 29% and 7%
 faster (their loops back on fast paths after a slow one), `index` 8% (the index page cache,
 [rdd.md](rdd.md#performance)).
+
+Loop guards (`codegen/LoopGuards.*`), on the loops the simplification rotated after the polls: a loop's header that
+computes nothing but its PHIs and a branch on a condition the loop does not change (LLVM moved what it reads out of the
+loop), one side of which leaves the loop (in a fast loop, into the generic copy: the test of a fast path, such as an
+array and an index the loop does not change), branches in the preheader instead (one is made only for such a loop);
+when the test fails there, the first pass goes where it would have gone, with the values the header's PHIs have on
+entry (the exit's PHIs receive those, and the header's values used past it are rewritten), so the generic copy runs it
+as before. What the test guarded (an element's loads) then runs on every pass, and the simplification moves it out of
+the loop; its own test may then be the header's next invariant branch (one round per level of an array of arrays).
+LLVM's own unswitching does not do it: the exit receives values the loop changes. `matmul` takes 12% fewer cycles,
+`pi` 3%; the other benchmarks are unchanged.

@@ -231,11 +231,11 @@ in the phases of [concurrency.md](concurrency.md#phases).
   heap pointer kept in registers; parameter versioning). Next, in order:
   1. Loops without slow paths: done at the LLVM level for innermost loops (`codegen/LoopSplit.*`,
      [compiler.md](compiler.md#object-emission)), with alias information (TBAA) on the accesses whose memory is known,
-     and their safepoint polls placed once every 1024 passes (`codegen/LoopPolls.*`).
-     Still to do: outer loops; loads of array headers moved out of fast loops (they follow a test that can leave the
-     loop: loop rotation or dereferenceability facts); frame slot stores of values only an inline operation uses (they
-     are there for the collector: statepoints); typed operations in xIR with sparse conditional propagation over the
-     type sets, so that xIR passes see the fast cases too.
+     and their safepoint polls placed once every 1024 passes (`codegen/LoopPolls.*`). Their invariant tests (an array
+     and an index the loop does not change) move before them, and what they guarded with them (`codegen/LoopGuards.*`).
+     Still to do: outer loops; frame slot stores of values only an inline operation uses (they are there for the
+     collector: statepoints); typed operations in xIR with sparse conditional propagation over the type sets, so that
+     xIR passes see the fast cases too.
   2. Value numbering, loop-invariant code motion, range analysis and bounds-check elimination on the typed
      operations.
   3. Runtime functions as xIR operations, inlining of xBase functions, string appends in place, direct calls with
