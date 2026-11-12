@@ -99,6 +99,14 @@ int xb_platform_path_separator(char c) { return c == '/'; }
 
 const char *xb_platform_eol(void) { return "\n"; }
 
+void xb_platform_with_registers(void (*fn)(void *), void *arg) {
+  volatile int returned = 0;
+  __builtin_unwind_init(); /* GCC and Clang: every callee-saved register is saved in this frame */
+  fn(arg);
+  returned = 1; /* a store after the call: fn(arg) is no tail call, which would free the frame first */
+  (void)returned;
+}
+
 /* The DOS error number of an errno value (see platform.h). */
 static int32_t dos_error(int e) {
   static const struct {

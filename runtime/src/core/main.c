@@ -18,8 +18,7 @@ typedef struct program {
 /* The command-line arguments after the program's name become strings in a
  * frame of their own, linked first into the context's chain (so the collector
  * sees them), which the start function receives as its parameters. */
-static void run_program(void *arg) {
-  program *p = arg;
+XB_NOINLINE static void run(program *p) {
   xb_ctx *ctx = xb_ctx_new();
   uint32_t n = p->argc > 1 ? (uint32_t)(p->argc - 1) : 0;
   xb_frame *args = calloc(1, sizeof(xb_frame) + n * sizeof(xb_item)); /* NIL slots */
@@ -37,6 +36,16 @@ static void run_program(void *arg) {
   free(args);
   p->exitcode = xb_ctx_exitcode(ctx);
   xb_ctx_free(ctx);
+}
+
+/* The thread's first function: its frame lies above every frame the program's code has, so collections that move
+ * objects scan the stack from it (gc.c). */
+static void run_program(void *arg) {
+  volatile int returned = 0;
+  xb_gc_thread_stack((const void *)&arg);
+  run(arg);
+  returned = 1; /* a store after the call: run() is no tail call, which would put its frame over this one */
+  (void)returned;
 }
 
 int main(int argc, char **argv) {

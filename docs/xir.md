@@ -34,8 +34,11 @@ coroutines, classes) run before lowering, where LLVM can no longer see them.
   replaced by their fields or placed in a region freed as a whole.
 - Variables become SSA values; only captured variables and variables passed by reference live in cells, and frames
   keep only values that must stay in memory.
-- Object pointers live across safepoints become LLVM statepoints with relocation (`gc.statepoint`, `gc.relocate`),
-  so the collector may move objects (evacuation in an Immix heap). Objects handed to C are pinned.
+- The collector moves objects (evacuation in the Immix heap) and pins those that the machine stack and registers
+  point into, so compiled code keeps object pointers in registers across safepoints without telling it where
+  ([runtime.md](runtime.md#garbage-collector)). *Planned:* LLVM statepoints (`gc.statepoint`, `gc.relocate`) for
+  pointers held in registers, so that objects they reach can move too, and frames need not keep every item in
+  memory.
 
 ## Control flow for errors and exceptions
 
@@ -246,5 +249,6 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
    numbering and typed operations.
 4. Statepoints: once mem2reg makes items SSA values, LLVM keeps them in registers and records where the live
    object pointers are at each call (stack maps, relative to the frame's anchor), instead of frame slots holding
-   every item; relocation, evacuation in the collector, barrier elision.
+   every item; relocation of what registers point to (the collector evacuates already, pinning those objects),
+   barrier elision.
 5. Unwind edges and `BEGIN SEQUENCE` (done); resumable functions (async/await, yield); classes.

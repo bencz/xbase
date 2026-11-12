@@ -21,11 +21,15 @@ typedef struct xb_gc_hdr {
   uint32_t size;            /* object bytes: the lines a block object covers, statistics (saturates for large) */
   uint8_t  kind;            /* xb_gc_kind */
   uint8_t  state;           /* XB_GC_MARKED | XB_GC_REMEMBERED */
-  uint16_t flags;           /* XB_GC_HDR_LARGE */
+  uint16_t flags;           /* XB_GC_HDR_LARGE, XB_GC_HDR_PINNED, XB_GC_HDR_MOVED */
 } xb_gc_hdr;
 
-/* xb_gc_hdr.flags: allocated on its own, not in a block. */
+/* xb_gc_hdr.flags: allocated on its own, not in a block (never moves); pinned by the collection in progress (a word of
+ * the stack, or a C root's address, points into it: it does not move); moved by it (the object holds the copy's
+ * address, see gc.c). */
 #define XB_GC_HDR_LARGE 1u
+#define XB_GC_HDR_PINNED 2u
+#define XB_GC_HDR_MOVED 4u
 
 /* Marked by the last collection that saw it, i.e. old (marks are sticky). */
 #define XB_GC_MARKED     XB_GC_STATE_OLD
@@ -50,6 +54,14 @@ void  xb_gc_add_root(xb_item *items, size_t count); /* may run before the first 
 /* xb_gc_write_item, the barrier for array elements, is in xbrt.h. */
 
 void  xb_gc_init(void);                    /* by the first context, before other threads exist */
+/* The start of the stack of the thread calling it (an address in the frame of its first function): full collections
+ * on that thread scan the stack from there for the objects to pin, and may move the others. A thread without it moves
+ * nothing. */
+void  xb_gc_thread_stack(const void *base);
+/* While held, collections move nothing: for C code that keeps object addresses where no scan sees them (a map of
+ * addresses in malloc'd memory). */
+void  xb_gc_hold(void);
+void  xb_gc_release(void);
 void *xb_gc_alloc(xb_gc_kind kind, size_t size);
 void  xb_gc_collect(void);                 /* a full collection */
 void  xb_gc_collect_young(void);           /* a young collection */

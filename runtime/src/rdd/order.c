@@ -808,7 +808,7 @@ int xb_order_cursor_matches(xb_order *o, const unsigned char *key, size_t used) 
   return k && memcmp(k, key, used) == 0;
 }
 
-void xb_order_mark(xb_order *o, int (*mark)(const xb_item *)) {
+void xb_order_mark(xb_order *o, int (*mark)(xb_item *)) {
   mark(&o->key);
   mark(&o->cond);
   mark(&o->scope[0].value);

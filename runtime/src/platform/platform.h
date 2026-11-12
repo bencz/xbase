@@ -32,6 +32,10 @@ void xb_platform_init(void);
  * unaffected by changes of the date and time). */
 int64_t xb_platform_elapsed_ms(void);
 
+/* Calls fn(arg) with the thread's registers saved on its stack first, so a scan of the stack from inside fn sees every
+ * pointer the thread holds (the collector's scan for pinned objects). The stack grows down on every target. */
+void xb_platform_with_registers(void (*fn)(void *), void *arg);
+
 /* Runs fn(arg) on a new thread whose stack can grow to `stack_size` bytes
  * (reserved, committed as it is used) and waits for it; returns 0 when the
  * thread could not be created. */

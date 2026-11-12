@@ -340,7 +340,7 @@ xb_area *xb_db_record(xb_ctx *ctx, const char *fn);
 void xb_order_conditions_clear(xb_order_conditions *c);
 
 /* Marks the work areas' items for the collector. */
-void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *));
+void xb_areas_mark(xb_ctx *ctx, int (*mark)(xb_item *));
 
 /* The structures a DBF table can have (completing the lengths of dates, logicals and memos), which text files share:
  * the DBF driver's check. */

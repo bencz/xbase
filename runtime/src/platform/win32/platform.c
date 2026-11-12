@@ -105,6 +105,15 @@ int xb_platform_path_separator(char c) { return c == '/' || c == '\\' || c == ':
 
 const char *xb_platform_eol(void) { return "\r\n"; }
 
+void xb_platform_with_registers(void (*fn)(void *), void *arg) {
+  CONTEXT registers; /* in this frame, which the scan from inside fn covers */
+  volatile int returned = 0;
+  RtlCaptureContext(&registers);
+  fn(arg);
+  returned = 1; /* a store after the call: fn(arg) is no tail call, which would free the frame first */
+  (void)returned;
+}
+
 /* The UTF-8 path as UTF-16 (malloc'ed), or NULL with the error code. */
 static wchar_t *wide_path(const char *path, int32_t *err) {
   int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);

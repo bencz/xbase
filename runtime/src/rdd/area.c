@@ -409,13 +409,13 @@ int xb_area_open_with(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *pa
   return area_open(ctx, n, rdd, path, NULL, 0, readonly, exclusive, text);
 }
 
-void xb_areas_mark(xb_ctx *ctx, int (*mark)(const xb_item *)) {
+void xb_areas_mark(xb_ctx *ctx, int (*mark)(xb_item *)) {
   for (uint32_t k = 0; k < ctx->areaCap; ++k)
     if (ctx->areas[k]) {
       mark(&ctx->areas[k]->filter);
       mark(&ctx->areas[k]->filter_text);
       mark(&ctx->areas[k]->locate);
-      const xb_order_conditions *c = &ctx->areas[k]->pending;
+      xb_order_conditions *c = &ctx->areas[k]->pending;
       mark(&c->cond);
       mark(&c->condText);
       mark(&c->whileBlock);

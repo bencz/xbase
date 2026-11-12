@@ -148,6 +148,7 @@ static int clone_item(clone_map *m, xb_item *it) {
 void xb_clone_deep(xb_item *ret, const xb_item *root) {
   clone_map m = {calloc(16, sizeof(clone_entry)), 15, 0, NULL, 0, 0};
   if (!m.slots) xb_gc_fatal("out of memory");
+  xb_gc_hold(); /* the map keeps the sources' and copies' addresses, which no collection may change meanwhile */
   *ret = *root;
   clone_item(&m, ret); /* every copy below hangs from `ret` once made */
   for (size_t next = 0; next < m.orderLen; ++next) {
@@ -163,6 +164,7 @@ void xb_clone_deep(xb_item *ret, const xb_item *root) {
         if (clone_item(&m, &a->items[i])) xb_gc_write_item(a, i);
     }
   }
+  xb_gc_release();
   free(m.slots);
   free(m.order);
 }

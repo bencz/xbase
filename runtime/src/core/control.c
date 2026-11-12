@@ -148,7 +148,7 @@ XB_NOINLINE static void move_current(xb_ctx *ctx, xb_ref *ref) {
   xb_set_nil(&value);
   xb_gc_root_push(ctx, &value);
   if (current(ctx, &value, &ref->coll)) {
-    ref->value = value; /* the reference is the loop's: alive, and objects do not move */
+    ref->value = value; /* the reference is the loop's: alive, and pinned while this frame holds it */
     xb_gc_write(ref);
   }
   xb_gc_root_pop(ctx, 1);

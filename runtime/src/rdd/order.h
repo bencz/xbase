@@ -110,6 +110,6 @@ int xb_order_record_key(xb_ctx *ctx, xb_area *a, xb_order *o, unsigned char *key
 void xb_order_key_value(const xb_order *o, const unsigned char *key, uint16_t dec, xb_item *r);
 
 /* Marks the order's items for the collector. */
-void xb_order_mark(xb_order *o, int (*mark)(const xb_item *));
+void xb_order_mark(xb_order *o, int (*mark)(xb_item *));
 
 #endif

@@ -38,7 +38,8 @@ struct Home {
 // follows it, or by `ret`, is computed in place. A Place home's address (a
 // cell, an element reached through a reference) stays valid only because
 // nothing between its computation and its use runs user code or grows an
-// array, and objects never move; a moving collector must revisit it. A value
+// array; the object it lies in does not move meanwhile, since the collector
+// pins what the machine stack and registers point into. A value
 // that never refers to a heap object (xir::TypeInfo) and is not computed in
 // place is Local: it takes no slot.
 class FramePlan {

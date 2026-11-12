@@ -27,7 +27,7 @@ void xb_gen_new(xb_ctx *ctx, xb_item *r, xb_func resume, uint32_t argc, const xb
   xb_array *frame = xb_array_alloc((uint64_t)argc + 1); /* slot 0, the enumerator itself, is the resume's argument */
   xb_set_array(&g->vars[GEN_FRAME], frame);
   xb_gc_write(g);
-  memcpy(frame->items + 1, argv, argc * sizeof *argv);
+  if (argc) memcpy(frame->items + 1, argv, argc * sizeof *argv);
   xb_gc_write_items(frame, 1, (size_t)argc + 1);
 }
 

@@ -1,7 +1,7 @@
-/* Tracing garbage collector: precise, non-moving, generational, with an Immix
- * heap layout.
+/* Tracing garbage collector: precise, generational, with an Immix heap layout;
+ * full collections move objects out of fragmented blocks (evacuation).
  *
- * Heap. Objects up to XB_GC_MEDIUM_MAX bytes (header included) live in blocks
+ * Heap. Objects up to XB_GC_SMALL_MAX bytes (header included) live in blocks
  * of XB_GC_BLOCK_SIZE bytes, aligned to their size, divided into lines of
  * XB_GC_LINE_SIZE bytes; the block's first lines hold its metadata: a mark per
  * line (the epoch of the last collection that reached an object there), a flag
@@ -10,8 +10,11 @@
  * free lines, with no lock; an object above one line that does not fit the
  * rest of the hole goes to an overflow run of the thread instead (holes large
  * enough for it, in recyclable or free blocks), so no hole is given up for it.
- * Larger objects are allocated individually and kept in a list. Blocks come
- * from chunks of XB_GC_CHUNK_BLOCKS blocks, aligned by hand.
+ * Larger objects, up to the largest size class, live in blocks of one size
+ * class each, whose slots are taken from a free list (a dead object's slot
+ * serves the next object of its class: holes of many lines would fragment);
+ * larger ones are allocated individually and kept in a list. Blocks come from
+ * chunks of XB_GC_CHUNK_BLOCKS blocks, aligned by hand.
  *
  * Objects. An 8-byte xb_gc_hdr precedes every object, so object pointers are
  * what the rest of the runtime and compiled code use (an xb_str* is still the
@@ -45,6 +48,23 @@
  * to clear their marks). Large objects are swept right away. Collections are
  * triggered by the bytes allocated since the last one.
  *
+ * Evacuation. Objects of up to several lines need holes of as many free
+ * lines, so dead objects spread over many blocks leave memory the heap cannot
+ * use (it would grow instead). A full collection defragments when it can: it
+ * picks the emptiest blocks of lines (at most half their lines live), as many
+ * as the free blocks and a reserve of new ones can take, and moves every
+ * object it reaches there into free blocks, its old place forwarding to the
+ * copy; every reference it sees is set to the copy (roots, fields, an array's
+ * own items, a hash's tables in its store, a codeblock's cells), and the
+ * blocks it emptied are free. When the heap is to grow while a quarter of it
+ * is free lines of blocks it may empty, such a full collection runs first.
+ * Objects in size classes' blocks, large ones and those too small for the
+ * copy's address never move. It runs on a thread whose stack start is known,
+ * and not while C code holds the collector (xb_gc_hold): it first scans that
+ * stack (registers saved on it) for words pointing into the objects it may
+ * move and pins those, the compiled code's frames aside (precise roots), and
+ * pins the objects the C roots' addresses lie in.
+ *
  * Threads. Global structures are protected by one lock; the allocation fast
  * path takes none. A collection must run with every mutator thread stopped at
  * a safepoint (the XB_PENDING_SAFEPOINT handshake); until tasks run on several
@@ -60,26 +80,34 @@
 #define XB_GC_BLOCK_SIZE ((size_t)32 << 10)
 #define XB_GC_LINE_SIZE ((size_t)128)
 #define XB_GC_LINES (XB_GC_BLOCK_SIZE / XB_GC_LINE_SIZE)
-#define XB_GC_MEDIUM_MAX ((size_t)8 << 10)       /* largest object in blocks, header included */
+#define XB_GC_SMALL_MAX (2 * XB_GC_LINE_SIZE)     /* largest object in lines, header included */
+#define XB_GC_CLASS_MIN_SLOTS 4u                  /* slots of the largest size class's block */
+#define XB_GC_CLASS_STEP 8u                       /* a class is at least 1/8 larger than the one before */
+#define XB_GC_CLASSES_MAX 64u
 #define XB_GC_CHUNK_BLOCKS 32u                    /* blocks obtained from the system at a time */
 /* Bytes allocated between young collections: they adapt to the survival
  * rate: they double while most young objects survive (collecting them early
  * only promotes them) and halve while few do. They never exceed the size of
  * the old generation, so memory stays proportional to the live data. */
-#define XB_GC_YOUNG_MIN ((size_t)8 << 20)
+#define XB_GC_YOUNG_MIN ((size_t)4 << 20)
 #define XB_GC_SURVIVAL_HIGH 2u                    /* survivors above 1/2 of the allocation */
 #define XB_GC_SURVIVAL_LOW 8u                     /* survivors below 1/8 */
 /* Aging turns off when the bytes promoted at a young collection exceed this
  * many times the aged bytes that died. */
 #define XB_GC_AGING_WASTE 4u
-#define XB_GC_MIN_FULL ((size_t)32 << 20)        /* old bytes that trigger the first full collection */
+#define XB_GC_MIN_FULL ((size_t)8 << 20)         /* old bytes that trigger the first full collection */
 #define XB_GC_ALIGN 8u
+#define XB_GC_DEFRAG_RESERVE 16u                 /* new blocks a defragmentation may take: the heap's blocks / this */
 
 /* The metadata at the start of a block (its first XB_GC_FIRST_LINE lines). */
 typedef struct xb_hblock {
   struct xb_hblock *next;            /* in the list of free or of recyclable blocks */
-  uint32_t freeLines;               /* after its last sweep */
+  uint32_t freeLines;               /* after its last sweep (none in a block of a size class) */
+  uint8_t cls;                      /* 0: lines; k + 1: the slots of size class k */
+  uint32_t used;                    /* a size class's: the slots taken */
+  xb_gc_hdr *freeSlot;              /* a size class's: the first free slot (each free slot links the next) */
   uint8_t young;                    /* received objects, or holds aged ones, since its last sweep */
+  uint8_t defrag;                   /* the full collection in progress moves its objects out (Evacuation above) */
   uint8_t lineMark[XB_GC_LINES];    /* the epoch of the last collection that reached an object in the line */
   uint8_t lineOld[XB_GC_LINES];     /* an old object covers the line */
   uint16_t starts[XB_GC_LINES];     /* bit k of a line: an object starts at its byte 8k */
@@ -87,6 +115,8 @@ typedef struct xb_hblock {
 #define XB_GC_FIRST_LINE ((sizeof(xb_hblock) + XB_GC_LINE_SIZE - 1) / XB_GC_LINE_SIZE)
 _Static_assert(XB_GC_LINE_SIZE / XB_GC_ALIGN == 16, "one start bit per 8 bytes of a line");
 _Static_assert(XB_GC_FIRST_LINE * 4 < XB_GC_LINES, "the metadata leaves most of a block");
+#define XB_GC_DATA_LINES (XB_GC_LINES - XB_GC_FIRST_LINE)          /* the lines of a block that hold objects */
+#define XB_GC_DATA_BYTES (XB_GC_DATA_LINES * XB_GC_LINE_SIZE)
 
 typedef struct xb_large {
   union {                   /* 8 bytes on every target, so the object stays 8-aligned */
@@ -95,6 +125,10 @@ typedef struct xb_large {
   } link;
   xb_gc_hdr hdr;            /* immediately followed by the object */
 } xb_large;
+
+typedef struct xb_range { /* a run of words a scan for pinned objects leaves out */
+  const char *start, *end;
+} xb_range;
 
 typedef struct xb_root {    /* items outside frames */
   struct xb_root *next;
@@ -109,6 +143,7 @@ typedef struct xb_tlh {     /* thread-local heap */
   /* The overflow run: objects above a line that do not fit the hole, in holes large enough for them. */
   char *overCursor, *overLimit;
   xb_hblock *overBlock;
+  xb_hblock *cls[XB_GC_CLASSES_MAX]; /* the block each size class takes slots from */
   size_t allocated;         /* bytes since it last reported to the global count */
 } xb_tlh;
 
@@ -120,6 +155,13 @@ static struct {
   xb_hblock *freeBlocks;            /* no live object */
   xb_hblock *recyclable;            /* free lines among live ones */
   char *chunkNext, *chunkEnd;      /* blocks of the last chunk not used yet */
+  char **chunks;                   /* the start of each chunk, in address order */
+  uint32_t classSize[XB_GC_CLASSES_MAX]; /* each size class's slot, header included */
+  unsigned classes;
+  uint8_t classOf[XB_GC_CLASSES_MAX * 64]; /* by (bytes - 1) / XB_GC_ALIGN above XB_GC_SMALL_MAX: the class */
+  size_t classMax;                 /* the largest object in a size class */
+  xb_hblock *classBlocks[XB_GC_CLASSES_MAX]; /* blocks of each class with free slots */
+  size_t chunkCount, chunkCap;
   uint8_t epoch;                   /* of the last collection, from 1 (lines start at 0, never current) */
   xb_large *large;
   xb_tlh *threads;
@@ -149,9 +191,20 @@ static struct {
   size_t finalizableLen, finalizableCap;
   xb_item *finalized;              /* found unreachable, kept alive (roots) until they are finalized, in order */
   size_t finalizedHead, finalizedLen, finalizedCap;
+  int evacuating;                  /* the collection in progress moves objects out of the blocks marked defrag */
+  xb_hblock **defrag;              /* those blocks */
+  size_t defragLen, defragCap;
+  size_t allocatedSinceFull;       /* bytes allocated since the last full collection */
+  unsigned holds;                  /* xb_gc_hold: none moves */
+  char *copyCursor, *copyLimit;    /* where the collection copies objects: free blocks */
+  xb_gc_hdr **pinned;              /* pinned by the collection in progress */
+  size_t pinnedLen, pinnedCap;
+  xb_range *frames;                /* the frames' slots on the stack being scanned, by address */
+  size_t framesLen, framesCap;
 } heap;
 
 static XB_THREAD_LOCAL xb_tlh *tlh;
+static XB_THREAD_LOCAL const char *stackBase; /* xb_gc_thread_stack */
 
 _Noreturn void xb_gc_fatal(const char *why) {
   fflush(stdout);
@@ -171,6 +224,22 @@ void xb_gc_init(void) {
   if (heap.ready) return;
   if (!xb_mutex_init(&heap.lock)) xb_gc_fatal("cannot create the heap lock");
   heap.epoch = 1; /* never 0, which a line that no collection marked has */
+  /* The size classes: each one the largest slot that as many slots fit a block's lines, the next at least an eighth
+   * larger, up to the class that fits XB_GC_CLASS_MIN_SLOTS slots. */
+  for (size_t want = XB_GC_SMALL_MAX + XB_GC_ALIGN; heap.classes < XB_GC_CLASSES_MAX;) {
+    size_t slots = XB_GC_DATA_BYTES / want;
+    if (slots < XB_GC_CLASS_MIN_SLOTS) break;
+    size_t size = (XB_GC_DATA_BYTES / slots) & ~(size_t)(XB_GC_ALIGN - 1);
+    heap.classSize[heap.classes++] = (uint32_t)size;
+    want = (size + size / XB_GC_CLASS_STEP + XB_GC_ALIGN - 1) & ~(size_t)(XB_GC_ALIGN - 1);
+  }
+  heap.classMax = heap.classSize[heap.classes - 1];
+  if ((heap.classMax - XB_GC_SMALL_MAX) / XB_GC_ALIGN > sizeof heap.classOf) xb_gc_fatal("size classes");
+  for (unsigned c = 0, k = 0; k < (heap.classMax - XB_GC_SMALL_MAX) / XB_GC_ALIGN; ++k) {
+    size_t bytes = XB_GC_SMALL_MAX + (k + 1) * XB_GC_ALIGN;
+    while (heap.classSize[c] < bytes) ++c;
+    heap.classOf[k] = (uint8_t)c;
+  }
   heap.fullThreshold = XB_GC_MIN_FULL;
   heap.youngBudget = XB_GC_YOUNG_MIN;
   heap.aging = 1;
@@ -210,15 +279,62 @@ static xb_hblock *block_of(const void *p) {
   return (xb_hblock *)((uintptr_t)p & ~(uintptr_t)(XB_GC_BLOCK_SIZE - 1));
 }
 static size_t line_of(const void *p) { return ((uintptr_t)p & (XB_GC_BLOCK_SIZE - 1)) / XB_GC_LINE_SIZE; }
+static char *block_data(xb_hblock *b) { return (char *)b + XB_GC_FIRST_LINE * XB_GC_LINE_SIZE; }
 
 /* Header and object, 8-byte aligned: what a block object takes. */
 static size_t object_total(size_t size) {
   return sizeof(xb_gc_hdr) + ((size + XB_GC_ALIGN - 1) & ~(size_t)(XB_GC_ALIGN - 1));
 }
 
+/* Where an object holds its header's link: the next free slot of a size class's block, or the copy of a moved object.
+ * Past a string's flags, which stay readable: a string's XB_STR_STATIC is tested before its header (a literal has
+ * none), also in a moved string's old place. */
+#define XB_GC_LINK_AT offsetof(xb_str, len)
+
+static xb_gc_hdr *link_of(const xb_gc_hdr *h) {
+  xb_gc_hdr *to;
+  memcpy(&to, (const char *)(h + 1) + XB_GC_LINK_AT, sizeof to);
+  return to;
+}
+static void set_link(xb_gc_hdr *h, xb_gc_hdr *to) { memcpy((char *)(h + 1) + XB_GC_LINK_AT, &to, sizeof to); }
+
 /* Whether nothing live covers line `l` of `b`: no old object, and no object
  * the last collection reached. */
 static int line_free(const xb_hblock *b, size_t l) { return !b->lineOld[l] && b->lineMark[l] != heap.epoch; }
+
+/* Keeps a chunk's start among the others, in address order. Under the lock. */
+static void add_chunk(char *start) {
+  if (heap.chunkCount == heap.chunkCap) {
+    size_t n = heap.chunkCap ? heap.chunkCap * 2 : 64;
+    char **list = realloc(heap.chunks, n * sizeof *list);
+    if (!list) out_of_memory();
+    heap.chunks = list;
+    heap.chunkCap = n;
+  }
+  size_t k = heap.chunkCount++;
+  for (; k > 0 && heap.chunks[k - 1] > start; --k) heap.chunks[k] = heap.chunks[k - 1];
+  heap.chunks[k] = start;
+}
+
+/* Whether a full collection may empty block `b` (Evacuation above): a block of lines, partly used, at most half of
+ * its lines live (as its last sweep found them). */
+static int defrag_candidate(const xb_hblock *b) {
+  return !b->cls && b->freeLines * 2 >= XB_GC_DATA_LINES && b->freeLines != XB_GC_DATA_LINES;
+}
+
+/* Whether the heap, which is to grow, is fragmented: a quarter of it free lines of blocks a full collection may empty,
+ * which objects of several lines may not fit, a young budget allocated since the last full collection (not to collect
+ * over and over), and this thread able to move objects. A full collection that defragments comes first then. Under
+ * the lock. */
+static int fragmented(void) {
+  if (heap.chunkNext != heap.chunkEnd || heap.allocatedSinceFull + heap.allocated < heap.youngBudget || heap.holds ||
+      !stackBase)
+    return 0;
+  size_t freeLines = 0;
+  for (size_t k = 0; k < heap.blockCount; ++k)
+    if (defrag_candidate(heap.blocks[k])) freeLines += heap.blocks[k]->freeLines;
+  return freeLines * XB_GC_LINE_SIZE * 4 > heap.blockCount * XB_GC_BLOCK_SIZE;
+}
 
 /* A block with every line free, from the free blocks or the current chunk (a
  * new chunk when it is used up). Under the lock. */
@@ -231,6 +347,7 @@ static xb_hblock *block_new(void) {
       char *raw = xmalloc(XB_GC_CHUNK_BLOCKS * XB_GC_BLOCK_SIZE + XB_GC_BLOCK_SIZE);
       heap.chunkNext = (char *)(((uintptr_t)raw + XB_GC_BLOCK_SIZE - 1) & ~(uintptr_t)(XB_GC_BLOCK_SIZE - 1));
       heap.chunkEnd = heap.chunkNext + XB_GC_CHUNK_BLOCKS * XB_GC_BLOCK_SIZE;
+      add_chunk(heap.chunkNext);
     }
     b = (xb_hblock *)heap.chunkNext;
     heap.chunkNext += XB_GC_BLOCK_SIZE;
@@ -304,6 +421,13 @@ static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
       xb_gc_collect_young(); /* retires every thread's holes */
       continue;
     }
+    xb_mutex_lock(&heap.lock);
+    int defrag = !heap.recyclable && !heap.freeBlocks && fragmented();
+    xb_mutex_unlock(&heap.lock);
+    if (defrag) { /* rather than growing the heap */
+      xb_gc_collect();
+      continue;
+    }
     /* Another block: a recyclable one first (a new one has a hole for any object); a recyclable block without a
      * hole large enough leaves the list until the next sweep. */
     xb_mutex_lock(&heap.lock);
@@ -315,6 +439,54 @@ static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
     } while (!take_hole(b, XB_GC_FIRST_LINE, total, cursor, limit));
     *block = b;
     xb_mutex_unlock(&heap.lock);
+  }
+}
+
+/* Makes a free block one of size class `c`: its slots, all free. Under the lock. */
+static void class_block_init(xb_hblock *b, unsigned c) {
+  size_t size = heap.classSize[c];
+  char *data = block_data(b);
+  size_t slots = XB_GC_DATA_BYTES / size;
+  b->cls = (uint8_t)(c + 1);
+  b->used = 0;
+  b->freeLines = 0;
+  b->freeSlot = NULL;
+  for (size_t i = slots; i-- > 0;) {
+    xb_gc_hdr *h = (xb_gc_hdr *)(data + i * size);
+    h->kind = 0; /* a free slot */
+    set_link(h, b->freeSlot);
+    b->freeSlot = h;
+  }
+}
+
+/* A slot of size class `c` for an object: from the thread's block of the class, else another block of it with free
+ * slots, else a free block made one; a young collection runs first when the allocation since the last one reached the
+ * budget. */
+static xb_gc_hdr *alloc_class(xb_tlh *t, unsigned c) {
+  for (;;) {
+    xb_hblock *b = t->cls[c];
+    if (b && b->freeSlot) {
+      xb_gc_hdr *h = b->freeSlot;
+      b->freeSlot = link_of(h);
+      ++b->used;
+      return h;
+    }
+    xb_mutex_lock(&heap.lock);
+    report_allocation(t);
+    int collect = heap.allocated >= heap.youngBudget;
+    if (!collect) {
+      b = heap.classBlocks[c];
+      if (b) {
+        heap.classBlocks[c] = b->next;
+      } else {
+        b = block_new();
+        class_block_init(b, c);
+      }
+      b->young = 1;
+      t->cls[c] = b;
+    }
+    xb_mutex_unlock(&heap.lock);
+    if (collect) xb_gc_collect_young(); /* retires every thread's blocks */
   }
 }
 
@@ -337,7 +509,7 @@ void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
   if (size > SIZE_MAX / 2) out_of_memory();
   size_t total = object_total(size);
   xb_gc_hdr *h;
-  if (total <= XB_GC_MEDIUM_MAX) {
+  if (total <= XB_GC_SMALL_MAX) {
     xb_tlh *t = thread_heap();
     if (total <= room(t->cursor, t->limit)) { /* the fast path: a bump in the hole */
       h = (xb_gc_hdr *)t->cursor;
@@ -347,6 +519,12 @@ void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
     }
     t->allocated += total;
     set_start(h);
+    h->flags = 0;
+  } else if (total <= heap.classMax) {
+    xb_tlh *t = thread_heap();
+    unsigned c = heap.classOf[(total - XB_GC_SMALL_MAX - 1) / XB_GC_ALIGN];
+    h = alloc_class(t, c);
+    t->allocated += heap.classSize[c];
     h->flags = 0;
   } else {
     h = alloc_large(size);
@@ -405,6 +583,7 @@ void xb_gc_root_pop(xb_ctx *ctx, unsigned n) { ctx->rootLen -= n; }
 static void mark_lines(const xb_gc_hdr *h, int old) {
   if (h->flags & XB_GC_HDR_LARGE) return;
   xb_hblock *b = block_of(h);
+  if (b->cls) return; /* a size class's block keeps no line marks: its slots are swept */
   size_t last = line_of((const char *)h + object_total(h->size) - 1);
   for (size_t l = line_of(h); l <= last; ++l) {
     b->lineMark[l] = heap.epoch;
@@ -437,6 +616,134 @@ static int mark_ref(xb_gc_hdr *h) {
   push(h);
   return !(h->state & (XB_GC_MARKED | XB_GC_AGED));
 }
+
+/* The object a word points into (its header, or anywhere in it, or just past it) in a block the collection in progress
+ * empties, NULL for none: the chunks hold the blocks in use, and the start bits where objects start (also dead ones,
+ * which pinning keeps in place to no harm). Only there: a free block also keeps dead objects' start bits, and receives
+ * the copies, over which a pin would write. */
+static xb_gc_hdr *object_at(uintptr_t w) {
+  if (!(w & (XB_GC_BLOCK_SIZE - 1))) --w; /* a block starts with its metadata: just past the last object before */
+  size_t lo = 0, hi = heap.chunkCount;
+  while (lo < hi) { /* the last chunk starting at or before the word */
+    size_t mid = (lo + hi) / 2;
+    if ((uintptr_t)heap.chunks[mid] <= w) lo = mid + 1;
+    else hi = mid;
+  }
+  if (!lo) return NULL;
+  uintptr_t chunk = (uintptr_t)heap.chunks[lo - 1];
+  if (w >= chunk + XB_GC_CHUNK_BLOCKS * XB_GC_BLOCK_SIZE) return NULL;
+  if (chunk == (uintptr_t)heap.chunkEnd - XB_GC_CHUNK_BLOCKS * XB_GC_BLOCK_SIZE && w >= (uintptr_t)heap.chunkNext)
+    return NULL; /* blocks of the last chunk not used yet */
+  const xb_hblock *b = block_of((const void *)w);
+  size_t l = line_of((const void *)w);
+  if (!b->defrag || l < XB_GC_FIRST_LINE) return NULL;
+  /* The start at or before the word: in its line, then in the lines before, as far as an object reaches. */
+  unsigned bit = (unsigned)((w & (XB_GC_LINE_SIZE - 1)) / XB_GC_ALIGN);
+  uint32_t bits = b->starts[l] & ((2u << bit) - 1);
+  for (size_t back = 0; !bits; bits = b->starts[l]) {
+    if (l == XB_GC_FIRST_LINE || ++back > XB_GC_SMALL_MAX / XB_GC_LINE_SIZE) return NULL;
+    --l;
+  }
+  unsigned k8 = 31u;
+  while (!((bits >> k8) & 1u)) --k8;
+  xb_gc_hdr *h = (xb_gc_hdr *)((char *)b + l * XB_GC_LINE_SIZE + k8 * XB_GC_ALIGN);
+  return w <= (uintptr_t)h + object_total(h->size) ? h : NULL;
+}
+
+/* Pins the object a word points into that this collection could move, if any: it stays. */
+static void pin(uintptr_t w) {
+  xb_gc_hdr *h = object_at(w);
+  if (!h || (h->flags & XB_GC_HDR_PINNED)) return;
+  h->flags |= XB_GC_HDR_PINNED;
+  stack_push(&heap.pinned, &heap.pinnedLen, &heap.pinnedCap, h);
+}
+
+static int range_order(const void *a, const void *b) {
+  const char *x = ((const xb_range *)a)->start, *y = ((const xb_range *)b)->start;
+  return x < y ? -1 : x > y;
+}
+
+/* Pins what the words of this thread's stack point to, from here to its start, the slots of the compiled code's
+ * frames on it left out (they are roots the collection updates); called with the registers saved on the stack. */
+static void pin_stack(void *unused) {
+  XB_UNUSED(unused);
+  const char *here = (const char *)&unused;
+  heap.framesLen = 0;
+  for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
+    for (const xb_frame *f = ctx->frames; f; f = f->prev) {
+      const char *start = (const char *)f->slots, *end = (const char *)(f->slots + f->nslots);
+      if (start >= stackBase || end <= here) continue; /* not on this stack */
+      if (heap.framesLen == heap.framesCap) {
+        size_t n = heap.framesCap ? heap.framesCap * 2 : 256;
+        xb_range *list = realloc(heap.frames, n * sizeof *list);
+        if (!list) out_of_memory();
+        heap.frames = list;
+        heap.framesCap = n;
+      }
+      heap.frames[heap.framesLen++] = (xb_range){start, end};
+    }
+  if (heap.framesLen) qsort(heap.frames, heap.framesLen, sizeof *heap.frames, range_order);
+  const char *p = (const char *)(((uintptr_t)here + sizeof(void *) - 1) & ~(uintptr_t)(sizeof(void *) - 1));
+  size_t next = 0;
+  while (p + sizeof(void *) <= stackBase) {
+    while (next < heap.framesLen && heap.frames[next].end <= p) ++next;
+    if (next < heap.framesLen && heap.frames[next].start <= p) {
+      p = heap.frames[next].end; /* slots are aligned items: the word after them is aligned too */
+      continue;
+    }
+    uintptr_t w;
+    memcpy(&w, p, sizeof w);
+    pin(w);
+    p += sizeof(void *);
+  }
+}
+
+/* Where an object is now: its copy when this collection moved it. */
+static xb_gc_hdr *forwarded(xb_gc_hdr *h) {
+  return h->flags & XB_GC_HDR_MOVED ? link_of(h) : h;
+}
+
+/* Moves an object of a block the collection empties, reached for the first time, into the copy space (free blocks),
+ * its old place forwarding to the copy: the copy, or NULL when it stays (in another block, pinned, large, reached
+ * already, too small to hold the forwarding address). An array whose items are its own gets them at the copy. */
+static xb_gc_hdr *evacuate(xb_gc_hdr *h) {
+  if (!heap.evacuating || (h->flags & (XB_GC_HDR_LARGE | XB_GC_HDR_PINNED)) ||
+      (h->state & (XB_GC_MARKED | XB_GC_SEEN)) || h->size < XB_GC_LINK_AT + sizeof(xb_gc_hdr *) ||
+      !block_of(h)->defrag)
+    return NULL;
+  size_t total = object_total(h->size);
+  if (total > room(heap.copyCursor, heap.copyLimit)) {
+    xb_hblock *b = block_new();
+    memset(b->starts, 0, sizeof b->starts);
+    heap.copyCursor = block_data(b);
+    heap.copyLimit = (char *)b + XB_GC_BLOCK_SIZE;
+  }
+  xb_gc_hdr *to = (xb_gc_hdr *)heap.copyCursor;
+  heap.copyCursor += total;
+  memcpy(to, h, total);
+  set_start(to);
+  if (h->kind == XB_GC_ARRAY) {
+    const xb_array *from = (const xb_array *)(h + 1);
+    xb_array *a = (xb_array *)(to + 1);
+    if (from->items == from->inline_items) a->items = a->inline_items;
+  }
+  h->flags |= XB_GC_HDR_MOVED;
+  set_link(h, to);
+  return to;
+}
+
+/* Marks the object a reference points to, moving it first when it can: where it is now. `young` gets whether it stays
+ * young (see mark_ref). */
+static xb_gc_hdr *reach(xb_gc_hdr *h, int *young) {
+  h = forwarded(h);
+  xb_gc_hdr *to = evacuate(h);
+  if (to) h = to;
+  *young |= mark_ref(h);
+  return h;
+}
+
+/* A pointer to an object, set to where the object is now. */
+#define REACH(ptr, young) ((ptr) = (void *)(reach(xb_gc_header(ptr), (young)) + 1))
 
 /* Puts an old object in the remembered set (once), to be traced whole
  * (XB_GC_REMEMBERED) or for its dirty cards (XB_GC_CARDED). Under the lock. */
@@ -476,18 +783,21 @@ void xb_gc_write_items(xb_array *a, size_t from, size_t to) {
     xb_gc_write_item(a, k);
 }
 
-/* Marks what an item refers to; true when that stays young (see mark_ref). */
-static int mark_item(const xb_item *it) {
+/* Marks what an item refers to, the item set to where it is now; true when that stays young (see mark_ref). */
+static int mark_item(xb_item *it) {
+  int young = 0;
   switch ((xb_type)it->type) {
     case XB_T_STRING:
-      return !(it->v.s->flags & XB_STR_STATIC) && mark_ref(xb_gc_header(it->v.s));
+      if (!(it->v.s->flags & XB_STR_STATIC)) REACH(it->v.s, &young);
+      return young;
     case XB_T_ARRAY:
     case XB_T_BLOCK:
     case XB_T_CELL:
     case XB_T_REF:
     case XB_T_OBJECT:
     case XB_T_HASH:
-      return mark_ref(xb_gc_header(it->v.p));
+      REACH(it->v.p, &young);
+      return young;
     default:
       return 0;
   }
@@ -496,7 +806,7 @@ static int mark_item(const xb_item *it) {
 /* The items under the dirty cards of an old array, eight cards per step. A
  * card whose items still refer to young objects stays dirty; returns whether
  * any did. */
-static int trace_cards(const xb_array *a) {
+static int trace_cards(xb_array *a) {
   uint8_t *cards = xb_array_cards(a);
   size_t n = xb_array_card_count(a->cap);
   int young = 0;
@@ -522,36 +832,46 @@ static int trace_cards(const xb_array *a) {
   return young;
 }
 
-/* Marks what an object refers to; returns whether some of it stays young. */
-static int trace(const xb_gc_hdr *h) {
-  const void *obj = h + 1;
+/* Marks what an object refers to, its references set to where the objects are now; returns whether some of it
+ * stays young. */
+static int trace(xb_gc_hdr *h) {
+  void *obj = h + 1;
   int young = 0;
   switch ((xb_gc_kind)h->kind) {
     case XB_GC_ARRAY: {
-      const xb_array *a = obj;
-      if (a->items != a->inline_items) young |= mark_ref(xb_gc_header(a->items));
+      xb_array *a = obj;
+      if (a->items != a->inline_items) REACH(a->items, &young);
       for (size_t i = 0; i < a->len; ++i) young |= mark_item(&a->items[i]);
       uint8_t *cards = xb_array_cards(a); /* everything was scanned */
       if (cards) memset(cards, 0, xb_array_card_count(a->cap));
       break;
     }
     case XB_GC_BLOCK: {
-      const xb_block *b = obj;
+      xb_block *b = obj;
       for (uint32_t i = 0; i < b->ncells; ++i)
-        if (b->cells[i]) young |= mark_ref(xb_gc_header(b->cells[i])); /* NULL until the creator fills it */
+        if (b->cells[i]) REACH(b->cells[i], &young); /* NULL until the creator fills it */
       break;
     }
     case XB_GC_CELL:
-      young = mark_item(&((const xb_cell *)obj)->value);
+      young = mark_item(&((xb_cell *)obj)->value);
       break;
     case XB_GC_REF:
-      young = mark_item(&((const xb_ref *)obj)->coll);
-      young |= mark_item(&((const xb_ref *)obj)->value);
-      young |= mark_item(&((const xb_ref *)obj)->key);
+      young = mark_item(&((xb_ref *)obj)->coll);
+      young |= mark_item(&((xb_ref *)obj)->value);
+      young |= mark_item(&((xb_ref *)obj)->key);
       break;
     case XB_GC_HASH: {
-      const xb_hash *hs = obj;
-      if (hs->entries) young |= mark_ref(xb_gc_header(hs->entries));
+      xb_hash *hs = obj;
+      if (hs->entries) { /* the tables live in the entries' store: they move with it */
+        char *before = (char *)hs->entries;
+        REACH(hs->entries, &young);
+        ptrdiff_t moved = (char *)hs->entries - before;
+        if (moved) {
+          hs->hashes = (uint32_t *)((char *)hs->hashes + moved);
+          hs->index = (uint32_t *)((char *)hs->index + moved);
+          if (hs->tree) hs->tree = (uint32_t *)((char *)hs->tree + moved);
+        }
+      }
       for (uint32_t i = 0; i < hs->used; ++i) {
         young |= mark_item(&hs->entries[i].key);
         young |= mark_item(&hs->entries[i].value);
@@ -559,7 +879,7 @@ static int trace(const xb_gc_hdr *h) {
       break;
     }
     case XB_GC_OBJECT: {
-      const xb_object *o = obj;
+      xb_object *o = obj;
       for (uint32_t i = 0; i < o->nvars; ++i) young |= mark_item(&o->vars[i]);
       break;
     }
@@ -634,7 +954,7 @@ static void settle_young(void) {
 
 static void mark_roots(void) {
   for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) {
-    for (const xb_frame *f = ctx->frames; f; f = f->prev)
+    for (xb_frame *f = ctx->frames; f; f = f->prev)
       for (uint32_t i = 0; i < f->nslots; ++i) mark_item(&f->slots[i]);
     for (unsigned i = 0; i < ctx->rootLen; ++i) mark_item(ctx->roots[i]);
     mark_item(&ctx->error_block);
@@ -656,7 +976,7 @@ static void mark_roots(void) {
 static void find_finalized(void) {
   size_t kept = 0;
   for (size_t i = 0; i < heap.finalizableLen; ++i) {
-    xb_gc_hdr *h = heap.finalizable[i];
+    xb_gc_hdr *h = forwarded(heap.finalizable[i]);
     if (h->state & (XB_GC_SEEN | XB_GC_MARKED)) {
       heap.finalizable[kept++] = h;
       continue;
@@ -689,6 +1009,11 @@ static void find_finalized(void) {
 static void unmark_all(void) {
   for (size_t k = 0; k < heap.blockCount; ++k) {
     xb_hblock *b = heap.blocks[k];
+    if (b->cls) {
+      size_t size = heap.classSize[b->cls - 1];
+      for (char *p = block_data(b); p + size <= (char *)b + XB_GC_BLOCK_SIZE; p += size) ((xb_gc_hdr *)p)->state = 0;
+      continue;
+    }
     memset(b->lineOld, 0, sizeof b->lineOld); /* the marks of lines go stale with the next epoch */
     for (size_t l = XB_GC_FIRST_LINE; l < XB_GC_LINES; ++l)
       for (uint32_t bits = b->starts[l]; bits; bits &= bits - 1) {
@@ -702,6 +1027,46 @@ static void unmark_all(void) {
   heap.agedLen = 0;
 }
 
+/* A size class's block after a collection (all of them after a full one, else those holding young objects): its dead
+ * objects' slots free, and the block in its class's list while some are; with none taken, it becomes a free block of
+ * lines again (0 is returned: it is swept as such). */
+static int sweep_class(xb_hblock *b, int full) {
+  unsigned c = b->cls - 1u;
+  size_t size = heap.classSize[c];
+  char *data = block_data(b);
+  size_t slots = XB_GC_DATA_BYTES / size;
+  if (full || b->young) {
+    b->freeSlot = NULL;
+    b->used = 0;
+    b->young = 0;
+    for (size_t i = slots; i-- > 0;) {
+      xb_gc_hdr *h = (xb_gc_hdr *)(data + i * size);
+      if (h->kind && (h->state & (XB_GC_MARKED | XB_GC_AGED))) { /* live: old, or aged young */
+        ++b->used;
+        b->young |= (uint8_t)((h->state & XB_GC_AGED) != 0);
+        continue;
+      }
+      h->kind = 0;
+      set_link(h, b->freeSlot);
+      b->freeSlot = h;
+    }
+  }
+  if (!b->used) { /* free: lines again, none marked */
+    b->cls = 0;
+    memset(b->lineMark, 0, sizeof b->lineMark);
+    memset(b->lineOld, 0, sizeof b->lineOld);
+    memset(b->starts, 0, sizeof b->starts);
+    b->freeLines = (uint32_t)XB_GC_DATA_LINES;
+    b->young = 0;
+    return 0;
+  }
+  if (b->used < slots) {
+    b->next = heap.classBlocks[c];
+    heap.classBlocks[c] = b;
+  }
+  return 1;
+}
+
 /* After a collection: the free lines of the blocks that may have changed (all
  * of them after a full collection; else those that received objects or hold
  * aged ones), and the lists of free and recyclable blocks. A block keeps being
@@ -709,9 +1074,11 @@ static void unmark_all(void) {
 static void sweep_blocks(int full) {
   heap.freeBlocks = NULL;
   heap.recyclable = NULL;
-  const uint32_t lines = (uint32_t)(XB_GC_LINES - XB_GC_FIRST_LINE);
+  memset(heap.classBlocks, 0, sizeof heap.classBlocks);
+  const uint32_t lines = (uint32_t)XB_GC_DATA_LINES;
   for (size_t k = heap.blockCount; k-- > 0;) {
     xb_hblock *b = heap.blocks[k];
+    if (b->cls && sweep_class(b, full)) continue; /* a size class's block with live objects */
     if (full || b->young) {
       uint32_t freeLines = 0;
       uint8_t aged = 0;
@@ -741,24 +1108,66 @@ static void next_epoch(void) {
   }
 }
 
+static int fewer_live(const void *a, const void *b) {
+  uint32_t x = (*(xb_hblock *const *)a)->freeLines, y = (*(xb_hblock *const *)b)->freeLines;
+  return x > y ? -1 : x < y; /* more free lines first */
+}
+
+/* The blocks the full collection in progress empties: the emptiest of those partly used (at most half their lines
+ * live), as long as the free blocks and a reserve of new ones (a sixteenth of the heap, which the emptied blocks give
+ * back) can take what lives there. True when there are some. */
+static int pick_defrag(void) {
+  const uint32_t lines = (uint32_t)XB_GC_DATA_LINES;
+  size_t space = heap.blockCount / XB_GC_DEFRAG_RESERVE * lines;
+  for (const xb_hblock *b = heap.freeBlocks; b; b = b->next) space += lines;
+  heap.defragLen = 0;
+  for (size_t i = 0; i < heap.blockCount; ++i) { /* the lists lose blocks allocation found no hole in: all of them */
+    xb_hblock *b = heap.blocks[i];
+    if (!defrag_candidate(b)) continue;
+    if (heap.defragLen == heap.defragCap) {
+      size_t n = heap.defragCap ? heap.defragCap * 2 : 256;
+      xb_hblock **list = realloc(heap.defrag, n * sizeof *list);
+      if (!list) out_of_memory();
+      heap.defrag = list;
+      heap.defragCap = n;
+    }
+    heap.defrag[heap.defragLen++] = b;
+  }
+  if (heap.defragLen) qsort(heap.defrag, heap.defragLen, sizeof *heap.defrag, fewer_live);
+  size_t k = 0;
+  for (; k < heap.defragLen && lines - heap.defrag[k]->freeLines <= space; ++k) {
+    space -= lines - heap.defrag[k]->freeLines;
+    heap.defrag[k]->defrag = 1;
+  }
+  heap.defragLen = k;
+  return k > 0;
+}
+
 static void collect(int full) {
   xb_mutex_lock(&heap.lock);
   for (xb_tlh *t = heap.threads; t; t = t->next) { /* the threads' holes end: blocks are swept anew */
     report_allocation(t);
     t->cursor = t->limit = t->overCursor = t->overLimit = NULL;
     t->block = t->overBlock = NULL;
+    memset(t->cls, 0, sizeof t->cls);
   }
   heap.full = full;
   if (full) unmark_all();
   next_epoch();
   heap.markedBytes = 0;
   heap.markedObjects = 0;
+  heap.evacuating = full && !heap.holds && stackBase && pick_defrag();
+  if (heap.evacuating) { /* pins first: what the stack points to, and the objects C roots sit in */
+    xb_platform_with_registers(pin_stack, NULL);
+    for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
+      for (unsigned i = 0; i < ctx->rootLen; ++i) pin((uintptr_t)ctx->roots[i]);
+  }
   mark_roots();
   for (size_t i = 0; i < heap.rememberedLen; ++i) {
     xb_gc_hdr *h = heap.remembered[i];
     uint8_t how = h->state & (XB_GC_REMEMBERED | XB_GC_CARDED);
     h->state = XB_GC_MARKED;
-    int young = (how & XB_GC_REMEMBERED) ? trace(h) : trace_cards((const xb_array *)(h + 1));
+    int young = (how & XB_GC_REMEMBERED) ? trace(h) : trace_cards((xb_array *)(h + 1));
     if (young) retain(h, (how & XB_GC_REMEMBERED) ? XB_GC_REMEMBERED : XB_GC_CARDED);
   }
   heap.rememberedLen = 0;
@@ -768,6 +1177,12 @@ static void collect(int full) {
     while (heap.stackLen) trace_queued(heap.stack[--heap.stackLen]);
   }
   if (!full) settle_young();
+  for (size_t i = 0; i < heap.pinnedLen; ++i) heap.pinned[i]->flags &= (uint16_t)~XB_GC_HDR_PINNED;
+  heap.pinnedLen = 0;
+  for (size_t i = 0; i < heap.defragLen; ++i) heap.defrag[i]->defrag = 0;
+  heap.defragLen = 0;
+  heap.evacuating = 0;
+  heap.copyCursor = heap.copyLimit = NULL; /* the rest of the copy space's block is free lines */
 
   for (xb_large **pl = &heap.large; *pl;) {
     xb_large *l = *pl;
@@ -790,12 +1205,27 @@ static void collect(int full) {
   }
   if (heap.youngBudget > heap.oldBytes) heap.youngBudget = heap.oldBytes;
   if (heap.youngBudget < XB_GC_YOUNG_MIN) heap.youngBudget = XB_GC_YOUNG_MIN;
+  heap.allocatedSinceFull = full ? 0 : heap.allocatedSinceFull + heap.allocated;
   heap.allocated = 0;
   int fullNext = heap.oldBytes >= heap.fullThreshold;
   if (heap.finalizedLen > heap.finalizedHead)
     for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) ctx->pending |= XB_PENDING_FINALIZE;
   xb_mutex_unlock(&heap.lock);
   if (!full && fullNext) collect(1);
+}
+
+void xb_gc_thread_stack(const void *base) { stackBase = base; }
+
+void xb_gc_hold(void) {
+  xb_mutex_lock(&heap.lock);
+  ++heap.holds;
+  xb_mutex_unlock(&heap.lock);
+}
+
+void xb_gc_release(void) {
+  xb_mutex_lock(&heap.lock);
+  --heap.holds;
+  xb_mutex_unlock(&heap.lock);
 }
 
 void xb_gc_collect(void) { collect(1); }
