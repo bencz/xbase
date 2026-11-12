@@ -110,6 +110,9 @@ ends in any way (`QUIT`, an unrecoverable error, a fatal error, a signal that en
 1. The model, the Stream and Dump drivers, and the screen functions and commands (`@ SAY`, `@ CLEAR`, `CLS`,
    `@ BOX`, `@ TO`, `?` on the screen), with `SetColor` and colors; `box.ch`.
 2. Events: `Inkey`, `NextKey`, `LastKey`, `KEYBOARD`, `SET KEY`, `SET TYPEAHEAD`, `inkey.ch`, event masks, resize.
+   The console's redirections: `SET CONSOLE`, `SET ALTERNATE TO <file> [ADDITIVE]` and `SET ALTERNATE ON|OFF`,
+   `SET PRINTER TO` and `ON|OFF`, `SET DEVICE`; with them the database commands that print through them, `LIST` and
+   `DISPLAY` ([rdd.md](rdd.md#order-of-the-work), step 6: the rest of it is done), and `TYPE`.
 3. The VT driver and its pty tests.
 4. The Console driver.
 5. `Alert`, `AChoice`, `MemoEdit`, `GET`/`READ`, `TBrowse`, `dbEdit`, menus, in xBase.

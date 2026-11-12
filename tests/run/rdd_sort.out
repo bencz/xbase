@@ -1,0 +1,41 @@
+
+on name: NAME AMT QTY D L |,    0.00,   0,  /  /,F,|Alpha,   -1.25,  10,12/31/23,F,|Beta,    3.50,   2,01/01/99,T,|_x,    0.00,   7,  /  /,F,|ab,12345.67,9999,01/05/24,T,|alpha, 1000.00,  -3,01/05/24,T,|alpha,   -1.25,  10,12/31/23,F,|beta,    3.50,   2,01/05/24,T,          1
+name/D: NAME AMT QTY D L |beta,    3.50,   2,01/05/24,T,|alpha, 1000.00,  -3,01/05/24,T,|alpha,   -1.25,  10,12/31/23,F,|ab,12345.67,9999,01/05/24,T,|_x,    0.00,   7,  /  /,F,|Beta,    3.50,   2,01/01/99,T,|Alpha,   -1.25,  10,12/31/23,F,|,    0.00,   0,  /  /,F,          7
+name/C: NAME AMT QTY D L |,    0.00,   0,  /  /,F,|ab,12345.67,9999,01/05/24,T,|Alpha,   -1.25,  10,12/31/23,F,|alpha, 1000.00,  -3,01/05/24,T,|alpha,   -1.25,  10,12/31/23,F,|beta,    3.50,   2,01/05/24,T,|Beta,    3.50,   2,01/01/99,T,|_x,    0.00,   7,  /  /,F,
+name/DC: NAME AMT QTY D L |_x,    0.00,   7,  /  /,F,|beta,    3.50,   2,01/05/24,T,|Beta,    3.50,   2,01/01/99,T,|Alpha,   -1.25,  10,12/31/23,F,|alpha, 1000.00,  -3,01/05/24,T,|alpha,   -1.25,  10,12/31/23,F,|ab,12345.67,9999,01/05/24,T,|,    0.00,   0,  /  /,F,
+amt: NAME AMT QTY D L |Alpha,   -1.25,  10,12/31/23,F,|alpha,   -1.25,  10,12/31/23,F,|_x,    0.00,   7,  /  /,F,|,    0.00,   0,  /  /,F,|beta,    3.50,   2,01/05/24,T,|Beta,    3.50,   2,01/01/99,T,|alpha, 1000.00,  -3,01/05/24,T,|ab,12345.67,9999,01/05/24,T,
+l, d/d, name: NAME AMT QTY D L |Alpha,   -1.25,  10,12/31/23,F,|alpha,   -1.25,  10,12/31/23,F,|,    0.00,   0,  /  /,F,|_x,    0.00,   7,  /  /,F,|ab,12345.67,9999,01/05/24,T,|alpha, 1000.00,  -3,01/05/24,T,|beta,    3.50,   2,01/05/24,T,|Beta,    3.50,   2,01/01/99,T,
+qty/AD for: NAME AMT QTY D L |ab,12345.67,9999,01/05/24,T,|Alpha,   -1.25,  10,12/31/23,F,|alpha,   -1.25,  10,12/31/23,F,|_x,    0.00,   7,  /  /,F,|beta,    3.50,   2,01/05/24,T,|Beta,    3.50,   2,01/01/99,T,          5
+qty/DA: NAME AMT QTY D L |alpha, 1000.00,  -3,01/05/24,T,|,    0.00,   0,  /  /,F,|beta,    3.50,   2,01/05/24,T,|Beta,    3.50,   2,01/01/99,T,|_x,    0.00,   7,  /  /,F,|Alpha,   -1.25,  10,12/31/23,F,|alpha,   -1.25,  10,12/31/23,F,|ab,12345.67,9999,01/05/24,T,
+next 3: NAME AMT QTY D L |Alpha,   -1.25,  10,12/31/23,F,|Beta,    3.50,   2,01/01/99,T,|_x,    0.00,   7,  /  /,F,          4
+no key: NAME AMT QTY D L |beta,    3.50,   2,01/05/24,T,|Alpha,   -1.25,  10,12/31/23,F,|alpha, 1000.00,  -3,01/05/24,T,|_x,    0.00,   7,  /  /,F,|Beta,    3.50,   2,01/01/99,T,|alpha,   -1.25,  10,12/31/23,F,|,    0.00,   0,  /  /,F,|ab,12345.67,9999,01/05/24,T,          9 .T.
+none: NAME AMT QTY D L  .T.
+total: NAME AMT QTY SM D L |aa,   3.75,   3,  1,01/01/24,T,|bb,   0.00,   3,  1,  /  /,F,|aa,  10.00,   4,  2,01/04/24,T,|*cc,  -0.99,  11,  1,01/05/24,F,|dd,   7.00,   7,  5,01/07/24,F, .T.
+total sm for: NAME AMT QTY SM D L |bb,   0.00,   3,  1,  /  /,F,|aa,  10.00,   4,  2,01/04/24,T,|*cc,  -1.00,   5,  3,01/05/24,F,|dd,   7.00,   7,  5,01/07/24,F,
+total while: NAME AMT QTY SM D L |aa,   1.50,   3,  1,01/01/24,T,|bb,   0.00,   3,  1,  /  /,F,|aa,  10.00,   4,  2,01/04/24,T,          5
+total one run: NAME AMT QTY SM D L |aa,   1.50,  28,  1,01/01/24,T,
+total of the first letter: NAME AMT QTY SM D L |aa,   1.50,   3,600,01/01/24,T,|bb,   0.00,   3,  1,  /  /,F,
+update:          5 .T. NAME AMT QTY |aa,  101,  1,|bb,  205,  2,|bb,  300,  0,|cc,  400,  0,|ee,  505,  1,
+update random: NAME AMT QTY |aa,  108,  1,|bb,  210,  2,|bb,  300,  0,|cc,  400,  0,|ee,  510,  1,
+join: NAME CODE QTY |aa,x1,10,|aa,x3,30,|cc,x2,20, .T. .T. MST
+join all: NAME AMT |aa,    1,|aa,    1,|aa,    1,|bb,    2,|bb,    2,|bb,    2,|cc,    3,|cc,    3,|cc,    3,
+total next 3: NAME QTY |aa,   3,|bb,   3,          3
+total record 3: NAME QTY |bb,   3,          3
+total of a character field: DBCMD       1015 .F.
+total field->: NAME QTY |aa,   3,|bb,   3,|aa,   4,|cc,  11,|dd,   7,
+sort memo, for as text: NAME QTY NOTE |dd,   7,nnnnnnn,|cc,   6,nnnnnn,|cc,   5,nnnnn,|aa,   4,nnnn,
+ERR DBFNTX         20       1004
+sort onto itself: .F. .T. RDD_SORT_T          7
+ERR DBFNTX         20       1004
+total onto itself: .F. .T.          7
+ERR DBFNTX         20       1004
+join onto itself: .F. RDD_SORT_T          1
+join of the other's name: QTY CODE NAME |   1,x1,dd,|   2,x1,dd,
+join of a name twice: NAME CODE |aa,x1,|aa,x1,
+sums after a memo: NAME QTY BIG |aa,   3,100000000000000001,|bb,   7,                -5,
+ERR DBFNTX         34       1021 Data width error QTY
+a sum too wide: NAME QTY BIG |aa,   3,100000000000000001,|bb,   0,                -5,
+18 digits: NOTE NAME MEMO2 QTY BIG |n,bb,,9000,                -5,|n,bb,,9000,                 7,|n,aa,,   2,100000000000000000,|n,aa,,   1,100000000000000001,
+a block closes the new file: .T. RDD_SORT_H
+the keys changed meanwhile: NOTE NAME MEMO2 QTY BIG |n,aa,,   1,100000000000000001,|n,aa,,   2,100000000000000000,|n,bb,,9000,                -5,|n,bb,,9000,                 7,
+update from no alias: BASE       1002 .T. RDD_SORT_T

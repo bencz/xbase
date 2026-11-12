@@ -291,11 +291,17 @@ EXTERN FUNCTION __dbCopyXStruct( cFile ) NATIVE
 EXTERN FUNCTION __dbCreate( cFile, [cFrom], [cDriver], [lNew], [cAlias] ) NATIVE
 EXTERN FUNCTION __dbDelim( lExport, cFile, [xDelimiter], [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], ;
    [cCodePage] ) NATIVE
+EXTERN FUNCTION __dbJoin( cAlias, cFile, [aFields], [bFor], [cDriver] ) NATIVE
 EXTERN FUNCTION __dbLocate( [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
 EXTERN FUNCTION __dbPack() NATIVE
 EXTERN FUNCTION __dbSDF( lExport, cFile, [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cCodePage] ) NATIVE
+EXTERN FUNCTION __dbSort( cFile, [aKeys], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cDriver] ) NATIVE
+EXTERN FUNCTION __dbSortTo( cFile, [cDriver], [aKeys], [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
+EXTERN FUNCTION __dbTotal( cFile, [xKey], [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cDriver] ) NATIVE
+EXTERN FUNCTION __dbTotalTo( cFile, [cDriver], [bKey], [aSums], [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
 EXTERN FUNCTION __dbTrans( nTarget, aFields, [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
 EXTERN FUNCTION __dbTransOpen( cFile, [cDriver], [lCreate], [aStruct], [xDelimiter] ) NATIVE
+EXTERN FUNCTION __dbUpdate( cAlias, bKey, [lRandom], [bReplace] ) NATIVE
 EXTERN FUNCTION __dbUsed( cOperation ) NATIVE
 EXTERN FUNCTION __dbZap() NATIVE
 

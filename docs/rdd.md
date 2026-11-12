@@ -303,18 +303,20 @@ functions only so that `REQUEST DBFCDX` links as in Clipper programs.
 
 *(Planned)*: `SET DB ENGINE TO <name>` (xbase's own command, over `RddSetDefault()`); later, as libraries in `libs/`,
 SQL engines (SQLite, PostgreSQL), among them an SQLite driver that behaves as `DBF` does (the row id as `RecNo()`,
-navigation in the order of an index, `Deleted()` a column). The language's other commands come with them: `SORT`,
-`TOTAL`, `UPDATE`, `JOIN`, `LIST`, `DISPLAY`.
+navigation in the order of an index, `Deleted()` a column). The language's `LIST` and `DISPLAY` come with the console's
+redirections (`SET ALTERNATE`, `SET PRINTER`).
 
 ## Copies between files
 
-`COPY TO`, `APPEND FROM` (`... SDF`, `... DELIMITED [WITH ...]`, `VIA <driver>`), `COPY STRUCTURE [FIELDS ...]`,
-`COPY STRUCTURE EXTENDED` and `CREATE <file> [FROM <file>]` are `std.ch` rules over functions written in xBase
-(`transfer.prg`: `__dbCopy`, `__dbApp`, `__dbSDF`, `__dbDelim`, `__dbCopyStruct`, `__dbCopyXStruct`, `__dbCreate`),
-which use three primitives (`transfer.c`): `__dbUsed( cOperation )` (`DBCMD/2001` for the command without a table),
-`__dbTransOpen( cFile, [cDriver], lCreate, [aStruct], [xDelimiter] )`, which opens the other file in the lowest free
-area, without an alias (`xb_area_open_with`; the current area stays current), and `__dbTrans( nTarget, aFields, [bFor],
-[bWhile], [nNext], [nRecord], [lRest] )`, which copies the records of the current area's scope.
+`COPY TO`, `APPEND FROM` (`... SDF`, `... DELIMITED [WITH ...]`, `VIA <driver>`), `COPY STRUCTURE [FIELDS ...]`, `COPY
+STRUCTURE EXTENDED`, `CREATE <file> [FROM <file>]`, `SORT`, `TOTAL`, `UPDATE` and `JOIN` are `std.ch` rules over
+functions written in xBase (`transfer.prg`: `__dbCopy`, `__dbApp`, `__dbSDF`, `__dbDelim`, `__dbCopyStruct`,
+`__dbCopyXStruct`, `__dbCreate`, `__dbSort`, `__dbTotal`, `__dbUpdate`, `__dbJoin`). They use the primitives of
+`transfer.c`: `__dbSortTo` and `__dbTotalTo` ([Sorts and totals](#sorts-and-totals)), and these three: `__dbUsed(
+cOperation )` (`DBCMD/2001` for the command without a table), `__dbTransOpen( cFile, [cDriver], lCreate, [aStruct],
+[xDelimiter] )`, which opens the other file in the lowest free area, without an alias (`xb_area_open_with`; the current
+area stays current), and `__dbTrans( nTarget, aFields, [bFor], [bWhile], [nNext], [nRecord], [lRest] )`, which copies
+the records of the current area's scope.
 
 - `COPY TO` creates the file (the driver's extension added to a name without one; one there is emptied) with the
   current area's fields the `FIELDS` list names, in its order (every field without it; names in any letter case, after
@@ -345,6 +347,36 @@ area, without an alias (`xb_area_open_with`; the current area stays current), an
 - `DELIMITED WITH` takes an expression or a name (`BLANK`, `TAB`, `PIPE`), and clauses may follow it; Clipper's rule,
   tried after it, takes the rest of the command as the delimiter's text. An unknown driver is `DBCMD/1015` (the
   reference's `COPY TO` uses the default driver, its `APPEND FROM` crashes). `CODEPAGE` is accepted and not used.
+
+### Sorts and totals
+
+- `SORT TO <file> ON <field>[/flags], ...`: a new file of the current table's fields with the records of the scope
+  ordered by the keys (`__dbSortTo`): the flags after the first `/` make a key descending (a `D` with no `A` before
+  it) or the same for upper and lower case letters (`C`, ASCII letters, character fields); keys compare as values
+  (numbers as numbers, an empty date first, `.F.` before `.T.`); records of equal keys keep the order of the scope (a
+  stable merge sort over keys encoded for `memcmp`, all of them in memory). Memo fields and names of no field are no
+  keys; without keys the records keep the order of the scope. No record of it is deleted; the table is left on the
+  record copied last (without keys, where the scope ends).
+- `TOTAL TO <file> ON <key> FIELDS <fields>`: a new file of the fields but the memos with a record for each run of
+  records of the scope whose key (exactly equal, `==`; the controlling order's key without `ON`; one run without
+  either) is the same: the copy of its first record the `FOR` block takes (deleted when it is), the `FIELDS` summed
+  over the records it takes (a sum too wide: `Data width error`, stars). `NEXT n` and `RECORD n` count the records the
+  scope visits (the reference's `NEXT n` loses the record that ends a run, its `NEXT 1` and `RECORD` go on to the end).
+  `FIELDS` must name number fields (`FIELD->` allowed): another name is `DBCMD/1015` before the file is made (the
+  reference sums dates and fails on other types after writing).
+- `UPDATE FROM <alias> ON <key> [RANDOM] REPLACE ...`: for each record of the other table the `REPLACE` runs, with the
+  current table current, on its record of the same key: with `RANDOM` the one a `SEEK` finds, else, both tables in the
+  key's order, the next one not before it (a key out of order, or of none, updates nothing; equal keys of the other
+  table update the same record).
+- `JOIN WITH <alias> TO <file> [FIELDS ...] FOR <condition>`: a new file with a record for each pair (the current
+  table's record, the other's) the condition takes, evaluated with the current table current, in the order of the
+  current table then the other. Fields: the current table's the list names (all without `FIELDS`), in its order, then
+  the other's it names as `alias->name`, in its order; a name already there is left out (the reference makes two
+  fields of one name), and each field takes the value of the table it was chosen from (the reference takes the current
+  table's whenever it has a field of the name).
+- A new file that cannot be made: the command gives `.F.` and the tables stay as they were (the reference goes on with
+  an input table as the target, appending to it and closing it). `FOR` and `WHILE` given as text to the functions are
+  compiled. A table a block puts in the new file's area is not closed with it.
 
 ### Text files
 
@@ -509,7 +541,8 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
 - `bench/index.prg` times a build over 200,000 records, 100,000 SEEKs, a SKIP through and 20,000 appends with the
   order open. Measured once against the reference on one machine, the same program: the build and SEEK about as
   fast, SKIP and appends with an order open faster. Copies (`COPY TO`, `APPEND FROM` of tables, SDF and DELIMITED
-  files, 200,000 records) take a third or less of the reference's time.
+  files, 200,000 records) took a third or less of the reference's time; `SORT` and `TOTAL` of 200,000 records and a
+  `JOIN` of 1,000 by 1,000 records less than half (measured once, as above).
 
 ## Sharing, locks and concurrency
 
@@ -676,6 +709,7 @@ query (as data a driver can translate), falling back to the record-by-record way
    threads: waiting inside the process, shared page caches, handing areas between tasks.
 5. `DBFCDX`: done: the driver, `FPT` memos, FoxPro's lock scheme, the order operations as an interface of the driver
    (`index.h`, NTX behind it), `CDX` indexes (tags, the production file, `ordDestroy()`, sharing).
-6. Done: relations (`SET RELATION`), `AVERAGE`, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `CREATE`. Next: `SORT`,
-   `TOTAL`, `UPDATE`, `JOIN`; `LIST` and `DISPLAY` with the console's redirections (`SET ALTERNATE`, `SET PRINTER`).
+6. Done: relations (`SET RELATION`), `AVERAGE`, `COPY`, `APPEND FROM`, `SDF`, `DELIM`, `CREATE`, `SORT`, `TOTAL`,
+   `UPDATE`, `JOIN`. `LIST` and `DISPLAY` come with the console's redirections (`SET ALTERNATE`, `SET PRINTER`), in
+   the terminal's work ([terminal.md](terminal.md#order-of-the-work)).
 7. `SET DB ENGINE`; then SQL engines as libraries, and queries.

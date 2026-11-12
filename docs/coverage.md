@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 213 of 551 done. Commands (`std.ch` families): 68 of 157 done.
+Functions: 213 of 551 done. Commands (`std.ch` families): 72 of 157 done.
 
 ## Statements (grammar)
 
@@ -25,7 +25,7 @@ Grouped by their leading words; each group covers every variant of the command.
 DATABASES**, *CLOSE FORMAT*, **CLOSE INDEXES**, *CLOSE PROCEDURE*, *CLS*, **COMMIT**, **CONTINUE**, **COPY**, *COPY
 FILE*, **COUNT**, **CREATE**, **DELETE**, *DELETE FILE*, **DELETE TAG**, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**,
 **ENDCASE**, **ENDDO**, **ENDFOR**, **ENDIF**, **ENDSEQUENCE**, *ERASE*, **FIND**, **GO**, **GOTO**, **INDEX ON**,
-*INPUT*, *JOIN*, *KEYBOARD*, *LABEL FORM*, *LIST*, **LOCATE**, *MENU*, **NEXT**, **PACK**, **QUIT**, *READ*, *READ
+*INPUT*, **JOIN**, *KEYBOARD*, *LABEL FORM*, *LIST*, **LOCATE**, *MENU*, **NEXT**, **PACK**, **QUIT**, *READ*, *READ
 SAVE*, **RECALL**, **REINDEX**, **RELEASE**, **RELEASE ALL**, *RENAME*, **REPLACE**, *REPORT FORM*, **REQUEST**,
 **RESTORE**, *RESTORE SCREEN*, *RUN*, **SAVE**, **SAVE ALL**, *SAVE SCREEN*, **SAVE TO**, **SEEK**, **SELECT**, *SET
 ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET CENTURY**, **SET CODEPAGE** (an xbase
@@ -37,8 +37,8 @@ INDEX**, *SET INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET M
 MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, **SET ORDER**, *SET PATH*, *SET PRINTER*, *SET
 PROCEDURE*, **SET RELATION**, *SET SAFETY*, **SET SCOPE**, **SET SCOPEBOTTOM**, **SET SCOPETOP**, *SET SCOREBOARD*,
 **SET SOFTSEEK**, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, **SET UNIQUE**,
-*SET VIDEOMODE*, *SET WRAP*, **SKIP**, *SORT*, **STORE**, **SUM**, *TEXT*, *TEXTBLOCK*, *TOTAL*, *TYPE*, **UNLOCK**,
-*UPDATE*, **USE**, *WAIT*, **ZAP**
+*SET VIDEOMODE*, *SET WRAP*, **SKIP**, **SORT**, **STORE**, **SUM**, *TEXT*, *TEXTBLOCK*, **TOTAL**, *TYPE*, **UNLOCK**,
+**UPDATE**, **USE**, *WAIT*, **ZAP**
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`, `set.ch`
 (partial), `error.ch` (provided: the severities and generic codes), `fileio.ch`, `directry.ch` and `dbstruct.ch`

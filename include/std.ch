@@ -92,6 +92,16 @@
          __dbApp( <(f)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <rdd>, , <cp> )
 #command CREATE <(db)> [FROM <(src)>] [VIA <rdd>] [ALIAS <a>] [<new: NEW>] [CODEPAGE <cp>] => ;
          __dbCreate( <(db)>, <(src)>, <rdd>, <.new.>, <(a)> )
+#command SORT [TO <(f)>] [ON <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] [RECORD <rec>] ;
+            [<rest: REST>] [ALL] [VIA <rdd>] [CODEPAGE <cp>] => ;
+         __dbSort( <(f)>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <rdd> )
+#command TOTAL [TO <(f)>] [ON <key>] [FIELDS <fields,...>] [FOR <for>] [WHILE <while>] [NEXT <next>] ;
+            [RECORD <rec>] [<rest: REST>] [ALL] [VIA <rdd>] [CODEPAGE <cp>] => ;
+         __dbTotal( <(f)>, <{key}>, { <(fields)> }, <{for}>, <{while}>, <next>, <rec>, <.rest.>, <rdd> )
+#command UPDATE [FROM <(alias)>] [ON <key>] [<rand: RANDOM>] [REPLACE <f1> WITH <x1> [, <fN> WITH <xN>]] => ;
+         __dbUpdate( <(alias)>, <{key}>, <.rand.>, {|| _FIELD-><f1> := <x1> [, _FIELD-><fN> := <xN>] } )
+#command JOIN [WITH <(alias)>] [TO <(f)>] [FIELDS <fields,...>] [FOR <for>] [VIA <rdd>] [CODEPAGE <cp>] => ;
+         __dbJoin( <(alias)>, <(f)>, { <(fields)> }, iif( Empty( #<for> ), {|| .T. }, <{for}> ), <rdd> )
 #command PACK                          => __dbPack()
 #command ZAP                           => __dbZap()
 #command GOTO <n>                      => dbGoTo( <n> )
