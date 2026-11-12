@@ -942,7 +942,9 @@ opened without being emptied, created when missing (`xb_platform_file_open_alway
 last change in local time), whether names differ by letter case, the current directory, the free space of a drive and an
 environment variable (for `GetEnv()` only). Paths are UTF-8 (UTF-16 on Windows). A failure gives the code `FError()`
 reports: a DOS error number (2 file not found, 3 path not found, 5 access denied, 25 seek error, ...), which Windows
-reports itself and the POSIX build translates `errno` values to (31, general failure, for those without one).
+reports itself and the POSIX build translates `errno` values to (31, general failure, for those without one). A name
+that is missing is 2 and a directory on its way that is missing is 3, on POSIX systems as on Windows, where `errno`
+alone does not tell them apart.
 `xb_platform_path_separator` tells the characters that separate directories (`/`; also `\` and `:` on Windows). Binary
 fields of the file formats go through the little-endian helpers of `core/bytes.h`. `SAVE` and `RESTORE` ([Memory
 variables](#memory-variables)) use this layer too.
@@ -963,7 +965,8 @@ variables](#memory-variables)) use this layer too.
   name matches the mask of `cSpec` (`*` and `?`; a mask ending in `.*` also takes a name without a dot, so `*.*` takes
   every name, as in DOS; letter case counts where the file system tells it, and is folded for ASCII letters only); a
   mask without wildcards names one entry, and none (a directory's name with its separator) every entry of the directory.
-  A link that leads nowhere is listed as the link itself.
+  A link that leads nowhere is listed as the link itself. On POSIX systems a name starting with a dot (but `.` and `..`)
+  is hidden (`H`); on Windows the attribute is the file system's.
 - `rtl/files.prg`: `Directory( [cSpec], [cAttributes] )` lists the files without the attributes D, H and S, and those
   whose such attributes `cAttributes` all names (`V`, the volume label, gives none); `ADir` fills its arrays from it
   (directories, hidden and system files too when the attributes' array is given; 0 without `cSpec`); `File()` is whether

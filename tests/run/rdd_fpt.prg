@@ -21,40 +21,40 @@ PROCEDURE Main()
    Put( 3, Replicate( "C", 56 ) )
    Put( 4, Replicate( "D", 200 ) )
    Put( 5, Replicate( "E", 30 ) )
-   Show( "five" )
+   Show( "five", "rdd_fpt", 5 )
    Put( 5, Replicate( "F", 150 ) )
-   Show( "grow at end" )
+   Show( "grow at end", "rdd_fpt", 5 )
    Put( 5, Replicate( "G", 5 ) )
-   Show( "shrink at end" )
+   Show( "shrink at end", "rdd_fpt", 5 )
    Put( 2, Replicate( "H", 300 ) )
-   Show( "rewrite middle" )
+   Show( "rewrite middle", "rdd_fpt", 5 )
    Put( 1, "" )
-   Show( "empty 1" )
+   Show( "empty 1", "rdd_fpt", 5 )
    Put( 3, Replicate( "I", 20 ) )
-   Show( "reuse" )
+   Show( "reuse", "rdd_fpt", 5 )
    GO 4
    REPLACE M4 WITH "four"
-   Show( "width 4" )
+   Show( "width 4", "rdd_fpt", 5 )
    Put( 1, Replicate( "J", 40 ) )
-   Show( "best fit" )
+   Show( "best fit", "rdd_fpt", 5 )
    FOR i := 1 TO 5
       Put( i, "" )
    NEXT
    GO 4
    REPLACE M4 WITH ""
-   Show( "all empty" )
+   Show( "all empty", "rdd_fpt", 5 )
    FOR i := 1 TO 5
       Put( i, Replicate( Chr( 64 + i ), i * 37 ) )
    NEXT
-   Show( "again" )
+   Show( "again", "rdd_fpt", 5 )
    Put( 4, Replicate( "x", 180 ) )
    Put( 5, Replicate( "y", 10 ) )
    Put( 2, "" )
    Put( 4, Replicate( "z", 10 ) )
-   Show( "exact fit marks" )
+   Show( "exact fit marks", "rdd_fpt", 5 )
    DELETE FOR RecNo() % 2 == 0
    PACK
-   Show( "pack" )
+   Show( "pack", "rdd_fpt", 5 )
    FOR i := 1 TO 300
       APPEND BLANK
       REPLACE M WITH Replicate( "p", 20 )
@@ -63,9 +63,9 @@ PROCEDURE Main()
       GO i
       REPLACE M WITH ""
    NEXT
-   Show( "many free" )
+   Show( "many free", "rdd_fpt", 5 )
    ZAP
-   Show( "zap" )
+   Show( "zap", "rdd_fpt", 5 )
    CLOSE
    USE rdd_fpt SHARED ALIAS sa NEW
    USE rdd_fpt SHARED ALIAS sb NEW
@@ -83,14 +83,14 @@ PROCEDURE Main()
    ? "shared:", Len( sb->M ), Left( sb->M, 1 ), sb->( LastRec() )
    CLOSE ALL
    USE rdd_fpt EXCLUSIVE NEW
-   Show( "after shared" )
+   Show( "after shared", "rdd_fpt", 5 )
    CLOSE
    USE rdd_fpt VIA "DBFNTX" NEW
    ? "fpt by DBFNTX:", RddName(), Len( M ), Left( M, 1 )
    REPLACE M WITH "via ntx"
    CLOSE
    USE rdd_fpt NEW
-   Show( "written by DBFNTX" )
+   Show( "written by DBFNTX", "rdd_fpt", 5 )
    CLOSE
    dbCreate( "rdd_fpt_d", { { "M", "M", 10, 0 } }, "DBFNTX" )
    USE rdd_fpt_d VIA "DBFCDX" NEW
@@ -123,26 +123,26 @@ STATIC PROCEDURE Plain()
    USE rdd_fpt_p EXCLUSIVE NEW
    GO 2
    REPLACE M WITH Replicate( "x", 200 )
-   ShowP( "bigger" )
+   Show( "bigger", "rdd_fpt_p", 6 )
    GO 4
    REPLACE M WITH ""
-   ShowP( "emptied" )
+   Show( "emptied", "rdd_fpt_p", 6 )
    GO 3
    REPLACE M WITH Replicate( "y", 20 )
-   ShowP( "rewrite" )
+   Show( "rewrite", "rdd_fpt_p", 6 )
    APPEND BLANK
    REPLACE M WITH Replicate( "z", 50 )
-   ShowP( "append" )
+   Show( "append", "rdd_fpt_p", 6 )
    PACK
-   ShowP( "pack" )
+   Show( "pack", "rdd_fpt_p", 6 )
    GO 2
    REPLACE M WITH Replicate( "w", 10 )
-   ShowP( "after pack" )
+   Show( "after pack", "rdd_fpt_p", 6 )
    ZAP
-   ShowP( "zap" )
+   Show( "zap", "rdd_fpt_p", 6 )
    APPEND BLANK
    REPLACE M WITH "after zap"
-   ShowP( "after zap" )
+   Show( "after zap", "rdd_fpt_p", 6 )
    CLOSE
    FErase( "rdd_fpt_p.dbf" )
    FErase( "rdd_fpt_p.fpt" )
@@ -153,15 +153,18 @@ STATIC PROCEDURE Put( n, c )
    REPLACE M WITH c
 RETURN
 
-STATIC PROCEDURE Show( c )
+// The memo file's length, a checksum of its bytes (the writer's signature, bytes 8-15, left out) and the first memos.
+// The table is closed while its file is read: an exclusive table's files cannot be opened again everywhere.
+STATIC PROCEDURE Show( c, cTable, nMemos )
    LOCAL s, i, n := 0, cMemos := ""
-   dbCommit()
-   s := FileBytes( "rdd_fpt.fpt" )
+   CLOSE
+   s := FileBytes( cTable + ".fpt" )
+   USE ( cTable ) EXCLUSIVE NEW
    s := Left( s, 8 ) + Replicate( Chr( 0 ), 8 ) + SubStr( s, 17 )
    FOR i := 1 TO Len( s )
       n := ( n * 31 + Asc( SubStr( s, i, 1 ) ) ) % 1000000007
    NEXT
-   FOR i := 1 TO Min( LastRec(), 5 )
+   FOR i := 1 TO Min( LastRec(), nMemos )
       GO i
       cMemos += " " + LTrim( Str( Len( M ) ) ) + Left( M, 1 )
    NEXT
@@ -174,23 +177,3 @@ STATIC FUNCTION FileBytes( cFile )
    FRead( h, @s, n )
    FClose( h )
 RETURN s
-
-STATIC PROCEDURE ShowP( c )
-   LOCAL s, i, n := 0, cMemos := "", h, nLen
-   dbCommit()
-   h := FOpen( "rdd_fpt_p.fpt" )
-   nLen := FSeek( h, 0, 2 )
-   s := Space( nLen )
-   FSeek( h, 0, 0 )
-   FRead( h, @s, nLen )
-   FClose( h )
-   s := Left( s, 8 ) + Replicate( Chr( 0 ), 8 ) + SubStr( s, 17 )
-   FOR i := 1 TO Len( s )
-      n := ( n * 31 + Asc( SubStr( s, i, 1 ) ) ) % 1000000007
-   NEXT
-   FOR i := 1 TO Min( LastRec(), 6 )
-      GO i
-      cMemos += " " + LTrim( Str( Len( M ) ) ) + Left( M, 1 )
-   NEXT
-   ? c, Len( s ), n, cMemos
-RETURN

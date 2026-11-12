@@ -45,6 +45,8 @@ enum class Tok : uint8_t {
   BlockBody,   // inside the preprocessor only: the statements of an extended codeblock, as one token (`ival`: which)
 };
 
+// The spelling of a kind. An operator or logical word takes it whatever the source wrote (`!=` and `<>` are `<>`,
+// `**` is `^`, `.not.` is `!`, `.y.` is `.T.`): it is the text that stringifying and -E output show.
 const char *tokName(Tok t);
 
 // `:=` and the compound assignments (`+=` ... `>>=`).
@@ -62,7 +64,7 @@ struct Token {
   Tok kind = Tok::Eof;
   SourceLoc loc;
   bool spaceBefore = false;  // whitespace precedes the token (stringify, #define f(...))
-  std::string text;          // spelling as written; String: the value without quotes
+  std::string text;          // spelling (operators: tokName()); String: the value without quotes
   std::string upper;         // Ident: upper-cased text (xBase is case-insensitive)
   // Number
   bool isInt = false;

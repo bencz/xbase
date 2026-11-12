@@ -9,9 +9,10 @@ write read-only:          0 .T.
 memo: .T.          3 abc         18 []          2
 end mark:          4         26          0          1 .T.
 missing:         -1          2         -1          5         -1          5         -1          5
+missing directory:         -1          3         -1          3         -1          3         -1          3         -1          3 .T.
 file: .T. .T. .T. .F. .T. .F. .F. files_noext          2 D          8 A .T. files_t1.txt         18 D          8 A .T. files_t2.txt          4 D          8 A .T.
 odd masks:          0          1          0          2          1 .T.
-masks:          1          2          0          1 HA          0
+masks:          1          2 .T.          1 .T.          0
 dirs:          0 . D .T.
 adir:          0          3          3 files_noext files_t2.txt          3
 rename:         -1          5          0          0 .T. .F.         -1          2          0          0

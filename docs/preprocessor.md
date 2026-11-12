@@ -34,6 +34,10 @@ The lexer delivers one logical line at a time. A UTF-8 byte order mark at the st
   `#` followed by `<` is a dumb-stringify result marker.
 - Identifiers keep their spelling (for `#define` and stringification) plus an upper-cased form used for keywords and
   names.
+- Operators and logical words take one spelling whatever the source wrote, and stringification and `-E` output show
+  it: `!=` is `<>`, `**` is `^`, `**=` is `^=`, `.NOT.` is `!`, `.AND.` and `.OR.` are upper case, `.Y.` is `.T.` and
+  `.N.` is `.F.`. So the text an index keeps for its `FOR` condition is the same whichever form the program used. `#`
+  keeps its spelling.
 
 ## Directives
 

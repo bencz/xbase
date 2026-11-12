@@ -14,7 +14,7 @@ after RESTORE in a callee: - - -
 after RESTORE in a codeblock: -
 error:         21       2005 Open error memvars_save_none          2 .T. .T. .F.  U
 after a failed RESTORE:          1
-error:         20       2006 Create error memvars_save_no/dir/file          2 .T. .T. .F.  U
+error:         20       2006 Create error memvars_save_no/dir/file          3 .T. .T. .F.  U
 after a failed SAVE
 try          1
 try          2

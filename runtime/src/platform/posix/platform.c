@@ -115,13 +115,29 @@ static int32_t dos_error(int e) {
   return XB_FERR_FAILURE;
 }
 
+/* The DOS error number of a failure on `path`: a missing directory on the way is "path not found" (3), as on
+ * Windows, where errno says ENOENT whichever part is missing. */
+static int32_t path_error(const char *path, int e) {
+  const char *slash = strrchr(path, '/');
+  if (e != ENOENT || !slash) return dos_error(e);
+  size_t len = slash == path ? 1 : (size_t)(slash - path); /* "/name" is in the root */
+  char *dir = malloc(len + 1);
+  if (!dir) return dos_error(e);
+  memcpy(dir, path, len);
+  dir[len] = '\0';
+  struct stat st;
+  int found = stat(dir, &st) == 0 && S_ISDIR(st.st_mode);
+  free(dir);
+  return found ? dos_error(e) : 3;
+}
+
 static int open_as(const char *path, int flags, mode_t perms, xb_file *f, int32_t *err) {
   int fd;
   do {
     fd = open(path, flags | O_CLOEXEC, perms);
   } while (fd < 0 && errno == EINTR);
   if (fd < 0) {
-    *err = dos_error(errno);
+    *err = path_error(path, errno);
     return 0;
   }
   *f = fd;
@@ -250,7 +266,7 @@ int xb_platform_file_id(xb_file f, xb_file_id *id, int32_t *err) {
 int xb_platform_path_id(const char *path, xb_file_id *id, int32_t *err) {
   struct stat st;
   if (stat(path, &st) != 0) {
-    *err = dos_error(errno);
+    *err = path_error(path, errno);
     return 0;
   }
   id->volume = (uint64_t)st.st_dev;
@@ -292,7 +308,7 @@ int xb_platform_file_erase(const char *path, int32_t *err) {
     return 0;
   }
   if (unlink(path) == 0) return 1;
-  *err = dos_error(errno);
+  *err = path_error(path, errno);
   return 0;
 }
 
@@ -304,7 +320,9 @@ int xb_platform_file_rename(const char *from, const char *to, int32_t *err) {
     return 0;
   }
   if (rename(from, to) == 0) return 1;
-  *err = dos_error(errno);
+  int e = errno;
+  *err = path_error(from, e);
+  if (*err != 3) *err = path_error(to, e);
   return 0;
 }
 
@@ -334,7 +352,7 @@ static int status_of(const char *path, struct stat *st) { return stat(path, st) 
 int xb_platform_file_info(const char *path, const char *name, xb_dir_entry *e, int32_t *err) {
   struct stat st;
   if (!status_of(path, &st)) {
-    *err = dos_error(errno);
+    *err = path_error(path, errno);
     return 0;
   }
   fill_entry(e, name, &st);

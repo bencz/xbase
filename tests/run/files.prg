@@ -4,11 +4,17 @@
 // the end mark) and MemoRead (without it); File and Directory with masks ("*.*" also takes a name without a dot, as in
 // DOS, once: "*.*.*" does not; a very long mask; a directory's name with its separator lists it), attributes and
 // hidden files; ADir (0 without a mask); FRename (never onto another existing file: 5; onto itself it succeeds) and
-// FErase (not a directory: 5); FOpen of a directory (5), with access 3 (5) or of a missing file (2); DirChange,
-// CurDir, GetEnv and DiskSpace. Its files start with "files_" (".files_" for the hidden one) and are deleted at the
-// end.
+// FErase (not a directory: 5); FOpen of a directory (5), with access 3 (5) or of a missing file (2); a directory on
+// the way that is missing (3, on every system); DirChange, CurDir, GetEnv and DiskSpace. Its files start with "files_"
+// (".files_" for the one hidden where a leading dot hides a name) and are deleted at the end.
 #include "fileio.ch"
 #include "directry.ch"
+
+#ifdef __PLATFORM__WINDOWS
+#define DOT_HIDES .F. // the attribute is the file system's
+#else
+#define DOT_HIDES .T.
+#endif
 
 PROCEDURE Main()
    LOCAL h, c, a, x
@@ -33,6 +39,9 @@ PROCEDURE Main()
    ? "end mark:", FRead( h, @c, 8 ), Asc( SubStr( c, 4, 1 ) ), FSeek( h, 0 ), FWrite( h, "Q" ), FClose( h )
    ? "missing:", FOpen( "files_none.txt" ), FError(), FOpen( "." ), FError(), FErase( "." ), FError(), ;
       FOpen( "files_t1.txt", 3 ), FError()
+   ? "missing directory:", FCreate( "files_no/x.txt" ), FError(), FOpen( "files_no/x.txt" ), FError(), ;
+      FErase( "files_no/x.txt" ), FError(), FRename( "files_no/x.txt", "files_y.txt" ), FError(), ;
+      FRename( "files_t1.txt", "files_no/x.txt" ), FError(), File( "files_t1.txt" )
    MemoWrit( "files_noext", "x" )
    MemoWrit( ".files_hid", "" )
    ? "file:", File( "files_t1.txt" ), File( "files_t*.txt" ), File( "files_t?.txt" ), File( "files_zz*" ), ;
@@ -45,8 +54,9 @@ PROCEDURE Main()
    ? "odd masks:", Len( Directory( "files_noe*.*.*" ) ), Len( Directory( "files_noext.*" ) ), ;
       Len( Directory( Replicate( ".*", 100000 ) ) ), Len( Directory( "files_t?.*" ) ), Len( Directory( "*s_t1*" ) ), ;
       AScan( Directory( "./" ), {| x | x[ F_NAME ] == "files_t1.txt" } ) > 0
-   ? "masks:", Len( Directory( "files_noe*.*" ) ), Len( Directory( "files_*.txt" ) ), Len( Directory( ".files_*" ) ), ;
-      Len( Directory( ".files_*", "H" ) ), Directory( ".files_*", "H" )[ 1 ][ 5 ], Len( Directory( "files_*", "V" ) )
+   ? "masks:", Len( Directory( "files_noe*.*" ) ), Len( Directory( "files_*.txt" ) ), ;
+      Len( Directory( ".files_*" ) ) == iif( DOT_HIDES, 0, 1 ), Len( Directory( ".files_*", "H" ) ), ;
+      Directory( ".files_*", "H" )[ 1 ][ 5 ] == iif( DOT_HIDES, "HA", "A" ), Len( Directory( "files_*", "V" ) )
    ? "dirs:", Len( Directory( "." ) ), Directory( ".", "D" )[ 1 ][ 1 ], Directory( ".", "D" )[ 1 ][ 5 ], ;
       Len( Directory( "*", "D" ) ) > Len( Directory( "*" ) )
    a := Array( 3 )

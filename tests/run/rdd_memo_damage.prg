@@ -6,6 +6,8 @@
 // and found as ".DBT" there when there is no ".dbt". An FPT memo whose length goes past the file is a Read error.
 // Functions that give back their argument unchanged keep a memo's "M" (AllTrim, PadR to its length), HardCR() makes a
 // plain string. The files start with "rdd_memo_damage" (upper case for one), deleted at the end.
+#include "directry.ch"
+
 FIELD NAME, NOTE
 
 PROCEDURE Main()
@@ -140,7 +142,6 @@ STATIC FUNCTION FSize( cFile )
    LOCAL a := Directory( cFile )
 RETURN IIf( Empty( a ), -1, a[ 1 ][ 2 ] )
 
+// From the directory: the file is open exclusively, which forbids opening it again on some systems.
 STATIC FUNCTION FileSize( cFile )
-   LOCAL h := FOpen( cFile ), n := FSeek( h, 0, 2 )
-   FClose( h )
-RETURN n
+RETURN Directory( cFile )[ 1 ][ F_SIZE ]

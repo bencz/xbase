@@ -1,6 +1,7 @@
 // SAVE and RESTORE (.mem files), compared with the reference. Kind() tells a variable holding NIL ("U") from one
-// that does not exist ("-"). A deliberate difference: a RESTORE whose file cannot be opened leaves the variables as
-// they were (the reference releases them first).
+// that does not exist ("-"). Deliberate differences: a RESTORE whose file cannot be opened leaves the variables as
+// they were (the reference releases them first); a SAVE into a missing directory is "path not found" (3) on every
+// system.
 MEMVAR cText, cBig, cNul, cEmpty, nInt, nDec, nNeg, nBig, dDay, dEmpty, lTrue, aList, xNil, abcdefghijklm, pub, hid, z
 MEMVAR p, arr, zzzzzzzzzzzz
 

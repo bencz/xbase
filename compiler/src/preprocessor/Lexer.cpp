@@ -54,7 +54,7 @@ const char *tokName(Tok t) {
   case Tok::ShrEq: return ">>=";
   case Tok::And: return ".AND.";
   case Tok::Or: return ".OR.";
-  case Tok::Not: return ".NOT.";
+  case Tok::Not: return "!";
   case Tok::LParen: return "(";
   case Tok::RParen: return ")";
   case Tok::LBracket: return "[";
@@ -236,9 +236,8 @@ bool Lexer::lexDotWord() {
   else if (w == "NOT") k = Tok::Not;
   else return false;
   SourceLoc loc = here();
-  size_t start = pos_;
   while (pos_ <= p) get();
-  add(k, loc, src_.substr(start, pos_ - start));
+  add(k, loc, tokName(k));
   return true;
 }
 
@@ -284,7 +283,7 @@ bool Lexer::lexOperator() {
     if (src_.compare(pos_, n, op.s) == 0) {
       SourceLoc loc = here();
       for (size_t i = 0; i < n; ++i) get();
-      add(op.k, loc, op.s);
+      add(op.k, loc, tokName(op.k));
       return true;
     }
   }
