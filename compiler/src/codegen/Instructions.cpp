@@ -593,11 +593,14 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   case Op::GenDone: b_.CreateCall(rtGenDone_, {fnCtx_, rawAddress(*i.var)}); break;
   case Op::Br:
+    pollOnBackEdge(i.parent, i.targets[0].block);
     shareOnEdge(i.parent, i.targets[0].block);
     emitBranch(i.targets[0]);
     b_.CreateBr(blocks_.at(i.targets[0].block));
     break;
   case Op::CondBr: {
+    pollOnBackEdge(i.parent, i.targets[0].block);
+    if (blockOrder_.at(i.targets[0].block) > blockOrder_.at(i.parent)) pollOnBackEdge(i.parent, i.targets[1].block);
     // A target with arguments, or whose edge ends a string's growth, gets an edge block of its own.
     BasicBlock *dests[2];
     bool own[2];

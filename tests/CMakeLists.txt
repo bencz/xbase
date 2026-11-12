@@ -157,6 +157,15 @@ xb_add_codegen_test(x86_64_string_hash x86_64-linux-gnu "i32 239963683, i64 7, \
 xb_add_codegen_test(s390x_string_hash s390x-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
 xb_add_codegen_test(ppc32_string_hash powerpc-linux-gnu "i32 239963683, i32 7, \\[8 x i8\\] c\"cliente" hashes)
 
+# A loop without calls polls the pending requests on its back edge (an atomic load: SUM has no other, and nothing after
+# it in the module has one).
+xb_add_codegen_test(loop_back_edge_poll x86_64-linux-gnu
+  "@xb\\.direct\\.SUM\\(.*load atomic i32, ptr %ctx monotonic" loop_poll)
+# Every function tests its frame against the stack limit before its body.
+xb_add_codegen_test(stack_limit_check x86_64-linux-gnu "@xb\\.direct\\.SUM\\(.*call void @xb_stack_overflow" loop_poll)
+# A loop's generic copy goes back on its back edge to a second fast copy of the loop, through a preheader of its own.
+xb_add_codegen_test(loop_reenter x86_64-linux-gnu "\n[A-Za-z0-9._]*\\.reenter:" loop_reenter)
+
 # xIR tests: the xIR of tests/xir/<name>.prg (--dump-xir) must equal <name>.xir.
 file(GLOB XB_XIR_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/xir ${CMAKE_CURRENT_SOURCE_DIR}/xir/*.prg)
 foreach(t ${XB_XIR_TESTS})

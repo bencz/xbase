@@ -126,7 +126,8 @@ are [shared objects](#shared-objects) themselves.
   tasks from outside the pool go to a global injection queue. An idle worker steals half of a random victim's deque,
   polls its I/O reactor and the timers, then parks.
 - **Blocking handoff**: every operation that may block the thread (file and lock I/O, `Mutex` waits, `Wait()`,
-  console input, a foreign call marked blocking) is bracketed by the runtime (`xb_blocking_enter` / `leave`). While a
+  console input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run` (done for the
+  collector). While a
   worker blocks with work waiting, another thread takes its place (started on demand, kept for a while, capped); the
   blocked one gives its place back when it returns. A monitor thread also sees a task that runs for long without a
   suspension point (a computation) and adds a thread the same way. Legacy synchronous code inside tasks therefore
@@ -193,18 +194,20 @@ freed storage. The runtime rules both out:
 
 The collector ([runtime.md](runtime.md#garbage-collector)) gets, in this order:
 
-1. **Stop the world.** A collection asks every running thread to stop (a bit of `pending` on each thread context, set
-   atomically) and waits for each one to reach a safepoint: compiled code already tests `pending` after calls, and
-   gets a test at loop back edges (an ABI change); long runtime loops (sorts, index builds, `PACK`) test it too. A
-   thread in a blocking operation is already stopped: it published its stack top, with its registers saved, when it
-   entered, and does not touch the heap until it has checked for a collection on its way back. Waiting for a runtime
-   lock under which xBase code may run (the lock of class preparations, whose holder evaluates INIT values and error
-   blocks) is such a blocking operation, or a collection the holder starts would wait for the waiter forever.
-2. **Every stack.** The conservative scan covers every thread's stack, from its published top to its start, and keeps
-   alive and pins what it finds. Suspended tasks have no stack: their frames are heap objects, traced precisely.
-3. **Thread-safe mutators.** Header state bits change with atomic byte operations; the remembered set is filled through
-   per-thread buffers drained at collection, not under the heap lock; allocation counts are per thread, summed
-   atomically; destructors run on a finalizer task of their own, never in whichever task polls next.
+1. **Stop the world** (done). A collection asks every other running thread to stop (a bit of `pending` on its context,
+   set atomically) and waits for each one to reach a safepoint: compiled code tests `pending` after calls and at loop
+   back edges, the macro evaluator after each operation that can fail, allocations on their slow paths; runtime loops
+   that evaluate blocks reach those polls through them, and only loops of C alone (a sort without a block) hold a
+   collection up for as long as they run. A thread in a blocking operation is already stopped: the operation runs with
+   the thread's registers saved on its stack, its stack's top published, and the thread does not touch the heap until it
+   has checked for a collection on its way back. Waiting for a runtime lock under which xBase code may run (the lock of
+   class preparations, whose holder evaluates INIT values and error blocks) is such a blocking operation, or a
+   collection the holder starts would wait for the waiter forever.
+2. **Every stack** (done). The scan for pinning covers every thread's stack, up to the end the system reports.
+   Suspended tasks have no stack: their frames are heap objects, traced precisely.
+3. **Thread-safe mutators** (done). Header state bits a mutator sets change with atomic byte operations; the remembered
+   set is filled through per-thread lists merged at collection, not under the heap lock; destructors run on one
+   context, the program's, never on two threads at once (*planned*: on a finalizer task of their own).
 4. **Parallel collection.** Marking with per-thread mark stacks and work stealing, sweeping lazily per block as
    allocation reaches it.
 5. **Concurrent marking** (a snapshot-at-the-beginning barrier) once pauses under the server load of the benchmarks

@@ -35,7 +35,7 @@ void xb_calls_end(xb_ctx *ctx, const xb_frame *frame, uint32_t n) {
 
 int xb_calls_run(xb_ctx *ctx, const xb_item *block, xb_item *call, uint32_t nargs) {
   xb_block_call(ctx, &call[nargs], block, nargs, call);
-  return !(ctx->pending && xb_pending(ctx));
+  return !(xb_pending_get(ctx) && xb_pending(ctx));
 }
 
 int xb_order_answer(const xb_item *r) {

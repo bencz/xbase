@@ -189,7 +189,7 @@ static void assign(xb_ctx *ctx, uint32_t id, const xb_item *v) {
   }
   xb_gc_root_push(ctx, &b);
   xb_item *target = xb_ref_target(ctx, &b);
-  if (target && !(ctx->pending & XB_PENDING_UNWIND)) {
+  if (target && !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
     *target = *v;
     xb_ref_written(&b);
   }
@@ -318,7 +318,7 @@ void xb_memvar_clear(xb_ctx *ctx) {
  * skipped. */
 void xbf___MEMRELEASE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  for (uint32_t k = 0; k < argc && !(ctx->pending & XB_PENDING_UNWIND); ++k) {
+  for (uint32_t k = 0; k < argc && !(xb_pending_get(ctx) & XB_PENDING_UNWIND); ++k) {
     uint32_t id;
     if (argv[k].type != XB_T_STRING || !find_name(argv[k].v.s->data, argv[k].v.s->len, &id))
       continue;
@@ -338,7 +338,7 @@ void xbf___MEMRELEASEALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv
   XB_UNUSED(ret);
   if (argc < 2 || argv[0].type != XB_T_STRING || argv[1].type != XB_T_LOGICAL) return;
   const xb_frame *caller = activation(ctx);
-  for (uint32_t i = 0; i < ctx->env->privateLen && !(ctx->pending & XB_PENDING_UNWIND); ++i) {
+  for (uint32_t i = 0; i < ctx->env->privateLen && !(xb_pending_get(ctx) & XB_PENDING_UNWIND); ++i) {
     const xb_private *p = &ctx->env->privates[i];
     if (p->id == CLEARED || p->owner != caller) continue;
     size_t len;

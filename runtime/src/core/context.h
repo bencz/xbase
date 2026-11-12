@@ -3,6 +3,7 @@
 #define XB_CONTEXT_H
 
 #include "gc/gc.h"
+#include "platform/atomic.h"
 
 #define XB_MACRO_CACHE 64
 
@@ -49,6 +50,7 @@ struct xb_ctx {
   xb_env   *env;
   const char *stack_low;    /* the lowest address of the thread's stack the program may use (NULL: unknown) */
   xb_ctx  *gcNext, *gcPrev; /* registered root sets */
+  struct xb_tlh *gcThread;  /* the attached thread that registered it (gc.c), NULL: none */
   xb_item **roots;          /* temporary C roots (xb_gc_root_push) */
   unsigned rootLen, rootCap;
   xb_item  break_value;     /* the value of a pending BREAK (a root of the collector) */
@@ -65,6 +67,14 @@ struct xb_ctx {
   xb_item  macro_cache[2 * XB_MACRO_CACHE];
   uint8_t  macro_cache_goal[XB_MACRO_CACHE];
 };
+
+/* ctx->pending: other threads set requests there (a collection's safepoint, objects to finalize), so every change is
+ * an atomic read-modify-write, and code that sets aside or ends requests touches only the flow's own (BREAK, QUIT,
+ * TRAP: XB_PENDING_UNWIND), never another thread's. A request is set with release and read with acquire: whoever
+ * sees it sees what was written before it (the collector's `stopping`). */
+static inline uint32_t xb_pending_get(const xb_ctx *ctx) { return xb_atomic_load32(&ctx->pending, XB_ACQUIRE); }
+static inline void xb_pending_set(xb_ctx *ctx, uint32_t bits) { xb_atomic_or32(&ctx->pending, bits, XB_RELEASE); }
+static inline void xb_pending_clear(xb_ctx *ctx, uint32_t bits) { xb_atomic_and32(&ctx->pending, ~bits, XB_RELAXED); }
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 

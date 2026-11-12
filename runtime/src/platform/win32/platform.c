@@ -1,4 +1,4 @@
-#include "platform/platform.h"
+#include "platform/os.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -27,10 +27,12 @@ int64_t xb_platform_monotonic_ns(void) {
 }
 
 /* The low limit is the reservation's start, its guard pages included: the stack error's reserve lies above them. */
-const char *xb_platform_stack_low(void) {
-  ULONG_PTR low = 0, high = 0;
-  GetCurrentThreadStackLimits(&low, &high);
-  return low ? (const char *)low : NULL;
+int xb_platform_stack_bounds(const char **low, const char **high) {
+  ULONG_PTR from = 0, to = 0;
+  GetCurrentThreadStackLimits(&from, &to);
+  *low = from ? (const char *)from : NULL;
+  *high = to ? (const char *)to : NULL;
+  return from && to;
 }
 
 unsigned xb_platform_cpu_count(void) {
@@ -239,17 +241,17 @@ static DWORD share_of(int32_t mode) {
   }
 }
 
-int xb_platform_file_open(const char *path, int32_t mode, xb_file *f, int32_t *err) {
+int xb_os_file_open(const char *path, int32_t mode, xb_file *f, int32_t *err) {
   static const DWORD access[] = {GENERIC_READ, GENERIC_WRITE, GENERIC_READ | GENERIC_WRITE};
   return open_as(path, access[mode & (FO_WRITE | FO_READWRITE)], share_of(mode), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
                  f, err);
 }
 
-int xb_platform_file_open_always(const char *path, int32_t mode, xb_file *f, int32_t *err) {
+int xb_os_file_open_always(const char *path, int32_t mode, xb_file *f, int32_t *err) {
   return open_as(path, GENERIC_READ | GENERIC_WRITE, share_of(mode), OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, f, err);
 }
 
-int xb_platform_file_create(const char *path, int32_t attr, xb_file *f, int32_t *err) {
+int xb_os_file_create(const char *path, int32_t attr, xb_file *f, int32_t *err) {
   DWORD attrs = (DWORD)attr & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
   wchar_t *w = wide_path(path, err);
   if (!w) return 0;
@@ -263,7 +265,7 @@ int xb_platform_file_create(const char *path, int32_t attr, xb_file *f, int32_t 
 /* ReadFile and WriteFile move at most this much at a time (a DWORD count). */
 #define FILE_CHUNK ((DWORD)1 << 30)
 
-int64_t xb_platform_file_read(xb_file f, void *buf, size_t n, int32_t *err) {
+int64_t xb_os_file_read(xb_file f, void *buf, size_t n, int32_t *err) {
   DWORD got = 0;
   if (!ReadFile((HANDLE)f, buf, n < FILE_CHUNK ? (DWORD)n : FILE_CHUNK, &got, NULL)) {
     *err = (int32_t)GetLastError();
@@ -282,7 +284,7 @@ static OVERLAPPED at_offset(int64_t pos) {
   return o;
 }
 
-int64_t xb_platform_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err) {
+int64_t xb_os_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err) {
   OVERLAPPED o = at_offset(pos);
   DWORD got = 0;
   if (!ReadFile((HANDLE)f, buf, n < FILE_CHUNK ? (DWORD)n : FILE_CHUNK, &got, &o)) {
@@ -315,15 +317,15 @@ static int write_all(xb_file f, int64_t pos, const void *buf, size_t n, int32_t 
   return 1;
 }
 
-int xb_platform_file_write_at(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err) {
+int xb_os_file_write_at(xb_file f, int64_t pos, const void *buf, size_t n, int32_t *err) {
   return write_all(f, pos, buf, n, err);
 }
 
-int xb_platform_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
+int xb_os_file_write(xb_file f, const void *buf, size_t n, int32_t *err) {
   return write_all(f, -1, buf, n, err);
 }
 
-int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *err) {
+int64_t xb_os_file_seek(xb_file f, int64_t offset, int origin, int32_t *err) {
   static const DWORD method[] = {FILE_BEGIN, FILE_CURRENT, FILE_END};
   LARGE_INTEGER to, pos;
   to.QuadPart = offset;
@@ -334,14 +336,14 @@ int64_t xb_platform_file_seek(xb_file f, int64_t offset, int origin, int32_t *er
   return pos.QuadPart;
 }
 
-int xb_platform_file_share(xb_file f, int kind, int32_t *err) {
+int xb_os_file_share(xb_file f, int kind, int32_t *err) {
   (void)f;
   (void)kind;
   (void)err;
   return 1;
 }
 
-int xb_platform_file_lock(xb_file f, uint64_t pos, uint64_t len, int kind, int32_t *err) {
+int xb_os_file_lock(xb_file f, uint64_t pos, uint64_t len, int kind, int32_t *err) {
   OVERLAPPED o;
   memset(&o, 0, sizeof o);
   o.Offset = (DWORD)(pos & 0xFFFFFFFFu);
@@ -362,7 +364,7 @@ int xb_platform_file_lock(xb_file f, uint64_t pos, uint64_t len, int kind, int32
 
 int xb_platform_locks_per_handle(void) { return 1; }
 
-int xb_platform_file_id(xb_file f, xb_file_id *id, int32_t *err) {
+int xb_os_file_id(xb_file f, xb_file_id *id, int32_t *err) {
   BY_HANDLE_FILE_INFORMATION info;
   if (!GetFileInformationByHandle((HANDLE)f, &info)) {
     *err = common_code(GetLastError());
@@ -373,7 +375,7 @@ int xb_platform_file_id(xb_file f, xb_file_id *id, int32_t *err) {
   return 1;
 }
 
-int xb_platform_path_id(const char *path, xb_file_id *id, int32_t *err) {
+int xb_os_path_id(const char *path, xb_file_id *id, int32_t *err) {
   wchar_t *w = wide_path(path, err);
   if (!w) return 0;
   HANDLE h = CreateFileW(w, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
@@ -384,14 +386,14 @@ int xb_platform_path_id(const char *path, xb_file_id *id, int32_t *err) {
     *err = common_code(code);
     return 0;
   }
-  int ok = xb_platform_file_id((xb_file)h, id, err);
+  int ok = xb_os_file_id((xb_file)h, id, err);
   CloseHandle(h); /* a handle with no access: it holds no lock */
   return ok;
 }
 
 void xb_platform_sleep_ms(uint32_t ms) { Sleep(ms); }
 
-int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err) {
+int xb_os_file_truncate(xb_file f, int64_t size, int32_t *err) {
   LARGE_INTEGER zero, here, to;
   zero.QuadPart = 0;
   to.QuadPart = size;
@@ -404,13 +406,13 @@ int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err) {
   return 1;
 }
 
-int xb_platform_file_close(xb_file f, int32_t *err) {
+int xb_os_file_close(xb_file f, int32_t *err) {
   if (CloseHandle((HANDLE)f)) return 1;
   *err = (int32_t)GetLastError();
   return 0;
 }
 
-int xb_platform_file_erase(const char *path, int32_t *err) {
+int xb_os_file_erase(const char *path, int32_t *err) {
   wchar_t *w = wide_path(path, err);
   if (!w) return 0;
   BOOL ok = DeleteFileW(w); /* a directory is ERROR_ACCESS_DENIED */
@@ -420,7 +422,7 @@ int xb_platform_file_erase(const char *path, int32_t *err) {
   return ok != 0;
 }
 
-int xb_platform_file_rename(const char *from, const char *to, int32_t *err) {
+int xb_os_file_rename(const char *from, const char *to, int32_t *err) {
   wchar_t *wf = wide_path(from, err);
   if (!wf) return 0;
   wchar_t *wt = wide_path(to, err);
@@ -451,7 +453,7 @@ static void fill_entry(xb_dir_entry *e, DWORD attrs, DWORD sizeHigh, DWORD sizeL
   e->second = local.wSecond;
 }
 
-int xb_platform_file_info(const char *path, const char *name, xb_dir_entry *e, int32_t *err) {
+int xb_os_file_info(const char *path, const char *name, xb_dir_entry *e, int32_t *err) {
   wchar_t *w = wide_path(path, err);
   if (!w) return 0;
   WIN32_FILE_ATTRIBUTE_DATA data;
@@ -474,7 +476,7 @@ struct xb_dir_impl {
   char *name;  /* the last entry's name */
 };
 
-int xb_platform_dir_open(const char *path, xb_dir *d, int32_t *err) {
+int xb_os_dir_open(const char *path, xb_dir *d, int32_t *err) {
   size_t len = strlen(path);
   char *pattern = malloc(len + 3);
   if (!pattern) {
@@ -506,7 +508,7 @@ int xb_platform_dir_open(const char *path, xb_dir *d, int32_t *err) {
   return 1;
 }
 
-int xb_platform_dir_next(xb_dir d, xb_dir_entry *e) {
+int xb_os_dir_next(xb_dir d, xb_dir_entry *e) {
   if (!d->pending && !FindNextFileW(d->find, &d->data)) return 0;
   d->pending = 0;
   free(d->name);
@@ -517,18 +519,18 @@ int xb_platform_dir_next(xb_dir d, xb_dir_entry *e) {
   return 1;
 }
 
-void xb_platform_dir_close(xb_dir d) {
+void xb_os_dir_close(xb_dir d) {
   FindClose(d->find);
   free(d->name);
   free(d);
 }
 
-int xb_platform_names_case_sensitive(const char *dir) {
+int xb_os_names_case_sensitive(const char *dir) {
   (void)dir;
   return 0;
 }
 
-char *xb_platform_cwd(int32_t *err) {
+char *xb_os_cwd(int32_t *err) {
   DWORD n = GetCurrentDirectoryW(0, NULL);
   wchar_t *w = n ? malloc(n * sizeof *w) : NULL;
   if (!w || GetCurrentDirectoryW(n, w) == 0) {
@@ -542,7 +544,7 @@ char *xb_platform_cwd(int32_t *err) {
   return out;
 }
 
-int xb_platform_chdir(const char *path, int32_t *err) {
+int xb_os_chdir(const char *path, int32_t *err) {
   wchar_t *w = wide_path(path, err);
   if (!w) return 0;
   BOOL ok = SetCurrentDirectoryW(w);
@@ -552,7 +554,7 @@ int xb_platform_chdir(const char *path, int32_t *err) {
   return ok != 0;
 }
 
-int xb_platform_disk_free(int drive, int64_t *bytes, int32_t *err) {
+int xb_os_disk_free(int drive, int64_t *bytes, int32_t *err) {
   if (drive < 0 || drive > 26) {
     *err = 15;
     return 0;

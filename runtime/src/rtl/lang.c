@@ -53,7 +53,7 @@ void xbf___GCCOLLECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc > 0 && argv[0].type == XB_T_LOGICAL && argv[0].v.l) xb_gc_collect_young();
   else xb_gc_collect();
   xb_set_int(ret, (int64_t)xb_gc_live_objects());
-  if (ctx->pending) xb_pending_gc(ctx); /* runs the destructors of what it found; the caller tests the rest */
+  if (xb_pending_get(ctx)) xb_pending_gc(ctx); /* runs the destructors of what it found; the caller tests the rest */
 }
 
 /* The call stack level `n` (0: the function calling, 1: its caller, ...)
@@ -126,7 +126,7 @@ void xbf_PVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_item *arg = (uint64_t)n <= f->proc->nparams ? &f->slots[n - 1] : &f->argv[n - 1];
   int ref = arg->type == XB_T_CELL || arg->type == XB_T_REF;
   xb_item *target = ref ? xb_ref_target(ctx, arg) : arg;
-  if (ctx->pending && xb_pending(ctx)) return;
+  if (xb_pending_get(ctx) && xb_pending(ctx)) return;
   if (argc > 1) {
     *target = argv[1];
     if (ref) xb_ref_written(arg);

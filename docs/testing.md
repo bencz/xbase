@@ -53,6 +53,16 @@ build/compiler/xbc --target=s390x-linux-gnu tests/run/funcs.prg -o /tmp/claude/f
 
 Running big-endian programs needs a target sysroot and an emulator (for example `qemu-s390x`); this is not automated.
 
+## Sanitizers
+
+A build of its own, configured with the sanitizer in `CMAKE_C_FLAGS`, `CMAKE_CXX_FLAGS` and `CMAKE_EXE_LINKER_FLAGS`,
+runs the whole suite (AddressSanitizer with UndefinedBehaviorSanitizer) or the platform tests (ThreadSanitizer). The
+AddressSanitizer build adds `-fsanitize-address-use-after-return=never`: the collector scans the threads' stacks for the
+addresses they hold ([runtime.md](runtime.md#garbage-collector)), and the "fake stack" frames that option would
+otherwise use keep local variables off the stack, where no scan finds them. `run.space_too_large`, which asks for more
+memory than there is, expects the allocation to fail instead of the sanitizer to stop the program
+(`ASAN_OPTIONS=allocator_may_return_null=1` for that run).
+
 ## Benchmarks
 
 `bench/<name>.prg` are benchmark programs: recursive calls (`fib`), an integer loop (`loops`), arrays (`sieve`,

@@ -51,31 +51,41 @@ std::vector<ColdEdge> coldEdges(const Loop &loop) {
   return out;
 }
 
-// The loop (in simplified and LCSSA form) is cloned; the cold edges of the
-// original go to the copy, whose values SSAUpdater joins with the original's
-// where the edges enter it.
-void split(Function &f, Loop &loop, const std::vector<ColdEdge> &cold) {
-  std::vector<BasicBlock *> blocks(loop.block_begin(), loop.block_end());
-  SmallVector<BasicBlock *, 8> exits;
-  loop.getUniqueExitBlocks(exits);
-  ValueToValueMapTy vmap;
+// A clone of the loop's blocks, entered only from the other copies: its PHIs drop what came from outside the loop.
+void cloneLoop(Function &f, const std::vector<BasicBlock *> &blocks, ValueToValueMapTy &vmap, const char *suffix) {
   std::vector<BasicBlock *> copies;
   for (BasicBlock *b : blocks) {
-    BasicBlock *c = CloneBasicBlock(b, vmap, ".generic", &f);
+    BasicBlock *c = CloneBasicBlock(b, vmap, suffix, &f);
     vmap[b] = c;
     copies.push_back(c);
   }
   remapInstructionsInBlocks(copies, vmap);
-  std::unordered_set<const BasicBlock *> inCopy(copies.begin(), copies.end());
-
-  // The copy is entered only through the redirected edges: its PHIs drop what
-  // came from outside the loop.
+  std::unordered_set<const BasicBlock *> cloned(copies.begin(), copies.end());
   for (BasicBlock *c : copies)
     for (PHINode &phi : c->phis())
       for (unsigned k = phi.getNumIncomingValues(); k-- > 0;)
-        if (!inCopy.count(phi.getIncomingBlock(k))) phi.removeIncomingValue(k, false);
+        if (!cloned.count(phi.getIncomingBlock(k))) phi.removeIncomingValue(k, false);
+}
 
-  // The exits receive the copy's values too.
+// What a value of the loop is in a copy (a value from outside the loop is itself).
+Value *inCopy(ValueToValueMapTy &vmap, Value *v) {
+  auto it = vmap.find(v);
+  return it != vmap.end() ? static_cast<Value *>(it->second) : v;
+}
+
+// The loop (in simplified and LCSSA form) is cloned twice: a generic copy, where the cold edges of the original go,
+// and the loop again, where the generic copy's back edge goes, whose cold edges go to the generic copy as well. The
+// original keeps what it knows of the values that enter it; the loop again, entered from the generic copy, runs fast
+// paths as well after a slow one. SSAUpdater joins the values of the copies where several may arrive.
+void split(Function &f, Loop &loop, const std::vector<ColdEdge> &cold) {
+  std::vector<BasicBlock *> blocks(loop.block_begin(), loop.block_end());
+  SmallVector<BasicBlock *, 8> exits;
+  loop.getUniqueExitBlocks(exits);
+  ValueToValueMapTy gen, again;
+  cloneLoop(f, blocks, gen, ".generic");
+  cloneLoop(f, blocks, again, ".again");
+
+  // The exits receive the copies' values too.
   for (BasicBlock *e : exits)
     for (PHINode &phi : e->phis()) {
       unsigned n = phi.getNumIncomingValues();
@@ -83,49 +93,80 @@ void split(Function &f, Loop &loop, const std::vector<ColdEdge> &cold) {
         BasicBlock *from = phi.getIncomingBlock(k);
         if (!loop.contains(from)) continue;
         Value *v = phi.getIncomingValue(k);
-        auto it = vmap.find(v);
-        phi.addIncoming(it != vmap.end() ? static_cast<Value *>(it->second) : v, cast<BasicBlock>(vmap[from]));
+        phi.addIncoming(inCopy(gen, v), cast<BasicBlock>(gen[from]));
+        phi.addIncoming(inCopy(again, v), cast<BasicBlock>(again[from]));
       }
     }
 
+  // What the back edge brings to the header, taken before a cold edge that is the back edge itself removes it.
+  BasicBlock *header = loop.getHeader(), *latch = loop.getLoopLatch();
+  std::vector<std::pair<PHINode *, Value *>> againEntries;
+  for (PHINode &phi : header->phis())
+    againEntries.push_back({cast<PHINode>(again[&phi]), inCopy(gen, phi.getIncomingValueForBlock(latch))});
+
   for (const ColdEdge &e : cold) {
-    Instruction *t = e.from->getTerminator();
-    BasicBlock *s = t->getSuccessor(e.succ);
-    for (PHINode &phi : s->phis())
-      cast<PHINode>(vmap[&phi])->addIncoming(phi.getIncomingValueForBlock(e.from), e.from);
+    BasicBlock *s = e.from->getTerminator()->getSuccessor(e.succ);
+    auto *genS = cast<BasicBlock>(gen[s]);
+    auto *againFrom = cast<BasicBlock>(again[e.from]);
+    auto *againS = cast<BasicBlock>(again[s]);
+    for (PHINode &phi : s->phis()) {
+      Value *v = phi.getIncomingValueForBlock(e.from);
+      auto *genPhi = cast<PHINode>(gen[&phi]);
+      genPhi->addIncoming(v, e.from);
+      genPhi->addIncoming(inCopy(again, v), againFrom);
+    }
     s->removePredecessor(e.from, /*KeepOneInputPHIs=*/true);
-    t->setSuccessor(e.succ, cast<BasicBlock>(vmap[s]));
+    againS->removePredecessor(againFrom, /*KeepOneInputPHIs=*/true);
+    e.from->getTerminator()->setSuccessor(e.succ, genS);
+    againFrom->getTerminator()->setSuccessor(e.succ, genS);
   }
 
-  // A value of the copy used where the original's may also arrive (through a
-  // redirected edge) becomes the join of both; in the copy's own block the
-  // copy dominates its uses. The pairs are taken first: the updater adds PHIs.
-  std::vector<std::pair<Instruction *, Instruction *>> pairs;
+  // The generic copy's back edge enters the loop again, through a preheader of its own (where what is hoisted out of
+  // that loop is computed again, after the calls of the generic iteration).
+  auto *genHeader = cast<BasicBlock>(gen[header]), *genLatch = cast<BasicBlock>(gen[latch]);
+  auto *againHeader = cast<BasicBlock>(again[header]);
+  BasicBlock *reenter = BasicBlock::Create(f.getContext(), header->getName() + ".reenter", &f, againHeader);
+  BranchInst::Create(againHeader, reenter);
+  for (auto [phi, v] : againEntries) phi->addIncoming(v, reenter);
+  genHeader->removePredecessor(genLatch, /*KeepOneInputPHIs=*/true);
+  genLatch->getTerminator()->replaceSuccessorWith(genHeader, reenter);
+
+  // A value of the generic copy used where the original's or the loop again's may arrive instead (through a
+  // redirected edge) becomes their join; in the copy's own block the copy dominates its uses. The loop again is
+  // entered at its header only, where its values dominate their uses as in the original. The pairs are taken first:
+  // the updater adds PHIs.
+  struct Defs {
+    Instruction *orig, *gen, *again;
+  };
+  std::vector<Defs> defs;
   for (BasicBlock *b : blocks)
     for (Instruction &i : *b)
-      if (!i.getType()->isVoidTy()) pairs.push_back({&i, cast<Instruction>(vmap[&i])});
-  for (auto [orig, c] : pairs) {
-    if (c->use_empty()) continue;
+      if (!i.getType()->isVoidTy())
+        defs.push_back({&i, cast<Instruction>(gen[&i]), cast<Instruction>(again[&i])});
+  for (const Defs &d : defs) {
+    if (d.gen->use_empty()) continue;
     SSAUpdater up;
-    up.Initialize(orig->getType(), orig->getName());
-    up.AddAvailableValue(orig->getParent(), orig);
-    up.AddAvailableValue(c->getParent(), c);
+    up.Initialize(d.orig->getType(), d.orig->getName());
+    up.AddAvailableValue(d.orig->getParent(), d.orig);
+    up.AddAvailableValue(d.again->getParent(), d.again);
+    up.AddAvailableValue(d.gen->getParent(), d.gen);
     SmallVector<Use *, 8> uses;
-    for (Use &u : c->uses()) uses.push_back(&u);
+    for (Use &u : d.gen->uses()) uses.push_back(&u);
     for (Use *u : uses) {
       auto *user = cast<Instruction>(u->getUser());
       auto *phi = dyn_cast<PHINode>(user);
       BasicBlock *at = phi ? phi->getIncomingBlock(*u) : user->getParent();
-      if (at != c->getParent()) up.RewriteUse(*u);
+      if (at != d.gen->getParent()) up.RewriteUse(*u);
     }
   }
 }
 
 } // namespace
 
-// Each cold edge is an entry into the copy, where every value live across it
-// needs a join: a loop of more instructions or with more cold edges is left as
-// it is, and the copies grow a function by at most its own size.
+// Each cold edge is an entry into the generic copy, where every value live
+// across it needs a join: a loop of more instructions or with more cold edges
+// is left as it is, and the two copies of each loop grow a function by at most
+// twice its own size.
 constexpr uint64_t kMaxLoopInstructions = 2000;
 constexpr size_t kMaxColdEdges = 64;
 
@@ -151,15 +192,16 @@ bool splitColdLoopPaths(Function &f) {
     simplifyLoop(l, &dt, &li, nullptr, nullptr, nullptr, /*PreserveLCSSA=*/false);
     formLCSSA(*l, dt, &li, nullptr);
   }
-  uint64_t budget = f.getInstructionCount(), grown = 0;
+  uint64_t budget = 2 * f.getInstructionCount(), grown = 0;
   bool changed = false;
   for (Loop *l : loops) {
     uint64_t size = 0;
     for (BasicBlock *b : l->blocks()) size += b->size();
     std::vector<ColdEdge> cold = coldEdges(*l);
-    if (cold.empty() || cold.size() > kMaxColdEdges || size > kMaxLoopInstructions || grown + size > budget) continue;
+    if (cold.empty() || cold.size() > kMaxColdEdges || size > kMaxLoopInstructions || grown + 2 * size > budget)
+      continue;
     split(f, *l, cold);
-    grown += size;
+    grown += 2 * size;
     changed = true;
   }
   return changed;

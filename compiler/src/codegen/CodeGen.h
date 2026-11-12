@@ -25,8 +25,10 @@ namespace xb {
 //  * every item lives in the function's item frame, an alloca linked into
 //    the context's chain (GC roots); FramePlan decides which item goes where;
 //  * operations call the runtime;
-//  * after an operation that can fail, ctx->pending is tested and the
-//    function leaves through the operation's unwind block (its exit).
+//  * after an operation that can fail, and on each loop's back edge,
+//    ctx->pending is tested (requests of other threads arrive there too) and
+//    the function leaves through the operation's unwind block (its exit) when
+//    it must unwind.
 class CodeGen {
 public:
   CodeGen(llvm::LLVMContext &ctx, llvm::Module &mod, Diagnostics &diag);
@@ -122,7 +124,8 @@ private:
   void setNil(llvm::Value *dst);
   void storeTagged(llvm::Value *dst, uint32_t tag, llvm::Value *v);
   void storeLogical(llvm::Value *dst, llvm::Value *bit);
-  void checkPending(llvm::BasicBlock *unwind);
+  void checkPending(llvm::BasicBlock *unwind, bool collects = false);
+  void pollOnBackEdge(const xir::BasicBlock *from, const xir::BasicBlock *to);
 
   // Literals.cpp
   llvm::StructType *strType(llvm::Type *data);
@@ -312,6 +315,7 @@ private:
   std::unordered_set<const llvm::Value *> quietCalls_; // runtime functions that never show the call stack
   const FramePlan *plan_ = nullptr;
   std::unordered_map<const xir::BasicBlock *, llvm::BasicBlock *> blocks_;
+  std::unordered_map<const xir::BasicBlock *, size_t> blockOrder_; // reverse postorder: a back edge goes no later
   std::unordered_map<const xir::Value *, llvm::Value *> values_; // machine values; addresses of Place homes
   std::unordered_map<const xir::Instruction *, llvm::Value *> fusedTruth_; // truth tests a comparison answered
   std::unordered_map<const xir::Value *, llvm::AllocaInst *> locals_;       // Local homes

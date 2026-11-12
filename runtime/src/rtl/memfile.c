@@ -115,7 +115,7 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     const char *name = xb_memvar_name(id, &len);
     if (xb_memvar_like(skel, name, len) != like) continue;
     const xb_item *v = xb_memvar_value(ctx, id);
-    if (ctx->pending & XB_PENDING_UNWIND) {
+    if (xb_pending_get(ctx) & XB_PENDING_UNWIND) {
       free(out.p);
       return;
     }
@@ -220,7 +220,7 @@ void xbf___MEMRESTORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_gc_root_push(ctx, &v);
   char name[MEM_NAME_MAX];
   size_t len;
-  while (!(ctx->pending & XB_PENDING_UNWIND) && get_record(f, &v, name, &len))
+  while (!(xb_pending_get(ctx) & XB_PENDING_UNWIND) && get_record(f, &v, name, &len))
     if (len) xb_memvar_assign(ctx, name, len, &v);
   xb_gc_root_pop(ctx, 1);
   int32_t err;

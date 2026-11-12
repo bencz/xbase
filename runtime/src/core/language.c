@@ -19,7 +19,7 @@ static int select_language(xb_ctx *ctx, const char *id, size_t len, int onlyFirs
   xb_gc_root_push(ctx, &texts);
   xbf___LANGUAGETEXTS(ctx, &texts, 1, &arg);
   xb_gc_root_pop(ctx, 2);
-  if ((ctx->pending & XB_PENDING_UNWIND) || texts.type != XB_T_ARRAY) return 0;
+  if ((xb_pending_get(ctx) & XB_PENDING_UNWIND) || texts.type != XB_T_ARRAY) return 0;
   if (!onlyFirst || ctx->env->language.type != XB_T_ARRAY) ctx->env->language = texts;
   return 1;
 }

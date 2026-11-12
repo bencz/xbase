@@ -40,7 +40,7 @@ static void write_var(xb_ctx *ctx, xb_item *var, const xb_item *v) {
     return;
   }
   xb_item *t = xb_ref_target(ctx, var);
-  if (t && !(ctx->pending & XB_PENDING_UNWIND)) {
+  if (t && !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
     *t = *v;
     xb_ref_written(var);
   }
@@ -87,7 +87,10 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     xb_stack_overflow(ctx);
     goto out;
   }
-#define FAILED() (ctx->pending && xb_pending(ctx))
+/* Every value of the machine is in its frame (a precise root): the test may serve a collection (a safepoint) and the
+ * destructors, as compiled code's polls do, so a long evaluation (a key per record of an index) never holds a
+ * collection up. */
+#define FAILED() (xb_pending_get(ctx) && xb_pending_gc(ctx))
   for (;;) {
     mop op = (mop)*pc++;
     xb_item *r = &s[sp + 1]; /* the scratch item above the top: results land there, rooted */
@@ -574,7 +577,7 @@ void xbf_TYPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     run(ctx, &work[2], &work[1], 0, NULL, NULL);
     --ctx->error_trap;
     if (ctx->error_trapped) {
-      ctx->pending &= ~(uint32_t)XB_PENDING_TRAP;
+      xb_pending_clear(ctx, XB_PENDING_TRAP);
       type = ctx->error_trapped == EG_NOVAR || ctx->error_trapped == EG_NOALIAS ? "U" : "UE";
     } else {
       letter[0] = xb_type_letter(&work[2]);

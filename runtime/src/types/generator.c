@@ -70,7 +70,7 @@ int xb_gen_move_next(xb_ctx *ctx, const xb_item *gen) {
   xb_item self = *gen, ret; /* the enumerator is the caller's (and slot 0 of the step's frame); the result a logical */
   xb_set_nil(&ret);
   resume(ctx, &ret, 1, &self);
-  if (ctx->pending & XB_PENDING_UNWIND) { /* a step that fails ends it, as the end of its body does */
+  if (xb_pending_get(ctx) & XB_PENDING_UNWIND) { /* a step that fails ends it, as the end of its body does */
     xb_gen_done(ctx, gen);
     return 0;
   }

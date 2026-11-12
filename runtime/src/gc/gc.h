@@ -54,10 +54,15 @@ void  xb_gc_add_root(xb_item *items, size_t count); /* may run before the first 
 /* xb_gc_write_item, the barrier for array elements, is in xbrt.h. */
 
 void  xb_gc_init(void);                    /* by every context made: the heap is made once */
-/* The start of the stack of the thread calling it (an address in the frame of its first function): full collections
- * on that thread scan the stack from there for the objects to pin, and may move the others. A thread without it moves
- * nothing. */
-void  xb_gc_thread_stack(const void *base);
+/* Threads. A thread that runs xBase code attaches first and detaches before it ends; the end of its stack is the one
+ * the system reports (xb_platform_stack_bounds), else `base`, an address in the frame of its first function (NULL:
+ * unknown, and then no collection moves objects). A collection stops every attached thread (each one parks at its next
+ * safepoint, or is blocked) and scans their stacks for the objects to pin. xb_gc_safepoint parks the caller while
+ * another thread's collection runs: compiled code's polls of XB_PENDING_SAFEPOINT and the allocations' slow paths call
+ * it, where every object still needed is rooted. xb_blocking_run (platform.h) runs what may block the thread. */
+void  xb_gc_thread_attach(const void *base);
+void  xb_gc_thread_detach(void);
+void  xb_gc_safepoint(void);
 /* While held, collections move nothing: for C code that keeps object addresses where no scan sees them (a map of
  * addresses in malloc'd memory). */
 void  xb_gc_hold(void);

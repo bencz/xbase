@@ -17,6 +17,7 @@ add_library(xbrt STATIC
   src/core/set.c
   src/core/shared_file.c
   src/core/sync.c
+  src/platform/blocking.c
   src/gc/gc.c
   src/types/array.c
   src/types/block.c

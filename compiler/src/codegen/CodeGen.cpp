@@ -392,6 +392,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   FramePlan plan(f);
   plan_ = &plan;
   blocks_.clear();
+  blockOrder_.clear();
   values_.clear();
   fusedTruth_.clear();
   findSharingLoads(f, plan.cfg());
@@ -448,6 +449,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   // Blocks in reverse postorder; machine-value block parameters become PHIs.
   for (xir::BasicBlock *xb : plan.cfg().order()) {
     BasicBlock *bb = BasicBlock::Create(ctx_, xb->name, fn_, fnExit_);
+    blockOrder_[xb] = blocks_.size();
     blocks_[xb] = bb;
     b_.SetInsertPoint(bb);
     for (auto &p : xb->params)
@@ -800,10 +802,14 @@ void CodeGen::storeTagged(Value *dst, uint32_t tag, Value *v) {
 
 void CodeGen::storeLogical(Value *dst, Value *bit) { storeTagged(dst, XB_T_LOGICAL, b_.CreateZExt(bit, i32_)); }
 
-// One load + one well-predicted branch per fallible call; when something is
-// pending, xb_pending() serves pauses (GC safepoints) and says whether to unwind.
-void CodeGen::checkPending(BasicBlock *unwind) {
+// The test of the context's pending requests, a load and a well-predicted branch: when something is pending,
+// xb_pending_gc serves a collection another thread makes (a safepoint) and destructors, and says whether to unwind;
+// after an operation whose substituted result waits in a home the collector does not see (unless `collects`: a poll
+// on a back edge), xb_pending, which never collects nor parks. The load is atomic (monotonic: another thread sets a
+// safepoint request there), so a loop without calls keeps it.
+void CodeGen::checkPending(BasicBlock *unwind, bool collects) {
   Value *pending = loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxPending), Mem::Ctx, "pending");
+  cast<LoadInst>(pending)->setAtomic(AtomicOrdering::Monotonic);
   Value *isSet = b_.CreateICmpNE(pending, ConstantInt::get(i32_, 0));
   BasicBlock *slow = newBlock("pending");
   BasicBlock *cont = newBlock("ok");
@@ -812,11 +818,17 @@ void CodeGen::checkPending(BasicBlock *unwind) {
   b_.SetInsertPoint(slow);
   // A result the error block may have substituted, in a home the collector does not see: the test must not collect
   // (xbrt.h), so destructors wait for a later one.
-  bool held = emitting_ && (emitting_->effects() & xir::Substitutes) &&
+  bool held = !collects && emitting_ && (emitting_->effects() & xir::Substitutes) &&
               plan_->home(emitting_).kind == Home::Kind::Local;
   Value *leave = b_.CreateCall(held ? rtPending_ : rtPendingGc_, {fnCtx_});
   b_.CreateCondBr(b_.CreateICmpNE(leave, ConstantInt::get(i32_, 0)), unwind, cont);
   b_.SetInsertPoint(cont);
+}
+
+// A loop's back edge polls the pending requests, so a loop without calls still reaches a safepoint when another
+// thread collects.
+void CodeGen::pollOnBackEdge(const xir::BasicBlock *from, const xir::BasicBlock *to) {
+  if (blockOrder_.at(to) <= blockOrder_.at(from)) checkPending(unwind_, true);
 }
 
 } // namespace xb

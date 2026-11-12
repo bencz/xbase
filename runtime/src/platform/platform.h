@@ -6,17 +6,27 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "fileio.ch"
 
 /* XB_NOINLINE keeps a rare path out of a hot function, which then needs no
- * frame of its own. */
+ * frame of its own. XB_SCANS_STACKS marks the function that reads other
+ * threads' stacks word by word (the collector's conservative scan): what it
+ * reads may be written meanwhile (a blocked thread's results and buffers, never
+ * the addresses it scans for) and lies between the variables of frames, which
+ * the address and thread sanitizers would report. */
 #if defined(_MSC_VER)
 #define XB_THREAD_LOCAL __declspec(thread)
 #define XB_NOINLINE __declspec(noinline)
 #else
 #define XB_THREAD_LOCAL _Thread_local
 #define XB_NOINLINE __attribute__((noinline))
+#endif
+#if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 8)
+#define XB_SCANS_STACKS __attribute__((no_sanitize("address", "thread")))
+#else
+#define XB_SCANS_STACKS
 #endif
 
 /* Synchronization between threads. Each kind is created by its init function (0: no memory or no system object
@@ -57,6 +67,15 @@ void xb_rwlock_read_unlock(xb_rwlock *l);
 void xb_rwlock_write_lock(xb_rwlock *l);
 void xb_rwlock_write_unlock(xb_rwlock *l);
 
+/* Runs fn(arg), which may block the calling thread (a file's I/O, a wait), so that a collection does not wait for it:
+ * the runtime provides it (gc.c). fn allocates nothing and changes no reference; it may read and write objects the
+ * thread keeps rooted (a buffer a read fills), which do not move meanwhile. Nested, it simply calls fn. */
+void xb_blocking_run(void (*fn)(void *), void *arg);
+
+/* fflush(stream) as a blocking operation (a full pipe holds it): the standard output before the standard error is
+ * written, the program's output at its end. */
+void xb_platform_flush(FILE *stream);
+
 /* Threads. xb_thread_start runs fn(arg) on a new thread whose stack can grow to `stack_size` bytes (reserved, committed
  * as it is used; rounded up to the system's page and minimum; 0: the system's default): 0 when it could not be
  * created. xb_thread_join waits for the thread to end
@@ -65,9 +84,10 @@ typedef struct xb_thread_impl *xb_thread;
 int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *arg);
 void xb_thread_join(xb_thread t);
 
-/* The lowest address of the calling thread's stack that code may use (above its guard pages), NULL when the system
- * does not tell: the limit under which the stack error is raised (core/ctx.c). */
-const char *xb_platform_stack_low(void);
+/* The calling thread's stack as the system reserved it: `*low` the lowest address code may use (above its guard
+ * pages), `*high` the end of the stack (it grows down from there): the stack error's limit (core/ctx.c) and the range
+ * the collector scans (gc.c). 0, both NULL, when the system does not tell. */
+int xb_platform_stack_bounds(const char **low, const char **high);
 
 /* The processors the program may run on (at least 1): those of its affinity where the system tells it (Linux), else
  * every processor online. */

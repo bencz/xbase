@@ -12,10 +12,6 @@
  * 256 MB. */
 #define XB_PROGRAM_STACK_SIZE (sizeof(void *) >= 8 ? (size_t)1 << 30 : (size_t)256 << 20)
 
-static int64_t started; /* the monotonic clock when main began */
-
-int64_t xb_program_elapsed_ms(void) { return (xb_platform_monotonic_ns() - started) / XB_NS_PER_MS; }
-
 typedef struct program {
   int argc;
   char **argv;
@@ -26,7 +22,9 @@ typedef struct program {
  * sees them), which the start function receives as its parameters. */
 XB_NOINLINE static void run(program *p) {
   xb_ctx *ctx = xb_ctx_new();
-  xb_ctx_set_stack(ctx, xb_platform_stack_low());
+  const char *low, *high;
+  xb_platform_stack_bounds(&low, &high);
+  xb_ctx_set_stack(ctx, low);
   uint32_t n = p->argc > 1 ? (uint32_t)(p->argc - 1) : 0;
   xb_frame *args = calloc(1, sizeof(xb_frame) + n * sizeof(xb_item)); /* NIL slots */
   if (!args) xb_gc_fatal("out of memory");
@@ -38,25 +36,25 @@ XB_NOINLINE static void run(program *p) {
     xb_set_str(&args->slots[i], xb_str_new(a, strlen(a)));
   }
   xb_app_main(ctx, n, args->slots);
-  fflush(stdout);
+  xb_platform_flush(stdout);
   ctx->frames = args->prev;
   free(args);
   xb_ctx_free(ctx);
 }
 
-/* The thread's first function: its frame lies above every frame the program's code has, so collections that move
- * objects scan the stack from it (gc.c). */
+/* The thread's first function: its frame lies above every frame the program's code has, so collections scan the
+ * stack from it (gc.c). */
 static void run_program(void *arg) {
   volatile int returned = 0;
-  xb_gc_thread_stack((const void *)&arg);
+  xb_gc_thread_attach((const void *)&arg);
   run(arg);
+  xb_gc_thread_detach();
   returned = 1; /* a store after the call: run() is no tail call, which would put its frame over this one */
   (void)returned;
 }
 
 int main(int argc, char **argv) {
   xb_platform_init();
-  started = xb_platform_monotonic_ns();
   program p = {0, NULL};
   p.argv = xb_platform_args(argc, argv, &p.argc);
   xb_thread thread;

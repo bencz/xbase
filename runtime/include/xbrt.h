@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 39u
+#define XB_ABI_VERSION 40u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -102,17 +102,20 @@ typedef struct xb_item {
 } xb_item;
 
 /* [ABI] `pending` is tested by compiled code after every call that can
- * fail. When it is non-zero the code calls xb_pending_gc(), which serves
- * requests that only need a pause (a GC safepoint) and runs the destructors of
- * the objects to finalize, and returns non-zero when the function must unwind
- * (a BREAK or a QUIT; an error that is not recovered ends in one; an error
- * while Type() evaluates its text ends that evaluation, a TRAP no BEGIN
- * SEQUENCE catches). The destructors may collect, so after an operation whose
- * error may substitute its result while that result waits where the collector
- * does not see it, the code calls xb_pending() instead, which never collects
- * and leaves the destructors to a later test (the runtime's C code calls it
- * too). The common case costs one load and one predictable branch, works on
- * every target, and survives AWAIT (unlike setjmp/longjmp). */
+ * fail and on every loop's back edge, with an atomic load: other threads set
+ * bits there (a collection's safepoint request, objects to finalize), and
+ * every change is an atomic read-modify-write. When it is non-zero the code
+ * calls xb_pending_gc(), which parks the thread while another thread's
+ * collection runs (a safepoint) and runs the destructors of the objects to
+ * finalize, and returns non-zero when the function must unwind (a BREAK or a
+ * QUIT; an error that is not recovered ends in one; an error while Type()
+ * evaluates its text ends that evaluation, a TRAP no BEGIN SEQUENCE catches).
+ * Parking and destructors may collect, so after an operation whose error may
+ * substitute its result while that result waits where the collector does not
+ * see it, the code calls xb_pending() instead, which never collects nor parks
+ * and leaves both to a later test (the runtime's C code calls it too). The
+ * common case costs one load and one predictable branch, works on every
+ * target, and survives AWAIT (unlike setjmp/longjmp). */
 enum {
   XB_PENDING_NONE      = 0,
   XB_PENDING_BREAK     = 1u << 1,
@@ -765,7 +768,12 @@ static inline void xb_set_ptr(xb_item *it, xb_type type, void *p) {
 #define XB_GC_STATE_RECORDED 2u   /* bit: in the remembered set, to be traced whole */
 void xb_gc_remember(void *obj);
 static inline void xb_gc_write(void *obj) {
-  uint8_t state = *((const uint8_t *)obj - XB_GC_STATE_BACK);
+  /* Other threads set bits of the byte (atomically): it is read atomically too. */
+#if defined(__GNUC__) || defined(__clang__)
+  uint8_t state = __atomic_load_n((const uint8_t *)obj - XB_GC_STATE_BACK, __ATOMIC_RELAXED);
+#else
+  uint8_t state = *((const volatile uint8_t *)obj - XB_GC_STATE_BACK);
+#endif
   if ((state & (XB_GC_STATE_OLD | XB_GC_STATE_RECORDED)) == XB_GC_STATE_OLD) xb_gc_remember(obj);
 }
 

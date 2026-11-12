@@ -52,7 +52,7 @@ void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
     xb_set_nil(&sum);
     xb_gc_root_push(ctx, &sum);
     xb_op_add(ctx, &sum, var, b);
-    if (!(ctx->pending && xb_pending(ctx))) *var = sum;
+    if (!(xb_pending_get(ctx) && xb_pending(ctx))) *var = sum;
     xb_gc_root_pop(ctx, 1);
     return;
   }
@@ -323,14 +323,14 @@ int32_t xb_for_test(xb_ctx *ctx, const xb_item *counter, const xb_item *limit, c
     xb_item zero;
     xb_set_int(&zero, 0);
     arg_error2(ctx, &r, 1073, "<", step, &zero);
-    if (ctx->pending & XB_PENDING_UNWIND) return 0;
+    if (xb_pending_get(ctx) & XB_PENDING_UNWIND) return 0;
     back = substituted_truth(ctx, &r);
-    if (ctx->pending & XB_PENDING_UNWIND) return 0;
+    if (xb_pending_get(ctx) & XB_PENDING_UNWIND) return 0;
   }
   int c = xb_compare(ctx, counter, limit);
   if (c != 2) return back ? xb_order_is(c, 0, 1, 1) : xb_order_is(c, 1, 1, 0); /* a NaN ends the loop */
   arg_error2(ctx, &r, back ? 1073 : 1075, back ? "<" : ">", counter, limit);
-  if (ctx->pending & XB_PENDING_UNWIND) return 0;
+  if (xb_pending_get(ctx) & XB_PENDING_UNWIND) return 0;
   int32_t past = substituted_truth(ctx, &r);
-  return !past && !(ctx->pending & XB_PENDING_UNWIND);
+  return !past && !(xb_pending_get(ctx) & XB_PENDING_UNWIND);
 }

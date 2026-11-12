@@ -56,7 +56,7 @@ int xb_area_eval(xb_ctx *ctx, xb_area *a, const xb_item *block, xb_item *r) {
   xb_block_call(ctx, r, &b, 0, r);
   xb_gc_root_pop(ctx, 1);
   if (ctx->env->areaCurrent == a->number) ctx->env->areaCurrent = before;
-  return !(ctx->pending && xb_pending(ctx));
+  return !(xb_pending_get(ctx) && xb_pending(ctx));
 }
 
 uint32_t xb_area_number(int64_t n) { return n >= 1 && n <= XB_AREA_MAX ? (uint32_t)n : 0; }
@@ -458,7 +458,7 @@ int xb_area_visible(xb_ctx *ctx, xb_area *a) {
   xb_gc_root_push(ctx, &block);
   xb_block_call(ctx, &r, &block, 0, &r); /* no arguments; argv stays a valid address */
   xb_gc_root_pop(ctx, 2);
-  if ((ctx->pending && xb_pending(ctx)) || a->closed) return -1;
+  if ((xb_pending_get(ctx) && xb_pending(ctx)) || a->closed) return -1;
   return r.type != XB_T_LOGICAL || r.v.l;
 }
 

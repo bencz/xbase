@@ -34,7 +34,7 @@ void xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics
 }
 
 /* Whether the function just called asks to unwind (a safepoint only pauses). */
-static int unwinding(xb_ctx *ctx) { return ctx->pending && xb_pending(ctx); }
+static int unwinding(xb_ctx *ctx) { return xb_pending_get(ctx) && xb_pending(ctx); }
 
 /* Calls `fn` with the arguments, its result in a rooted item and dropped. */
 static void call(xb_ctx *ctx, xb_func fn, uint32_t argc, xb_item *argv) {
@@ -82,13 +82,13 @@ static int start_up(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
 void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
   xb_symbols_seal();
   if (start_up(ctx, argc, argv)) call(ctx, start, argc, argv);
-  ctx->pending = XB_PENDING_NONE; /* the request is served: the exit code stays */
+  xb_pending_clear(ctx, XB_PENDING_UNWIND); /* the request is served: the exit code stays */
   xb_set_nil(&ctx->break_value);
   if (xb_gc_finalizable_count()) { /* what the start function alone kept: destroyed before the EXIT procedures */
     xb_gc_collect();
-    ctx->pending = XB_PENDING_NONE;
+    xb_pending_clear(ctx, XB_PENDING_UNWIND);
     xb_classes_finalize(ctx);
-    ctx->pending = XB_PENDING_NONE;
+    xb_pending_clear(ctx, XB_PENDING_UNWIND);
   }
   int stopped = 0;
   for (const xb_module *m = modules; m && !stopped; m = m->next)
@@ -96,8 +96,8 @@ void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
       call(ctx, m->procs[m->ninit + k], 0, argv); /* no arguments; argv stays a valid address */
       stopped = unwinding(ctx);
     }
-  uint32_t requests = ctx->pending; /* the tables are written and closed whatever ended the program */
-  ctx->pending = XB_PENDING_NONE;
+  uint32_t requests = xb_pending_get(ctx) & XB_PENDING_UNWIND; /* the tables are closed whatever ended the program */
+  xb_pending_clear(ctx, XB_PENDING_UNWIND);
   xb_area_close_all(ctx);
-  ctx->pending = requests;
+  xb_pending_set(ctx, requests);
 }

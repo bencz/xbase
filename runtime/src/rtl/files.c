@@ -86,7 +86,7 @@ void xbf_FREAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       !xb_is_number(&argv[2]))
     return;
   const xb_item *target = xb_ref_target(ctx, &argv[1]);
-  if (ctx->pending && xb_pending(ctx)) return;
+  if (xb_pending_get(ctx) && xb_pending(ctx)) return;
   if (target->type != XB_T_STRING) return;
   int64_t n = xb_num_to_i64(&argv[2]);
   size_t len = target->v.s->len;
@@ -99,7 +99,11 @@ void xbf_FREAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (target->type != XB_T_STRING || target->v.s->len != len) return;
   memcpy(buf->data, target->v.s->data, len);
   int32_t err = 0;
+  xb_item held; /* rooted while the read writes into it: another thread may collect meanwhile */
+  xb_set_str(&held, buf);
+  xb_gc_root_push(ctx, &held);
   int64_t got = xb_file_read_up_to(f, buf->data, (size_t)n, &err);
+  xb_gc_root_pop(ctx, 1);
   set_error(ctx, got >= 0, err);
   if (got <= 0) return;
   xb_item *var = xb_ref_target(ctx, &argv[1]);

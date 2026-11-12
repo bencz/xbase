@@ -66,7 +66,7 @@ on a thread whose stack is reserved at 1 GB on 64-bit targets and 256 MB on 32-b
 `core/main.c`; pages are committed as used), so deep recursion has room.
 
 Running out of it is an error, not the end of the process: the context knows the lowest address of its thread's
-stack the program may use (`xb_ctx_set_stack`, from `xb_platform_stack_low`: the system's bounds of the thread's
+stack the program may use (`xb_ctx_set_stack`, from `xb_platform_stack_bounds`: the system's bounds of the thread's
 stack, above its guard pages; none on a system that does not tell, where the error is never raised), and its
 `stack_limit` lies 1 MB above it. Every place where xBase code goes deeper tests it: a compiled function (a
 codeblock's too) compares its frame's address with the limit after linking the frame, and below it, before its body
@@ -162,7 +162,8 @@ rest of the runtime and compiled code use.
   calls `xb_ref_written` after a store through a reference (a `FOR EACH` variable, a parameter passed by reference). The
   barrier comes after the store, with no allocation in between, and an item a call produces never goes straight into a
   heap object: it goes through a frame slot first (a root). A recorded object is traced by the next young collection and
-  leaves the set.
+  leaves the set. Threads record without a lock: the thread that sets an object's bit first (atomically) lists it in a
+  list of its own, which a collection merges into the remembered set.
 - Card marking: array storage for 1024 items or more carries one card byte per 64 items after its last item. A store
   into such an old array marks the element's card and records the array for its cards only; the young collection
   scans the marked cards (eight card bytes per step) instead of the whole array. Storage that is replaced (the array
@@ -188,29 +189,52 @@ rest of the runtime and compiled code use.
   Objects of size classes, large objects and objects too small to hold the copy's address (on 32-bit targets, a
   codeblock without cells or an object without variables) never move.
 - Pinning: compiled code and C code keep object addresses in registers and on the machine stack, where the collector
-  cannot update them. Before moving anything, the collection saves the thread's registers on its stack
-  (`xb_platform_with_registers`) and scans every word from there up to the stack's start (`xb_gc_thread_stack`, given
-  by the thread's first function), the slots of the compiled code's frames aside (they are precise roots); an object
-  of the blocks being emptied that a word points into (to its header, anywhere inside it or just past it) is pinned
-  (`XB_GC_HDR_PINNED`) and stays. The object that a C root's address lies in is pinned too. A collection on a thread
-  whose stack start is unknown, or while C code holds the collector, moves nothing. A pointer below an object's start
-  (such as `items - 1` for 1-based indexing) does not pin it: C code keeps the object's address, or one inside it,
-  across a call that may allocate.
+  cannot update them. Before moving anything, the collector saves its registers on its stack
+  (`xb_platform_with_registers`) and scans every thread's stack up to its end (the system's bounds of the stack,
+  `xb_platform_stack_bounds`, else the address the thread attached with): its own from there, a parked thread's from
+  where it parked or entered its blocking operation (its registers saved on the stack above that point); the slots of
+  the compiled code's frames are left out (they are precise roots). An object of the blocks being emptied that a word
+  points into (to its header, anywhere inside it or just past it) is pinned (`XB_GC_HDR_PINNED`) and stays. The object
+  that a C root's address lies in is pinned too. A collection moves nothing when a thread's stack is unknown, when the
+  collecting thread is not attached, while a thread is in a blocking operation it entered alone (below), or while C
+  code holds the collector. A pointer below an object's start (such as
+  `items - 1` for 1-based indexing) does not pin it: C code keeps the object's address, or one inside it, across a call
+  that may allocate.
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
 - Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, an object above half the address space,
   memory exhausted), a lock that cannot be created and an ABI mismatch
   end the program through `xb_gc_fatal`, the runtime's single fatal exit, with a message on standard error and exit
   code 1.
-- Rules for C code: a collection can run inside any allocation, so every object still needed must be reachable from
-  a frame or a C root before the next allocation, and a store into a heap object that may have aged since it was
-  allocated (any allocation in between) is followed by `xb_gc_write` or `xb_gc_write_item`. An object address in a C
-  variable stays valid across a collection (the stack scan pins the object), but an address kept anywhere the scan
-  does not see (in `malloc`'d memory, as a map's key) is valid only between `xb_gc_hold()` and `xb_gc_release()`,
-  during which no collection moves anything (`xb_clone_deep` keeps such a map).
-- Threads: global structures are protected by a lock (`xb_mutex`, platform layer); the allocation fast path takes
-  none. A collection requires every mutator to be stopped at a safepoint (`XB_PENDING_SAFEPOINT`); while tasks run on
-  one thread the allocating thread is the only mutator.
+- Rules for C code: a collection can run inside any allocation, so every object still needed must be reachable from a
+  frame or a C root before the next allocation, and a store into a heap object that may have aged since it was allocated
+  (any allocation in between) is followed by `xb_gc_write` or `xb_gc_write_item`. An object address in a C variable
+  stays valid across a collection (the stack scan pins the object), but an address kept anywhere the scan does not see
+  (in `malloc`'d memory, as a map's key) is valid only between `xb_gc_hold()` and `xb_gc_release()`, during which no
+  collection moves anything (`xb_clone_deep` keeps such a map). What may block the thread (a file's I/O, a wait, a write
+  to or flush of the standard output or error) runs through `xb_blocking_run`: it allocates nothing and changes no
+  reference, and the objects it reads or writes are rooted (`FRead()` roots the string a read fills, the console the
+  text it writes), since another thread may collect meanwhile. A runtime lock held across a safepoint or a blocking
+  operation (the registry of shared files', whose holder may park on its way back from a file operation; the lock of
+  class preparations, whose holder runs xBase code) is waited for in a blocking operation; others (the heap's, the
+  memory variable names') are never held across one.
+- Threads: a thread that runs xBase code attaches (`xb_gc_thread_attach`, by its first function) and detaches before
+  it ends; the allocation fast path takes no lock, the global structures one (`xb_mutex`). A collection stops the
+  world: the collecting thread sets `stopping` and `XB_PENDING_SAFEPOINT` on the contexts of the other threads still
+  running (each context knows the thread that registered it; a request served for nothing would send that thread's
+  loops to their generic copy for an iteration, [compiler.md](compiler.md#object-emission)), then waits (on a
+  condition) until no other attached thread is running. A running thread parks at its next safepoint (a poll of
+  compiled code that serves the request, `xb_pending_gc`; the slow path of an allocation; a change of the contexts),
+  its registers saved on its stack, until the collection ends. The request is set with release and read with acquire,
+  and the collector raises it again each millisecond it waits, so a thread that served it before `stopping` reached
+  it parks at its next poll. A thread in a blocking operation counts as stopped: the operation runs inside
+  `xb_platform_with_registers`, so the registers of every caller stay saved on the stack while it runs (a thread that is
+  the only one attached skips that, nothing else collecting then, and marks itself `unsaved`: a thread that attaches
+  meanwhile and collects moves nothing until the operation ends); the thread
+  publishes where its stack is in use and its state (sequentially consistent, as the collector's `stopping` is, so
+  neither misses the other), and on its way back it parks if a collection runs. A second thread that wants to collect
+  parks until the first one's collection ends, then sees whether its own is still needed. What holds a collection up
+  is code that reaches no safepoint: a runtime loop of C alone (a sort without a block) for as long as it runs.
 
 `__GcCollect( [lYoung] )` runs a full collection (a young one with `.T.`), then the destructors of the objects it
 found unreachable ([Classes](#classes)), and returns the number of live objects the last full collection found (tests
@@ -219,7 +243,7 @@ use it).
 Finalization: an object registered with `xb_gc_finalizable` (an object whose class has a destructor) that a
 collection does not reach moves, after marking, to a queue of finalized objects, and is marked with what it refers to
 (the queue is a root until `xb_gc_next_finalized` hands it out); the collection then raises `XB_PENDING_FINALIZE` in
-every context.
+the context that runs the destructors (the first one registered, then another when it goes).
 
 ## Hashes
 
@@ -438,15 +462,17 @@ first time it is used (its class function, or a subclass):
   `Message not found`; values of other types behave as before.
 - Destructors (`DESTRUCTOR name`, `xb_class_def.destructor`): an object of a class whose line has one is registered with
   the collector (`xb_gc_finalizable`) when it is made. A collection that finds it unreachable keeps it, and what it
-  refers to, alive in a queue and raises `XB_PENDING_FINALIZE`; the next pending test of compiled code that may collect
-  (`xb_pending_gc`, also right inside `__GcCollect()`) runs the destructor of each class of its line that has one, its
-  own class first, with the object as `Self` (`xb_classes_finalize`); destructors may allocate and collect. The requests
-  already pending (a `BREAK` on its way, with its value) wait while they run; an error is the error block's, and a
-  `BREAK` or an unrecovered error ends the destructor alone, while a `QUIT` stays and leaves the other queued objects
-  for the end. When the start function returns, a full collection destroys what it alone kept, and what is still queued,
-  before the `EXIT` procedures. A destructor runs once: one that stores its object keeps it alive, without the
-  reference's error. Objects die when a collection finds them unreachable (a frame temporary may keep one until its
-  function returns), not, as with the reference's reference counts, the moment the last reference goes.
+  refers to, alive in a queue and raises `XB_PENDING_FINALIZE` on one context, the first registered (the program's; when
+  it goes, the next one, which gets the request if objects wait), so destructors never run on two threads at once; that
+  context's next pending test that may collect (`xb_pending_gc`, also right inside `__GcCollect()`) runs the destructor
+  of each class of its line that has one, its own class first, with the object as `Self` (`xb_classes_finalize`);
+  destructors may allocate and collect. The requests already pending (a `BREAK` on its way, with its value) wait while
+  they run; an error is the error block's (also when the destructor runs inside a `Type()`, whose evaluation its errors
+  do not end), and a `BREAK` or an unrecovered error ends the destructor alone, while a `QUIT` stays and leaves the
+  other queued objects for the end. When the start function returns, a full collection destroys what it alone kept, and
+  what is still queued, before the `EXIT` procedures. A destructor runs once: one that stores its object keeps it alive,
+  without the reference's error. Objects die when a collection finds them unreachable (a frame temporary may keep one
+  until its function returns), not, as with the reference's reference counts, the moment the last reference goes.
 - Inline caches: each send of compiled code has its own `xb_send_cache`, of `XB_SEND_CACHE_WAYS` (4) ways. A message
   that reaches a member of an object (not through a cast) stores the object's class, the member and its slot there (a
   variable's index, a class variable's address) as the newest way (the oldest of a full cache goes); the next message
@@ -633,10 +659,14 @@ which inline `/` and `%` read), `xb_frame *frames` and `const char *stack_limit`
 requests. The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`,
 `XB_PENDING_FINALIZE` when there are objects to destroy, and `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro
 operator](#macro-operator)). Compiled code tests the field after each fallible call; when it is set the code calls
-`xb_pending_gc` (or `xb_pending`, which never collects, where a substituted result waits unseen: see
-[compiler.md](compiler.md#xir-to-llvm)), which serves pauses (a safepoint) and destructors ([Classes](#classes)) and
-returns non-zero when the function must unwind: to a `BEGIN SEQUENCE` handler of the function, or to its caller
-([xir.md](xir.md#control-flow-for-errors-and-exceptions)). The check stays valid across `AWAIT`. `QUIT` raises
+`xb_pending_gc` (or `xb_pending`, which never collects nor parks the thread, where a substituted result waits unseen:
+see [compiler.md](compiler.md#xir-to-llvm)), which serves a collection another thread makes (the thread parks: a
+safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a `BEGIN
+SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)); a loop's
+back edge tests the field the same way, and the macro evaluator after each operation that can fail (with
+`xb_pending_gc`: its values are all in its frame). Other threads set bits there, so every change is an atomic
+read-modify-write (`xb_pending_set`, `xb_pending_clear` in `core/context.h`), and code that sets requests aside or ends
+them touches only the flow's own (`XB_PENDING_UNWIND`). The check stays valid across `AWAIT`. `QUIT` raises
 `XB_PENDING_QUIT` with exit code 0.
 
 A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`; `xb_error_of` for one with another
@@ -1078,14 +1108,18 @@ The program's code runs on one thread today; the services below are what tasks a
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`), mutexes (`xb_mutex`, with
-  `trylock`), condition variables (`xb_cond`, with waits timed on the monotonic clock: POSIX binds the condition to
-  it, macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks (`xb_rwlock`;
-  on glibc of the kind where a waiting writer goes before readers that come after it, elsewhere with the system's
-  policy), the number of processors the program may run on (its affinity on Linux, else every processor online), and
-  a monotonic clock in nanoseconds (`xb_platform_monotonic_ns`), which `ElapsedMs` counts from the start of `main`
-  (`xb_program_elapsed_ms`). Each object is made by its `init` function, which fails only for lack of memory or system
-  objects, and freed by its `destroy` function. None of these locks is recursive: the thread holding one never asks
-  for it again, not even for a second read lock, which would wait behind a waiting writer.
+  `trylock`), condition variables (`xb_cond`, with waits timed on the monotonic clock: POSIX binds the condition to it,
+  macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks (`xb_rwlock`; on glibc
+  of the kind where a waiting writer goes before readers that come after it, elsewhere with the system's policy), the
+  number of processors the program may run on (its affinity on Linux, else every processor online), the bounds of the
+  calling thread's stack (`xb_platform_stack_bounds`), and a monotonic clock in nanoseconds
+  (`xb_platform_monotonic_ns`), which `ElapsedMs` counts from the program's first context (`xb_program_elapsed_ms`). The
+  functions that may block (files, directories) are the operating system's side (`xb_os_*`, `platform/os.h`) wrapped
+  once for every platform through `xb_blocking_run` (`platform/blocking.c`, the arguments in a structure), which the
+  collector provides ([Garbage collector](#garbage-collector)); so is the flush of a C stream (`xb_platform_flush`).
+  Each object is made by its `init` function, which fails only for lack of memory or system objects, and freed by its
+  `destroy` function. None of these locks is recursive: the thread holding one never asks for it again, not even for a
+  second read lock, which would wait behind a waiting writer.
 - Atomic operations (`platform/atomic.h`) on ordinary 8-bit, 32-bit, 64-bit, `size_t` and pointer fields, so that
   memory read plainly where no other thread sees it (an object header, a field compiled code reads) is also changed
   atomically where one may: loads, stores, add, or, and, exchange and compare-and-swap with an explicit order (not
@@ -1122,14 +1156,14 @@ function creates for its caller (`RESTORE`), as a compiled caller does; an unkno
 `Undefined function` (not substitutable), anything else as its first argument `BASE/3012`.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
-in binary mode so programs write the same bytes everywhere), notes the start of the `ElapsedMs` clock and takes
-the command-line arguments in UTF-8 (`xb_platform_args`: as `main` received them on POSIX systems, converted from the
-wide command line on Windows). Then, on the program's thread (started with `xb_thread_start` and a stack reserved at
-`XB_PROGRAM_STACK_SIZE`; the process's first thread when it cannot be started), it creates the context, makes the
-arguments after the program's name strings in a frame of its own linked into the context's chain (so the collector
-sees them), calls `xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes output and returns the
-exit code.
-`xb_app_main` checks the ABI and calls `xb_program_run`, which runs, in this order:
+in binary mode so programs write the same bytes everywhere) and takes the command-line arguments in UTF-8
+(`xb_platform_args`: as `main` received them on POSIX systems, converted from the wide command line on Windows). Then,
+on the program's thread (started with `xb_thread_start` and a stack reserved at `XB_PROGRAM_STACK_SIZE`; the process's
+first thread when it cannot be started), attached to the collector, it creates the context (the first, which starts the
+`ElapsedMs` clock), makes the arguments after the program's name strings in a frame of its own linked into the context's
+chain (so the collector sees them), calls `xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes
+output, detaches and returns the exit code. `xb_app_main` checks the ABI and calls `xb_program_run`, which runs, in this
+order:
 
 1. the modules' `STATIC` initializations, in registration order;
 2. `ErrorSys()`, found by name (the program's own, else the runtime's), which installs the error block

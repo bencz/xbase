@@ -208,6 +208,7 @@ void CodeGen::refWritten(Value *item) {
 void CodeGen::cellWritten(Value *cell) {
   Value *back = ConstantInt::getSigned(i64_, -static_cast<int64_t>(XB_GC_STATE_BACK));
   Value *state = loadFrom(i8_, b_.CreateGEP(i8_, cell, back), Mem::GcState, "gc.state");
+  cast<LoadInst>(state)->setAtomic(AtomicOrdering::Monotonic); // other threads set its bits (xb_gc_write)
   Value *bits = b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
   BasicBlock *join = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gc.old");
   b_.CreateCall(rtGcRemember_, {cell});

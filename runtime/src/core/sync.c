@@ -95,6 +95,16 @@ uint32_t xb_park_wake(const uint32_t *addr, int all) {
   return n;
 }
 
+typedef struct park_args {
+  const uint32_t *addr;
+  uint32_t expected;
+} park_args;
+
+static void park_forever(void *p) {
+  const park_args *a = p;
+  xb_park_wait(a->addr, a->expected, -1);
+}
+
 void xb_rlock_lock(xb_rlock *l) {
   uint32_t self = xb_thread_self();
   if (xb_atomic_load32(&l->owner, XB_RELAXED) == self) { /* only this thread writes its own number there */
@@ -103,7 +113,8 @@ void xb_rlock_lock(xb_rlock *l) {
   }
   uint32_t owner = 0;
   while (!xb_atomic_cas32(&l->owner, &owner, self, XB_ACQUIRE)) {
-    xb_park_wait(&l->owner, owner, -1);
+    park_args a = {&l->owner, owner}; /* its holder may run code that waits for a collection: a blocking operation */
+    xb_blocking_run(park_forever, &a);
     owner = 0;
   }
   l->depth = 1;

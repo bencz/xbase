@@ -26,7 +26,16 @@ static void env_free(xb_env *env) {
   free(env);
 }
 
+/* The monotonic clock when the first context was made, as the program started: ElapsedMs() counts from it. */
+static int64_t started;
+
+static void start_clock(void) { started = xb_platform_monotonic_ns(); }
+
+int64_t xb_program_elapsed_ms(void) { return (xb_platform_monotonic_ns() - started) / XB_NS_PER_MS; }
+
 xb_ctx *xb_ctx_new(void) {
+  static xb_once_flag clock = XB_ONCE_INIT;
+  xb_once(&clock, start_clock);
   xb_gc_init();
   xb_shared_init();
   xb_ctx *ctx = calloc(1, sizeof *ctx);
@@ -82,26 +91,26 @@ void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len) {
   ctx->env->date_format = fmt;
 }
 
-/* Slow paths of the pending test (xbrt.h). A safepoint request only pauses
- * the task (all mutators stopped for a collection); with one mutator thread
- * there is nothing to wait for, so it is simply acknowledged. xb_pending never
- * collects: a result the error block substituted may wait across it in a home
- * the collector does not see (docs/xir.md, Passes), and C callers may hold
- * items in their own variables. xb_pending_gc also runs destructors, which may
- * collect. */
-int32_t xb_pending(xb_ctx *ctx) {
-  ctx->pending &= ~(uint32_t)XB_PENDING_SAFEPOINT;
-  return (ctx->pending & XB_PENDING_UNWIND) != 0;
-}
+/* Slow paths of the pending test (xbrt.h). xb_pending never collects and never parks the thread for another's
+ * collection: a result the error block substituted may wait across it in a home the collector does not see
+ * (docs/xir.md, Passes), and C callers may hold items in their own variables; a safepoint request stays pending for the
+ * next poll that serves it. xb_pending_gc serves it (it parks the thread while another thread collects) and runs the
+ * destructors, which may collect. */
+int32_t xb_pending(xb_ctx *ctx) { return (xb_pending_get(ctx) & XB_PENDING_UNWIND) != 0; }
 
 int32_t xb_pending_gc(xb_ctx *ctx) {
-  if (ctx->pending & XB_PENDING_FINALIZE) {
-    ctx->pending &= ~(uint32_t)XB_PENDING_FINALIZE;
+  if (xb_pending_get(ctx) & XB_PENDING_SAFEPOINT) {
+    xb_pending_clear(ctx, XB_PENDING_SAFEPOINT);
+    xb_gc_safepoint();
+  }
+  if (xb_pending_get(ctx) & XB_PENDING_FINALIZE) {
+    xb_pending_clear(ctx, XB_PENDING_FINALIZE);
     xb_classes_finalize(ctx);
   }
   return xb_pending(ctx);
 }
-void xb_ctx_raise(xb_ctx *ctx, uint32_t what) { ctx->pending |= what; }
+
+void xb_ctx_raise(xb_ctx *ctx, uint32_t what) { xb_pending_set(ctx, what); }
 
 void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                   uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,

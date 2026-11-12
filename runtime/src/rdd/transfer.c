@@ -155,8 +155,8 @@ static int copy_fields(xb_ctx *ctx, transfer *t, xb_area *src, xb_area *dst) {
     xb_set_nil(&v);
     xb_gc_root_push(ctx, &v);
     ok = xb_area_field_get(ctx, src, t->from[k], &v) && !src->closed && !dst->closed;
-    ok = ok && (xb_area_field_put(ctx, dst, t->to[k], &v) || !(ctx->pending && xb_pending(ctx))) && !dst->closed &&
-         !src->closed; /* the error block may close either */
+    ok = ok && (xb_area_field_put(ctx, dst, t->to[k], &v) || !(xb_pending_get(ctx) && xb_pending(ctx))) &&
+         !dst->closed && !src->closed; /* the error block may close either */
     xb_gc_root_pop(ctx, 1);
   }
   return ok;
@@ -459,7 +459,7 @@ static int close_group(xb_ctx *ctx, totaling *g) {
   for (uint32_t k = 0; ok && g->written && !dst->closed && k < g->count; ++k) {
     xb_item v;
     xb_set_double(&v, g->sums[k], (uint16_t)dst->fields[g->to[k]].dec);
-    ok = (xb_area_field_put(ctx, dst, g->to[k], &v) || !(ctx->pending && xb_pending(ctx))) && !dst->closed;
+    ok = (xb_area_field_put(ctx, dst, g->to[k], &v) || !(xb_pending_get(ctx) && xb_pending(ctx))) && !dst->closed;
   }
   g->open = g->written = 0;
   return ok;
@@ -477,7 +477,7 @@ static int total_record(xb_ctx *ctx, xb_area *src, void *arg) {
   if (ok && g->open) { /* the same group while the key is exactly the same */
     xb_item same;
     xb_op_exacteq(ctx, &same, &k, &g->key);
-    ok = !(ctx->pending && xb_pending(ctx));
+    ok = !(xb_pending_get(ctx) && xb_pending(ctx));
     if (ok && !(same.type == XB_T_LOGICAL && same.v.l)) ok = close_group(ctx, g);
   }
   if (ok && !g->open) {
@@ -499,7 +499,7 @@ static int total_record(xb_ctx *ctx, xb_area *src, void *arg) {
     g->sums[i] += v.type == XB_T_INT ? (double)v.v.i : v.v.d;
   }
   xb_gc_root_pop(ctx, 2);
-  return ok && !(ctx->pending && xb_pending(ctx)) && !src->closed ? 1 : -1;
+  return ok && !(xb_pending_get(ctx) && xb_pending(ctx)) && !src->closed ? 1 : -1;
 }
 
 /* TOTAL into the new file: the scope's records in runs, a record for each. */

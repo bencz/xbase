@@ -230,7 +230,7 @@ static int call_init(xb_ctx *ctx, cls *c) {
   ++initsRunning;
   def->init(ctx, &values, 0, NULL);
   --initsRunning;
-  int ok = !(ctx->pending & XB_PENDING_UNWIND);
+  int ok = !(xb_pending_get(ctx) & XB_PENDING_UNWIND);
   if (ok && values.type == XB_T_ARRAY) {
     const xb_array *a = values.v.p;
     for (uint32_t i = 0; i < def->nvars + def->nclassVars && i < a->len; ++i) c->initial[i] = a->items[i];
@@ -515,7 +515,7 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
       if (super) dispatch(ctx, r, c, "INIT", from, 1, NULL, argc, argv);
       else dispatch(ctx, r, c, "INIT", c->def, 0, NULL, argc, argv);
       xb_gc_root_pop(ctx, 1);
-      if (!(ctx->pending & XB_PENDING_UNWIND)) *r = self;
+      if (!(xb_pending_get(ctx) & XB_PENDING_UNWIND)) *r = self;
       return;
     }
     if (strcmp(message, "INIT") == 0) {
@@ -580,7 +580,7 @@ int xb_class_send_as(xb_ctx *ctx, xb_item *r, xb_func classFunction, xb_class_de
     xb_gc_root_push(ctx, &made);
     classFunction(ctx, &made, 0, &none); /* no arguments; a valid address all the same */
     xb_gc_root_pop(ctx, 1);
-    if (ctx->pending & XB_PENDING_UNWIND) return 1;
+    if (xb_pending_get(ctx) & XB_PENDING_UNWIND) return 1;
     if (made.type != XB_T_OBJECT || !((const xb_object *)made.v.p)->cls->compiled) return 0;
     known = ((const xb_object *)made.v.p)->cls->compiled->def;
     xb_atomic_storeptr((void **)def, known, XB_RELEASE);
@@ -687,14 +687,20 @@ void xb_classes_finalize(xb_ctx *ctx) {
     for (uint32_t k = 0; k < c->nline && !quit; ++k) {
       xb_func destructor = c->line[k]->destructor;
       if (!destructor) continue;
-      uint32_t before = ctx->pending; /* the requests already pending wait, with their BREAK value */
+      uint32_t before = xb_pending_get(ctx) & XB_PENDING_UNWIND; /* the requests pending wait, with their BREAK value */
       breakValue = ctx->break_value;
-      ctx->pending &= ~(uint32_t)XB_PENDING_UNWIND;
+      xb_pending_clear(ctx, XB_PENDING_UNWIND);
+      uint32_t trap = ctx->error_trap; /* a Type() evaluating: the destructor's errors are not its own */
+      int32_t trapped = ctx->error_trapped;
+      ctx->error_trap = 0;
       self = obj;
       destructor(ctx, &ret, 1, &self);
-      quit = (ctx->pending & XB_PENDING_QUIT) != 0;
-      ctx->pending = before | (ctx->pending & XB_PENDING_QUIT);
+      quit = (xb_pending_get(ctx) & XB_PENDING_QUIT) != 0;
+      xb_pending_clear(ctx, XB_PENDING_UNWIND & ~(uint32_t)XB_PENDING_QUIT);
+      xb_pending_set(ctx, before);
       ctx->break_value = breakValue;
+      ctx->error_trap = trap;
+      ctx->error_trapped = trapped;
     }
   }
   xb_gc_root_pop(ctx, 3);

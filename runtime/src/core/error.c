@@ -30,13 +30,20 @@ void xbf_ERRORNEW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 static void set_text(xb_item *it, const char *s) { xb_set_str(it, xb_str_new(s, strlen(s))); }
 
-/* An error the program cannot recover from: reported (with the innermost XB_CALLS_SHOWN calls), and the program ends
- * with exit code 1. */
-static void unrecoverable(xb_ctx *ctx, int code, const char *text) {
+typedef struct report {
+  const xb_ctx *ctx;
+  int code;
+  const char *text;
+} report;
+
+/* The report, on the standard error after the standard output's text, as a blocking operation (a full pipe holds
+ * it): it reads the frames and their functions' names, no object. */
+static void write_report(void *p) {
+  const report *r = p;
   fflush(stdout);
-  fprintf(stderr, "\nUnrecoverable error %d: %s", code, text);
+  fprintf(stderr, "\nUnrecoverable error %d: %s", r->code, r->text);
   uint32_t shown = 0;
-  for (const xb_frame *f = ctx->frames; f; f = f->prev) {
+  for (const xb_frame *f = r->ctx->frames; f; f = f->prev) {
     if (!xb_frame_shown(f)) continue;
     if (shown++ == XB_CALLS_SHOWN) {
       fprintf(stderr, "\n%s", XB_CALLS_NOT_SHOWN);
@@ -46,8 +53,15 @@ static void unrecoverable(xb_ctx *ctx, int code, const char *text) {
     if (f->proc->file) fprintf(stderr, " in %s", f->proc->file);
   }
   fputc('\n', stderr);
+}
+
+/* An error the program cannot recover from: reported (with the innermost XB_CALLS_SHOWN calls), and the program ends
+ * with exit code 1. */
+static void unrecoverable(xb_ctx *ctx, int code, const char *text) {
+  report r = {ctx, code, text};
+  xb_blocking_run(write_report, &r);
   xb_exit_code_set(1);
-  ctx->pending |= XB_PENDING_QUIT;
+  xb_pending_set(ctx, XB_PENDING_QUIT);
 }
 
 int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *operation, uint32_t flags,
@@ -78,7 +92,7 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
   const xb_item *args = f->args;
   if (ctx->error_trap) { /* Type() evaluating: it ends here */
     ctx->error_trapped = f->gencode ? f->gencode : -1;
-    ctx->pending |= XB_PENDING_TRAP;
+    xb_pending_set(ctx, XB_PENDING_TRAP);
     return 0;
   }
   xb_proc proc = XB_RUNTIME_PROC(frame, 0);
@@ -137,7 +151,7 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
   --ctx->error_depth;
   if (frame) xb_frame_pop(ctx, &inside);
   int outcome = 0;
-  if (!(ctx->pending & XB_PENDING_UNWIND)) {
+  if (!(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
     if ((flags & XB_ERR_RETRY) && call[1].type == XB_T_LOGICAL && call[1].v.l) {
       outcome = 2;
     } else if (flags & XB_ERR_SUBSTITUTE) {
@@ -196,7 +210,7 @@ void xbf_ERRORBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void request_break(xb_ctx *ctx, uint32_t argc, const xb_item *argv) {
   if (argc >= 1) ctx->break_value = argv[0];
   else xb_set_nil(&ctx->break_value);
-  ctx->pending |= XB_PENDING_BREAK;
+  xb_pending_set(ctx, XB_PENDING_BREAK);
 }
 
 void xbf_BREAK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -217,8 +231,8 @@ void xbf___BREAK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 int32_t xb_seq_catch(xb_ctx *ctx) {
-  if ((ctx->pending & XB_PENDING_UNWIND) != XB_PENDING_BREAK) return 0;
-  ctx->pending &= ~(uint32_t)XB_PENDING_BREAK;
+  if ((xb_pending_get(ctx) & XB_PENDING_UNWIND) != XB_PENDING_BREAK) return 0;
+  xb_pending_clear(ctx, XB_PENDING_BREAK);
   return 1;
 }
 
@@ -235,16 +249,16 @@ void xb_seq_with(xb_ctx *ctx, xb_item *r, const xb_item *handler) {
 void xb_seq_restore(xb_ctx *ctx, const xb_item *old) { ctx->env->error_block = *old; }
 
 uint32_t xb_seq_suspend(xb_ctx *ctx) {
-  uint32_t requests = ctx->pending & XB_PENDING_UNWIND;
-  ctx->pending &= ~requests;
+  uint32_t requests = xb_pending_get(ctx) & XB_PENDING_UNWIND;
+  xb_pending_clear(ctx, requests);
   return requests;
 }
 
 void xb_seq_resume(xb_ctx *ctx, uint32_t requests, const xb_item *value) {
-  if (ctx->pending & XB_PENDING_UNWIND) { /* ALWAYS made its own: it replaces them, but a QUIT stays */
-    ctx->pending |= requests & XB_PENDING_QUIT;
+  if (xb_pending_get(ctx) & XB_PENDING_UNWIND) { /* ALWAYS made its own: it replaces them, but a QUIT stays */
+    xb_pending_set(ctx, requests & XB_PENDING_QUIT);
     return;
   }
-  ctx->pending |= requests;
+  xb_pending_set(ctx, requests);
   ctx->break_value = *value;
 }

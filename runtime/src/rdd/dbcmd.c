@@ -480,7 +480,7 @@ static int test(xb_ctx *ctx, const xb_item *block) {
   xb_gc_root_push(ctx, &r);
   xb_block_call(ctx, &r, block, 0, &r);
   xb_gc_root_pop(ctx, 1);
-  if (ctx->pending && xb_pending(ctx)) return -1;
+  if (xb_pending_get(ctx) && xb_pending(ctx)) return -1;
   return r.type == XB_T_LOGICAL && r.v.l;
 }
 
@@ -563,7 +563,7 @@ static int eval_block(xb_ctx *ctx, xb_area *a, void *arg) {
   xb_gc_root_push(ctx, &r);
   xb_block_call(ctx, &r, (const xb_item *)arg, 0, &r);
   xb_gc_root_pop(ctx, 1);
-  return ctx->pending && xb_pending(ctx) ? -1 : 1;
+  return xb_pending_get(ctx) && xb_pending(ctx) ? -1 : 1;
 }
 
 /* dbEval( bBlock, [bFor], [bWhile], [nNext], [nRecord], [lRest] ): evaluates bBlock on each record of the scope. */

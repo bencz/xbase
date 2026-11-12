@@ -547,16 +547,20 @@ emits the object file.
   that never raise an error or run code, `quietCalls_`), once per LLVM block and line. The fast paths of operations thus
   store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for references clears its
   own `proc`: the other body shows instead.
-- After every operation that can fail, the generated code loads `ctx->pending`; when it is set (marked unlikely) it
-  calls `xb_pending_gc` (which may run destructors, and so collect) or, right after an operation whose error may
-  substitute its result while that result has a `Local` home the collector does not see (`checkPending`, from the
-  instruction being lowered), `xb_pending`, which never collects; if that asks to unwind, it goes to the LLVM block of
-  the xIR block's unwind block, or leaves through the function's exit. A runtime operator may also return a value the
-  error block substituted, of any type: the code after it reads the result's type instead of assuming one, unless
-  `subst.check` follows the operation (its types then hold; the check reads the item's own tag and leaves for the
-  generic copy on an unlikely edge, see [xir.md](xir.md#passes)), and a comparison that feeds a condition tests the
-  truth of what its slow path returned. `truth` tests the item type inline; a non-logical value calls `xb_cond_error`
-  and leaves.
+- After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
+  `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
+  load stays in a loop without calls instead of leaving it); when it is set (marked unlikely, so the loop splitting
+  below moves the call to the generic copy: the fast loop keeps a load, a test and a branch, which cost 9% of the cycles
+  of the `loops` benchmark, a loop of two additions, 8% of `pi`'s, whose loops are a few instructions each, and 3% or
+  less elsewhere, perf stat on x86-64) it calls `xb_pending_gc` (which may park the thread for another thread's
+  collection, or run destructors, and so collect) or, right after an operation whose error may substitute its result
+  while that result has a `Local` home the collector does not see (`checkPending`, from the instruction being lowered),
+  `xb_pending`, which never collects nor parks; if that asks to unwind, it goes to the LLVM block of the xIR block's
+  unwind block, or leaves through the function's exit. A runtime operator may also return a value the error block
+  substituted, of any type: the code after it reads the result's type instead of assuming one, unless `subst.check`
+  follows the operation (its types then hold; the check reads the item's own tag and leaves for the generic copy on an
+  unlikely edge, see [xir.md](xir.md#passes)), and a comparison that feeds a condition tests the truth of what its slow
+  path returned. `truth` tests the item type inline; a non-logical value calls `xb_cond_error` and leaves.
 - Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
   target `DataLayout`); a `FOR EACH` variable, a `STATIC`, a shared or captured variable or a parameter tests its type
   inline (one unsigned comparison covers `XB_T_CELL` and `XB_T_REF`) and follows a cell inline. An element
@@ -647,11 +651,17 @@ on.
 Loops without slow paths (`codegen/LoopSplit.*`): every inline fast path keeps a call to the runtime for the other
 cases, behind an edge weighted unlikely (`branchLikely`: edges to runtime calls, and to the rare double index; a choice
 between two inline paths, such as an integer or a double operand, or a variable that holds a cell, is a plain branch).
-The innermost loops with such cold edges, found once per function, are put in simplified and LCSSA form and cloned: in
-the original, every cold edge goes to the same block of the copy, which runs the rest of the loop generically and
-never comes back; `SSAUpdater` joins the values of both where the edges enter the copy, and the exits receive the
-copy's values. The original keeps only the calls on its own paths (a `Len()` in a `FOR` limit stays), so the
-function simplification pipeline, run again on the functions that changed, optimizes it as a fast loop: values keep
-the types its fast paths give them, and loads can leave it. A loop of more than 2000 instructions or 64 cold edges is
-left as it is, and the copies grow a function by at most its own size (`kMaxLoopInstructions`, `kMaxColdEdges`). The
-module is verified after the split (an invalid module is an internal error).
+The innermost loops with such cold edges, found once per function, are put in simplified and LCSSA form and cloned
+twice: a generic copy and the loop again. In the original, every cold edge goes to the same block of the generic copy,
+which runs the rest of the iteration generically; its back edge goes to the loop again, through a preheader of its own,
+whose cold edges go to the generic copy as well. So one slow path (an error, a value of another type, a destructor or a
+collection's safepoint served by a poll) costs one generic iteration, and the next ones run fast paths again: the loop
+again knows less of the values that enter it than the original (their types and ranges come from the generic copy),
+so the original runs as long as no slow path is taken. `SSAUpdater` joins the values of the copies where several may
+arrive, and the exits receive the copies' values. The original and the loop again keep only the calls on their own
+paths (a `Len()` in a `FOR` limit stays), so the function simplification pipeline, run again on the functions that
+changed, optimizes them as fast loops: values keep the types their fast paths give them, and loads can leave them (the
+loop again computes what it hoisted in its preheader, after the generic iteration's calls). A loop of more than 2000
+instructions or 64 cold edges is left as it is, and the copies grow a function by at most twice its own size
+(`kMaxLoopInstructions`, `kMaxColdEdges`). The module is verified after the split (an invalid module is an internal
+error).

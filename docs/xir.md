@@ -141,8 +141,8 @@ xIR is an internal error naming the pass. `--dump-xir` writes the result. Implem
   only are removed. The copy's operations keep giving any type, so a substituted value of any type runs correctly, while
   the original code keeps registers and constant type tags. The lowering reads the item's real tag for `subst.check` and
   weights its branch unlikely; between the operation and `subst.value` the result may sit in a home the collector does
-  not see, which holds because the pending test after such an operation calls `xb_pending`, which never collects (one
-  mutator), and not `xb_pending_gc`.
+  not see, which holds because the pending test after such an operation calls `xb_pending`, which never collects nor
+  parks the thread for another thread's collection (the request waits for the next poll), and not `xb_pending_gc`.
 
 They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
 with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor

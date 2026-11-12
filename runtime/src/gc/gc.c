@@ -59,16 +59,22 @@
  * blocks it emptied are free. When the heap is to grow while a quarter of it
  * is free lines of blocks it may empty, such a full collection runs first.
  * Objects in size classes' blocks, large ones and those too small for the
- * copy's address never move. It runs on a thread whose stack start is known,
- * and not while C code holds the collector (xb_gc_hold): it first scans that
- * stack (registers saved on it) for words pointing into the objects it may
- * move and pins those, the compiled code's frames aside (precise roots), and
- * pins the objects the C roots' addresses lie in.
+ * copy's address never move. It runs when every attached thread's stack is
+ * known, and not while C code holds the collector (xb_gc_hold): it first scans
+ * those stacks (registers saved on them) for words pointing into the objects
+ * it may move and pins those, the compiled code's frames aside (precise
+ * roots), and pins the objects the C roots' addresses lie in.
  *
  * Threads. Global structures are protected by one lock; the allocation fast
- * path takes none. A collection must run with every mutator thread stopped at
- * a safepoint (the XB_PENDING_SAFEPOINT handshake); until tasks run on several
- * threads, the allocating thread is the only mutator. */
+ * path takes none. Threads that run xBase code attach. A collection stops the
+ * world: the collecting thread raises XB_PENDING_SAFEPOINT on the contexts of
+ * the other threads still running (a request a thread serves for nothing costs
+ * its loops, docs/compiler.md) and waits until no other thread runs; each one
+ * parks at its next safepoint
+ * (a poll of compiled code, an allocation's slow path), or is blocked already
+ * (xb_blocking_run, whose operation touches only rooted objects). The write
+ * barrier lists objects in a list of the thread's own, merged when a
+ * collection starts. */
 #include "xbrt_int.h"
 
 #include "rdd/rdd.h"
@@ -98,6 +104,7 @@
 #define XB_GC_MIN_FULL ((size_t)8 << 20)         /* old bytes that trigger the first full collection */
 #define XB_GC_ALIGN 8u
 #define XB_GC_DEFRAG_RESERVE 16u                 /* new blocks a defragmentation may take: the heap's blocks / this */
+#define XB_GC_STOP_LOOK_NS (XB_NS_PER_MS)        /* a collector waiting for threads to stop looks again after this */
 
 /* The metadata at the start of a block (its first XB_GC_FIRST_LINE lines). */
 typedef struct xb_hblock {
@@ -136,8 +143,20 @@ typedef struct xb_root {    /* items outside frames */
   size_t count;
 } xb_root;
 
-typedef struct xb_tlh {     /* thread-local heap */
+/* What a thread is doing, for a collection that stops the others (Threads above): running code that touches the heap
+ * (it parks at its next safepoint), parked there, or in a blocking operation (it touches no object until it leaves). */
+enum { T_RUNNING, T_PARKED, T_BLOCKED };
+
+typedef struct xb_tlh {     /* a mutator thread's own part of the heap (xb_gc_thread_attach) */
   struct xb_tlh *next;
+  uint32_t state;           /* T_*: written by the thread, read by a collector (sequentially consistent) */
+  int blocking;             /* in xb_blocking_run */
+  uint32_t unsaved;         /* in it without its registers saved (it was the only thread): nothing moves meanwhile */
+  const char *stackBase;    /* the end of its stack (it grows down from there); NULL: unknown */
+  const char *stackTop;     /* parked or blocked: the lowest address of its stack in use, its registers saved above */
+  /* Old objects it recorded with the write barrier since the last collection (merged then into the remembered set). */
+  xb_gc_hdr **remembered;
+  size_t rememberedLen, rememberedCap;
   char *cursor, *limit;     /* the hole being filled */
   xb_hblock *block;          /* its block */
   /* The overflow run: objects above a line that do not fit the hole, in holes large enough for them. */
@@ -198,12 +217,16 @@ static struct {
   char *copyCursor, *copyLimit;    /* where the collection copies objects: free blocks */
   xb_gc_hdr **pinned;              /* pinned by the collection in progress */
   size_t pinnedLen, pinnedCap;
-  xb_range *frames;                /* the frames' slots on the stack being scanned, by address */
+  xb_range *frames;                /* the frames' slots on the stacks being scanned, by address */
   size_t framesLen, framesCap;
+  uint32_t stopping;               /* a collection stops the other threads (sequentially consistent) */
+  uint32_t threadCount;            /* attached threads */
+  xb_cond stopped;                 /* a thread parked or blocked: the collector counts them again */
+  xb_cond resumed;                 /* the collection ended: parked threads go on */
+  xb_ctx *finalizer;               /* the context destructors run in (the first registered) */
 } heap;
 
 static XB_THREAD_LOCAL xb_tlh *tlh;
-static XB_THREAD_LOCAL const char *stackBase; /* xb_gc_thread_stack */
 
 _Noreturn void xb_gc_fatal(const char *why) {
   fflush(stdout);
@@ -220,7 +243,8 @@ static void *xmalloc(size_t n) {
 }
 
 static void init_heap(void) {
-  if (!xb_mutex_init(&heap.lock)) xb_gc_fatal("cannot create the heap lock");
+  if (!xb_mutex_init(&heap.lock) || !xb_cond_init(&heap.stopped) || !xb_cond_init(&heap.resumed))
+    xb_gc_fatal("cannot create the heap lock");
   heap.epoch = 1; /* never 0, which a line that no collection marked has */
   /* The size classes: each one the largest slot that as many slots fit a block's lines, the next at least an eighth
    * larger, up to the class that fits XB_GC_CLASS_MIN_SLOTS slots. */
@@ -249,15 +273,170 @@ void xb_gc_init(void) {
 }
 
 static xb_tlh *thread_heap(void) {
-  if (!tlh) {
-    tlh = xmalloc(sizeof *tlh);
-    memset(tlh, 0, sizeof *tlh);
+  if (!tlh) xb_gc_fatal("a thread allocates without xb_gc_thread_attach");
+  return tlh;
+}
+
+/* Parks the calling thread while a collection another thread makes runs (heap.stopping): its registers are saved on
+ * its stack first (xb_platform_with_registers), and the scan of its stack starts below them. Under the lock. */
+static void park_locked(void *arg) {
+  xb_tlh *t = arg;
+  t->stackTop = (const char *)&arg;
+  xb_atomic_store32(&t->state, T_PARKED, XB_SEQ_CST);
+  xb_cond_broadcast(&heap.stopped);
+  while (xb_atomic_load32(&heap.stopping, XB_SEQ_CST)) xb_cond_wait(&heap.resumed, &heap.lock);
+  xb_atomic_store32(&t->state, T_RUNNING, XB_SEQ_CST);
+  t->stackTop = NULL;
+}
+
+/* The lock, taken by a thread between collections (another thread's collection in progress is waited for, parked):
+ * to change what a collection sees (the contexts, the threads), or to collect. Returns whether it waited. */
+static int lock_between_collections(void) {
+  xb_mutex_lock(&heap.lock);
+  int waited = 0;
+  while (heap.stopping) {
+    waited = 1;
+    if (tlh) xb_platform_with_registers(park_locked, tlh);
+    else xb_cond_wait(&heap.resumed, &heap.lock);
+  }
+  return waited;
+}
+
+/* Stops every other thread for a collection, with the lock held: each one parks at its next safepoint (the request in
+ * its context's pending bits) or is blocked already. A thread that leaves a blocking operation meanwhile finds
+ * `stopping` set and parks (the store of its state and the load of `stopping` are ordered against the collector's). */
+static void stop_world(xb_tlh *self) {
+  xb_atomic_store32(&heap.stopping, 1, XB_SEQ_CST);
+  for (;;) {
+    /* Raised again at each look: a thread that served the request before `stopping` reached it sees it again. A
+     * blocked thread needs none: it parks on its way back. */
+    for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) {
+      const xb_tlh *t = ctx->gcThread;
+      if (!t || (t != self && xb_atomic_load32(&t->state, XB_SEQ_CST) == T_RUNNING))
+        xb_pending_set(ctx, XB_PENDING_SAFEPOINT);
+    }
+    int running = 0;
+    for (xb_tlh *t = heap.threads; t && !running; t = t->next)
+      running = t != self && xb_atomic_load32(&t->state, XB_SEQ_CST) == T_RUNNING;
+    if (!running) return;
+    xb_cond_wait_ns(&heap.stopped, &heap.lock, XB_GC_STOP_LOOK_NS);
+  }
+}
+
+/* Whether every thread's stack can be scanned, its registers saved on it: a collection moves objects only then. Under
+ * the lock, the other threads stopped. */
+static int stacks_known(void) {
+  for (const xb_tlh *t = heap.threads; t; t = t->next)
+    if (!t->stackBase || xb_atomic_load32(&t->unsaved, XB_RELAXED)) return 0; /* also read between collections */
+  return heap.threads != NULL;
+}
+
+static void start_world(void) {
+  xb_atomic_store32(&heap.stopping, 0, XB_SEQ_CST);
+  xb_cond_broadcast(&heap.resumed);
+}
+
+void xb_gc_safepoint(void) {
+  xb_tlh *t = tlh;
+  if (!t || !xb_atomic_load32(&heap.stopping, XB_SEQ_CST)) return;
+  xb_mutex_lock(&heap.lock);
+  if (heap.stopping) xb_platform_with_registers(park_locked, t);
+  xb_mutex_unlock(&heap.lock);
+}
+
+typedef struct blocked_call {
+  void (*fn)(void *);
+  void *arg;
+  xb_tlh *t;
+} blocked_call;
+
+/* The blocking operation, with the thread's registers saved on its stack (xb_platform_with_registers) for as long as it
+ * runs: the thread publishes where its stack starts to be in use and that it is blocked (release: a collector that
+ * reads the state before it looks again within XB_GC_STOP_LOOK_NS), runs it, and on its way back parks if a
+ * collection runs (that state and the collector's `stopping` are sequentially consistent, so neither misses the
+ * other: the thread touches the heap again only when no collection counts it as stopped). */
+static void run_blocked(void *p) {
+  blocked_call *c = p;
+  xb_tlh *t = c->t;
+  t->stackTop = (const char *)&p;
+  xb_atomic_store32(&t->state, T_BLOCKED, XB_RELEASE);
+  if (xb_atomic_load32(&heap.stopping, XB_RELAXED)) { /* a collector waits for this thread: no need to wait for it */
     xb_mutex_lock(&heap.lock);
-    tlh->next = heap.threads;
-    heap.threads = tlh;
+    xb_cond_broadcast(&heap.stopped);
     xb_mutex_unlock(&heap.lock);
   }
-  return tlh;
+  c->fn(c->arg);
+  xb_atomic_store32(&t->state, T_RUNNING, XB_SEQ_CST);
+  if (xb_atomic_load32(&heap.stopping, XB_SEQ_CST)) { /* a collection runs: wait for it, still as blocked */
+    xb_mutex_lock(&heap.lock);
+    if (heap.stopping) {
+      xb_atomic_store32(&t->state, T_BLOCKED, XB_SEQ_CST);
+      xb_cond_broadcast(&heap.stopped);
+      while (xb_atomic_load32(&heap.stopping, XB_SEQ_CST)) xb_cond_wait(&heap.resumed, &heap.lock);
+      xb_atomic_store32(&t->state, T_RUNNING, XB_SEQ_CST);
+    }
+    xb_mutex_unlock(&heap.lock);
+  }
+  t->stackTop = NULL;
+}
+
+/* The registers are saved only while other threads are attached: with this one alone, nothing collects beside it, and
+ * one that attaches meanwhile moves nothing until the operation ends (stacks_known). */
+void xb_blocking_run(void (*fn)(void *), void *arg) {
+  xb_tlh *t = tlh;
+  if (!t || t->blocking) { /* not attached, or inside a blocking operation already */
+    fn(arg);
+    return;
+  }
+  blocked_call c = {fn, arg, t};
+  t->blocking = 1;
+  if (xb_atomic_load32(&heap.threadCount, XB_RELAXED) > 1) {
+    xb_platform_with_registers(run_blocked, &c);
+  } else {
+    xb_atomic_store32(&t->unsaved, 1, XB_RELAXED);
+    run_blocked(&c);
+    xb_atomic_store32(&t->unsaved, 0, XB_RELAXED);
+  }
+  t->blocking = 0;
+}
+
+void xb_gc_thread_attach(const void *base) {
+  xb_gc_init();
+  if (tlh) xb_gc_fatal("a thread attached twice");
+  xb_tlh *t = xmalloc(sizeof *t);
+  memset(t, 0, sizeof *t);
+  const char *low, *high;
+  t->stackBase = xb_platform_stack_bounds(&low, &high) ? high : base; /* the system's end of the stack, when it tells */
+  lock_between_collections(); /* not attached yet: it waits unparked, and no collection counts it */
+  t->next = heap.threads;
+  heap.threads = t;
+  xb_atomic_add32(&heap.threadCount, 1, XB_RELAXED);
+  xb_mutex_unlock(&heap.lock);
+  tlh = t;
+}
+
+static void merge_remembered(xb_tlh *t);
+static void report_allocation(xb_tlh *t);
+static void collect(int full, int due);
+
+void xb_gc_thread_detach(void) {
+  xb_tlh *t = tlh;
+  if (!t) return;
+  lock_between_collections();
+  report_allocation(t);
+  merge_remembered(t);
+  for (xb_tlh **p = &heap.threads; *p; p = &(*p)->next)
+    if (*p == t) {
+      *p = t->next;
+      break;
+    }
+  xb_atomic_add32(&heap.threadCount, (uint32_t)-1, XB_RELAXED);
+  for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
+    if (ctx->gcThread == t) ctx->gcThread = NULL; /* still registered: asked like an unattached thread's from now on */
+  xb_mutex_unlock(&heap.lock);
+  free(t->remembered);
+  free(t);
+  tlh = NULL;
 }
 
 static void report_allocation(xb_tlh *t) {
@@ -326,11 +505,11 @@ static int defrag_candidate(const xb_hblock *b) {
 
 /* Whether the heap, which is to grow, is fragmented: a quarter of it free lines of blocks a full collection may empty,
  * which objects of several lines may not fit, a young budget allocated since the last full collection (not to collect
- * over and over), and this thread able to move objects. A full collection that defragments comes first then. Under
- * the lock. */
+ * over and over), and the collection able to move objects. A full collection that defragments comes first then.
+ * Under the lock. */
 static int fragmented(void) {
   if (heap.chunkNext != heap.chunkEnd || heap.allocatedSinceFull + heap.allocated < heap.youngBudget || heap.holds ||
-      !stackBase)
+      !stacks_known())
     return 0;
   size_t freeLines = 0;
   for (size_t k = 0; k < heap.blockCount; ++k)
@@ -404,6 +583,7 @@ static void set_start(const void *p) {
  * a young collection runs first when the allocation since the last one
  * reached the budget. */
 static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
+  xb_gc_safepoint(); /* a collection another thread asked for: an allocation is a safepoint */
   int medium = total > XB_GC_LINE_SIZE;
   for (;;) {
     char **cursor = medium && total > room(t->cursor, t->limit) ? &t->overCursor : &t->cursor;
@@ -417,17 +597,17 @@ static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
     if (*block && take_hole(*block, line_of(*limit - 1) + 1, total, cursor, limit)) continue;
     xb_mutex_lock(&heap.lock);
     report_allocation(t);
-    int collect = heap.allocated >= heap.youngBudget;
+    int due = heap.allocated >= heap.youngBudget;
     xb_mutex_unlock(&heap.lock);
-    if (collect) {
-      xb_gc_collect_young(); /* retires every thread's holes */
+    if (due) {
+      collect(0, 1); /* retires every thread's holes */
       continue;
     }
     xb_mutex_lock(&heap.lock);
     int defrag = !heap.recyclable && !heap.freeBlocks && fragmented();
     xb_mutex_unlock(&heap.lock);
     if (defrag) { /* rather than growing the heap */
-      xb_gc_collect();
+      collect(1, 1);
       continue;
     }
     /* Another block: a recyclable one first (a new one has a hole for any object); a recyclable block without a
@@ -473,10 +653,11 @@ static xb_gc_hdr *alloc_class(xb_tlh *t, unsigned c) {
       ++b->used;
       return h;
     }
+    xb_gc_safepoint(); /* a new block: a safepoint, as the slow path of the others */
     xb_mutex_lock(&heap.lock);
     report_allocation(t);
-    int collect = heap.allocated >= heap.youngBudget;
-    if (!collect) {
+    int due = heap.allocated >= heap.youngBudget;
+    if (!due) {
       b = heap.classBlocks[c];
       if (b) {
         heap.classBlocks[c] = b->next;
@@ -488,16 +669,17 @@ static xb_gc_hdr *alloc_class(xb_tlh *t, unsigned c) {
       t->cls[c] = b;
     }
     xb_mutex_unlock(&heap.lock);
-    if (collect) xb_gc_collect_young(); /* retires every thread's blocks */
+    if (due) collect(0, 1); /* retires every thread's blocks */
   }
 }
 
 static void *alloc_large(size_t size) {
+  xb_gc_safepoint();
   xb_mutex_lock(&heap.lock);
   heap.allocated += size;
-  int collect = heap.allocated >= heap.youngBudget;
+  int due = heap.allocated >= heap.youngBudget;
   xb_mutex_unlock(&heap.lock);
-  if (collect) xb_gc_collect_young();
+  if (due) collect(0, 1);
   xb_large *l = xmalloc(sizeof(xb_large) + size);
   xb_mutex_lock(&heap.lock);
   l->link.next = heap.large;
@@ -537,20 +719,31 @@ void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
   return h + 1;
 }
 
+/* Asks the context that runs the destructors to run those of the objects waiting (under the lock). */
+static void request_finalize(void) {
+  if (heap.finalizedLen > heap.finalizedHead && heap.finalizer) xb_pending_set(heap.finalizer, XB_PENDING_FINALIZE);
+}
+
 void xb_gc_register(xb_ctx *ctx) {
-  xb_mutex_lock(&heap.lock);
+  lock_between_collections();
+  ctx->gcThread = tlh;
   ctx->gcPrev = NULL;
   ctx->gcNext = heap.contexts;
   if (heap.contexts) heap.contexts->gcPrev = ctx;
   heap.contexts = ctx;
+  if (!heap.finalizer) heap.finalizer = ctx;
   xb_mutex_unlock(&heap.lock);
 }
 
 void xb_gc_unregister(xb_ctx *ctx) {
-  xb_mutex_lock(&heap.lock);
+  lock_between_collections();
   if (ctx->gcPrev) ctx->gcPrev->gcNext = ctx->gcNext;
   else heap.contexts = ctx->gcNext;
   if (ctx->gcNext) ctx->gcNext->gcPrev = ctx->gcPrev;
+  if (heap.finalizer == ctx) { /* another one runs the destructors from now on, those waiting too */
+    heap.finalizer = heap.contexts;
+    request_finalize();
+  }
   xb_mutex_unlock(&heap.lock);
 }
 
@@ -665,16 +858,13 @@ static int range_order(const void *a, const void *b) {
   return x < y ? -1 : x > y;
 }
 
-/* Pins what the words of this thread's stack point to, from here to its start, the slots of the compiled code's
- * frames on it left out (they are roots the collection updates); called with the registers saved on the stack. */
-static void pin_stack(void *unused) {
-  XB_UNUSED(unused);
-  const char *here = (const char *)&unused;
+/* The slots of the compiled code's frames on the threads' stacks, by address: the scans leave them out (they are
+ * roots the collection updates). */
+static void frame_ranges(void) {
   heap.framesLen = 0;
   for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
     for (const xb_frame *f = ctx->frames; f; f = f->prev) {
-      const char *start = (const char *)f->slots, *end = (const char *)(f->slots + f->nslots);
-      if (start >= stackBase || end <= here) continue; /* not on this stack */
+      if (!f->nslots) continue;
       if (heap.framesLen == heap.framesCap) {
         size_t n = heap.framesCap ? heap.framesCap * 2 : 256;
         xb_range *list = realloc(heap.frames, n * sizeof *list);
@@ -682,12 +872,16 @@ static void pin_stack(void *unused) {
         heap.frames = list;
         heap.framesCap = n;
       }
-      heap.frames[heap.framesLen++] = (xb_range){start, end};
+      heap.frames[heap.framesLen++] = (xb_range){(const char *)f->slots, (const char *)(f->slots + f->nslots)};
     }
   if (heap.framesLen) qsort(heap.frames, heap.framesLen, sizeof *heap.frames, range_order);
-  const char *p = (const char *)(((uintptr_t)here + sizeof(void *) - 1) & ~(uintptr_t)(sizeof(void *) - 1));
+}
+
+/* Pins what the words from `from` to `to` point to, the frames' slots left out. */
+XB_SCANS_STACKS static void pin_range(const char *from, const char *to) {
+  const char *p = (const char *)(((uintptr_t)from + sizeof(void *) - 1) & ~(uintptr_t)(sizeof(void *) - 1));
   size_t next = 0;
-  while (p + sizeof(void *) <= stackBase) {
+  while (p + sizeof(void *) <= to) {
     while (next < heap.framesLen && heap.frames[next].end <= p) ++next;
     if (next < heap.framesLen && heap.frames[next].start <= p) {
       p = heap.frames[next].end; /* slots are aligned items: the word after them is aligned too */
@@ -697,6 +891,17 @@ static void pin_stack(void *unused) {
     memcpy(&w, p, sizeof w);
     pin(w);
     p += sizeof(void *);
+  }
+}
+
+/* Pins what the threads' stacks point to: the collector's from here, every other one's from where it parked or
+ * blocked, each with its registers saved on it above that point. */
+static void pin_stacks(void *self) {
+  frame_ranges();
+  for (xb_tlh *t = heap.threads; t; t = t->next) {
+    const char *from = t == self ? (const char *)&self : t->stackTop;
+    if (!from) xb_gc_fatal("a thread runs during a collection");
+    pin_range(from, t->stackBase);
   }
 }
 
@@ -747,20 +952,26 @@ static xb_gc_hdr *reach(xb_gc_hdr *h, int *young) {
 /* A pointer to an object, set to where the object is now. */
 #define REACH(ptr, young) ((ptr) = (void *)(reach(xb_gc_header(ptr), (young)) + 1))
 
-/* Puts an old object in the remembered set (once), to be traced whole
- * (XB_GC_REMEMBERED) or for its dirty cards (XB_GC_CARDED). Under the lock. */
-static void record_locked(xb_gc_hdr *h, uint8_t how) {
-  if ((h->state & XB_GC_MARKED) && !(h->state & how)) {
-    if (!(h->state & (XB_GC_REMEMBERED | XB_GC_CARDED)))
-      stack_push(&heap.remembered, &heap.rememberedLen, &heap.rememberedCap, h);
-    h->state = (uint8_t)(h->state | how);
-  }
+/* Puts an old object in the remembered set (once), to be traced whole (XB_GC_REMEMBERED) or for its dirty cards
+ * (XB_GC_CARDED): the write barrier's, and a collection's for what it keeps young. The thread that sets the object's
+ * bit first (atomically) lists it, in a list of its own, without the lock; a collection merges the lists into the
+ * remembered set (merge_remembered). */
+static void record(xb_gc_hdr *h, uint8_t how) {
+  uint8_t state = xb_atomic_load8(&h->state, XB_RELAXED);
+  if (!(state & XB_GC_MARKED) || (state & how)) return;
+  if (xb_atomic_or8(&h->state, how, XB_RELAXED) & (XB_GC_REMEMBERED | XB_GC_CARDED)) return; /* listed already */
+  xb_tlh *t = tlh;
+  if (t)
+    stack_push(&t->remembered, &t->rememberedLen, &t->rememberedCap, h);
+  else /* a collection made by a thread not attached, under the lock */
+    stack_push(&heap.remembered, &heap.rememberedLen, &heap.rememberedCap, h);
 }
 
-static void record(xb_gc_hdr *h, uint8_t how) {
-  xb_mutex_lock(&heap.lock);
-  record_locked(h, how);
-  xb_mutex_unlock(&heap.lock);
+/* A thread's list of recorded objects joins the remembered set. Under the lock, the thread stopped or leaving. */
+static void merge_remembered(xb_tlh *t) {
+  for (size_t i = 0; i < t->rememberedLen; ++i)
+    stack_push(&heap.remembered, &heap.rememberedLen, &heap.rememberedCap, t->remembered[i]);
+  t->rememberedLen = 0;
 }
 
 void xb_gc_remember(void *obj) { record(xb_gc_header(obj), XB_GC_REMEMBERED); }
@@ -768,19 +979,21 @@ void xb_gc_remember(void *obj) { record(xb_gc_header(obj), XB_GC_REMEMBERED); }
 void xb_gc_write_item(xb_array *a, size_t index) {
   if (index < a->len && !xb_type_is_heap(a->items[index].type)) return; /* refers to no object */
   xb_gc_hdr *h = xb_gc_header(a);
-  if ((h->state & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED) return; /* young, or traced whole anyway */
+  if ((xb_atomic_load8(&h->state, XB_RELAXED) & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED)
+    return; /* young, or traced whole anyway */
   uint8_t *cards = xb_array_cards(a);
   if (!cards || index >= a->cap) {
     record(h, XB_GC_REMEMBERED);
     return;
   }
   cards[index >> XB_ARRAY_CARD_SHIFT] = 1;
-  if (!(h->state & XB_GC_CARDED)) record(h, XB_GC_CARDED);
+  record(h, XB_GC_CARDED);
 }
 
 void xb_gc_write_items(xb_array *a, size_t from, size_t to) {
   xb_gc_hdr *h = xb_gc_header(a);
-  if ((h->state & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED) return; /* young, or traced whole anyway */
+  if ((xb_atomic_load8(&h->state, XB_RELAXED) & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED)
+    return; /* young, or traced whole anyway */
   for (size_t k = from; k < to; k = (k | (((size_t)1 << XB_ARRAY_CARD_SHIFT) - 1)) + 1) /* one per card */
     xb_gc_write_item(a, k);
 }
@@ -950,7 +1163,7 @@ static void settle_young(void) {
   heap.survivorsLen = 0;
   heap.oldBytes += promoted;
   if (promoted > died * XB_GC_AGING_WASTE) heap.aging = 0;
-  for (size_t i = 0; i < heap.retainedLen; ++i) record_locked(heap.retained[i], heap.retainedHow[i]);
+  for (size_t i = 0; i < heap.retainedLen; ++i) record(heap.retained[i], heap.retainedHow[i]);
   heap.retainedLen = 0;
 }
 
@@ -1145,10 +1358,19 @@ static int pick_defrag(void) {
   return k > 0;
 }
 
-static void collect(int full) {
-  xb_mutex_lock(&heap.lock);
+/* A collection, full or young, with every other thread stopped. `due`: one an allocation asks for, which a
+ * collection another thread made meanwhile may have made needless. */
+static void collect(int full, int due) {
+  xb_tlh *self = tlh;
+  /* Another thread's collection, waited for, may have made this one needless. */
+  if (lock_between_collections() && due && !full && heap.allocated < heap.youngBudget) {
+    xb_mutex_unlock(&heap.lock);
+    return;
+  }
+  stop_world(self);
   for (xb_tlh *t = heap.threads; t; t = t->next) { /* the threads' holes end: blocks are swept anew */
     report_allocation(t);
+    merge_remembered(t);
     t->cursor = t->limit = t->overCursor = t->overLimit = NULL;
     t->block = t->overBlock = NULL;
     memset(t->cls, 0, sizeof t->cls);
@@ -1158,9 +1380,9 @@ static void collect(int full) {
   next_epoch();
   heap.markedBytes = 0;
   heap.markedObjects = 0;
-  heap.evacuating = full && !heap.holds && stackBase && pick_defrag();
-  if (heap.evacuating) { /* pins first: what the stack points to, and the objects C roots sit in */
-    xb_platform_with_registers(pin_stack, NULL);
+  heap.evacuating = full && !heap.holds && tlh && stacks_known() && pick_defrag();
+  if (heap.evacuating) { /* pins first: what the stacks point to, and the objects C roots sit in */
+    xb_platform_with_registers(pin_stacks, tlh);
     for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
       for (unsigned i = 0; i < ctx->rootLen; ++i) pin((uintptr_t)ctx->roots[i]);
   }
@@ -1210,13 +1432,11 @@ static void collect(int full) {
   heap.allocatedSinceFull = full ? 0 : heap.allocatedSinceFull + heap.allocated;
   heap.allocated = 0;
   int fullNext = heap.oldBytes >= heap.fullThreshold;
-  if (heap.finalizedLen > heap.finalizedHead)
-    for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) ctx->pending |= XB_PENDING_FINALIZE;
+  request_finalize();
+  start_world();
   xb_mutex_unlock(&heap.lock);
-  if (!full && fullNext) collect(1);
+  if (!full && fullNext) collect(1, 0);
 }
-
-void xb_gc_thread_stack(const void *base) { stackBase = base; }
 
 void xb_gc_hold(void) {
   xb_mutex_lock(&heap.lock);
@@ -1230,8 +1450,8 @@ void xb_gc_release(void) {
   xb_mutex_unlock(&heap.lock);
 }
 
-void xb_gc_collect(void) { collect(1); }
-void xb_gc_collect_young(void) { collect(0); }
+void xb_gc_collect(void) { collect(1, 0); }
+void xb_gc_collect_young(void) { collect(0, 0); }
 
 void xb_gc_finalizable(void *obj) {
   xb_mutex_lock(&heap.lock);

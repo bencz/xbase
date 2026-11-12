@@ -17,7 +17,7 @@
 #include "platform/platform.h"
 #include "types/types.h"
 
-/* Milliseconds since the program started, from the monotonic clock (core/main.c): ElapsedMs(). */
+/* Milliseconds since the program started (its first context), from the monotonic clock (core/ctx.c): ElapsedMs(). */
 int64_t xb_program_elapsed_ms(void);
 
 /* Functions with the fixed xBase calling convention do not use every parameter. */

@@ -15,7 +15,7 @@ static int send0(xb_ctx *ctx, xb_item *r, const xb_item *obj, const char *messag
   xb_gc_root_push(ctx, &self);
   xb_op_send(ctx, r, message, 1, &self);
   xb_gc_root_pop(ctx, 1);
-  return !(ctx->pending && xb_pending(ctx));
+  return !(xb_pending_get(ctx) && xb_pending(ctx));
 }
 
 /* Whether FOR EACH goes through the object: a generator's enumerator, one with GetEnumerator(), or an enumerator
@@ -211,7 +211,7 @@ int32_t xb_args_rest(xb_ctx *ctx, xb_item *dst, xb_item *rest, uint32_t n, uint3
       continue;
     }
     const xb_item *v = xb_ref_target(ctx, &rest[k]);
-    if (ctx->pending && xb_pending(ctx)) return 0;
+    if (xb_pending_get(ctx) && xb_pending(ctx)) return 0;
     dst[k] = *v;
   }
   return 1;
