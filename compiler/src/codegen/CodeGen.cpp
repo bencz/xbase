@@ -100,6 +100,8 @@ void CodeGen::initTypes() {
   rtWriteItem_ = rt("xb_gc_write_item", voidTy, {ptrTy_, intPtrTy_});
   rtCellOf_ = rt("xb_cell_of", ptrTy_, {ptrTy_, ptrTy_});
   rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, i32_});
+  rtRootPush_ = rt("xb_gc_root_push", voidTy, {ptrTy_, ptrTy_});
+  rtRootPop_ = rt("xb_gc_root_pop", voidTy, {ptrTy_, i32_});
   rtEnumLen_ = rt("xb_enum_len", i64_, {ptrTy_, ptrTy_});
   rtEachSource_ = rt("xb_each_source", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtEachShared_ = rt("xb_each_shared", i32_, {ptrTy_, ptrTy_});
@@ -140,7 +142,8 @@ void CodeGen::initTypes() {
   rtSendFrom_ = rt("xb_op_send_from", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_});
   rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
-  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtArrayNew_,
+  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtRootPush_,
+                           rtRootPop_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
                            rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_,
                            rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_, rtMvPrivate_, rtMvPublic_,
@@ -397,6 +400,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   localItems_.clear();
   heapItems_.clear();
   scratch_.clear();
+  blockTemp_ = nullptr;
 
   BasicBlock *entry = BasicBlock::Create(ctx_, "entry", fn_);
   b_.SetInsertPoint(entry);

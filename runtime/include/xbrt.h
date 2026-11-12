@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 36u
+#define XB_ABI_VERSION 37u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -355,6 +355,10 @@ void     xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc,
  * the whole array. Compiled code that stores an element in place calls it for
  * heap values only. */
 void     xb_gc_write_item(xb_array *a, size_t index);
+/* [ABI] Temporary roots of a context, as many as nested calls need (a vector that grows; growing it is the only
+ * allocation, and never a collection): C code, and compiled code while it makes a codeblock's cells. */
+void     xb_gc_root_push(xb_ctx *ctx, xb_item *it);
+void     xb_gc_root_pop(xb_ctx *ctx, unsigned n);
 
 /* References. An item that designates another item is an XB_T_CELL (a
  * variable in a cell) or an XB_T_REF (an element); xBase code never sees one,

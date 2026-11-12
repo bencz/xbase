@@ -256,7 +256,8 @@ private:
   llvm::FunctionCallee rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_;
   llvm::FunctionCallee rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArgsRest_;
-  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_;
+  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_, rtRootPush_,
+      rtRootPop_;
   llvm::FunctionCallee rtEnumLen_, rtEachSource_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_;
   llvm::FunctionCallee rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;
@@ -316,6 +317,7 @@ private:
   std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
   std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
+  llvm::AllocaInst *blockTemp_ = nullptr;  // a codeblock while its cells are made (a C root then)
   std::unordered_set<const xir::Instruction *> sharingLoads_;              // loads that end an `append`'s growth
   std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<const xir::Var *>>
       shareOnEdge_; // and the edges (from, to) that do it instead of the loads after them

@@ -559,8 +559,11 @@ emits the object file.
   length, the entry at a position of a hash without holes, or the reference's own value for any other collection
   (`inlineRefTarget`); the rest calls `xb_ref_target`, which finds a hash entry by key or with holes and raises the
   bound error.
-- `block` obtains the cells first (`xb_cell_of`: the variable's cell, made now if it has none, or a cell holding the
-  current element of a `FOR EACH` variable), then creates the block.
+- `block` creates the block first into an item of its own (`block.tmp`), kept as a C root (`xb_gc_root_push`) while
+  it obtains the cells (`xb_cell_of`: the variable's cell, made now if it has none, or a new cell holding the current
+  element of a `FOR EACH` variable, which only the block refers to) and stores each one, then passes the barrier test
+  for the block (a collection meanwhile may have aged it) and copies it to its home, which may be the slot of a
+  variable that moved into its cell meanwhile.
   `ref` calls `xb_ref_of` (or builds the `XB_T_CELL` item of a captured variable's cell); `ref.index` calls
   `xb_ref_elem`. `each.enter` and `each.leave` call `xb_each_enter` and `xb_each_leave`; `each.move` stores the
   position in the loop's reference and calls `xb_each_move` only when the element is not one `inlineRefTarget` finds

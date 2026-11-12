@@ -55,10 +55,6 @@ void  xb_gc_collect(void);                 /* a full collection */
 void  xb_gc_collect_young(void);           /* a young collection */
 void  xb_gc_register(xb_ctx *ctx);
 void  xb_gc_unregister(xb_ctx *ctx);
-/* Temporary C roots of a context, as many as nested C calls need (a vector
- * that grows; growing it is the only allocation, and never a collection). */
-void  xb_gc_root_push(xb_ctx *ctx, xb_item *it);
-void  xb_gc_root_pop(xb_ctx *ctx, unsigned n);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */
 /* The barrier after storing items `from` .. `to` - 1 of an array (xb_gc_write_item for each card they cover). */
 void   xb_gc_write_items(xb_array *a, size_t from, size_t to);

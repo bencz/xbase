@@ -115,8 +115,8 @@ rest of the runtime and compiled code use.
   large enough for it, from the same recyclable blocks, then free ones; a recyclable block without one leaves the list
   until the next sweep), so no hole is given up for it and the free lines of recyclable blocks serve objects of every
   size.
-- Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest) of
-  every registered context, and global item arrays
+- Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest;
+  also compiled code's, while it makes a codeblock's cells) of every registered context, and global item arrays
   registered with `xb_gc_add_root` (the modules' `STATIC`s).
 - Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young.
   A young collection marks from the roots and the remembered set, stops at old objects instead of traversing them,
