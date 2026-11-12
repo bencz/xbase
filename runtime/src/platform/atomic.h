@@ -1,6 +1,8 @@
 /* Atomic operations on ordinary integers and pointers, so that the same memory may also be read and written plainly
  * where no other thread can see it (an object's header before it is shared, a field compiled code reads).
  *
+ * A 64-bit field used atomically is aligned to 8 bytes (_Alignas), which 32-bit targets do not do by themselves.
+ *
  * Orders: XB_RELAXED (atomicity only), XB_ACQUIRE (loads: nothing after it is done before it), XB_RELEASE (stores:
  * nothing before it is done after it), XB_ACQ_REL (read-modify-write: both), XB_SEQ_CST (one order every thread
  * agrees on). The read-modify-write operations return the value before them; xb_atomic_cas* replace `*expected` with
@@ -109,6 +111,17 @@ static inline size_t xb_atomic_addsz(size_t *p, size_t v, int order) {
   return (size_t)_InterlockedExchangeAdd((volatile long *)p, (long)v);
 #endif
 }
+static inline int xb_atomic_cassz(size_t *p, size_t *expected, size_t desired, int order) {
+  XB_ATOMIC_UNUSED(order);
+#if defined(_WIN64)
+  size_t found = (size_t)_InterlockedCompareExchange64((volatile __int64 *)p, (__int64)desired, (__int64)*expected);
+#else
+  size_t found = (size_t)_InterlockedCompareExchange((volatile long *)p, (long)desired, (long)*expected);
+#endif
+  if (found == *expected) return 1;
+  *expected = found;
+  return 0;
+}
 static inline void *xb_atomic_xchgptr(void **p, void *v, int order) {
   XB_ATOMIC_UNUSED(order);
   return _InterlockedExchangePointer((void *volatile *)p, v);
@@ -119,6 +132,30 @@ static inline int xb_atomic_casptr(void **p, void **expected, void *desired, int
   if (found == *expected) return 1;
   *expected = found;
   return 0;
+}
+
+/* 64-bit loads and stores of a 32-bit target are no single access: they go through compare-and-swap there. */
+static inline uint64_t xb_atomic_load64(const uint64_t *p, int order) {
+  XB_ATOMIC_UNUSED(order);
+#if defined(_WIN64)
+  return *(const volatile uint64_t *)p;
+#else
+  return (uint64_t)_InterlockedCompareExchange64((volatile __int64 *)p, 0, 0);
+#endif
+}
+static inline void xb_atomic_store64(uint64_t *p, uint64_t v, int order) {
+#if defined(_WIN64)
+  if (order != XB_SEQ_CST) {
+    *(volatile uint64_t *)p = v;
+    return;
+  }
+#endif
+  XB_ATOMIC_UNUSED(order);
+  _InterlockedExchange64((volatile __int64 *)p, (__int64)v);
+}
+static inline uint64_t xb_atomic_add64(uint64_t *p, uint64_t v, int order) {
+  XB_ATOMIC_UNUSED(order);
+  return (uint64_t)_InterlockedExchangeAdd64((volatile __int64 *)p, (__int64)v);
 }
 
 static inline void xb_atomic_fence(int order) {
@@ -159,10 +196,17 @@ static inline int xb_atomic_cas32(uint32_t *p, uint32_t *expected, uint32_t desi
   return __atomic_compare_exchange_n(p, expected, desired, 0, order, XB_ATOMIC_FAIL_ORDER(order));
 }
 static inline size_t xb_atomic_addsz(size_t *p, size_t v, int order) { return __atomic_fetch_add(p, v, order); }
+static inline int xb_atomic_cassz(size_t *p, size_t *expected, size_t desired, int order) {
+  return __atomic_compare_exchange_n(p, expected, desired, 0, order, XB_ATOMIC_FAIL_ORDER(order));
+}
 static inline void *xb_atomic_xchgptr(void **p, void *v, int order) { return __atomic_exchange_n(p, v, order); }
 static inline int xb_atomic_casptr(void **p, void **expected, void *desired, int order) {
   return __atomic_compare_exchange_n(p, expected, desired, 0, order, XB_ATOMIC_FAIL_ORDER(order));
 }
+
+static inline uint64_t xb_atomic_load64(const uint64_t *p, int order) { return __atomic_load_n(p, order); }
+static inline void xb_atomic_store64(uint64_t *p, uint64_t v, int order) { __atomic_store_n(p, v, order); }
+static inline uint64_t xb_atomic_add64(uint64_t *p, uint64_t v, int order) { return __atomic_fetch_add(p, v, order); }
 
 static inline void xb_atomic_fence(int order) { __atomic_thread_fence(order); }
 

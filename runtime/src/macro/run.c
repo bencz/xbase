@@ -101,7 +101,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     }
     case MO_MV_FIELD: {
       xb_memvar m = memvar_of(word(&pc));
-      xb_field_cache cache = {0, 0};
+      xb_field_cache cache = {0};
       xb_set_nil(r);
       xb_mv_field(ctx, r, &m, &cache);
       ++sp;
@@ -112,7 +112,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     case MO_FIELD_SET: {
       uint32_t alias = word(&pc);
       const char *name = fa->items[word(&pc)].v.s->data;
-      xb_field_cache cache = {0, 0};
+      xb_field_cache cache = {0};
       int onStack = alias == XB_MACRO_STACK_ALIAS;
       const char *aliasName = alias >= XB_MACRO_STACK_ALIAS ? NULL : fa->items[alias].v.s->data;
       if (op == MO_FIELD) {

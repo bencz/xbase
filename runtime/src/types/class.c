@@ -8,7 +8,9 @@
  * of the line in order, its methods, then its variables ("NAME" reads,
  * "_NAME" assigns), a message taken by the first class that has it. The INIT
  * values are evaluated then, once per class; when that fails, they are
- * evaluated again the next time the class is used.
+ * evaluated again the next time the class is used. Threads prepare classes one
+ * at a time (one lock for all, taken again by the thread that holds it as a
+ * preparation nests); a prepared class is used without it.
  *
  * A message sent from a method of a class F reaches what F sees when it is
  * F's own HIDDEN member, else a method of the object's class (overridden
@@ -44,11 +46,13 @@ typedef struct member {
   xb_func fn;               /* M_METHOD */
 } member;
 
-/* A class's preparation: its line while its parents are prepared (meeting it
- * again then means it inherits from itself, unless INIT values evaluated
- * meanwhile need it), its INIT values while they are evaluated (meeting it
- * then means they need an object of the class). */
-typedef enum cls_state { C_LINE, C_TABLED, C_INIT, C_READY } cls_state;
+/* A class's preparation: none yet (or its line failed: tried again), its line
+ * while its parents are prepared (meeting it again then means it inherits
+ * from itself, unless INIT values evaluated meanwhile need it), tabled, its
+ * INIT values while they are evaluated (meeting it then means they need an
+ * object of the class), ready. Only the thread preparing it sees the states
+ * between none and ready: the others wait for the lock. */
+typedef enum cls_state { C_NONE, C_LINE, C_TABLED, C_INIT, C_READY } cls_state;
 
 typedef struct cls {
   xb_class base;            /* what the class's objects point to */
@@ -64,13 +68,14 @@ typedef struct cls {
   uint32_t *classArea;      /* the first class variable of each class of the line */
   xb_item *classValues;     /* the values of the class variables it holds itself (a root) */
   xb_item **classSlots;     /* where each class variable of the line is: here, or an ancestor's when SHARED */
-  cls_state state;
+  uint32_t state;           /* cls_state; ready is published (release) after everything else */
   int finalized;            /* a class of its line has a destructor */
   uint32_t initsBefore;     /* C_LINE: the INIT evaluations in progress when it began */
 } cls;
 
-/* The INIT evaluations in progress, nested (a class met again in C_LINE with
+/* The lock of preparations, and the INIT evaluations in progress under it, nested (a class met again in C_LINE with
  * more of them than when it began was reached through INIT values). */
+static xb_rlock preparing = XB_RLOCK_INIT;
 static uint32_t initsRunning;
 
 /* The classes by name, as modules register them (the first of a name stays). */
@@ -102,7 +107,8 @@ void xb_classes_register(xb_class_def *defs, uint32_t n) {
   }
 }
 
-static cls *runtime_of(const xb_class_def *def) { return def->runtime; }
+/* A class's runtime part: made once, never freed, published to the other threads by its preparation. */
+static cls *runtime_of(const xb_class_def *def) { return xb_atomic_loadptr(&def->runtime, XB_ACQUIRE); }
 
 static uint32_t position(const cls *c, const xb_class_def *x) {
   for (uint32_t k = 0; k < c->nline; ++k)
@@ -267,11 +273,13 @@ static xb_class_def **linearize(xb_ctx *ctx, xb_class_def *def, uint32_t *count)
   return line;
 }
 
-/* Prepares the class (see the top of the file): NULL when an error stopped
- * it, with a request to unwind pending. */
-static cls *prepare(xb_ctx *ctx, xb_class_def *def) {
+static void set_state(cls *c, cls_state state) { xb_atomic_store32(&c->state, state, XB_RELEASE); }
+
+/* Prepares the class under the lock of preparations: NULL when an error stopped it, with a request to unwind
+ * pending. */
+static cls *prepare_locked(xb_ctx *ctx, xb_class_def *def) {
   cls *c = runtime_of(def);
-  if (c && c->state == C_READY) return c;
+  if (c && c->state == C_READY) return c; /* another thread prepared it meanwhile */
   if (c && (c->state == C_LINE || c->state == C_INIT)) {
     int cycle = c->state == C_LINE && initsRunning == c->initsBefore;
     const char *what = cycle ? "Class inherits from itself" : "Class used by its own initial values";
@@ -282,22 +290,36 @@ static cls *prepare(xb_ctx *ctx, xb_class_def *def) {
     c = calloc(1, sizeof *c);
     if (!c) xb_gc_fatal("out of memory");
     c->def = def;
-    c->state = C_LINE;
+    xb_atomic_storeptr(&def->runtime, c, XB_RELEASE);
+  }
+  if (c->state == C_NONE) {
+    set_state(c, C_LINE);
     c->initsBefore = initsRunning;
-    def->runtime = c;
     c->line = linearize(ctx, def, &c->nline);
     if (!c->line) { /* tried again next time */
-      def->runtime = NULL;
-      free(c);
+      set_state(c, C_NONE);
       return NULL;
     }
     build_tables(c);
   }
-  c->state = C_INIT;
+  set_state(c, C_INIT);
   int ok = call_init(ctx, c);
-  c->state = ok ? C_READY : C_TABLED;
-  if (!ok) return NULL;
+  if (!ok) {
+    set_state(c, C_TABLED);
+    return NULL;
+  }
   start_class_vars(c);
+  set_state(c, C_READY);
+  return c;
+}
+
+/* Prepares the class (see the top of the file): NULL when an error stopped it, with a request to unwind pending. */
+static cls *prepare(xb_ctx *ctx, xb_class_def *def) {
+  cls *c = runtime_of(def);
+  if (c && xb_atomic_load32(&c->state, XB_ACQUIRE) == C_READY) return c;
+  xb_rlock_lock(&preparing);
+  c = prepare_locked(ctx, def);
+  xb_rlock_unlock(&preparing);
   return c;
 }
 
@@ -399,6 +421,45 @@ static int cast(xb_item *r, const cls *c, uint32_t view, const xb_item *self, co
   return 1;
 }
 
+_Static_assert(sizeof(size_t) == sizeof(uintptr_t), "a send cache's words are all one size (xbrt.h)");
+_Static_assert(sizeof(xb_send_cache) == XB_SEND_CACHE_WORDS * sizeof(void *), "the size the compiler emits (xbrt.h)");
+
+/* The send caches are shared by every thread (xbrt.h): a sequence lock. A writer makes the version odd, changes the
+ * ways, and makes it even again; a writer that finds another one at work leaves the cache. A reader that sees the
+ * version odd, or changed once it has read a way, does the full lookup instead: nothing torn is ever used, and nothing
+ * is tried again (unless a reader stops between its two reads of the version while the cache changes 2^31 times on a
+ * 32-bit target, and finds it back where it was). */
+static int cache_find(xb_send_cache *cache, const void *c, member **m, size_t *slot) {
+  size_t version = xb_atomic_loadsz(&cache->version, XB_ACQUIRE);
+  if (version & 1) return 0;
+  for (size_t k = 0; k < XB_SEND_CACHE_WAYS; ++k) {
+    const void *way = xb_atomic_loadptr(&cache->cls[k], XB_RELAXED);
+    if (!way) return 0;
+    if (way != c) continue;
+    *m = xb_atomic_loadptr(&cache->member[k], XB_RELAXED);
+    *slot = xb_atomic_loadsz(&cache->slot[k], XB_RELAXED);
+    xb_atomic_fence(XB_ACQUIRE);
+    return xb_atomic_loadsz(&cache->version, XB_RELAXED) == version;
+  }
+  return 0;
+}
+
+/* The member a message reached for class `c`, first in the cache; the oldest of a full cache goes. */
+static void cache_put(xb_send_cache *cache, const void *c, const member *m, size_t slot) {
+  size_t version = xb_atomic_loadsz(&cache->version, XB_RELAXED);
+  if ((version & 1) || !xb_atomic_cassz(&cache->version, &version, version + 1, XB_ACQUIRE)) return;
+  xb_atomic_fence(XB_RELEASE); /* the odd version is seen before any way changes */
+  for (size_t k = XB_SEND_CACHE_WAYS - 1; k > 0; --k) {
+    xb_atomic_storeptr(&cache->cls[k], xb_atomic_loadptr(&cache->cls[k - 1], XB_RELAXED), XB_RELAXED);
+    xb_atomic_storeptr(&cache->member[k], xb_atomic_loadptr(&cache->member[k - 1], XB_RELAXED), XB_RELAXED);
+    xb_atomic_storesz(&cache->slot[k], xb_atomic_loadsz(&cache->slot[k - 1], XB_RELAXED), XB_RELAXED);
+  }
+  xb_atomic_storeptr(&cache->cls[0], (void *)(uintptr_t)c, XB_RELAXED);
+  xb_atomic_storeptr(&cache->member[0], (void *)(uintptr_t)m, XB_RELAXED);
+  xb_atomic_storesz(&cache->slot[0], slot, XB_RELAXED);
+  xb_atomic_storesz(&cache->version, version + 2, XB_RELEASE);
+}
+
 /* What member `m` does for argv[0] (`slot`: the object's variable, or the
  * address of a class variable's value). */
 static void perform(xb_ctx *ctx, xb_item *r, const member *m, uintptr_t slot, uint32_t argc, xb_item *argv) {
@@ -480,16 +541,7 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
   } else if (m->kind != M_METHOD) {
     slot = c->area[position(c, m->owner)] + m->index;
   }
-  if (cache && object && !view) { /* the newest first; the oldest of a full cache goes */
-    for (size_t k = XB_SEND_CACHE_WAYS - 1; k > 0; --k) {
-      cache->cls[k] = cache->cls[k - 1];
-      cache->member[k] = cache->member[k - 1];
-      cache->slot[k] = cache->slot[k - 1];
-    }
-    cache->cls[0] = ((const xb_object *)argv[0].v.p)->cls;
-    cache->member[0] = m;
-    cache->slot[0] = slot;
-  }
+  if (cache && object && !view) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, m, slot);
   perform(ctx, r, m, slot, argc, argv);
 }
 
@@ -507,10 +559,9 @@ int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
                          uint32_t argc, xb_item *argv) {
   uint32_t t = argv[0].type;
   if (t >= XB_T_COUNT_) return 0;
-  cls *c = scalars[t];
+  cls *c = xb_atomic_loadptr((void *const *)&scalars[t], XB_ACQUIRE);
   if (!c && typeClasses[t]) { /* the type's own class: what it does not answer keeps Clipper's error */
-    c = runtime_of(typeClasses[t]);
-    if (!c || c->state != C_READY) c = prepare(ctx, typeClasses[t]);
+    c = prepare(ctx, typeClasses[t]);
     if (!c) return 1; /* the error is pending */
     if (!lookup(c, message)) return 0;
   }
@@ -521,7 +572,8 @@ int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
 
 int xb_class_send_as(xb_ctx *ctx, xb_item *r, xb_func classFunction, xb_class_def **def, const char *message,
                      uint32_t argc, xb_item *argv) {
-  if (!*def) {
+  xb_class_def *known = xb_atomic_loadptr((void *const *)def, XB_ACQUIRE); /* found once, by any thread */
+  if (!known) {
     xb_item made, none;
     xb_set_nil(&made);
     xb_set_nil(&none);
@@ -530,9 +582,10 @@ int xb_class_send_as(xb_ctx *ctx, xb_item *r, xb_func classFunction, xb_class_de
     xb_gc_root_pop(ctx, 1);
     if (ctx->pending & XB_PENDING_UNWIND) return 1;
     if (made.type != XB_T_OBJECT || !((const xb_object *)made.v.p)->cls->compiled) return 0;
-    *def = ((const xb_object *)made.v.p)->cls->compiled->def;
+    known = ((const xb_object *)made.v.p)->cls->compiled->def;
+    xb_atomic_storeptr((void **)def, known, XB_RELEASE);
   }
-  cls *c = prepare(ctx, *def);
+  cls *c = prepare(ctx, known);
   if (!c) return 1; /* the error is pending */
   if (!lookup(c, message)) return 0;
   dispatch(ctx, r, c, message, NULL, 0, NULL, argc, argv);
@@ -546,7 +599,7 @@ int xb_class_associate(const xb_object *o, const char *type) {
   for (uint32_t t = 0; t < XB_T_COUNT_; ++t) {
     const char *name = xb_type_class_name((xb_type)t);
     if (name && strcmp(name, type) == 0) {
-      scalars[t] = c;
+      xb_atomic_storeptr((void **)&scalars[t], c, XB_RELEASE);
       found = 1;
     }
   }
@@ -557,12 +610,12 @@ void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def 
                      xb_send_cache *cache, uint32_t argc, xb_item *argv) {
   if (argv[0].type == XB_T_OBJECT) {
     const xb_object *o = argv[0].v.p;
-    if (argv[0].width == 0) /* a class the cache holds the member for */
-      for (size_t k = 0; k < XB_SEND_CACHE_WAYS && cache->cls[k]; ++k)
-        if (o->cls == cache->cls[k]) {
-          perform(ctx, r, cache->member[k], cache->slot[k], argc, argv);
-          return;
-        }
+    member *m;
+    size_t slot;
+    if (argv[0].width == 0 && cache_find(cache, o->cls, &m, &slot)) { /* a class the cache holds the member for */
+      perform(ctx, r, m, slot, argc, argv);
+      return;
+    }
     if (o->cls->compiled) {
       dispatch(ctx, r, o->cls->compiled, message, from, super, cache, argc, argv);
       return;
@@ -619,7 +672,7 @@ int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a,
 }
 
 void xb_classes_finalize(xb_ctx *ctx) {
-  static int running; /* a destructor's own pending tests, or a collection it makes */
+  static XB_THREAD_LOCAL int running; /* a destructor's own pending tests, or a collection it makes */
   if (running) return;
   running = 1;
   xb_item obj, self, ret, breakValue;

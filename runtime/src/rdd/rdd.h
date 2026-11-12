@@ -143,7 +143,7 @@ struct xb_area {
   int flocked;              /* shared: the file lock is held */
   uint32_t pins;            /* code that runs blocks over the area (xb_area_pin) */
   int closed;               /* closed while pinned: no driver state, freed by the last unpin */
-  uint32_t generation;      /* a different number for each table opened: field caches compare it */
+  uint64_t generation;      /* a different number for each table opened (from 1): field caches compare it */
   xb_item filter;           /* SET FILTER: a codeblock or NIL (a root) */
   xb_item filter_text;      /* its text, "" without one (a root) */
   xb_item locate;           /* the FOR block of the last LOCATE, for CONTINUE (a root) */

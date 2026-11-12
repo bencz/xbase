@@ -71,11 +71,11 @@ else()
   check_c_source_compiles("
     #include <stddef.h>
     #include <stdint.h>
-    uint8_t b; uint32_t w; size_t s; void *p;
+    uint8_t b; uint32_t w; size_t s; void *p; _Alignas(8) uint64_t d;
     int main(void) {
       void *e = 0;
       return (int)(__atomic_fetch_or(&b, 1, __ATOMIC_ACQ_REL) + __atomic_fetch_add(&w, 1, __ATOMIC_ACQ_REL) +
-                   __atomic_fetch_add(&s, 1, __ATOMIC_ACQ_REL) +
+                   __atomic_fetch_add(&s, 1, __ATOMIC_ACQ_REL) + (int)__atomic_fetch_add(&d, 1, __ATOMIC_ACQ_REL) +
                    __atomic_compare_exchange_n(&p, &e, &p, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
     }" XB_ATOMICS_NATIVE)
   if(NOT XB_ATOMICS_NATIVE)

@@ -11,6 +11,7 @@
 #include "core/numeric.h"
 #include "core/names.h"
 #include "core/symbols.h"
+#include "core/sync.h"
 #include "core/text.h"
 #include "gc/gc.h"
 #include "platform/platform.h"

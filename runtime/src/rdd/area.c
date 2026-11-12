@@ -335,7 +335,7 @@ static void alias_error(xb_ctx *ctx, const char *alias, size_t aliasLen, int leg
 /* xb_area_open, and xb_area_open_with without an alias (`alias` NULL). */
 static int area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *path, const char *alias, size_t aliasLen,
                      int readonly, int exclusive, const xb_text_open *text) {
-  static uint32_t generations;
+  static XB_ALIGN8 uint64_t generations;
   xb_area_close(ctx, n);
   aliasLen = alias ? without_trailing_blanks(alias, aliasLen) : 0;
   int legal = !alias || alias_name(alias, aliasLen);
@@ -350,7 +350,7 @@ static int area_open(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *pat
   a->rdd = rdd;
   a->readonly = readonly;
   a->shared = !exclusive;
-  a->generation = ++generations;
+  a->generation = xb_atomic_add64(&generations, 1, XB_RELAXED) + 1;
   xb_order_conditions_clear(&a->pending);
   for (uint16_t tries = 1;; ++tries) {
     xb_open_failure why = {0, text && text->create ? EG_CREATE : EG_OPEN, text && text->create ? 1004 : 1001, NULL};

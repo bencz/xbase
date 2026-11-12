@@ -185,11 +185,10 @@ freed storage. The runtime rules both out:
   position tree) run under the lock when it is shared.
 - **Lifetime.** Conservative stack scanning keeps alive (not only pins) what any thread's stack points into, so storage
   a reader is still inside never goes away under it.
-- **Runtime caches** that compiled code and the runtime fill at run time stop being multi-word: a send cache's way
-  is one atomic pointer to an immutable record (class, member, slot), a field cache one 64-bit word (generation,
-  index), the table generation an atomic counter, the memory variable name table grows in chunks published
-  atomically, and a class is prepared once under a lock that knows the task preparing it (its nesting count moves
-  into the context).
+- **Runtime caches and tables** filled at run time (done, [runtime.md](runtime.md#threads-and-synchronization)): a
+  send cache is a sequence lock, a field cache one 64-bit word (generation, index) from an atomic counter, the memory
+  variable names are found under a reader-writer lock and read by number from chunks that never move, and classes
+  are prepared under one recursive lock, a ready class published atomically.
 
 ## Garbage collector
 
@@ -199,7 +198,9 @@ The collector ([runtime.md](runtime.md#garbage-collector)) gets, in this order:
    atomically) and waits for each one to reach a safepoint: compiled code already tests `pending` after calls, and
    gets a test at loop back edges (an ABI change); long runtime loops (sorts, index builds, `PACK`) test it too. A
    thread in a blocking operation is already stopped: it published its stack top, with its registers saved, when it
-   entered, and does not touch the heap until it has checked for a collection on its way back.
+   entered, and does not touch the heap until it has checked for a collection on its way back. Waiting for a runtime
+   lock under which xBase code may run (the lock of class preparations, whose holder evaluates INIT values and error
+   blocks) is such a blocking operation, or a collection the holder starts would wait for the waiter forever.
 2. **Every stack.** The conservative scan covers every thread's stack, from its published top to its start, and keeps
    alive and pins what it finds. Suspended tasks have no stack: their frames are heap objects, traced precisely.
 3. **Thread-safe mutators.** Header state bits change with atomic byte operations; the remembered set is filled through

@@ -149,7 +149,6 @@ typedef struct xb_tlh {     /* thread-local heap */
 
 static struct {
   xb_mutex lock;
-  int ready;
   xb_hblock **blocks;               /* every block */
   size_t blockCount, blockCap;
   xb_hblock *freeBlocks;            /* no live object */
@@ -220,8 +219,7 @@ static void *xmalloc(size_t n) {
   return p;
 }
 
-void xb_gc_init(void) {
-  if (heap.ready) return;
+static void init_heap(void) {
   if (!xb_mutex_init(&heap.lock)) xb_gc_fatal("cannot create the heap lock");
   heap.epoch = 1; /* never 0, which a line that no collection marked has */
   /* The size classes: each one the largest slot that as many slots fit a block's lines, the next at least an eighth
@@ -243,7 +241,11 @@ void xb_gc_init(void) {
   heap.fullThreshold = XB_GC_MIN_FULL;
   heap.youngBudget = XB_GC_YOUNG_MIN;
   heap.aging = 1;
-  heap.ready = 1;
+}
+
+void xb_gc_init(void) {
+  static xb_once_flag made = XB_ONCE_INIT;
+  xb_once(&made, init_heap);
 }
 
 static xb_tlh *thread_heap(void) {

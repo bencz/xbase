@@ -409,8 +409,8 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *argv = operandGroup(i);
     Value *d = dest(i);
     setNil(d);
-    // The send's own inline cache (xb_send_cache: three pointer-sized words per way, which the runtime fills).
-    auto *cacheTy = ArrayType::get(intPtrTy_, 3 * XB_SEND_CACHE_WAYS);
+    // The send's own inline cache (xb_send_cache: pointer-sized words, which the runtime fills).
+    auto *cacheTy = ArrayType::get(intPtrTy_, XB_SEND_CACHE_WORDS);
     auto *cache = new GlobalVariable(mod_, cacheTy, false, GlobalValue::PrivateLinkage,
                                      ConstantAggregateZero::get(cacheTy), "xb.send.cache");
     Constant *from = i.classIndex < 0 ? static_cast<Constant *>(ConstantPointerNull::get(ptrTy_))

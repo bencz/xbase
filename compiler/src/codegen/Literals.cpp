@@ -102,11 +102,13 @@ Constant *CodeGen::aliasName(const std::string &alias) {
   return alias.empty() ? static_cast<Constant *>(ConstantPointerNull::get(ptrTy_)) : messageName(alias);
 }
 
-// A field reference's own cache (xb_field_cache: two 32-bit words the runtime fills).
+// A field reference's own cache (xb_field_cache: one 64-bit word the runtime fills, read and written atomically, so
+// aligned to 8 bytes on every target).
 Constant *CodeGen::fieldCache() {
-  auto *ty = ArrayType::get(i32_, 2);
-  return new GlobalVariable(mod_, ty, false, GlobalValue::PrivateLinkage, ConstantAggregateZero::get(ty),
-                            "xb.field.cache");
+  auto *cache = new GlobalVariable(mod_, i64_, false, GlobalValue::PrivateLinkage, ConstantInt::get(i64_, 0),
+                                   "xb.field.cache");
+  cache->setAlignment(Align(alignof(xb_field_cache)));
+  return cache;
 }
 
 } // namespace xb

@@ -94,14 +94,15 @@ static uint32_t area_number(xb_ctx *ctx, const xb_item *area, const char *alias,
   return ctx->areaCurrent;
 }
 
-/* The position of field `name` in `a`, through the reference's cache; -1 when the table has none. */
+/* The position of field `name` in `a`, through the reference's cache; -1 when the table has none. The cache is one
+ * word, read and written atomically: a thread finds either its table's entry whole or another one. */
 static int64_t field_of(xb_area *a, const char *name, xb_field_cache *cache) {
-  if (cache->generation == a->generation && cache->index < a->nfields) return cache->index;
+  const uint64_t index = ((uint64_t)1 << XB_FIELD_CACHE_INDEX_BITS) - 1;
+  uint64_t key = xb_atomic_load64(&cache->key, XB_RELAXED);
+  if (key >> XB_FIELD_CACHE_INDEX_BITS == a->generation && (key & index) < a->nfields) return (int64_t)(key & index);
   int64_t k = xb_area_field_index(a, name, strlen(name));
-  if (k >= 0) {
-    cache->generation = a->generation;
-    cache->index = (uint32_t)k;
-  }
+  if (k >= 0 && (uint64_t)k <= index && !(a->generation >> (64 - XB_FIELD_CACHE_INDEX_BITS))) /* a key holds both */
+    xb_atomic_store64(&cache->key, a->generation << XB_FIELD_CACHE_INDEX_BITS | (uint64_t)k, XB_RELAXED);
   return k;
 }
 

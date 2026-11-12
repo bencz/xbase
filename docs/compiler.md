@@ -514,9 +514,9 @@ emits the object file.
   its parents (each one's name, and its entry when the module has the class), its variables with their flags, its
   methods with their functions and flags, its INIT function, `XB_CLASS_STATIC` for a `STATIC CLASS`) and registers them
   (`xb_classes_register`) with the module, with the class variables, the friends' names and the destructor. Every `send`
-  calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed `xb_send_cache`: three arrays of
-  `XB_SEND_CACHE_WAYS` pointer-sized words) and, from a method or one of its codeblocks (`classIndex`, `superSend`), its
-  class's descriptor (else a null one). `class.new` calls `xb_class_instance`.
+  calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed `xb_send_cache`:
+  `XB_SEND_CACHE_WORDS` pointer-sized words) and, from a method or one of its codeblocks (`classIndex`,
+  `superSend`), its class's descriptor (else a null one). `class.new` calls `xb_class_instance`.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
   call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,
@@ -526,7 +526,8 @@ emits the object file.
   neither.
 - Fields ([runtime.md](runtime.md#work-areas)): `field.get` and `field.set` call `xb_field_get` and `xb_field_set`
   with the alias's item (`( expr )->name`) or its name as a C string (`aliasName`: null for the current work area),
-  the field's name and a cache of the reference's own (`fieldCache`, a zeroed private global); `mv.field` calls
+  the field's name and a cache of the reference's own (`fieldCache`, a zeroed private 64-bit global aligned to 8
+  bytes); `mv.field` calls
   `xb_mv_field` with the name's `xb_memvar` and a cache.
 - Macros ([runtime.md](runtime.md#macro-operator)): `macro.get`, `macro.set`, `macro.private`, `macro.public` and
   `macro.text` call `xb_macro_get`, `xb_macro_set`, `xb_macro_private` (with the activation's mark),

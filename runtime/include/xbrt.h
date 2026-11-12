@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 37u
+#define XB_ABI_VERSION 38u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -480,15 +480,21 @@ void     xb_mv_param(xb_ctx *ctx, const xb_memvar *m, const xb_item *arg);
 void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv);
 
 /* [ABI] Fields of work areas (rdd/field.c). A field reference of compiled code has its own cache, zeroed: the table
- * where it last found the field (the work area's generation) and the field's position there, so a reference to the
- * same table looks for nothing. get and set reach the field `name` of the work area of `alias` (NULL: the current
+ * where it last found the field (the work area's generation) and the field's position there, in one 64-bit word read
+ * and written at once (threads share it; the compiler aligns it to 8 bytes), so a reference to the same table looks
+ * for nothing. get and set reach the field `name` of the work area of `alias` (NULL: the current
  * one), or of the one the item `area`, when not NULL, names (an alias or a number); a missing alias (1002) or field
  * (1003) is an error the block may retry; on the blank record after the last a write does nothing. mv_field reads
  * an undeclared name: the current work area's field of that name, else the memory variable (as xb_mv_get). */
+#ifdef __cplusplus
+#define XB_ALIGN8 alignas(8)
+#else
+#define XB_ALIGN8 _Alignas(8)
+#endif
 typedef struct xb_field_cache {
-  uint32_t generation;
-  uint32_t index;
+  XB_ALIGN8 uint64_t key; /* generation << XB_FIELD_CACHE_INDEX_BITS | index; 0: none */
 } xb_field_cache;
+#define XB_FIELD_CACHE_INDEX_BITS 16
 void     xb_field_get(xb_ctx *ctx, xb_item *r, const xb_item *area, const char *alias, const char *name,
                       xb_field_cache *cache);
 void     xb_field_set(xb_ctx *ctx, const xb_item *area, const char *alias, const char *name, xb_field_cache *cache,
@@ -598,12 +604,16 @@ void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
  * reached for the classes of the last XB_SEND_CACHE_WAYS objects of different
  * classes it went to, the most recent first (a polymorphic inline cache), so
  * that the next message to an object of one of those classes skips the lookup
- * and the checks. */
+ * and the checks. Threads share it: `version` is odd while one changes it (a
+ * sequence lock, types/class.c). Every field is pointer-sized: the compiler
+ * emits it as XB_SEND_CACHE_WORDS words. */
 #define XB_SEND_CACHE_WAYS 4
+#define XB_SEND_CACHE_WORDS (1 + 3 * XB_SEND_CACHE_WAYS)
 typedef struct xb_send_cache {
-  const void *cls[XB_SEND_CACHE_WAYS];
-  const void *member[XB_SEND_CACHE_WAYS];
-  uintptr_t slot[XB_SEND_CACHE_WAYS];
+  size_t version;
+  void *cls[XB_SEND_CACHE_WAYS];
+  void *member[XB_SEND_CACHE_WAYS];
+  size_t slot[XB_SEND_CACHE_WAYS];
 } xb_send_cache;
 void     xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                          xb_send_cache *cache, uint32_t argc, xb_item *argv);

@@ -40,9 +40,11 @@ static uint32_t key_hash(const xb_hash *h, const xb_item *k) {
     if (h->flags & XB_HASH_IGNORECASE) return xb_hash_bytes_as(s->data, s->len, 1);
     /* a string an append grows keeps its room in `hash` (only its variable sees it, so it never gets here) */
     int growing = (s->flags & XB_STR_APPEND) != 0;
-    if (s->hash && !growing) return s->hash; /* literals carry theirs */
+    /* Threads may compute it at once: each stores the same value, atomically. */
+    uint32_t known = growing ? 0 : xb_atomic_load32(&s->hash, XB_RELAXED);
+    if (known) return known; /* literals carry theirs */
     uint32_t v = xb_hash_bytes(s->data, s->len);
-    if (!growing && !(s->flags & XB_STR_STATIC)) s->hash = v; /* strings are immutable: the hash holds */
+    if (!growing && !(s->flags & XB_STR_STATIC)) xb_atomic_store32(&s->hash, v, XB_RELAXED); /* strings are immutable */
     return v;
   }
   if (k->type == XB_T_DATE) return fold((uint64_t)k->v.i ^ UINT64_C(0xd6e8feb86659fd93));

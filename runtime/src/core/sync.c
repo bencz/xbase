@@ -95,6 +95,26 @@ uint32_t xb_park_wake(const uint32_t *addr, int all) {
   return n;
 }
 
+void xb_rlock_lock(xb_rlock *l) {
+  uint32_t self = xb_thread_self();
+  if (xb_atomic_load32(&l->owner, XB_RELAXED) == self) { /* only this thread writes its own number there */
+    ++l->depth;
+    return;
+  }
+  uint32_t owner = 0;
+  while (!xb_atomic_cas32(&l->owner, &owner, self, XB_ACQUIRE)) {
+    xb_park_wait(&l->owner, owner, -1);
+    owner = 0;
+  }
+  l->depth = 1;
+}
+
+void xb_rlock_unlock(xb_rlock *l) {
+  if (--l->depth) return;
+  xb_atomic_store32(&l->owner, 0, XB_RELEASE);
+  xb_park_wake(&l->owner, 0);
+}
+
 void xb_once(xb_once_flag *flag, void (*fn)(void)) {
   uint32_t state = xb_atomic_load32(&flag->state, XB_ACQUIRE);
   if (state == 2) return;

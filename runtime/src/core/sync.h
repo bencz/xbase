@@ -18,6 +18,16 @@ typedef struct xb_once_flag {
 #define XB_ONCE_INIT {0}
 void xb_once(xb_once_flag *flag, void (*fn)(void));
 
+/* A lock the thread holding it may take again, released when it has been released as many times as taken; made
+ * statically as XB_RLOCK_INIT, it needs no setup. For rare, nesting work (preparing classes), not hot paths. */
+typedef struct xb_rlock {
+  uint32_t owner; /* the holder's xb_thread_self, 0 when free */
+  uint32_t depth;
+} xb_rlock;
+#define XB_RLOCK_INIT {0, 0}
+void xb_rlock_lock(xb_rlock *l);
+void xb_rlock_unlock(xb_rlock *l);
+
 /* Waiting on an address (a parking lot): xb_park_wait waits while the 32-bit value at `addr` is `expected`, until a
  * xb_park_wake on the same address, or `ns` nanoseconds of the monotonic clock (ns < 0: no limit); 0 when it timed out.
  * The value is tested under the lock xb_park_wake takes, so a thread that changes it and then wakes the address never

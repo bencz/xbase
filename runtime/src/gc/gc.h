@@ -53,7 +53,7 @@ void  xb_gc_add_root(xb_item *items, size_t count); /* may run before the first 
 
 /* xb_gc_write_item, the barrier for array elements, is in xbrt.h. */
 
-void  xb_gc_init(void);                    /* by the first context, before other threads exist */
+void  xb_gc_init(void);                    /* by every context made: the heap is made once */
 /* The start of the stack of the thread calling it (an address in the frame of its first function): full collections
  * on that thread scan the stack from there for the objects to pin, and may move the others. A thread without it moves
  * nothing. */

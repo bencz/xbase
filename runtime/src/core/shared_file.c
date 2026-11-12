@@ -10,6 +10,7 @@
  *
  * Waiting locks are retried with a growing pause, the registry's mutex released meanwhile. */
 #include "core/shared_file.h"
+#include "core/sync.h"
 
 #include "gc/gc.h"
 
@@ -47,8 +48,13 @@ static struct {
   entry *files;
 } registry;
 
+static void init_registry(void) {
+  if (!xb_mutex_init(&registry.lock)) xb_gc_fatal("cannot create the file registry lock");
+}
+
 void xb_shared_init(void) {
-  if (!registry.lock && !xb_mutex_init(&registry.lock)) xb_gc_fatal("cannot create the file registry lock");
+  static xb_once_flag made = XB_ONCE_INIT;
+  xb_once(&made, init_registry);
 }
 
 static void *grow(void *p, uint32_t *cap, size_t size) {

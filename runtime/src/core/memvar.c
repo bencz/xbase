@@ -12,29 +12,66 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The names numbered so far, and each name by number. */
-static xb_names names;
-static struct spelling {
+/* The names numbered so far, shared by every thread: found by name under the read lock, a name added under the write
+ * lock (macros and RESTORE may number new names at any time). A name, once numbered, never changes: its spelling is
+ * read by number without a lock, from chunks of SPELLED_CHUNK entries that are never moved or freed, a chunk's address
+ * published (release) before any number in it is handed out, the count after the entry is written. */
+#define SPELLED_CHUNK 1024u
+#define SPELLED_CHUNKS 4096u /* names a program may number: SPELLED_CHUNK * SPELLED_CHUNKS */
+
+typedef struct spelling {
   const char *name;
   size_t len;
-} *spelled;
-static uint32_t spelledCap;
+} spelling;
+
+static xb_names names;
+static spelling *spelled[SPELLED_CHUNKS];
+static uint32_t spelledCount;
+static xb_rwlock namesLock;
+static xb_once_flag namesLockMade = XB_ONCE_INIT;
+
+static void make_names_lock(void) {
+  if (!xb_rwlock_init(&namesLock)) xb_gc_fatal("cannot create the memory variables' lock");
+}
+
+static xb_rwlock *names_lock(void) {
+  xb_once(&namesLockMade, make_names_lock);
+  return &namesLock;
+}
+
+/* The number of a name (any letter case), if it has one. */
+static int find_name(const char *name, size_t len, uint32_t *id) {
+  xb_rwlock_read_lock(names_lock());
+  int found = xb_names_find_upper(&names, name, len, id);
+  xb_rwlock_read_unlock(names_lock());
+  return found;
+}
 
 /* xb_private.id of a PRIVATE that CLEAR MEMORY released: it no longer names a
  * variable, and restores nothing when its activation ends. */
 #define CLEARED UINT32_MAX
 
-/* The number of `name` (upper case, kept by reference), new when it had none. */
-static uint32_t number(const char *name, size_t len) {
+/* The number of `name` (upper case, kept by reference), new when it had none; under the write lock. */
+static uint32_t number_locked(const char *name, size_t len) {
+  uint32_t before = names.count;
+  if (before == SPELLED_CHUNK * SPELLED_CHUNKS) xb_gc_fatal("too many memory variable names");
   uint32_t id = xb_names_add(&names, name, len);
-  if (id == spelledCap) {
-    uint32_t cap = spelledCap ? spelledCap * 2 : 64;
-    struct spelling *s = cap > spelledCap ? realloc(spelled, cap * sizeof *s) : NULL;
-    if (!s) xb_gc_fatal("out of memory");
-    spelled = s;
-    spelledCap = cap;
+  if (names.count == before) return id;
+  spelling *chunk = spelled[id / SPELLED_CHUNK];
+  if (!chunk) {
+    chunk = malloc(SPELLED_CHUNK * sizeof *chunk);
+    if (!chunk) xb_gc_fatal("out of memory");
+    xb_atomic_storeptr((void **)&spelled[id / SPELLED_CHUNK], chunk, XB_RELEASE);
   }
-  spelled[id] = (struct spelling){name, len};
+  chunk[id % SPELLED_CHUNK] = (spelling){name, len};
+  xb_atomic_store32(&spelledCount, names.count, XB_RELEASE);
+  return id;
+}
+
+static uint32_t number(const char *name, size_t len) {
+  xb_rwlock_write_lock(names_lock());
+  uint32_t id = number_locked(name, len);
+  xb_rwlock_write_unlock(names_lock());
   return id;
 }
 
@@ -42,17 +79,18 @@ void xb_memvars_add(xb_memvar *memvars, uint32_t n) {
   for (uint32_t k = 0; k < n; ++k) memvars[k].id = number(memvars[k].name, strlen(memvars[k].name));
 }
 
-uint32_t xb_memvar_count(void) { return names.count; }
+uint32_t xb_memvar_count(void) { return xb_atomic_load32(&spelledCount, XB_ACQUIRE); }
 
 const char *xb_memvar_name(uint32_t id, size_t *len) {
-  *len = spelled[id].len;
-  return spelled[id].name;
+  const spelling *chunk = xb_atomic_loadptr((void *const *)&spelled[id / SPELLED_CHUNK], XB_ACQUIRE);
+  *len = chunk[id % SPELLED_CHUNK].len;
+  return chunk[id % SPELLED_CHUNK].name; /* names live as long as the program */
 }
 
 /* The binding of variable `id` in the context: NIL for none. */
 static xb_item *binding(xb_ctx *ctx, uint32_t id) {
   if (id >= ctx->memvarCap) {
-    uint32_t cap = names.count; /* every name numbered so far */
+    uint32_t cap = xb_memvar_count(); /* every name numbered so far */
     xb_item *mv = realloc(ctx->memvars, cap * sizeof *mv);
     if (!mv) xb_gc_fatal("out of memory");
     for (uint32_t i = ctx->memvarCap; i < cap; ++i) xb_set_nil(&mv[i]);
@@ -184,19 +222,24 @@ const xb_item *xb_memvar_value(xb_ctx *ctx, uint32_t id) {
 
 uint32_t xb_memvar_number(const char *name, size_t len) {
   uint32_t id;
-  if (xb_names_find_upper(&names, name, len, &id)) return id;
-  char *upper = malloc(len + 1); /* a name no module uses: kept for the program's life */
-  if (!upper) xb_gc_fatal("out of memory");
-  for (size_t i = 0; i < len; ++i) upper[i] = xb_ascii_upper(name[i]);
-  upper[len] = 0;
-  return number(upper, len);
+  if (find_name(name, len, &id)) return id;
+  xb_rwlock_write_lock(names_lock());
+  if (!xb_names_find_upper(&names, name, len, &id)) { /* another thread may have numbered it meanwhile */
+    char *upper = malloc(len + 1); /* a name no module uses: kept for the program's life */
+    if (!upper) xb_gc_fatal("out of memory");
+    for (size_t i = 0; i < len; ++i) upper[i] = xb_ascii_upper(name[i]);
+    upper[len] = 0;
+    id = number_locked(upper, len);
+  }
+  xb_rwlock_write_unlock(names_lock());
+  return id;
 }
 
 int xb_memvar_exists(xb_ctx *ctx, uint32_t id) { return binding(ctx, id)->type == XB_T_CELL; }
 
 const xb_item *xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len) {
   uint32_t id;
-  if (!xb_names_find_upper(&names, name, len, &id)) return NULL;
+  if (!find_name(name, len, &id)) return NULL;
   const xb_item *b = binding(ctx, id);
   if (b->type != XB_T_CELL) return NULL;
   const xb_item *v = &((const xb_cell *)b->v.p)->value;
@@ -277,7 +320,7 @@ void xbf___MEMRELEASE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   for (uint32_t k = 0; k < argc && !(ctx->pending & XB_PENDING_UNWIND); ++k) {
     uint32_t id;
-    if (argv[k].type != XB_T_STRING || !xb_names_find_upper(&names, argv[k].v.s->data, argv[k].v.s->len, &id))
+    if (argv[k].type != XB_T_STRING || !find_name(argv[k].v.s->data, argv[k].v.s->len, &id))
       continue;
     xb_item *b = binding(ctx, id);
     if (b->type != XB_T_CELL) continue;
@@ -316,7 +359,8 @@ void xbf___MEMCLEAR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * integer item). Called with an argument that is not NIL, it assigns it. */
 static void memvar_block(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self) {
   uint32_t id = (uint32_t)self->cells[0]->value.v.i;
-  xb_memvar m = {spelled[id].name, id};
+  size_t len;
+  xb_memvar m = {xb_memvar_name(id, &len), id};
   if (argc && argv[0].type != XB_T_NIL) {
     xb_mv_set(ctx, &m, &argv[0]);
     *ret = argv[0];
@@ -331,7 +375,7 @@ static void memvar_block(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv
 void xbf_MEMVARBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   uint32_t id;
   if (!argc || argv[0].type != XB_T_STRING) return;
-  if (!xb_names_find_upper(&names, argv[0].v.s->data, argv[0].v.s->len, &id) || !xb_memvar_exists(ctx, id)) return;
+  if (!find_name(argv[0].v.s->data, argv[0].v.s->len, &id) || !xb_memvar_exists(ctx, id)) return;
   xb_block *b = xb_block_new(ctx, ret, memvar_block, 1);
   xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell)); /* the block is rooted in `ret` */
   xb_set_int(&c->value, id);

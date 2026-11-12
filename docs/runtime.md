@@ -352,6 +352,12 @@ first time it is used (its class function, or a subclass):
   evaluating them fails, the class is not usable yet and they are evaluated again the next time it is used; INIT
   values that need an object of their own class, or of a subclass being prepared, are `BASE/0` `Class used by its own
   initial values`.
+- Threads prepare classes one at a time, under one lock for every class (`xb_rlock`, taken again by the thread that
+  holds it as a preparation nests into parents and INIT values); a class is published ready (an atomic store of its
+  state after everything else) and from then on used without the lock. The part a preparation makes is never freed: a
+  class whose line failed keeps it for the next try. INIT values (and the error blocks and destructors that run
+  meanwhile) run under that lock: other threads that need an unprepared class wait for the whole evaluation, and code
+  run there never waits for another thread that may be preparing a class.
 - `NAME()` returns a new object with its initial values; `:New( ... )` is the class's method, else the default one,
   which sends `Init` with the arguments as the class's own method would (a PROTECTED or HIDDEN `Init` is reached) and
   returns the object; `Init` without a method returns the object. A method receives the object as its first argument
@@ -434,9 +440,12 @@ first time it is used (its class function, or a subclass):
   (which give the same answer for the same class at the same send) or a call to `dispatch` (`perform`). Messages to
   casts, to values of scalar classes and to the runtime's own classes always look up. The `oop` benchmark (method calls,
   one through `Super`, variable reads and assignments) went from 292 ms to 69 ms; a send that goes to objects of three
-  classes in turn, from 46 ms to 23 ms for 3,000,000 messages once the cache held more than one class. The cache is
-  written without synchronization: when tasks run on several threads, it has to be filled atomically. Not yet:
-  devirtualized calls and variables at known offsets in the generated code ([xir.md](xir.md#classes)).
+  classes in turn, from 46 ms to 23 ms for 3,000,000 messages once the cache held more than one class. Threads share
+  the caches: each one is a sequence lock (`version`, odd while a thread changes it). A reader that finds the version
+  odd, or changed once it has read a way, does the full lookup instead (nothing torn is used, nothing is tried again),
+  and a writer that finds another one at work leaves the cache as it is; 20,000,000 messages to objects of two classes
+  through one send take the same time as without it. Not yet: devirtualized calls and variables at known offsets in
+  the generated code ([xir.md](xir.md#classes)).
 
 ## References
 
@@ -465,7 +474,9 @@ place.
 code runs, so a function sees and changes the memory variables of the functions that called it, whatever module they
 are in. Each module gives the runtime the names it uses (`xb_memvar`, numbered when it registers; `RESTORE` numbers
 the names of its file that no module uses, while the program runs, so `xb_ctx.memvars` may grow, and move, whenever
-xBase code runs: C code keeps no pointer into it across an error block); each context keeps,
+xBase code runs: C code keeps no pointer into it across an error block). The table of names is the process's: a name
+is found under a reader-writer lock and added under its write lock, so a macro or `RESTORE` may number a new name on
+any thread; a number's spelling is read without a lock, from chunks of entries that never move. Each context keeps,
 by number, the binding visible now (`xb_ctx.memvars`), and the PRIVATEs alive, in creation order, each with the
 frame of the activation that created it and the binding it hid (`xb_ctx.privates`). Both are roots of the collector.
 
@@ -1017,7 +1028,10 @@ variables](#memory-variables)) use this layer too.
 The work areas, their tables and the database functions are in `runtime/src/rdd/` ([rdd.md](rdd.md)). Each context
 has its own (`xb_ctx.areas`, `areaCurrent`, `set_deleted`, `rddDefault`, `netErr`). Compiled code reaches fields
 through three entry points of `xbrt.h`, each call with a cache of its own (`xb_field_cache`, a zeroed static of the
-reference: the `generation` of the table it found the field in and the field's position):
+reference: the `generation` of the table it found the field in, from a process-wide atomic 64-bit counter, and the
+field's position, in one 64-bit word read and written atomically, so threads find either their table's entry whole or
+another one; the word keeps 48 bits of the generation and 16 of the position, and a table past either is looked up
+each time):
 
 - `xb_field_get( ctx, r, area, alias, name, cache )` reads field `name` (upper case) of the work area that the item
   `area` names (an alias or a number, for `( expr )->name`), else the C string `alias`, else the current one (both
@@ -1042,17 +1056,21 @@ The program's code runs on one thread today; the services below are what tasks a
   policy), the number of processors the program may run on (its affinity on Linux, else every processor online), and
   a monotonic clock in nanoseconds (`xb_platform_monotonic_ns`), which `ElapsedMs` counts from the start of `main`
   (`xb_program_elapsed_ms`). Each object is made by its `init` function, which fails only for lack of memory or system
-  objects, and freed by its `destroy` function. No lock is recursive: the thread holding one never asks for it again,
-  not even for a second read lock, which would wait behind a waiting writer.
-- Atomic operations (`platform/atomic.h`) on ordinary 8-bit, 32-bit, `size_t` and pointer fields, so that memory
-  read plainly where no other thread sees it (an object header, a field compiled code reads) is also changed
-  atomically where one may: loads, stores, add, or, and, exchange and compare-and-swap with an explicit order. GCC and
+  objects, and freed by its `destroy` function. None of these locks is recursive: the thread holding one never asks
+  for it again, not even for a second read lock, which would wait behind a waiting writer.
+- Atomic operations (`platform/atomic.h`) on ordinary 8-bit, 32-bit, 64-bit, `size_t` and pointer fields, so that
+  memory read plainly where no other thread sees it (an object header, a field compiled code reads) is also changed
+  atomically where one may: loads, stores, add, or, and, exchange and compare-and-swap with an explicit order (not
+  every one for every size). A 64-bit field used atomically is aligned to 8 bytes (`XB_ALIGN8` in `xbrt.h`), which
+  32-bit targets do not do by themselves. GCC and
   Clang use their `__atomic` builtins (with libatomic on a target that lacks native atomics of some size, found when
   the build is configured); MSVC builds the runtime with `/volatile:ms` (volatile loads acquire, stores release, on
   every architecture; a build with `/volatile:iso` stops) and its `Interlocked` intrinsics.
 - On top of them, the same everywhere (`core/sync.c`): `xb_thread_self` (a number per thread, never 0, no other
   thread's until 2^32 threads have asked), `xb_once` (a function run once whatever threads ask at the same time, the
-  others waiting until it returns), and a parking lot: `xb_park_wait` sleeps while a 32-bit value at an address is the
+  others waiting until it returns), a recursive lock (`xb_rlock`, made statically, for rare nesting work such as
+  preparing classes: the thread holding it takes it again, and holds it until it has released it as often), and a
+  parking lot: `xb_park_wait` sleeps while a 32-bit value at an address is the
   one expected (with an optional limit in nanoseconds, which its own deadline decides), `xb_park_wake` wakes the
   waiter of the address that came first, or every one. Waiters queue in arrival order in one of 256 buckets chosen by
   the address (each made when first used) and sleep on a condition of their own, so a wake reaches only the waiters

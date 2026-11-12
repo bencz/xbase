@@ -109,9 +109,9 @@ The compiler resolves names; the runtime finds fields by name when the code runs
   ignored.
 
 Compiled code calls `xb_field_get`, `xb_field_set` and `xb_mv_field` ([runtime.md](runtime.md#work-areas)), each
-reference with a cache of its own (`xb_field_cache`): the field's position in the table it found it in, which a table
-opened later (each one has a different `generation`) makes it look up again. The macro compiler reads the same forms
-([runtime.md](runtime.md#macro-operator)).
+reference with a cache of its own (`xb_field_cache`, one 64-bit word): the field's position in the table it found
+it in, which a table opened later (each one has a different `generation`) makes it look up again. The macro compiler
+reads the same forms ([runtime.md](runtime.md#macro-operator)).
 
 ## Orders
 
