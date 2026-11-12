@@ -640,9 +640,11 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   it. Within a module, compiled code calls a function's direct entry, passing the parameters' items in registers
   ([compiler.md](compiler.md#xir-to-llvm)).
 - The caller evaluates the arguments into consecutive slots of its own frame and sets `ret` to `NIL`; a callee that
-  returns nothing leaves it untouched. The callee copies its parameters into its frame; missing arguments are
-  `NIL`. An argument passed by reference is an `XB_T_CELL` or `XB_T_REF` item (see
-  [References](#references)); a C function receives one only where its declaration says `@`.
+  returns nothing leaves it untouched. Compiled code always writes `ret` when it returns (`NIL` for no value), so a call
+  to a direct entry within the module does not clear it first (when the callee unwinds, the result is not read). The
+  callee copies its parameters into its frame; missing arguments are `NIL`. An argument passed by reference is an
+  `XB_T_CELL` or `XB_T_REF` item (see [References](#references)); a C function receives one only where its declaration
+  says `@`.
 - A list with `...` (a call, a send or an array literal) has a length known at run time: compiled code reserves a frame
   of that size on the stack (`llvm.stacksave`/`stackrestore` around it), linked into the chain while the call runs, and
   fills it with the other items and, after them, the function's own arguments past its parameters

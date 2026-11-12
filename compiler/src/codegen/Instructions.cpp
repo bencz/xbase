@@ -180,7 +180,10 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
 
 // A call to a function of the module with a direct entry: each parameter's
 // item as two words in registers (NIL for one not passed; arguments past the
-// parameters are evaluated and left out, as nothing reads them).
+// parameters are evaluated and left out, as nothing reads them). The result is
+// not cleared first: a compiled function always writes it when it returns, and
+// when it unwinds the result is not read (its slot keeps a valid item for the
+// collector, as every slot does).
 void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
   const xir::Function &callee = *i.callee.function;
   std::vector<Value *> args{fnCtx_, d, fnFrame_}; // the chain's frame at a call is the caller's
@@ -193,7 +196,6 @@ void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
     args.push_back(loadHeader(item));        // the cached header when there is one
     args.push_back(loadWords(item).payload); // a pointer is read where it is
   }
-  setNil(d);
   b_.CreateCall(direct_.at(&callee), args);
   checkPending(unwind_);
 }
@@ -623,8 +625,12 @@ void CodeGen::emit(const xir::Instruction &i) {
     }
     break;
   }
-  case Op::Ret:
-    if (!ops.empty() && plan_->home(ops[0]).kind != Home::Kind::Ret) copyItem(fnRet_, addr(ops[0]));
+  case Op::Ret: // a compiled function always gives its result, NIL for none: a direct call clears nothing first
+    if (ops.empty()) {
+      if (fnRet_) setNil(fnRet_);
+    } else if (plan_->home(ops[0]).kind != Home::Kind::Ret) {
+      copyItem(fnRet_, addr(ops[0]));
+    }
     b_.CreateBr(fnExit_);
     break;
   case Op::GenYield: // the frame and the element into the enumerator; the step returns .T.
