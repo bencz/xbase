@@ -18,8 +18,8 @@
  * variable F sees (F's, or its ancestors'), else what the object's class
  * answers. HIDDEN members answer F's own methods only, PROTECTED ones the
  * methods of their class and its subclasses, and a READONLY variable is
- * assigned by those only; anything else is a scope violation (BASE/41,
- * BASE/42). Without a method of its own, a class answers New (it sends Init
+ * assigned as if one scope narrower (EXPORTED as PROTECTED, PROTECTED as
+ * HIDDEN); anything else is a scope violation (BASE/41, BASE/42). Without a method of its own, a class answers New (it sends Init
  * with the arguments, as its own method would, and returns the object) and
  * Init (the object).
  *
@@ -360,7 +360,7 @@ static member *lookup_super(cls *from, const char *message) {
   return NULL;
 }
 
-/* A scope violation: BASE/41 (HIDDEN) or BASE/42 (PROTECTED, READONLY). */
+/* A scope violation: BASE/41 (HIDDEN) or BASE/42 (PROTECTED). */
 static void violation(xb_ctx *ctx, xb_item *r, const cls *c, const char *message, int hidden) {
   char op[XB_MESSAGE_TEXT_SIZE];
   xb_error(ctx, r, EG_NOMETHOD, hidden ? 41 : 42, xb_message_text(op, c->def->name, message), XB_ERR_SUBSTITUTE, 0,
@@ -527,9 +527,9 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
   }
   uint32_t scope = m->flags & XB_SCOPE_MASK;
   int inside = f && kind_of(f, m->owner); /* a method of the member's class or of a subclass */
-  int assigns = m->kind == M_SET || m->kind == M_CLASS_SET;
-  if (((scope == XB_SCOPE_HIDDEN && from != m->owner) || (scope == XB_SCOPE_PROTECTED && !inside) ||
-       (assigns && (m->flags & XB_MEMBER_READONLY) && !inside)) &&
+  if ((m->kind == M_SET || m->kind == M_CLASS_SET) && (m->flags & XB_MEMBER_READONLY))
+    scope = scope == XB_SCOPE_EXPORTED ? XB_SCOPE_PROTECTED : XB_SCOPE_HIDDEN;
+  if (((scope == XB_SCOPE_HIDDEN && from != m->owner) || (scope == XB_SCOPE_PROTECTED && !inside)) &&
       !friend_of(ctx, m->owner, from)) {
     violation(ctx, r, c, message, scope == XB_SCOPE_HIDDEN);
     return;

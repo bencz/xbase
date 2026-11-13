@@ -440,11 +440,14 @@ first time it is used (its class function, or a subclass):
   FUNCTION` with the codeblocks it makes and the macros it evaluates (found from the innermost frame of the call stack
   that is not a macro's, a codeblock's name without its `(b)` prefix, `XB_BLOCK_PREFIX`), reach the HIDDEN and PROTECTED
   members of the class and assign its READONLY variables.
-- Scopes: HIDDEN members answer F's own methods, PROTECTED ones the methods of their class and its subclasses, a
-  READONLY variable is assigned by those only (and by friends); anything else is `BASE/41` `Scope violation (hidden)` or
-  `BASE/42` `Scope violation (protected)` (generic code 13, the operation `CLASS:MESSAGE`, no `args`). A message the
-  class does not answer is `BASE/1004` (`BASE/1005` to assign) `Message not found`, the operation `CLASS:MESSAGE`, the
-  object in `args`, as in the reference; the runtime's own classes keep Clipper's `No exported method`.
+- Scopes: HIDDEN members answer F's own methods, PROTECTED ones the methods of their class and its subclasses, and a
+  READONLY variable (or class variable) is assigned as if it were one scope narrower: an EXPORTED one as PROTECTED, a
+  PROTECTED or HIDDEN one as HIDDEN (friends assign them all; the reference lets nothing assign a HIDDEN READONLY one,
+  not even its own class's methods, so that only its INIT value is ever set); anything else is `BASE/41`
+  `Scope violation (hidden)` or `BASE/42` `Scope violation (protected)` (generic code 13, the operation
+  `CLASS:MESSAGE`, no `args`). A message the class does not answer is `BASE/1004` (`BASE/1005` to assign)
+  `Message not found`, the operation `CLASS:MESSAGE`, the object in `args`, as in the reference; the runtime's own
+  classes keep Clipper's `No exported method`.
 - Casts: a message naming a class of the object's line that no member answers (`o:TParent`; `SUPER`, outside the
   `Super:` of a method, the first parent of the class the object is seen as) gives the object seen as that class,
   without allocating: the same item with the class's position in the line in its `width` field. A message to a cast

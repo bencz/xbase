@@ -1,0 +1,14 @@
+
+compiled sends
+outside TA  vE x vR 42 42 42 42 41 41 41 41 41 mE 42 41 42 42 41 cE x cR 42 42 41 41 41 41
+TA method TA  x x vR x vP x vPR x vH x vHR x mE mP mH x+ x x+ x x cR x cP x cH x x
+TB method TA  x x x x x x x 41 41 41 41 41 mE mP 41 x+ x 41 x x x x cP 41 41 41 41
+TC method TA  x x x 42 42 42 42 41 41 41 41 41 mE 42 41 42 42 41 x x x 42 42 41 41 41 41
+friend TA  x x x x x x x x x x x x mE mP mH x+ x x+ x x x x cP x x x x
+block TA  x x x x x x x x x x x x mE mP mH x+ x x+ x x x x cP x x x x
+outside TB  vE x vR 42 42 42 42 41 41 41 41 41 mE 42 41 42 42 41 cE x cR 42 42 41 41 41 41
+TA method TB  x x vR x vP x vPR x vH x vHR x mE mP mH x+ x x+ x x cR x cP x cH x x
+TB method TB  x x x x x x x 41 41 41 41 41 mE mP 41 x+ x 41 x x x x cP 41 41 41 41
+TC method TB  x x x 42 42 42 42 41 41 41 41 41 mE 42 41 42 42 41 x x x 42 42 41 41 41 41
+friend TB  x x x x x x x x x x x x mE mP mH x+ x x+ x x x x cP x x x x
+block TB  x x x x x x x x x x x x mE mP mH x+ x x+ x x x x cP x x x x

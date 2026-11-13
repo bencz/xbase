@@ -544,8 +544,8 @@ void     xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache
  * and an ASSIGN one "_NAME". A class variable (`classVars`) holds one value
  * for the class, another for each subclass, unless it is XB_MEMBER_SHARED:
  * then the class and its subclasses share it. A member's `flags`: the scope
- * (XB_SCOPE_*), and XB_MEMBER_READONLY for a variable assigned only from the
- * methods of its class and of its subclasses. The friends (classes, whose own
+ * (XB_SCOPE_*), and XB_MEMBER_READONLY for a variable assigned as if one
+ * scope narrower (EXPORTED as PROTECTED, PROTECTED as HIDDEN). The friends (classes, whose own
  * methods, and functions, which with the codeblocks they make) reach the
  * class's HIDDEN and PROTECTED members and assign its READONLY ones. `init`
  * returns an array with the initial values (INIT) of the variables, then of
