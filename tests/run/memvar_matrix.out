@@ -1,0 +1,45 @@
+          5
+in the maker:
+pub     public public public C C B
+shadow  private shadow private shadow private shadow C C B
+priv    private private private C C B
+parm    parameter parameter parameter C C B
+rel     NIL NIL NIL U U B
+made    made by a macro made by a macro made by a macro C C B
+loc     E1003 E1003 E1004 U U U
+st      E1003 E1003 E1004 U U U
+nothing E1003 E1003 E1004 U U U
+undeclared public private shadow private parameter NIL made by a macro
+inner function:
+pub     public public public C C B
+shadow  private shadow private shadow private shadow C C B
+priv    inner hides inner hides inner hides C C B
+parm    parameter parameter parameter C C B
+rel     NIL NIL NIL U U B
+made    made by a macro made by a macro made by a macro C C B
+loc     E1003 E1003 E1004 U U U
+st      E1003 E1003 E1004 U U U
+nothing E1003 E1003 E1004 U U U
+undeclared public private shadow inner hides parameter NIL made by a macro
+after assignments:
+pub     pub by block +M pub by block +M pub by block +M C C B
+shadow  shadow by block +u shadow by block +u shadow by block +u C C B
+priv    private private private C C B
+parm    parm by macro parm by macro parm by macro C C B
+rel     rel by block rel by block rel by block C C B
+made    made by block made by block made by block C C B
+loc     E1003 E1003 E1004 U U U
+st      E1003 E1003 E1004 U U U
+nothing E1003 E1003 E1004 U U U
+undeclared pub by block +M shadow by block +u private parm by macro rel by block made by block
+after return:
+pub     pub by block +M pub by block +M pub by block +M C C B
+shadow  public shadow public shadow public shadow C C B
+priv    E1003 E1003 E1004 U U U
+parm    E1003 E1003 E1004 U U U
+rel     E1003 E1003 E1004 U U U
+made    E1003 E1003 E1004 U U U
+loc     E1003 E1003 E1004 U U U
+st      E1003 E1003 E1004 U U U
+nothing E1003 E1003 E1004 U U U
+undeclared pub by block +M public shadow E1003 E1003 E1003 E1003
