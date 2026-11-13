@@ -1,0 +1,20 @@
+
+private:          2
+public:          6
+blanks and case:          3
+dot and parentheses:          5
+element of the value:         21
+eval:        100        100
+do with:        101 len:          2
+error       1003 NOSUCH Variable does not exist
+ok a[1]        101         11          3          1          1 U
+error       1449 & Syntax error
+error       1065 & Argument error
+error       1449 & Syntax error
+error       1003 L Variable does not exist
+ok M->x        102         11          3          1          1 U
+ok m[2][1]        102         11          4          1          1 U
+ok h['k']        102         11          4          2          1 U
+error       1449 & Syntax error
+error       1132 array access Bound error
+local

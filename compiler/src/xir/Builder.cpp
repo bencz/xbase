@@ -127,7 +127,7 @@ Instruction *Builder::memvarParam(const std::string &name, uint32_t index) {
 }
 
 Instruction *Builder::macro(Op op, Value *text, const std::vector<Value *> &more) {
-  bool value = op == Op::MacroGet || op == Op::MacroCall || op == Op::MacroText;
+  bool value = op == Op::MacroGet || op == Op::MacroCall || op == Op::MacroRef || op == Op::MacroText;
   Instruction *i = make(op, value ? Type::Item : Type::Void, {text});
   for (Value *v : more) i->addOperand(v);
   return i;

@@ -201,6 +201,9 @@ static int is_lvalue(const node *n) {
          (n->kind == N_SEND && !n->flag);
 }
 
+/* What `@` may pass by reference: a variable or an element, not parenthesized. */
+static int is_ref_target(const node *n) { return (n->kind == N_VAR || n->kind == N_INDEX) && !n->parens; }
+
 static node *parse_expr(parser *p);
 static node *parse_postfix(parser *p);
 static void fail(parser *p);
@@ -242,7 +245,7 @@ static void parse_args(parser *p, nlist *out, mtok close, int refs) {
       advance(p);
       node *r = mk(p, N_REF);
       r->a = parse_postfix(p);
-      if (!refs || (r->a->kind != N_VAR && r->a->kind != N_INDEX) || r->a->parens) fail(p);
+      if (!refs || !is_ref_target(r->a)) fail(p);
       push(p, out, grown(p, r));
     } else {
       push(p, out, parse_expr(p));
@@ -1446,7 +1449,9 @@ uint32_t xb_macro_compile(xb_ctx *ctx, xb_item *code, const char *text, size_t l
   parser p = {0};
   xb_mlex_init(&p.lx, text, len);
   node *e = cur(&p) == MT_END ? (fail(&p), NULL) : parse_expr(&p);
-  if (cur(&p) != MT_END || (goal == MG_ASSIGN && e && !is_lvalue(e))) fail(&p);
+  if (cur(&p) != MT_END || (goal == MG_ASSIGN && e && !is_lvalue(e)) ||
+      (goal == MG_REF && e && !is_ref_target(e)))
+    fail(&p);
   if (p.error) {
     free_arena(p.arena);
     return XB_MACRO_SYNTAX;
@@ -1458,6 +1463,10 @@ uint32_t xb_macro_compile(xb_ctx *ctx, xb_item *code, const char *text, size_t l
     top.nparams = 1;
     node arg = {.kind = N_ARG, .op = -1};
     gen_assign(&g, &top, e, &arg, -1, 0, 0, 0);
+  } else if (goal == MG_REF) { /* `@target`, as an argument passed by reference */
+    fn_init(&g, &top, NULL);
+    node ref = {.kind = N_REF, .op = -1, .a = e};
+    gen_expr(&g, &top, &ref);
   } else {
     fn_init(&g, &top, NULL);
     gen_expr(&g, &top, e);

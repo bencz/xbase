@@ -239,7 +239,8 @@ inline bool isLvalue(const Expr &e) {
 // A call argument passed by reference: the callee's parameter designates the
 // variable or element, so assigning the parameter assigns it.
 struct RefExpr : Expr {
-  ExprPtr target;                // a VarExpr or an IndexExpr, or the CallExpr of a function reference (@name())
+  ExprPtr target;                // a VarExpr, an IndexExpr or a MacroExpr (@&name), or the CallExpr of a function
+                                 // reference (@name())
   RefExpr(SourceLoc l, ExprPtr t) : Expr(ExprKind::Ref, l), target(std::move(t)) {}
 };
 

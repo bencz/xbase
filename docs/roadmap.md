@@ -27,14 +27,14 @@ design of the larger parts.
 - Done: `MEMVAR`, `PRIVATE` (and `DECLARE`), `PUBLIC`, `PARAMETERS`, `M->name`, `RELEASE` (`ALL`, `LIKE`, `EXCEPT`),
   `CLEAR MEMORY`, `SAVE`/`RESTORE` (`.mem` files), and Clipper's rule for undeclared names (a memory variable at run
   time, with a warning; `-Wno-undeclared`, `-Werror=undeclared`) ([runtime.md](runtime.md#memory-variables),
-  [compiler.md](compiler.md#semantic-checks)).
-- Missing: a memory variable as the variable of `FOR EACH`.
+  [compiler.md](compiler.md#semantic-checks)); a memory variable as the variable of `FOR EACH`.
 
 ### Fields and work areas
 
 - Done: `FIELD` (with `IN`), `alias->field`, `FIELD->name`, `(expr)->name`, `alias->( expr )`, undeclared names read
-  as a field first, `SELECT`, the work areas and `DBF` tables without memos ([rdd.md](rdd.md)).
-- Missing: memos (DBT, FPT), indexes (NTX, CDX), sharing and locks, relations, SDF and DELIM, as
+  as a field first, `SELECT`, the work areas, `DBF` tables, memos (DBT, FPT), indexes (NTX, CDX), sharing and locks,
+  relations, SDF and DELIM ([rdd.md](rdd.md)).
+- Missing: `LIST` and `DISPLAY`, with the terminal's redirections, and the SQL engines, as
   [rdd.md](rdd.md#order-of-the-work) orders them.
 
 ### Macro operator
@@ -44,19 +44,18 @@ design of the larger parts.
   `Type()`, compiled by the runtime's own expression compiler and cached
   ([runtime.md](runtime.md#macro-operator), [compiler.md](compiler.md#grammar)).
 - Done also: aliases in and before macros (`&cAlias->field`, `( expr )->( ... )` inside the text).
-- Done also: macro messages (`o:&message`) and `PCount()`/`PValue()` inside a macro
-  ([runtime.md](runtime.md#macro-operator)).
-- Missing: `@&name`, and the reference's macro lists (`&c` spread into arguments, its own extension).
+- Done also: macro messages (`o:&message`), macros passed by reference (`@&name`) and `PCount()`/`PValue()` inside a
+  macro ([runtime.md](runtime.md#macro-operator)).
+- Missing: the reference's macro lists (`&c` spread into arguments, its own extension).
 
 ### Errors
 
 Done: objects of runtime classes, messages (`o:x`, `o:x := v`, `o:m( args )`), runtime errors as `Error` objects,
 `ErrorBlock()`, substitution, `ErrorSys()` and the default handler in xBase, `BREAK`/`Break()`, `BEGIN SEQUENCE` /
 `RECOVER [USING x]` on xIR unwind edges ([runtime.md](runtime.md#errors-and-pending-requests),
-[xir.md](xir.md#control-flow-for-errors-and-exceptions)). Missing:
-
-- Retrying (`canRetry`, `tries`) and defaults (`canDefault`) once file and database errors exist, with the default
-  handler's choice between them (`Alert()`, the terminal layer).
+[xir.md](xir.md#control-flow-for-errors-and-exceptions)), retrying (`canRetry`, `tries`) and defaults
+(`canDefault`) for file and database errors. Missing: the default handler's choice between quitting, retrying and the
+default (`Alert()`, the terminal layer).
 
 ### Procedures, parameters and the call stack
 
@@ -64,26 +63,26 @@ Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
 
 ### Commands, statements and headers
 
-- `std.ch` has 27 of 157 command families ([coverage.md](coverage.md#commands-stdch)); most of the rest need the
-  runtime parts below (screen, GET/READ, files, RDD).
+- `std.ch` has 73 of 157 command families ([coverage.md](coverage.md#commands-stdch)); most of the rest need the
+  terminal layer below (screen, GET/READ, printing).
 - `TEXT ... ENDTEXT` is not a command yet and its lines are compiled as statements.
-- Standard headers still to provide: `common.ch`, `inkey.ch`, `box.ch`, `color.ch`, `dbstruct.ch`, `getexit.ch`,
+- Standard headers still to provide: `common.ch`, `inkey.ch`, `box.ch`, `color.ch`, `getexit.ch`,
   `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
 
 ### Runtime library
 
-124 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
+216 of 551 functions are done ([coverage.md](coverage.md#functions)). By area, in the planned order:
 
 1. Files and directories: done ([runtime.md](runtime.md#files)) but the drive functions (`DiskChange`, `DiskName`,
    `IsDisk`) and `FSetDevMod`.
 2. The terminal layer ([terminal.md](terminal.md)): screen, cursor, colors and keyboard, with drivers for plain
    standard output, terminals (xbase's own, not ncurses) and the Windows console; then `@ ... SAY/GET`, `READ`,
    `AChoice`, `MemoEdit`, `TBrowse`, `dbEdit`, menus.
-3. The RDD layer and the database functions and commands ([rdd.md](rdd.md)): work areas and `DBF` tables done; memos,
-   indexes, locks and the rest next.
+3. The RDD layer and the database functions and commands ([rdd.md](rdd.md)): done but `LIST`/`DISPLAY` (with the
+   terminal) and the SQL engines.
 
 The SIx Driver and HiPer-SEEK functions (`sx_*`, `hs_*`, `cfts*`) belong to add-on database drivers; whether xbase
-provides them is decided when the RDD layer exists.
+provides them is still to be decided.
 
 ## Extensions
 

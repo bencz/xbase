@@ -663,7 +663,10 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
   value that is not a string is `1065`, a text that is not a name `1449`. The reference has no `Super:&text`.
 - `PCount()` inside a macro expression counts the arguments of the function or codeblock running it; inside a
   codeblock the macro made, the codeblock's own (`PValue()` gives them as passed).
-- Not yet: `@&name`.
+- `@&text` (`xb_macro_ref`) gives a reference to what the text designates, as an argument passed by reference: a
+  memory variable (one that does not exist is `BASE/1003`, not created; a macro sees no `LOCAL`) or an element
+  (`"a[1]"`, `"h['k']"`); any other text is `1449`, a message too (`"o:x"`, which the reference passes as a reference
+  to the instance variable, though no compiled code can). The reference has no `@&( expr )`.
 
 ## Calling convention
 

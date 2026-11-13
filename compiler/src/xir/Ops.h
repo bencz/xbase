@@ -61,6 +61,7 @@ enum class Op : uint8_t {
   MacroGet,       // text -> Item: its value                                    [may fail]
   MacroSet,       // text, value: assigns what it designates                     [may fail]
   MacroCall,      // text, args... -> Item: calls the function it names           [may fail]
+  MacroRef,       // text -> Item: a reference to the variable or element it designates (@&text) [may fail]
   MacroPrivate,   // text: PRIVATE &text                                         [may fail]
   MacroPublic,    // text: PUBLIC &text                                          [may fail]
   MacroText,      // string -> Item: `&name` in it replaced by the memory variable's text (a string literal)

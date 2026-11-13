@@ -55,6 +55,7 @@ void xb_mlex_next(mlexer *lx);
 typedef enum mgoal {
   MG_VALUE,       /* an expression: its value */
   MG_ASSIGN,      /* something that can be assigned: the code stores its argument there and gives it back */
+  MG_REF,         /* a variable or an element: the code gives a reference to it (@&text) */
 } mgoal;
 
 /* Compiles `len` bytes of `text` into `*code` (a function of the stack

@@ -512,6 +512,14 @@ void xb_macro_get(xb_ctx *ctx, xb_item *r, const xb_item *text) {
   xb_gc_root_pop(ctx, 1);
 }
 
+void xb_macro_ref(xb_ctx *ctx, xb_item *r, const xb_item *text) {
+  xb_item code;
+  xb_set_nil(&code);
+  xb_gc_root_push(ctx, &code);
+  if (compile(ctx, &code, r, text, MG_REF)) run(ctx, r, &code, 0, NULL, NULL);
+  xb_gc_root_pop(ctx, 1);
+}
+
 void xb_macro_set(xb_ctx *ctx, const xb_item *text, const xb_item *value) {
   xb_item frame[3]; /* the function, the value as its argument, its result */
   for (int k = 0; k < 3; ++k) {

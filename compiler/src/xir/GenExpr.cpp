@@ -69,6 +69,11 @@ Value *Generator::genExpr(const Expr &e) {
   case ExprKind::Ref: { // a call argument passed by reference, or a function reference
     const Expr &target = *static_cast<const RefExpr &>(e).target;
     if (target.kind == ExprKind::Call) return b.funcRef(calleeOf(static_cast<const CallExpr &>(target)));
+    if (target.kind == ExprKind::Macro) { // @&name: what the text designates
+      Value *text = genExpr(*static_cast<const MacroExpr &>(target).text);
+      b.setLoc(target.loc);
+      return b.macro(Op::MacroRef, text);
+    }
     if (target.kind == ExprKind::Var) {
       auto &v = static_cast<const VarExpr &>(target);
       return v.where == VarWhere::Memvar ? b.memvar(Op::MvRef, v.name) : b.refVar(varOf(v));

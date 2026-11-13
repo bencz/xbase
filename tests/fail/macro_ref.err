@@ -1,1 +1,1 @@
-a macro cannot be passed by reference (@&name) yet
+only a variable or an array element can be passed by reference

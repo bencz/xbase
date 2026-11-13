@@ -173,20 +173,20 @@ line, then statements, then a line that starts with `}` (the expression goes on 
 ends without one; the procedure rule does not apply), any other statement but `STATIC`, `MEMVAR`, `PRIVATE`, `PUBLIC`
 and `PARAMETERS`. A codeblock inside captures its `LOCAL`s like a function's, and they can be passed by reference
 (`BlockExpr::boxed`). It is generated like any codeblock, with a frame of its own. A call argument `@name` or
-`@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is an error (references in
-array literals are not supported yet), and so are fields (`@alias->name`, and a name `FIELD` declares, also as the
-argument `DO ... WITH` passes by reference or as the variable of `FOR EACH`). `@name()` where an operand starts is a
-function reference, a value anywhere (`RefExpr` of a `CallExpr` with `reference` set and no arguments; what follows,
-such as `:Name`, applies to the function reference, among call arguments too, where the reference implementation
-calls the function and sends the message to its result; `@IIF()` is an error): it is lowered to `func.ref` with
-the function's callee, and the generator emits its `xb_funcref` ([runtime.md](runtime.md#function-references)).
-`...` as the last argument of a call or a send or the last element of an array literal (`SpreadExpr`; once, with nothing
-after it, not even an empty argument) stands for the arguments the function received past its parameters, as many as
-there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it only in a function declared with `...`, outside
-its codeblocks (which have arguments of their own); a `CHECKED` function's count includes the other arguments only, so
-only too many of them is an error. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables
-(`o:x := v`, a message without arguments) and macros can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares
-`a := Array( n1, n2 )`.
+`@name[i]...` (or `@&name`, see the macro operator below) passes a variable or an element by reference (`RefExpr`); `@`
+anywhere else is an error (references in array literals are not supported yet), and so are fields (`@alias->name`, and a
+name `FIELD` declares, also as the argument `DO ... WITH` passes by reference or as the variable of `FOR EACH`).
+`@name()` where an operand starts is a function reference, a value anywhere (`RefExpr` of a `CallExpr` with `reference`
+set and no arguments; what follows, such as `:Name`, applies to the function reference, among call arguments too, where
+the reference implementation calls the function and sends the message to its result; `@IIF()` is an error): it is
+lowered to `func.ref` with the function's callee, and the generator emits its `xb_funcref`
+([runtime.md](runtime.md#function-references)). `...` as the last argument of a call or a send or the last element of an
+array literal (`SpreadExpr`; once, with nothing after it, not even an empty argument) stands for the arguments the
+function received past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it
+only in a function declared with `...`, outside its codeblocks (which have arguments of their own); a `CHECKED`
+function's count includes the other arguments only, so only too many of them is an error. Variables, elements
+(`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`, a message without arguments) and macros can be
+assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
 
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
 C has them, so a comparison binds tighter than `&`, `^^` and `|`: `x & 1 == 0` is `x & ( 1 == 0 )`, an argument error at
@@ -208,7 +208,8 @@ runs (`MacroExpr`, whose `text` is the expression giving the string):
   `:` of `WITH OBJECT` (`SendExpr::messageText`), with arguments (`...` too), assigned like any message (see
   [Syntax tree to xIR](#syntax-tree-to-xir)).
 - `PRIVATE &name` and `PUBLIC &name` (also `&( expr )`, with an initializer or array dimensions) create the variable
-  the text names. A macro cannot be passed by reference (`@&name`, an error).
+  the text names. `@&name` (also `@&( expr )`, a call argument) passes a reference to what the text designates
+  (`macro.ref`), `@&name[ i ]` one to an element of the macro's value.
 - A string literal with `&name` in it (`"Hello &cName."`) is substituted when the code runs (`MacroTextExpr`; Clipper's
   rule): it is not a constant, so nothing folds it. A name there (or in a macro name joined to identifiers) that is a
   `LOCAL`, `STATIC` or parameter of the code is an error (the substitution sees memory variables only).
@@ -564,10 +565,10 @@ emits the object file.
   the field's name and a cache of the reference's own (`fieldCache`, a zeroed private 64-bit global aligned to 8
   bytes); `mv.field` calls
   `xb_mv_field` with the name's `xb_memvar` and a cache.
-- Macros ([runtime.md](runtime.md#macro-operator)): `macro.get`, `macro.set`, `macro.private`, `macro.public` and
-  `macro.text` call `xb_macro_get`, `xb_macro_set`, `xb_macro_private` (with the activation's mark),
-  `xb_macro_public` and `xb_macro_text` with the text's item; `macro.call` puts the text and the arguments in
-  consecutive slots (a list, as a send does) and calls `xb_macro_call`.
+- Macros ([runtime.md](runtime.md#macro-operator)): `macro.get`, `macro.ref`, `macro.set`, `macro.private`,
+  `macro.public` and `macro.text` call `xb_macro_get`, `xb_macro_ref`, `xb_macro_set`, `xb_macro_private` (with the
+  activation's mark), `xb_macro_public` and `xb_macro_text` with the text's item; `macro.call` puts the text and the
+  arguments in consecutive slots (a list, as a send does) and calls `xb_macro_call`.
 - Stack limit ([runtime.md](runtime.md#frames)): once the frame is linked, the prologue compares its address with the
   context's `stack_limit` and, below it (an unlikely branch), calls `xb_stack_overflow` and branches to the exit, before
   the body (`checkStack`); a list built for `...` is tested the same way before it is written, restoring the stack and

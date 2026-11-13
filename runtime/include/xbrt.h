@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 42u
+#define XB_ABI_VERSION 43u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -685,6 +685,8 @@ void     xb_gen_done(xb_ctx *ctx, const xb_item *gen);
  * the code runs; it sees memory variables and functions by name, never the
  * caller's LOCALs. xb_macro_get stores its value in `r` (&text);
  * xb_macro_set assigns `value` to what it designates (&text := value);
+ * xb_macro_ref stores in `r` a reference to the variable or element it
+ * designates (@&text, an argument passed by reference);
  * xb_macro_call calls the function it names (&text( args ), references as
  * in Do()); xb_macro_send sends the message it names (o:&text( args ),
  * argv[0] the text, then the object and the arguments; `assign`: the
@@ -695,6 +697,7 @@ void     xb_gen_done(xb_ctx *ctx, const xb_item *gen);
  * name, or something assignable) error 1449; both may be substituted. */
 void     xb_macro_get(xb_ctx *ctx, xb_item *r, const xb_item *text);
 void     xb_macro_set(xb_ctx *ctx, const xb_item *text, const xb_item *value);
+void     xb_macro_ref(xb_ctx *ctx, xb_item *r, const xb_item *text);
 void     xb_macro_call(xb_ctx *ctx, xb_item *r, const xb_item *text, uint32_t argc, xb_item *argv);
 void     xb_macro_send(xb_ctx *ctx, xb_item *r, xb_class_def *from, uint32_t super, uint32_t assign, uint32_t argc,
                        xb_item *argv);

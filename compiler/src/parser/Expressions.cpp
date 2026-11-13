@@ -285,9 +285,7 @@ ExprPtr Parser::parseRef() {
     auto &c = static_cast<CallExpr &>(*target);
     if (!c.args.empty()) diag_.error(c.loc, "a function reference (@" + c.name + "()) takes no arguments");
     c.reference = true;
-  } else if (target->kind == ExprKind::Macro)
-    diag_.error(target->loc, "a macro cannot be passed by reference (@&name) yet");
-  else if (target->kind == ExprKind::Field)
+  } else if (target->kind == ExprKind::Field)
     diag_.error(target->loc, "a field cannot be passed by reference");
   else if (!isLvalue(*target) || target->kind == ExprKind::Send || target->parenthesized)
     diag_.error(target->loc, "only a variable or an array element can be passed by reference");

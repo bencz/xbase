@@ -222,7 +222,7 @@ private:
       expect(i, 1, {Type::Item});
       if (i.message.empty()) fail("memory variable without a name");
       break;
-    case Op::MacroGet: case Op::MacroPrivate: case Op::MacroPublic: case Op::MacroText:
+    case Op::MacroGet: case Op::MacroRef: case Op::MacroPrivate: case Op::MacroPublic: case Op::MacroText:
       expect(i, 1, {Type::Item});
       break;
     case Op::MacroSet: expect(i, 2, {Type::Item, Type::Item}); break;

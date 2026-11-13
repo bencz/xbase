@@ -55,6 +55,7 @@ constexpr OpInfo kOps[] = {
     {Op::MacroGet, "macro.get", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
     {Op::MacroSet, "macro.set", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
     {Op::MacroCall, "macro.call", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
+    {Op::MacroRef, "macro.ref", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
     {Op::MacroPrivate, "macro.private", Fails | RunsCode | Allocates | WritesHeap},
     {Op::MacroPublic, "macro.public", Fails | RunsCode | Allocates | WritesHeap},
     {Op::MacroText, "macro.text", ReadsHeap | Allocates},

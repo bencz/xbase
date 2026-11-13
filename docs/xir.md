@@ -297,25 +297,25 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   `mv.param`; read and written as the heap is, since any call may create, change or end one; `mv.field` reads an
   undeclared name, a field of the current work area first), fields of work areas (`field.get` and `field.set`, by name,
   with the alias's name in the instruction or its item as the first operand; they read the context's state and may run
-  code: an error block), the macro operator (`macro.get`, `macro.set`, `macro.call`, `macro.private`, `macro.public`,
-  the text an item operand, and `macro.text`, the substitution in a string literal; a macro may do anything a call does,
-  and create a PRIVATE of the function, which `createsPrivates` tells codegen), the truth test, calls (to the module's
-  functions or to declared externals), `send` (a message to the first operand, with the others as arguments),
-  `send.macro` (a text, then the object and the arguments: the message the text names when it runs; `index` 1 to
-  assign), array literals (`...` in a call, a send or an array literal is its last operand, of type `args`, `args.rest`:
-  the function's arguments past its parameters, made right before its list, which is its one use in the block; the
-  callee's `byref` the positions of a call that receive references), `func.ref` (a function reference, `@name()`: the
-  `xb_funcref` of its callee as an item), hash literals (`hash`, keys and values alternating), element read and write,
-  codeblock creation with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations (`each.source`,
-  `each.in_cell`, `each.enter`, `each.move`, `each.leave`, and `each.key`, the key at a position), the `SWITCH` check
-  (whose result is the value the `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value`
-  for `BEGIN SEQUENCE`, the generator operations (`gen.new`, `gen.restore`, `gen.done`, the terminator `gen.yield`, and
-  `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), `append` (`var := var + value`,
-  `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right after its
-  operation and the value first in the block only the check leads to), and for parameter versioning `params.ref`
-  (whether parameters hold references their caller passed) and `call.forward` (a call with the function's own arguments,
-  as received), and `inline.enter` (naming a function or block function) and `inline.leave`, around an inlined body: the
-  call stack shows that function in between.
+  code: an error block), the macro operator (`macro.get`, `macro.set`, `macro.call`, `macro.ref`, `macro.private`,
+  `macro.public`, the text an item operand, and `macro.text`, the substitution in a string literal; a macro may do
+  anything a call does, and create a PRIVATE of the function, which `createsPrivates` tells codegen), the truth test,
+  calls (to the module's functions or to declared externals), `send` (a message to the first operand, with the others as
+  arguments), `send.macro` (a text, then the object and the arguments: the message the text names when it runs; `index`
+  1 to assign), array literals (`...` in a call, a send or an array literal is its last operand, of type `args`,
+  `args.rest`: the function's arguments past its parameters, made right before its list, which is its one use in the
+  block; the callee's `byref` the positions of a call that receive references), `func.ref` (a function reference,
+  `@name()`: the `xb_funcref` of its callee as an item), hash literals (`hash`, keys and values alternating), element
+  read and write, codeblock creation with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations
+  (`each.source`, `each.in_cell`, `each.enter`, `each.move`, `each.leave`, and `each.key`, the key at a position), the
+  `SWITCH` check (whose result is the value the `CASE`s match: a substituted one after an error) and match, `seq.catch`
+  and `seq.value` for `BEGIN SEQUENCE`, the generator operations (`gen.new`, `gen.restore`, `gen.done`, the terminator
+  `gen.yield`, and `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), `append`
+  (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps
+  the check right after its operation and the value first in the block only the check leads to), and for parameter
+  versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the
+  function's own arguments, as received), and `inline.enter` (naming a function or block function) and `inline.leave`,
+  around an inlined body: the call stack shows that function in between.
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `ret`.

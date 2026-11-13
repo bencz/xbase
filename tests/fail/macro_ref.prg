@@ -1,6 +1,6 @@
-// A macro cannot be passed by reference.
+// A macro call is not a variable: it cannot be passed by reference.
 MEMVAR c
 PROCEDURE Main()
-   c := "x"
-   QOut( @&c )
+   c := "Upper"
+   QOut( @&c( "x" ) )
 RETURN

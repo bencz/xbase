@@ -368,7 +368,8 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::MacroGet:
-    callItemOp(rtMacroGet_, dest(i), {addr(ops[0])});
+  case Op::MacroRef:
+    callItemOp(i.op == Op::MacroGet ? rtMacroGet_ : rtMacroRef_, dest(i), {addr(ops[0])});
     checkPending(unwind_);
     break;
   case Op::MacroSet:

@@ -225,9 +225,10 @@ inline const Instruction *asInstruction(const Value *v, Op op) {
 Instruction *versioning(const Function &f);
 Function *referenceBody(const Instruction &versioning);
 
-// A reference to a variable or an element, as an argument passed by reference (@x, @a[i], @name) is.
+// A reference to a variable or an element, as an argument passed by reference (@x, @a[i], @name, @&name) is.
 inline bool isReference(const Value *v) {
-  return asInstruction(v, Op::RefVar) || asInstruction(v, Op::RefIndex) || asInstruction(v, Op::MvRef);
+  return asInstruction(v, Op::RefVar) || asInstruction(v, Op::RefIndex) || asInstruction(v, Op::MvRef) ||
+         asInstruction(v, Op::MacroRef);
 }
 
 class BasicBlock {
