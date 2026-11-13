@@ -392,15 +392,17 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
 // double with SET DECIMALS decimals, as xb_op_div and xb_op_mod make it; `%`
 // of two integers is their remainder (0 for a divisor of -1). Anything else
 // calls the operator, which raises the errors.
-// fmod( x, y ) (y not 0, else anything): for two integers below 2^53 in
-// magnitude (doubles that hold integers exactly), their integer remainder with
-// x's sign, which is fmod's exactly, without calling it; fmod otherwise.
+// fmod( x, y ) (y not 0, else anything): for two integers below 2^63 in
+// magnitude (doubles that hold integers convert to int64 exactly), their
+// integer remainder with x's sign, which is fmod's exactly (fmod's result is a
+// double exactly, so converting it back loses nothing), without calling it;
+// fmod otherwise.
 Value *CodeGen::doubleRemainder(Value *x, Value *y) {
   Type *f64 = b_.getDoubleTy();
   auto integral = [&](Value *v) {
     Value *whole = b_.CreateFCmpOEQ(v, b_.CreateUnaryIntrinsic(Intrinsic::trunc, v));
     return b_.CreateAnd(whole, b_.CreateFCmpOLT(b_.CreateUnaryIntrinsic(Intrinsic::fabs, v),
-                                                ConstantFP::get(f64, 9007199254740992.0)));
+                                                ConstantFP::get(f64, 9223372036854775808.0)));
   };
   BasicBlock *ints = newBlock("fmod.int"), *call = newBlock("fmod"), *done = newBlock("fmod.done");
   branchLikely(b_.CreateAnd(integral(x), integral(y)), ints, call);

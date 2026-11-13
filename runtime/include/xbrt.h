@@ -832,13 +832,18 @@ static inline uint32_t xb_hash_bytes_as(const char *p, size_t n, int upper) {
 static inline uint32_t xb_hash_bytes(const char *p, size_t n) { return xb_hash_bytes_as(p, n, 0); }
 
 /* Default display width of the integer part of a number (Clipper rule):
- * 10 columns, 20 when the value does not fit in 10. Shared by the compiler
- * (numeric literals) and the runtime (computed values). */
+ * 10 columns, 20 when the value does not fit in 10 (above XB_NUM_FITS_MAX or
+ * below XB_NUM_FITS_MIN). Shared by the compiler (numeric literals, and the
+ * width code it generates for Int()) and the runtime (computed values). */
+#define XB_NUM_WIDTH 10
+#define XB_NUM_WIDE_WIDTH 20
+#define XB_NUM_FITS_MAX INT64_C(9999999999)
+#define XB_NUM_FITS_MIN INT64_C(-999999999)
 static inline uint16_t xb_num_int_width(int64_t i) {
-  return (uint16_t)((i < -999999999 || i > INT64_C(9999999999)) ? 20 : 10);
+  return (uint16_t)((i < XB_NUM_FITS_MIN || i > XB_NUM_FITS_MAX) ? XB_NUM_WIDE_WIDTH : XB_NUM_WIDTH);
 }
 static inline uint16_t xb_num_dbl_width(double d) {
-  return (uint16_t)((d > 9999999999.0 || d < -999999999.0) ? 20 : 10);
+  return (uint16_t)((d > (double)XB_NUM_FITS_MAX || d < (double)XB_NUM_FITS_MIN) ? XB_NUM_WIDE_WIDTH : XB_NUM_WIDTH);
 }
 
 /* xbase's bit functions (BitAnd, BitOr, BitXor, BitNor, BitNot, BitShl,

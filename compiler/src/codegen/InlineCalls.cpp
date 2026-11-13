@@ -375,8 +375,8 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     copyItem(d, src);
     break;
   }
-  case Inline::Int: { // an integer as it is; a double with a width of its own truncated, an integer with that width
-    // when it fits 64 bits (xb_dbl_fits_i64); the rest (a double's width computed, NaN): the runtime
+  case Inline::Int: { // an integer as it is; a double truncated, an integer when it fits 64 bits (xb_dbl_fits_i64)
+    // with the double's width, its own or else the default one (xb_num_dbl_width); the rest (NaN too): the runtime
     BasicBlock *isInt = newBlock("int.int"), *other = newBlock("int.other"), *dbl = newBlock("int.double");
     BasicBlock *fits = newBlock("int.fits");
     Value *t = argType(0);
@@ -386,11 +386,17 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     b_.CreateBr(join);
     b_.SetInsertPoint(other);
     Value *widthMask = ConstantInt::get(i64_, (uint64_t)0xFFFF << headerShift(FWidth));
-    Value *width = b_.CreateAnd(loadHeader(arg(0)), widthMask, "width");
-    branchLikely(b_.CreateAnd(isType(t, XB_T_DOUBLE), b_.CreateICmpNE(width, ConstantInt::get(i64_, 0))), dbl, slow);
+    Value *own = b_.CreateAnd(loadHeader(arg(0)), widthMask, "width");
+    branchLikely(isType(t, XB_T_DOUBLE), dbl, slow);
     b_.SetInsertPoint(dbl);
     Type *f64 = b_.getDoubleTy();
-    Value *tr = b_.CreateUnaryIntrinsic(Intrinsic::trunc, b_.CreateBitCast(intValue(arg(0)), f64));
+    Value *v = b_.CreateBitCast(intValue(arg(0)), f64);
+    auto widthWord = [&](uint64_t w) { return ConstantInt::get(i64_, w << headerShift(FWidth)); };
+    Value *wide = b_.CreateOr(b_.CreateFCmpOGT(v, ConstantFP::get(f64, (double)XB_NUM_FITS_MAX)),
+                              b_.CreateFCmpOLT(v, ConstantFP::get(f64, (double)XB_NUM_FITS_MIN)));
+    Value *width = b_.CreateSelect(b_.CreateICmpNE(own, ConstantInt::get(i64_, 0)), own,
+                                   b_.CreateSelect(wide, widthWord(XB_NUM_WIDE_WIDTH), widthWord(XB_NUM_WIDTH)));
+    Value *tr = b_.CreateUnaryIntrinsic(Intrinsic::trunc, v);
     Value *inRange = b_.CreateAnd(b_.CreateFCmpOGE(tr, ConstantFP::get(f64, -9223372036854775808.0)),
                                   b_.CreateFCmpOLT(tr, ConstantFP::get(f64, 9223372036854775808.0)));
     branchLikely(inRange, fits, slow); // NaN and the rest: the runtime keeps them doubles
