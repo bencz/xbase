@@ -63,10 +63,13 @@ typedef enum mgoal {
 uint32_t xb_macro_compile(xb_ctx *ctx, xb_item *code, const char *text, size_t len, mgoal goal);
 
 /* The stack machine's operations (see compile.c for their operands). */
+/* An MO_BLOCK capture's source: a parameter of the creator, or (with this bit) one of the creator's captures. */
+#define XB_MACRO_FROM_CAPTURE 0x80000000u
 typedef enum mop {
   MO_NIL, MO_TRUE, MO_FALSE, MO_CONST,
   MO_MV_GET, MO_MV_SET, MO_MV_REF, MO_MV_FIELD, MO_FIELD, MO_FIELD_SET,
   MO_LOCAL_GET, MO_LOCAL_SET, MO_LOCAL_REF,
+  MO_CAPTURE_GET, MO_CAPTURE_SET, MO_CAPTURE_REF,
   MO_UNARY, MO_BINARY, MO_STEP,
   MO_JUMP, MO_JUMP_FALSE, MO_JUMP_TRUE,
   MO_POP, MO_PICK, MO_INSERT,

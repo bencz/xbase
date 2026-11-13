@@ -17,7 +17,7 @@ a name with blanks: X
 block: B         16
 parameters:          2          4
 elements in a block:          9         10
-a block in a block sees its own parameters only: -
+a block in a block sees the parameters around it: N          3
 Hello World, World! World World A&Q &World
 nested:          2          6
 iif:          1          2          5 x .T.

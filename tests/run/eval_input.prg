@@ -2,7 +2,8 @@
 // arguments, a number, a double, a string, an array, NIL and two arguments, by reference, kept in an array and run by
 // AEval, passed to and returned by functions (small ones, which run in place), and a block that makes blocks; text
 // that is no block, a syntax error, and the errors the blocks raise (division by zero, an unknown function, a wrong
-// type), each recovered with its description and operation.
+// type), each recovered with its description and operation. A block made by a block made from text sees its
+// parameter (beyond the reference, whose macros see only their own).
 PROCEDURE Main( ... )
    LOCAL aText := { ... }, aBlocks := {}, cText, b, x, aArgs, n
    aArgs := { {}, { 5 }, { 2.01 }, { "abc" }, { { 1, 2, 3 } }, { NIL }, { 2.01, 5 } }

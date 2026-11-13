@@ -581,13 +581,15 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
   and the runtime's functions, by name; never a function's `LOCAL`s or `STATIC`s, nor a `STATIC FUNCTION`. `M->name` and
   `MEMVAR->name` are memory variables; a name alone is a field of the current work area before a memory variable
   (`MO_MV_FIELD`), and the aliases of [rdd.md](rdd.md#field-references) name fields (`alias->name`, `FIELD->name`,
-  `FIELD->alias->name`, `( expr )->name`, `&( expr )->name`) or evaluate in a work area (`alias->( expr, ... )`,
-  `( expr )->( ... )`, with `MO_AREA`, which makes the area current again when the evaluation ends, also by an error);
-  `M->( expr )` names the alias `M`, as in compiled code. A codeblock made from text sees its own parameters, not those
-  of the codeblock around it (as a compiled one, Clipper's rule). Inside the text, `&name` is a macro of its own (the
-  variable's text); a name joined to other identifiers there is one the substitution below could not make, an error. A
-  text nested deeper than 1024 levels (parentheses, a chain of operators, `a[1][2]...`), the compiler's limit, is error
-  1449, so that compiling it keeps the stack small.
+  `FIELD->alias->name`, `( expr )->name`, `&( expr )->name`) or evaluate in a work area (`alias->( expr, ... )`, `( expr
+  )->( ... )`, with `MO_AREA`, which makes the area current again when the evaluation ends, also by an error); `M->(
+  expr )` names the alias `M`, as in compiled code. A codeblock made from text sees its own parameters and those of the
+  codeblocks around it in the text, at any depth, shared through cells as a compiled codeblock captures them
+  (`MO_CAPTURE_*`; the parameter's slot moves into a cell when the inner codeblock is made); Clipper's and the
+  reference's macros see only their own, and the name is then a memory variable. Inside the text, `&name` is a macro of
+  its own (the variable's text); a name joined to other identifiers there is one the substitution below could not make,
+  an error. A text nested deeper than 1024 levels (parentheses, a chain of operators, `a[1][2]...`), the compiler's
+  limit, is error 1449, so that compiling it keeps the stack small.
 - `compile.c` parses the text into a tree, then generates code for a stack machine: a function is an array, its
   code (a string of bytes) and its constants. `run.c` runs it with the runtime's operators (`xb_op_*`, as compiled code
   calls them); nothing is folded, so `&( "7 % 3" )` is `1.00`, as `n % m` is (the reference folds some constants). The

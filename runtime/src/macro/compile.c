@@ -15,6 +15,9 @@
  *   MO_MV_FIELD id          an undeclared name read: the current work area's
  *                           field of the variable's name, else as MO_MV_GET
  *   MO_LOCAL_* s            the same for the codeblock's parameter s
+ *   MO_CAPTURE_* k          the same for the codeblock's captured variable k:
+ *                           a parameter of a codeblock around it (at any
+ *                           depth), shared through a cell
  *   MO_FIELD a k            push field k (a name) of the work area of alias
  *                           a (XB_MACRO_NO_ALIAS: the current one;
  *                           XB_MACRO_STACK_ALIAS: the item it pops);
@@ -36,9 +39,12 @@
  *   MO_CALL entry argc      the entry's address in the next pointer-sized
  *                           bytes; MO_NO_FUNC k argc: error 1001 on name k
  *   MO_SEND k argc          message k to the first of argc items
- *   MO_BLOCK k              a codeblock running function k (as in Clipper, it
- *                           sees its own parameters, not those of the
- *                           codeblock around it)
+ *   MO_BLOCK k n s...       a codeblock running function k, with n captured
+ *                           variables, each a parameter s of the function
+ *                           making it (its slot moves into a cell) or, with
+ *                           XB_MACRO_FROM_CAPTURE, one of its captures: a
+ *                           codeblock sees the parameters of the codeblocks
+ *                           around it (Clipper's macros see none of them)
  *   MO_MACRO set            `&`: pops the text (and, to set, a value)
  *   MO_RETURN               the top is the result */
 #include "macro/macro.h"
@@ -644,6 +650,10 @@ static node *parse_expr(parser *p) { return parse_assign(p); }
 typedef struct fn {
   const node *params;       /* the codeblock's N_LIST of parameters (N_VAR), or NULL */
   uint32_t nparams;
+  struct fn *parent;        /* the function making this codeblock, or NULL */
+  const char **capName;     /* the variables captured (names of a parameter around it) and where each comes from */
+  uint32_t *capFrom;        /* (an MO_BLOCK source) */
+  uint32_t ncap, capCap;
   unsigned char *code;
   size_t len, cap;
   xb_item self;             /* the function's array (rooted while generated) */
@@ -724,9 +734,35 @@ static int param_of(const fn *f, const char *name, uint32_t *index) {
   return 0;
 }
 
+/* Whether a name is a parameter of a codeblock around `f` (at any depth), and which of f's captures it is: captured
+ * now when it is not yet, and by every codeblock between (a capture of a capture). */
+static int capture_of(fn *f, const char *name, uint32_t *index) {
+  if (!f->parent) return 0;
+  for (uint32_t k = 0; k < f->ncap; ++k)
+    if (!strcmp(f->capName[k], name)) {
+      *index = k;
+      return 1;
+    }
+  uint32_t from;
+  if (!param_of(f->parent, name, &from)) {
+    if (!capture_of(f->parent, name, &from)) return 0;
+    from |= XB_MACRO_FROM_CAPTURE;
+  }
+  if (f->ncap == f->capCap) {
+    f->capCap = f->capCap ? 2 * f->capCap : 4;
+    f->capName = realloc(f->capName, f->capCap * sizeof *f->capName);
+    f->capFrom = realloc(f->capFrom, f->capCap * sizeof *f->capFrom);
+    if (!f->capName || !f->capFrom) xb_gc_fatal("out of memory");
+  }
+  f->capName[f->ncap] = name;
+  f->capFrom[f->ncap] = from;
+  *index = f->ncap++;
+  return 1;
+}
+
 static void gen_expr(gen *g, fn *f, const node *n);
 
-/* Loads a variable: the codeblock's parameter, else a memory variable. */
+/* Loads a variable: the codeblock's parameter, or one of a codeblock around it, else a memory variable. */
 static void gen_load(gen *g, fn *f, const node *v) {
   if (v->kind == N_ARG) {
     emit1(f, MO_LOCAL_GET, 0, 0, 1);
@@ -735,6 +771,10 @@ static void gen_load(gen *g, fn *f, const node *v) {
   uint32_t index;
   if (!v->flag && param_of(f, v->name, &index)) {
     emit1(f, MO_LOCAL_GET, index, 0, 1);
+    return;
+  }
+  if (!v->flag && capture_of(f, v->name, &index)) {
+    emit1(f, MO_CAPTURE_GET, index, 0, 1);
     return;
   }
   uint32_t id = xb_memvar_number(v->name, v->nameLen);
@@ -806,6 +846,10 @@ static void gen_store(fn *f, const node *v) {
   uint32_t index;
   if (!v->flag && param_of(f, v->name, &index)) {
     emit1(f, MO_LOCAL_SET, index, 1, 0);
+    return;
+  }
+  if (!v->flag && capture_of(f, v->name, &index)) {
+    emit1(f, MO_CAPTURE_SET, index, 1, 0);
     return;
   }
   emit1(f, MO_MV_SET, xb_memvar_number(v->name, v->nameLen), 1, 0);
@@ -1019,16 +1063,22 @@ static void fn_finish(gen *g, fn *f, xb_item *out) {
 static void gen_block(gen *g, fn *f, const node *n) {
   fn child;
   fn_init(g, &child, n->a);
+  child.parent = f;
   for (uint32_t k = 0; k < n->n; ++k) {
     gen_expr(g, &child, n->list[k]);
     if (k + 1 < n->n) emit(&child, MO_POP, 1, 0);
   }
   xb_item code;
+  uint32_t ncap = child.ncap, *from = child.capFrom;
+  free(child.capName);
   fn_finish(g, &child, &code);
   xb_gc_root_push(g->ctx, &code);
   uint32_t k = add_const(f, &code);
   xb_gc_root_pop(g->ctx, 1);
   emit1(f, MO_BLOCK, k, 0, 1);
+  word(f, ncap);
+  for (uint32_t c = 0; c < ncap; ++c) word(f, from[c]);
+  free(from);
 }
 
 static void gen_call(gen *g, fn *f, const node *n) {
@@ -1131,6 +1181,10 @@ static void gen_expr(gen *g, fn *f, const node *n) {
     uint32_t index;
     if (!t->flag && param_of(f, t->name, &index)) {
       emit1(f, MO_LOCAL_REF, index, 0, 1);
+      return;
+    }
+    if (!t->flag && capture_of(f, t->name, &index)) {
+      emit1(f, MO_CAPTURE_REF, index, 0, 1);
       return;
     }
     uint32_t id = xb_memvar_number(t->name, t->nameLen);

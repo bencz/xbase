@@ -1,0 +1,10 @@
+
+        42 |         42
+       123 |        123
+ 1 2 3 |  1 2 3
+         5 |          5
+        21 |         21
+set by macro | set by macro
+       110 |        110
+parameter | parameter memvar
+memvar | memvar

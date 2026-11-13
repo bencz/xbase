@@ -54,7 +54,7 @@ PROCEDURE Main()
    b := &( "{|v| v[ 1 ] := 9, v[ 1 ]++ }" )
    ? "elements in a block:", Eval( b, arr ), arr[ 1 ]
    b := &( "{|x| {|y| x + y } }" )
-   ? "a block in a block sees its own parameters only:", Kind( {|| Eval( Eval( b, 1 ), 2 ) } )
+   ? "a block in a block sees the parameters around it:", Kind( {|| Eval( Eval( b, 1 ), 2 ) } ), Eval( Eval( b, 1 ), 2 )
    cName := "World"
    ? "Hello &cName., &cName!", '&cName' + [ &cName.], "A&Q &&cName"
 

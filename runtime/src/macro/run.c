@@ -163,6 +163,27 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       xb_ref_of(ctx, r, &s[1 + word(&pc)], 0);
       ++sp;
       break;
+    case MO_CAPTURE_GET:
+    case MO_CAPTURE_SET:
+    case MO_CAPTURE_REF: { /* the variable's cell: cells[0] holds the function */
+      xb_item cell;
+      xb_set_ptr(&cell, XB_T_CELL, self->cells[1 + word(&pc)]);
+      if (op == MO_CAPTURE_REF) {
+        *r = cell;
+        ++sp;
+        break;
+      }
+      if (op == MO_CAPTURE_GET) {
+        xb_set_nil(r);
+        read_var(ctx, r, &cell);
+        ++sp;
+      } else {
+        write_var(ctx, &cell, &s[sp]);
+        --sp;
+      }
+      if (FAILED()) goto out;
+      break;
+    }
     case MO_UNARY: {
       uint32_t u = word(&pc);
       xb_set_nil(r);
@@ -279,14 +300,24 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       if (FAILED()) goto out;
       break;
     }
-    case MO_BLOCK: { /* its function in its one cell */
+    case MO_BLOCK: { /* its function in cell 0, then the cells of the variables it captures */
       const xb_item *child = &fa->items[word(&pc)];
-      xb_block *b = xb_block_new(ctx, r, block_fn, 1);
-      ++sp; /* the block, rooted, while its cell is made */
+      uint32_t ncap = word(&pc);
+      xb_block_new(ctx, r, block_fn, 1 + ncap);
+      ++sp; /* the block, rooted, while its cells are made (read again after each: a collection may move it) */
       xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell));
       c->value = *child;
+      xb_block *b = s[sp].v.p;
       b->cells[0] = c;
       xb_gc_write(b);
+      for (uint32_t k = 0; k < ncap; ++k) {
+        uint32_t from = word(&pc);
+        c = from & XB_MACRO_FROM_CAPTURE ? self->cells[1 + (from & ~XB_MACRO_FROM_CAPTURE)]
+                                         : xb_cell_of(ctx, &s[1 + from]); /* the parameter's slot holds the cell */
+        b = s[sp].v.p;
+        b->cells[1 + k] = c;
+        xb_gc_write(b);
+      }
       break;
     }
     case MO_MACRO:

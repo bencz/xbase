@@ -15,4 +15,4 @@
 [{| x, y | Str( x, 8, 3 ) + "|" + Str( y, 8, 3 ) }] <Argument error STR> <Argument error STR> <Argument error STR> <Argument error STR> <Argument error STR> <Argument error STR>    2.010|   5.000
 by reference changed          1
 kept         12 42 7
-aeval         12 <Variable does not exist X> {2}
+aeval         12 42 {2}
