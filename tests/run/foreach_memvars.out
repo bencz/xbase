@@ -1,0 +1,12 @@
+         1          2          1          1          2          4          2          2          3          6          3          3 
+after: before         10         20         30         1          2 
+hash: public        101        102z y x 
+string: before
+exit: before
+return: r2! before
+break: x before         1 p          2 q 
+two: before publicin1 in2 /          1 in1 in2 /          2 
+nested: beforeshadow          1 shadow          2 
+shadowed: beforek1 v1 k2 v2 
+key: k2 w
+missing:       1003 Variable does not exist NOSUCH

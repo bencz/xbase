@@ -321,7 +321,7 @@ Var *Generator::varOf(const VarExpr &v) {
 
 bool Generator::isEachVar(const VarExpr &v) const {
   for (const EachVar &e : cur_.eachVars)
-    if (e.var->where == v.where && e.var->slot == v.slot) return true;
+    if (!e.memvar && e.var->where == v.where && e.var->slot == v.slot) return true;
   return false;
 }
 

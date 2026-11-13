@@ -298,8 +298,8 @@ memory variable there, before a `STATIC` of an enclosing frame, and cannot name 
 same frame; a function's `LOCAL` hides a file-wide `MEMVAR`. `PRIVATE`, `PUBLIC` and `PARAMETERS` do not declare (as in
 the reference, a `STATIC` of the name stays the `STATIC`), and their names cannot be a `LOCAL` or parameter of the same
 function. A name nothing declares (no `MEMVAR`, and no `PRIVATE`, `PUBLIC` or `PARAMETERS` earlier in the function) gets
-a warning; `-Wno-undeclared` drops it and `-Werror=undeclared` makes it an error. A memory variable cannot be the
-variable of a `FOR EACH` yet.
+a warning; `-Wno-undeclared` drops it and `-Werror=undeclared` makes it an error. A memory variable can be the
+variable of a `FOR EACH` (a field cannot).
 
 Sema reports: duplicate functions, parameters or locals, `EXIT` outside a loop or `SWITCH`, `LOOP`
 outside a loop, a `LOCAL`, `STATIC` or `MEMVAR` that follows an executable statement or appears inside a nested block, a
@@ -366,11 +366,14 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   reference that takes a `LOCAL` or parameter while it holds a loop's reference gets the current element instead of the
   variable, which stays the loop's: later iterations, inner loops on the same variable (here or in a callee) and the
   restore do not change what it designates. A `STATIC` is one variable for everyone: a reference to it designates it,
-  and the loop follows its cell from the moment one is made. In `FOR EACH k => v`, `k` is an ordinary variable, other
-  than `v` (the parser rejects `FOR EACH x => x`): before each iteration `each.key` stores into it the key of the
-  current hash entry, or the index for an array or a string, so assigning it changes nothing else, and after the loop it
-  keeps the last key stored (the one `EXIT` left). A `k` that is the variable of an enclosing `FOR EACH` receives the
-  keys as any assignment would: in that loop's element.
+  and the loop follows its cell from the moment one is made. A memory variable is a cell, its binding: the loop takes
+  the one visible when it starts (`mv.ref`, error 1003 for none) into a frame variable of its own and works inside it,
+  so every function, macro and codeblock that reads or assigns the name meets the element, a `PRIVATE` of the name made
+  during the loop hides it as any other, and the variable is restored on every way out, as one others can see. In `FOR
+  EACH k => v`, `k` is an ordinary variable, other than `v` (the parser rejects `FOR EACH x => x`): before each
+  iteration `each.key` stores into it the key of the current hash entry, or the index for an array or a string, so
+  assigning it changes nothing else, and after the loop it keeps the last key stored (the one `EXIT` left). A `k` that
+  is the variable of an enclosing `FOR EACH` receives the keys as any assignment would: in that loop's element.
 - `BEGIN SEQUENCE` gives the blocks of its body an unwind block, the handler: a `BREAK` (pending after an operation
   of the body, or a call) is taken there and `RECOVER` follows, with the `BREAK` value stored in the `USING`
   variable; other requests go on unwinding (see [xir.md](xir.md#control-flow-for-errors-and-exceptions)). `WITH`

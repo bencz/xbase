@@ -347,9 +347,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
     auto loopVar = [&](Expr &v) {
       expr(v, s);
       VarWhere where = v.kind == ExprKind::Var ? static_cast<const VarExpr &>(v).where : VarWhere::Frame;
-      if (where == VarWhere::Memvar)
-        diag_.error(v.loc, "a memory variable as the variable of FOR EACH is not supported yet");
-      else if (where == VarWhere::Field)
+      if (where == VarWhere::Field)
         diag_.error(v.loc, "a field cannot be the variable of FOR EACH");
     };
     if (f.key) loopVar(*f.key);

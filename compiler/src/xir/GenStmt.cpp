@@ -210,14 +210,15 @@ void Generator::genFor(const ForStmt &st) {
 // xb_each_move); a STATIC is one variable for everyone, so its cell, once
 // made, is always followed.
 Value *Generator::eachInCell(const EachVar &v) {
-  Var *x = varOf(*v.var);
-  return x->kind == Var::Kind::Static ? cur_.b->eachInCell(x) : v.inCell;
+  return v.x->kind == Var::Kind::Static ? cur_.b->eachInCell(v.x) : v.inCell;
 }
 
 // FOR EACH: the collections are evaluated once. During the loop each variable
 // holds a reference to the current element, so reading or assigning it reads
 // or assigns the element; a variable shared with codeblocks or a caller holds
-// it inside its cell, so they see the elements too. The variables get their
+// it inside its cell, so they see the elements too, and so does a memory
+// variable, which is a cell (its binding, taken when the loop starts: a missing
+// one is error 1003), held in a frame variable of the loop's own. The variables get their
 // previous values back when the loop ends (by EXIT too), and when unwinding
 // leaves it for a BEGIN SEQUENCE of the function, or for the caller when one
 // of them may be seen there.
@@ -229,14 +230,23 @@ void Generator::genForEach(const ForEachStmt &st) {
   std::vector<EachVar> vars;
   for (size_t k = 0; k < n; ++k) {
     auto &v = static_cast<const VarExpr &>(*st.vars[k]);
-    Var *x = varOf(v);
-    Value *inCell = mayBeInCell(*x) ? static_cast<Value *>(b.eachInCell(x)) : b.boolean(false);
+    bool memvar = v.where == VarWhere::Memvar;
+    Var *x;
+    Value *inCell;
+    if (memvar) {
+      x = cur_.fn->addFrameVar("(each " + v.name + ")");
+      b.store(x, Access::Direct, b.memvar(Op::MvRef, v.name));
+      inCell = b.boolean(true);
+    } else {
+      x = varOf(v);
+      inCell = mayBeInCell(*x) ? static_cast<Value *>(b.eachInCell(x)) : b.boolean(false);
+    }
     Value *saved = b.eachEnter(x, inCell, colls[k]);
-    vars.push_back({&v, inCell, saved});
+    vars.push_back({&v, x, inCell, saved, memvar});
   }
   BasicBlock *outer = b.unwindBlock();
   bool cleanup = outer != nullptr;
-  for (const EachVar &v : vars) cleanup |= mayBeInCell(*varOf(*v.var));
+  for (const EachVar &v : vars) cleanup |= v.memvar || mayBeInCell(*v.x);
   BasicBlock *restore = nullptr;
   if (cleanup) {
     restore = cur_.fn->addBlock("each.unwind");
@@ -287,7 +297,7 @@ void Generator::genForEach(const ForEachStmt &st) {
   b.setBlock(body);
   for (size_t k = 0; k < n; ++k) {
     Value *i = index(k); // emitted before the test of the cell, like the loop test does
-    b.eachMove(varOf(*vars[k].var), eachInCell(vars[k]), i);
+    b.eachMove(vars[k].x, eachInCell(vars[k]), i);
     if (st.key) store(static_cast<const VarExpr &>(*st.key), b.eachKey(colls[k], i));
   }
   cur_.eachVars.insert(cur_.eachVars.end(), vars.begin(), vars.end());
@@ -303,11 +313,11 @@ void Generator::genForEach(const ForEachStmt &st) {
   if (cleanup) {
     b.setUnwind(outer);
     b.setBlock(restore);
-    for (const EachVar &v : vars) b.eachLeave(varOf(*v.var), eachInCell(v), v.saved);
+    for (const EachVar &v : vars) b.eachLeave(v.x, eachInCell(v), v.saved);
     unwindOnward();
   }
   b.setBlock(end);
-  for (const EachVar &v : vars) b.eachLeave(varOf(*v.var), eachInCell(v), v.saved);
+  for (const EachVar &v : vars) b.eachLeave(v.x, eachInCell(v), v.saved);
 }
 
 // The end of an unwind block whose work is done: unwinding goes on to the
@@ -412,8 +422,7 @@ void Generator::exitCleanups(size_t loops, bool leaveEach) {
   auto leaveDownTo = [&](size_t depth) {
     for (; leaveEach && each > depth; --each) {
       const EachVar &v = cur_.eachVars[each - 1];
-      Var *x = varOf(*v.var);
-      if (everyOne || mayBeInCell(*x)) b.eachLeave(x, eachInCell(v), v.saved);
+      if (everyOne || v.memvar || mayBeInCell(*v.x)) b.eachLeave(v.x, eachInCell(v), v.saved);
     }
   };
   for (size_t k = all.size(); k-- > 0 && all[k].loops >= loops;) {

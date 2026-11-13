@@ -86,8 +86,11 @@ private:
   };
   struct EachVar {                 // the variable of a FOR EACH loop being generated
     const VarExpr *var;
+    Var *x;                        // what the loop works on: the variable, or for a memory variable a frame variable
+                                   // holding its cell
     Value *inCell;                 // Bool: the loop works inside the variable's cell
     Value *saved;                  // its value before the loop
+    bool memvar;                   // a memory variable: any function may see it
   };
   struct Cleanup {                 // what a RETURN, EXIT or LOOP that leaves a sequence does first
     Value *oldBlock;               // the error block to put back (WITH), or null
