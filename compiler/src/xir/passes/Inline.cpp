@@ -2,10 +2,11 @@
 // place.
 //
 // The body runs in the calling function between inline.enter and inline.leave, so the call stack shows the callee as
-// its call would. Its parameters and LOCALs become variables of the function, set again on every entry (a call starts
-// with fresh ones): the arguments, NIL past the last and for the LOCALs. A codeblock's captures are the variables it
-// captured, and its result is the call's. Once the block is no longer made, a variable that only it captured needs no
-// cell any more and can live in a register.
+// its call would (a body in which nothing can see the call stack loses them: trimInlinedBodies). Its parameters and
+// LOCALs become variables of the function, set again on every entry (a call starts with fresh ones): the arguments,
+// NIL past the last and for the LOCALs. A codeblock's captures are the variables it captured, and its result is the
+// call's. Once the block is no longer made, a variable that only it captured needs no cell any more and can live in a
+// register.
 #include "xir/passes/Passes.h"
 
 #include "xir/Analysis.h"
@@ -205,27 +206,60 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   eraseInstruction(call);
 }
 
-// The arguments an inlined body no longer reads (the call of an ARGS function that did, gone with a branch never
-// taken) stop being passed: the values they were stay free to go (a codeblock literal no longer made, say).
-bool dropUnreadArguments(Function &f) {
-  std::unordered_set<const Instruction *> read;
-  walkBodies<const Instruction *>(CFG(f), [&](const BasicBlock &b, auto &open) {
+// What the folding left of the inlined bodies. Arguments a body no longer reads (the call of an ARGS function that
+// did, gone with a branch never taken) stop being passed: the values they were stay free to go (a codeblock literal
+// no longer made, say). A body in which nothing can see the call stack (no call, nothing that can fail or run code,
+// no loop, whose back edge polls and may run destructors, no body inlined in it) needs no frame: its inline.enter and
+// inline.leave go. A leave that several bodies reach keeps them all.
+bool trimInlinedBodies(Function &f) {
+  CFG cfg(f);
+  std::unordered_map<const BasicBlock *, size_t> rpo;
+  for (const BasicBlock *b : cfg.order()) rpo.emplace(b, rpo.size());
+  std::unordered_set<const Instruction *> read, seen, enters;
+  std::unordered_map<const Instruction *, std::unordered_set<const Instruction *>> leaves; // leave -> its enters
+  walkBodies<const Instruction *>(cfg, [&](const BasicBlock &b, auto &open) {
     bool changed = false;
+    auto see = [&](const std::unordered_set<const Instruction *> &es) {
+      for (const Instruction *e : es) changed |= seen.insert(e).second;
+    };
     for (auto &i : b.insts) {
-      if (i->op == Op::InlineEnter) open.push_back({i.get()});
-      else if (i->op == Op::InlineLeave) open.pop_back();
-      else if (i->op == Op::Call && i->callee.readsCallerArgs && !open.empty())
+      // A back edge (to a block no later in reverse postorder) polls the pending requests (CodeGen::pollOnBackEdge).
+      bool backEdge = std::any_of(i->targets.begin(), i->targets.end(),
+                                  [&](const Target &t) { return rpo.at(t.block) <= rpo.at(&b); });
+      bool shows = i->op == Op::InlineEnter || i->mayFail() || (i->effects() & RunsCode) || backEdge;
+      if (i->op == Op::InlineLeave) {
+        for (const Instruction *e : open.back()) changed |= leaves[i.get()].insert(e).second;
+        if (open.back().size() > 1) see(open.back());
+        open.pop_back();
+        continue;
+      }
+      if (shows)
+        for (auto &level : open) see(level);
+      if (i->op == Op::Call && i->callee.readsCallerArgs && !open.empty())
         for (const Instruction *e : open.back()) changed |= read.insert(e).second;
+      if (i->op == Op::InlineEnter) {
+        enters.insert(i.get());
+        open.push_back({i.get()});
+      }
     }
     return changed;
   });
   bool changed = false;
-  for (auto &b : f.blocks)
+  for (auto &b : f.blocks) {
     for (auto &i : b->insts)
       if (i->op == Op::InlineEnter && !i->operands().empty() && !read.count(i.get())) {
         i->dropOperands();
         changed = true;
       }
+    changed |= std::erase_if(b->insts, [&](const std::unique_ptr<Instruction> &i) {
+                 if (i->op == Op::InlineEnter) return enters.count(i.get()) && !seen.count(i.get());
+                 if (i->op != Op::InlineLeave) return false;
+                 auto l = leaves.find(i.get());
+                 return l != leaves.end() && !l->second.empty() &&
+                        std::none_of(l->second.begin(), l->second.end(),
+                                     [&](const Instruction *e) { return seen.count(e); });
+               }) > 0;
+  }
   return changed;
 }
 
@@ -374,12 +408,12 @@ bool unshareVariables(Function &f) {
 
 bool inlineFunctions(Module &m, Function &f) {
   if (isGenerator(f)) return false;
-  bool dropped = dropUnreadArguments(f);
+  bool trimmed = trimInlinedBodies(f);
   std::vector<std::pair<Instruction *, Inlined>> found;
   for (auto &b : f.blocks)
     for (auto &i : b->insts)
       if (auto in = functionOf(m, f, *i)) found.push_back({i.get(), std::move(*in)});
-  return inlineFound(f, found, false) || dropped;
+  return inlineFound(f, found, false) || trimmed;
 }
 
 } // namespace xb::xir

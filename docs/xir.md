@@ -123,13 +123,16 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   reading and writing through what they hold), and so do the callee's variables marked so already (the parameters of
   a body inlined in it before). A callee that reads the arguments it received (`readsArgs`: `PCount()`) gets them as
   `inline.enter`'s operands, the inlined frame's arguments, until no call of an `ARGS` function in its body is left
-  (`Callee::readsCallerArgs`; a branch folded away may take the last one): then they are no longer passed. A body is
-  inlined only at a call without `...` in a block
-  that unwinds to the function's exit, and only when the callee reads no parameters in its frame slots
-  (`readsParams`: `PValue()`; the inlined frame has none), creates no `PRIVATE` (nor calls a function that creates
-  its caller's: it would be the function's, released later), and has no unwind block, no `...` and no `YIELD`;
-  nothing is inlined into a generator, nor into a function that has grown past 3000 instructions. The body is copied
-  with `copyBlocks`, its constants made anew in the function.
+  (`Callee::readsCallerArgs`; a branch folded away may take the last one): then they are no longer passed. A body in
+  which nothing can see the call stack any more (no call, nothing that can fail or run code, no loop, whose back edge
+  polls and may run destructors, no body inlined in it: what folding leaves of `Mul( 2, 3 )`) needs no frame: its
+  `inline.enter` and `inline.leave` go (`trimInlinedBodies`, at the start of `inline-functions`; a leave several
+  bodies reach keeps them all). A body is inlined only at a call without `...` in a block that unwinds to the
+  function's exit, and only when the callee reads no parameters in its frame slots (`readsParams`: `PValue()`; the
+  inlined frame has none), creates no `PRIVATE` (nor calls a function that creates its caller's: it would be the
+  function's, released later), and has no unwind block, no `...` and no `YIELD`; nothing is inlined into a generator,
+  nor into a function that has grown past 3000 instructions. The body is copied with `copyBlocks`, its constants made
+  anew in the function.
   - `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
     (`Module::library`, below), not a method, an `INIT` or `EXIT` procedure, a generator, nor one that calls itself, of
     at most 30 instructions, or 200 when the call passes a codeblock literal (which the body may then run in place
@@ -166,7 +169,11 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   parameters that only feed each other through a loop are removed (their arguments first, then them). The variables
   leave the frame.
 - `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `from_bool` and `truth` of
-  constants (`truth` of a logical just made is its boolean), `=`, `==` and `!=` of two string constants when SET
+  constants (`truth` of a logical just made is its boolean), `+`, `-`, `*`, the bit operators, unary `-` and `~`, and
+  the comparisons of two number constants, as the run-time operators compute them from two values (`foldNumbers`,
+  `foldNumber` and `compareNumbers` of `opt/Fold`, with `runtime`: an integer result is a computed one, of width 0; a
+  double's decimals are the operator's; `/`, `%`, `^` and an integer product that overflows, whose decimals are SET
+  DECIMALS at run time, stay), `=`, `==` and `!=` of two string constants when SET
   EXACT cannot change the result (`stringEquality` in `opt/Fold`, which the syntax tree's folding uses too),
   `ValType()` of a value whose types all have one letter (`XB_TYPE_LETTERS`; not a string, which may be a memo field's
   value: an array, codeblock or hash literal, a number, a logical), and `cond_br` on a constant becomes `br`. A folded

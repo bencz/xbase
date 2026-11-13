@@ -17,6 +17,18 @@ constexpr uint16_t kDefaultDecimals = 255;
 // only how a longer string compares with a shorter one).
 std::optional<bool> stringEquality(BinOp op, const std::string &x, const std::string &y);
 
+// `a op b` for two numbers and an arithmetic or bit operator, as a number literal, or null when it is left to run
+// time (a division by zero, and so on). Without `runtime`, as literals fold (an exact division of two integers is an
+// integer, a quotient's decimals are SET DECIMALS at run time: kDefaultDecimals); with it, as the run-time operator
+// makes it from two values (an integer is a computed one, of width 0; /, %, ^ and an integer product that overflows,
+// whose decimals are SET DECIMALS, and a product with more decimals than a literal holds, give null).
+ExprPtr foldNumbers(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberExpr &b, bool runtime);
+// `op n` for a number and `-` or `~`, as a number literal (with `runtime`, as the run-time operator makes it: an
+// integer is a computed one), or null for another operator.
+ExprPtr foldNumber(SourceLoc loc, UnOp op, const NumberExpr &n, bool runtime);
+// `a op b` for two numbers and a comparison operator (as xb_compare orders them), or nothing for another operator.
+std::optional<bool> compareNumbers(BinOp op, const NumberExpr &a, const NumberExpr &b);
+
 // Compile-time evaluation of expressions on literals (constant folding). It
 // runs after call resolution and before Sema; calls are evaluated only for
 // functions declared FOLD (see sema/Calls.h).

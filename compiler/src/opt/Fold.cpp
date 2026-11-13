@@ -50,9 +50,11 @@ const LogicalExpr *logical(const ExprPtr &e) {
   return e->kind == ExprKind::Logical ? static_cast<const LogicalExpr *>(e.get()) : nullptr;
 }
 
-ExprPtr foldArithmetic(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberExpr &b) {
+} // namespace
+
+ExprPtr foldNumbers(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberExpr &b, bool runtime) {
   bool ints = a.isInt && b.isInt;
-  bool computed = isComputedInt(a) || isComputedInt(b);
+  bool computed = runtime || isComputedInt(a) || isComputedInt(b);
   int64_t r;
   switch (op) {
   case BinOp::Add:
@@ -69,20 +71,24 @@ ExprPtr foldArithmetic(SourceLoc loc, BinOp op, const NumberExpr &a, const Numbe
   case BinOp::Mul:
     if (ints) {
       if (!llvm::MulOverflow(a.ival, b.ival, r)) return makeInt(loc, r, computed);
+      if (runtime) return nullptr; // the run-time operator's double has SET DECIMALS decimals
       return makeDouble(loc, (double)a.ival * (double)b.ival, 0);
     }
+    if (runtime && a.dec + b.dec >= kDefaultDecimals) return nullptr; // decimals no literal holds
     return makeDouble(loc, asDouble(a) * asDouble(b), (uint16_t)std::min<int>(a.dec + b.dec, kDefaultDecimals));
   case BinOp::Div:
-    if (asDouble(b) == 0.0) return nullptr; // left for the run-time error
+    // A division by zero is left for the run-time error; at run time, a quotient has SET DECIMALS decimals.
+    if (runtime || asDouble(b) == 0.0) return nullptr;
     if (ints && !(a.ival == std::numeric_limits<int64_t>::min() && b.ival == -1) && a.ival % b.ival == 0)
       return makeInt(loc, a.ival / b.ival, computed);
     return makeDouble(loc, asDouble(a) / asDouble(b), kDefaultDecimals);
   case BinOp::Mod:
-    if (asDouble(b) == 0.0) return nullptr;
+    if (runtime || asDouble(b) == 0.0) return nullptr; // at run time a double with SET DECIMALS decimals
     // x % -1 is 0 (and INT64_MIN % -1 is UB).
     if (ints) return makeInt(loc, b.ival == -1 ? 0 : a.ival % b.ival, computed);
     return makeDouble(loc, std::fmod(asDouble(a), asDouble(b)), kDefaultDecimals);
   case BinOp::Pow:
+    if (runtime) return nullptr; // SET DECIMALS decimals
     return makeDouble(loc, std::pow(asDouble(a), asDouble(b)), kDefaultDecimals);
   default:
     if (const xb_bit_function *f = bitOperator(op)) // an integer without a display width, as the runtime makes it
@@ -90,6 +96,8 @@ ExprPtr foldArithmetic(SourceLoc loc, BinOp op, const NumberExpr &a, const Numbe
     return nullptr;
   }
 }
+
+namespace {
 
 // Result of a comparison operator given the operands' order c (xb_order_is).
 bool comparisonResult(BinOp op, int c, bool &result) {
@@ -110,6 +118,20 @@ int order(const NumberExpr &a, const NumberExpr &b) {
 }
 
 } // namespace
+
+ExprPtr foldNumber(SourceLoc loc, UnOp op, const NumberExpr &n, bool runtime) {
+  if (op == UnOp::BitNot) return makeInt(loc, xb_bit_apply(XB_BIT_NOT, asInteger(n), 0), true);
+  if (op != UnOp::Neg) return nullptr;
+  if (!n.isInt) return makeDouble(loc, -n.dval, n.dec);
+  if (n.ival == std::numeric_limits<int64_t>::min()) return makeDouble(loc, -(double)n.ival, 0);
+  return makeInt(loc, -n.ival, runtime || isComputedInt(n));
+}
+
+std::optional<bool> compareNumbers(BinOp op, const NumberExpr &a, const NumberExpr &b) {
+  bool result;
+  if (comparisonResult(op, order(a, b), result)) return result;
+  return std::nullopt;
+}
 
 void Folder::run(Module &m) {
   for (LocalDecl &d : m.fileStatics)
@@ -303,19 +325,15 @@ ExprPtr Folder::foldUnary(UnaryExpr &u) {
   const NumberExpr *n = num(u.operand);
   if (!n) return nullptr;
   if (u.op == UnOp::Plus) return std::move(u.operand);
-  if (u.op == UnOp::BitNot) return makeInt(loc, xb_bit_apply(XB_BIT_NOT, asInteger(*n), 0), true);
-  if (!n->isInt) return makeDouble(loc, -n->dval, n->dec);
-  if (n->ival == std::numeric_limits<int64_t>::min()) return makeDouble(loc, -(double)n->ival, 0);
-  return makeInt(loc, -n->ival, isComputedInt(*n));
+  return foldNumber(loc, u.op, *n, false);
 }
 
 ExprPtr Folder::foldBinary(BinaryExpr &b) {
   SourceLoc loc = b.loc;
   const NumberExpr *na = num(b.lhs), *nb = num(b.rhs);
   if (na && nb) {
-    if (ExprPtr r = foldArithmetic(loc, b.op, *na, *nb)) return r;
-    bool result;
-    if (comparisonResult(b.op, order(*na, *nb), result)) return makeLogical(loc, result);
+    if (ExprPtr r = foldNumbers(loc, b.op, *na, *nb, false)) return r;
+    if (std::optional<bool> r = compareNumbers(b.op, *na, *nb)) return makeLogical(loc, *r);
     return nullptr;
   }
   const LogicalExpr *la = logical(b.lhs), *lb = logical(b.rhs);

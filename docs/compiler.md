@@ -568,6 +568,8 @@ emits the object file.
   to `NIL` the slots of the body's values that are dead there and that no live value holds (`FramePlan::clearsAt`: the
   units of each body's values, argument lists and received arguments, found by a forward walk with one set per open
   body, `walkBodies`): as when a callee returns, an object only they held can be collected (and its destructor run).
+  A body left without a frame (nothing in it can see the call stack) has no `inline.leave` and clears nothing there:
+  its values are like the function's own.
 - After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
   `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
   load stays in a loop without calls instead of leaving it; the loads carry the metadata `xb.poll`, on a back edge, or
@@ -619,7 +621,10 @@ emits the object file.
 
 `opt/Fold.*` evaluates expressions on literals before semantic checks, so that checks on constants (`STATIC`
 initializers, `SWITCH` cases) see the folded values. Folding is part of the language semantics: the
-folded result's type and decimals follow Clipper's compile-time rules, which differ from the run-time operators.
+folded result's type and decimals follow Clipper's compile-time rules, which differ from the run-time operators. The
+same functions (`foldNumbers`, `foldNumber`, `compareNumbers`, `stringEquality`) also fold the xIR's constants, which
+are values the program computes at run time, with the run-time operators' rules instead (`runtime`:
+[xir.md](xir.md#passes)).
 
 | Expression on literals | Result |
 |---|---|
