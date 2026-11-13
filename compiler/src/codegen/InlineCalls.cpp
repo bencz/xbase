@@ -1,17 +1,22 @@
 // Calls to a few runtime functions done in place when their arguments allow
-// it, with the functions' own rules (rtl/lang.c, rtl/strings.c): Len() of a
-// string or an array, Asc() of a string, Chr() of a number and SubStr( c, n, 1 )
-// with n within c (both give the shared one-byte string, xb_str_bytes), and
-// Asc( SubStr( c, n, 1 ) ) right after each other (the byte itself, without a
-// string). Anything else calls the function, which raises the errors. Also
-// shareString, which ends the in-place growth of a string an `append` made.
+// it, with the functions' own rules (rtl/lang.c, rtl/strings.c, rtl/numbers.c):
+// Len() of a string or an array, Asc() of a string, Chr() of a number and
+// SubStr( c, n, 1 ) with n within c (both give the shared one-byte string,
+// xb_str_bytes), Asc( SubStr( c, n, 1 ) ) right after each other (the byte
+// itself, without a string), and the number functions Int, Abs, Max, Min,
+// Round, Sqrt, Exp, Log and Mod of numbers (Max and Min of dates too).
+// Anything else calls the function, which raises the errors. Also shareString,
+// which ends the in-place growth of a string an `append` made.
 #include "codegen/CodeGen.h"
 
-#include "xbrt.h" // type tags, xb_str_bytes
+#include "xbrt.h" // type tags, xb_str_bytes, XB_DBL_INTEGRAL
 
 #include <llvm/IR/Constants.h>
 
 #include <algorithm>
+#include <cfloat>
+#include <cstdint>
+#include <vector>
 
 using namespace llvm;
 
@@ -19,7 +24,10 @@ namespace xb {
 
 namespace {
 
-enum class Inline { None, Len, Asc, Chr, SubStr, PCount, PValue, Int, ValType };
+enum class Inline { None, Len, Asc, Chr, SubStr, PCount, PValue, Int, ValType, Abs, Max, Min, Round, Sqrt, Exp, Log, Mod };
+
+// The powers of ten Round() scales by, exact as doubles up to 10^22 (pow( 10, n ) gives the same).
+constexpr int kRoundPlaces = 22;
 
 Inline inlineKind(const xir::Instruction &i) {
   if (i.op != xir::Op::Call || i.callee.function || !i.callee.native || i.hasRest()) return Inline::None;
@@ -30,7 +38,10 @@ Inline inlineKind(const xir::Instruction &i) {
   } table[] = {
       {"LEN", 1, Inline::Len},       {"ASC", 1, Inline::Asc},          {"CHR", 1, Inline::Chr},
       {"SUBSTR", 3, Inline::SubStr}, {"PCOUNT", 0, Inline::PCount}, {"PVALUE", 1, Inline::PValue},
-      {"INT", 1, Inline::Int},       {"VALTYPE", 1, Inline::ValType},
+      {"INT", 1, Inline::Int},       {"VALTYPE", 1, Inline::ValType}, {"ABS", 1, Inline::Abs},
+      {"MAX", 2, Inline::Max},       {"MIN", 2, Inline::Min},          {"ROUND", 2, Inline::Round},
+      {"SQRT", 1, Inline::Sqrt},     {"EXP", 1, Inline::Exp},          {"LOG", 1, Inline::Log},
+      {"MOD", 2, Inline::Mod},
   };
   for (const auto &e : table)
     if (i.callee.name == e.name && i.operands().size() == e.argc) return e.kind;
@@ -402,6 +413,148 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     branchLikely(inRange, fits, slow); // NaN and the rest: the runtime keeps them doubles
     b_.SetInsertPoint(fits);
     storeWords(d, b_.CreateOr(headerWord(XB_T_INT, 0, 0), width), b_.CreateFPToSI(tr, i64_));
+    break;
+  }
+  case Inline::Abs: { // an integer not below 0 as it is; a negative one negated (computed width), not INT64_MIN; a
+    // double's magnitude with its decimals (xbf_ABS)
+    BasicBlock *isInt = newBlock("abs.int"), *neg = newBlock("abs.neg"), *keep = newBlock("abs.keep");
+    BasicBlock *other = newBlock("abs.other"), *dbl = newBlock("abs.double");
+    Value *t = argType(0);
+    branchLikely(isType(t, XB_T_INT), isInt, other);
+    b_.SetInsertPoint(isInt);
+    Value *v = intValue(arg(0));
+    b_.CreateCondBr(b_.CreateICmpSLT(v, ConstantInt::get(i64_, 0)), neg, keep);
+    b_.SetInsertPoint(keep);
+    copyItem(d, arg(0));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(neg);
+    BasicBlock *negate = newBlock("abs.negate");
+    branchLikely(b_.CreateICmpNE(v, ConstantInt::getSigned(i64_, INT64_MIN)), negate, slow);
+    b_.SetInsertPoint(negate);
+    storeInt(d, b_.CreateNeg(v));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(other);
+    branchLikely(isType(t, XB_T_DOUBLE), dbl, slow);
+    b_.SetInsertPoint(dbl);
+    Value *x = b_.CreateBitCast(intValue(arg(0)), b_.getDoubleTy());
+    storeDouble(d, b_.CreateUnaryIntrinsic(Intrinsic::fabs, x), numberDec(arg(0), ConstantInt::get(i32_, XB_T_DOUBLE)));
+    break;
+  }
+  case Inline::Max:
+  case Inline::Min: { // two numbers compared as doubles, or two dates: the first when it wins or ties, as is
+    BasicBlock *nums = newBlock("minmax.num"), *other = newBlock("minmax.other"), *dates = newBlock("minmax.date");
+    BasicBlock *pick = newBlock("minmax.pick");
+    Value *ta = argType(0), *tb = argType(1);
+    branchLikely(b_.CreateAnd(isNumberType(ta), isNumberType(tb)), nums, other);
+    b_.SetInsertPoint(nums);
+    Value *x = numberAsDouble(arg(0), ta), *y = numberAsDouble(arg(1), tb);
+    Value *firstNum = kind == Inline::Max ? b_.CreateFCmpOGE(x, y) : b_.CreateFCmpOLE(x, y);
+    b_.CreateBr(pick);
+    b_.SetInsertPoint(other);
+    branchLikely(b_.CreateAnd(isType(ta, XB_T_DATE), isType(tb, XB_T_DATE)), dates, slow);
+    b_.SetInsertPoint(dates);
+    Value *da = intValue(arg(0)), *db = intValue(arg(1));
+    Value *firstDate = kind == Inline::Max ? b_.CreateICmpSGE(da, db) : b_.CreateICmpSLE(da, db);
+    b_.CreateBr(pick);
+    b_.SetInsertPoint(pick);
+    PHINode *first = b_.CreatePHI(b_.getInt1Ty(), 2, "first");
+    first->addIncoming(firstNum, nums);
+    first->addIncoming(firstDate, dates);
+    BasicBlock *takeFirst = newBlock("minmax.first"), *takeSecond = newBlock("minmax.second");
+    b_.CreateCondBr(first, takeFirst, takeSecond); // a copy each (a select of addresses keeps items in memory)
+    b_.SetInsertPoint(takeFirst);
+    copyItem(d, arg(0));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(takeSecond);
+    copyItem(d, arg(1));
+    break;
+  }
+  case Inline::Round: { // Round( n, d ), d an integer within 22 places: xbf_ROUND's formula; any other: the runtime
+    BasicBlock *check = newBlock("round.check"), *fast = newBlock("round");
+    Value *t = argType(0);
+    branchLikely(b_.CreateAnd(isNumberType(t), isType(argType(1), XB_T_INT)), check, slow);
+    b_.SetInsertPoint(check);
+    Value *places = intValue(arg(1));
+    Value *within = b_.CreateICmpULE(b_.CreateAdd(places, ConstantInt::get(i64_, kRoundPlaces)),
+                                     ConstantInt::get(i64_, 2 * kRoundPlaces));
+    branchLikely(within, fast, slow);
+    b_.SetInsertPoint(fast);
+    Type *f64 = b_.getDoubleTy();
+    auto fp = [&](double c) { return ConstantFP::get(f64, c); };
+    std::vector<Constant *> powers;
+    double ten = 1.0;
+    for (int k = 0; k <= kRoundPlaces; ++k, ten *= 10.0) powers.push_back(ConstantFP::get(f64, ten));
+    auto *tableTy = ArrayType::get(f64, powers.size());
+    GlobalVariable *table = mod_.getNamedGlobal("xb.round.powers");
+    if (!table)
+      table = new GlobalVariable(mod_, tableTy, true, GlobalValue::PrivateLinkage, ConstantArray::get(tableTy, powers),
+                                 "xb.round.powers");
+    Value *up = b_.CreateICmpSGE(places, ConstantInt::get(i64_, 0));
+    Value *k = b_.CreateSelect(up, places, b_.CreateNeg(places));
+    Value *p = b_.CreateLoad(f64, b_.CreateInBoundsGEP(tableTy, table, {ConstantInt::get(i64_, 0), k}));
+    Value *v = numberAsDouble(arg(0), t);
+    Value *scaled = b_.CreateSelect(up, b_.CreateFMul(v, p), b_.CreateFDiv(v, p));
+    Value *tenfold = b_.CreateFMul(scaled, fp(10.0));
+    tenfold = b_.CreateFAdd(tenfold, b_.CreateSelect(b_.CreateFCmpOLT(tenfold, fp(0.0)), fp(-5.0), fp(5.0)));
+    Value *back = b_.CreateFDiv(tenfold, fp(10.0));
+    Value *r = b_.CreateUnaryIntrinsic(Intrinsic::trunc,
+                                       b_.CreateIntrinsic(Intrinsic::fma, {f64}, {back, fp(DBL_EPSILON), back}));
+    r = b_.CreateSelect(up, b_.CreateFDiv(r, p), b_.CreateFMul(r, p));
+    // 0 for 0; a number whose scaled value reaches 2^52 as it is (its own nearest rounding)
+    Value *coarse = b_.CreateAnd(up, b_.CreateFCmpOGE(b_.CreateFMul(b_.CreateUnaryIntrinsic(Intrinsic::fabs, v), p),
+                                                      fp(XB_DBL_INTEGRAL)));
+    r = b_.CreateSelect(coarse, v, r);
+    r = b_.CreateSelect(b_.CreateFCmpOEQ(v, fp(0.0)), fp(0.0), r);
+    // an integer for no decimals when it fits 64 bits, else a double with d decimals (0 for fewer)
+    BasicBlock *asInt = newBlock("round.int"), *asDouble = newBlock("round.double");
+    Value *fits = b_.CreateAnd(b_.CreateFCmpOGE(r, fp(-9223372036854775808.0)),
+                               b_.CreateFCmpOLT(r, fp(9223372036854775808.0)));
+    b_.CreateCondBr(b_.CreateAnd(b_.CreateNot(b_.CreateICmpSGT(places, ConstantInt::get(i64_, 0))), fits), asInt,
+                    asDouble);
+    b_.SetInsertPoint(asInt);
+    storeInt(d, b_.CreateFPToSI(r, i64_));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(asDouble);
+    storeDouble(d, r, b_.CreateTrunc(b_.CreateSelect(up, places, ConstantInt::get(i64_, 0)), i16_));
+    break;
+  }
+  case Inline::Sqrt:
+  case Inline::Exp:
+  case Inline::Log: { // of a number, with SET DECIMALS decimals; outside the reals as Clipper (math_sqrt, ...)
+    BasicBlock *fast = newBlock("math");
+    Value *t = argType(0);
+    branchLikely(isNumberType(t), fast, slow);
+    b_.SetInsertPoint(fast);
+    Type *f64 = b_.getDoubleTy();
+    Value *v = numberAsDouble(arg(0), t);
+    Value *negative = b_.CreateFCmpOLT(v, ConstantFP::get(f64, 0.0));
+    Value *r;
+    if (kind == Inline::Sqrt) { // a negative number: 0
+      r = b_.CreateSelect(negative, ConstantFP::get(f64, 0.0), b_.CreateUnaryIntrinsic(Intrinsic::sqrt, v));
+    } else if (kind == Inline::Exp) { // an overflow: 0
+      Value *e = b_.CreateUnaryIntrinsic(Intrinsic::exp, v);
+      r = b_.CreateSelect(b_.CreateFCmpOEQ(e, ConstantFP::getInfinity(f64)), ConstantFP::get(f64, 0.0), e);
+    } else { // a negative number: minus infinity, as Log( 0 )
+      r = b_.CreateSelect(negative, ConstantFP::getInfinity(f64, true), b_.CreateUnaryIntrinsic(Intrinsic::log, v));
+    }
+    storeDouble(d, r, setDecimals());
+    break;
+  }
+  case Inline::Mod: { // dBase's modulus of two numbers, a base other than 0: fmod, moved to the base's sign
+    BasicBlock *check = newBlock("mod.check"), *fast = newBlock("mod");
+    Value *ta = argType(0), *tb = argType(1);
+    branchLikely(b_.CreateAnd(isNumberType(ta), isNumberType(tb)), check, slow);
+    b_.SetInsertPoint(check);
+    Type *f64 = b_.getDoubleTy();
+    Value *n = numberAsDouble(arg(0), ta), *base = numberAsDouble(arg(1), tb);
+    branchLikely(b_.CreateFCmpUNE(base, ConstantFP::get(f64, 0.0)), fast, slow);
+    b_.SetInsertPoint(fast);
+    Value *r = doubleRemainder(n, base);
+    Value *zero = ConstantFP::get(f64, 0.0);
+    Value *otherSign = b_.CreateSelect(b_.CreateFCmpOGT(n, zero), b_.CreateFCmpOLT(base, zero),
+                                       b_.CreateFCmpOGT(base, zero));
+    Value *move = b_.CreateAnd(b_.CreateFCmpUNE(r, zero), otherSign);
+    storeDouble(d, b_.CreateSelect(move, b_.CreateFAdd(r, base), r), setDecimals());
     break;
   }
   case Inline::None: break;

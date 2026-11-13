@@ -482,7 +482,13 @@ emits the object file.
   `xb_str_bytes`), and an `Asc()` whose argument is the `SubStr()` right before it, used nowhere else, reads the byte
   itself; `Int()` of an integer is it, of a double its truncation when that fits 64 bits (`xb_dbl_fits_i64`), with the
   double's width, its own or else the default one (`xb_num_dbl_width`'s rule, from the constants `XB_NUM_FITS_MAX`,
-  `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`, `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too) calls the runtime; outside an
+  `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`, `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too) calls the runtime; `Abs()` of
+  an integer not below 0 is it, of a negative one (not INT64_MIN) its negation, of a double its magnitude with its
+  decimals; `Max()` and `Min()` of two numbers (compared as doubles) or two dates copy the first when it wins or ties,
+  else the second; `Round( n, d )` with an integer `d` within 22 places is `xbf_ROUND`'s formula (a table of the exact
+  powers of ten, `fma`, `XB_DBL_INTEGRAL`); `Sqrt()`, `Exp()` and `Log()` of a number are the C library's (`llvm.sqrt`,
+  `llvm.exp`, `llvm.log`) with Clipper's results outside the reals and SET DECIMALS decimals; `Mod()` of two numbers and
+  a base other than 0 is `doubleRemainder` moved to the base's sign; outside an
   inlined body, `PCount()` is the function's own `argc` (less `Self` in a method), and `PValue( n )` with an integer `n`
   copies the parameter's slot or the argument as passed (`NIL` outside 1 .. `argc`); `ValType()` of a value is the
   shared one-byte string of its tag's letter (`XB_TYPE_LETTERS`, the runtime's table too; a memo field's value,

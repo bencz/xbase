@@ -896,6 +896,10 @@ static inline const xb_bit_function *xb_bit_function_of(xb_bit_op op) {
   return &table[op];
 }
 
+/* 2^52: every double of this magnitude or more is an integer (the step between doubles is 1 or more there); Round()
+ * gives such a scaled value back as it is, in the runtime and in the compiler's inline code. */
+#define XB_DBL_INTEGRAL 4503599627370496.0
+
 /* Display width of an integer constant in the program (a literal or a folded
  * expression): 10 columns plus one per digit beyond nine, 20 for values of
  * -1000000000 or less. Computed integers use xb_num_int_width instead. */

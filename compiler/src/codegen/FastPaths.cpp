@@ -446,6 +446,11 @@ Value *CodeGen::doubleRemainder(Value *x, Value *y) {
   return phi;
 }
 
+// SET DECIMALS as an item's decimals (16 bits), read from the context's head.
+Value *CodeGen::setDecimals() {
+  return b_.CreateTrunc(loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxDecimals), Mem::Ctx), i16_);
+}
+
 void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *d) {
   BasicBlock *dblBB = newBlock("double"), *other = newBlock("other"), *numBB = newBlock("num");
   BasicBlock *slow = newBlock("op"), *join = newBlock("join");
@@ -457,7 +462,7 @@ void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *
   // The quotient or remainder `r` of a non-zero divisor `fy`, with SET DECIMALS decimals.
   auto finish = [&](Value *r, Value *fy) {
     BasicBlock *done = newBlock("num.done");
-    Value *dec = b_.CreateTrunc(loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxDecimals), Mem::Ctx), i16_);
+    Value *dec = setDecimals();
     branchLikely(b_.CreateFCmpUNE(fy, ConstantFP::get(b_.getDoubleTy(), 0.0)), done, slow);
     b_.SetInsertPoint(done);
     storeDouble(d, r, dec);
