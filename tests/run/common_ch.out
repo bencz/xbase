@@ -1,0 +1,15 @@
+
+.T. .F. .T. .F.
+U .T. .F. .F. .F. .F. .F. .F. .F. .F.
+A .F. .T. .F. .F. .F. .F. .F. .F. .F.
+B .F. .F. .T. .F. .F. .F. .F. .F. .F.
+C .F. .F. .F. .T. .F. .F. .F. .F. .F.
+D .F. .F. .F. .F. .T. .F. .F. .F. .F.
+L .F. .F. .F. .F. .F. .T. .F. .F. .F.
+M .F. .F. .F. .F. .F. .F. .T. .F. .F.
+N .F. .F. .F. .F. .F. .F. .F. .T. .F.
+N .F. .F. .F. .F. .F. .F. .F. .T. .F.
+O .F. .F. .F. .F. .F. .F. .F. .F. .T.
+H .F. .F. .F. .F. .F. .F. .F. .F. .F.
+default:         10          2         30 kept evaluated:          2
+update:         10 updated

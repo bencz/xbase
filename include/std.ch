@@ -200,6 +200,10 @@
 #command ?  [<explist,...>]            => QOut( <explist> )
 #command ?? [<explist,...>]            => QQOut( <explist> )
 
+/* TEXT ... ENDTEXT: each line between them, as written, through QOut(), then QQOut(); `text` is the preprocessor's
+   form that takes the lines (see preprocessor.md). */
+#command TEXT                          => text QOut, QQOut
+
 /* Settings (see set.ch); the runtime's Set() holds the values. */
 
 #command SET DECIMALS TO <x>           => Set( _SET_DECIMALS, <x> )

@@ -16,10 +16,13 @@ namespace xb {
 // delimiter (it marks optional clauses) and '\' is an escape.
 class Lexer {
 public:
-  Lexer(uint32_t fileId, std::string src, Diagnostics &diag);
+  // `start`: where `src` starts in the file (a part of a line: what follows ENDTEXT's `;`), else line 1.
+  Lexer(uint32_t fileId, std::string src, Diagnostics &diag, SourceLoc start = {});
 
   // Returns false at end of file. `line` may be empty (blank line).
   bool nextLine(std::vector<Token> &line);
+  // The next physical line as written (without its end, CR LF or LF), where it starts in `loc`; false at end of file.
+  bool rawLine(std::string &text, SourceLoc &loc);
 
 private:
   char peek(size_t o = 0) const { return pos_ + o < src_.size() ? src_[pos_ + o] : '\0'; }

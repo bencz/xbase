@@ -1,0 +1,20 @@
+before
+line one
+   indented "double" 'single' [bracket] all: "'] together
+	tab first
+
+  // not a comment /* nor this */ ; semicolon && neither
+#define NOT_A_DIRECTIVE
+Hello World and World! and &nosuch and && and &
+not ENDTEXT here
+ENDTEXTS is no end eitherafter
+a<after a><and more>
+b
+ENDTEXT is a line of text
+         1<rest of the line first>
+c
+from the included file
+in a function
+[translated]
+inside a codeblock
+end

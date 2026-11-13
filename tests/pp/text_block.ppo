@@ -1,0 +1,7 @@
+QOut("plain")
+QOut([  "double" and 'single'])
+QOut("" + '"' + "'] all three")
+QQOut()
+OutStd("by hand")
+QQOut()
+OutErr("only lines")

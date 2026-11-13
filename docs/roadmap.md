@@ -64,11 +64,12 @@ Done: skipped arguments, `PARAMETERS`, and `DO &name [WITH args]`, the procedure
 
 ### Commands, statements and headers
 
-- `std.ch` has 73 of 157 command families ([coverage.md](coverage.md#commands-stdch)); most of the rest need the
+- `std.ch` has 74 of 157 command families ([coverage.md](coverage.md#commands-stdch)); most of the rest need the
   terminal layer below (screen, GET/READ, printing).
-- `TEXT ... ENDTEXT` is not a command yet and its lines are compiled as statements.
-- Standard headers still to provide: `common.ch`, `inkey.ch`, `box.ch`, `color.ch`, `getexit.ch`,
-  `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
+- `TEXT ... ENDTEXT` is done ([preprocessor.md](preprocessor.md#text-blocks)); `TEXT TO FILE` and `TEXT TO PRINTER`
+  come with the console's redirections ([terminal.md](terminal.md#order-of-the-work)).
+- Standard headers still to provide: `inkey.ch`, `box.ch`, `color.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`,
+  `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
 
 ### Runtime library
 

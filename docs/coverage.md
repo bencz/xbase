@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 216 of 551 done. Commands (`std.ch` families): 73 of 157 done.
+Functions: 216 of 551 done. Commands (`std.ch` families): 74 of 157 done.
 
 ## Statements (grammar)
 
@@ -37,10 +37,11 @@ INDEX**, *SET INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET M
 MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, **SET ORDER**, *SET PATH*, *SET PRINTER*, *SET
 PROCEDURE*, **SET RELATION**, *SET SAFETY*, **SET SCOPE**, **SET SCOPEBOTTOM**, **SET SCOPETOP**, *SET SCOREBOARD*,
 **SET SOFTSEEK**, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, **SET UNIQUE**,
-*SET VIDEOMODE*, *SET WRAP*, **SKIP**, **SORT**, **STORE**, **SUM**, *TEXT*, *TEXTBLOCK*, **TOTAL**, *TYPE*, **UNLOCK**,
-**UPDATE**, **USE**, *WAIT*, **ZAP**
+*SET VIDEOMODE*, *SET WRAP*, **SKIP**, **SORT**, **STORE**, **SUM**, **TEXT** (but `TO FILE`, `TO PRINTER`),
+*TEXTBLOCK*, **TOTAL**, *TYPE*, **UNLOCK**, **UPDATE**, **USE**, *WAIT*, **ZAP**
 
-Other standard headers, each to be provided with the matching runtime support: `common.ch`, `inkey.ch`, `set.ch`
+Other standard headers, each to be provided with the matching runtime support: `common.ch` (provided: the logical
+constants, the `IS...()` type tests through `ValType()`, `DEFAULT ... TO`, `UPDATE ... IF ... TO`), `inkey.ch`, `set.ch`
 (partial), `error.ch` (provided: the severities and generic codes), `fileio.ch`, `directry.ch` and `dbstruct.ch`
 (provided), `box.ch`, `color.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`,
 `simpleio.ch`, `blob.ch`.

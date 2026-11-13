@@ -146,6 +146,19 @@ the codeblock whole, as one operand inside its braces (`? Eval( {| a | ... }, 1 
 between the end of the opening line and the `}`; stringified, the codeblock gives them on one line, separated by `;`.
 Lines of a skipped `#if` part close nothing. A codeblock without its closing line is an error.
 
+### TEXT blocks
+
+A statement that comes out of the rewriting as `text <lineFunc> [, <endFunc>]` (Clipper's form, which `std.ch`'s
+`TEXT` gives) takes, once the other statements of its line are done, the physical lines after that line, as written,
+up to the one that ends them: `ENDTEXT` as a whole word, in any letter case, followed by nothing but blanks, a comment
+(`//`, `&&`, `/*`) or a `;` and statements, which are compiled (`ENDTEXT is here` is a line of text). Nothing in the
+lines is tokenized, so blanks, quotes, comments, `;` and `#` stay. Each becomes the statement
+`<lineFunc>( "line" )`, a string literal (so `&name` in it is substituted when the code runs,
+[compiler.md](compiler.md#grammar)), and `ENDTEXT` the statement `<endFunc>()`; these are rewritten like any statement,
+so a `#translate` of `QOut` applies to them (`Lexer::rawLine`, `Preprocessor::textBlock`). A file that ends first is an
+error. Inside an extended codeblock it works the same; inside a skipped `#if` part the lines are read as source lines
+(an apostrophe there starts a string), as the reference does.
+
 ### Rescanning
 
 Each statement is processed in this order: expand defines, apply translates from left to right, apply a command; then
@@ -172,6 +185,7 @@ lists only commands whose runtime support exists and grows with the runtime:
 | `STORE <v> TO <v1> [, <vN>]` | `<v1> := [ <vN> := ] <v>` |
 | `REQUEST <vars,...>` | `EXTERNAL <vars>` |
 | `? [<list,...>]`, `?? [<list,...>]` | `QOut( <list> )`, `QQOut( <list> )` |
+| `TEXT` ... `ENDTEXT` | `QOut( "line" )` for each line as written, then `QQOut()` ([TEXT blocks](#text-blocks)) |
 | `SET DECIMALS TO [<x>]` | `Set( _SET_DECIMALS, <x> )` (0 without a value) |
 | `SET EXACT ON \| OFF \| &var`, `SET EXACT (<x>)` | `Set( _SET_EXACT, ... )` |
 | `SET DATE [TO] AMERICAN \| ANSI \| BRITISH \| FRENCH \| GERMAN \| ITALIAN \| JAPANESE \| USA` | `Set( _SET_DATEFORMAT, ... )`, the picture with `yyyy` or `yy` as `SET CENTURY` says (`_DFSET`) |

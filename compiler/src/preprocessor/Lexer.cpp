@@ -81,9 +81,14 @@ const char *tokName(Tok t) {
   return "?";
 }
 
-Lexer::Lexer(uint32_t fileId, std::string src, Diagnostics &diag)
+Lexer::Lexer(uint32_t fileId, std::string src, Diagnostics &diag, SourceLoc start)
     : file_(fileId), src_(std::move(src)), diag_(diag) {
-  if (src_.compare(0, 3, "\xEF\xBB\xBF") == 0) pos_ = 3; // UTF-8 byte order mark
+  if (start.line) {
+    line_ = start.line;
+    col_ = start.col;
+  } else if (src_.compare(0, 3, "\xEF\xBB\xBF") == 0) {
+    pos_ = 3; // UTF-8 byte order mark
+  }
 }
 
 char Lexer::get() {
@@ -288,6 +293,17 @@ bool Lexer::lexOperator() {
     }
   }
   return false;
+}
+
+bool Lexer::rawLine(std::string &text, SourceLoc &loc) {
+  if (pos_ >= src_.size()) return false;
+  loc = here();
+  size_t start = pos_;
+  skipToEol();
+  text.assign(src_, start, pos_ - start);
+  if (!text.empty() && text.back() == '\r') text.pop_back();
+  if (pos_ < src_.size()) get(); // the newline
+  return true;
 }
 
 bool Lexer::nextLine(std::vector<Token> &line) {

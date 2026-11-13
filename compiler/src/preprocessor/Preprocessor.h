@@ -109,6 +109,8 @@ private:
   bool splitStatements(Toks &st, int depth, Rewrite &rw);
   void rewriteFailed(Rewrite &rw, SourceLoc loc, const char *msg);
   void emit(const Toks &st);
+  static bool isTextForm(const Toks &st);
+  void textBlock();
   bool expandDefines(Toks &st, int &budget);
   bool applyTranslates(Toks &st, int &budget);
   bool applyCommand(Toks &st, int &budget);
@@ -156,6 +158,8 @@ private:
   std::vector<Cond> conds_;
   Toks out_;
   std::vector<Toks> blockBodies_; // the statements of extended codeblocks (Tok::BlockBody), until emitted
+  Lexer *lexer_ = nullptr;        // the file being read (TEXT reads its lines as written)
+  Toks pendingText_;              // a `text` statement, whose lines are read once its line is done
 };
 
 } // namespace xb

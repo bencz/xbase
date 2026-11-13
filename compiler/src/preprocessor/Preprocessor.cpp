@@ -5,12 +5,16 @@
 #include "preprocessor/Internal.h"
 #include "preprocessor/Lexer.h"
 
+#include "common/Text.h"
+
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
+#include <utility>
 
 namespace xb {
 
@@ -54,6 +58,7 @@ bool Preprocessor::processFile(const std::string &path, SourceLoc from) {
 void Preprocessor::processText(const std::string &name, const std::string &text) {
   uint32_t id = diag_.addFile(name);
   Lexer lex(id, text, diag_);
+  Lexer *outer = std::exchange(lexer_, &lex);
   fileStack_.push_back(name);
   size_t condBase = conds_.size();
 
@@ -73,6 +78,7 @@ void Preprocessor::processText(const std::string &name, const std::string &text)
     conds_.pop_back();
   }
   fileStack_.pop_back();
+  lexer_ = outer;
 }
 
 std::vector<Token> Preprocessor::takeOutput() {
@@ -149,6 +155,7 @@ void Preprocessor::processLine(Toks &line) {
     else st.push_back(std::move(t));
   }
   flush();
+  if (!pendingText_.empty()) textBlock();
 }
 
 bool Preprocessor::splitStatements(Toks &st, int depth, Rewrite &rw) {
@@ -196,7 +203,74 @@ void Preprocessor::processStatement(Toks st, int depth, Rewrite &rw) {
     }
     if (!changed || st.empty()) break;
   }
-  emit(st);
+  if (isTextForm(st)) pendingText_ = std::move(st);
+  else emit(st);
+}
+
+// `text <lineFunc> [, <endFunc>]`: the result of std.ch's TEXT (Clipper's form).
+bool Preprocessor::isTextForm(const Toks &st) {
+  return (st.size() == 2 || (st.size() == 4 && st[2].kind == Tok::Comma && st[3].kind == Tok::Ident)) &&
+         st[0].kind == Tok::Ident && st[0].upper == "TEXT" && st[1].kind == Tok::Ident;
+}
+
+// The lines after the one with the `text` statement (whose other statements come first), as written, up to the one
+// that ends them: ENDTEXT as a whole word in any letter case, then nothing but blanks, a comment or a `;` and
+// statements, which are compiled. Each line becomes `<lineFunc>( "line" )`, a string literal (so `&name` in it is
+// substituted when the code runs), and the end `<endFunc>()`; these are rewritten like any statement.
+void Preprocessor::textBlock() {
+  Toks st = std::move(pendingText_);
+  pendingText_.clear();
+  auto call = [&](const Token &fn, const Token *arg, SourceLoc loc) {
+    Toks c{fn};
+    c[0].loc = loc;
+    Token t;
+    t.kind = Tok::LParen;
+    t.text = "(";
+    t.loc = loc;
+    c.push_back(t);
+    if (arg) c.push_back(*arg);
+    t.kind = Tok::RParen;
+    t.text = ")";
+    c.push_back(t);
+    Rewrite rw{kRewriteBudget};
+    processStatement(std::move(c), 0, rw);
+  };
+  auto blank = [](char c) { return c == ' ' || c == '\t' || c == '\f' || c == '\x1a'; };
+  auto nameChar = [](char c) { return std::isalnum((unsigned char)c) || c == '_'; };
+  std::string text;
+  SourceLoc loc;
+  while (lexer_ && lexer_->rawLine(text, loc)) {
+    size_t from = 0;
+    while (from < text.size() && blank(text[from])) ++from;
+    size_t to = from;
+    while (to < text.size() && nameChar(text[to])) ++to;
+    size_t rest = to;
+    while (rest < text.size() && blank(text[rest])) ++rest;
+    std::string_view after = std::string_view(text).substr(rest);
+    bool ends = upperCase(std::string_view(text).substr(from, to - from)) == "ENDTEXT" &&
+                (after.empty() || after[0] == ';' || after.substr(0, 2) == "//" || after.substr(0, 2) == "&&" ||
+                 after.substr(0, 2) == "/*");
+    if (!ends) {
+      Token line;
+      line.kind = Tok::String;
+      line.text = text;
+      line.loc = loc;
+      call(st[1], &line, loc);
+      continue;
+    }
+    if (st.size() == 4) call(st[3], nullptr, loc);
+    if (!after.empty() && after[0] == ';') { // the statements after it, on the rest of the line
+      SourceLoc at{loc.file, loc.line, loc.col + (uint32_t)rest + 1};
+      Lexer part(loc.file, std::string(after.substr(1)), diag_, at);
+      Toks line;
+      while (part.nextLine(line)) {
+        joinBlocks(*lexer_, line);
+        processLine(line);
+      }
+    }
+    return;
+  }
+  diag_.error(st[0].loc, "TEXT without ENDTEXT");
 }
 
 void Preprocessor::emit(const Toks &st) {
