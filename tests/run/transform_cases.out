@@ -1,0 +1,143 @@
+
+==============================================
+     TESTE COMPLETO - TRANSFORM()
+==============================================
+
+ 
+--- NUMEROS INTEIROS ---
+[ OK ]  Inteiro simples
+[ OK ]  Inteiro com espacos
+[ OK ]  Inteiro zero
+[ OK ]  Inteiro negativo
+[ OK ]  Mascara com asteriscos
+[ OK ]  Mascara com preenchimento
+ 
+--- NUMEROS DECIMAIS ---
+[ OK ]  Duas casas decimais
+[ OK ]  Uma casa decimal
+[ OK ]  Tres casas decimais
+[ OK ]  Valor decimal zero
+[ OK ]  Valor decimal negativo
+[ OK ]  Decimal com largura maior
+ 
+--- SEPARADORES DE MILHARES ---
+[ OK ]  Milhar
+[ OK ]  Milhoes
+[ OK ]  Milhar decimal
+[ OK ]  Milhar com zero
+ 
+--- SIMBOLOS MONETARIOS ---
+[ OK ]  Simbolo monetario
+[ OK ]  Simbolo monetario com milhar
+[ OK ]  Simbolo monetario com espacos
+ 
+--- SINAIS ---
+[ OK ]  Negativo
+[ OK ]  Positivo
+[ OK ]  Mascara com sinal
+[ OK ]  Mascara com sinal positivo
+ 
+--- STRINGS ---
+[ OK ]  String simples
+[ OK ]  String em minusculo
+[ OK ]  String em maiusculo
+[ OK ]  String sem alteracao
+[ OK ]  String com preenchimento
+[ OK ]  String com espacos
+[ OK ]  String vazia
+ 
+--- DATAS ---
+[ OK ]  Data padrao
+[ OK ]  Data com mascara
+[ OK ]  Data vazia
+ 
+--- VALORES LOGICOS ---
+[ OK ]  Logico verdadeiro
+[ OK ]  Logico falso
+ 
+--- MASCARAS ESPECIAIS ---
+[ OK ]  Maiusculas
+[ OK ]  Sem espacos a esquerda
+[ OK ]  String com tamanho
+[ OK ]  Mascara @R
+ 
+--- ARREDONDAMENTO ---
+[ OK ]  Arredonda para cima
+[ OK ]  Arredonda para baixo
+[ OK ]  Arredondamento inteiro
+[ OK ]  Arredondamento negativo
+ 
+--- LIMITES ---
+[ OK ]  Numero zero
+[ OK ]  Numero pequeno
+[ OK ]  Numero grande
+[ OK ]  Numero negativo grande
+[ OK ]  Numero com overflow
+ 
+--- TESTES DE REPETICAO ---
+[ OK ]  1000 execucoes sem alteracao
+ 
+--- MASCARAS MONETARIAS AVANCADAS ---
+[ OK ]  Moeda simples
+[ OK ]  Moeda com milhar
+[ OK ]  Moeda com milhoes
+[ OK ]  Moeda zero
+[ OK ]  Moeda negativa
+[ OK ]  Moeda negativa com milhar
+[ OK ]  Moeda com tres casas
+[ OK ]  Moeda com quatro casas
+ 
+--- FORMATACAO BRASILEIRA ---
+[ OK ]  Valor com duas casas
+[ OK ]  Valor com centavos zero
+[ OK ]  Valor com centavos pequenos
+[ OK ]  Valor com centavos grandes
+[ OK ]  Valor negativo brasileiro
+ 
+--- CIFRAO E PREENCHIMENTO ---
+[ OK ]  Cifrao com largura
+[ OK ]  Cifrao com asteriscos
+[ OK ]  Preenchimento com asteriscos
+[ OK ]  Mascara monetaria larga
+[ OK ]  Mascara monetaria com zero
+ 
+--- SINAIS FINANCEIROS ---
+[ OK ]  Negativo simples
+[ OK ]  Negativo com cifrao
+[ OK ]  Positivo com @C
+[ OK ]  Negativo com @X
+[ OK ]  Zero com @Z
+[ OK ]  Negativo com parenteses
+ 
+--- ARREDONDAMENTO FINANCEIRO ---
+[ OK ]  Arredondamento 1
+[ OK ]  Arredondamento 2
+[ OK ]  Arredondamento 3
+[ OK ]  Arredondamento negativo 1
+[ OK ]  Arredondamento negativo 2
+[ OK ]  Casas decimais extras
+[ OK ]  Duas casas com valor inteiro
+ 
+--- OVERFLOW MONETARIO ---
+[ OK ]  Valor maior que mascara
+[ OK ]  Milhoes
+[ OK ]  Valor negativo grande
+[ OK ]  Valor proximo do limite
+[ OK ]  Valor acima do limite
+ 
+--- PRECOS E PERCENTUAIS ---
+[ OK ]  Preco unitario
+[ OK ]  Preco de produto
+[ OK ]  Preco alto
+[ OK ]  Percentual
+[ OK ]  Percentual negativo
+[ OK ]  Taxa com quatro casas
+
+==============================================
+               RESULTADO FINAL
+==============================================
+Total de testes :         91
+Aprovados       :         91
+Reprovados      :          0
+==============================================
+TODOS OS TESTES PASSARAM!
