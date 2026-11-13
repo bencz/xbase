@@ -22,7 +22,8 @@ void xb_pages_free(xb_pages *c) {
   c->buckets = NULL;
 }
 
-/* Offsets are multiples of the page size: the multiplicative hash's top bits mix them all. */
+/* Keys (offsets that are multiples of a page size, or consecutive numbers): the multiplicative hash's top bits mix
+ * them all. */
 static uint32_t bucket(const xb_pages *c, uint32_t offset) { return (offset * 2654435761u) >> (32 - c->bucketBits); }
 
 uint16_t xb_pages_find(const xb_pages *c, uint32_t offset) {
@@ -61,9 +62,9 @@ void xb_pages_use(xb_pages *c, uint16_t s) {
   link_newest(c, s);
 }
 
-uint16_t xb_pages_spare(xb_pages *c) {
+uint16_t xb_pages_spare(xb_pages *c, int grow) {
   if (c->oldest && !c->slot[c->oldest].offset) return c->oldest;
-  if (c->count == c->max) return 0;
+  if (!grow || c->count == c->max) return 0;
   uint16_t s = (uint16_t)++c->count;
   link_oldest(c, s);
   return s;

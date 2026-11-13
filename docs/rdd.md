@@ -41,8 +41,8 @@ touching the rest (SQL engines later), each as a library when it needs one.
   `alias->( expr )`.
 - `dbf.c`: the `DBF` driver, with its memos in `dbt.c` ([Files](#files)).
 - `order.c`, `index.h`, `ntx.c`, `cdx.c`, `pages.c`, `ordcmd.c`: orders, the interface of their files' formats, NTX
-  and CDX files, the pages of index files kept in memory ([Performance](#performance)) and the functions
-  ([Orders](#orders)).
+  and CDX files, the pages of files kept in memory (index pages, and `dbf.c`'s records: [Performance](#performance))
+  and the functions ([Orders](#orders)).
 - `relation.c`: relations between areas and their functions ([Relations](#relations)).
 - `transfer.c`, `transfer.prg`, `text.c`: the copies between files and the text file drivers ([Copies between
   files](#copies-between-files)).
@@ -518,11 +518,13 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
 - Navigation reads no record: `GO`, `SKIP` and `SEEK` set the record number, and the driver reads the record when a
   field, its deletion flag or a key is first used (`load`). In order, a `SKIP` moves the order's cursor (the path from
   the root to the entry, kept from one call to the next while the order does not change) to the next entry.
-- Each index file keeps up to 512 pages in memory (`pages.c`, for both index drivers): slots made as pages come, found
-  by a hash of the page's offset (the page used last checked first), and kept in the order of their last use (a list,
-  updated in constant time), so a page read takes a free slot, else a new one, else the one used longest ago (NTX: that
-  no operation holds; CDX: the pages an operation works on are its latest); pages changed are written on `COMMIT`, at
-  closing, or when the cache needs their slot.
+- Each index file keeps pages in memory (`pages.c`, for both index drivers): NTX up to 4096 pages of 1 KB when the
+  file is exclusive, 512 when shared (other programs' changes drop them, and every change writes the changed ones
+  back); CDX 512 pages, and up to 2048 while their decoded nodes (2.5 KB each with its keys whole, which long keys make
+  larger) take less than 8 MB. Slots are made as pages come, found by a hash of the page's offset (the page used last
+  checked first), and kept in the order of their last use (a list, updated in constant time), so a page read takes a
+  free slot, else a new one, else the one used longest ago (NTX: that no operation holds; CDX: the pages an operation
+  works on are its latest); pages changed are written on `COMMIT`, at closing, or when the cache needs their slot.
 - A page is searched by halves over its offsets; a key compares with `memcmp`.
 - Counting (`ordKeyCount()`, `ordKeyNo()`) and `ordKeyGoto()` read the pages' entry counts, never one entry at a
   time: the pages where the bounds fall (`ordKeyNo()`: the current entry's path) are searched, the subtrees between
@@ -532,6 +534,13 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
 - Files are read and written at a position in one call (`pread`/`pwrite`, `ReadFile`/`WriteFile` with an offset;
   `xb_platform_file_read_at`), the last record with the end mark after it in one write. Records read in order come
   64 KB at a time (a shared table's under the file lock, or while a copy reads it: `snapshot`).
+- An exclusive table keeps records read out of order (an order's navigation, `GO`) in pages of whole records, about
+  4 KB each (one record when a record is longer), up to 1024 of them while they take less than 4 MB (`pages.c`, keyed
+  by the page's number): a record read is taken from its page when the page holds it, else its page is read (the
+  record alone when the page cannot be read whole: a file shorter than its header says). A page holds the records the
+  file had when it was read (a record appended after reads the page again); a record written changes its page's copy
+  too, and `PACK`, `ZAP` and a failed write of the records kept behind drop them. A shared table reads each record
+  from the file (other programs change it).
 - An exclusive table keeps the records written at its end behind (`behind`, up to 64 KB of them) and writes them in
   one call when the chunk is full, before the file is read where they are or past them, and on `COMMIT`, `PACK`,
   `ZAP` and closing; reading one of them takes it from there. Appending costs a write a chunk instead of one a record;
@@ -543,8 +552,9 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
   one sort, one pass of writes. Keeping orders up to date costs the keys' evaluation before and after a change, and
   the entries only of keys that changed.
 - `bench/index.prg` times a build over 200,000 records, 100,000 SEEKs, a SKIP through and 20,000 appends with the
-  order open. Measured once against the reference on one machine, the same program: the build and SEEK about as
-  fast, SKIP and appends with an order open faster. Copies (`COPY TO`, `APPEND FROM` of tables, SDF and DELIMITED
+  order open. Measured against the reference on one machine, the same program (Release build, the best of three):
+  220 ms against 380 (NTX; with CDX, 258 ms against 580): the build and SEEK faster, SKIP in order about three times
+  as fast, appends with an order open faster. Copies (`COPY TO`, `APPEND FROM` of tables, SDF and DELIMITED
   files, 200,000 records) took a third or less of the reference's time; `SORT` and `TOTAL` of 200,000 records and a
   `JOIN` of 1,000 by 1,000 records less than half (measured once, as above).
 

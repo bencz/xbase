@@ -14,6 +14,7 @@
 
 #include "rdd/index.h"
 #include "rdd/memo.h"
+#include "rdd/pages.h"
 
 #include "core/bytes.h"
 #include "core/file.h"
@@ -34,6 +35,9 @@
 #define DBF_MEMO_LEN 10          /* a memo's block number, in digits */
 #define DBF_MEMO_BINARY 4        /* the same as a 32-bit little-endian number (FPT tables) */
 #define DBF_AHEAD 65536          /* bytes of records read at once when records are read in order */
+#define DBF_PAGE 4096            /* bytes of records (whole ones, at least one) a page of the record cache holds */
+#define DBF_PAGES 1024           /* pages of records an exclusive table keeps at most, made as they come, */
+#define DBF_PAGES_BYTES (4u << 20) /* while they take less than this (pages of one wide record take more each) */
 #define DBF_FLAGS 28             /* the header's flags byte */
 #define DBF_HAS_PRODUCTION 0x01  /* the table has a production order file (FoxPro's) */
 
@@ -58,6 +62,14 @@ typedef struct dbf {
   unsigned char *behind;   /* exclusive: the last records, written at the end and not to the file yet (behindCount
                               of them from behindFirst), then written together (drain) */
   uint32_t behindFirst, behindCount;
+  /* Exclusive: records read out of order, by pages of perPage records (page k, from 0, holds records k * perPage + 1
+     on, keyed k + 1), page[s - 1] the bytes of slot s and how many of its records the file had when it was read. */
+  xb_pages pages;
+  struct dbf_page {
+    unsigned char *bytes;
+    uint32_t held;
+  } *page;
+  uint32_t perPage;
 } dbf;
 
 static dbf *state(xb_area *a) { return a->state; }
@@ -288,13 +300,67 @@ static int write_header(dbf *d, int32_t *err) {
   return 1;
 }
 
+/* The record cache's key of the page holding record `recno` (from 1), and where in that page the record is. */
+static uint32_t page_key(const dbf *d, uint32_t recno) { return (recno - 1) / d->perPage + 1; }
+static uint32_t page_index(const dbf *d, uint32_t recno) { return (recno - 1) % d->perPage; }
+
+/* Exclusive, the slot of the record cache whose page holds record `recno` as the table has it (0: none). */
+static uint16_t page_of(const dbf *d, uint32_t recno) {
+  if (!d->page) return 0;
+  uint16_t s = xb_pages_find(&d->pages, page_key(d, recno));
+  return s && page_index(d, recno) < d->page[s - 1].held ? s : 0;
+}
+
+/* Record `recno`'s bytes in slot s's page (page_of). */
+static unsigned char *page_record(const dbf *d, uint16_t s, uint32_t recno) {
+  return d->page[s - 1].bytes + (size_t)page_index(d, recno) * d->recordLen;
+}
+
+/* Reads record `recno` (out of order, exclusive, every record on the file) with its page into the record cache; when
+ * the page cannot be read whole (a file shorter than its header says), the record alone. */
+static int read_page(dbf *d, uint32_t recno, int32_t *err) {
+  if (!d->page) {
+    d->perPage = DBF_PAGE / d->recordLen ? DBF_PAGE / d->recordLen : 1;
+    xb_pages_init(&d->pages, DBF_PAGES);
+    if (!(d->page = calloc(DBF_PAGES, sizeof *d->page))) xb_gc_fatal("out of memory");
+  }
+  uint32_t key = page_key(d, recno), first = (key - 1) * d->perPage + 1;
+  uint32_t n = d->count - first + 1 < d->perPage ? d->count - first + 1 : d->perPage;
+  size_t bytes = (size_t)d->perPage * d->recordLen;
+  uint16_t s = xb_pages_find(&d->pages, key); /* one read before the records appended since */
+  if (!s) s = xb_pages_spare(&d->pages, (uint64_t)d->pages.count * bytes < DBF_PAGES_BYTES);
+  if (!s) s = xb_pages_oldest(&d->pages); /* pages are copies: any one goes */
+  struct dbf_page *p = &d->page[s - 1];
+  if (!p->bytes && !(p->bytes = malloc(bytes))) xb_gc_fatal("out of memory");
+  xb_pages_place(&d->pages, s, 0);
+  p->held = 0;
+  if (!xb_file_read_at(d->f, record_pos(d, first), p->bytes, (size_t)n * d->recordLen, err))
+    return xb_file_read_at(d->f, record_pos(d, recno), d->record, d->recordLen, err);
+  p->held = n;
+  xb_pages_place(&d->pages, s, key);
+  xb_pages_use(&d->pages, s);
+  memcpy(d->record, page_record(d, s, recno), d->recordLen);
+  return 1;
+}
+
+/* The record cache dropped (the records moved: PACK, ZAP). */
+static void drop_pages(dbf *d) {
+  if (!d->page) return;
+  for (uint32_t s = 1; s <= d->pages.count; ++s) {
+    xb_pages_place(&d->pages, (uint16_t)s, 0);
+    d->page[s - 1].held = 0;
+  }
+}
+
 /* Writes the records kept behind, the end mark after the last one. */
 static int drain(dbf *d, int32_t *err) {
   if (!d->behindCount) return 1;
   size_t n = (size_t)d->behindCount * d->recordLen;
   if (d->behindFirst + d->behindCount - 1 == d->count) d->behind[n++] = DBF_EOF;
   d->behindCount = 0;
-  return xb_platform_file_write_at(d->f, record_pos(d, d->behindFirst), d->behind, n, err);
+  if (xb_platform_file_write_at(d->f, record_pos(d, d->behindFirst), d->behind, n, err)) return 1;
+  drop_pages(d); /* the records' copies are what the file did not get */
+  return 0;
 }
 
 /* Writes the current record. Exclusive, a record at the end is kept behind with the ones before it, which go to the
@@ -327,6 +393,8 @@ static int dbf_flush(xb_area *a, int header, int32_t *err) {
     if (!write_record(d, err)) return 0;
     if (d->recno - d->aheadFirst < d->aheadCount) /* the copy read ahead too */
       memcpy(d->ahead + (size_t)(d->recno - d->aheadFirst) * d->recordLen, d->record, d->recordLen);
+    uint16_t s = page_of(d, d->recno); /* and the record cache's */
+    if (s) memcpy(page_record(d, s, d->recno), d->record, d->recordLen);
     d->dirty = 0;
   }
   if (header && !drain(d, err)) return 0;
@@ -348,6 +416,11 @@ static int dbf_close(xb_area *a, int32_t *err) {
   free(d->record);
   free(d->ahead);
   free(d->behind);
+  if (d->page) {
+    for (uint32_t s = 0; s < d->pages.count; ++s) free(d->page[s].bytes);
+    free(d->page);
+    xb_pages_free(&d->pages);
+  }
   free(d);
   free(a->fields);
   a->state = NULL;
@@ -374,7 +447,8 @@ static uint32_t dbf_lastrec(xb_area *a) {
 }
 
 /* Reads record `recno` into the record buffer: from the records read ahead, or with the ones after it when the
- * records are read in order, when `ahead` allows (a shared table: under the file lock only). */
+ * records are read in order, when `ahead` allows (a shared table: under the file lock only); exclusive, a record read
+ * out of order comes with its page into the record cache. */
 static int read_record(dbf *d, uint32_t recno, int ahead, int32_t *err) {
   if (d->behindCount && recno - d->behindFirst < d->behindCount) {
     memcpy(d->record, d->behind + (size_t)(recno - d->behindFirst) * d->recordLen, d->recordLen);
@@ -384,10 +458,19 @@ static int read_record(dbf *d, uint32_t recno, int ahead, int32_t *err) {
     memcpy(d->record, d->ahead + (size_t)(recno - d->aheadFirst) * d->recordLen, d->recordLen);
     return 1;
   }
+  if (!d->shared) {
+    uint16_t s = page_of(d, recno);
+    if (s) {
+      xb_pages_use(&d->pages, s);
+      memcpy(d->record, page_record(d, s, recno), d->recordLen);
+      return 1;
+    }
+  }
   if (!drain(d, err)) return 0; /* the file has every record before it is read */
   uint32_t n = DBF_AHEAD / d->recordLen;
-  if (recno != d->lastRead + 1 || n < 2 || !ahead)
-    return xb_file_read_at(d->f, record_pos(d, recno), d->record, d->recordLen, err);
+  int inOrder = recno == d->lastRead + 1 && n >= 2;
+  if (!inOrder && !d->shared) return read_page(d, recno, err);
+  if (!inOrder || !ahead) return xb_file_read_at(d->f, record_pos(d, recno), d->record, d->recordLen, err);
   if (n > d->count - recno + 1) n = d->count - recno + 1;
   if (!d->ahead && !(d->ahead = malloc(DBF_AHEAD))) xb_gc_fatal("out of memory");
   d->aheadCount = 0;
@@ -677,6 +760,7 @@ static int pack(xb_area *a, int32_t *err) {
 static int dbf_pack(xb_area *a, int32_t *err) {
   dbf *d = state(a);
   d->aheadCount = 0;
+  drop_pages(d);
   int ok = dbf_flush(a, 0, err) && drain(d, err) && pack(a, err);
   d->recno = d->count + 1; /* the record read last is no longer the current one */
   blank(a, d);
@@ -687,6 +771,7 @@ static int dbf_pack(xb_area *a, int32_t *err) {
 static int dbf_zap(xb_area *a, int32_t *err) {
   dbf *d = state(a);
   d->aheadCount = 0;
+  drop_pages(d);
   d->behindCount = 0; /* records ZAP removes */
   d->dirty = 0;
   d->count = 0;

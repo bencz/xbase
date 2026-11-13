@@ -44,7 +44,8 @@
 #define NTX_DESCEND 280
 #define NTX_COND_TEXT 282
 #define NTX_ENTRY_HEAD 8 /* the page offset and the record number before the key */
-#define NTX_CACHE 512    /* pages kept in memory per file (rdd/pages.h), made as pages come */
+#define NTX_CACHE 4096   /* pages an exclusive file keeps in memory (rdd/pages.h), made as pages come */
+#define NTX_CACHE_SHARED 512 /* a shared one's: other programs' changes drop them, and each change writes them back */
 #define NTX_DEPTH 40     /* levels a tree may have: past what 4 GB of pages holds */
 #define NTX_CHILDREN (NTX_PAGE / NTX_ENTRY_HEAD + 1) /* more than a page's entries and the page after them */
 
@@ -166,7 +167,7 @@ static int write_page(xb_tag *x, page *p, int32_t *err) {
 /* A slot of the cache for a page, free: a free one, else a new one, else the one unused longest that no operation
  * holds (written first when it changed). */
 static page *victim(xb_tag *x, int32_t *err) {
-  uint16_t s = xb_pages_spare(&x->pages);
+  uint16_t s = xb_pages_spare(&x->pages, 1);
   if (s) {
     if (!x->cache[s - 1]) {
       page *p = calloc(1, sizeof *p);
@@ -494,8 +495,9 @@ static int open_tag(const char *path, int readonly, int exclusive, xb_tag **out,
   x->root = xb_get_le32(h + NTX_ROOT);
   x->freeList = xb_get_le32(h + NTX_FREE);
   x->end = (uint32_t)(end / NTX_PAGE * NTX_PAGE);
-  xb_pages_init(&x->pages, NTX_CACHE);
-  x->cache = calloc(NTX_CACHE, sizeof *x->cache);
+  uint32_t pages = x->shared ? NTX_CACHE_SHARED : NTX_CACHE;
+  xb_pages_init(&x->pages, pages);
+  x->cache = calloc(pages, sizeof *x->cache);
   x->scratch = malloc((size_t)(2 * max + 4) * entrySize);
   if (!x->cache || !x->scratch) xb_gc_fatal("out of memory");
   *info = x->info;
