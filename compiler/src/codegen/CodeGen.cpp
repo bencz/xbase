@@ -462,11 +462,12 @@ void CodeGen::genFunction(const xir::Function &f) {
   b_.SetInsertPoint(entry);
   checkStack(fnFrame_, fnExit_, nullptr); // the frame is linked: the function returns through its exit
   b_.CreateBr(blocks_.at(f.entry()));
-  xir::openInlineBodies(plan.cfg(), inlineAt_); // they nest: only inline-blocks makes them, and it is verified
+  xir::openInlineBodies(plan.cfg(), inlineAt_); // verified: they nest
   for (xir::BasicBlock *xb : plan.cfg().order()) {
     b_.SetInsertPoint(blocks_.at(xb));
     unwind_ = xb->unwind ? blocks_.at(xb->unwind) : fnExit_;
     inlineOpen_ = inlineAt_[xb];
+    for (uint32_t s : plan.clearsAtStart(xb)) setNil(slot(s));
     findFusedComparisons(*xb);
     findFusedCalls(*xb);
     for (auto &p : xb->params) cacheWords(p.get());
@@ -518,7 +519,9 @@ void CodeGen::markLine(Instruction *i) {
 }
 
 // The innermost frame of the code being lowered: the function's, or that of the inlined body it is in.
-Value *CodeGen::innermostFrame() const { return inlineOpen_.empty() ? fnFrame_ : inlineFrames_.at(inlineOpen_.back()); }
+Value *CodeGen::innermostFrame() const {
+  return inlineOpen_.empty() ? fnFrame_ : inlineFrames_.at(inlineOpen_.size() - 1);
+}
 
 // The frame's line, stored right before each call that can see the call stack
 // (a function of the program, a send, a runtime function or operator, which

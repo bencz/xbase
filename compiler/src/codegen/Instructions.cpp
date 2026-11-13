@@ -595,10 +595,13 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   case Op::GenDone: b_.CreateCall(rtGenDone_, {fnCtx_, rawAddress(*i.var)}); break;
   case Op::InlineEnter: { // a frame without slots, showing the inlined function, over the innermost one
-    IRBuilder<> entry(&fn_->getEntryBlock(), fn_->getEntryBlock().begin());
-    AllocaInst *frame = entry.CreateAlloca(frameType(0), nullptr, "inline.frame");
+    if (inlineFrames_.size() == inlineOpen_.size()) {
+      IRBuilder<> entry(&fn_->getEntryBlock(), fn_->getEntryBlock().begin());
+      inlineFrames_.push_back(entry.CreateAlloca(frameType(0), nullptr, "inline.frame"));
+    }
+    Value *frame = inlineFrames_[inlineOpen_.size()];
     Value *outer = innermostFrame();
-    if (line_) { // the line of the call it replaces, as that call would have stored it (placeLines counts it)
+    if (line_ && !runtimeLibrary_) { // the line of the call it replaces, as that call would store it (see markLine)
       Value *at = b_.CreateStructGEP(frameType(0), outer, FrameLine);
       StoreInst *line = b_.CreateStore(ConstantInt::get(i32_, line_), at);
       tag(line, Mem::FrameLink);
@@ -606,11 +609,11 @@ void CodeGen::emit(const xir::Instruction &i) {
       callFrame_[line] = outer;
     }
     linkFrame(frame, ConstantInt::get(i32_, 0), procOf(*i.blockFn), outer);
-    inlineFrames_[&i] = frame;
-    inlineOpen_.push_back(&i);
+    inlineOpen_.push_back(i.blockFn);
     break;
   }
   case Op::InlineLeave: {
+    for (uint32_t s : plan_->clearsAt(&i)) setNil(slot(s));
     inlineOpen_.pop_back();
     tag(b_.CreateStore(innermostFrame(), b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
     break;

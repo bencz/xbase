@@ -54,6 +54,13 @@ public:
   uint32_t groupBase(const xir::Instruction *user) const { return groupBase_.at(user); }
   bool inGroup(const xir::Instruction *user, size_t operand) const; // computed straight into its group slot
   bool forwarded(const xir::Instruction *store) const { return forwardedStores_.count(store) != 0; }
+  // The slots an inline.leave sets to NIL: those of the values of its inlined body that are dead there, as the
+  // callee's frame would be gone after its return (no other value holds them then).
+  const std::vector<uint32_t> &clearsAt(const xir::Instruction *leave) const;
+  // The slots set to NIL where a block starts: those of the values of a loop it leaves that are dead there. A dead
+  // value's slot otherwise keeps what it held until another value takes the slot, and what only it holds would not be
+  // collected (nor its destructor run).
+  const std::vector<uint32_t> &clearsAtStart(const xir::BasicBlock *b) const;
 
 private:
   struct Unit {                  // what one allocation serves
@@ -70,6 +77,10 @@ private:
   void findUnwritten();
   void computeLiveness();
   void allocate();
+  void findBodyUnits();
+  void placeClears();
+  void placeLoopClears();
+  void addClears(std::vector<uint32_t> &slots, const std::unordered_set<uint32_t> &units, uint32_t at) const;
   uint32_t unitOf(const xir::Value *v);
 
   const xir::Function &f_;
@@ -87,6 +98,9 @@ private:
   std::unordered_map<const xir::Instruction *, uint32_t> groupUnit_, groupBase_;
   std::unordered_set<const xir::Instruction *> forwardedStores_;
   std::vector<Unit> units_;
+  std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> bodyUnits_; // inline.leave -> units
+  std::unordered_map<const xir::Instruction *, std::vector<uint32_t>> clears_;           // inline.leave -> slots
+  std::unordered_map<const xir::BasicBlock *, std::vector<uint32_t>> blockClears_;       // loop exit -> slots
 };
 
 } // namespace xb

@@ -213,9 +213,9 @@ bool openInlineBodies(const CFG &cfg, InlineBodies &at) {
   at.clear();
   bool nested = true;
   for (const BasicBlock *b : cfg.order()) {
-    std::vector<const Instruction *> open = at[b]; // the entry's: none
+    std::vector<const Function *> open = at[b]; // the entry's: none
     for (auto &i : b->insts) {
-      if (i->op == Op::InlineEnter) open.push_back(i.get());
+      if (i->op == Op::InlineEnter) open.push_back(i->blockFn);
       else if (i->op == Op::InlineLeave && open.empty()) nested = false;
       else if (i->op == Op::InlineLeave) open.pop_back();
       else if ((i->op == Op::Ret || i->op == Op::GenYield) && !open.empty()) nested = false;

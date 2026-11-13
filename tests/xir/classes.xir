@@ -2,10 +2,12 @@ module CLASSES
 
 function MAIN params 0 {
 entry:
-  %0 = call TFOO
-  %1 = send NEW %0
-  %2 = send GET %1
-  %3 = call QOUT native %2
+  inline.enter TFOO
+  %1 = class.new 0
+  inline.leave
+  %3 = send NEW %1
+  %4 = send GET %3
+  %5 = call QOUT native %4
   ret
 }
 

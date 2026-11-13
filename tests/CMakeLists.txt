@@ -157,12 +157,12 @@ xb_add_codegen_test(x86_64_string_hash x86_64-linux-gnu "i32 239963683, i64 7, \
 xb_add_codegen_test(s390x_string_hash s390x-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
 xb_add_codegen_test(ppc32_string_hash powerpc-linux-gnu "i32 239963683, i32 7, \\[8 x i8\\] c\"cliente" hashes)
 
-# A loop without calls polls the pending requests on its back edge (an atomic load: SUM has no other, and nothing after
-# it in the module has one).
+# A loop without calls polls the pending requests on its back edge (an atomic load marked xb.poll; SUM's entry is the
+# function of the symbol: its direct one, called by nothing else once MAIN inlines SUM, is inlined into it).
 xb_add_codegen_test(loop_back_edge_poll x86_64-linux-gnu
-  "@xb\\.direct\\.SUM\\(.*load atomic i32, ptr %ctx monotonic" loop_poll)
+  "@xbp_SUM\\(.*load atomic i32, ptr %[0-9a-z]+ monotonic[^\n]*!xb\\.poll" loop_poll)
 # Every function tests its frame against the stack limit before its body.
-xb_add_codegen_test(stack_limit_check x86_64-linux-gnu "@xb\\.direct\\.SUM\\(.*call void @xb_stack_overflow" loop_poll)
+xb_add_codegen_test(stack_limit_check x86_64-linux-gnu "@xbp_SUM\\(.*call void @xb_stack_overflow" loop_poll)
 # A counted loop polls when it reaches a stop, in its exit test's branch; a loop whose end depends on its data counts
 # its passes down between polls (LoopPolls).
 xb_add_codegen_test(loop_strip_mined x86_64-linux-gnu "\npoll\\.reached[0-9]*:" loop_stops)

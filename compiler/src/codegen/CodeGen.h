@@ -298,13 +298,13 @@ private:
   // the function being generated
   llvm::Function *fn_ = nullptr;
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
-  // Inlined bodies (inline.enter, inline.leave): the frame each inline.enter made; the inline.enters open where each
+  // Inlined bodies (inline.enter, inline.leave): their frames, by depth; the functions of the bodies open where each
   // block starts, innermost last; those open where the code being lowered is (the innermost frame shows its line);
   // the frame each call (or the line store of an inline.enter) stores its line in, when not the function's own
   // (placeLines).
-  std::unordered_map<const xir::Instruction *, llvm::Value *> inlineFrames_;
+  std::vector<llvm::Value *> inlineFrames_; // by depth: bodies open at once are at different depths
   xir::InlineBodies inlineAt_;
-  std::vector<const xir::Instruction *> inlineOpen_;
+  std::vector<const xir::Function *> inlineOpen_;
   std::unordered_map<llvm::Instruction *, llvm::Value *> callFrame_;
   std::unordered_map<const xir::Function *, llvm::Constant *> procs_; // procOf's, made once each
   llvm::Value *fnMark_ = nullptr; // the PRIVATE mark of an activation that may create PRIVATEs (xb_mv_mark), or null

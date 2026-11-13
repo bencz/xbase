@@ -32,31 +32,32 @@ body:
   %17 = binary add.one %16, 1:w0
   store $f6 maybe_ref, %17
   barrier $f6 maybe_ref
+  store $f6, nil
   inline.leave
-  %21 = each.source %4, false
-  %22 = each.enter $f3, false, %21
+  %22 = each.source %4, false
+  %23 = each.enter $f3, false, %22
   br each.test(i64 0)
-each.test(%24: i64):
-  %25 = i.add %24, i64 1
-  %26 = enum.len %21
-  %27 = i.cmp le %25, %26
-  cond_br %27, each.body, each.end
+each.test(%25: i64):
+  %26 = i.add %25, i64 1
+  %27 = enum.len %22
+  %28 = i.cmp le %26, %27
+  cond_br %28, each.body, each.end
 each.body:
-  %29 = i.add %24, i64 1
-  each.move $f3, false, %29
-  %31 = load $f3 ref
+  %30 = i.add %25, i64 1
+  each.move $f3, false, %30
+  %32 = load $f3 ref
   inline.enter MAIN.block8
-  %33 = binary mul %31, 2:w10
+  %34 = binary mul %32, 2:w10
   inline.leave
-  store $f3 ref, %33
+  store $f3 ref, %34
   barrier $f3 ref
-  %37 = i.add %24, i64 1
-  br each.test(%37)
+  %38 = i.add %25, i64 1
+  br each.test(%38)
 each.end:
-  each.leave $f3, false, %22
-  %40 = load $f1 maybe_ref
-  %41 = binary add %40, %11
-  ret %41
+  each.leave $f3, false, %23
+  %41 = load $f1 maybe_ref
+  %42 = binary add %41, %11
+  ret %42
 }
 
 function MAIN.byref internal params 1 {
@@ -84,32 +85,33 @@ entry:
   %13 = binary add.one %12, 1:w0
   store $f5 maybe_ref, %13
   barrier $f5 maybe_ref
+  store $f5, nil
   inline.leave
-  %17 = load $f0 maybe_ref
-  %18 = each.source %17, false
-  %19 = each.enter $f3, false, %18
+  %18 = load $f0 maybe_ref
+  %19 = each.source %18, false
+  %20 = each.enter $f3, false, %19
   br each.test(i64 0)
-each.test(%21: i64):
-  %22 = i.add %21, i64 1
-  %23 = enum.len %18
-  %24 = i.cmp le %22, %23
-  cond_br %24, each.body, each.end
+each.test(%22: i64):
+  %23 = i.add %22, i64 1
+  %24 = enum.len %19
+  %25 = i.cmp le %23, %24
+  cond_br %25, each.body, each.end
 each.body:
-  %26 = i.add %21, i64 1
-  each.move $f3, false, %26
-  %28 = load $f3 ref
+  %27 = i.add %22, i64 1
+  each.move $f3, false, %27
+  %29 = load $f3 ref
   inline.enter MAIN.block4
-  %30 = binary mul %28, 2:w10
+  %31 = binary mul %29, 2:w10
   inline.leave
-  store $f3 ref, %30
+  store $f3 ref, %31
   barrier $f3 ref
-  %34 = i.add %21, i64 1
-  br each.test(%34)
+  %35 = i.add %22, i64 1
+  br each.test(%35)
 each.end:
-  each.leave $f3, false, %19
-  %37 = load $f1 maybe_ref
-  %38 = binary add %37, %7
-  ret %38
+  each.leave $f3, false, %20
+  %38 = load $f1 maybe_ref
+  %39 = binary add %38, %7
+  ret %39
 }
 
 block MAIN.block1 internal params 1 {

@@ -27,6 +27,9 @@ FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {
   chooseHomes();
   computeLiveness();
   allocate();
+  findBodyUnits();
+  placeClears();
+  placeLoopClears();
 }
 
 // Parameters keep their slots; the other frame variables something still
@@ -317,6 +320,105 @@ void FramePlan::allocate() {
     auto m = groupMember_.find(v);
     homes_[v] = {Home::Kind::Slot, units_[u].slot + (m == groupMember_.end() ? 0 : m->second), nullptr};
   }
+}
+
+// The units of each inlined body (values and argument groups of its instructions; a nested body's that are still live
+// where it ends), by a forward walk: a stack of open bodies, one set each, joined where paths meet, until nothing
+// changes (loops).
+void FramePlan::findBodyUnits() {
+  using Open = std::vector<std::unordered_set<uint32_t>>;
+  std::unordered_map<const BasicBlock *, Open> at;
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (BasicBlock *b : cfg_.order()) {
+      Open open = at[b];
+      auto add = [&](const Value *v) {
+        auto u = unit_.find(v);
+        if (u != unit_.end() && !open.empty()) open.back().insert(u->second);
+      };
+      for (auto &p : b->params) add(p.get());
+      for (auto &i : b->insts) {
+        if (i->op == Op::InlineEnter) {
+          open.emplace_back();
+          continue;
+        }
+        if (i->op == Op::InlineLeave) {
+          auto &mine = bodyUnits_[i.get()];
+          size_t before = mine.size();
+          mine.insert(open.back().begin(), open.back().end());
+          changed |= mine.size() != before;
+          open.pop_back();
+          uint32_t p = pos_.at(i.get());
+          if (!open.empty())
+            for (uint32_t u : mine)
+              if (units_[u].start <= p && p <= units_[u].end) open.back().insert(u);
+          continue;
+        }
+        add(i.get());
+        if (auto g = groupUnit_.find(i.get()); g != groupUnit_.end() && !open.empty()) open.back().insert(g->second);
+      }
+      for (size_t k = 0; k < b->numSuccessors(); ++k) {
+        Open &next = at[b->successor(k)];
+        if (next.size() < open.size()) next.resize(open.size());
+        for (size_t d = 0; d < open.size(); ++d) {
+          size_t before = next[d].size();
+          next[d].insert(open[d].begin(), open[d].end());
+          changed |= next[d].size() != before;
+        }
+      }
+    }
+  }
+}
+
+// Adds to `slots` (kept sorted, without repeats) those of `units` that no unit live at position `at` holds. Live
+// intervals cover every point where their value is live, so a slot a live value holds is never among them.
+void FramePlan::addClears(std::vector<uint32_t> &slots, const std::unordered_set<uint32_t> &units, uint32_t at) const {
+  std::unordered_set<uint32_t> held(slots.begin(), slots.end());
+  for (const Unit &u : units_)
+    if (u.start <= at && at <= u.end)
+      for (uint32_t s = 0; s < u.size; ++s) held.insert(u.slot + s);
+  for (uint32_t k : units)
+    for (uint32_t s = 0; s < units_[k].size; ++s)
+      if (held.insert(units_[k].slot + s).second) slots.push_back(units_[k].slot + s);
+  std::sort(slots.begin(), slots.end());
+}
+
+void FramePlan::placeClears() {
+  for (auto &[leave, units] : bodyUnits_) addClears(clears_[leave], units, pos_.at(leave));
+}
+
+// The units of each loop (values and argument groups of its blocks), cleared where it exits.
+void FramePlan::placeLoopClears() {
+  xir::Loops loops(cfg_);
+  for (auto &loop : loops.all()) {
+    std::unordered_set<uint32_t> units;
+    auto add = [&](const Value *v) {
+      if (auto u = unit_.find(v); u != unit_.end()) units.insert(u->second);
+    };
+    for (const BasicBlock *b : loop->blocks) {
+      for (auto &p : b->params) add(p.get());
+      for (auto &i : b->insts) {
+        add(i.get());
+        if (auto g = groupUnit_.find(i.get()); g != groupUnit_.end()) units.insert(g->second);
+      }
+    }
+    for (const BasicBlock *b : loop->blocks)
+      for (size_t k = 0; k < b->numSuccessors(); ++k)
+        if (const BasicBlock *exit = b->successor(k); !loop->contains(exit))
+          addClears(blockClears_[exit], units, start_.at(exit));
+  }
+}
+
+const std::vector<uint32_t> &FramePlan::clearsAtStart(const BasicBlock *b) const {
+  static const std::vector<uint32_t> none;
+  auto c = blockClears_.find(b);
+  return c == blockClears_.end() ? none : c->second;
+}
+
+const std::vector<uint32_t> &FramePlan::clearsAt(const Instruction *leave) const {
+  static const std::vector<uint32_t> none;
+  auto c = clears_.find(leave);
+  return c == clears_.end() ? none : c->second;
 }
 
 const Home &FramePlan::home(const Value *v) const {

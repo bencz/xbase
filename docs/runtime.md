@@ -91,8 +91,8 @@ shown. A runtime function shows only while what it does can be seen, with a fram
 xBase, such as `AEval`, shows its own frame, also with line 0: [Functions written in
 xBase](#functions-written-in-xbase)), and a function or message whose error raises the error block (`xb_error_in` names
 it: `SUBSTR`, `ERROR:FOO` for a message to an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block).
-Compiled code links a frame without slots too, over the function's own, while the body of a codeblock it runs in place
-(inlined, [xir.md](xir.md#passes)) runs: the call stack shows the block as its call would.
+Compiled code links a frame without slots too, over the function's own, while the body of a function or codeblock it
+runs in place (inlined, [xir.md](xir.md#passes)) runs: the call stack shows the callee as its call would.
 Operators and statements show nothing of their own. `ProcName( [nLevel] )`, `ProcLine( [nLevel] )` and
 `ProcFile( [nLevel] )` read it: level 0 is the function calling them, a non-numeric level is 0, a negative one gives
 `PROCNAME`, line 0 and `""`, a level past the end `""`, 0 and `""`. `ProcFile` gives the name of the function's source

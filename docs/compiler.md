@@ -400,7 +400,10 @@ lives), `Instructions.cpp`, `Variables.cpp` (variable addresses, references, wri
 emits the object file.
 
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
-  from its uses back to its definition, slots are assigned by linear scan and reused once free. The parameters take
+  from its uses back to its definition, slots are assigned by linear scan and reused once free. A dead value's slot
+  keeps what it held until another value takes it, so where a loop exits, the block it goes to first sets to `NIL` the
+  slots of the loop's values that are dead there and that no live value holds (`clearsAtStart`; see `inline.leave`
+  below for an inlined body): what only they held can be collected, and its destructor run. The parameters take
   slots 0 to n-1 (the prologue copies them there), then the frame variables still in memory (those mem2reg did not make
   values), then temporaries. The arguments of a call and the elements of an array literal take consecutive slots, and a
   value used only there (a block parameter too) is computed straight into its slot; a branch argument used only there
@@ -547,12 +550,16 @@ emits the object file.
   frame right before each marked call that can see the call stack (any call but intrinsics and the runtime entry points
   that never raise an error or run code, `quietCalls_`), once per LLVM block and line. The fast paths of operations thus
   store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for references clears its
-  own `proc`: the other body shows instead. `inline.enter` links a frame without slots (an `alloca` of the entry
-  block) that shows the inlined block function, after storing the line of the `Eval` it replaces in the frame below;
-  until the matching `inline.leave`, which links the frame below again, calls take it as the caller's frame and their
-  lines are stored in it. The frames open where each block starts are those of the `inline.enter`s on the way to it
-  (`openInlineBodies` in `xir/Analysis`: an inlined body is entered at its start and left at its end). That store of
-  the line counts as one `placeLines` made.
+  own `proc`: the other body shows instead. `inline.enter` links a frame without slots that shows the inlined function
+  (an `alloca` of the entry block, one per nesting depth: bodies open at once are at different depths, and the copies
+  of a body share it), after storing the line of the call it replaces in the frame below (not in a module of the
+  runtime, which stores no lines); until the matching `inline.leave`, which links the frame below again, calls take it
+  as the caller's frame and their lines are stored in it. The bodies open where each block starts are those of the
+  `inline.enter`s on the way to it (`openInlineBodies` in `xir/Analysis`: an inlined body is entered at its start and
+  left at its end). That store of the line counts as one `placeLines` made. `inline.leave` first sets to `NIL` the
+  slots of the body's values that are dead there and that no live value holds (`FramePlan::clearsAt`: the units of
+  each body's values and argument lists, found by a forward walk with one set per open body): as when a callee
+  returns, an object only they held can be collected (and its destructor run).
 - After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
   `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
   load stays in a loop without calls instead of leaving it; the loads carry the metadata `xb.poll`, on a back edge, or

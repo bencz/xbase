@@ -107,24 +107,37 @@ An operation that `subst.check` follows gives only its own types (see `typed-con
 
 The syntax tree is folded first (`opt/Fold`, [compiler.md](compiler.md#constant-folding)). From `-O1` on, the pass
 manager (`PassManager.*`, `optimize`) runs a table of passes on every function, in order, repeating the pipeline
-while something changes (at most four rounds), and verifies the function after every pass that changed it; invalid
-xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
+while something changes (at most four rounds), each function after those it calls, makes or forwards to (post-order of
+the call graph: a body is inlined optimized, its own calls inlined already), then the final passes on every function
+(so that a body inlined elsewhere is copied before them), and verifies the function after every pass that changed
+it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
 
-- `inline-blocks`, first: `Eval( {| p | body }, args )` where the codeblock literal is made only for that call (its
-  `block` has no other use; `Eval` of the native runtime function, without `...`, in a block that unwinds to the
-  function's exit) runs the body in place, between `inline.enter` (which names the block function: the call stack shows
-  the block, as its call would) and `inline.leave`; its `ret` becomes `inline.leave` and a branch passing the result to
-  the rest of the caller's block. The block's parameters and `LOCAL`s become frame variables of the function, set again
-  on every entry (the arguments, `NIL` past the last and for the `LOCAL`s: a block call starts with fresh ones); its
-  captures, the variables it captured; the module's `STATIC`s stay. When an argument is a reference (`@x`, `@a[i]`), the
-  variables of its parameters are marked `param`: they keep reading and writing through what they hold. A block is
-  inlined only when it reads no arguments as received, creates no `PRIVATE` (nor calls a function that creates its
-  caller's: it would be the function's, released later), has no unwind block and no `...`, none of its own variables is
-  shared (captured by a nested block, or passed by reference: each call needs fresh cells), and it has at most 200
-  instructions; nothing is inlined into a generator. The body is copied with `copyBlocks`, its constants made anew in
-  the function. Afterwards, a frame variable that nothing captures or passes by reference any more loses its cell
-  (`shared`), its accesses become direct and their barriers go, so `promote-variables` takes it. The verifier checks
-  that `inline.enter` and `inline.leave` nest (`openInlineBodies` in `Analysis`).
+- Inlining (`Inline.cpp`), first: a call runs its callee's body in place, between `inline.enter` (which names the
+  callee: the call stack shows it, as its call would) and `inline.leave`; each `ret` becomes `inline.leave` and a
+  branch passing the result to the rest of the caller's block. The callee's parameters and `LOCAL`s become frame
+  variables of the function, set on every entry (the arguments, `NIL` past the last and for the `LOCAL`s: a call starts
+  with fresh ones) and set to `NIL` before each `inline.leave` (as its frame would be gone: what they held is no
+  longer kept); a codeblock's captures are the variables it captured; the module's `STATIC`s stay. When an argument is
+  a reference (`@x`, `@a[i]`), the variables of its parameters are marked `param`: they keep reading and writing
+  through what they hold. A body is inlined only at a call without `...` in a block that unwinds to the function's
+  exit, and only when the callee reads no arguments as received, creates no `PRIVATE` (nor calls a function that
+  creates its caller's: it would be the function's, released later), has no unwind block, no `...` and no `YIELD`, and
+  none of its own variables is shared (captured by a nested block, or passed by reference: each call needs fresh
+  cells); nothing is inlined into a generator, nor into a function that has grown past 3000 instructions. The body is
+  copied with `copyBlocks`, its constants made anew in the function.
+  - `inline-functions`: a call of a function of the module (not a method, an `INIT` or `EXIT` procedure, a generator,
+    nor one that calls itself) of at most 30 instructions. A function versioned for
+    references runs, for arguments without a reference, the body after its `params.ref` test (which they pass);
+    otherwise its other body (`NAME.byref`).
+  - `inline-blocks`, after it (which may pass a block literal to an `Eval`): `Eval( {| p | body }, args )` where the
+    codeblock literal is made only for that call (its `block` has no other use; `Eval` of the native runtime
+    function), of at most 200 instructions. Afterwards, a frame variable that nothing captures or passes by reference
+    any more loses its cell (`shared`), its accesses become direct and their barriers go, so `promote-variables` takes
+    it.
+
+  The verifier checks that `inline.enter` and `inline.leave` nest (`openInlineBodies` in `Analysis`: the functions of
+  the bodies open where each block starts, the same on every path into it, also through the copies
+  `typed-continuations` makes).
 - `append-in-place`, before `promote-variables`: `store x (binary add (load x) y)`, with the load and the add in the
   store's block, used only there, and no other write of `x` between the load and the store, becomes `append x, y` when
   `x` is a `LOCAL` only the function sees (`directLocals` in `Analysis`) and holds strings (a string constant is stored
@@ -164,7 +177,7 @@ Shared changes of shape are in `Transform.*`: `splitAfter` (the rest of a block 
 copy; a value from outside the copied blocks stays, or is what a given function makes of it), `SSAUpdater` (SSA form
 rebuilt for a value that gets more definitions, given at the end of blocks: the value reaching a block, through block
 parameters made on demand where definitions meet, as in Braun et al.) and `removeTrivialParams` (a parameter made so
-whose arguments are one value is that value). `typed-continuations` and `inline-blocks` use them.
+whose arguments are one value is that value). `typed-continuations` and the inlining passes use them.
 
 They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
 with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor
@@ -246,8 +259,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right after its
   operation and the value first in the block only the check leads to), and for parameter versioning `params.ref`
   (whether parameters hold references their caller passed) and `call.forward` (a call with the function's own arguments,
-  as received), and `inline.enter` (naming a block function) and `inline.leave`, around a body inlined by
-  `inline-blocks`: the call stack shows that function in between.
+  as received), and `inline.enter` (naming a function or block function) and `inline.leave`, around an inlined body:
+  the call stack shows that function in between.
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `ret`.
