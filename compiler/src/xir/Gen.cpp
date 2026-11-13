@@ -285,12 +285,7 @@ Var *Generator::frameVar(uint32_t slot) {
 }
 
 // A frame variable of the function's own, after every other, which no program names.
-Var *Generator::hiddenVar() {
-  uint32_t slot = 0;
-  for (auto &v : cur_.fn->vars)
-    if (v->kind == Var::Kind::Frame) slot = std::max(slot, v->index + 1);
-  return cur_.fn->addVar(Var::Kind::Frame, slot, "");
-}
+Var *Generator::hiddenVar() { return cur_.fn->addFrameVar(""); }
 
 // The error block a WITH handler replaced, as it is now (Cleanup).
 Value *Generator::oldBlockOf(const Cleanup &c) {

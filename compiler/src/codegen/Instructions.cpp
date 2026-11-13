@@ -186,7 +186,7 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
 // collector, as every slot does).
 void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
   const xir::Function &callee = *i.callee.function;
-  std::vector<Value *> args{fnCtx_, d, fnFrame_}; // the chain's frame at a call is the caller's
+  std::vector<Value *> args{fnCtx_, d, innermostFrame()}; // the chain's frame at a call is the caller's
   for (uint32_t k = 0; k < callee.numParams; ++k) {
     if (k >= i.operands().size()) {
       args.insert(args.end(), {headerWord(XB_T_NIL, 0, 0), ConstantInt::get(i64_, 0)});
@@ -594,6 +594,27 @@ void CodeGen::emit(const xir::Instruction &i) {
                                 i64_);
     break;
   case Op::GenDone: b_.CreateCall(rtGenDone_, {fnCtx_, rawAddress(*i.var)}); break;
+  case Op::InlineEnter: { // a frame without slots, showing the inlined function, over the innermost one
+    IRBuilder<> entry(&fn_->getEntryBlock(), fn_->getEntryBlock().begin());
+    AllocaInst *frame = entry.CreateAlloca(frameType(0), nullptr, "inline.frame");
+    Value *outer = innermostFrame();
+    if (line_) { // the line of the call it replaces, as that call would have stored it (placeLines counts it)
+      Value *at = b_.CreateStructGEP(frameType(0), outer, FrameLine);
+      StoreInst *line = b_.CreateStore(ConstantInt::get(i32_, line_), at);
+      tag(line, Mem::FrameLink);
+      line->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
+      callFrame_[line] = outer;
+    }
+    linkFrame(frame, ConstantInt::get(i32_, 0), procOf(*i.blockFn), outer);
+    inlineFrames_[&i] = frame;
+    inlineOpen_.push_back(&i);
+    break;
+  }
+  case Op::InlineLeave: {
+    inlineOpen_.pop_back();
+    tag(b_.CreateStore(innermostFrame(), b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
+    break;
+  }
   case Op::Br:
     pollOnBackEdge(i.parent, i.targets[0].block);
     shareOnEdge(i.parent, i.targets[0].block);

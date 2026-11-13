@@ -394,6 +394,8 @@ void CodeGen::genFunction(const xir::Function &f) {
   plan_ = &plan;
   blocks_.clear();
   blockOrder_.clear();
+  inlineFrames_.clear();
+  callFrame_.clear();
   values_.clear();
   fusedTruth_.clear();
   findSharingLoads(f, plan.cfg());
@@ -460,9 +462,11 @@ void CodeGen::genFunction(const xir::Function &f) {
   b_.SetInsertPoint(entry);
   checkStack(fnFrame_, fnExit_, nullptr); // the frame is linked: the function returns through its exit
   b_.CreateBr(blocks_.at(f.entry()));
+  xir::openInlineBodies(plan.cfg(), inlineAt_); // they nest: only inline-blocks makes them, and it is verified
   for (xir::BasicBlock *xb : plan.cfg().order()) {
     b_.SetInsertPoint(blocks_.at(xb));
     unwind_ = xb->unwind ? blocks_.at(xb->unwind) : fnExit_;
+    inlineOpen_ = inlineAt_[xb];
     findFusedComparisons(*xb);
     findFusedCalls(*xb);
     for (auto &p : xb->params) cacheWords(p.get());
@@ -475,6 +479,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   }
   line_ = 0;
   emitting_ = nullptr;
+  inlineOpen_.clear();
   b_.SetInsertPoint(fnExit_);
   if (fnMark_) b_.CreateCall(rtMvRelease_, {fnCtx_, fnMark_});
   unlinkFrame(fnFrame_, fnPrev_);
@@ -493,6 +498,7 @@ StructType *CodeGen::frameType(uint32_t nslots) {
 // The function's xb_proc, or null when the call stack does not show it.
 Constant *CodeGen::procOf(const xir::Function &f) {
   if (f.stackName.empty()) return ConstantPointerNull::get(ptrTy_);
+  if (auto it = procs_.find(&f); it != procs_.end()) return it->second;
   Constant *name = b_.CreateGlobalString(f.stackName, ".xb.procname", 0, &mod_);
   auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_, ptrTy_});
   Constant *nparams = ConstantInt::get(i32_, f.numParams);
@@ -501,38 +507,52 @@ Constant *CodeGen::procOf(const xir::Function &f) {
   auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage,
                                   ConstantStruct::get(ty, {name, nparams, flags, file_}), ".xb.proc");
   proc->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+  procs_[&f] = proc;
   return proc;
 }
 
-void CodeGen::markLine(Instruction *i) const {
-  if (line_ && !runtimeLibrary_ && isa<CallInst>(i))
-    i->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
+void CodeGen::markLine(Instruction *i) {
+  if (!line_ || runtimeLibrary_ || !isa<CallInst>(i)) return;
+  i->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
+  if (!inlineOpen_.empty()) callFrame_[i] = innermostFrame();
 }
+
+// The innermost frame of the code being lowered: the function's, or that of the inlined body it is in.
+Value *CodeGen::innermostFrame() const { return inlineOpen_.empty() ? fnFrame_ : inlineFrames_.at(inlineOpen_.back()); }
 
 // The frame's line, stored right before each call that can see the call stack
 // (a function of the program, a send, a runtime function or operator, which
 // may raise an error): only there can it be read, so the fast paths of
 // operations store nothing, and their slow paths, which are cold, do. A block
-// stores a line once until another one is needed.
+// stores a line once until another one is needed. A store marked with its line
+// (inline.enter's, into the frame below) is one stored already.
 void CodeGen::placeLines() {
   for (BasicBlock &bb : *fn_) {
     uint32_t stored = 0;
+    Value *storedIn = nullptr;
     for (Instruction &inst : bb) {
-      auto *call = dyn_cast<CallInst>(&inst);
-      if (!call) continue;
-      MDNode *md = call->getMetadata(lineKind_);
+      MDNode *md = inst.getMetadata(lineKind_);
       if (!md) continue;
-      call->setMetadata(lineKind_, nullptr);
+      inst.setMetadata(lineKind_, nullptr);
+      auto line = (uint32_t)mdconst::extract<ConstantInt>(md->getOperand(0))->getZExtValue();
+      auto in = callFrame_.find(&inst);
+      Value *frame = in == callFrame_.end() ? fnFrame_ : in->second;
+      auto *call = dyn_cast<CallInst>(&inst);
+      if (!call) {
+        stored = line;
+        storedIn = frame;
+        continue;
+      }
       const Function *callee = call->getCalledFunction();
       if (callee && (callee->isIntrinsic() || quietCalls_.count(callee))) continue;
-      auto line = (uint32_t)mdconst::extract<ConstantInt>(md->getOperand(0))->getZExtValue();
-      if (line == stored) continue;
-      Value *at = GetElementPtrInst::CreateInBounds(frameType(0), fnFrame_,
+      if (line == stored && frame == storedIn) continue;
+      Value *at = GetElementPtrInst::CreateInBounds(frameType(0), frame,
                                                     {ConstantInt::get(i32_, 0), ConstantInt::get(i32_, FrameLine)},
                                                     "line", call->getIterator());
       auto *store = new StoreInst(ConstantInt::get(i32_, line), at, call->getIterator());
       tag(store, Mem::FrameLink);
       stored = line;
+      storedIn = frame;
     }
   }
 }

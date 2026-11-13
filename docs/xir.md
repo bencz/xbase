@@ -110,6 +110,21 @@ manager (`PassManager.*`, `optimize`) runs a table of passes on every function, 
 while something changes (at most four rounds), and verifies the function after every pass that changed it; invalid
 xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
 
+- `inline-blocks`, first: `Eval( {| p | body }, args )` where the codeblock literal is made only for that call (its
+  `block` has no other use; `Eval` of the native runtime function, without `...`, in a block that unwinds to the
+  function's exit) runs the body in place, between `inline.enter` (which names the block function: the call stack shows
+  the block, as its call would) and `inline.leave`; its `ret` becomes `inline.leave` and a branch passing the result to
+  the rest of the caller's block. The block's parameters and `LOCAL`s become frame variables of the function, set again
+  on every entry (the arguments, `NIL` past the last and for the `LOCAL`s: a block call starts with fresh ones); its
+  captures, the variables it captured; the module's `STATIC`s stay. When an argument is a reference (`@x`, `@a[i]`), the
+  variables of its parameters are marked `param`: they keep reading and writing through what they hold. A block is
+  inlined only when it reads no arguments as received, creates no `PRIVATE` (nor calls a function that creates its
+  caller's: it would be the function's, released later), has no unwind block and no `...`, none of its own variables is
+  shared (captured by a nested block, or passed by reference: each call needs fresh cells), and it has at most 200
+  instructions; nothing is inlined into a generator. The body is copied with `copyBlocks`, its constants made anew in
+  the function. Afterwards, a frame variable that nothing captures or passes by reference any more loses its cell
+  (`shared`), its accesses become direct and their barriers go, so `promote-variables` takes it. The verifier checks
+  that `inline.enter` and `inline.leave` nest (`openInlineBodies` in `Analysis`).
 - `append-in-place`, before `promote-variables`: `store x (binary add (load x) y)`, with the load and the add in the
   store's block, used only there, and no other write of `x` between the load and the store, becomes `append x, y` when
   `x` is a `LOCAL` only the function sees (`directLocals` in `Analysis`) and holds strings (a string constant is stored
@@ -145,11 +160,11 @@ xIR is an internal error naming the pass. `--dump-xir` writes the result. Implem
   parks the thread for another thread's collection (the request waits for the next poll), and not `xb_pending_gc`.
 
 Shared changes of shape are in `Transform.*`: `splitAfter` (the rest of a block into a new one it jumps to),
-`copyBlocks` (blocks copied inside their function, with the map from each original block and value to its copy; values
-from outside the copied blocks stay), `SSAUpdater` (SSA form rebuilt for a value that gets more definitions, given at
-the end of blocks: the value reaching a block, through block parameters made on demand where definitions meet, as in
-Braun et al.) and `removeTrivialParams` (a parameter made so whose arguments are one value is that value).
-`typed-continuations` uses them.
+`copyBlocks` (blocks copied into their function or another, with the map from each original block and value to its
+copy; a value from outside the copied blocks stays, or is what a given function makes of it), `SSAUpdater` (SSA form
+rebuilt for a value that gets more definitions, given at the end of blocks: the value reaching a block, through block
+parameters made on demand where definitions meet, as in Braun et al.) and `removeTrivialParams` (a parameter made so
+whose arguments are one value is that value). `typed-continuations` and `inline-blocks` use them.
 
 They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
 with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor
@@ -231,7 +246,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right after its
   operation and the value first in the block only the check leads to), and for parameter versioning `params.ref`
   (whether parameters hold references their caller passed) and `call.forward` (a call with the function's own arguments,
-  as received).
+  as received), and `inline.enter` (naming a block function) and `inline.leave`, around a body inlined by
+  `inline-blocks`: the call stack shows that function in between.
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `ret`.

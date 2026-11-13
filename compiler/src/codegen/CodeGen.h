@@ -84,7 +84,8 @@ private:
   void cacheWords(const xir::Value *v);
   llvm::Value *argItem(llvm::Value *argc, llvm::Value *argv, uint32_t k);
   llvm::Constant *procOf(const xir::Function &f);
-  void markLine(llvm::Instruction *i) const;
+  void markLine(llvm::Instruction *i);
+  llvm::Value *innermostFrame() const;
   void placeLines();
   // `prev`: the frame the chain has now, when known (else it is read from the context).
   void linkFrame(llvm::Value *frame, llvm::Value *nslots, llvm::Value *proc, llvm::Value *prev = nullptr);
@@ -297,6 +298,15 @@ private:
   // the function being generated
   llvm::Function *fn_ = nullptr;
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
+  // Inlined bodies (inline.enter, inline.leave): the frame each inline.enter made; the inline.enters open where each
+  // block starts, innermost last; those open where the code being lowered is (the innermost frame shows its line);
+  // the frame each call (or the line store of an inline.enter) stores its line in, when not the function's own
+  // (placeLines).
+  std::unordered_map<const xir::Instruction *, llvm::Value *> inlineFrames_;
+  xir::InlineBodies inlineAt_;
+  std::vector<const xir::Instruction *> inlineOpen_;
+  std::unordered_map<llvm::Instruction *, llvm::Value *> callFrame_;
+  std::unordered_map<const xir::Function *, llvm::Constant *> procs_; // procOf's, made once each
   llvm::Value *fnMark_ = nullptr; // the PRIVATE mark of an activation that may create PRIVATEs (xb_mv_mark), or null
   uint32_t fnParams_ = 0; // the function's parameters: the arguments past them are what `...` passes on
   const xir::Instruction *emitting_ = nullptr; // the instruction being lowered (checkPending)

@@ -1,0 +1,195 @@
+module INLINE_BLOCKS
+
+function MAIN params 1 {
+  $f0 = frame 0 "ALIST"
+  $f1 = frame 1 shared "N"
+  $f2 = frame 2 "M"
+  $f3 = frame 3 "E"
+  $f4 = frame 4 "ALIST"
+  $f5 = frame 5 "K"
+  $f6 = frame 6 "R"
+  $f7 = frame 7 "V"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward MAIN.byref
+  ret %2
+body:
+  %4 = load $f0
+  store $f1 maybe_ref, 0:w10
+  barrier $f1 maybe_ref
+  %7 = block MAIN.block5 $f1
+  %8 = call AEVAL native %4, %7
+  inline.enter MAIN.block6
+  %10 = binary mul 2:w10, 1:w10
+  %11 = binary add %10, 1:w10
+  inline.leave
+  %13 = ref $f1
+  inline.enter MAIN.block7
+  store $f6, %13
+  %16 = load $f6 maybe_ref
+  %17 = binary add.one %16, 1:w0
+  store $f6 maybe_ref, %17
+  barrier $f6 maybe_ref
+  inline.leave
+  %21 = each.source %4, false
+  %22 = each.enter $f3, false, %21
+  br each.test(i64 0)
+each.test(%24: i64):
+  %25 = i.add %24, i64 1
+  %26 = enum.len %21
+  %27 = i.cmp le %25, %26
+  cond_br %27, each.body, each.end
+each.body:
+  %29 = i.add %24, i64 1
+  each.move $f3, false, %29
+  %31 = load $f3 ref
+  inline.enter MAIN.block8
+  %33 = binary mul %31, 2:w10
+  inline.leave
+  store $f3 ref, %33
+  barrier $f3 ref
+  %37 = i.add %24, i64 1
+  br each.test(%37)
+each.end:
+  each.leave $f3, false, %22
+  %40 = load $f1 maybe_ref
+  %41 = binary add %40, %11
+  ret %41
+}
+
+function MAIN.byref internal params 1 {
+  $f0 = frame 0 "ALIST"
+  $f1 = frame 1 shared "N"
+  $f2 = frame 2 "M"
+  $f3 = frame 3 "E"
+  $f4 = frame 4 "K"
+  $f5 = frame 5 "R"
+  $f6 = frame 6 "V"
+entry:
+  store $f1 maybe_ref, 0:w10
+  barrier $f1 maybe_ref
+  %2 = load $f0 maybe_ref
+  %3 = block MAIN.block1 $f1
+  %4 = call AEVAL native %2, %3
+  inline.enter MAIN.block2
+  %6 = binary mul 2:w10, 1:w10
+  %7 = binary add %6, 1:w10
+  inline.leave
+  %9 = ref $f1
+  inline.enter MAIN.block3
+  store $f5, %9
+  %12 = load $f5 maybe_ref
+  %13 = binary add.one %12, 1:w0
+  store $f5 maybe_ref, %13
+  barrier $f5 maybe_ref
+  inline.leave
+  %17 = load $f0 maybe_ref
+  %18 = each.source %17, false
+  %19 = each.enter $f3, false, %18
+  br each.test(i64 0)
+each.test(%21: i64):
+  %22 = i.add %21, i64 1
+  %23 = enum.len %18
+  %24 = i.cmp le %22, %23
+  cond_br %24, each.body, each.end
+each.body:
+  %26 = i.add %21, i64 1
+  each.move $f3, false, %26
+  %28 = load $f3 ref
+  inline.enter MAIN.block4
+  %30 = binary mul %28, 2:w10
+  inline.leave
+  store $f3 ref, %30
+  barrier $f3 ref
+  %34 = i.add %21, i64 1
+  br each.test(%34)
+each.end:
+  each.leave $f3, false, %19
+  %37 = load $f1 maybe_ref
+  %38 = binary add %37, %7
+  ret %38
+}
+
+block MAIN.block1 internal params 1 {
+  $f0 = frame 0 "X"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $c0 maybe_ref
+  %1 = load $f0 maybe_ref
+  %2 = binary add %0, %1
+  store $c0 maybe_ref, %2
+  barrier $c0 maybe_ref
+  ret %2
+}
+
+block MAIN.block2 internal params 1 {
+  $f0 = frame 0 "K"
+  $c0 = capture 0 "M"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = load $c0 maybe_ref
+  %2 = binary mul %0, %1
+  %3 = binary add %2, 1:w10
+  ret %3
+}
+
+block MAIN.block3 internal params 1 {
+  $f0 = frame 0 "R"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = binary add.one %0, 1:w0
+  store $f0 maybe_ref, %1
+  barrier $f0 maybe_ref
+  ret %0
+}
+
+block MAIN.block4 internal params 1 {
+  $f0 = frame 0 "V"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = binary mul %0, 2:w10
+  ret %1
+}
+
+block MAIN.block5 internal params 1 {
+  $f0 = frame 0 "X"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $c0 maybe_ref
+  %1 = load $f0 maybe_ref
+  %2 = binary add %0, %1
+  store $c0 maybe_ref, %2
+  barrier $c0 maybe_ref
+  ret %2
+}
+
+block MAIN.block6 internal params 1 {
+  $f0 = frame 0 "K"
+  $c0 = capture 0 "M"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = load $c0 maybe_ref
+  %2 = binary mul %0, %1
+  %3 = binary add %2, 1:w10
+  ret %3
+}
+
+block MAIN.block7 internal params 1 {
+  $f0 = frame 0 "R"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = binary add.one %0, 1:w0
+  store $f0 maybe_ref, %1
+  barrier $f0 maybe_ref
+  ret %0
+}
+
+block MAIN.block8 internal params 1 {
+  $f0 = frame 0 "V"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = binary mul %0, 2:w10
+  ret %1
+}

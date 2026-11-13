@@ -15,6 +15,7 @@ struct Pass {
 };
 
 constexpr Pass kPipeline[] = {
+    {"inline-blocks", inlineBlocks},    // first: the variables it frees promote-variables takes
     {"append-in-place", appendInPlace}, // before promote-variables, which takes the other LOCALs
     {"promote-variables", promoteVariables},
     {"fold-constants", foldConstants},

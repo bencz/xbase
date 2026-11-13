@@ -40,8 +40,8 @@ bool dominatesUses(const CFG &cfg, const Value *v, const BasicBlock *def) {
 
 // Moves `v` (defined in `def`) into a new frame variable: stored there at position `at` of `def` (Bool and I64
 // values boxed as items), loaded right before each use.
-void spill(Function &f, Value *v, BasicBlock *def, size_t at, uint32_t slot) {
-  Var *home = f.addVar(Var::Kind::Frame, slot, "");
+void spill(Function &f, Value *v, BasicBlock *def, size_t at) {
+  Var *home = f.addFrameVar("");
   Type t = v->type();
   std::vector<Instruction *> users = v->users();
   std::sort(users.begin(), users.end());
@@ -84,9 +84,6 @@ bool makeResumable(Function &f) {
   for (auto &b : f.blocks)
     if (Instruction *t = b->terminator(); t && t->op == Op::GenYield) yields = true;
   if (!yields) return false;
-  uint32_t slot = 0;
-  for (auto &v : f.vars)
-    if (v->kind == Var::Kind::Frame) slot = std::max(slot, v->index + 1);
   CFG cfg(f);
   struct Crossing {
     Value *v;
@@ -102,7 +99,7 @@ bool makeResumable(Function &f) {
   }
   for (const Crossing &c : crossing) {
     size_t at = c.after ? positionOf(c.def, c.after) + 1 : 0;
-    spill(f, c.v, c.def, at, slot++);
+    spill(f, c.v, c.def, at);
   }
   return !crossing.empty();
 }

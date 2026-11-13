@@ -18,7 +18,8 @@ BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k) {
   return tail;
 }
 
-BlockCopy copyBlocks(Function &f, const std::vector<BasicBlock *> &originals, const std::string &suffix) {
+BlockCopy copyBlocks(Function &f, const std::vector<BasicBlock *> &originals, const std::string &suffix,
+                     const std::function<Value *(Value *)> &outside) {
   BlockCopy c;
   for (BasicBlock *b : originals) {
     BasicBlock *nb = f.addBlock(b->name + suffix);
@@ -38,17 +39,21 @@ BlockCopy copyBlocks(Function &f, const std::vector<BasicBlock *> &originals, co
       c.pairs.push_back({ip.get(), ni.get()});
       c.blocks[b]->insts.push_back(std::move(ni));
     }
+  auto of = [&](Value *v) {
+    auto it = c.values.find(v);
+    return it != c.values.end() ? it->second : outside ? outside(v) : v;
+  };
   for (BasicBlock *b : originals) {
     BasicBlock *nb = c.blocks[b];
     nb->unwind = b->unwind ? (c.blocks.count(b->unwind) ? c.blocks[b->unwind] : b->unwind) : nullptr;
     for (size_t k = 0; k < b->insts.size(); ++k) {
       const Instruction &i = *b->insts[k];
       Instruction &ni = *nb->insts[k];
-      for (Value *v : i.operands()) ni.addOperand(c.of(v));
+      for (Value *v : i.operands()) ni.addOperand(of(v));
       for (size_t t = 0; t < i.targets.size(); ++t) {
         auto in = c.blocks.find(i.targets[t].block);
         ni.targets.push_back({in == c.blocks.end() ? i.targets[t].block : in->second, {}});
-        for (Value *v : i.targets[t].args) ni.addTargetArg(t, c.of(v));
+        for (Value *v : i.targets[t].args) ni.addTargetArg(t, of(v));
       }
     }
   }

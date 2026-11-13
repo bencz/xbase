@@ -174,6 +174,14 @@ Instruction *Builder::indexSet(Value *base, Value *idx, Value *value) {
   return make(Op::IndexSet, Type::Void, {base, idx, value});
 }
 
+Instruction *Builder::inlineEnter(Function *shown) {
+  Instruction *i = make(Op::InlineEnter, Type::Void);
+  i->blockFn = shown;
+  return i;
+}
+
+Instruction *Builder::inlineLeave() { return make(Op::InlineLeave, Type::Void); }
+
 Instruction *Builder::makeBlock(Function *blockFn, std::vector<Var *> captures) {
   Instruction *i = make(Op::MakeBlock, Type::Item);
   i->blockFn = blockFn;

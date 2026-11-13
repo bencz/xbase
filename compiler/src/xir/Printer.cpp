@@ -180,7 +180,7 @@ private:
       break;
     case Op::ClassNew: out_ += " " + std::to_string(i.classIndex); break;
     case Op::MvParam: out_ += " " + i.message + " " + std::to_string(i.index); break;
-    case Op::MakeBlock:
+    case Op::MakeBlock: case Op::InlineEnter:
       out_ += " " + i.blockFn->name;
       for (Var *c : i.captures) out_ += " " + varName(*c);
       break;

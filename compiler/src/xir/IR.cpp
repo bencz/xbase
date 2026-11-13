@@ -80,6 +80,7 @@ void Instruction::copyData(const Instruction &from) {
   superSend = from.superSend;
   blockFn = from.blockFn;
   captures = from.captures;
+  alias = from.alias;
 }
 
 void Instruction::removeUse(Value *v, Instruction *user) {
@@ -204,6 +205,13 @@ BasicBlock *Function::addBlock(const std::string &blockName) {
 Var *Function::addVar(Var::Kind k, uint32_t index, std::string varName) {
   vars.push_back(std::make_unique<Var>(Var{k, index, false, false, std::move(varName)}));
   return vars.back().get();
+}
+
+Var *Function::addFrameVar(std::string varName) {
+  uint32_t slot = 0;
+  for (auto &v : vars)
+    if (v->kind == Var::Kind::Frame) slot = std::max(slot, v->index + 1);
+  return addVar(Var::Kind::Frame, slot, std::move(varName));
 }
 
 void Function::renumber() const {

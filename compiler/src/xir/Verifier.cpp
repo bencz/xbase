@@ -26,6 +26,7 @@ public:
     }
     for (auto &b : f_.blocks) block(*b);
     useLists();
+    inlineNesting();
     return error_;
   }
 
@@ -61,6 +62,11 @@ private:
       for (auto &p : b->params) check(*p);
       for (auto &i : b->insts) check(*i);
     }
+  }
+
+  void inlineNesting() {
+    InlineBodies at;
+    if (!openInlineBodies(cfg_, at)) fail("inline.enter and inline.leave do not nest");
   }
 
   void block(const BasicBlock &b) {
@@ -235,7 +241,11 @@ private:
         if (!ok) fail("params.ref tests something other than a parameter of this function");
       }
       break;
-    case Op::SeqCatch: case Op::SeqValue: case Op::SeqSuspend: expect(i, 0, {}); break;
+    case Op::SeqCatch: case Op::SeqValue: case Op::SeqSuspend: case Op::InlineLeave: expect(i, 0, {}); break;
+    case Op::InlineEnter:
+      expect(i, 0, {});
+      if (!i.blockFn || i.blockFn->kind != Function::Kind::Block) fail("inline.enter without the block it shows");
+      break;
     case Op::SeqWith: case Op::SeqRestore: expect(i, 1, {Type::Item}); break;
     case Op::BoxI64: expect(i, 1, {Type::I64}); break;
     case Op::BoxBool: expect(i, 1, {Type::Bool}); break;

@@ -3,6 +3,7 @@
 #include "xir/Analysis.h"
 #include "xir/IR.h"
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -15,21 +16,17 @@ namespace xb::xir {
 // it.
 BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k);
 
-// A copy of blocks of a function, in it: each block's copy is named with `suffix`, takes parameters of the same types,
-// and holds copies of its instructions, whose operands and targets are the copies of the originals (values from
-// outside the copied blocks, and constants, stay). `pairs` lists (original, copy) in block order: a stable order of
-// work.
+// A copy of blocks into function `f` (theirs, or another): each block's copy is named with `suffix`, takes parameters
+// of the same types, and holds copies of its instructions, whose operands and targets are the copies of the originals;
+// a value from outside the copied blocks (a constant, say) is what `outside` gives for it, or itself. `pairs` lists
+// (original, copy) in block order: a stable order of work.
 struct BlockCopy {
   std::unordered_map<const BasicBlock *, BasicBlock *> blocks;
   std::unordered_map<const Value *, Value *> values;
   std::vector<std::pair<Value *, Value *>> pairs;
-
-  Value *of(Value *v) const {
-    auto it = values.find(v);
-    return it == values.end() ? v : it->second;
-  }
 };
-BlockCopy copyBlocks(Function &f, const std::vector<BasicBlock *> &originals, const std::string &suffix);
+BlockCopy copyBlocks(Function &f, const std::vector<BasicBlock *> &originals, const std::string &suffix,
+                     const std::function<Value *(Value *)> &outside = {});
 
 // A value of type `t` for a use that never runs: NIL, false, 0.
 Value *undefinedValue(Function &f, Type t);

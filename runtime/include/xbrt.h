@@ -183,7 +183,9 @@ typedef struct xb_proc {
  * the call; the callee may replace them, so the caller does not read them
  * again after the call. The runtime links frames without slots or arguments
  * for its own functions while what they do can be seen: an error block they
- * run, a codeblock they call. */
+ * run, a codeblock they call. Compiled code links one too, over its own,
+ * while the body of a codeblock it runs in place (inlined) runs: `argc` and
+ * `argv` are not set (its proc has no XB_PROC_ARGS). */
 typedef struct xb_frame xb_frame;
 #ifndef __cplusplus
 struct xb_frame {

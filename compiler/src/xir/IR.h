@@ -281,6 +281,7 @@ public:
   BasicBlock *entry() const { return blocks.front().get(); }
   BasicBlock *addBlock(const std::string &name);
   Var *addVar(Var::Kind k, uint32_t index, std::string name);
+  Var *addFrameVar(std::string name); // in the slot after every other frame variable's
   void renumber() const;          // ids for values, in block order
 
 private:

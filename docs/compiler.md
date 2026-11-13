@@ -413,7 +413,7 @@ emits the object file.
   variable, and one used only by `ret` into the caller's result slot. A call's result is never computed straight into a
   heap object (a cell, an element) and only into a plain frame variable, and an operation that can fail is not computed
   in place through a reference (finding the element can fail too, and the operation's error comes first) or in a block
-  that unwinds (the handler may read the variable, and a call clears its result first). Two edges from
+  that unwinds (the handler may read the variable, and a call may clear its result first). Two edges from
   one block to the same block do not share their arguments' slots. A value that never refers to a heap object
   (`xir::TypeInfo`, [xir.md](xir.md#types)) and is not computed in a slot as above is `Local`: an item of its own
   outside the frame (an `alloca` reached only by loads and stores, which LLVM keeps in registers). Block parameters are
@@ -440,7 +440,8 @@ emits the object file.
   [runtime.md](runtime.md#frames)), copies the parameters into the first slots (in a direct entry, from the words in
   registers; otherwise branch-free from a selected source, `argv[k]` or a `NIL` constant: `argItem`), clears the other
   slots, stores the arguments as received (`argv`, `argc`) when the function reads them (`readsArgs`) and links the
-  frame into the context; the caller has already set the result to `NIL`. The exit block unlinks the frame and returns.
+  frame into the context; every `ret` writes the result (`NIL` without a value: a direct caller does not clear it
+  first). The exit block unlinks the frame and returns.
   Blocks are laid out in reverse postorder visiting successors last first, so a block's first successor (a loop body, a
   THEN branch) follows it and exits come later.
 - Operations call the runtime (`xb_op_*` and the others); the result may alias an operand. `FastPaths.cpp` inlines the
@@ -546,7 +547,12 @@ emits the object file.
   frame right before each marked call that can see the call stack (any call but intrinsics and the runtime entry points
   that never raise an error or run code, `quietCalls_`), once per LLVM block and line. The fast paths of operations thus
   store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for references clears its
-  own `proc`: the other body shows instead.
+  own `proc`: the other body shows instead. `inline.enter` links a frame without slots (an `alloca` of the entry
+  block) that shows the inlined block function, after storing the line of the `Eval` it replaces in the frame below;
+  until the matching `inline.leave`, which links the frame below again, calls take it as the caller's frame and their
+  lines are stored in it. The frames open where each block starts are those of the `inline.enter`s on the way to it
+  (`openInlineBodies` in `xir/Analysis`: an inlined body is entered at its start and left at its end). That store of
+  the line counts as one `placeLines` made.
 - After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
   `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
   load stays in a loop without calls instead of leaving it; the loads carry the metadata `xb.poll`, on a back edge, or

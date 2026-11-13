@@ -111,8 +111,8 @@ void FramePlan::elideLoads(const BasicBlock &b) {
 // whose address can fail (through a reference) takes no operation that can:
 // the operation's error comes first. In a block that unwinds (to a BEGIN
 // SEQUENCE handler, which may read the variable, or a FOR EACH cleanup), an
-// operation that can fail is not computed in place either: a call clears its
-// result first.
+// operation that can fail is not computed in place either: a call may clear
+// its result first.
 bool FramePlan::canForward(const Instruction &value, const Instruction &store) const {
   if (store.op != Op::Store || store.operand(0) != &value || !value.hasOneUse()) return false;
   if (value.mayFail() && (store.mayFail() || store.parent->unwind)) return false;

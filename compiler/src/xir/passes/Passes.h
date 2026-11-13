@@ -7,6 +7,10 @@ namespace xb::xir {
 // The optimization passes on xIR (docs/xir.md, Passes). Each one transforms a
 // function in place and returns whether it changed anything.
 
+// `Eval( {| p | body }, x )` where the block is made only for that call: the body runs in place, shown on the call
+// stack as the block (inline.enter, inline.leave), its variables the function's own (InlineBlocks.cpp).
+bool inlineBlocks(Function &f);
+
 // `x := x + y` on a LOCAL only the function sees and that holds strings
 // becomes one `append`, whose string grows in place (AppendInPlace.cpp).
 bool appendInPlace(Function &f);

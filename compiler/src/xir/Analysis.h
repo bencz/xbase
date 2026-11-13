@@ -84,4 +84,10 @@ bool removeUnreachableBlocks(Function &f); // true when it removed some
 using Predecessors = std::unordered_map<const BasicBlock *, std::vector<Instruction *>>;
 Predecessors predecessorTerminators(const Function &f);
 
+// The inline.enters open where each reachable block starts, innermost last: an inlined body is entered at its start
+// and left at its end. False when they do not nest so (a leave with none open, two paths into a block with different
+// ones open, a return or yield with one open).
+using InlineBodies = std::unordered_map<const BasicBlock *, std::vector<const Instruction *>>;
+bool openInlineBodies(const CFG &cfg, InlineBodies &at);
+
 } // namespace xb::xir

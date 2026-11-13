@@ -77,6 +77,8 @@ constexpr OpInfo kOps[] = {
     {Op::GenNew, "gen.new", Allocates | ReadsHeap},
     {Op::GenRestore, "gen.restore", WritesVar | ReadsHeap | WritesState},
     {Op::GenDone, "gen.done", WritesHeap | WritesState},
+    {Op::InlineEnter, "inline.enter", WritesState},
+    {Op::InlineLeave, "inline.leave", WritesState},
     {Op::Br, "br", Terminator},
     {Op::CondBr, "cond_br", Terminator},
     {Op::GenYield, "gen.yield", Terminator | ReadsVar | WritesHeap | WritesState | Allocates},
