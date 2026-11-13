@@ -1,7 +1,8 @@
 // PCount() and PValue(): the arguments a function or codeblock received, its parameters by their current value (a
 // function calling PValue() keeps them in its frame) and the arguments past them as passed; PValue( n, x ) writes one,
 // through the reference when one was passed, and the caller's own values stay as they were. Main receives the
-// command-line arguments (pcount_pvalue.args), as an INIT procedure does before it.
+// command-line arguments (pcount_pvalue.args), as an INIT procedure does before it. Through a macro: an expression's
+// PCount() is the function's running it, a codeblock's its own.
 INIT PROCEDURE Setup()
    ? "init", PCount(), PValue( 1 ), PValue( 1, "changed" ), PValue( 2, "too" ), PValue( 1 )
 RETURN
@@ -23,6 +24,8 @@ PROCEDURE Main( cFirst )
    ? "nested", Outer( "o1", "o2" )
    ? "promoted", Promoted( 10 )
    ? "abbreviated", PCou()
+   ? "macro", ThroughMacro( 1, 2, 3 ), Eval( &( "{| x | PCount() }" ) ), Eval( &( "{| x | PCount() }" ), 9, 8 ), ;
+      Eval( &( "{|| PValue( 2 ) }" ), "a", "b" )
    ? "hmerge", Merged()
 RETURN
 
@@ -74,3 +77,6 @@ FUNCTION Promoted( n )
       s += i
    NEXT
 RETURN s + PCount()
+
+STATIC FUNCTION ThroughMacro( a, b, c )
+RETURN &( "PCount()" )

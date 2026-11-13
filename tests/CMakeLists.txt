@@ -6,28 +6,31 @@
 # in an optional directory <name>.d/ are compiled on their own with --no-entry
 # and linked into the program, and those in <name>.rt/ likewise as modules of
 # the runtime (--runtime).
-function(xb_add_run_test name)
-  set(obj ${CMAKE_CURRENT_BINARY_DIR}/${name}.o)
+# Every program is built twice, run.<name> as xbc builds by default (-O2) and run0.<name> with -O0 (no xIR passes):
+# both must give the same output, so that no optimization changes what a program does. Each test runs in a directory
+# of its own, work/<test>.<name> (programs write and list files: tests running at once never see each other's).
+function(xb_add_run_test_variant name suffix test workdir)
+  set(obj ${CMAKE_CURRENT_BINARY_DIR}/${name}${suffix}.o)
   file(GLOB with ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.with/*.prg)
-  xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.prg ${obj} ${with})
+  xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.prg ${obj} ${with} ${ARGN})
   set(objs ${obj})
   file(GLOB modules ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.d/*.prg)
   foreach(module ${modules})
     get_filename_component(stem ${module} NAME_WE)
-    set(mobj ${CMAKE_CURRENT_BINARY_DIR}/${name}.d.${stem}.o)
-    xb_compile_prg(${module} ${mobj} --no-entry)
+    set(mobj ${CMAKE_CURRENT_BINARY_DIR}/${name}${suffix}.d.${stem}.o)
+    xb_compile_prg(${module} ${mobj} --no-entry ${ARGN})
     list(APPEND objs ${mobj})
   endforeach()
   file(GLOB modules ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.rt/*.prg)
   foreach(module ${modules})
     get_filename_component(stem ${module} NAME_WE)
-    set(mobj ${CMAKE_CURRENT_BINARY_DIR}/${name}.rt.${stem}.o)
-    xb_compile_prg(${module} ${mobj} --runtime)
+    set(mobj ${CMAKE_CURRENT_BINARY_DIR}/${name}${suffix}.rt.${stem}.o)
+    xb_compile_prg(${module} ${mobj} --runtime ${ARGN})
     list(APPEND objs ${mobj})
   endforeach()
-  add_executable(t_${name} ${objs})
-  set_target_properties(t_${name} PROPERTIES LINKER_LANGUAGE C)
-  target_link_libraries(t_${name} PRIVATE xbrt)
+  add_executable(t${suffix}_${name} ${objs})
+  set_target_properties(t${suffix}_${name} PROPERTIES LINKER_LANGUAGE C)
+  target_link_libraries(t${suffix}_${name} PRIVATE xbrt)
   set(rc 0)
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.rc)
     file(READ ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.rc rc)
@@ -37,17 +40,24 @@ function(xb_add_run_test name)
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.args)
     file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.args args)
   endif()
-  add_test(NAME run.${name}
+  file(MAKE_DIRECTORY ${workdir})
+  add_test(NAME ${test}.${name}
     COMMAND ${CMAKE_COMMAND}
-      "-DEXE=$<TARGET_FILE:t_${name}>;${args}"
+      "-DEXE=$<TARGET_FILE:t${suffix}_${name}>;${args}"
       -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.out
       -DEXPECTED_RC=${rc}
       -DEXPECTED_ERR=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.err
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake
+    WORKING_DIRECTORY ${workdir})
   # A test that commits much memory (a recursion to the end of the stack) runs alone, never beside another.
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.serial)
-    set_tests_properties(run.${name} PROPERTIES RUN_SERIAL TRUE)
+    set_tests_properties(${test}.${name} PROPERTIES RUN_SERIAL TRUE)
   endif()
+endfunction()
+
+function(xb_add_run_test name)
+  xb_add_run_test_variant(${name} "" run ${CMAKE_CURRENT_BINARY_DIR}/work/run.${name})
+  xb_add_run_test_variant(${name} _O0 run0 ${CMAKE_CURRENT_BINARY_DIR}/work/run0.${name} -O0)
 endfunction()
 
 file(GLOB XB_RUN_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/run ${CMAKE_CURRENT_SOURCE_DIR}/run/*.prg)

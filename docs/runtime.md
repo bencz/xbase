@@ -100,13 +100,15 @@ file (`xb_proc.file`; a codeblock's is its function's), without the directories:
 the compiler, which would put build directories into programs; a runtime function, in C or in xBase, has none (`""`).
 
 `argc` and `argv` in the frame are the arguments as the function received them, stored only by a function or codeblock
-that calls `PCount()` or `PValue()` itself (`XB_PROC_ARGS` in its `xb_proc`; nothing else can read them, and the other
-calls cost nothing more); they belong to its caller (slots of the caller's frame, or items the runtime keeps rooted),
+that calls `PCount()` or `PValue()` itself, or runs a macro, whose text may call them (`XB_PROC_ARGS` in its
+`xb_proc`; nothing else can read them, and the other calls cost nothing more; a codeblock the macro evaluator made
+keeps its own); they belong to its caller (slots of the caller's frame, or items the runtime keeps rooted),
 which keeps them during the call. The function may replace them (`PValue()`), so a caller does not read an argument
 again after the call: `HMerge` merges the entry as it was before its filter ran, and each `INIT` procedure receives its
 own copy of the command-line arguments. `PCount()` and `PValue( nArg, [xNew] )` (`rtl/lang.c`) read the innermost frame
 with a `proc` (a codeblock's own, also a hidden one of the runtime's xBase code; `Do`'s, with `Do`'s own arguments,
-while `Do` runs; a frame without `XB_PROC_ARGS` counts no arguments): `PCount()` is `argc` (in a method's frame,
+while `Do` runs; past a macro expression's, `XB_PROC_TRANSPARENT`, which is no activation of its own; a frame without
+`XB_PROC_ARGS` counts no arguments): `PCount()` is `argc` (in a method's frame,
 `XB_PROC_METHOD`, the arguments after `Self`, which `PValue()` numbers from 1 too); `PValue()` gives argument
 `nArg` (a fraction truncated) for `1 <= nArg <= argc`, `NIL` otherwise: a parameter's current value (the first
 `xb_proc.nparams` slots; a function calling `PValue()` keeps its parameters there, see
@@ -622,8 +624,8 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
   it is `EG_NOVAR` or `EG_NOALIAS` (a variable, field or alias found missing only then), `"UE"` otherwise; else the
   letter `ValType()` would give. A PRIVATE the
   evaluation creates is the calling function's (`PRIVATES` in `rtl.ch`). Anything but a string is `BASE/1121`.
-- Not yet: `o:&message`, `@&name`, and `PCount()`/`PValue()` inside a macro (they read the
-  macro's frame, which keeps no arguments).
+- Not yet: `o:&message`, `@&name`. `PCount()` inside a macro expression counts the arguments of the function or
+  codeblock running it; inside a codeblock the macro made, the codeblock's own (`PValue()` gives them as passed).
 
 ## Calling convention
 

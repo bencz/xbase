@@ -12,15 +12,17 @@ Tests run through CTest (`ctest --test-dir build --output-on-failure`); `tests/C
 | Declarations | `runtime.declarations` (`tests/declarations_test.cmake`) | `include/rtl.ch` declares exactly the `xbf_` functions defined in `runtime/src`. |
 | Platform | `tests/platform/<name>.c`, optional `<name>.prg` | A C program linked with `xbrt` (and with `<name>.prg`, compiled with `--no-entry`, whose functions it calls as `xbp_NAME`) exercises the runtime's own services (threads, locks, atomics, waiting on an address, collections while compiled loops run) under contention, and exits with 0 when every check passed (`check.h`). |
 
-Every test has a 30-second timeout, so a hang or a loop fails instead of stalling the run. Execution tests run in the
-build's `tests` directory; one that writes files names them after itself (`memvars_save_*.mem`), so tests running in
-parallel do not share them, and each run overwrites them.
+Every test has a 30-second timeout, so a hang or a loop fails instead of stalling the run. Every execution test is
+built twice: `run.<name>` as `xbc` builds by default (`-O2`) and `run0.<name>` with `-O0` (no xIR passes); both must
+give `<name>.out`, so that no optimization changes what a program does. Each runs in a directory of its own in the
+build (`tests/work/run.<name>`, `tests/work/run0.<name>`), so tests running at once never see each other's files, even
+those that list a directory; a test that writes files still names them after itself (`memvars_save_*.mem`) and
+deletes them at the end.
 
 Include files used by a test sit next to it (for example `tests/run/commands.ch`). Execution tests are rebuilt when
 `std.ch` or an included file changes (`xbc --depfile`).
 
-A test that creates files (tables, `.mem` files, ...) runs in the build's test directory: its files' names start with
-the test's name, so that tests running in parallel never share one, and the test deletes them at the end. A table
+A table
 written by the reference that a test needs is kept inside the test (its bytes in hexadecimal, as in
 `tests/run/rdd_format.prg`), written out when the test runs.
 
@@ -42,6 +44,14 @@ matching doc (for example the last digits of large doubles in [runtime.md](runti
 compared with `harbour -p -s -q test.prg`, whose `.ppo` keeps a line's statements joined by `;` and differs in
 spacing. Expressions on literals are folded at compile time, with results that can differ from the run-time operators
 (`10 / 5` is `2`, `n / 5` is `2.00`): tests of run-time operators use variables.
+
+A rule is tested across its inputs, not on one example: every pair of a list of values with every operator
+(`number_matrix`: integers and doubles, signs, fractions, the display widths' limits, products past 64 bits), and each
+pair as a program meets it: literals (folded when compiled), values computed at run time (elements of an array made
+then), values the compiler knows once calls are inlined (folded in xIR), and input (`Val()` of the command line).
+Code that takes text at run time is tested with text read as input (`eval_input`: codeblocks compiled from the
+command line, run with every kind of argument, and the errors bad text and bad arguments give). The reference shows
+what a rule gives; where it is wrong, xbase does better, and the difference is documented.
 
 Every behavior change adds or extends a test. Changes to code generation or to the runtime ABI are also cross-compiled
 for a 32-bit and a big-endian target, for example:

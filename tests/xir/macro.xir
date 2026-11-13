@@ -1,6 +1,6 @@
 module MACRO
 
-function MAIN params 0 {
+function MAIN params 0 args {
 entry:
   mv.set C "n"
   %1 = mv.get C

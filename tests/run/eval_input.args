@@ -1,0 +1,14 @@
+{| x | x * 2 }
+{| x, y | x + y }
+{|| "no arguments" }
+{| a | ValType( a ) }
+{| s | Upper( s ) }
+{| n | iif( n > 0, "positive", "not positive" ) }
+{| a | a[ 2 ] }
+{| x | x / 0 }
+{|| NoSuchFunction() }
+{| x | x +
+1 + 2
+{| x | {| y | x * 10 + y } }
+{| r | r := "changed", PCount() }
+{| x, y | Str( x, 8, 3 ) + "|" + Str( y, 8, 3 ) }

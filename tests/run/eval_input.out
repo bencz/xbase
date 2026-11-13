@@ -1,0 +1,18 @@
+
+[{| x | x * 2 }] <Argument error *> 10 4.02 <Argument error *> <Argument error *> <Argument error *> 4.02
+[{| x, y | x + y }] <Argument error +> <Argument error +> <Argument error +> <Argument error +> <Argument error +> <Argument error +> 7.01
+[{|| "no arguments" }] no arguments no arguments no arguments no arguments no arguments no arguments no arguments
+[{| a | ValType( a ) }] U N N C A U N
+[{| s | Upper( s ) }] <Argument error UPPER> <Argument error UPPER> <Argument error UPPER> ABC <Argument error UPPER> <Argument error UPPER> <Argument error UPPER>
+[{| n | iif( n > 0, "positive", "not positive" ) }] <Argument error >> positive positive <Argument error >> <Argument error >> <Argument error >> positive
+[{| a | a[ 2 ] }] <Argument error array access> <Argument error array access> <Argument error array access> <Argument error array access> 2 <Argument error array access> <Argument error array access>
+[{| x | x / 0 }] <Argument error /> <Zero divisor /> <Zero divisor /> <Argument error /> <Argument error /> <Argument error /> <Zero divisor />
+[{|| NoSuchFunction() }] <Undefined function NOSUCHFUNCTION> <Undefined function NOSUCHFUNCTION> <Undefined function NOSUCHFUNCTION> <Undefined function NOSUCHFUNCTION> <Undefined function NOSUCHFUNCTION> <Undefined function NOSUCHFUNCTION> <Undefined function NOSUCHFUNCTION>
+[{| x | x +] gives error: Syntax error
+[1 + 2] gives 3
+[{| x | {| y | x * 10 + y } }] block block block block block block block
+[{| r | r := "changed", PCount() }] 0 1 1 1 1 1 2
+[{| x, y | Str( x, 8, 3 ) + "|" + Str( y, 8, 3 ) }] <Argument error STR> <Argument error STR> <Argument error STR> <Argument error STR> <Argument error STR> <Argument error STR>    2.010|   5.000
+by reference changed          1
+kept         12 42 7
+aeval         12 <Variable does not exist X> {2}

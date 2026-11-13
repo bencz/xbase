@@ -29,6 +29,7 @@ private:
   void nestedBlock(Block &b, Scope &s);
   void stmt(Stmt &st, Scope &s);
   void expr(Expr &e, Scope &s);
+  void keepsArgs();
   void codeblock(BlockExpr &b, Scope &s);
   void superSend(SendExpr &m);
   bool resolve(VarExpr &v);

@@ -50,7 +50,7 @@ static void block_fn(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb
 
 /* An expression's evaluation is no activation of its own; a codeblock's is. */
 static const xb_proc expression_proc = XB_RUNTIME_PROC("&", XB_PROC_HIDDEN | XB_PROC_TRANSPARENT);
-static const xb_proc block_proc = XB_RUNTIME_PROC("&", XB_PROC_HIDDEN);
+static const xb_proc block_proc = XB_RUNTIME_PROC("&", XB_PROC_HIDDEN | XB_PROC_ARGS); /* PCount() reads them */
 
 /* The items of a frame kept in run's own stack frame; a larger one is allocated. */
 #define LOCAL_SLOTS 32u
@@ -80,6 +80,10 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
   }
   xb_frame_push(ctx, frame, self ? &block_proc : &expression_proc);
   frame->nslots = 1 + nslots;
+  if (self) { /* a codeblock's arguments as received, its caller's (rooted there) */
+    frame->argc = argc;
+    frame->argv = argv;
+  }
   uint32_t mark = self ? xb_mv_mark(ctx) : 0; /* a codeblock ends the PRIVATEs it creates */
   size_t sp = nparams; /* the top item; the stack starts above the parameters */
   uint32_t areas = 0, areaBefore = 0; /* alias->( expr ) entered, and the work area current before the first */

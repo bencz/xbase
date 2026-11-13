@@ -94,11 +94,12 @@ void xbf_PROCLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 /* The frame of the function calling: the innermost one the call stack shows
- * (a codeblock's own; Do's while Do runs); NULL when it keeps no arguments
- * (only a function that calls PCount() or PValue() itself does). */
+ * (a codeblock's own; Do's while Do runs; through a macro expression's, which
+ * is no activation of its own); NULL when it keeps no arguments (only a
+ * function that calls PCount() or PValue(), or runs a macro, does). */
 static xb_frame *caller_frame(const xb_ctx *ctx) {
   xb_frame *f = ctx->frames;
-  while (f && !f->proc) f = f->prev;
+  while (f && (!f->proc || (f->proc->flags & XB_PROC_TRANSPARENT))) f = f->prev;
   return f && (f->proc->flags & XB_PROC_ARGS) ? f : NULL;
 }
 
