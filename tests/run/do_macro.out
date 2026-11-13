@@ -1,0 +1,12 @@
+
+hi          1          1          5          7          4
+after:         10          1         30
+hi NIL NIL NIL NIL          0
+hi         10 NIL          3 NIL          3
+        10
+hi2
+hi          1 NIL NIL NIL          1
+hi          2 NIL NIL NIL          1
+error       1001 NOSUCH Undefined function
+error       1449 & Syntax error
+error       1065 & Argument error

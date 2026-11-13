@@ -59,7 +59,8 @@ default (`Alert()`, the terminal layer).
 
 ### Procedures, parameters and the call stack
 
-Skipped arguments and `PARAMETERS`; `DO <proc> WITH` by name at run time.
+Done: skipped arguments, `PARAMETERS`, and `DO &name [WITH args]`, the procedure named at run time
+([compiler.md](compiler.md#grammar)).
 
 ### Commands, statements and headers
 

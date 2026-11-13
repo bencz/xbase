@@ -63,24 +63,37 @@ StmtPtr Parser::parseStmtKind() {
     endOfStmt();
     return std::make_unique<JumpStmt>(loc, k);
   }
-  if (atStmtKw("DO") && ahead().kind == Tok::Ident) { // DO proc [WITH args]
+  bool doMacro = atStmtKw("DO") && ahead().kind == Tok::Amp &&
+                 ((ahead(2).kind == Tok::Ident && !ahead(2).spaceBefore) || ahead(2).kind == Tok::LParen);
+  if (atStmtKw("DO") && (ahead().kind == Tok::Ident || doMacro)) { // DO proc [WITH args], DO &name [WITH args]
     advance();
-    auto call = std::make_unique<CallExpr>(cur().loc, cur().upper);
-    advance();
+    ExprPtr call;
+    std::vector<ExprPtr> *args;
+    if (doMacro) { // the procedure the text names when the statement runs
+      SourceLoc callLoc = cur().loc;
+      auto m = std::make_unique<MacroCallExpr>(callLoc, parseMacroOperand());
+      args = &m->args;
+      call = std::move(m);
+    } else {
+      auto c = std::make_unique<CallExpr>(cur().loc, cur().upper);
+      advance();
+      args = &c->args;
+      call = std::move(c);
+    }
     if (atKw("WITH")) { // empty arguments pass NIL, as in a call; a variable is passed by reference
       advance();
       do {
         if (at(Tok::Comma) || atEndOfStmt()) {
-          call->args.push_back(std::make_unique<NilExpr>(cur().loc));
+          args->push_back(std::make_unique<NilExpr>(cur().loc));
         } else if (at(Tok::At) && !atFunctionRef()) {
-          call->args.push_back(parseRef());
+          args->push_back(parseRef());
         } else { // a function reference is a value, which an operator or a message may follow
           ExprPtr arg = parseExpr();
           if (arg->kind == ExprKind::Var && !arg->parenthesized) {
             SourceLoc argLoc = arg->loc;
             arg = std::make_unique<RefExpr>(argLoc, std::move(arg));
           }
-          call->args.push_back(std::move(arg));
+          args->push_back(std::move(arg));
         }
       } while (accept(Tok::Comma));
     }

@@ -154,7 +154,9 @@ Statements:
   type` declares the class of a built-in type's values (its name is the type's as `ClassName()` gives it; no class
   function, no instance variables).
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
-  other arguments (an element, a variable in parentheses, an expression) by value
+  other arguments (an element, a variable in parentheses, an expression) by value. `DO &name [WITH args]` (also
+  `&name.suffix` and `&( expr )`, which the reference lacks) calls the procedure the text names when it runs, as
+  `&name( args )` does (`MacroCallExpr`), with the arguments by the same rule
 - expression statements; a statement `operand = expr` is an assignment, and `=` inside `expr` compares:
   `x = y = 3` is `x := ( y = 3 )`, `a[1] = 5` assigns. The parser reports an invalid assignment target (anything but
   a variable, an element, an instance variable, a macro or a field, also in parentheses) here, for `:=`, `op=` and
