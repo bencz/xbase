@@ -15,7 +15,7 @@ bool isItemResult(const Value *v) { return v->kind() == Value::Kind::Instruction
 // Operations whose operands go in consecutive slots (a call to a direct entry passes words in registers).
 bool isGroupUser(const Instruction &i) {
   return (i.op == Op::Call && !isDirectCall(i)) || i.op == Op::Send || i.op == Op::ArrayLit || i.op == Op::HashLit ||
-         i.op == Op::MacroCall || i.op == Op::GenNew;
+         i.op == Op::MacroCall || i.op == Op::GenNew || i.op == Op::InlineEnter;
 }
 
 } // namespace
@@ -26,8 +26,9 @@ FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {
   number();
   chooseHomes();
   computeLiveness();
-  allocate();
+  extendArgumentGroups();
   findBodyUnits();
+  allocate();
   placeClears();
   placeLoopClears();
 }
@@ -322,52 +323,68 @@ void FramePlan::allocate() {
   }
 }
 
-// The units of each inlined body (values and argument groups of its instructions; a nested body's that are still live
-// where it ends), by a forward walk: a stack of open bodies, one set each, joined where paths meet, until nothing
-// changes (loops).
-void FramePlan::findBodyUnits() {
-  using Open = std::vector<std::unordered_set<uint32_t>>;
-  std::unordered_map<const BasicBlock *, Open> at;
-  for (bool changed = true; changed;) {
-    changed = false;
-    for (BasicBlock *b : cfg_.order()) {
-      Open open = at[b];
-      auto add = [&](const Value *v) {
-        auto u = unit_.find(v);
-        if (u != unit_.end() && !open.empty()) open.back().insert(u->second);
-      };
-      for (auto &p : b->params) add(p.get());
-      for (auto &i : b->insts) {
-        if (i->op == Op::InlineEnter) {
-          open.emplace_back();
-          continue;
-        }
-        if (i->op == Op::InlineLeave) {
-          auto &mine = bodyUnits_[i.get()];
-          size_t before = mine.size();
-          mine.insert(open.back().begin(), open.back().end());
-          changed |= mine.size() != before;
-          open.pop_back();
-          uint32_t p = pos_.at(i.get());
-          if (!open.empty())
-            for (uint32_t u : mine)
-              if (units_[u].start <= p && p <= units_[u].end) open.back().insert(u);
-          continue;
-        }
-        add(i.get());
-        if (auto g = groupUnit_.find(i.get()); g != groupUnit_.end() && !open.empty()) open.back().insert(g->second);
+// The arguments an inline.enter passes stay in their slots, the frame's argv, while its body runs: their group lives
+// to the body's last instruction (on every path, through the copies of the body).
+void FramePlan::extendArgumentGroups() {
+  xir::walkBodies<const Instruction *>(cfg_, [&](const BasicBlock &b, auto &open) {
+    bool changed = false;
+    for (auto &i : b.insts) {
+      if (i->op == Op::InlineEnter) {
+        open.push_back({i.get()});
+        continue;
       }
-      for (size_t k = 0; k < b->numSuccessors(); ++k) {
-        Open &next = at[b->successor(k)];
-        if (next.size() < open.size()) next.resize(open.size());
-        for (size_t d = 0; d < open.size(); ++d) {
-          size_t before = next[d].size();
-          next[d].insert(open[d].begin(), open[d].end());
-          changed |= next[d].size() != before;
-        }
+      if (i->op == Op::InlineLeave) {
+        open.pop_back();
+        continue;
       }
+      uint32_t p = pos_.at(i.get());
+      for (auto &enters : open)
+        for (const Instruction *e : enters)
+          if (auto g = groupUnit_.find(e); g != groupUnit_.end() && units_[g->second].end < p) {
+            units_[g->second].end = p;
+            changed = true;
+          }
     }
-  }
+    return changed;
+  });
+}
+
+// The units of each inlined body: values and argument groups of its instructions, the arguments it received, and a
+// nested body's units still live where that one ends.
+void FramePlan::findBodyUnits() {
+  xir::walkBodies<uint32_t>(cfg_, [&](const BasicBlock &b, auto &open) {
+    bool changed = false;
+    auto add = [&](const Value *v) {
+      auto u = unit_.find(v);
+      if (u != unit_.end() && !open.empty()) open.back().insert(u->second);
+    };
+    auto addGroup = [&](const Instruction *i) {
+      if (auto g = groupUnit_.find(i); g != groupUnit_.end() && !open.empty()) open.back().insert(g->second);
+    };
+    for (auto &p : b.params) add(p.get());
+    for (auto &i : b.insts) {
+      if (i->op == Op::InlineEnter) {
+        open.emplace_back();
+        addGroup(i.get());
+        continue;
+      }
+      if (i->op == Op::InlineLeave) {
+        auto &mine = bodyUnits_[i.get()];
+        size_t before = mine.size();
+        mine.insert(open.back().begin(), open.back().end());
+        changed |= mine.size() != before;
+        open.pop_back();
+        uint32_t p = pos_.at(i.get());
+        if (!open.empty())
+          for (uint32_t u : mine)
+            if (units_[u].start <= p && p <= units_[u].end) open.back().insert(u);
+        continue;
+      }
+      add(i.get());
+      addGroup(i.get());
+    }
+    return changed;
+  });
 }
 
 // Adds to `slots` (kept sorted, without repeats) those of `units` that no unit live at position `at` holds. Live

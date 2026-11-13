@@ -86,6 +86,7 @@ private:
   llvm::Constant *procOf(const xir::Function &f);
   void markLine(llvm::Instruction *i);
   llvm::Value *innermostFrame() const;
+  bool showsLines() const;
   void placeLines();
   // `prev`: the frame the chain has now, when known (else it is read from the context).
   void linkFrame(llvm::Value *frame, llvm::Value *nslots, llvm::Value *proc, llvm::Value *prev = nullptr);
@@ -302,6 +303,7 @@ private:
   // block starts, innermost last; those open where the code being lowered is (the innermost frame shows its line);
   // the frame each call (or the line store of an inline.enter) stores its line in, when not the function's own
   // (placeLines).
+  const xir::Function *fnShown_ = nullptr;  // the function being lowered
   std::vector<llvm::Value *> inlineFrames_; // by depth: bodies open at once are at different depths
   xir::InlineBodies inlineAt_;
   std::vector<const xir::Function *> inlineOpen_;

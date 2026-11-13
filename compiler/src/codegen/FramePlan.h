@@ -30,7 +30,8 @@ struct Home {
 // prologue copies them there), then the other frame variables still in memory
 // (those mem2reg did not make values), then temporaries. Every live item value that needs storage gets a slot; slots
 // are assigned by linear scan over live intervals and reused once free.
-// Operands of a call or array literal take consecutive slots (a group), and a
+// Operands of a call or array literal (and the arguments an inline.enter passes,
+// kept while its body runs) take consecutive slots (a group), and a
 // value used only there is computed straight into its slot of the group; a
 // branch argument used only there shares the slot of the block parameter; a
 // load whose single use follows with nothing in between that can write the
@@ -77,6 +78,7 @@ private:
   void findUnwritten();
   void computeLiveness();
   void allocate();
+  void extendArgumentGroups();
   void findBodyUnits();
   void placeClears();
   void placeLoopClears();

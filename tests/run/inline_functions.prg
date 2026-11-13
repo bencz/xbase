@@ -2,7 +2,7 @@
 // function with its own lines (also to a function it calls and to an error), parameters take the arguments (NIL past
 // the last, extra ones ignored, references through them), LOCALs start NIL on every call, a procedure gives NIL,
 // nested and repeated calls, a RETURN from inside FOR EACH, and a BREAK out of one leave the stack as it was. An object
-// a call made and dropped is gone once it returns, as its frame is. Recursive functions, those that read PCount() or
+// a call made and dropped is gone once it returns, as its frame is. Recursive functions, those that take `...` or
 // create PRIVATEs stay calls.
 STATIC s_nGone := 0
 

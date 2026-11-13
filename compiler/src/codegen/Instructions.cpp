@@ -601,12 +601,18 @@ void CodeGen::emit(const xir::Instruction &i) {
     }
     Value *frame = inlineFrames_[inlineOpen_.size()];
     Value *outer = innermostFrame();
-    if (line_ && !runtimeLibrary_) { // the line of the call it replaces, as that call would store it (see markLine)
+    if (line_ && showsLines()) { // the line of the call it replaces, as that call would store it (see markLine)
       Value *at = b_.CreateStructGEP(frameType(0), outer, FrameLine);
       StoreInst *line = b_.CreateStore(ConstantInt::get(i32_, line_), at);
       tag(line, Mem::FrameLink);
       line->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
       callFrame_[line] = outer;
+    }
+    if (i.blockFn->readsArgs) { // the arguments as received, which its body reads (PCount())
+      Value *argv = operandGroup(i);
+      tag(b_.CreateStore(argv, b_.CreateStructGEP(frameType(0), frame, FrameArgv)), Mem::FrameLink);
+      Value *argc = ConstantInt::get(i32_, i.operands().size());
+      tag(b_.CreateStore(argc, b_.CreateStructGEP(frameType(0), frame, FrameArgc)), Mem::FrameLink);
     }
     linkFrame(frame, ConstantInt::get(i32_, 0), procOf(*i.blockFn), outer);
     inlineOpen_.push_back(i.blockFn);

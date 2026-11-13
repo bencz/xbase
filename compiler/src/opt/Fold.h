@@ -2,6 +2,7 @@
 
 #include "parser/AST.h"
 
+#include <optional>
 #include <string>
 
 namespace xb {
@@ -10,6 +11,11 @@ namespace xb {
 // time" (the result of folding `/`, `%` on doubles, or `^`). Never reaches the
 // runtime: code generation materializes such numbers with a runtime call.
 constexpr uint16_t kDefaultDecimals = 255;
+
+// The result of `x op y` for two strings and a comparison for equality (=, ==, !=), when it does not depend on SET
+// EXACT at run time: == compares the bytes; = and != compare the bytes of strings of one length (SET EXACT changes
+// only how a longer string compares with a shorter one).
+std::optional<bool> stringEquality(BinOp op, const std::string &x, const std::string &y);
 
 // Compile-time evaluation of expressions on literals (constant folding). It
 // runs after call resolution and before Sema; calls are evaluated only for

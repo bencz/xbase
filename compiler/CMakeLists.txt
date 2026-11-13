@@ -48,7 +48,18 @@ add_executable(xbc
   src/codegen/Variables.cpp
   src/codegen/Emit.cpp
   src/driver/main.cpp
+  ${CMAKE_CURRENT_BINARY_DIR}/RuntimeSources.cpp
 )
+
+# The runtime's xBase sources whose functions calls may run in place (docs/xir.md, Inlining): compiled into the
+# runtime too, and carried by xbc.
+set(XB_INLINE_PRG ${PROJECT_SOURCE_DIR}/runtime/src/rtl/arrays.prg)
+string(REPLACE ";" "|" XB_INLINE_LIST "${XB_INLINE_PRG}")
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/RuntimeSources.cpp
+  COMMAND ${CMAKE_COMMAND} "-DSOURCES=${XB_INLINE_LIST}" -DOUT=${CMAKE_CURRENT_BINARY_DIR}/RuntimeSources.cpp
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_sources.cmake
+  DEPENDS ${XB_INLINE_PRG} ${CMAKE_CURRENT_SOURCE_DIR}/embed_sources.cmake
+  COMMENT "runtime sources for inlining")
 
 # xbrt.h is included for shared constants only (type tags, ABI version).
 target_include_directories(xbc PRIVATE src ${PROJECT_SOURCE_DIR}/runtime/include)

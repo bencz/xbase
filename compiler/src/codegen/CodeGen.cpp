@@ -392,6 +392,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   fn_->setUWTableKind(UWTableKind::Async); // backtraces / profilers
   FramePlan plan(f);
   plan_ = &plan;
+  fnShown_ = &f;
   blocks_.clear();
   blockOrder_.clear();
   inlineFrames_.clear();
@@ -506,14 +507,22 @@ Constant *CodeGen::procOf(const xir::Function &f) {
   Constant *flags = ConstantInt::get(i32_, (f.readsArgs ? XB_PROC_ARGS : 0) | (f.hidden ? XB_PROC_HIDDEN : 0) |
                                                (f.method ? XB_PROC_METHOD : 0));
   auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage,
-                                  ConstantStruct::get(ty, {name, nparams, flags, file_}), ".xb.proc");
+                                  ConstantStruct::get(ty, {name, nparams, flags,
+                                                           f.runtime ? ConstantPointerNull::get(ptrTy_) : file_}),
+                                  ".xb.proc");
   proc->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   procs_[&f] = proc;
   return proc;
 }
 
+// Whether the innermost frame of the code being lowered shows lines: not one of a function of the runtime, whose
+// frames show line 0 (its module's, or a function of a carried runtime source inlined or copied in).
+bool CodeGen::showsLines() const {
+  return !(inlineOpen_.empty() ? fnShown_->runtime : inlineOpen_.back()->runtime);
+}
+
 void CodeGen::markLine(Instruction *i) {
-  if (!line_ || runtimeLibrary_ || !isa<CallInst>(i)) return;
+  if (!line_ || !showsLines() || !isa<CallInst>(i)) return;
   i->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
   if (!inlineOpen_.empty()) callFrame_[i] = innermostFrame();
 }

@@ -7,13 +7,18 @@ namespace xb::xir {
 // The optimization passes on xIR (docs/xir.md, Passes). Each one transforms a
 // function in place and returns whether it changed anything.
 
-// A call of a small function of the module runs its body in place, shown on the call stack as the function
-// (inline.enter, inline.leave), its variables the caller's own (Inline.cpp).
-bool inlineFunctions(Function &f);
+// A call of a small function of the module, or of a function of the runtime's carried sources (Module::library), runs
+// its body in place, shown on the call stack as the function (inline.enter, inline.leave), its variables the caller's
+// own (Inline.cpp).
+bool inlineFunctions(Module &m, Function &f);
 
-// `Eval( {| p | body }, x )` where the block is made only for that call: the body runs in place, shown on the call
-// stack as the block, its variables the function's own (Inline.cpp).
+// `Eval( {| p | body }, x )` of a codeblock literal of the function: the body runs in place, shown on the call stack as
+// the block, its variables the function's own (Inline.cpp).
 bool inlineBlocks(Function &f);
+
+// A frame variable that nothing captures or passes by reference any more holds no cell (`shared`): it is read and
+// written directly (no barrier: it is never in the heap), which lets promote-variables take it (Inline.cpp).
+bool unshareVariables(Function &f);
 
 // `x := x + y` on a LOCAL only the function sees and that holds strings
 // becomes one `append`, whose string grows in place (AppendInPlace.cpp).

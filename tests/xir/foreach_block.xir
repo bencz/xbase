@@ -4,8 +4,6 @@ function MAIN params 1 {
   $f0 = frame 0 "ALIST"
   $f1 = frame 1 "E"
   $f2 = frame 2 shared "N"
-  $f3 = frame 3 "B"
-  $f4 = frame 4 "ALIST"
 entry:
   %0 = params.ref $f0
   cond_br %0, byref, body
@@ -37,16 +35,18 @@ each.body:
 each.end:
   each.leave $f1, false, %8
   %25 = block MAIN.block2 $f2
-  %26 = call EVAL native %25, 2:w10
-  %27 = array %26, %25
-  ret %27
+  inline.enter MAIN.block2
+  %27 = load $f2 maybe_ref
+  %28 = binary mul 2:w10, %27
+  inline.leave
+  %30 = array %28, %25
+  ret %30
 }
 
 function MAIN.byref internal params 1 {
   $f0 = frame 0 "ALIST"
   $f1 = frame 1 "E"
   $f2 = frame 2 shared "N"
-  $f3 = frame 3 "B"
 entry:
   store $f2 maybe_ref, 0:w10
   barrier $f2 maybe_ref
@@ -72,9 +72,12 @@ each.body:
 each.end:
   each.leave $f1, false, %4
   %21 = block MAIN.block1 $f2
-  %22 = call EVAL native %21, 2:w10
-  %23 = array %22, %21
-  ret %23
+  inline.enter MAIN.block1
+  %23 = load $f2 maybe_ref
+  %24 = binary mul 2:w10, %23
+  inline.leave
+  %26 = array %24, %21
+  ret %26
 }
 
 block MAIN.block1 internal params 1 {

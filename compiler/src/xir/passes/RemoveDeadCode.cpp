@@ -1,5 +1,6 @@
 // Dead code elimination: results nobody uses, of operations that do nothing
-// else, and block parameters nobody uses.
+// else, block parameters nobody uses, and frame variables (not parameters)
+// nothing reaches any more (those of inlined bodies promote-variables took).
 #include "xir/passes/Passes.h"
 
 #include "xir/Analysis.h"
@@ -55,6 +56,15 @@ bool removeDeadCode(Function &f) {
   bool changed = !dead.empty();
   for (auto &bb : f.blocks)
     std::erase_if(bb->insts, [&](const std::unique_ptr<Instruction> &i) { return dead.count(i.get()) != 0; });
+  std::unordered_set<const Var *> used;
+  for (auto &bb : f.blocks)
+    for (auto &i : bb->insts) {
+      used.insert(i->var);
+      used.insert(i->captures.begin(), i->captures.end());
+    }
+  changed |= std::erase_if(f.vars, [&](const std::unique_ptr<Var> &v) {
+               return v->kind == Var::Kind::Frame && v->index >= f.numParams && !used.count(v.get());
+             }) > 0;
   return changed || removedParams;
 }
 

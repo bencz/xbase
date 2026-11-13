@@ -38,6 +38,8 @@ public:
 
   // Processes a file; statements it produces go to the output stream.
   bool processFile(const std::string &path, SourceLoc from = {});
+  // Processes a source held in memory (one the compiler carries), named `name` in diagnostics; not a file read.
+  void processText(const std::string &name, const std::string &text);
   std::string findInclude(const std::string &name, const std::string &currentFile) const;
 
   // Every file opened so far (sources and includes), for dependency files.

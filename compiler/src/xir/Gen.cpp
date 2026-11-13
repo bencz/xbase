@@ -25,7 +25,10 @@ std::unique_ptr<Module> Generator::run(const xb::Module &ast) {
   declareClasses(ast);
   for (size_t i = 0; i < ast.funcs.size(); ++i) genFunction(*ast.funcs[i], fns[i]);
   genModuleInit(ast);
-  for (auto &f : mod_->functions) removeUnreachableBlocks(*f);
+  for (auto &f : mod_->functions) {
+    removeUnreachableBlocks(*f);
+    f->runtime = runtimeLibrary_;
+  }
   return std::move(mod_);
 }
 
@@ -159,6 +162,7 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   fn->hidden = runtimeLibrary_ && f.isStatic;
   fn->numParams = (uint32_t)f.params.size();
   fn->readsArgs = f.readsArgs;
+  fn->readsParams = f.readsParams;
   fn->method = f.ofClass != nullptr && !f.generator; // a resume function's arguments are its enumerator
   fn->callsPrivates = f.callsPrivates;
   for (uint32_t s = 0; s < f.numLocals; ++s) {
@@ -244,6 +248,7 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   fn->internal = true;
   fn->numParams = (uint32_t)blk.params.size();
   fn->readsArgs = blk.readsArgs;
+  fn->readsParams = blk.readsParams;
   fn->callsPrivates = blk.callsPrivates;
   for (uint32_t s = 0; s < blk.numLocals; ++s) { // the parameters, then an extended codeblock's LOCALs
     Var *v = fn->addVar(Var::Kind::Frame, s, s < fn->numParams ? blk.params[s].name : "");

@@ -14,7 +14,9 @@
 
 #include <algorithm>
 #include <optional>
+#include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace xb::xir {
 
@@ -24,6 +26,9 @@ namespace {
 constexpr size_t kMaxBlockInstructions = 200;
 // A function bigger than this stays a call: its body is copied at each call.
 constexpr size_t kMaxFunctionInstructions = 30;
+// ... unless the call passes a codeblock literal, which the inlined body may then run in place too (inline-blocks):
+// up to this.
+constexpr size_t kMaxFunctionWithBlockInstructions = 200;
 // Nothing is inlined into a function that has grown past this.
 constexpr size_t kMaxCallerInstructions = 3000;
 
@@ -44,14 +49,12 @@ void eraseInstruction(Instruction *i) {
   b->insts.erase(std::find_if(b->insts.begin(), b->insts.end(), [&](auto &p) { return p.get() == i; }));
 }
 
-// The blocks of a callee whose body can run in its caller's frame: they read no arguments as received (PCount(),
-// PValue(), `...`), create no PRIVATE (it would be the caller's, released later), have no unwind block (BEGIN
-// SEQUENCE), and none of the callee's own variables is shared (one captured on an earlier pass would share the cell a
-// later pass writes: a call gives each pass fresh variables).
+// The blocks of a callee whose body can run in its caller's frame: they read no parameters in their frame slots
+// (PValue(): the inlined frame has none) and no `...`, create no PRIVATE (it would be the caller's, released later),
+// and have no unwind block (BEGIN SEQUENCE). The arguments as received (PCount()) are the inlined frame's, and a
+// variable a block captures gets a fresh cell on every entry, whose store replaces the cell an earlier entry left.
 bool inlinable(const Function &callee, const std::vector<BasicBlock *> &body, size_t maxInstructions) {
-  if (callee.readsArgs || callee.usesRest || callee.callsPrivates) return false;
-  for (auto &v : callee.vars)
-    if (v->kind == Var::Kind::Frame && v->shared) return false;
+  if (callee.readsParams || callee.usesRest || callee.callsPrivates) return false;
   if (countInstructions(body) > maxInstructions) return false;
   for (const BasicBlock *blk : body) {
     if (blk->unwind) return false;
@@ -102,6 +105,27 @@ struct Inlined {
   std::vector<Var *> captures;
 };
 
+// Whether `body`, of a function of a carried runtime source, needs nothing of its module in another one: no
+// STATIC of it, none of its classes, no function of it called or made (its STATIC functions and codeblocks run in place
+// there already, once its own calls are inlined); it calls the runtime only.
+bool selfContained(const std::vector<BasicBlock *> &body) {
+  auto isStatic = [](const Var *v) { return v && v->kind == Var::Kind::Static; };
+  for (const BasicBlock *b : body)
+    for (auto &i : b->insts)
+      if (isStatic(i->var) || std::any_of(i->captures.begin(), i->captures.end(), isStatic) ||
+          i->op == Op::ClassNew || i->classIndex >= 0 || i->op == Op::MakeBlock || i->callee.function)
+        return false;
+  return true;
+}
+
+// The public function `name` of a carried runtime source, and its module; null when none has one.
+std::pair<Function *, const Module *> libraryFunction(const Module &m, const std::string &name) {
+  for (const Module *l : m.library)
+    for (auto &f : l->functions)
+      if (f->kind == Function::Kind::Program && !f->internal && f->name == name) return {f.get(), l};
+  return {nullptr, nullptr};
+}
+
 std::vector<Value *> operandsFrom(const Instruction &call, size_t first) {
   std::vector<Value *> out;
   for (size_t a = first; a < call.operands().size(); ++a) out.push_back(call.operand(a));
@@ -118,7 +142,8 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   BlockParam *result = tail->addParam(Type::Item);
 
   // The callee's variables: its captures are the cells' variables; its frame variables, new ones of the function. Its
-  // parameters, when an argument is a reference (@x), keep reading and writing through what they hold.
+  // parameters, when an argument is a reference (@x), keep reading and writing through what they hold, as do its other
+  // variables marked so (the parameters of a body inlined in it before).
   bool refArgs = anyReference(args);
   std::unordered_map<const Var *, Var *> vars;
   for (auto &v : callee.vars) {
@@ -127,7 +152,8 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
       continue;
     }
     Var *nv = f.addFrameVar(v->name);
-    nv->param = v->param && refArgs;
+    nv->param = v->param && (refArgs || v->index >= callee.numParams);
+    nv->shared = v->shared;
     vars[v.get()] = nv;
   }
   auto varOf = [&](Var *v) { // the module's STATICs stay
@@ -168,7 +194,7 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   at->takeTerminator();
   builder.setBlock(at);
   builder.setLoc(call->loc);
-  builder.inlineEnter(in.callee);
+  builder.inlineEnter(in.callee, callee.readsArgs ? args : std::vector<Value *>{});
   for (auto &v : callee.vars) {
     if (v->kind != Var::Kind::Frame) continue;
     bool given = v->param && v->index < callee.numParams && v->index < args.size();
@@ -179,22 +205,28 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   eraseInstruction(call);
 }
 
-// A variable that nothing captures or passes by reference any more holds no cell: it is read and written directly
-// (no barrier: it is never in the heap), which lets promote-variables take it.
-void unshare(Function &f) {
-  std::unordered_map<const Var *, bool> needed;
-  for (auto &b : f.blocks)
-    for (auto &i : b->insts) {
-      for (const Var *c : i->captures) needed[c] = true;
-      if (i->var && i->op != Op::Load && i->op != Op::Store && i->op != Op::Barrier) needed[i->var] = true;
+// The arguments an inlined body no longer reads (the call of an ARGS function that did, gone with a branch never
+// taken) stop being passed: the values they were stay free to go (a codeblock literal no longer made, say).
+bool dropUnreadArguments(Function &f) {
+  std::unordered_set<const Instruction *> read;
+  walkBodies<const Instruction *>(CFG(f), [&](const BasicBlock &b, auto &open) {
+    bool changed = false;
+    for (auto &i : b.insts) {
+      if (i->op == Op::InlineEnter) open.push_back({i.get()});
+      else if (i->op == Op::InlineLeave) open.pop_back();
+      else if (i->op == Op::Call && i->callee.readsCallerArgs && !open.empty())
+        for (const Instruction *e : open.back()) changed |= read.insert(e).second;
     }
-  for (auto &v : f.vars)
-    if (v->kind == Var::Kind::Frame && v->shared && !v->param && !needed[v.get()]) v->shared = false;
-  for (auto &b : f.blocks) {
+    return changed;
+  });
+  bool changed = false;
+  for (auto &b : f.blocks)
     for (auto &i : b->insts)
-      if (plain(i->var) && i->access == Access::MaybeRef) i->access = Access::Direct;
-    std::erase_if(b->insts, [](auto &i) { return i->op == Op::Barrier && i->access == Access::Direct; });
-  }
+      if (i->op == Op::InlineEnter && !i->operands().empty() && !read.count(i.get())) {
+        i->dropOperands();
+        changed = true;
+      }
+  return changed;
 }
 
 // A function that calls itself: inlining it would only unroll the recursion. (Both bodies of a function versioned for
@@ -212,15 +244,31 @@ bool isGenerator(const Function &f) {
   return false;
 }
 
-// The Eval of a codeblock literal made only for it (`call EVAL native %block, args...`, the block with no other use):
-// what runs in its place, or nothing.
-std::optional<Inlined> blockOf(const Instruction &call) {
+// The variables an inlined body binds anew, at its entry and before it ends (direct stores of shared variables, which
+// the code generated from the source writes through their cells): a block made while one was bound holds the cell of
+// that time, not what the variable holds later.
+std::unordered_set<const Var *> reboundVars(const Function &f) {
+  std::unordered_set<const Var *> out;
+  for (auto &b : f.blocks)
+    for (auto &i : b->insts)
+      if (i->op == Op::Store && i->access == Access::Direct && i->var->shared) out.insert(i->var);
+  return out;
+}
+
+// The Eval of a codeblock literal of the function (`call EVAL native %block, args...`, none of the block's captured
+// variables bound anew): what runs in its place, or nothing. The block is immutable and its body reaches the cells it
+// captured through the same variables, so its other uses (another Eval, a call it is passed to) may keep it.
+std::optional<Inlined> blockOf(const Function &f, const Instruction &call,
+                               const std::unordered_set<const Var *> &rebound) {
   if (!inlinableCall(call) || call.callee.function || !call.callee.native || call.callee.name != "EVAL" ||
       call.operands().empty())
     return std::nullopt;
   const Instruction *mk = asInstruction(call.operand(0), Op::MakeBlock);
-  if (!mk || mk->users().size() != 1) return std::nullopt;
+  if (!mk) return std::nullopt;
+  for (const Var *c : mk->captures)
+    if (rebound.count(c)) return std::nullopt;
   Function *blk = mk->blockFn;
+  if (blk == &f) return std::nullopt; // a block that runs itself (a call inlined in it made it)
   std::vector<BasicBlock *> body = allBlocks(*blk);
   if (!inlinable(*blk, body, kMaxBlockInstructions)) return std::nullopt;
   return Inlined{blk, std::move(body), blk->entry(), 1, mk->captures};
@@ -234,10 +282,14 @@ const Instruction *versioning(const Function &f) {
   return t;
 }
 
-// A call of a function of the module: what runs in its place, or nothing. Arguments without references run the body
-// for them (after the versioning test, which they pass); with one, the body versioned for references.
-std::optional<Inlined> functionOf(const Function &f, const Instruction &call) {
+// A call of a function of the module, or of a public function of a carried runtime source (`from` its module): what
+// runs in its place, or nothing. Arguments without references run the body for them (after the versioning test, which
+// they pass); with one, the body versioned for references.
+std::optional<Inlined> functionOf(const Module &m, const Function &f, const Instruction &call) {
+  if (call.op != Op::Call) return std::nullopt;
   Function *callee = call.callee.function;
+  const Module *from = nullptr;
+  if (!callee && call.callee.native) std::tie(callee, from) = libraryFunction(m, call.callee.name);
   if (!inlinableCall(call) || !callee || callee == &f || callee->kind != Function::Kind::Program || callee->method ||
       callee->startup || isGenerator(*callee) || recursive(*callee))
     return std::nullopt;
@@ -258,12 +310,16 @@ std::optional<Inlined> functionOf(const Function &f, const Instruction &call) {
   } else {
     body = allBlocks(*callee);
   }
-  if (!inlinable(*callee, body, kMaxFunctionInstructions)) return std::nullopt;
+  bool passesBlock = std::any_of(call.operands().begin(), call.operands().end(),
+                                 [](const Value *v) { return asInstruction(v, Op::MakeBlock); });
+  if (!inlinable(*callee, body, passesBlock ? kMaxFunctionWithBlockInstructions : kMaxFunctionInstructions) ||
+      (from && !selfContained(body)))
+    return std::nullopt;
   return Inlined{callee, std::move(body), start, 0, {}};
 }
 
-// Inlines the calls found while the function stays within kMaxCallerInstructions (an Eval's block, no longer made, is
-// removed); true when it inlined one.
+// Inlines the calls found while the function stays within kMaxCallerInstructions (an Eval's block that nothing else
+// uses any more is no longer made); true when it inlined one.
 bool inlineFound(Function &f, std::vector<std::pair<Instruction *, Inlined>> &found, bool evals) {
   size_t size = countInstructions(allBlocks(f));
   bool changed = false;
@@ -271,7 +327,7 @@ bool inlineFound(Function &f, std::vector<std::pair<Instruction *, Inlined>> &fo
     if (size > kMaxCallerInstructions) break;
     auto *mk = evals ? static_cast<Instruction *>(call->operand(0)) : nullptr;
     inlineCall(f, call, in);
-    if (mk) eraseInstruction(mk);
+    if (mk && mk->users().empty()) eraseInstruction(mk);
     size += countInstructions(in.body);
     changed = true;
   }
@@ -283,21 +339,47 @@ bool inlineFound(Function &f, std::vector<std::pair<Instruction *, Inlined>> &fo
 bool inlineBlocks(Function &f) {
   if (isGenerator(f)) return false; // its values live in the frame
   std::vector<std::pair<Instruction *, Inlined>> found;
+  std::unordered_set<const Var *> rebound = reboundVars(f);
   for (auto &b : f.blocks)
     for (auto &i : b->insts)
-      if (auto in = blockOf(*i)) found.push_back({i.get(), std::move(*in)});
+      if (auto in = blockOf(f, *i, rebound)) found.push_back({i.get(), std::move(*in)});
   if (!inlineFound(f, found, true)) return false;
-  unshare(f);
+  unshareVariables(f);
   return true;
 }
 
-bool inlineFunctions(Function &f) {
+bool unshareVariables(Function &f) {
+  std::unordered_map<const Var *, bool> needed;
+  for (auto &b : f.blocks)
+    for (auto &i : b->insts) {
+      for (const Var *c : i->captures) needed[c] = true;
+      if (i->var && i->op != Op::Load && i->op != Op::Store && i->op != Op::Barrier) needed[i->var] = true;
+    }
+  bool changed = false;
+  for (auto &v : f.vars)
+    if (v->kind == Var::Kind::Frame && v->shared && !v->param && !needed[v.get()]) {
+      v->shared = false;
+      changed = true;
+    }
+  for (auto &b : f.blocks) {
+    for (auto &i : b->insts)
+      if (plain(i->var) && i->access == Access::MaybeRef) {
+        i->access = Access::Direct;
+        changed = true;
+      }
+    changed |= std::erase_if(b->insts, [](auto &i) { return i->op == Op::Barrier && i->access == Access::Direct; }) > 0;
+  }
+  return changed;
+}
+
+bool inlineFunctions(Module &m, Function &f) {
   if (isGenerator(f)) return false;
+  bool dropped = dropUnreadArguments(f);
   std::vector<std::pair<Instruction *, Inlined>> found;
   for (auto &b : f.blocks)
     for (auto &i : b->insts)
-      if (auto in = functionOf(f, *i)) found.push_back({i.get(), std::move(*in)});
-  return inlineFound(f, found, false);
+      if (auto in = functionOf(m, f, *i)) found.push_back({i.get(), std::move(*in)});
+  return inlineFound(f, found, false) || dropped;
 }
 
 } // namespace xb::xir

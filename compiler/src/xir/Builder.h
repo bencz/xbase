@@ -69,7 +69,7 @@ public:
   Instruction *genRestore(Var *gen);
   Instruction *genDone(Var *gen);
   Instruction *genYield(Var *gen, Value *value, BasicBlock *resume, uint32_t state);
-  Instruction *inlineEnter(Function *shown);
+  Instruction *inlineEnter(Function *shown, const std::vector<Value *> &args = {});
   Instruction *inlineLeave();
   Instruction *seqWith(Value *handler);
   Instruction *seqRestore(Value *old);

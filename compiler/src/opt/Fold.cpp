@@ -12,6 +12,12 @@
 
 namespace xb {
 
+std::optional<bool> stringEquality(BinOp op, const std::string &x, const std::string &y) {
+  if (op != BinOp::ExactEq && op != BinOp::Eq && op != BinOp::NotEq) return std::nullopt;
+  if (op != BinOp::ExactEq && x.size() != y.size()) return std::nullopt;
+  return (x == y) == (op != BinOp::NotEq);
+}
+
 namespace {
 
 bool isConstant(const Expr &e);
@@ -330,11 +336,10 @@ ExprPtr Folder::foldBinary(BinaryExpr &b) {
     return std::make_unique<StringExpr>(loc, std::move(r));
   }
   case BinOp::ExactEq:
-    return makeLogical(loc, x == y);
   case BinOp::Eq:
-  case BinOp::NotEq: // `=` depends on SET EXACT at run time, except for two empty strings
-    if (!x.empty() || !y.empty()) return nullptr;
-    return makeLogical(loc, b.op == BinOp::Eq);
+  case BinOp::NotEq:
+    if (std::optional<bool> r = stringEquality(b.op, x, y)) return makeLogical(loc, *r);
+    return nullptr;
   case BinOp::In:
     return makeLogical(loc, !x.empty() && y.find(x) != std::string::npos);
   default:

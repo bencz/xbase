@@ -1,0 +1,85 @@
+module AEVAL_INLINE
+
+function MAIN params 0 {
+entry:
+  %0 = array 1:w10, 2:w10, 3:w10
+  inline.enter AEVAL
+  %2 = call LEN native %0
+  %3 = call __RANGESTART native %2, nil
+  %4 = binary exacteq %3, 0:w10
+  %5 = truth %4
+  cond_br %5, seq.exit.3.inline, endif.3.inline
+entry.2(%7: item):
+  ret %7
+endif.3.inline:
+  %9 = call LEN native %0
+  %10 = binary sub %9, %3
+  %11 = binary add %10, 1:w10
+  %12 = call __RANGECOUNT native %11, nil
+  %13 = binary add %3, %12
+  %14 = binary sub %13, 1:w10
+  br for.test.inline(%3, 0:w10)
+seq.exit.3.inline:
+  inline.leave
+  br entry.2(0:w10)
+for.test.inline(%18: item, %19: item):
+  %20 = for.test %18, %14, 1:w0
+  cond_br %20, for.body.inline, seq.exit.5.inline
+for.body.inline:
+  %22 = call LEN native %0
+  %23 = binary gt %18, %22
+  %24 = truth %23
+  cond_br %24, seq.exit.5.inline, endif.4.inline
+endif.4.inline:
+  %26 = index %0, %18
+  inline.enter MAIN.block1
+  %28 = binary add %19, %26
+  %29 = subst.check %28
+  cond_br %29, endif.4.inline.subst, endif.4.inline.3
+seq.exit.5.inline:
+  inline.leave
+  br entry.2(%19)
+endif.4.inline.3:
+  inline.leave
+  %34 = binary add.one %18, 1:w0
+  %35 = subst.check %34
+  cond_br %35, endif.4.inline.3.subst, for.test.inline(%34, %28)
+for.body.inline.any:
+  %37 = call LEN native %54
+  %38 = binary gt %57, %37
+  %39 = truth %38
+  cond_br %39, seq.exit.5.inline.any, endif.4.inline.any
+endif.4.inline.any:
+  %41 = index %54, %57
+  inline.enter MAIN.block1
+  %43 = binary add %56, %41
+  br endif.4.inline.3.any(%57, %54, %55, %43)
+seq.exit.5.inline.any:
+  inline.leave
+  ret %56
+endif.4.inline.3.any(%47: item, %48: item, %49: item, %50: item):
+  inline.leave
+  %52 = binary add.one %47, 1:w0
+  br endif.4.inline.3.any.2(%48, %49, %50, %52)
+endif.4.inline.3.any.2(%54: item, %55: item, %56: item, %57: item):
+  %58 = for.test %57, %55, 1:w0
+  cond_br %58, for.body.inline.any, seq.exit.5.inline.any
+endif.4.inline.subst:
+  %60 = subst.value %28
+  br endif.4.inline.3.any(%18, %0, %14, %60)
+endif.4.inline.3.subst:
+  %62 = subst.value %34
+  br endif.4.inline.3.any.2(%0, %14, %28, %62)
+}
+
+block MAIN.block1 internal params 1 {
+  $f0 = frame 0 "X"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $c0 maybe_ref
+  %1 = load $f0 maybe_ref
+  %2 = binary add %0, %1
+  store $c0 maybe_ref, %2
+  barrier $c0 maybe_ref
+  ret %2
+}

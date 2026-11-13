@@ -87,9 +87,10 @@ enum class Op : uint8_t {
   GenRestore,     // var: the enumerator (parameter 0) -> I64: its frame back from the enumerator; the state to resume
                   // in (0 at the start)
   GenDone,        // var: the generator ended: the enumerator has no more elements
-  // A function's body inlined in another (passes/InlineBlocks.cpp) shows on the call stack as its own call would:
+  // A function's body inlined in another (passes/Inline.cpp) shows on the call stack as its own call would:
   // inline.enter makes a frame without slots (that of `blockFn`, its line the inlined code's) the innermost of the
   // context, inline.leave makes its caller's again. Between them, the inlined code's values live in the caller's frame.
+  // inline.enter's operands, when `blockFn` reads the arguments it received, are those arguments (the frame's argv).
   InlineEnter,
   InlineLeave,
   // terminators

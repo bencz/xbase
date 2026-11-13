@@ -264,6 +264,7 @@ struct BlockExpr : Expr {
   };
   std::vector<Capture> captures; // cells this block holds, in VarExpr::slot order
   bool readsArgs = false;        // calls an ARGS function: its frame keeps the arguments it received
+  bool readsParams = false;      // calls a PARAMS function: it reads its parameters in its frame slots
   bool callsPrivates = false;    // calls a PRIVATES function: ends the PRIVATEs it creates
   explicit BlockExpr(SourceLoc l) : Expr(ExprKind::Block, l) {}
 };
@@ -415,6 +416,7 @@ struct FuncDecl {
   uint32_t numLocals = 0;        // params + LOCALs, set by Sema
   std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock or passed by reference (shared)
   bool readsArgs = false;        // set by Sema: calls an ARGS function, so its frame keeps the arguments received
+  bool readsParams = false;      // set by Sema: calls a PARAMS function, which reads its parameters in its frame slots
   bool callsPrivates = false;    // set by Sema: calls a PRIVATES function, so it ends the PRIVATEs created
   // A generator: its body has YIELD (set by the parser). Calling it returns an enumerator; the body runs step by step
   // as a resumable function whose first parameter, which Sema adds, is the enumerator.

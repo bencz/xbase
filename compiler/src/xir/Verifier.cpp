@@ -243,9 +243,13 @@ private:
       break;
     case Op::SeqCatch: case Op::SeqValue: case Op::SeqSuspend: case Op::InlineLeave: expect(i, 0, {}); break;
     case Op::InlineEnter:
-      expect(i, 0, {});
-      if (!i.blockFn || i.blockFn->kind == Function::Kind::ModuleInit)
+      if (!i.blockFn || i.blockFn->kind == Function::Kind::ModuleInit) {
         fail("inline.enter without the function it shows");
+        break;
+      }
+      for (const Value *a : i.operands())
+        if (a->type() != Type::Item) fail("inline.enter has an argument that is not an item");
+      if (!i.operands().empty() && !i.blockFn->readsArgs) fail("inline.enter passes arguments nothing reads");
       break;
     case Op::SeqWith: case Op::SeqRestore: expect(i, 1, {Type::Item}); break;
     case Op::BoxI64: expect(i, 1, {Type::I64}); break;

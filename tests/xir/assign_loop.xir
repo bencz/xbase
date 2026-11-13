@@ -1,9 +1,6 @@
 module ASSIGN_LOOP
 
 function MAIN params 0 {
-  $f0 = frame 0 "A"
-  $f1 = frame 1 "X"
-  $f2 = frame 2 "I"
 entry:
   %0 = array 1:w10, 2:w10
   br for.test(0:w10, 10:w10)

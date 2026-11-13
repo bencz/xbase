@@ -56,6 +56,16 @@ bool pendingTest(Instruction *term, const char *kind, PendingTest &t) {
   return true;
 }
 
+// The test's successors as its branch has them now: a preheader inserted for another loop after the test was found may
+// have split the edge to one (an outer loop's poll going on into an inner loop's header).
+void refresh(PendingTest &t) {
+  Value *v;
+  unsigned taken;
+  nonZeroSuccessor(t.br, v, taken);
+  t.slow = t.br->getSuccessor(taken);
+  t.cont = t.br->getSuccessor(1 - taken);
+}
+
 // Whether `v` can be used at the end of block `at`.
 bool availableAt(const DominatorTree &dt, Value *v, BasicBlock *at) {
   auto *i = dyn_cast<Instruction>(v);
@@ -191,12 +201,12 @@ bool carriedPast(Loop &loop, LoopInfo &li, const PendingTest &poll,
 
 // The counted loop polls when its variable reaches the stop, in the branch of its exit test (the header); when a
 // request is pending, it goes where `poll` would have gone at the end of the pass before, with the header's values.
-void stripMine(Function &f, Loop &loop, const Counted &c, const PendingTest &poll, Value *start,
+void stripMine(Function &f, Loop &loop, const Counted &c, const PendingTest &poll, BasicBlock *pre, Value *start,
                const std::vector<std::pair<Instruction *, Use *>> &carried) {
   LLVMContext &ctx = f.getContext();
   auto *br = cast<BranchInst>(c.test->getTerminator());
   BasicBlock *stay = br->getSuccessor(c.stay), *exit = br->getSuccessor(1 - c.stay);
-  BasicBlock *header = loop.getHeader(), *pre = loop.getLoopPreheader(), *latch = poll.br->getParent();
+  BasicBlock *header = loop.getHeader(), *latch = poll.br->getParent();
   IRBuilder<> b(pre->getTerminator());
   Value *stop0 = nextStop(b, c, start);
 
@@ -285,6 +295,7 @@ bool placeLoopPolls(Function &f, FunctionAnalysisManager &fam) {
     Counted counted{};
     std::vector<std::pair<Instruction *, Use *>> carried;
     bool countDown = false;
+    BasicBlock *pre = nullptr; // strip mining: the preheader the loop's stop starts in
     Value *start = nullptr;
   };
   std::vector<Plan> plans;
@@ -327,6 +338,7 @@ bool placeLoopPolls(Function &f, FunctionAnalysisManager &fam) {
     SCEVExpander expander(se, "poll");
     if (pre && expander.isSafeToExpandAt(p.counted.start, pre->getTerminator())) {
       p.start = expander.expandCodeFor(p.counted.start, p.counted.x->getType(), pre->getTerminator());
+      p.pre = pre;
       plans.push_back(std::move(p));
       continue;
     }
@@ -340,11 +352,15 @@ bool placeLoopPolls(Function &f, FunctionAnalysisManager &fam) {
   }
 
   for (Plan &p : plans) {
+    for (PendingTest &t : p.polls) refresh(t);
     if (p.countDown) {
       countDown(f, *p.loop, p.polls[0]);
       continue;
     }
-    if (!p.served) stripMine(f, *p.loop, p.counted, p.polls[0], p.start, p.carried);
+    // The changes made for loops before may have given its header another way in from outside (the slow path of one
+    // they poll on reaches it): the plan no longer holds, and the loop keeps polling on every pass.
+    if (!p.served && p.loop->getLoopPreheader() != p.pre) continue;
+    if (!p.served) stripMine(f, *p.loop, p.counted, p.polls[0], p.pre, p.start, p.carried);
     for (const PendingTest &t : p.polls) removeTest(t);
   }
   return changed || !plans.empty();

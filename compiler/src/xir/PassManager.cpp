@@ -14,17 +14,21 @@ namespace {
 
 struct Pass {
   const char *name;
-  bool (*run)(Function &f);
+  bool (*run)(Module &m, Function &f);
 };
 
+// A pass that needs only the function.
+template <bool (*P)(Function &)> bool onFunction(Module &, Function &f) { return P(f); }
+
 constexpr Pass kPipeline[] = {
-    {"inline-functions", inlineFunctions}, // first: the variables they free promote-variables takes
-    {"inline-blocks", inlineBlocks},       // after inline-functions, which may pass a block literal to an Eval
-    {"append-in-place", appendInPlace}, // before promote-variables, which takes the other LOCALs
-    {"promote-variables", promoteVariables},
-    {"fold-constants", foldConstants},
-    {"simplify-cfg", simplifyCFG},
-    {"remove-dead-code", removeDeadCode},
+    {"inline-functions", inlineFunctions},             // first: the variables they free promote-variables takes
+    {"inline-blocks", onFunction<inlineBlocks>},       // after inline-functions, which may pass a block to an Eval
+    {"append-in-place", onFunction<appendInPlace>},    // before promote-variables, which takes the other LOCALs
+    {"promote-variables", onFunction<promoteVariables>},
+    {"fold-constants", onFunction<foldConstants>},
+    {"simplify-cfg", onFunction<simplifyCFG>},
+    {"remove-dead-code", onFunction<removeDeadCode>},
+    {"unshare-variables", onFunction<unshareVariables>}, // after remove-dead-code: captures gone with dead code
 };
 
 // Each round can expose work for the others (a folded branch leaves a block
@@ -36,9 +40,9 @@ constexpr unsigned kMaxRounds = 4;
 // inlined elsewhere is copied before): typed continuations copy the function,
 // and the cleanup passes tidy what the copy joined.
 constexpr Pass kFinal[] = {
-    {"typed-continuations", typedContinuations},
-    {"simplify-cfg", simplifyCFG},
-    {"remove-dead-code", removeDeadCode},
+    {"typed-continuations", onFunction<typedContinuations>},
+    {"simplify-cfg", onFunction<simplifyCFG>},
+    {"remove-dead-code", onFunction<removeDeadCode>},
 };
 
 // The module's functions, each after the functions and codeblocks it calls, makes or forwards to (post-order of the
@@ -77,11 +81,11 @@ std::vector<Function *> calleesFirst(const Module &m) {
 
 } // namespace
 
-std::string optimize(Module &m) {
+std::string optimize(Module &m, bool final) {
   std::string bad;
   // Runs a pass on a function; true when it changed it (`bad` reports invalid xIR).
   auto run = [&](const Pass &p, Function &f) {
-    if (!p.run(f)) return false;
+    if (!p.run(m, f)) return false;
     if (std::string report = verify(m, f); !report.empty() && bad.empty())
       bad = std::string("after ") + p.name + ": " + report;
     return true;
@@ -93,9 +97,10 @@ std::string optimize(Module &m) {
         if (bad.empty()) changed |= run(p, *f);
       if (!changed) break;
     }
-  for (auto &f : m.functions)
-    for (const Pass &p : kFinal)
-      if (bad.empty()) run(p, *f);
+  if (final) // on the functions inlining copied in too (optimized where they come from)
+    for (auto &f : m.functions)
+      for (const Pass &p : kFinal)
+        if (bad.empty()) run(p, *f);
   return bad;
 }
 

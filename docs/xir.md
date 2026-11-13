@@ -115,25 +115,41 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
 - Inlining (`Inline.cpp`), first: a call runs its callee's body in place, between `inline.enter` (which names the
   callee: the call stack shows it, as its call would) and `inline.leave`; each `ret` becomes `inline.leave` and a
   branch passing the result to the rest of the caller's block. The callee's parameters and `LOCAL`s become frame
-  variables of the function, set on every entry (the arguments, `NIL` past the last and for the `LOCAL`s: a call starts
-  with fresh ones) and set to `NIL` before each `inline.leave` (as its frame would be gone: what they held is no
-  longer kept); a codeblock's captures are the variables it captured; the module's `STATIC`s stay. When an argument is
-  a reference (`@x`, `@a[i]`), the variables of its parameters are marked `param`: they keep reading and writing
-  through what they hold. A body is inlined only at a call without `...` in a block that unwinds to the function's
-  exit, and only when the callee reads no arguments as received, creates no `PRIVATE` (nor calls a function that
-  creates its caller's: it would be the function's, released later), has no unwind block, no `...` and no `YIELD`, and
-  none of its own variables is shared (captured by a nested block, or passed by reference: each call needs fresh
-  cells); nothing is inlined into a generator, nor into a function that has grown past 3000 instructions. The body is
-  copied with `copyBlocks`, its constants made anew in the function.
-  - `inline-functions`: a call of a function of the module (not a method, an `INIT` or `EXIT` procedure, a generator,
-    nor one that calls itself) of at most 30 instructions. A function versioned for
-    references runs, for arguments without a reference, the body after its `params.ref` test (which they pass);
-    otherwise its other body (`NAME.byref`).
-  - `inline-blocks`, after it (which may pass a block literal to an `Eval`): `Eval( {| p | body }, args )` where the
-    codeblock literal is made only for that call (its `block` has no other use; `Eval` of the native runtime
-    function), of at most 200 instructions. Afterwards, a frame variable that nothing captures or passes by reference
-    any more loses its cell (`shared`), its accesses become direct and their barriers go, so `promote-variables` takes
-    it.
+  variables of the function, stored directly on every entry (the arguments, `NIL` past the last and for the `LOCAL`s)
+  and set to `NIL` before each `inline.leave` (as its frame would be gone: what they held is no longer kept): a call
+  starts with fresh variables, and a shared one gets a fresh cell when a block captures it, the store having replaced
+  the cell an earlier entry left. A codeblock's captures are the variables it captured; the module's `STATIC`s stay.
+  When an argument is a reference (`@x`, `@a[i]`), the variables of its parameters are marked `param` (they keep
+  reading and writing through what they hold), and so do the callee's variables marked so already (the parameters of
+  a body inlined in it before). A callee that reads the arguments it received (`readsArgs`: `PCount()`) gets them as
+  `inline.enter`'s operands, the inlined frame's arguments, until no call of an `ARGS` function in its body is left
+  (`Callee::readsCallerArgs`; a branch folded away may take the last one): then they are no longer passed. A body is
+  inlined only at a call without `...` in a block
+  that unwinds to the function's exit, and only when the callee reads no parameters in its frame slots
+  (`readsParams`: `PValue()`; the inlined frame has none), creates no `PRIVATE` (nor calls a function that creates
+  its caller's: it would be the function's, released later), and has no unwind block, no `...` and no `YIELD`;
+  nothing is inlined into a generator, nor into a function that has grown past 3000 instructions. The body is copied
+  with `copyBlocks`, its constants made anew in the function.
+  - `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
+    (`Module::library`, below), not a method, an `INIT` or `EXIT` procedure, a generator, nor one that calls itself, of
+    at most 30 instructions, or 200 when the call passes a codeblock literal (which the body may then run in place
+    too). A function versioned for references runs, for arguments without a reference, the body after its
+    `params.ref` test (which they pass); otherwise its other body (`NAME.byref`).
+  - `inline-blocks`, after it (which may pass a block literal to an `Eval`): `Eval( {| p | body }, args )` of a
+    codeblock literal of the function (`Eval` of the native runtime function), of at most 200 instructions, not the
+    function itself (a block a call inlined in it runs), none of whose captured variables an inlined body binds anew
+    (a direct store of a shared variable: the block holds the cell of when it was made). The block is immutable and
+    its body reaches its cells through the same variables, so other uses may keep it; it is no longer made once none
+    is left. Afterwards, `unshare-variables` runs.
+
+  The driver compiles the runtime's carried sources (`driver/RuntimeLibrary.h`: the `.prg` files `XB_INLINE_PRG` in
+  `compiler/CMakeLists.txt` lists, held in `xbc` as bytes with their public functions' names) as modules of the
+  runtime, through the pipeline's rounds only, once a module calls one of their functions (at `-O1` and above, not
+  with `--runtime`, and only when `std.ch` is found in the include directories: else nothing of them is inlined);
+  each module gets them as `Module::library`. A body from one is inlined only when it needs nothing of its module
+  (`selfContained`: no `STATIC` of it, none of its classes, no function of it called or codeblock made; its own
+  `STATIC` functions and codeblocks run in place in it already): it calls the runtime only. Their functions are
+  marked `runtime` (`Function::runtime`): their frames show no source file and no lines, as the runtime's do.
 
   The verifier checks that `inline.enter` and `inline.leave` nest (`openInlineBodies` in `Analysis`: the functions of
   the bodies open where each block starts, the same on every path into it, also through the copies
@@ -150,13 +166,20 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   parameters that only feed each other through a loop are removed (their arguments first, then them). The variables
   leave the frame.
 - `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `from_bool` and `truth` of
-  constants (`truth` of a logical just made is its boolean), `cond_br` on a constant becomes `br`. A folded
+  constants (`truth` of a logical just made is its boolean), `=`, `==` and `!=` of two string constants when SET
+  EXACT cannot change the result (`stringEquality` in `opt/Fold`, which the syntax tree's folding uses too),
+  `ValType()` of a value whose types all have one letter (`XB_TYPE_LETTERS`; not a string, which may be a memo field's
+  value: an array, codeblock or hash literal, a number, a logical), and `cond_br` on a constant becomes `br`. A folded
   instruction is removed at once, also one that can fail in general (`truth`) but not with these operands.
 - `simplify-cfg`: a block holding only `br` whose parameters nothing else uses is skipped by its predecessors; two
   branches to one block differing only in a `true`/`false` argument become a jump passing the condition; a block
   whose single predecessor jumps to it joins it; unreachable blocks go. The steps repeat until nothing changes.
 - `remove-dead-code`: instructions whose result is unused and that cannot fail and write nothing (the effects in
-  `Ops.*`), and unused block parameters with their arguments, by a worklist.
+  `Ops.*`), and unused block parameters with their arguments, by a worklist; then the frame variables (not
+  parameters) no instruction reaches any more (those of inlined bodies that promote-variables took).
+- `unshare-variables`, after it: a frame variable (not a parameter) that nothing captures or passes by reference any
+  more (the block that did is gone: inlined, or dead code) loses its cell (`shared`); its accesses become direct and
+  their barriers go, so `promote-variables` takes it in the next round.
 - `typed-continuations`, once after the others (then `simplify-cfg` and `remove-dead-code` again): an operation in a
   loop whose error may substitute its result, whose own types hold no heap reference (numbers, logicals, dates) or are a
   single type (a string concatenation: a constant tag), and that another operation computes with (an index too) or a

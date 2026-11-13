@@ -18,7 +18,10 @@ source is preprocessed on its own, with `std.ch` and the command-line defines (i
 the next source), and goes through the front end; a source with errors does not stop the others from being checked.
 Two modules defining the same public function is an error. Then every module is lowered into one LLVM module and one
 object (`-o`, by default the first source's name with `.o`), where calls between the modules are direct and LLVM can
-inline across them; `-p` writes a `.ppo` per source, `-E` prints them all, `--depfile` lists every file read.
+inline across them; `-p` writes a `.ppo` per source, `-E` prints them all, `--depfile` lists every file read. A
+module that calls a function of the runtime's sources `xbc` carries (`driver/RuntimeLibrary.h`) has them compiled
+too, as modules of the runtime with `std.ch` and the target's defines only, for its calls to inline
+([xir.md](xir.md#passes)); they are not lowered.
 
 The program starts at the public function `MAIN` of any module, or else at the first function of the first source that
 has one (a `STATIC` function named `MAIN`, and `INIT` and `EXIT` procedures, do not count). Clipper starts at the first
@@ -237,7 +240,7 @@ function always receives the reference, so `@` in a declaration without `NATIVE`
 | `ABBREV n` | calls may abbreviate the name to its first `n` or more letters (the keyword rule, `keywordMatches`) |
 | `FOLD` | calls with constant arguments are evaluated at compile time (see [Constant folding](#constant-folding)) |
 | `ARGS` | the function reads the arguments the function calling it received (`PCount()`): that function (or codeblock) keeps them in its frame (`FuncDecl::readsArgs`, `BlockExpr::readsArgs`, `xir::Function::readsArgs`; `args` in the xIR listing) |
-| `PARAMS` | `ARGS`, and the function reads and writes the parameters of the function calling it (`PValue()`): that function keeps them in its frame slots, as written (no parameter versioning, no SSA values) |
+| `PARAMS` | `ARGS`, and the function reads and writes the parameters of the function calling it (`PValue()`): that function keeps them in its frame slots, as written (no parameter versioning, no SSA values; `FuncDecl::readsParams`, `BlockExpr::readsParams`, `xir::Function::readsParams`) |
 | `PRIVATES` | the function creates PRIVATEs of the function calling it (`RESTORE`): that function (or codeblock) takes a PRIVATE mark and ends them when it returns (`FuncDecl::callsPrivates`, `BlockExpr::callsPrivates`, `xir::Function::callsPrivates`; `privates` in the xIR listing) |
 
 `sema/Calls.*` resolves every call before the other passes. A function the module defines comes first (a name that is
@@ -472,7 +475,7 @@ emits the object file.
   (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()` whose argument is the `SubStr()` right
   before it, used nowhere else, reads the byte itself; `Int()` of an integer is it, of a double with a width of its
   own its truncation with that width when that fits 64 bits (`xb_dbl_fits_i64`; else, a double with no width, NaN
-  too, the runtime); `PCount()` is the function's own `argc`
+  too, the runtime); outside an inlined body, `PCount()` is the function's own `argc`
   (less `Self` in a method), and `PValue( n )` with an integer `n` copies the parameter's slot or the argument as passed
   (`NIL` outside 1 .. `argc`); `ValType()` of a value is the shared one-byte string of its tag's letter
   (`XB_TYPE_LETTERS`, the runtime's table too; a memo field's value, `XB_STR_MEMO`, calls the function); anything else
@@ -544,22 +547,27 @@ emits the object file.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`, its number of parameters, `XB_PROC_ARGS` when it keeps its arguments, `XB_PROC_HIDDEN`
   when it is hidden, `XB_PROC_METHOD` for a method (`xir::Function::method`, `method` in the xIR listing), and its
-  source file name without directories, one string per module, none for a module of the runtime) in the frame. While an
-  xIR instruction is lowered, every call the builder creates is marked with the instruction's source line
+  source file name without directories, one string per module, none for a function of the runtime: `Function::runtime`,
+  of a module of the runtime or a carried source) in the frame. While an xIR instruction is lowered, every call the
+  builder creates is marked with the instruction's source line
   (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is complete, `placeLines` stores that line in the
   frame right before each marked call that can see the call stack (any call but intrinsics and the runtime entry points
-  that never raise an error or run code, `quietCalls_`), once per LLVM block and line. The fast paths of operations thus
+  that never raise an error or run code, `quietCalls_`), once per LLVM block and line; not in the frame of a function of
+  the runtime, which shows line 0 (`showsLines`: the innermost frame's function). The fast paths of operations thus
   store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for references clears its
   own `proc`: the other body shows instead. `inline.enter` links a frame without slots that shows the inlined function
   (an `alloca` of the entry block, one per nesting depth: bodies open at once are at different depths, and the copies
-  of a body share it), after storing the line of the call it replaces in the frame below (not in a module of the
-  runtime, which stores no lines); until the matching `inline.leave`, which links the frame below again, calls take it
-  as the caller's frame and their lines are stored in it. The bodies open where each block starts are those of the
-  `inline.enter`s on the way to it (`openInlineBodies` in `xir/Analysis`: an inlined body is entered at its start and
-  left at its end). That store of the line counts as one `placeLines` made. `inline.leave` first sets to `NIL` the
-  slots of the body's values that are dead there and that no live value holds (`FramePlan::clearsAt`: the units of
-  each body's values and argument lists, found by a forward walk with one set per open body): as when a callee
-  returns, an object only they held can be collected (and its destructor run).
+  of a body share it), after storing the line of the call it replaces in the frame below (unless that frame is a
+  function of the runtime's); until the matching `inline.leave`, which links the frame below again, calls take it
+  as the caller's frame and their lines are stored in it. A body that reads the arguments it received gets them in
+  consecutive slots of the frame (a group, as a call's: `inline.enter`'s operands, kept until the body's last
+  instruction, `FramePlan::extendArgumentGroups`), which the inlined frame's `argv` and `argc` give; `PCount()` and
+  `PValue()` inside an inlined body call the runtime, which reads that frame. The bodies open where each block starts
+  are those of the `inline.enter`s on the way to it (`openInlineBodies` in `xir/Analysis`: an inlined body is entered
+  at its start and left at its end). That store of the line counts as one `placeLines` made. `inline.leave` first sets
+  to `NIL` the slots of the body's values that are dead there and that no live value holds (`FramePlan::clearsAt`: the
+  units of each body's values, argument lists and received arguments, found by a forward walk with one set per open
+  body, `walkBodies`): as when a callee returns, an object only they held can be collected (and its destructor run).
 - After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
   `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
   load stays in a loop without calls instead of leaving it; the loads carry the metadata `xb.poll`, on a back edge, or
@@ -624,7 +632,7 @@ folded result's type and decimals follow Clipper's compile-time rules, which dif
 | unary `-` | the negated number, same decimals |
 | bit operators `&` `\|` `^^` `<<` `>>` `~` on numbers | an integer without a display width of its own (`xb_bit_apply`, the operands taken as integers by `xb_dbl_to_i64`) |
 | comparisons of numbers or logicals | `.T.`/`.F.` |
-| strings `+`, `-`, `==`, `$`; `=`/`!=` of two empty strings | the result (`=` on other strings depends on SET EXACT and is not folded) |
+| strings `+`, `-`, `==`, `$`; `=`/`!=` of two strings of one length | the result (`=` of strings of different lengths depends on SET EXACT and is not folded; `stringEquality`) |
 | `.NOT.`, `.AND.`/`.OR.` with a logical literal on the left, `IIF` with a logical literal condition | the result or the remaining operand |
 | a call to a `FOLD` function with constant arguments | its result, from the evaluator table in `opt/Fold.cpp`: `Len` of a string literal (its length) or of an array literal of constants (its element count); the bit functions on number constants (an integer without a display width of its own, as the runtime makes it; arithmetic on such an integer gives one too) |
 
@@ -697,8 +705,12 @@ the header runs again (it must compute nothing that running again would change: 
 of what it does not load; the slow path must be outside the loop, and the header's own values must not be used on it,
 being the next pass's there). A loop whose count is known and below the stride ends up with no poll at all (the stop is
 the exit's value). Another loop counts its passes down in a register (`poll.left`) and loads the pending requests once
-every 1024 passes. So a thread in loops without calls reaches a safepoint within 1024 passes of an innermost loop or one
-pass of another, at the cost of the counted loop's own test, or a decrement and a branch. Measured against the code
+every 1024 passes. Every loop is planned first, while the analyses describe the function (a counted loop gets a
+preheader then), and changed after: each poll's branch is read again then (a preheader inserted for another loop may
+have split the edge to where it goes on), and a counted loop whose preheader another loop's change took (an edge from
+its slow path into the header) keeps polling on every pass. So a thread in loops without calls reaches a safepoint
+within 1024 passes of an innermost loop or one pass of another, at the cost of the counted loop's own test, or a
+decrement and a branch. Measured against the code
 before stop-the-world collections (perf stat, x86-64, the best of 5 runs): `loops` 2% more cycles (9% with a load on
 each pass), `pi` 2% (8%), `qsort`, `sieve` and `asort` 1 to 2%, the others within 1%; `crc32` and `mixed` are 29% and 7%
 faster (their loops back on fast paths after a slow one), `index` 8% (the index page cache,

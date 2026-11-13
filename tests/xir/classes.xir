@@ -35,7 +35,6 @@ entry:
 
 function TBAR:GET internal params 1 method {
   $f0 = frame 0 "SELF"
-  $f1 = frame 1 "SELF"
 entry:
   %0 = params.ref $f0
   cond_br %0, byref, body

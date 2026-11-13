@@ -160,6 +160,7 @@ Value *Generator::genCall(const CallExpr &c) {
   if (c.callee || c.external) { // an EXTERN FUNCTION, or another module's function (sema/Calls)
     callee.name = c.name;
     callee.native = c.callee && c.callee->native;
+    callee.readsCallerArgs = c.callee && c.callee->args;
   } else {
     callee.function = funcs_.at(c.name);
   }

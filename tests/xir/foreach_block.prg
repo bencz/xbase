@@ -1,5 +1,5 @@
 // FOR EACH through references, a captured variable (shared, its store followed by a barrier), and a codeblock with
-// its captures (kept: the block escapes, so Eval calls it).
+// its captures (kept: the block escapes; Eval runs its body in place, through the same variable).
 FUNCTION Main( aList )
    LOCAL e, n := 0, b
    FOR EACH e IN aList

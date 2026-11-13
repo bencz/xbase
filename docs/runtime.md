@@ -250,7 +250,7 @@ the context that runs the destructors (the first one registered, then another wh
 ## Hashes
 
 `types/hash.c` holds the hash itself, `rtl/hashes.c` the `H*` functions (`HEval`, `HScan` and `HMerge` are in
-`rtl/collections.prg`), and `rtl/collections.c` what they share with the array functions: argument ranges, block calls
+`rtl/arrays.prg`), and `rtl/collections.c` what they share with the array functions: argument ranges, block calls
 from C, the order of values, the stable merge sort and deep copies.
 
 - Keys are strings, numbers and dates; values are anything. A number that equals an integer is that integer as a key,
@@ -938,17 +938,21 @@ Each one moved from C is measured against its C version (callgrind).
   `runtime.declarations` test (`FUNCTION`/`PROCEDURE` lines of the `.prg` files).
 - On the call stack they show with line 0, as the C functions do; their `STATIC` functions and codeblocks do not show
   (`XB_PROC_HIDDEN`), though `PCount()` and `PValue()` still read their frames.
+- The compiler carries some of these sources (`XB_INLINE_PRG` in `compiler/CMakeLists.txt`: `rtl/arrays.prg`), so that
+  a program's calls of their functions may run in place ([xir.md](xir.md#passes)), with the same frames on the call
+  stack: line 0, no source file, the hidden ones hidden. Their functions are written so that a call with a codeblock
+  literal, inlined, folds to its array path (`ValType()` of a block or an array literal is known).
 - Primitives for them: `__ConsoleWrite( xValue )` writes the display form of a value ([Display](#display)) to the
   console (standard output until the terminal layer exists), `__StdWrite( nHandle, xValue )` to the standard output (1)
   or error (2), flushing the output before writing to the error; `__ArgError( nSubCode, [lSubstitute] )` raises the
   calling function's argument error (`EG_ARG`, its name as the operation, the arguments it received), as its C
   counterparts do: not substitutable, or with `lSubstitute` substitutable, the handler's value its result.
 - Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` and `AScan`
-  (`rtl/collections.prg`; they also go through collection objects, those `__IsCollection( xValue )` (`core/control.c`)
+  (`rtl/arrays.prg`; they also go through collection objects, those `__IsCollection( xValue )` (`core/control.c`)
   finds `FOR EACH` goes through: an `Enumerable`, a generator's enumerator, from position `nStart`, `nCount` elements;
   another object is `AEval`'s argument error and `AScan`'s 0; `AScan` finds a value in an array with the primitive
   `__ScanValue`, and in a collection with `__ValueMatches`, both `xb_value_matches`), `AFill`, `ACopy`, `HEval`, `HScan`
-  (a value through `__ScanValue` too) and `HMerge` (without a filter, `HCopy`) (`rtl/collections.prg`), the `Enumerable`
+  (a value through `__ScanValue` too) and `HMerge` (without a filter, `HCopy`) (`rtl/arrays.prg`), the `Enumerable`
   class and the classes of the built-in types (`rtl/collections.prg`, see [Classes](#classes)), `ErrorSys` and the
   default error handler (`rtl/errorsys.prg`), Clipper's time sample functions `Secs`, `TString`, `Days`, `ElapTime`,
   `AMPM`, and `LenNum` (`rtl/time.prg`), `Directory`, `ADir`, `File`, `MemoRead`, `MemoWrit` and `FReadStr`

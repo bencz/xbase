@@ -46,11 +46,15 @@ bool Preprocessor::processFile(const std::string &path, SourceLoc from) {
   }
   std::stringstream ss;
   ss << in.rdbuf();
-
-  uint32_t id = diag_.addFile(path);
   if (std::find(filesRead_.begin(), filesRead_.end(), path) == filesRead_.end()) filesRead_.push_back(path);
-  Lexer lex(id, ss.str(), diag_);
-  fileStack_.push_back(path);
+  processText(path, ss.str());
+  return true;
+}
+
+void Preprocessor::processText(const std::string &name, const std::string &text) {
+  uint32_t id = diag_.addFile(name);
+  Lexer lex(id, text, diag_);
+  fileStack_.push_back(name);
   size_t condBase = conds_.size();
 
   Toks line;
@@ -69,7 +73,6 @@ bool Preprocessor::processFile(const std::string &path, SourceLoc from) {
     conds_.pop_back();
   }
   fileStack_.pop_back();
-  return true;
 }
 
 std::vector<Token> Preprocessor::takeOutput() {

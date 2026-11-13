@@ -144,6 +144,7 @@ struct Callee {
   Function *function = nullptr; // the module's own
   std::string name;             // upper-cased xBase name
   bool native = false;          // external: written in C (runtime prefix), else another module's
+  bool readsCallerArgs = false; // ARGS: it reads the arguments its caller received (PCount(), __ArgError())
 };
 
 // A branch destination with its arguments.
@@ -269,6 +270,8 @@ public:
   bool startup = false;           // an INIT or EXIT procedure: the runtime runs it, nothing calls it
   uint32_t numParams = 0;
   bool readsArgs = false;         // its frame keeps the arguments received (PCount(), PValue())
+  bool readsParams = false;       // reads its parameters in its frame slots (PValue())
+  bool runtime = false;           // of a module of the runtime: its frames show no source file and no lines
   bool callsPrivates = false;     // calls a function that creates PRIVATEs of its caller (PRIVATES in rtl.ch)
   bool hidden = false;            // the call stack does not show it (a STATIC function or codeblock of the runtime)
   bool method = false;            // a method: its first parameter is Self, which PCount() and PValue() skip
@@ -297,6 +300,8 @@ public:
   Function *init = nullptr;                         // initializes the STATICs (null: none have initializers)
   std::vector<Function *> initProcs, exitProcs;     // INIT and EXIT procedures, in source order
   std::vector<std::string> requests;                // functions of other modules to link in (EXTERNAL)
+  // Modules of the runtime's carried sources (driver/RuntimeLibrary.h), whose public functions calls may inline.
+  std::vector<const Module *> library;
   // The module's classes (xb_class_def in xbrt.h): their methods are functions of the module.
   struct Class {
     std::string name;

@@ -1,7 +1,6 @@
 module MACRO
 
 function MAIN params 0 {
-  $f0 = frame 0 "N"
 entry:
   mv.set C "n"
   %1 = mv.get C
@@ -28,7 +27,6 @@ entry:
 
 function NOMACRO params 1 {
   $f0 = frame 0 "X"
-  $f1 = frame 1 "X"
 entry:
   %0 = params.ref $f0
   cond_br %0, byref, body

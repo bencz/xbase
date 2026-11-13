@@ -1,8 +1,6 @@
 module PASSES
 
 function MAIN params 0 {
-  $f0 = frame 0 "N"
-  $f1 = frame 1 "LG"
 entry:
   br while.cond(0:w10)
 while.cond(%1: item):

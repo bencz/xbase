@@ -270,7 +270,9 @@ void CodeGen::shareOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to
 
 bool CodeGen::emitInlineCall(const xir::Instruction &i) {
   Inline kind = inlineKind(i);
-  if (kind == Inline::None) return false;
+  // In an inlined body, the arguments are its frame's: the runtime reads them (PValue(), whose function keeps its
+  // parameters in its frame slots, is never inlined).
+  if (kind == Inline::None || (!inlineOpen_.empty() && kind == Inline::PCount)) return false;
   if (kind == Inline::Asc && fusedCalls_.count(&i)) return true; // lowered with its SubStr()
   const xir::Instruction *asc = nullptr;                        // the Asc() lowered with this SubStr()
   if (kind == Inline::SubStr && i.hasOneUse() && fusedCalls_.count(i.users().front()))

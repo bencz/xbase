@@ -91,4 +91,28 @@ Predecessors predecessorTerminators(const Function &f);
 using InlineBodies = std::unordered_map<const BasicBlock *, std::vector<const Function *>>;
 bool openInlineBodies(const CFG &cfg, InlineBodies &at);
 
+// Walks the reachable blocks with the inlined bodies open at each point, innermost last, one set of T each: the sets
+// a block starts with join those of the paths into it, and the walk repeats until no set and nothing `visit` (which
+// steps through a block, pushing a set at inline.enter and popping it at inline.leave) records changes.
+template <class T, class Visit> void walkBodies(const CFG &cfg, Visit visit) {
+  using Open = std::vector<std::unordered_set<T>>;
+  std::unordered_map<const BasicBlock *, Open> at;
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (BasicBlock *b : cfg.order()) {
+      Open open = at[b];
+      changed |= visit(*b, open);
+      for (size_t k = 0; k < b->numSuccessors(); ++k) {
+        Open &next = at[b->successor(k)];
+        if (next.size() < open.size()) next.resize(open.size());
+        for (size_t d = 0; d < open.size(); ++d) {
+          size_t before = next[d].size();
+          next[d].insert(open[d].begin(), open[d].end());
+          changed |= next[d].size() != before;
+        }
+      }
+    }
+  }
+}
+
 } // namespace xb::xir

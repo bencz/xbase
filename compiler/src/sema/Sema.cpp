@@ -531,8 +531,10 @@ void Sema::expr(Expr &e, Scope &s) {
     // also reads and writes keeps them there, as written (a codeblock's own parameters always stay there).
     if (Frame &f = frames_.back(); f.block) {
       f.block->readsArgs = true;
+      f.block->readsParams |= c.callee->params;
     } else if (f.boxed) {
       curFunc_->readsArgs = true;
+      curFunc_->readsParams |= c.callee->params;
       if (c.callee->params)
         for (uint32_t k = 0; k < curFunc_->params.size(); ++k) markBoxed(f, k);
     }

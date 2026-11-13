@@ -1,7 +1,6 @@
 module FIELDS
 
 function MAIN params 0 {
-  $f0 = frame 0 "C"
 entry:
   %0 = field.get CUST->NAME
   %1 = field.get NAME

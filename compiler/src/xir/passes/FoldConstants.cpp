@@ -1,9 +1,14 @@
 // Constant folding on xIR: machine operations on constants, the truth test of
-// a constant or of a logical just made, and branches on known conditions.
+// a constant or of a logical just made, comparisons of string constants for
+// equality, ValType() of a value whose type is known, and branches on known
+// conditions.
 #include "xir/passes/Passes.h"
 
+#include "opt/Fold.h"
 #include "xir/Builder.h"
+#include "xir/Types.h"
 
+#include <optional>
 #include <unordered_set>
 
 namespace xb::xir {
@@ -28,11 +33,41 @@ bool compare(IntPred p, int64_t a, int64_t b) {
   return false;
 }
 
+const Constant *asString(const Value *v) {
+  const Constant *c = asConstant(v);
+  return c && c->lit == Constant::Lit::String ? c : nullptr;
+}
+
+// ValType() of a value whose types all have one letter (XB_TYPE_LETTERS); not a string, which may be a memo field's
+// value ("M"), nor a cell or reference.
+std::optional<char> typeLetter(TypeSet t) {
+  constexpr TypeSet kNot = typeBit(XB_T_STRING) | typeBit(XB_T_CELL) | typeBit(XB_T_REF);
+  if (!t || (t & kNot)) return std::nullopt;
+  std::optional<char> letter;
+  for (int tag = 0; tag < XB_T_COUNT_; ++tag) {
+    if (!(t & typeBit((xb_type)tag))) continue;
+    if (letter && *letter != XB_TYPE_LETTERS[tag]) return std::nullopt;
+    letter = XB_TYPE_LETTERS[tag];
+  }
+  return letter;
+}
+
 // The value `i` always gives, or null. Counters wrap like the machine
 // arithmetic they lower to.
-Value *foldedValue(Instruction &i, Builder &b) {
+Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
   const auto &ops = i.operands();
   switch (i.op) {
+  case Op::Binary: {
+    const Constant *x = asString(ops[0]), *y = asString(ops[1]);
+    if (!x || !y) return nullptr;
+    std::optional<bool> r = stringEquality(i.binop, x->str, y->str);
+    return r ? b.logical(*r) : nullptr;
+  }
+  case Op::Call:
+    if (i.callee.function || !i.callee.native || i.callee.name != "VALTYPE" || ops.size() != 1 || i.hasRest())
+      return nullptr;
+    if (std::optional<char> letter = typeLetter(types.of(ops[0]))) return b.string(std::string(1, *letter));
+    return nullptr;
   case Op::IntAdd: case Op::IntSub: {
     const Constant *x = asConstant(ops[0]), *y = asConstant(ops[1]);
     if (!x || !y) return nullptr;
@@ -69,13 +104,15 @@ Value *foldedValue(Instruction &i, Builder &b) {
 // `truth`, proven not to with these operands.
 bool foldConstants(Function &f) {
   Builder b(&f);
+  CFG cfg(f);
+  TypeInfo types(cfg);
   bool changed = false;
   for (auto &bb : f.blocks) {
     std::unordered_set<const Instruction *> folded;
     for (auto &ip : bb->insts) {
       Instruction &i = *ip;
       if (i.users().empty()) continue; // dead code goes in its own pass
-      if (Value *v = foldedValue(i, b)) {
+      if (Value *v = foldedValue(i, b, types)) {
         i.replaceAllUsesWith(v);
         i.dropOperands();
         folded.insert(&i);

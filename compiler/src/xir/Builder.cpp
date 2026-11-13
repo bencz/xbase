@@ -174,9 +174,10 @@ Instruction *Builder::indexSet(Value *base, Value *idx, Value *value) {
   return make(Op::IndexSet, Type::Void, {base, idx, value});
 }
 
-Instruction *Builder::inlineEnter(Function *shown) {
+Instruction *Builder::inlineEnter(Function *shown, const std::vector<Value *> &args) {
   Instruction *i = make(Op::InlineEnter, Type::Void);
   i->blockFn = shown;
+  for (Value *a : args) i->addOperand(a);
   return i;
 }
 

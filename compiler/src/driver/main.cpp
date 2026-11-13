@@ -2,6 +2,7 @@
 #include "codegen/CodeGen.h"
 #include "codegen/Emit.h"
 #include "common/Diagnostics.h"
+#include "driver/RuntimeLibrary.h"
 #include "opt/Fold.h"
 #include "parser/Parser.h"
 #include "preprocessor/Preprocessor.h"
@@ -177,6 +178,80 @@ struct Source {
   std::unique_ptr<xb::xir::Module> xir;
 };
 
+// The files a preprocessor read, added to `filesRead` (the dependency file's list) once each.
+void addFilesRead(std::vector<std::string> &filesRead, const xb::Preprocessor &pp) {
+  for (const std::string &f : pp.filesRead())
+    if (std::find(filesRead.begin(), filesRead.end(), f) == filesRead.end()) filesRead.push_back(f);
+}
+
+// The syntax tree of a preprocessed source, its names resolved and checked; null after an error.
+std::unique_ptr<xb::Module> analyze(std::vector<xb::Token> tokens, const std::string &path, xb::Diagnostics &diag,
+                                    bool runtimeLibrary, xb::Sema::Undeclared undeclared) {
+  unsigned errors = diag.errorCount();
+  xb::Parser parser(std::move(tokens), diag);
+  auto ast = parser.parseModule(moduleNameFor(path));
+  ast->file = llvm::sys::path::filename(path).str();
+  if (diag.errorCount() != errors) return nullptr;
+  xb::ClassResolver(diag).run(*ast);
+  if (diag.errorCount() != errors) return nullptr;
+  xb::CallResolver(diag, xb::Folder::canEvaluate, runtimeLibrary).run(*ast);
+  if (diag.errorCount() != errors) return nullptr;
+  xb::Folder().run(*ast); // before Sema: STATIC initializers are checked once folded
+  xb::Sema(diag, undeclared).run(*ast);
+  if (diag.errorCount() != errors) return nullptr;
+  return ast;
+}
+
+// Whether the module calls a function of the carried runtime sources (by name, as a function of the runtime).
+bool callsRuntimeLibrary(const xb::xir::Module &m) {
+  for (auto &f : m.functions)
+    for (auto &b : f->blocks)
+      for (auto &i : b->insts)
+        if (i->op == xb::xir::Op::Call && i->callee.native)
+          for (const xb::EmbeddedSource &s : xb::runtimeLibrarySources())
+            if (std::find(s.functions.begin(), s.functions.end(), i->callee.name) != s.functions.end()) return true;
+  return false;
+}
+
+// The runtime's carried sources, compiled as modules of the runtime are (with std.ch, found in the include
+// directories, and the target's defines only) and through the passes that run before the final ones, for calls of
+// their functions to inline. Without std.ch there is nothing to inline (empty, no error); a source that does not
+// compile is an internal error (`failed`). The std.ch read goes into `filesRead`.
+std::vector<std::unique_ptr<xb::xir::Module>> loadRuntimeLibrary(const std::vector<std::string> &includeDirs,
+                                                                const std::vector<std::string> &predefined,
+                                                                std::vector<std::string> &filesRead, bool &failed) {
+  std::vector<std::unique_ptr<xb::xir::Module>> out;
+  failed = false;
+  for (const xb::EmbeddedSource &s : xb::runtimeLibrarySources()) {
+    xb::Diagnostics diag;
+    xb::Preprocessor pp(diag);
+    for (const std::string &d : includeDirs) pp.addIncludeDir(d);
+    for (const std::string &d : predefined) pp.defineFromCommandLine(d);
+    std::string stdPath = pp.findInclude("std.ch", "");
+    if (stdPath.empty()) return {};
+    pp.processFile(stdPath);
+    addFilesRead(filesRead, pp);
+    pp.processText(s.name, s.text);
+    auto ast = diag.errorCount() ? nullptr : analyze(pp.takeOutput(), s.name, diag, true, xb::Sema::Undeclared::Ignore);
+    if (!ast) {
+      std::fprintf(stderr, "xbc: internal error: the carried runtime source %s does not compile\n", s.name);
+      failed = true;
+      return {};
+    }
+    auto m = xb::xir::Generator(true).run(*ast);
+    std::string bad = xb::xir::verify(*m);
+    if (bad.empty()) bad = xb::xir::optimize(*m, false);
+    if (!bad.empty()) {
+      std::fprintf(stderr, "xbc: internal error: invalid xIR in the carried runtime source %s: %s\n", s.name,
+                   bad.c_str());
+      failed = true;
+      return {};
+    }
+    out.push_back(std::move(m));
+  }
+  return out;
+}
+
 // The function that starts the program: a public MAIN in any module, or else
 // the first function (not an INIT or EXIT procedure) of the first source that
 // has one.
@@ -329,8 +404,7 @@ static int compile(int argc, char **argv) {
     unsigned errors = diag.errorCount();
     pp.processFile(input);
     std::vector<xb::Token> tokens = pp.takeOutput();
-    for (const std::string &f : pp.filesRead())
-      if (std::find(filesRead.begin(), filesRead.end(), f) == filesRead.end()) filesRead.push_back(f);
+    addFilesRead(filesRead, pp);
     if (diag.errorCount() != errors) continue;
 
     if (ppOnly || ppFile) {
@@ -343,30 +417,31 @@ static int compile(int argc, char **argv) {
       ppo << text;
     }
 
-    xb::Parser parser(std::move(tokens), diag);
-    auto ast = parser.parseModule(moduleNameFor(input));
-    ast->file = llvm::sys::path::filename(input).str();
-    if (diag.errorCount() != errors) continue;
-    xb::ClassResolver(diag).run(*ast);
-    if (diag.errorCount() != errors) continue;
-    xb::CallResolver(diag, xb::Folder::canEvaluate, runtimeLibrary).run(*ast);
-    if (diag.errorCount() != errors) continue;
-    xb::Folder().run(*ast); // before Sema: STATIC initializers are checked once folded
-    xb::Sema(diag, undeclared).run(*ast);
-    if (diag.errorCount() != errors) continue;
-    sources.push_back({input, std::move(ast), nullptr});
+    auto ast = analyze(std::move(tokens), input, diag, runtimeLibrary, undeclared);
+    if (ast) sources.push_back({input, std::move(ast), nullptr});
   }
   if (ppOnly) return diag.errorCount() ? 1 : 0;
   checkDuplicates(sources, diag);
   if (diag.errorCount()) return 1;
 
   std::string xirText;
+  std::vector<std::unique_ptr<xb::xir::Module>> library; // loaded once a module calls one of its functions
+  bool libraryLoaded = false;
   for (Source &s : sources) {
     s.xir = xb::xir::Generator(runtimeLibrary).run(*s.ast);
     if (std::string bad = xb::xir::verify(*s.xir); !bad.empty()) {
       std::fprintf(stderr, "xbc: internal error: invalid xIR: %s\n", bad.c_str());
       return 1;
     }
+    if (tcfg.optLevel > 0 && !runtimeLibrary && !libraryLoaded && callsRuntimeLibrary(*s.xir)) {
+      std::vector<std::string> dirs = includeDirs;
+      for (const std::string &d : defaultIncludeDirs(argv[0])) dirs.push_back(d);
+      bool failed;
+      library = loadRuntimeLibrary(dirs, predefined, filesRead, failed);
+      if (failed) return 1;
+      libraryLoaded = true;
+    }
+    for (auto &l : library) s.xir->library.push_back(l.get());
     if (tcfg.optLevel > 0) {
       if (std::string bad = xb::xir::optimize(*s.xir); !bad.empty()) {
         std::fprintf(stderr, "xbc: internal error: invalid xIR %s\n", bad.c_str());

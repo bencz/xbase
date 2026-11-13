@@ -2,9 +2,6 @@ module TYPED_CONTINUATIONS
 
 function SUM params 1 {
   $f0 = frame 0 "A"
-  $f1 = frame 1 "I"
-  $f2 = frame 2 "S"
-  $f3 = frame 3 "A"
 entry:
   %0 = params.ref $f0
   cond_br %0, byref, body
@@ -48,8 +45,6 @@ for.body.subst:
 
 function SUM.byref internal params 1 {
   $f0 = frame 0 "A"
-  $f1 = frame 1 "I"
-  $f2 = frame 2 "S"
 entry:
   br for.test(1:w10, 0:w10)
 for.test(%1: item, %2: item):

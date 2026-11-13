@@ -2,7 +2,6 @@ module SPREAD
 
 function PASS params 1 {
   $f0 = frame 0 "A"
-  $f1 = frame 1 "A"
 entry:
   %0 = params.ref $f0
   cond_br %0, byref, body
