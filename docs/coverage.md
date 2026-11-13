@@ -43,8 +43,9 @@ PROCEDURE*, **SET RELATION**, *SET SAFETY*, **SET SCOPE**, **SET SCOPEBOTTOM**, 
 Other standard headers, each to be provided with the matching runtime support: `common.ch` (provided: the logical
 constants, the `IS...()` type tests through `ValType()`, `DEFAULT ... TO`, `UPDATE ... IF ... TO`), `inkey.ch`, `set.ch`
 (partial), `error.ch` (provided: the severities and generic codes), `fileio.ch`, `directry.ch` and `dbstruct.ch`
-(provided), `box.ch`, `color.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`,
-`simpleio.ch`, `blob.ch`.
+(provided), `box.ch`, `color.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`, `dbedit.ch`, `ord.ch`, `assert.ch`
+(provided: `ASSERT`, nothing with `NDEBUG`), `simpleio.ch` (provided: `?`, `??` through `OutStd()`, `ACCEPT` from the
+standard input), `blob.ch`.
 
 ## Functions
 

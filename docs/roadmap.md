@@ -69,7 +69,7 @@ Done: skipped arguments, `PARAMETERS`, and `DO &name [WITH args]`, the procedure
 - `TEXT ... ENDTEXT` is done ([preprocessor.md](preprocessor.md#text-blocks)); `TEXT TO FILE` and `TEXT TO PRINTER`
   come with the console's redirections ([terminal.md](terminal.md#order-of-the-work)).
 - Standard headers still to provide: `inkey.ch`, `box.ch`, `color.ch`, `getexit.ch`, `memoedit.ch`, `achoice.ch`,
-  `dbedit.ch`, `ord.ch`, `assert.ch`, `simpleio.ch`, `blob.ch`.
+  `dbedit.ch`, `ord.ch`, `blob.ch`.
 
 ### Runtime library
 

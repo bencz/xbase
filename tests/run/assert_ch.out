@@ -1,0 +1,3 @@
+
+passed
+CHECK(15)  Assertion failed: n * 2 < Len( "abc" )

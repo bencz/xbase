@@ -1,7 +1,8 @@
 # Run tests: tests/run/<name>.prg is compiled with xbc, linked against xbrt,
 # executed, and its stdout compared with <name>.out. An optional <name>.rc
 # holds the expected exit code (default 0), an optional <name>.args the
-# command-line arguments, one per line. The modules in an optional
+# command-line arguments, one per line, an optional <name>.in its standard
+# input. The modules in an optional
 # directory <name>.with/ are compiled in the same xbc run (one object); those
 # in an optional directory <name>.d/ are compiled on their own with --no-entry
 # and linked into the program, and those in <name>.rt/ likewise as modules of
@@ -47,6 +48,7 @@ function(xb_add_run_test_variant name suffix test workdir)
       -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.out
       -DEXPECTED_RC=${rc}
       -DEXPECTED_ERR=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.err
+      -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/run/${name}.in
       -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake
     WORKING_DIRECTORY ${workdir})
   # A test that commits much memory (a recursion to the end of the stack) runs alone, never beside another.
