@@ -279,13 +279,14 @@ from C, the order of values, the stable merge sort and deep copies.
 - `HCaseMatch( h, .F. )` rebuilds the index ignoring case. Keys that then become equal merge into the first of them,
   which keeps its spelling and position and takes the value of the last, so a key always names one entry.
 - Elements: `h[k]` reads the value; a missing key is `Bound error: array access` (1132), a value that cannot be a key
-  `Argument error: array access` (1068, whose handler may substitute the value). `h[k] := v` replaces the value in place
-  or adds the key last; a value that cannot be a key is `Argument error: array assign` (1069). A reference to `h[k]`
-  (`@h[k]`) designates the entry of key `k` (`xb_ref.key`, the entry's own key as it is spelled): it finds it again at
-  every use, wherever deletions move it, and using it once the key is gone is the bound error (1132). The `FOR EACH`
-  reference designates a position; a codeblock or a reference that takes the loop's current element gets the entry's key
-  instead. A literal `{ k => v, ... }` is built by `xb_hash_new` from frame slots; a value that cannot be a key raises
-  `Bound error: array assign` (1133) with the hash built so far, the key and the value as arguments.
+  `Argument error: array access` (1068, whose handler may substitute the value; also for a literal such as `h[ .T. ]`,
+  in compiled code and in a macro, where the reference rejects it when compiling). `h[k] := v` replaces the value in
+  place or adds the key last; a value that cannot be a key is `Argument error: array assign` (1069). A reference to
+  `h[k]` (`@h[k]`) designates the entry of key `k` (`xb_ref.key`, the entry's own key as it is spelled): it finds it
+  again at every use, wherever deletions move it, and using it once the key is gone is the bound error (1132). The `FOR
+  EACH` reference designates a position; a codeblock or a reference that takes the loop's current element gets the
+  entry's key instead. A literal `{ k => v, ... }` is built by `xb_hash_new` from frame slots; a value that cannot be a
+  key raises `Bound error: array assign` (1133) with the hash built so far, the key and the value as arguments.
 - The `H*` functions raise `Argument error` (1123) for a first argument that is not a hash or a key that cannot be one,
   and `Bound error` (1187, named after the function, `HDelAt` included, where the reference implementation gives 1133)
   for a position outside `1 .. Len( h )`. `Hash( k1, v1, ... )` with a key and no value is `Bound error: array
@@ -294,10 +295,12 @@ from C, the order of values, the stable merge sort and deep copies.
   destination first. `HAllocate` returns the hash.
 - Walking a hash that changes: every walk reads the entry at a position when its turn comes, so the entries after a
   deleted one move down a position. `FOR EACH` and `HMerge` check each position against the current length, so they
-  reach the entries a block adds; `HEval` and `HScan` walk the range fixed when they start, and stop at a position
-  that no longer exists. `HSort` sorts positions and puts the entries back only when its block left the number of
-  entries alone (otherwise the hash stays as the block left it). No change made by a block leaves the hash
-  inconsistent.
+  reach the entries a block adds; `HEval` and `HScan` walk the range fixed when they start, and stop at a position that
+  no longer exists. `HSort` without a block orders keys as the hash knows them (`xb_hash_key_order`): numbers by value,
+  then dates, then strings byte by byte (a prefix first; ASCII letter case aside when the hash ignores it), a total
+  order, so equal-looking keys such as `"a"` and `"a "` keep no insertion order (the reference ignores trailing blanks
+  there). It sorts positions and puts the entries back only when its block left the number of entries alone (otherwise
+  the hash stays as the block left it). No change made by a block leaves the hash inconsistent.
 - Copies: `HClone` and `AClone` copy the arrays and hashes inside too (`xb_clone_deep`), each once, so shared and
   cyclic parts stay shared and cyclic in the copy; objects and codeblocks are shared. The copy works through a list
   of copies to visit, not recursion, so the depth of the structure has no limit. `HCopy` and `HMerge` copy entries
@@ -756,17 +759,19 @@ goes to that block again, as in the reference, until the limit of nested handler
 | `=` on strings | with `SET EXACT OFF`, compares only the right operand's length (`"abc" = "ab"` is true) |
 | `==` | exact comparison; on strings byte-for-byte |
 | `<` `<=` `>` `>=` `!=` | numbers, strings (same rule as `=`), logicals (`.F.` < `.T.`); NaN is ordered with nothing (IEEE 754, `xb_order_is` in `xbrt.h`): every comparison with it is false but `!=`, so a `FOR` loop ends at one, where the reference loops forever |
-| `$` | substring test; an empty left operand is false; with a hash on the right, whether the left is one of its keys |
+| `$` | substring test; an empty left operand is false; with a hash on the right, whether the left is one of its keys, or, for a hash of one entry on the left, whether the right has that key with the same value (of one type, a string byte for byte, an array, codeblock, hash or object the same one) |
 | `.NOT.` | logicals only |
 | `&` `\|` `^^` `<<` `>>` `~` | xbase's bit operators (`xb_op_bitand`, ..., `xb_op_bitnot`): numbers taken as integers (`xb_dbl_to_i64`: truncated, saturated, NaN 0), an integer result; `>>` is arithmetic; anything else is an argument error with the operator and the code of its operation (`xb_bit_function`) |
 
 Comparing `NIL` with `=`/`==`/`!=` is allowed; other type mismatches raise `BASE` argument errors (whose error block
 may substitute the result, see [Errors and pending requests](#errors-and-pending-requests)). `==` on two arrays,
-two codeblocks, two objects or two hashes tests identity; other comparisons of them are argument errors.
+two codeblocks, two objects or two hashes tests identity, and an array with an object is `.F.` (Clipper's objects are
+arrays); other comparisons of them are argument errors.
 
 Element access `a[i]` (`xb_op_index`) and assignment (`xb_op_index_set`) raise `Argument error: array access` (1068)
 or `array assign` (1069) when the base is not an array or the index not a number, and `Bound error` (1132/1133)
-outside `1 .. Len( a )`.
+outside `1 .. Len( a )`. An object is no array: unless its class defines `[]`, an index on it is that error (the
+reference reads the object's variables by position).
 
 `xb_num_default_dec(ctx, r, value)` makes a double with SET DECIMALS decimals; the compiler uses it for folded
 expressions whose decimals are decided at run time. Items keep 16 bits of SET DECIMALS, as in Clipper.

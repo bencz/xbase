@@ -176,6 +176,9 @@ xb_hash *xb_hash_alloc(void); /* empty, without a store */
 void     xb_set_hash(xb_item *it, xb_hash *h);
 /* Whether `key` can be a key (a string, a number or a date). */
 int      xb_hash_key_ok(const xb_item *key);
+/* The order of two keys of `h` (-1, 0, 1), as HSort() sorts them: numbers by value, then dates, then strings byte by
+ * byte (a prefix first), ASCII letter case aside when `h` ignores it; 0 only for keys that are one key. */
+int      xb_hash_key_order(const xb_hash *h, const xb_item *a, const xb_item *b);
 /* The entry of `key` (a valid key), or -1. */
 int64_t  xb_hash_find(const xb_hash *h, const xb_item *key);
 /* Sets `key` (a valid key) to `value`, adding it last when new; `h` must be

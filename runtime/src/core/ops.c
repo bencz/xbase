@@ -246,11 +246,14 @@ void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   else xb_set_logical(r, !xb_order_is(c, 0, 1, 0));
 }
 
+/* An array and an object are one kind for ==, as in Clipper, where objects are arrays: never the same one. */
+static int array_like(const xb_item *it) { return it->type == XB_T_ARRAY || it->type == XB_T_OBJECT; }
+
 void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_EXACT_EQ, a, b, NULL)) return;
   int identity = a->type == XB_T_ARRAY || a->type == XB_T_BLOCK || a->type == XB_T_OBJECT || a->type == XB_T_HASH;
-  if (identity && a->type == b->type) {
-    xb_set_logical(r, a->v.p == b->v.p);
+  if (identity && (a->type == b->type || (array_like(a) && array_like(b)))) {
+    xb_set_logical(r, a->type == b->type && a->v.p == b->v.p);
     return;
   }
   if (a->type == XB_T_STRING && b->type == XB_T_STRING) {
@@ -279,11 +282,30 @@ XB_REL_OP(xb_op_le, 1074, XB_OPERATOR_LE, 1, 1, 0)
 XB_REL_OP(xb_op_gt, 1075, XB_OPERATOR_GT, 0, 0, 1)
 XB_REL_OP(xb_op_ge, 1076, XB_OPERATOR_GE, 0, 1, 1)
 
-/* `$`: a substring of a string, or a key of a hash. */
+/* Two values that are the same for `$` of a pair: of one type (numbers of either kind) and equal, strings byte for
+ * byte, arrays, codeblocks, hashes and objects the same one. */
+static int same_value(const xb_ctx *ctx, const xb_item *x, const xb_item *y) {
+  if (x->type == XB_T_STRING && y->type == XB_T_STRING) {
+    const xb_str *p = x->v.s, *q = y->v.s;
+    return p->len == q->len && memcmp(p->data, q->data, p->len) == 0;
+  }
+  if (xb_type_is_heap(x->type) || xb_type_is_heap(y->type)) return x->type == y->type && x->v.p == y->v.p;
+  if (x->type == XB_T_NIL || y->type == XB_T_NIL) return x->type == y->type;
+  return xb_compare(ctx, x, y) == 0;
+}
+
+/* `$`: a substring of a string, a key of a hash, or a pair of a hash (a hash of one entry whose key the other has,
+ * with the same value). */
 void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_IN, a, b, NULL)) return;
   if (b->type == XB_T_HASH && xb_hash_key_ok(a)) {
     xb_set_logical(r, xb_hash_find(b->v.p, a) >= 0);
+    return;
+  }
+  if (b->type == XB_T_HASH && a->type == XB_T_HASH && ((xb_hash *)a->v.p)->len == 1) {
+    const xb_hentry *pair = xb_hash_at(a->v.p, 1);
+    int64_t e = xb_hash_find(b->v.p, &pair->key);
+    xb_set_logical(r, e >= 0 && same_value(ctx, &((xb_hash *)b->v.p)->entries[e].value, &pair->value));
     return;
   }
   if (a->type != XB_T_STRING || b->type != XB_T_STRING) { arg_error2(ctx, r, 1109, "$", a, b); return; }

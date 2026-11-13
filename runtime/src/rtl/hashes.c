@@ -212,7 +212,7 @@ static int key_less(void *arg, size_t i, size_t j) {
     return 0;
   }
   const xb_item *x = &xb_hash_at(s->h, (int64_t)i + 1)->key, *y = &xb_hash_at(s->h, (int64_t)j + 1)->key;
-  if (!s->block) return xb_value_less(s->ctx, x, y);
+  if (!s->block) return xb_hash_key_order(s->h, x, y) < 0;
   s->call[0] = *x;
   s->call[1] = *y;
   if (!xb_calls_run(s->ctx, s->block, s->call, 2)) {
@@ -225,8 +225,8 @@ static int key_less(void *arg, size_t i, size_t j) {
 static const xb_proc hsort_proc = XB_RUNTIME_PROC("HSORT", 0);
 
 /* HSort( hHash, [bOrder] ): orders the entries by key, stably, by bOrder(
- * key1, key2 ) (whether the first goes first) or as ASort orders values;
- * returns hHash. */
+ * key1, key2 ) (whether the first goes first) or in the hash's key order
+ * (xb_hash_key_order); returns hHash. */
 void xbf_HSORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HSORT", argc, argv, 0);
   if (!h) return;

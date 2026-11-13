@@ -72,6 +72,29 @@ static int key_equal(const xb_hash *h, const xb_item *a, const xb_item *b) {
   return memcmp(&a->v.d, &b->v.d, sizeof a->v.d) == 0;
 }
 
+static int key_kind(const xb_item *k) { return k->type == XB_T_STRING ? 2 : k->type == XB_T_DATE; }
+
+int xb_hash_key_order(const xb_hash *h, const xb_item *a, const xb_item *b) {
+  int ka = key_kind(a), kb = key_kind(b);
+  if (ka != kb) return ka < kb ? -1 : 1;
+  if (ka == 1) return (a->v.i > b->v.i) - (a->v.i < b->v.i);
+  if (ka == 0) {
+    if (a->type == XB_T_INT && b->type == XB_T_INT) return (a->v.i > b->v.i) - (a->v.i < b->v.i);
+    return key_equal(h, a, b) ? 0 : xb_order_double(xb_num_value(a), xb_num_value(b));
+  }
+  const xb_str *x = a->v.s, *y = b->v.s;
+  size_t n = x->len < y->len ? x->len : y->len;
+  for (size_t i = 0; i < n; ++i) {
+    unsigned char p = (unsigned char)x->data[i], q = (unsigned char)y->data[i];
+    if (h->flags & XB_HASH_IGNORECASE) {
+      p = (unsigned char)xb_ascii_upper((char)p);
+      q = (unsigned char)xb_ascii_upper((char)q);
+    }
+    if (p != q) return p < q ? -1 : 1;
+  }
+  return (x->len > y->len) - (x->len < y->len);
+}
+
 /* The index slot of `key`: its entry's, or the free slot where it would go. */
 static uint32_t slot_of(const xb_hash *h, const xb_item *key, uint32_t hv) {
   for (uint32_t i = hv & h->imask;; i = (i + 1) & h->imask) {
