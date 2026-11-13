@@ -109,6 +109,7 @@ private:
   void parseInline(ClassMethodDecl &m);
   std::string operatorMessage();
   bool atMacroParen() const;
+  bool atFunctionRef() const;
 
   std::vector<Token> toks_;
   Diagnostics &diag_;

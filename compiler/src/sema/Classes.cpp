@@ -1,10 +1,9 @@
 // Classes to functions (see Classes.h).
 #include "sema/Classes.h"
 
-#include "xbrt.h" // XB_TYPE_NAME_*
+#include "xbrt.h" // xb_type_class_name
 
 #include <algorithm>
-#include <iterator>
 #include <set>
 #include <unordered_map>
 
@@ -49,10 +48,9 @@ void ClassResolver::run(Module &m) {
   for (auto &c : m.classes) {
     if (!byName.emplace(c->name, c.get()).second) diag_.error(c->loc, "class " + c->name + " is already defined");
     if (c->scalar) {
-      static const char *const types[] = {XB_TYPE_NAME_NIL,   XB_TYPE_NAME_LOGICAL, XB_TYPE_NAME_NUMERIC,
-                                          XB_TYPE_NAME_CHARACTER, XB_TYPE_NAME_ARRAY, XB_TYPE_NAME_BLOCK,
-                                          XB_TYPE_NAME_DATE,  XB_TYPE_NAME_HASH};
-      if (std::none_of(std::begin(types), std::end(types), [&](const char *t) { return c->name == t; }))
+      bool known = false;
+      for (uint32_t t = 0; t < XB_T_COUNT_; ++t) known |= xb_type_class_name(t) && c->name == xb_type_class_name(t);
+      if (!known)
         diag_.error(c->loc, "SCALAR CLASS " + c->name + ": not the name of a type as ClassName() gives it");
       if (!c->vars.empty()) diag_.error(c->vars[0].loc, "a SCALAR CLASS has no instance variables");
     } else if (functions.count(c->name)) {

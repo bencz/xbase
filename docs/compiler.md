@@ -174,14 +174,18 @@ ends without one; the procedure rule does not apply), any other statement but `S
 and `PARAMETERS`. A codeblock inside captures its `LOCAL`s like a function's, and they can be passed by reference
 (`BlockExpr::boxed`). It is generated like any codeblock, with a frame of its own. A call argument `@name` or
 `@name[i]...` passes a variable or an element by reference (`RefExpr`); `@` anywhere else is an error (references in
-array literals are not supported yet), and so are function references `@name()` and fields (`@alias->name`, and a name
-`FIELD` declares, also as the argument `DO ... WITH` passes by reference or as the variable of `FOR EACH`). `...` as the
-last argument of a call or a send or the last element of an array literal (`SpreadExpr`; once, with nothing after it,
-not even an empty argument) stands for the arguments the function received past its parameters, as many as there are:
-`f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it only in a function declared with `...`, outside its
-codeblocks (which have arguments of their own); a `CHECKED` function's count includes the other arguments only, so only
-too many of them is an error. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`,
-a message without arguments) and macros can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares
+array literals are not supported yet), and so are fields (`@alias->name`, and a name `FIELD` declares, also as the
+argument `DO ... WITH` passes by reference or as the variable of `FOR EACH`). `@name()` where an operand starts is a
+function reference, a value anywhere (`RefExpr` of a `CallExpr` with `reference` set and no arguments; what follows,
+such as `:Name`, applies to the function reference, among call arguments too, where the reference implementation
+calls the function and sends the message to its result; `@IIF()` is an error): it is lowered to `func.ref` with
+the function's callee, and the generator emits its `xb_funcref` ([runtime.md](runtime.md#function-references)).
+`...` as the last argument of a call or a send or the last element of an array literal (`SpreadExpr`; once, with nothing
+after it, not even an empty argument) stands for the arguments the function received past its parameters, as many as
+there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it only in a function declared with `...`, outside
+its codeblocks (which have arguments of their own); a `CHECKED` function's count includes the other arguments only, so
+only too many of them is an error. Variables, elements (`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables
+(`o:x := v`, a message without arguments) and macros can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares
 `a := Array( n1, n2 )`.
 
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where

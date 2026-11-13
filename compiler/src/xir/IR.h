@@ -145,6 +145,10 @@ struct Callee {
   std::string name;             // upper-cased xBase name
   bool native = false;          // external: written in C (runtime prefix), else another module's
   bool readsCallerArgs = false; // ARGS: it reads the arguments its caller received (PCount(), __ArgError())
+  // The arguments it takes as references (bit k: argument k, bit 31: argument 31 and after; xb_refs_take, as
+  // xb_funcref's): a native function's declared ones, every one for an xBase function. A call with `...` passes the
+  // arguments on as they are there, references included; a send or an array literal passes their values.
+  uint32_t byref = UINT32_MAX;
 };
 
 // A branch destination with its arguments.
@@ -200,10 +204,6 @@ public:
   // whether it is Super:message; ClassNew: the class.
   int32_t classIndex = -1;
   bool superSend = false;
-  // Call with `...` (an args.rest operand): the argument positions that receive the arguments passed on as they are,
-  // references included (bit k: argument k, bit 31: argument 31 and after; xb_refs_take); the others, and those of
-  // a send or an array literal, receive their values.
-  uint32_t restRefs = 0;
   Function *blockFn = nullptr;        // MakeBlock
   std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
   std::vector<Target> targets;        // Br: one; CondBr: then, else (operand 0 is the condition)

@@ -1,1 +1,1 @@
-function references (@name()) are not supported yet
+a function reference (@MAIN()) takes no arguments

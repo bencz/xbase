@@ -1,3 +1,3 @@
 PROCEDURE Main()
-   ? Len( @Main() )
+   ? Len( @Main( 1 ) )
    RETURN

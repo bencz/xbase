@@ -1,5 +1,6 @@
-// A STATIC FUNCTION is called only by the module's own calls (no macro, no other module, no message reaches it): when
-// none of them passes a reference, nor `...` (whose arguments may be references), its parameters never hold one. Its
+// A STATIC FUNCTION is reached only from the module (no macro, no other module, no message reaches it): by its calls,
+// and through its function references (`func.ref`), which may pass anything. When it has no reference and none of its
+// calls passes a reference, nor `...` (whose arguments may be references), its parameters never hold one. Its
 // versioning test (`params.ref`) is then false, and its body versioned for references (`NAME.byref`), which only that
 // test leads to, is never run: it leaves the module, with the codeblocks it makes.
 #include "xir/passes/Passes.h"
@@ -14,7 +15,8 @@
 namespace xb::xir {
 
 bool dropReferenceBodies(Module &m) {
-  // What may reach each function with a reference: a call passing one or `...`, or forwarding its arguments.
+  // What may reach each function with a reference: a call passing one or `...`, forwarding its arguments, or any
+  // other use of the function (`func.ref`: Eval(), Do() and :Exec() pass what they are given).
   std::unordered_map<const Function *, bool> calls; // callee: some call may pass a reference
   for (auto &g : m.functions)
     for (auto &b : g->blocks)

@@ -62,6 +62,7 @@ public:
   Instruction *makeBlock(Function *blockFn, std::vector<Var *> captures);
   Instruction *paramsRef(std::vector<Var *> params);
   Instruction *callForward(Function *callee);
+  Instruction *funcRef(Callee callee);
   Instruction *argsRest();
   Instruction *seqCatch();
   Instruction *seqValue();

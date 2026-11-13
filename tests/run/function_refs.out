@@ -1,0 +1,19 @@
+
+S @TWICE() .F. .T. .F. TWICE STR          1
+        42          8         10 nil ABC   7 TWICE          6 SQUARE          9 NEG         -3
+        81         -4         -6 S
+by reference:          6
+by value:          6
+recursion:    3628800
+pcount:          0          3          1
+native by reference: a-bc
+macro: STR X S
+type: S SYMBOL          0          3
+static:         16         -8         64 U
+do with: NEG @NEG()
+pair: .T. .F.
+error       1001 NOSUCHFUNCTION
+error       1081 +
+error       1073 <
+error       1071 =
+error       1133 array assign

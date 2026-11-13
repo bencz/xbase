@@ -38,13 +38,21 @@ void xbf___QUIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_ctx_raise(ctx, XB_PENDING_QUIT);
 }
 
-/* Eval( bBlock [, xArgs...] ) */
+void xb_funcref_call(xb_ctx *ctx, xb_item *ret, const xb_funcref *f, uint32_t argc, xb_item *argv) {
+  if (!xb_args_rest(ctx, argv, argv, argc, 0, xb_funcref_refs(f))) return;
+  uint32_t mark = xb_mv_mark(ctx); /* the PRIVATEs a runtime function made for its caller end with the call */
+  f->fn(ctx, ret, argc, argv);
+  xb_mv_release(ctx, mark);
+}
+
+/* Eval( bBlock | sFunction [, xArgs...] ) */
 void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 1) {
     xb_error_in(ctx, "(b)EVAL", ret, EG_NOMETHOD, 1004, "EVAL", XB_ERR_SUBSTITUTE, 0, argv);
     return;
   }
-  xb_block_call(ctx, ret, &argv[0], argc - 1, argv + 1);
+  if (argv[0].type == XB_T_SYMBOL) xb_funcref_call(ctx, ret, argv[0].v.p, argc - 1, argv + 1);
+  else xb_block_call(ctx, ret, &argv[0], argc - 1, argv + 1);
 }
 
 /* __GcCollect( [lYoung] ): a full collection (or a young one with .T.);
@@ -156,7 +164,7 @@ void xbf_ERRORLEVEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc) xb_exit_code_set(xb_is_number(&argv[0]) ? xb_num_wrap_int32(&argv[0]) : 0);
 }
 
-/* Do( cName | bBlock, [xArgs...] ): the result of the function named cName
+/* Do( cName | sFunction | bBlock, [xArgs...] ): the result of the function named cName or referenced (@Name())
  * (letter case aside; the name ends at a NUL) or of the block, called with the
  * arguments; references go on as passed where the function takes them, a
  * runtime function receives the value elsewhere. Do shows on the call stack
@@ -179,11 +187,12 @@ void xbf_DO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_error_in(ctx, "DO", NULL, EG_NOFUNC, 1001, name, 0, argc, argv);
       return;
     }
-    if (!xb_args_rest(ctx, argv + 1, argv + 1, argc - 1, 0, xb_symbol_refs(e))) return;
     do_frame_push(ctx, &frame, argc, argv);
-    uint32_t mark = xb_mv_mark(ctx);
-    e->fn(ctx, ret, argc - 1, argv + 1);
-    xb_mv_release(ctx, mark);
+    xb_funcref_call(ctx, ret, &e->ref, argc - 1, argv + 1);
+    xb_frame_pop(ctx, &frame);
+  } else if (argc && argv[0].type == XB_T_SYMBOL) {
+    do_frame_push(ctx, &frame, argc, argv);
+    xb_funcref_call(ctx, ret, argv[0].v.p, argc - 1, argv + 1);
     xb_frame_pop(ctx, &frame);
   } else if (argc && argv[0].type == XB_T_BLOCK) {
     do_frame_push(ctx, &frame, argc, argv);

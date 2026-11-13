@@ -19,6 +19,15 @@ xb_str *xb_item_display(const xb_ctx *ctx, const xb_item *it) {
       size_t n = xb_date_format(it->v.i, ctx->env->date_format, out);
       return xb_str_new(out, n);
     }
+    case XB_T_SYMBOL: { /* @NAME() */
+      const char *name = ((const xb_funcref *)it->v.p)->name;
+      size_t n = strlen(name);
+      xb_str *s = xb_str_alloc(n + 3);
+      s->data[0] = '@';
+      memcpy(s->data + 1, name, n);
+      memcpy(s->data + 1 + n, "()", 2);
+      return s;
+    }
     case XB_T_ARRAY:
     case XB_T_BLOCK:
     case XB_T_OBJECT:

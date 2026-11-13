@@ -138,7 +138,8 @@ every exit (normal end, error, `RETURN`, `EXIT`, `LOOP`). Built on the unwind ed
   ([compiler.md](compiler.md#grammar)).
 - Timestamps (date and time in one value) with their arithmetic and comparisons, date and timestamp literals,
   strings with escapes.
-- Function references `@Name()` and symbol values; `Do()` and `Eval()` on them.
+- Done: function references `@Name()` (symbol values), run by `Eval()`, `Do()` and `:Exec()`
+  ([runtime.md](runtime.md#function-references)).
 - Strings indexed like arrays (`s[ i ]`) and negative indexes counting from the end, if they fit Clipper's rules.
 - Done: `SET LANGUAGE TO <id>` ([runtime.md](runtime.md#languages)) and `SET CODEPAGE TO <cp>` with UTF-8 the
   default and the character functions ([runtime.md](runtime.md#codepages)). Planned: comparisons and sorting by a

@@ -279,7 +279,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       /* a runtime function receives references only where it takes them */
       if (!xb_args_rest(ctx, &s[base], &s[base], argn, 0, xb_symbol_refs(e))) goto out;
       xb_set_nil(r);
-      e->fn(ctx, r, argn, &s[base]);
+      e->ref.fn(ctx, r, argn, &s[base]);
       s[base] = *r;
       sp = base;
       if (FAILED()) goto out;
@@ -559,7 +559,7 @@ void xb_macro_call(xb_ctx *ctx, xb_item *r, const xb_item *text, uint32_t argc, 
     return;
   }
   if (!xb_args_rest(ctx, argv, argv, argc, 0, xb_symbol_refs(e))) return;
-  e->fn(ctx, r, argc, argv);
+  e->ref.fn(ctx, r, argc, argv);
 }
 
 void xb_macro_private(xb_ctx *ctx, const xb_item *text, uint32_t mark) {

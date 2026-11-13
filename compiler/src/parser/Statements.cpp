@@ -72,9 +72,9 @@ StmtPtr Parser::parseStmtKind() {
       do {
         if (at(Tok::Comma) || atEndOfStmt()) {
           call->args.push_back(std::make_unique<NilExpr>(cur().loc));
-        } else if (at(Tok::At)) {
+        } else if (at(Tok::At) && !atFunctionRef()) {
           call->args.push_back(parseRef());
-        } else {
+        } else { // a function reference is a value, which an operator or a message may follow
           ExprPtr arg = parseExpr();
           if (arg->kind == ExprKind::Var && !arg->parenthesized) {
             SourceLoc argLoc = arg->loc;

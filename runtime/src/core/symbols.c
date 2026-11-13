@@ -22,7 +22,7 @@ static void add(const char *name, xb_func fn, int native, uint32_t byref, int re
     entries = e;
     entryCap = cap;
   }
-  entries[id] = (xb_symbol_entry){name, len, fn, native, byref, reserved};
+  entries[id] = (xb_symbol_entry){{name, fn, (uint32_t)native, byref}, len, reserved};
 }
 
 void xb_symbols_add(const xb_symbol *symbols, uint32_t n) {

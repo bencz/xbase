@@ -249,6 +249,8 @@ std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
   while (true) {
     if (at(Tok::Comma) || at(close)) {
       args.push_back(std::make_unique<NilExpr>(cur().loc));
+    } else if (atFunctionRef()) { // a value, which an operator or a message may follow
+      args.push_back(parseExpr());
     } else if (at(Tok::At)) {
       if (!refs) diag_.error(cur().loc, "'@' (by reference) is supported only in function call arguments");
       args.push_back(parseRef());
@@ -268,11 +270,22 @@ std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
 // @name or @name[i]... (the '@' is current).
 ExprPtr Parser::parseRef() {
   SourceLoc loc = cur().loc;
+  bool function = atFunctionRef(); // @name(): the call alone; what follows (:Name, [1]) applies to the reference
   advance();
-  ExprPtr target = parsePostfix();
-  if (target->kind == ExprKind::Call)
-    diag_.error(target->loc, "function references (@name()) are not supported yet");
-  else if (target->kind == ExprKind::Macro)
+  if (function && (cur().upper == "IIF" || cur().upper == "IF")) { // an operator written as a call
+    diag_.error(loc, cur().upper + "() is not a function: it has no reference");
+    advance();
+    advance();
+    parseArgs(Tok::RParen, false, false);
+    expect(Tok::RParen, "')'");
+    return std::make_unique<NilExpr>(loc);
+  }
+  ExprPtr target = function ? parsePrimary() : parsePostfix();
+  if (target->kind == ExprKind::Call) { // @name(): a function reference
+    auto &c = static_cast<CallExpr &>(*target);
+    if (!c.args.empty()) diag_.error(c.loc, "a function reference (@" + c.name + "()) takes no arguments");
+    c.reference = true;
+  } else if (target->kind == ExprKind::Macro)
     diag_.error(target->loc, "a macro cannot be passed by reference (@&name) yet");
   else if (target->kind == ExprKind::Field)
     diag_.error(target->loc, "a field cannot be passed by reference");
@@ -367,10 +380,16 @@ ExprPtr Parser::parseSend(SourceLoc loc, ExprPtr object) {
   return send;
 }
 
+// `@name(` where an operand starts: a function reference.
+bool Parser::atFunctionRef() const {
+  return at(Tok::At) && ahead().kind == Tok::Ident && ahead(2).kind == Tok::LParen;
+}
+
 ExprPtr Parser::parsePrimary() {
   const Token &t = cur();
   SourceLoc loc = t.loc;
   if (atMacroName() || atMacroParen()) return parseMacro();
+  if (atFunctionRef()) return parseRef();
   if (at(Tok::Colon) && ahead().kind == Tok::Ident) { // :message in WITH OBJECT is object:message
     advance();
     if (withObjects_.empty()) { // reported, and parsed as a message to NIL

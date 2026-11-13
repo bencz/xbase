@@ -122,9 +122,6 @@ int        xb_class_associate(const xb_object *o, const char *type);
  * function makes no object of a compiled class, or the class does not answer the message. */
 int        xb_class_send_as(xb_ctx *ctx, xb_item *r, xb_func classFunction, xb_class_def **def, const char *message,
                             uint32_t argc, xb_item *argv);
-/* The name ClassName() gives values of a type that is not an object's
- * ("NUMERIC", "CHARACTER" ...), NULL for internal types. */
-const char *xb_type_class_name(xb_type type);
 /* Generators (types/generator.c): whether `it` is a generator's enumerator;
  * one step (MoveNext: .T. while it yields an element, its CURRENT variable);
  * the messages it answers besides its CURRENT variable (1 when it did). */

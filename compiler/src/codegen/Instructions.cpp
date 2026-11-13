@@ -140,7 +140,8 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
   Value *rest = b_.CreateSelect(b_.CreateICmpUGT(argc, params), b_.CreateSub(argc, params), ConstantInt::get(i32_, 0),
                                 "rest");
   Value *restItems = b_.CreateGEP(itemTy_, argv, params, "rest.items"); // not dereferenced when there are none
-  if (forwardInPlace_ && i.op == xir::Op::Call && fixed == 0 && i.restRefs == UINT32_MAX) {
+  uint32_t refs = i.op == xir::Op::Call ? i.callee.byref : 0; // a method and an array element receive values
+  if (forwardInPlace_ && i.op == xir::Op::Call && fixed == 0 && refs == UINT32_MAX) {
     // f( ... ): the callee receives the arguments where they are, which nothing here reads again
     emit(rest, restItems);
     return;
@@ -164,7 +165,7 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
     copyItem(b_.CreateConstInBoundsGEP1_32(itemTy_, items, k), b_.CreateConstInBoundsGEP1_32(itemTy_, group, k));
   Value *at = b_.CreateConstInBoundsGEP1_32(itemTy_, items, fixed);
   Value *ok = b_.CreateCall(rtArgsRest_, {fnCtx_, at, restItems, rest, ConstantInt::get(i32_, fixed),
-                                          ConstantInt::get(i32_, i.restRefs)});
+                                          ConstantInt::get(i32_, refs)});
   BasicBlock *failed = newBlock("list.failed");
   BasicBlock *next = newBlock("list.rest");
   b_.CreateCondBr(b_.CreateICmpNE(ok, ConstantInt::get(i32_, 0)), next, failed);
@@ -408,6 +409,9 @@ void CodeGen::emit(const xir::Instruction &i) {
     checkPending(unwind_);
     break;
   }
+  case Op::FuncRef:
+    copyItem(dest(i), funcRef(i.callee));
+    break;
   case Op::Send: {
     Value *argv = operandGroup(i);
     Value *d = dest(i);

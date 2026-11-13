@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 40u
+#define XB_ABI_VERSION 41u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -48,11 +48,13 @@ typedef enum xb_type {
   XB_T_OBJECT  = 9,   /* v.p: an object (an instance of a class)   */
   XB_T_HASH    = 10,  /* v.p: a hash (keys to values, in insertion order) */
   XB_T_DATE    = 11,  /* v.i: Julian day number, 0 for the empty date  */
+  XB_T_SYMBOL  = 12,  /* v.p: the xb_funcref of a function reference
+                         (@Name()), static: never collected */
   XB_T_COUNT_
 } xb_type;
 /* ValType() of each tag, by tag (a cell or a reference, which ValType never
  * sees, as NIL). */
-#define XB_TYPE_LETTERS "ULNNCABUUOHD"
+#define XB_TYPE_LETTERS "ULNNCABUUOHDS"
 /* [ABI] The `width` of a string item that is a memo field's value: ValType()
  * "M". Every copy of the item keeps it; a string made from it is plain. */
 #define XB_STR_MEMO 1u
@@ -456,6 +458,22 @@ typedef struct xb_symbol {
   const char *name;
   xb_func fn;
 } xb_symbol;
+/* [ABI] What a function reference designates (@Name(), an XB_T_SYMBOL item's
+ * v.p): the function's upper-cased name, its entry, and whether it is a
+ * runtime function (written in C), which receives references only where
+ * `byref` has a bit (bit k: argument k, the last bit for the rest); a compiled
+ * function receives them all. Compiled code emits one, constant, for each
+ * function it references; the symbol table holds one for each name (macros).
+ * xb_funcref_call calls it with arguments, as Eval(), Do() and :exec() do. */
+typedef struct xb_funcref {
+  const char *name;
+  xb_func fn;
+  uint32_t native;
+  uint32_t byref;
+} xb_funcref;
+void xb_funcref_call(xb_ctx *ctx, xb_item *ret, const xb_funcref *f, uint32_t argc, xb_item *argv);
+/* The arguments the function receives as references (bits, as `byref`). */
+static inline uint32_t xb_funcref_refs(const xb_funcref *f) { return f->native ? f->byref : UINT32_MAX; }
 /* [ABI] The name of a memory variable a module uses (PRIVATE, PUBLIC,
  * PARAMETERS, MEMVAR, M->, an undeclared name): one per name and module,
  * numbered by the runtime when the module registers (`memvars`). */
@@ -553,6 +571,23 @@ void     xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache
 #define XB_TYPE_NAME_BLOCK     "BLOCK"
 #define XB_TYPE_NAME_DATE      "DATE"
 #define XB_TYPE_NAME_HASH      "HASH"
+#define XB_TYPE_NAME_SYMBOL    "SYMBOL"
+/* The class name of a type's values (one of the above), or NULL for a tag no value shows (a cell, a reference) or an
+ * object (its own class). */
+static inline const char *xb_type_class_name(uint32_t type) {
+  switch (type) {
+  case XB_T_NIL: return XB_TYPE_NAME_NIL;
+  case XB_T_LOGICAL: return XB_TYPE_NAME_LOGICAL;
+  case XB_T_INT: case XB_T_DOUBLE: return XB_TYPE_NAME_NUMERIC;
+  case XB_T_STRING: return XB_TYPE_NAME_CHARACTER;
+  case XB_T_ARRAY: return XB_TYPE_NAME_ARRAY;
+  case XB_T_BLOCK: return XB_TYPE_NAME_BLOCK;
+  case XB_T_DATE: return XB_TYPE_NAME_DATE;
+  case XB_T_HASH: return XB_TYPE_NAME_HASH;
+  case XB_T_SYMBOL: return XB_TYPE_NAME_SYMBOL;
+  default: return NULL;
+  }
+}
 typedef struct xb_class_var_def {
   const char *name;         /* upper-cased */
   uint32_t flags;

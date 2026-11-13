@@ -164,7 +164,7 @@ private:
       out_ += buf;
       break;
     }
-    case Op::Call:
+    case Op::Call: case Op::FuncRef:
       out_ += " " + (i.callee.function ? i.callee.function->name : i.callee.name) +
               (i.callee.function ? "" : i.callee.native ? " native" : " extern");
       break;

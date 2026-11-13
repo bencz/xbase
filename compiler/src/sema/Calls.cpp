@@ -68,7 +68,7 @@ const ExternDecl *CallResolver::findExtern(const std::string &name, SourceLoc lo
 void CallResolver::call(CallExpr &c) {
   const ExternDecl *d = findExtern(c.name, c.loc);
   if (!c.declaredOnly && funcs_.count(c.name)) { // the module's own functions come first
-    if (d && d->name == c.name) checkArgs(c, *d);   // a CHECKED name keeps its argument count when redefined
+    if (d && d->name == c.name && !c.reference) checkArgs(c, *d); // a CHECKED name keeps its count when redefined
     return;
   }
   if (!d) { // as in Clipper, the linker finds it in another module
@@ -77,12 +77,14 @@ void CallResolver::call(CallExpr &c) {
   }
   c.name = d->name;
   c.callee = d;
+  if (c.reference) return; // @name(): no call, no arguments to check
   checkArgs(c, *d);
   // A native function that does not take a reference at that position
   // receives the value (`...` comes last: every other argument's position is
   // known).
   for (size_t k = 0; k < c.args.size(); ++k) {
     if (c.args[k]->kind != ExprKind::Ref || d->takesRef(k)) continue;
+    if (static_cast<RefExpr &>(*c.args[k]).target->kind == ExprKind::Call) continue; // @name(): a value
     ExprPtr target = std::move(static_cast<RefExpr &>(*c.args[k]).target);
     c.args[k] = std::move(target);
   }

@@ -68,7 +68,7 @@ static int start_up(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
   /* ErrorSys() by name: the program's own when it defines one, else the runtime's (rtl/errorsys.prg). */
   const xb_symbol_entry *errorsys = xb_symbol_find("ERRORSYS", 8);
   if (errorsys) {
-    call(ctx, errorsys->fn, 0, argv); /* no arguments; argv stays a valid address */
+    call(ctx, errorsys->ref.fn, 0, argv); /* no arguments; argv stays a valid address */
     if (unwinding(ctx)) return 0;
   }
   for (const xb_module *m = modules; m; m = m->next)

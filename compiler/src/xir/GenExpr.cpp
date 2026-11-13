@@ -63,10 +63,11 @@ Value *Generator::genExpr(const Expr &e) {
     Value *object = genExpr(*m.object);
     std::vector<Value *> args = genArgs(m.args);
     b.setLoc(m.loc);
-    return sendFrom(m.message, object, args, m.super); // a method receives values (restRefs 0)
+    return sendFrom(m.message, object, args, m.super); // a method receives values (see CodeGen::withRest)
   }
-  case ExprKind::Ref: { // a call argument passed by reference
+  case ExprKind::Ref: { // a call argument passed by reference, or a function reference
     const Expr &target = *static_cast<const RefExpr &>(e).target;
+    if (target.kind == ExprKind::Call) return b.funcRef(calleeOf(static_cast<const CallExpr &>(target)));
     if (target.kind == ExprKind::Var) {
       auto &v = static_cast<const VarExpr &>(target);
       return v.where == VarWhere::Memvar ? b.memvar(Op::MvRef, v.name) : b.refVar(varOf(v));
@@ -154,21 +155,26 @@ std::vector<Value *> Generator::genArgs(const std::vector<ExprPtr> &exprs) {
   return values;
 }
 
-Value *Generator::genCall(const CallExpr &c) {
-  std::vector<Value *> args = genArgs(c.args);
+// What a call (or a function reference) names: an EXTERN FUNCTION, another module's function (sema/Calls), or the
+// module's own.
+Callee Generator::calleeOf(const CallExpr &c) {
   Callee callee;
-  if (c.callee || c.external) { // an EXTERN FUNCTION, or another module's function (sema/Calls)
+  if (c.callee || c.external) {
     callee.name = c.name;
     callee.native = c.callee && c.callee->native;
     callee.readsCallerArgs = c.callee && c.callee->args;
+    if (c.callee) callee.byref = c.callee->refMask();
   } else {
     callee.function = funcs_.at(c.name);
   }
+  return callee;
+}
+
+Value *Generator::genCall(const CallExpr &c) {
+  std::vector<Value *> args = genArgs(c.args);
+  Callee callee = calleeOf(c);
   cur_.b->setLoc(c.loc);
-  Instruction *call = cur_.b->call(std::move(callee), args);
-  // A native function receives references only where it takes them; an xBase one always.
-  if (call->hasRest()) call->restRefs = c.callee ? c.callee->refMask() : UINT32_MAX;
-  return call;
+  return cur_.b->call(std::move(callee), args);
 }
 
 // x := v evaluates v, then stores; x op= v reads x, then evaluates v. The

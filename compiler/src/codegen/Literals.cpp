@@ -99,6 +99,22 @@ Constant *CodeGen::stringLiteral(const std::string &s) {
   return c;
 }
 
+// The constant item of a function reference (@name(), XB_T_SYMBOL): one per function, pointing at its xb_funcref
+// { name, entry, native, byref }.
+Constant *CodeGen::funcRef(const xir::Callee &c) {
+  Function *fn = c.function ? functions_.at(c.function) : externFunction(c);
+  Constant *&item = funcRefs_[fn];
+  if (item) return item;
+  const std::string &name = c.function ? c.function->name : c.name;
+  auto *refTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_, i32_});
+  auto *init = ConstantStruct::get(refTy, {messageName(name), fn, ConstantInt::get(i32_, c.native ? 1 : 0),
+                                           ConstantInt::get(i32_, c.byref)});
+  auto *ref = new GlobalVariable(mod_, refTy, true, GlobalValue::PrivateLinkage, init, ".xb.funcref");
+  ref->setAlignment(dl_.getABITypeAlign(refTy));
+  item = literalItem(XB_T_SYMBOL, 0, 0, ref);
+  return item;
+}
+
 // A message name (or a field's) as the C string xb_op_send (or xb_field_get) receives.
 Constant *CodeGen::messageName(const std::string &message) {
   Constant *&c = messages_[message];

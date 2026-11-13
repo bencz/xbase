@@ -62,6 +62,7 @@ private:
   void genDiscard(const Expr &e);
   Value *genCond(const Expr &e);
   Value *genCall(const CallExpr &c);
+  Callee calleeOf(const CallExpr &c);
   std::vector<Value *> genArgs(const std::vector<ExprPtr> &exprs);
   Value *genAssign(const AssignExpr &a);
   Value *genIncDec(const IncDecExpr &e);

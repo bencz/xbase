@@ -209,6 +209,12 @@ Instruction *Builder::seqResume(Value *requests, Value *value) {
 Instruction *Builder::substCheck(Value *checked) { return make(Op::SubstCheck, Type::Bool, {checked}); }
 Instruction *Builder::substValue(Value *checked) { return make(Op::SubstValue, Type::Item, {checked}); }
 
+Instruction *Builder::funcRef(Callee callee) {
+  Instruction *i = make(Op::FuncRef, Type::Item);
+  i->callee = std::move(callee);
+  return i;
+}
+
 Instruction *Builder::callForward(Function *callee) {
   Instruction *i = make(Op::CallForward, Type::Item);
   i->callee.function = callee;

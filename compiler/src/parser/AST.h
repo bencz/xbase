@@ -116,6 +116,7 @@ struct CallExpr : Expr {
   const ExternDecl *callee = nullptr; // the declaration, when the call goes to an EXTERN FUNCTION
   bool declaredOnly = false;     // always the declared function, even if the module defines one (LOCAL a[n])
   bool external = false;         // neither defined nor declared: another module's function, found when linking
+  bool reference = false;        // @name(): the function itself (a RefExpr's target), not a call
   CallExpr(SourceLoc l, std::string n) : Expr(ExprKind::Call, l), name(std::move(n)) {}
 };
 
@@ -236,7 +237,7 @@ inline bool isLvalue(const Expr &e) {
 // A call argument passed by reference: the callee's parameter designates the
 // variable or element, so assigning the parameter assigns it.
 struct RefExpr : Expr {
-  ExprPtr target;                // a VarExpr or an IndexExpr
+  ExprPtr target;                // a VarExpr or an IndexExpr, or the CallExpr of a function reference (@name())
   RefExpr(SourceLoc l, ExprPtr t) : Expr(ExprKind::Ref, l), target(std::move(t)) {}
 };
 

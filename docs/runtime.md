@@ -17,7 +17,8 @@ typedef struct xb_item {
 } xb_item;
 ```
 
-- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `OBJECT`, `HASH`, `DATE`, and two kinds
+- Types: `NIL`, `LOGICAL`, `INT` (64-bit), `DOUBLE`, `STRING`, `ARRAY`, `BLOCK`, `OBJECT`, `HASH`, `DATE`, `SYMBOL` (a
+  function reference, see [Function references](#function-references)), and two kinds
   the language never shows, which designate another item (see [References](#references)): `CELL`, a variable in a cell,
   and `REF`, an element. An all-zero item is `NIL`.
 - Copying an item is a plain memory copy; there is no reference counting. Items are written as two 8-byte words, the
@@ -318,6 +319,25 @@ variable stays the loop's. The function and every block
 that captured it share the cell, which outlives the function. A codeblock is a compiled function
 `(ctx, ret, argc, argv, self)` plus the captured cells (`self->cells[]`); `xb_block_new` creates it and the compiled
 code stores the cells. `Eval( bBlock, ... )` and `xb_block_call` run it; the caller sets the result to `NIL` first.
+
+## Function references
+
+`@Name()`, in compiled code or in a macro, is a value that designates a function: an `XB_T_SYMBOL` item whose `v.p` is a
+static `xb_funcref` (`xbrt.h`: the upper-cased name, the function's entry (`xb_func`), whether it is a runtime function,
+and the mask of the parameters that take references, as for `Do()`). It is not a heap object, so the collector ignores
+it. Compiled code emits one `xb_funcref` per function a module references (`.xb.funcref`), for its `STATIC` functions
+too; a macro uses the one in the symbol table's entry (`xb_symbol_entry`, see [Program startup](#program-startup)), and
+a name that is no function there is `BASE/1001` where the macro's code takes the reference, as for a call to it
+(`Type()` gives `U`; in compiled code the link fails, as for a call). The reference implementation makes a symbol of a
+missing name, which fails only when it is called; xbase reports the missing function where the reference is taken.
+
+- `ValType()` and `Type()` give `S`, `ClassName()` gives `SYMBOL` (a `SCALAR CLASS SYMBOL` gives it methods), `?`
+  shows `@NAME()`, and `Empty()` is `.F.`.
+- `==` is true for two references to the same function (so is `$` of a pair whose values they are); the other
+  comparisons, `$` and arithmetic are the operators' argument errors (`=` 1071, `!=` 1072, `+` 1081, `$` 1109, ...), a
+  reference as a hash key is `BASE/1133`, and `AScan()` by value never matches one.
+- `Eval( p, ... )`, `Do( p, ... )` and `p:Exec( ... )` call the function with the arguments (`xb_funcref_call`: a
+  reference goes on to a parameter that takes one, as in `Do()`); `p:Name` gives its name.
 
 ## Objects and messages
 
@@ -800,7 +820,7 @@ above 2^53.
 ## Display
 
 `xb_item_display` formats values the way `?`/`QOut()` print them: `NIL`, `.T.`/`.F.`, strings as they are, arrays,
-codeblocks, objects and hashes as nothing, and
+codeblocks, objects and hashes as nothing, function references as `@NAME()`, and
 numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`):
 
 - the field has the item's width (or `xb_num_int_width`/`xb_num_dbl_width`) for the sign and integer digits, then a
@@ -1190,7 +1210,8 @@ and what each designates, which the runtime's own functions join when the progra
 table generated from `include/rtl.ch` at build time (`runtime/symbols.cmake`, with which parameters take references,
 read from the declarations by `runtime/rtl_declarations.cmake`); a program function hides a runtime function of its
 name. The table refers to every runtime function, so every program links them all in. `Do( cName | bBlock, [args] )`
-calls a function found there (letter case aside; spaces are part of the name, which ends at a NUL) or a codeblock, with
+calls a function found there (letter case aside; spaces are part of the name, which ends at a NUL), a codeblock or a
+function reference ([Function references](#function-references)), with
 its arguments: a reference goes on as passed to a compiled function and to a runtime function's parameter declared `@`,
 other runtime parameters receive the value. Do shows as `DO` on the call stack, and ends the PRIVATEs that a runtime
 function creates for its caller (`RESTORE`), as a compiled caller does; an unknown name is `BASE/1001`

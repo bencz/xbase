@@ -92,7 +92,7 @@ void xb_classes_register(xb_class_def *defs, uint32_t n) {
     if (defs[k].flags & XB_CLASS_STATIC) continue;
     if (defs[k].flags & XB_CLASS_SCALAR)
       for (uint32_t t = 0; t < XB_T_COUNT_; ++t) {
-        const char *name = xb_type_class_name((xb_type)t);
+        const char *name = xb_type_class_name(t);
         if (name && !typeClasses[t] && strcmp(name, defs[k].name) == 0) typeClasses[t] = &defs[k];
       }
     uint32_t before = names.count, id = xb_names_add(&names, defs[k].name, strlen(defs[k].name));
@@ -597,7 +597,7 @@ int xb_class_associate(const xb_object *o, const char *type) {
   if (c->base.nvars) return -1;
   int found = 0;
   for (uint32_t t = 0; t < XB_T_COUNT_; ++t) {
-    const char *name = xb_type_class_name((xb_type)t);
+    const char *name = xb_type_class_name(t);
     if (name && strcmp(name, type) == 0) {
       xb_atomic_storeptr((void **)&scalars[t], c, XB_RELEASE);
       found = 1;

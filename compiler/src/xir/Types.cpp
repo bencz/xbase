@@ -64,7 +64,7 @@ namespace {
 // Whether one operand type pair of `op` gives a result instead of an error
 // (core/ops.c): the comparisons take two numbers, strings, logicals or dates
 // (xb_compare), = <> and == also NIL against anything, == also the same array,
-// block, object or hash type, and an array with an object; $ takes strings, or a key and a hash (a hash with a hash
+// block, object, hash or function reference type, and an array with an object; $ takes strings, or a key and a hash (a hash with a hash
 // may fail: one of more than one entry); the arithmetic follows kBinaryRules.
 bool pairWorks(BinOp op, TypeSet a, TypeSet b) {
   const TypeSet comparable[] = {kNumberTypes, kString, kLogical, kDate};
@@ -76,7 +76,7 @@ bool pairWorks(BinOp op, TypeSet a, TypeSet b) {
   constexpr TypeSet kNil = typeBit(XB_T_NIL);
   constexpr TypeSet kHash = typeBit(XB_T_HASH);
   constexpr TypeSet kArrayLike = typeBit(XB_T_ARRAY) | kObject; // one kind for == (core/ops.c)
-  constexpr TypeSet kIdentity = kArrayLike | typeBit(XB_T_BLOCK) | kHash;
+  constexpr TypeSet kIdentity = kArrayLike | typeBit(XB_T_BLOCK) | kHash | typeBit(XB_T_SYMBOL);
   switch (op) {
   case BinOp::Eq: case BinOp::NotEq: return ((a | b) & kNil) || compares();
   case BinOp::ExactEq:
@@ -192,6 +192,7 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   case Op::ArrayLit: return {typeBit(XB_T_ARRAY), false};
   case Op::HashLit: return {typeBit(XB_T_HASH), false};
   case Op::MakeBlock: return {typeBit(XB_T_BLOCK), false};
+  case Op::FuncRef: return {typeBit(XB_T_SYMBOL), false};
   case Op::Call:
   case Op::CallForward: // what the module's function returns (its errors are its own: none substitutes the call)
     return {i.callee.function ? i.callee.function->returnTypes & kAnyType : kAnyType, false};

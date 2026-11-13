@@ -92,6 +92,10 @@ bool Sema::constantInit(const Expr &e, unsigned blockDepth) const {
     for (auto &b : static_cast<const BlockExpr &>(e).body)
       if (!constantInit(*b, blockDepth + 1)) return false;
     return true;
+  case ExprKind::Ref: { // @name(), a function reference; @x only inside a codeblock
+    const Expr &target = *static_cast<const RefExpr &>(e).target;
+    return (target.kind == ExprKind::Call && static_cast<const CallExpr &>(target).reference) || blockDepth > 0;
+  }
   case ExprKind::Var: // a codeblock's own parameters and STATICs; a captured LOCAL has no value yet
     return blockDepth > 0 && static_cast<const VarExpr &>(e).where != VarWhere::Capture;
   default: // anything else runs code: allowed only inside a codeblock body
@@ -526,6 +530,7 @@ void Sema::expr(Expr &e, Scope &s) {
   case ExprKind::Call: {
     auto &c = static_cast<CallExpr &>(e);
     for (auto &a : c.args) expr(*a, s);
+    if (c.reference) break; // @name(): Eval(), Do() or :Exec() runs it later, as Do( "name" ) would
     if (c.callee && c.callee->privates) {
       if (Frame &f = frames_.back(); f.block) f.block->callsPrivates = true;
       else if (curFunc_) curFunc_->callsPrivates = true;

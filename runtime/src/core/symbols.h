@@ -22,11 +22,8 @@ extern const uint32_t xb_runtime_symbol_count;
 /* What a name designates. A compiled function receives references as they
  * are; a runtime function only where `byref` says so. */
 typedef struct xb_symbol_entry {
-  const char *name;
+  xb_funcref ref;           /* the name's function, as a function reference designates it (@Name() in a macro) */
   size_t len;
-  xb_func fn;
-  int native;
-  uint32_t byref;
   int reserved;             /* a runtime function declared RESERVED (Type() calls the others "UI") */
 } xb_symbol_entry;
 
@@ -42,6 +39,6 @@ void xb_symbols_seal(void);
 const xb_symbol_entry *xb_symbol_find(const char *name, size_t len);
 
 /* The positions that receive references as passed (xb_refs_take). */
-static inline uint32_t xb_symbol_refs(const xb_symbol_entry *e) { return e->native ? e->byref : UINT32_MAX; }
+static inline uint32_t xb_symbol_refs(const xb_symbol_entry *e) { return xb_funcref_refs(&e->ref); }
 
 #endif

@@ -41,6 +41,7 @@ constexpr OpInfo kOps[] = {
     {Op::ParamsRef, "params.ref", ReadsVar},
     {Op::CallForward, "call.forward", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
     {Op::ClassNew, "class.new", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
+    {Op::FuncRef, "func.ref", 0},
     {Op::FieldGet, "field.get", Fails | RunsCode | ReadsHeap | ReadsState | Allocates},
     {Op::FieldSet, "field.set", Fails | RunsCode | WritesHeap | ReadsState | Allocates},
     {Op::MvGet, "mv.get", Fails | RunsCode | ReadsHeap | Allocates},

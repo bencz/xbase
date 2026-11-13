@@ -236,6 +236,8 @@ static void parse_args(parser *p, nlist *out, mtok close, int refs) {
   for (;;) {
     if (cur(p) == MT_COMMA || cur(p) == close) {
       push(p, out, mk(p, N_NIL));
+    } else if (cur(p) == MT_AT && ahead(p) == MT_IDENT && peek(p, 2).kind == MT_LPAREN) {
+      push(p, out, parse_expr(p)); /* @name(): a value, which an operator or a message may follow */
     } else if (cur(p) == MT_AT) {
       advance(p);
       node *r = mk(p, N_REF);
@@ -397,6 +399,13 @@ static node *parse_primary(parser *p) {
     n->tok = keep(p);
     advance(p);
     return n;
+  }
+  case MT_AT: { /* @name(): a function reference; what follows (:Name) applies to it */
+    advance(p);
+    node *r = mk(p, N_REF);
+    r->a = parse_primary(p);
+    if (r->a->kind != N_CALL || r->a->n != 0) fail(p);
+    return grown(p, r);
   }
   case MT_TRUE: advance(p); return mk(p, N_TRUE);
   case MT_FALSE: advance(p); return mk(p, N_FALSE);
@@ -1148,7 +1157,7 @@ static int64_t folded_integer(const xb_folded *v) { return v->is_int ? v->i : xb
 /* Len() and the bit functions of the runtime (not a function of the program of that name) on folded arguments. */
 static int folded_call(const node *n, xb_folded *out) {
   const xb_symbol_entry *e = xb_symbol_find(n->name, n->nameLen);
-  if (!e || !e->native) return 0;
+  if (!e || !e->ref.native) return 0;
   if (!strcmp(n->name, "LEN") && n->n == 1) {
     const node *a = n->list[0];
     if (a->kind == N_STRING) *out = xb_folded_int((int64_t)(a->tok->len - 2), 0);
@@ -1357,6 +1366,19 @@ static void gen_expr(gen *g, fn *f, const node *n) {
   }
   case N_REF: {
     const node *t = n->a;
+    if (t->kind == N_CALL) { /* @name(): the function's symbol (xb_funcref); a name none has is error 1001 */
+      const xb_symbol_entry *e = xb_symbol_find(t->name, t->nameLen);
+      if (!e) {
+        g->flags |= XB_MACRO_NO_FUNC;
+        emit1(f, MO_NO_FUNC, add_string(f, t->name, t->nameLen), 0, 1);
+        word(f, 0);
+        return;
+      }
+      xb_item sym;
+      xb_set_ptr(&sym, XB_T_SYMBOL, (void *)&e->ref);
+      emit1(f, MO_CONST, add_const(f, &sym), 0, 1);
+      return;
+    }
     if (t->kind == N_INDEX) {
       gen_expr(g, f, t->a);
       gen_expr(g, f, t->b);

@@ -24,12 +24,6 @@ xb_object *xb_object_new(const xb_class *cls) {
 void xb_set_object(xb_item *it, xb_object *o) { xb_set_ptr(it, XB_T_OBJECT, o); }
 
 /* What ClassName() returns for a value that is not an object. */
-static const char *const type_class_names[XB_T_COUNT_] = {
-  [XB_T_NIL] = XB_TYPE_NAME_NIL,         [XB_T_LOGICAL] = XB_TYPE_NAME_LOGICAL, [XB_T_INT] = XB_TYPE_NAME_NUMERIC,
-  [XB_T_DOUBLE] = XB_TYPE_NAME_NUMERIC,  [XB_T_STRING] = XB_TYPE_NAME_CHARACTER, [XB_T_ARRAY] = XB_TYPE_NAME_ARRAY,
-  [XB_T_BLOCK] = XB_TYPE_NAME_BLOCK,     [XB_T_DATE] = XB_TYPE_NAME_DATE,       [XB_T_HASH] = XB_TYPE_NAME_HASH,
-};
-
 const char *xb_message_text(char buf[XB_MESSAGE_TEXT_SIZE], const char *cls, const char *message) {
   size_t n = 0;
   for (const char *s = cls; *s && n + 1 < XB_MESSAGE_TEXT_SIZE; ++s) buf[n++] = *s;
@@ -109,14 +103,23 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
   if (!xb_class_scalar_send(ctx, r, message, NULL, 0, argc, argv)) xb_object_message(ctx, r, message, argc, argv);
 }
 
-const char *xb_type_class_name(xb_type type) { return type < XB_T_COUNT_ ? type_class_names[type] : NULL; }
-
 void xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
   int assign = message[0] == '_';
   const char *name = message + assign;
+  if (!assign && argv[0].type == XB_T_SYMBOL) { /* a function reference: :Name, :Exec( args ) */
+    const xb_funcref *f = argv[0].v.p;
+    if (strcmp(message, "NAME") == 0) {
+      xb_set_str(r, xb_str_new(f->name, strlen(f->name)));
+      return;
+    }
+    if (strcmp(message, "EXEC") == 0) {
+      xb_funcref_call(ctx, r, f, argc - 1, argv + 1);
+      return;
+    }
+  }
   if (!assign && strcmp(message, "CLASSNAME") == 0) {
     const char *cn = argv[0].type == XB_T_OBJECT ? ((const xb_object *)argv[0].v.p)->cls->name
-                                                 : xb_type_class_name((xb_type)argv[0].type);
+                                                 : xb_type_class_name(argv[0].type);
     if (!cn) cn = "NIL";
     xb_set_str(r, xb_str_new(cn, strlen(cn)));
     return;

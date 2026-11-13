@@ -126,9 +126,10 @@ the call graph: a body is inlined optimized, its own calls inlined already), the
 it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
 
 - `drop-reference-bodies` (`Versioning.cpp`), once on the module before the others: a `STATIC FUNCTION` (not a method,
-  not `INIT` or `EXIT`) is called only by the module's own calls (no macro, no other module, no message reaches it);
-  when none passes a reference (`@x`, `@a[i]`, `@name`) or `...` (whose arguments may be references) and none forwards
-  its arguments (`call.forward`), its parameters never hold a reference: its `params.ref` test becomes false, the
+  not `INIT` or `EXIT`) is reached only from the module (no macro, no other module, no message reaches it); when it
+  has no function reference (`func.ref`, which may be called with anything), and none of its calls passes a reference
+  (`@x`, `@a[i]`, `@name`) or `...` (whose arguments may be references) or forwards its arguments (`call.forward`),
+  its parameters never hold a reference: its `params.ref` test becomes false, the
   branch to its other body goes, and that body (`NAME.byref`), which nothing else calls, leaves the module with the
   codeblocks it makes; the module's functions are verified after it.
 
@@ -301,8 +302,9 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   and create a PRIVATE of the function, which `createsPrivates` tells codegen), the truth test, calls (to the module's
   functions or to declared externals), `send` (a message to the first operand, with the others as arguments), array
   literals (`...` in a call, a send or an array literal is its last operand, of type `args`, `args.rest`: the function's
-  arguments past its parameters, made right before its list, which is its one use in the block; `restRefs` the positions
-  of a call that receive references), hash literals (`hash`, keys and values alternating), element read and write,
+  arguments past its parameters, made right before its list, which is its one use in the block; the callee's `byref`
+  the positions of a call that receive references), `func.ref` (a function reference, `@name()`: the `xb_funcref` of
+  its callee as an item), hash literals (`hash`, keys and values alternating), element read and write,
   codeblock creation with the cells of its captured variables, the `FOR` test, the `FOR EACH` operations (`each.source`,
   `each.in_cell`, `each.enter`, `each.move`, `each.leave`, and `each.key`, the key at a position), the `SWITCH` check
   (whose result is the value the `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value`

@@ -246,6 +246,11 @@ void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   else xb_set_logical(r, !xb_order_is(c, 0, 1, 0));
 }
 
+/* Two function references to one function, whichever reference designates it. */
+static int same_function(const xb_item *a, const xb_item *b) {
+  return ((const xb_funcref *)a->v.p)->fn == ((const xb_funcref *)b->v.p)->fn;
+}
+
 /* An array and an object are one kind for ==, as in Clipper, where objects are arrays: never the same one. */
 static int array_like(const xb_item *it) { return it->type == XB_T_ARRAY || it->type == XB_T_OBJECT; }
 
@@ -254,6 +259,10 @@ void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) 
   int identity = a->type == XB_T_ARRAY || a->type == XB_T_BLOCK || a->type == XB_T_OBJECT || a->type == XB_T_HASH;
   if (identity && (a->type == b->type || (array_like(a) && array_like(b)))) {
     xb_set_logical(r, a->type == b->type && a->v.p == b->v.p);
+    return;
+  }
+  if (a->type == XB_T_SYMBOL && b->type == XB_T_SYMBOL) {
+    xb_set_logical(r, same_function(a, b));
     return;
   }
   if (a->type == XB_T_STRING && b->type == XB_T_STRING) {
@@ -283,7 +292,7 @@ XB_REL_OP(xb_op_gt, 1075, XB_OPERATOR_GT, 0, 0, 1)
 XB_REL_OP(xb_op_ge, 1076, XB_OPERATOR_GE, 0, 1, 1)
 
 /* Two values that are the same for `$` of a pair: of one type (numbers of either kind) and equal, strings byte for
- * byte, arrays, codeblocks, hashes and objects the same one. */
+ * byte, arrays, codeblocks, hashes and objects the same one, function references to the same function. */
 static int same_value(const xb_ctx *ctx, const xb_item *x, const xb_item *y) {
   if (x->type == XB_T_STRING && y->type == XB_T_STRING) {
     const xb_str *p = x->v.s, *q = y->v.s;
@@ -291,6 +300,7 @@ static int same_value(const xb_ctx *ctx, const xb_item *x, const xb_item *y) {
   }
   if (xb_type_is_heap(x->type) || xb_type_is_heap(y->type)) return x->type == y->type && x->v.p == y->v.p;
   if (x->type == XB_T_NIL || y->type == XB_T_NIL) return x->type == y->type;
+  if (x->type == XB_T_SYMBOL || y->type == XB_T_SYMBOL) return x->type == y->type && same_function(x, y);
   return xb_compare(ctx, x, y) == 0;
 }
 
