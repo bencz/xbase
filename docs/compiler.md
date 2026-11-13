@@ -176,12 +176,13 @@ ends without one; the procedure rule does not apply), any other statement but `S
 and `PARAMETERS`. A codeblock inside captures its `LOCAL`s like a function's, and they can be passed by reference
 (`BlockExpr::boxed`). It is generated like any codeblock, with a frame of its own. A call argument `@name` or
 `@name[i]...` (or `@&name`, see the macro operator below) passes a variable or an element by reference (`RefExpr`); `@`
-anywhere else is an error (references in array literals are not supported yet), and so are fields (`@alias->name`, and a
-name `FIELD` declares, also as the argument `DO ... WITH` passes by reference or as the variable of `FOR EACH`).
-`@name()` where an operand starts is a function reference, a value anywhere (`RefExpr` of a `CallExpr` with `reference`
-set and no arguments; what follows, such as `:Name`, applies to the function reference, among call arguments too, where
-the reference implementation calls the function and sends the message to its result; `@IIF()` is an error): it is
-lowered to `func.ref` with the function's callee, and the generator emits its `xb_funcref`
+anywhere else is an error (also in an array literal, by design: an element never holds a reference, which keeps every
+array operation free of the test; the reference's live elements read through it but are replaced by `:=`), and so are
+fields (`@alias->name`, and a name `FIELD` declares, also as the argument `DO ... WITH` passes by reference or as the
+variable of `FOR EACH`). `@name()` where an operand starts is a function reference, a value anywhere (`RefExpr` of a
+`CallExpr` with `reference` set and no arguments; what follows, such as `:Name`, applies to the function reference,
+among call arguments too, where the reference implementation calls the function and sends the message to its result;
+`@IIF()` is an error): it is lowered to `func.ref` with the function's callee, and the generator emits its `xb_funcref`
 ([runtime.md](runtime.md#function-references)). `...` as the last argument of a call or a send or the last element of an
 array literal (`SpreadExpr`; once, with nothing after it, not even an empty argument) stands for the arguments the
 function received past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it

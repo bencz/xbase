@@ -20,7 +20,7 @@ design of the larger parts.
   ([runtime.md](runtime.md#program-startup)).
 - Done: `ANNOUNCE`, `REQUEST`/`EXTERNAL` ([compiler.md](compiler.md#grammar)).
 - Done: the macro operator's calls by name ([runtime.md](runtime.md#macro-operator)).
-- Missing: Clipper's 10 significant characters of names.
+- By design, not as in Clipper: every character of a name counts (Clipper keeps 10), so long names never clash.
 
 ### Variables
 
