@@ -242,6 +242,30 @@ void xbf_FIELDNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_str(ret, f >= 0 ? xb_str_new(a->fields[f].name, strlen(a->fields[f].name)) : xb_str_empty());
 }
 
+/* The field a number or a name designates in the current area, or NULL. */
+static const xb_field_info *field_named(const xb_area *a, uint32_t argc, const xb_item *argv) {
+  const xb_str *name = argc && argv[0].type == XB_T_STRING ? argv[0].v.s : NULL;
+  int64_t f = name ? (a ? xb_area_field_index(a, name->data, name->len) : -1) : field_arg(a, argc, argv, 0);
+  return f >= 0 ? &a->fields[f] : NULL;
+}
+
+/* FieldLen( nField | cField ), FieldDec(), FieldType(): the field's length, decimals and type letter; 0, 0 and ""
+ * for no such field (or no table). */
+void xbf_FIELDLEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_field_info *fi = field_named(xb_area_current(ctx), argc, argv);
+  xb_set_int(ret, fi ? fi->len : 0);
+}
+
+void xbf_FIELDDEC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_field_info *fi = field_named(xb_area_current(ctx), argc, argv);
+  xb_set_int(ret, fi ? fi->dec : 0);
+}
+
+void xbf_FIELDTYPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_field_info *fi = field_named(xb_area_current(ctx), argc, argv);
+  xb_set_str(ret, fi ? xb_str_new(&fi->type, 1) : xb_str_empty());
+}
+
 /* dbStruct(): { cName, cType, nLength, nDecimals } for each field, {} with no table. */
 void xbf_DBSTRUCT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);

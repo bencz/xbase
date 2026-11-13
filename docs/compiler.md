@@ -95,8 +95,10 @@ Statements:
   variable whatever else the name is. `RELEASE` and `CLEAR MEMORY` are commands (`std.ch`).
 - Fields ([rdd.md](rdd.md#field-references)): `FIELD name, ... [IN alias]` declares fields as `MEMVAR` declares memory
   variables; `alias->name`, `FIELD->name` (`_FIELD->name`), `FIELD->alias->name`, `( expr )->name` and a macro before
-  `->` (`&cAlias->name`, `&( expr )->name`) are fields (`FieldExpr`, assignable); `alias->( expr, ... )` (also after
-  `( expr )` or a macro, not after `FIELD->alias`) becomes `__AreaEval( alias, {|| expr, ... } )`.
+  `->` (`&cAlias->name`, `&( expr )->name`) are fields (`FieldExpr`, assignable); a macro after the arrow
+  (`alias->&cName`, `FIELD->&( expr )`, `M->&cName`, also after a macro alias) is the macro of the text they make
+  (`parseAliasedMacro`); `alias->( expr, ... )` (also after `( expr )` or a macro, not after `FIELD->alias`) becomes
+  `__AreaEval( alias, {|| expr, ... } )`.
 - `RETURN [expr]` (a `PROCEDURE` cannot return a value)
 - `IF ... [ELSEIF ...] [ELSE ...] ENDIF | END`
 - `DO CASE`, then `CASE cond` arms, an optional `OTHERWISE`, and `ENDCASE | END`; the first true arm runs. Nothing

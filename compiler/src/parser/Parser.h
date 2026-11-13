@@ -98,10 +98,12 @@ private:
   ExprPtr parseRef();
   ExprPtr parseMacroText();
   ExprPtr parseMacro();
+  ExprPtr parseAliasedMacro(SourceLoc loc, ExprPtr prefix);
   bool atMacroName() const;
   bool atClassStart() const;
   ExprPtr parseSend(SourceLoc loc, ExprPtr object);
-  ExprPtr parseAliased(SourceLoc loc, std::string alias, ExprPtr aliasExpr);
+  // aliasIsText: aliasExpr is the text of an alias (`&cAlias->`), not a value naming a work area (`( expr )->`).
+  ExprPtr parseAliased(SourceLoc loc, std::string alias, ExprPtr aliasExpr, bool aliasIsText = false);
   bool atMemberStart() const;
   std::unique_ptr<ClassDecl> parseClass();
   void parseInline(ClassMethodDecl &m);

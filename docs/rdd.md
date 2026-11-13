@@ -29,7 +29,8 @@ touching the rest (SQL engines later), each as a library when it needs one.
 - `dbcmd.c`: the database functions ([coverage.md](coverage.md) lists them), and `__dbPack`, `__dbZap`, `__dbLocate`,
   `__dbContinue`, which the commands use. On an area with no table, the functions that only tell something give a
   neutral value (`RecNo()` 0, `Eof()` and `Bof()` `.T.`, `FieldGet()` NIL, `Alias()` `""`, `FieldPut()` nothing); those
-  that move or change are `DBCMD/2001` `Workarea not in use` (generic code `EG_NOTABLE`).
+  that move or change are `DBCMD/2001` `Workarea not in use` (generic code `EG_NOTABLE`). `FieldLen()`, `FieldDec()`
+  and `FieldType()` take the field's number or name and give 0, 0 and `""` for none.
   `dbEval( bBlock, [bFor], [bWhile], [nNext], [nRecord], [lRest] )` and the commands with a scope (`DELETE`, `RECALL`,
   `REPLACE`, `LOCATE`, `COUNT`, `SUM`, `AVERAGE`) share one scope walk: from the top, unless `WHILE`, `NEXT n` or
   `REST` start it at the current record or `RECORD n` names the one record; `WHILE` stops at the first record that
@@ -73,7 +74,10 @@ Where xbase does not follow the reference (each checked by `tests/run/rdd_checks
 
 - `dbCreate` takes only the types the driver writes (`C`, `N`, `D`, `L`, `M`) and at least one field; the reference
   creates a table from an empty structure or one with a type it cannot use. A memo field is always 10 bytes, the
-  block number as text (the reference also makes one of 4 bytes, a binary number, when asked).
+  block number as text (the reference also makes one of 4 bytes, a binary number, when asked); a date field is 8 bytes
+  and a logical 1, whatever the width asked (the reference writes the width asked, which cannot hold the value). A
+  character field takes 1 to 65535 bytes and a number's decimals leave room for a digit and the point (`N(4,2)`, not
+  `N(4,3)`, as dBase); the reference creates fields of no width and numbers with no room for the point.
 - A memo's value stays `M` for `ValType()` in every copy ([runtime.md](runtime.md#values)); the reference makes it `C`
   when it is stored in a variable, an element or a hash, returned, or taken by `FOR EACH`, and keeps it elsewhere.
 - PACK ends each memo it moves with two `0x1A`, as every memo is written (the reference writes one there), and a value
@@ -98,7 +102,11 @@ The compiler resolves names; the runtime finds fields by name when the code runs
 - `alias->name` is a field of the work area the alias names; `FIELD->name` (and `_FIELD->name`) one of the current
   area; `FIELD->alias->name` one of the alias's. `( expr )->name` takes the area from the expression's value (an
   alias, or a number from 1), and so does a macro before `->` (`&cAlias->name`, `&cAlias.->name`, `&( expr )->name`:
-  the text is the alias, not compiled). `M->name` and `MEMVAR->name` are memory variables.
+  the text is the alias, not compiled). `M->name` and `MEMVAR->name` are memory variables. A macro after the arrow
+  names the field (or variable) when the code runs (`FIELD->&cName`, `alias->&cName`, `&cAlias->&cName`,
+  `FIELD->alias->&( expr )`, `M->&cName`; `REPLACE &cName WITH x` makes `_FIELD->&cName := x`): it is the macro of the
+  text the alias and the name make (`"alias->" + cName`), read and assigned as any macro; `( expr )->&name` is not
+  supported (the area there is a value, not text).
 - `alias->( expr, ... )` (also `( expr )->( ... )` and `&cAlias->( ... )`) evaluates the expressions with that area
   current and gives the last one's value: the compiler makes it `__AreaEval( alias, {|| expr, ... } )`.
 - `FIELD name, ... [IN alias]` declares fields as `MEMVAR` declares memory variables: before the first function for

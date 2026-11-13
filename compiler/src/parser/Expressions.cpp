@@ -335,7 +335,7 @@ ExprPtr Parser::parseMacro() {
   } else {
     text = parseMacroText();
   }
-  if (accept(Tok::Arrow)) return parseAliased(loc, "", std::move(text));
+  if (accept(Tok::Arrow)) return parseAliased(loc, "", std::move(text), true);
   if (!accept(Tok::LParen)) return std::make_unique<MacroExpr>(loc, std::move(text));
   auto call = std::make_unique<MacroCallExpr>(loc, std::move(text));
   call->args = parseArgs(Tok::RParen, true, false);
@@ -449,6 +449,8 @@ ExprPtr Parser::parsePrimary() {
         v->memvarAlias = true;
         return v;
       }
+      if ((name == "M" || name == "MEMVAR") && (atMacroName() || atMacroParen()))
+        return parseAliasedMacro(loc, std::make_unique<StringExpr>(loc, "M->"));
       return parseAliased(loc, name == "FIELD" || name == "_FIELD" ? "" : name, nullptr);
     }
     return std::make_unique<VarExpr>(loc, name);
@@ -461,10 +463,26 @@ ExprPtr Parser::parsePrimary() {
   }
 }
 
+// A name given by a macro after an alias (`alias->&name`, `FIELD->&( expr )`, `M->&name`): the macro of the text the
+// alias makes with the name, which reads and assigns what that text names.
+ExprPtr Parser::parseAliasedMacro(SourceLoc loc, ExprPtr prefix) {
+  ExprPtr text;
+  if (atMacroParen()) {
+    advance();
+    advance();
+    text = parseExpr();
+    expect(Tok::RParen, "')'");
+  } else {
+    text = parseMacroText();
+  }
+  return std::make_unique<MacroExpr>(
+      loc, std::make_unique<BinaryExpr>(loc, BinOp::Add, std::move(prefix), std::move(text)));
+}
+
 // What follows `alias->` (after an alias, FIELD or _FIELD, or a parenthesized expression naming the work area): a
 // field name, or a parenthesized expression (list) evaluated with that work area current, which becomes
 // __AreaEval( alias, {|| ... } ). After FIELD->alias-> only a field name.
-ExprPtr Parser::parseAliased(SourceLoc loc, std::string alias, ExprPtr aliasExpr) {
+ExprPtr Parser::parseAliased(SourceLoc loc, std::string alias, ExprPtr aliasExpr, bool aliasIsText) {
   bool fieldAlias = alias.empty() && !aliasExpr && at(Tok::Ident) && ahead().kind == Tok::Arrow;
   if (fieldAlias) { // FIELD->alias->name
     alias = cur().upper;
@@ -481,6 +499,17 @@ ExprPtr Parser::parseAliased(SourceLoc loc, std::string alias, ExprPtr aliasExpr
     call->args.push_back(aliasExpr ? std::move(aliasExpr) : std::make_unique<StringExpr>(loc, alias));
     call->args.push_back(std::move(block));
     return call;
+  }
+  if (atMacroName() || atMacroParen()) { // FIELD->&name, alias->&name, FIELD->alias->&( expr ), &cAlias->&name
+    if (aliasExpr && aliasIsText) {
+      auto arrow = std::make_unique<StringExpr>(loc, "->");
+      auto prefix = std::make_unique<BinaryExpr>(loc, BinOp::Add, std::move(aliasExpr), std::move(arrow));
+      return parseAliasedMacro(loc, std::move(prefix));
+    }
+    if (!aliasExpr) {
+      std::string prefix = alias.empty() ? "FIELD->" : (fieldAlias ? "FIELD->" : "") + alias + "->";
+      return parseAliasedMacro(loc, std::make_unique<StringExpr>(loc, prefix));
+    }
   }
   if (!at(Tok::Ident)) {
     expect(Tok::Ident, "a field name");
