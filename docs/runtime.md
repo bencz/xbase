@@ -898,7 +898,10 @@ Conventions:
   missing or not a number is 1, one past the end or negative sorts nothing (`xb_range_start`, which `AFill` shares);
   `nCount` missing, 0, negative or reaching past the end means the rest. The sort is stable (a merge sort of positions:
   equal elements keep their order; one algorithm, `XB_DEFINE_MERGE_SORT` in `rtl/collections.h`, compiled once per
-  comparison: without `bOrder`, a range of integers only or of doubles only is sorted comparing them in place). `bOrder(
+  comparison: without `bOrder`, a range of integers only or of doubles only is sorted comparing them in place). Without
+  `bOrder`, a range of 256 or more integers only or doubles only is sorted by radix instead (`radix_sort`, stable too:
+  the values as unsigned keys, 16 bits a pass, a pass skipped when every key has the same digit there; `-0.0` as `0.0`,
+  which compares equal; a NaN, which orders before nothing, leaves the range to the merge sort). `bOrder(
   x, y )` says whether `x` goes first (a number: whether it is not 0; any other value: yes); without it, values of one
   kind compare like the operators (strings follow SET EXACT, integers exactly, dates by day, `.F.` before `.T.`) and
   other pairs by kind: array, object or hash, block, string, logical, date, number, `NIL`. The block's arguments are

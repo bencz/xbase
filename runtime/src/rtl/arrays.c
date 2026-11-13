@@ -78,7 +78,8 @@ void xbf_ACLONE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* ASort( aTarget, [nStart], [nCount], [bOrder] ): sorts the elements from
  * nStart (1 when missing or 0; past the end: nothing), nCount of them (the
  * rest when missing, 0 or too many), in place, and returns the array (NIL for
- * anything else). The sort is stable (xb_merge_sort of positions). bOrder
+ * anything else). The sort is stable (xb_merge_sort of positions; numbers of
+ * one type, without bOrder: radix_sort). bOrder
  * receives two elements and answers whether the first goes before the second
  * (xb_order_answer); without it, xb_value_less orders them. A negative nStart
  * sorts nothing; a negative nCount means the rest. */
@@ -115,6 +116,56 @@ static int double_less(const xb_item *items, size_t i, size_t j) {
 }
 XB_DEFINE_MERGE_SORT(sort_ints, const xb_item *, int_less)
 XB_DEFINE_MERGE_SORT(sort_doubles, const xb_item *, double_less)
+
+/* The positions items[pos[k]] of one type (integers or doubles) in the order xb_value_less gives them, stable: an LSD
+ * radix sort of the values as unsigned keys (the sign flipped; a negative double's bits all flipped; -0.0 as 0.0, which
+ * compares equal), 16 bits a pass, a pass skipped when every key has the same digit there. False (nothing done) for a
+ * double NaN, which orders before nothing: the merge sort keeps its rule. */
+#define RADIX_BITS 16
+#define RADIX_SIZE ((size_t)1 << RADIX_BITS)
+#define RADIX_MIN 256 /* fewer elements: the merge sort, without the counts' cost */
+static int radix_sort(size_t *pos, size_t n, const xb_item *items, uint32_t type) {
+  uint64_t *key = malloc(2 * n * sizeof *key);
+  size_t *tmp = malloc(n * sizeof *tmp), *count = malloc(RADIX_SIZE * sizeof *count);
+  if (!key || !tmp || !count) xb_gc_fatal("out of memory");
+  int ok = 1;
+  for (size_t k = 0; k < n && ok; ++k) {
+    const xb_item *it = &items[pos[k]];
+    if (type == XB_T_INT) {
+      key[k] = (uint64_t)it->v.i ^ ((uint64_t)1 << 63);
+      continue;
+    }
+    double d = it->v.d;
+    if (d != d) ok = 0;
+    if (d == 0.0) d = 0.0;
+    uint64_t bits;
+    memcpy(&bits, &d, sizeof bits);
+    key[k] = bits >> 63 ? ~bits : bits | ((uint64_t)1 << 63);
+  }
+  uint64_t *other = key + n;
+  for (unsigned shift = 0; ok && shift < 64; shift += RADIX_BITS) {
+    memset(count, 0, RADIX_SIZE * sizeof *count);
+    for (size_t k = 0; k < n; ++k) ++count[(key[k] >> shift) & (RADIX_SIZE - 1)];
+    if (count[(key[0] >> shift) & (RADIX_SIZE - 1)] == n) continue; /* one digit: the order stays */
+    size_t sum = 0;
+    for (size_t d = 0; d < RADIX_SIZE; ++d) {
+      size_t c = count[d];
+      count[d] = sum;
+      sum += c;
+    }
+    for (size_t k = 0; k < n; ++k) {
+      size_t at = count[(key[k] >> shift) & (RADIX_SIZE - 1)]++;
+      other[at] = key[k];
+      tmp[at] = pos[k];
+    }
+    memcpy(key, other, n * sizeof *key);
+    memcpy(pos, tmp, n * sizeof *pos);
+  }
+  free(key);
+  free(tmp);
+  free(count);
+  return ok;
+}
 
 /* The type every element of items[first .. first+n-1] has, else XB_T_NIL. */
 static uint32_t common_type(const xb_item *items, size_t first, size_t n) {
@@ -248,9 +299,10 @@ void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   sorter s = {ctx, &argv[0], argc > 3 && argv[3].type == XB_T_BLOCK ? &argv[3] : NULL, call, 0};
   const xb_item *items = ((const xb_array *)argv[0].v.p)->items;
   uint32_t same = s.block ? XB_T_NIL : common_type(items, first, n); /* without a block nothing runs: no change */
-  if (same == XB_T_INT) sort_ints(pos, pos + n, n, items);
-  else if (same == XB_T_DOUBLE) sort_doubles(pos, pos + n, n, items);
-  else xb_merge_sort(pos, pos + n, n, sort_less, &s);
+  int done = (same == XB_T_INT || same == XB_T_DOUBLE) && n >= RADIX_MIN && radix_sort(pos, n, items, same);
+  if (!done && same == XB_T_INT) sort_ints(pos, pos + n, n, items);
+  else if (!done && same == XB_T_DOUBLE) sort_doubles(pos, pos + n, n, items);
+  else if (!done) xb_merge_sort(pos, pos + n, n, sort_less, &s);
   xb_calls_end(ctx, &frame, 3);
   if (!s.failed) {
     xb_array *a = argv[0].v.p;
