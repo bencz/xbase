@@ -175,7 +175,9 @@ struct IndexExpr : Expr { // a[i, j] is Index( Index( a, i ), j )
 // "_" + message with the value.
 struct SendExpr : Expr {
   ExprPtr object;
-  std::string message;           // upper-cased
+  std::string message;           // upper-cased; empty for a macro message
+  ExprPtr messageText;           // o:&name, o:&name.suffix, o:prefix&name, o:&( expr ): the text naming the message,
+                                 // as MacroExpr::text
   std::vector<ExprPtr> args;
   bool withArgs = false;         // written object:message( ... )
   bool super = false;            // Super:message or Self:Super:message (Sema: in a method, Super no variable

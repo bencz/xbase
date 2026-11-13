@@ -141,7 +141,7 @@ private:
 
   // Items, and in a call, a send or an array literal also args (checked in inst).
   void allItems(const Instruction &i) {
-    bool lists = i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit;
+    bool lists = i.op == Op::Call || i.op == Op::Send || i.op == Op::SendMacro || i.op == Op::ArrayLit;
     for (Value *v : i.operands())
       if (v->type() != Type::Item && !(lists && v->type() == Type::Args))
         fail(std::string(opName(i.op)) + " takes items only");
@@ -155,10 +155,11 @@ private:
   void inst(const Instruction &i, size_t pos) {
     const BasicBlock *at = i.parent;
     for (Value *v : i.operands()) use(v, at, pos);
-    bool lists = i.op == Op::Call || i.op == Op::Send || i.op == Op::ArrayLit;
+    bool lists = i.op == Op::Call || i.op == Op::Send || i.op == Op::SendMacro || i.op == Op::ArrayLit;
+    size_t named = i.op == Op::Send ? 1 : i.op == Op::SendMacro ? 2 : 0; // the object (and the text) of a send
     for (size_t k = 0; k < i.operands().size(); ++k) {
       bool last = k + 1 == i.operands().size();
-      if (i.operand(k)->type() == Type::Args && (!lists || !last || (i.op == Op::Send && k == 0)))
+      if (i.operand(k)->type() == Type::Args && (!lists || !last || k < named))
         fail("args other than the last argument of a call, a send or an array literal");
     }
     if (i.op == Op::ArgsRest) {
@@ -195,6 +196,11 @@ private:
       allItems(i);
       if (i.operands().empty()) fail("send without an object");
       if (i.message.empty()) fail("send without a message");
+      break;
+    case Op::SendMacro:
+      allItems(i);
+      if (i.operands().size() < 2) fail("macro send without a text or an object");
+      if (i.index > 1) fail("macro send neither reads nor assigns");
       break;
     case Op::ArrayLit: allItems(i); break;
     case Op::ClassNew: expect(i, 0, {}); break;

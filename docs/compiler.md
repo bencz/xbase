@@ -204,6 +204,9 @@ runs (`MacroExpr`, whose `text` is the expression giving the string):
 - `&( expr )`: the text is the expression's value.
 - A macro can be assigned (`&c := v`, `&c += v`, `&c++`; the text is evaluated once), and called: `&name( args )`
   (`MacroCallExpr`, the function the text names, found by name when the code runs; `...` is not accepted there).
+- A macro message: `o:&name`, `o:&name.suffix`, `o:prefix&name.`, `o:&( expr )`, also after `::`, `Super:` and the
+  `:` of `WITH OBJECT` (`SendExpr::messageText`), with arguments (`...` too), assigned like any message (see
+  [Syntax tree to xIR](#syntax-tree-to-xir)).
 - `PRIVATE &name` and `PUBLIC &name` (also `&( expr )`, with an initializer or array dimensions) create the variable
   the text names. A macro cannot be passed by reference (`@&name`, an error).
 - A string literal with `&name` in it (`"Hello &cName."`) is substituted when the code runs (`MacroTextExpr`; Clipper's
@@ -331,7 +334,10 @@ the result before it goes further (an invalid xIR is an internal error). From `-
 - Messages: `o:name` and `o:name( args )` (`SendExpr`; postfix like `[`, so `a[1]:cargo[2]` chains) are `send`, the
   object first and then the arguments, all by value (`@` is not accepted there). A message written without arguments
   is an lvalue (`isLvalue`): it can be assigned, incremented and be the target of a statement `o:x = v`, but not
-  passed by reference.
+  passed by reference. A macro message (`o:&name`, `o:&name.suffix`, `o:prefix&name.`, `o:&( expr )`, also after
+  `::`, `Super:` and the `:` of `WITH OBJECT`; `SendExpr::messageText`, the text as a macro's) is `send.macro`: the
+  text (once, also for `o:&c += v`), then the object, then the arguments, as in the reference; its text names the
+  message when it runs.
 - Variables: frame variables (parameters and `LOCAL`s), a codeblock's captures, and the module's `STATIC`s. A frame
   variable moves into a cell when a codeblock captures it (`block`) or a reference is taken (`ref`), as in Clipper,
   and a `STATIC` when a reference is taken; its own item then holds the cell (`Var::shared` marks the frame variables
@@ -544,7 +550,8 @@ emits the object file.
   (`xb_classes_register`) with the module, with the class variables, the friends' names and the destructor. Every `send`
   calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed `xb_send_cache`:
   `XB_SEND_CACHE_WORDS` pointer-sized words) and, from a method or one of its codeblocks (`classIndex`,
-  `superSend`), its class's descriptor (else a null one). `class.new` calls `xb_class_instance`.
+  `superSend`), its class's descriptor (else a null one). `send.macro` calls `xb_macro_send` the same way, without a
+  cache. `class.new` calls `xb_class_instance`.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
   call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,

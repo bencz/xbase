@@ -153,10 +153,10 @@ ExprPtr Parser::parsePostfix() {
         e = std::make_unique<IndexExpr>(loc, std::move(e), parseExpr());
       } while (accept(Tok::Comma));
       expect(Tok::RBracket, "']'");
-    } else if (at(Tok::Colon)) { // o:message, o:message( args )
+    } else if (at(Tok::Colon)) { // o:message, o:message( args ), o:&name
       SourceLoc loc = cur().loc;
       advance();
-      if (!at(Tok::Ident)) {
+      if (!at(Tok::Ident) && !atMacroName() && !atMacroParen()) {
         expect(Tok::Ident, "message name");
         return e;
       }
@@ -335,19 +335,21 @@ ExprPtr Parser::parseMacroText() {
   return std::make_unique<MacroTextExpr>(loc, std::move(written));
 }
 
+// What gives a macro's text: a macro name, or the expression of `&( expr )`.
+ExprPtr Parser::parseMacroOperand() {
+  if (!atMacroParen()) return parseMacroText();
+  advance();
+  advance();
+  ExprPtr text = parseExpr();
+  expect(Tok::RParen, "')'");
+  return text;
+}
+
 // A macro: a macro name or `&( expr )`, and a call when `(` follows. Before `->`, the text names a work area
 // (`&cAlias->name`, `&cAlias->( expr )`): it is not compiled.
 ExprPtr Parser::parseMacro() {
   SourceLoc loc = cur().loc;
-  ExprPtr text;
-  if (atMacroParen()) {
-    advance();
-    advance();
-    text = parseExpr();
-    expect(Tok::RParen, "')'");
-  } else {
-    text = parseMacroText();
-  }
+  ExprPtr text = parseMacroOperand();
   if (accept(Tok::Arrow)) return parseAliased(loc, "", std::move(text), true);
   if (!accept(Tok::LParen)) return std::make_unique<MacroExpr>(loc, std::move(text));
   auto call = std::make_unique<MacroCallExpr>(loc, std::move(text));
@@ -356,7 +358,7 @@ ExprPtr Parser::parseMacro() {
   return call;
 }
 
-// The message (current) sent to `object`, with its arguments. Super:message
+// The message (current: a name, or a macro that gives it) sent to `object`, with its arguments. Super:message
 // and ::Super:message (or Self:Super:message) may be the ancestors' member,
 // which Sema decides (SendExpr::super).
 ExprPtr Parser::parseSend(SourceLoc loc, ExprPtr object) {
@@ -369,9 +371,11 @@ ExprPtr Parser::parseSend(SourceLoc loc, ExprPtr object) {
     super = inner.message == "SUPER" && !inner.withArgs && inner.object->kind == ExprKind::Var &&
             static_cast<VarExpr &>(*inner.object).name == "SELF" && !static_cast<VarExpr &>(*inner.object).memvarAlias;
   }
-  auto send = std::make_unique<SendExpr>(loc, std::move(object), cur().upper);
+  ExprPtr text = atMacroName() || atMacroParen() ? parseMacroOperand() : nullptr;
+  auto send = std::make_unique<SendExpr>(loc, std::move(object), text ? std::string() : cur().upper);
   send->super = super;
-  advance();
+  if (text) send->messageText = std::move(text);
+  else advance();
   if (accept(Tok::LParen)) {
     send->withArgs = true;
     send->args = parseArgs(Tok::RParen, false, true);
@@ -390,8 +394,12 @@ ExprPtr Parser::parsePrimary() {
   SourceLoc loc = t.loc;
   if (atMacroName() || atMacroParen()) return parseMacro();
   if (atFunctionRef()) return parseRef();
-  if (at(Tok::Colon) && ahead().kind == Tok::Ident) { // :message in WITH OBJECT is object:message
+  if (at(Tok::Colon) && (ahead().kind == Tok::Ident || ahead().kind == Tok::Amp)) { // :message in WITH OBJECT
     advance();
+    if (!at(Tok::Ident) && !atMacroName() && !atMacroParen()) {
+      expect(Tok::Ident, "message name");
+      return std::make_unique<NilExpr>(loc);
+    }
     if (withObjects_.empty()) { // reported, and parsed as a message to NIL
       diag_.error(loc, "':' without an object is valid only in WITH OBJECT");
       return parseSend(loc, std::make_unique<NilExpr>(loc));
@@ -400,7 +408,7 @@ ExprPtr Parser::parsePrimary() {
   }
   if (at(Tok::DoubleColon)) { // ::message is Self:message
     advance();
-    if (!at(Tok::Ident)) {
+    if (!at(Tok::Ident) && !atMacroName() && !atMacroParen()) {
       expect(Tok::Ident, "message name");
       return std::make_unique<NilExpr>(loc);
     }

@@ -14,8 +14,8 @@ bool isItemResult(const Value *v) { return v->kind() == Value::Kind::Instruction
 
 // Operations whose operands go in consecutive slots (a call to a direct entry passes words in registers).
 bool isGroupUser(const Instruction &i) {
-  return (i.op == Op::Call && !isDirectCall(i)) || i.op == Op::Send || i.op == Op::ArrayLit || i.op == Op::HashLit ||
-         i.op == Op::MacroCall || i.op == Op::GenNew || i.op == Op::InlineEnter;
+  return (i.op == Op::Call && !isDirectCall(i)) || i.op == Op::Send || i.op == Op::SendMacro || i.op == Op::ArrayLit ||
+         i.op == Op::HashLit || i.op == Op::MacroCall || i.op == Op::GenNew || i.op == Op::InlineEnter;
 }
 
 } // namespace
@@ -124,7 +124,7 @@ bool FramePlan::canForward(const Instruction &value, const Instruction &store) c
   case Op::Unary: case Op::Binary: case Op::Index: case Op::ArrayLit: case Op::MakeBlock: case Op::NumDefaultDec:
   case Op::FromBool:
     return true;
-  case Op::Call: case Op::Send:
+  case Op::Call: case Op::Send: case Op::SendMacro:
     return isPlain(*store.var, store.access);
   default:
     return false;

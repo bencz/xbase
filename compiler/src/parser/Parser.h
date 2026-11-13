@@ -98,6 +98,7 @@ private:
   ExprPtr parseRef();
   ExprPtr parseMacroText();
   ExprPtr parseMacro();
+  ExprPtr parseMacroOperand();
   ExprPtr parseAliasedMacro(SourceLoc loc, ExprPtr prefix);
   bool atMacroName() const;
   bool atClassStart() const;

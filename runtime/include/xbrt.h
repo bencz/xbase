@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 41u
+#define XB_ABI_VERSION 42u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -648,8 +648,8 @@ void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
 /* [ABI] A message sent by compiled code: from a method of class `from` (its
  * scope decides what the method may reach, and a variable is first the one
  * `from` sees), or from elsewhere (NULL); with `super`, the method or variable
- * of `from`'s ancestors (Super:message). `cache` is the send's own, zeroed
- * storage, which the runtime alone reads and writes: the members the message
+ * of `from`'s ancestors (Super:message). `cache` (NULL: none) is the send's
+ * own, zeroed storage, which the runtime alone reads and writes: the members the message
  * reached for the classes of the last XB_SEND_CACHE_WAYS objects of different
  * classes it went to, the most recent first (a polymorphic inline cache), so
  * that the next message to an object of one of those classes skips the lookup
@@ -686,13 +686,18 @@ void     xb_gen_done(xb_ctx *ctx, const xb_item *gen);
  * caller's LOCALs. xb_macro_get stores its value in `r` (&text);
  * xb_macro_set assigns `value` to what it designates (&text := value);
  * xb_macro_call calls the function it names (&text( args ), references as
- * in Do()); xb_macro_private and xb_macro_public create the variable it
+ * in Do()); xb_macro_send sends the message it names (o:&text( args ),
+ * argv[0] the text, then the object and the arguments; `assign`: the
+ * assignment o:&text := value, `from` and `super` as in xb_op_send_from;
+ * no inline cache); xb_macro_private and xb_macro_public create the variable it
  * names (PRIVATE &text, `mark` the activation's, and PUBLIC &text). A text
  * that is not a string is error 1065, one that is not an expression (or a
  * name, or something assignable) error 1449; both may be substituted. */
 void     xb_macro_get(xb_ctx *ctx, xb_item *r, const xb_item *text);
 void     xb_macro_set(xb_ctx *ctx, const xb_item *text, const xb_item *value);
 void     xb_macro_call(xb_ctx *ctx, xb_item *r, const xb_item *text, uint32_t argc, xb_item *argv);
+void     xb_macro_send(xb_ctx *ctx, xb_item *r, xb_class_def *from, uint32_t super, uint32_t assign, uint32_t argc,
+                       xb_item *argv);
 void     xb_macro_private(xb_ctx *ctx, const xb_item *text, uint32_t mark);
 void     xb_macro_public(xb_ctx *ctx, const xb_item *text);
 /* Clipper's text substitution, for a string literal with `&name` in it and

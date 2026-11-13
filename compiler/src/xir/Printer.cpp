@@ -168,8 +168,8 @@ private:
       out_ += " " + (i.callee.function ? i.callee.function->name : i.callee.name) +
               (i.callee.function ? "" : i.callee.native ? " native" : " extern");
       break;
-    case Op::Send:
-      out_ += " " + i.message;
+    case Op::Send: case Op::SendMacro:
+      out_ += i.op == Op::Send ? " " + i.message : i.index ? std::string(" assign") : std::string();
       if (i.classIndex >= 0) out_ += std::string(i.superSend ? " super " : " from ") + std::to_string(i.classIndex);
       break;
     case Op::MvGet: case Op::MvField: case Op::MvSet: case Op::MvRef: case Op::MvPrivate: case Op::MvPublic:

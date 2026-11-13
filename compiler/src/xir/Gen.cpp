@@ -64,11 +64,12 @@ void Generator::declareClasses(const xb::Module &ast) {
   }
 }
 
-Instruction *Generator::sendFrom(const std::string &message, Value *object, const std::vector<Value *> &args,
-                                 bool super) {
-  Instruction *i = cur_.b->send(message, object, args);
+Instruction *Generator::sendFrom(const SendExpr &m, Value *text, bool assign, Value *object,
+                                 const std::vector<Value *> &args) {
+  Instruction *i = text ? cur_.b->sendMacro(text, assign, object, args)
+                        : cur_.b->send(assign ? "_" + m.message : m.message, object, args);
   i->classIndex = cur_.classIndex;
-  i->superSend = super && cur_.classIndex >= 0;
+  i->superSend = m.super && cur_.classIndex >= 0;
   return i;
 }
 

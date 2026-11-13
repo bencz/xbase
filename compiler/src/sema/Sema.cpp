@@ -551,6 +551,7 @@ void Sema::expr(Expr &e, Scope &s) {
   case ExprKind::Send: {
     auto &m = static_cast<SendExpr &>(e);
     if (m.super) superSend(m);
+    if (m.messageText) expr(*m.messageText, s);
     expr(*m.object, s);
     for (auto &a : m.args) expr(*a, s);
     break;

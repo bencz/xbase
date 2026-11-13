@@ -551,15 +551,25 @@ void xb_macro_call(xb_ctx *ctx, xb_item *r, const xb_item *text, uint32_t argc, 
   if (!name_of(ctx, r, text, &name, &len)) return;
   const xb_symbol_entry *e = xb_symbol_find(name, len);
   if (!e) {
-    char upper[64];
-    size_t n = len < sizeof upper - 1 ? len : sizeof upper - 1;
-    for (size_t i = 0; i < n; ++i) upper[i] = xb_ascii_upper(name[i]);
-    upper[n] = 0;
+    char buf[64];
+    char *upper = xb_name_upper("", name, len, buf, sizeof buf);
     xb_error(ctx, r, EG_NOFUNC, 1001, upper, XB_ERR_SUBSTITUTE, 0, NULL);
+    xb_name_upper_free(upper, buf);
     return;
   }
   if (!xb_args_rest(ctx, argv, argv, argc, 0, xb_symbol_refs(e))) return;
   e->ref.fn(ctx, r, argc, argv);
+}
+
+void xb_macro_send(xb_ctx *ctx, xb_item *r, xb_class_def *from, uint32_t super, uint32_t assign, uint32_t argc,
+                   xb_item *argv) {
+  const char *name;
+  size_t len;
+  if (!name_of(ctx, r, &argv[0], &name, &len)) return;
+  char buf[64];
+  char *message = xb_name_upper(assign ? "_" : "", name, len, buf, sizeof buf);
+  xb_op_send_from(ctx, r, message, from, super, NULL, argc - 1, argv + 1);
+  xb_name_upper_free(message, buf);
 }
 
 void xb_macro_private(xb_ctx *ctx, const xb_item *text, uint32_t mark) {

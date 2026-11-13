@@ -22,4 +22,9 @@ int xb_names_find(const xb_names *t, const char *name, size_t len, uint32_t *id)
 /* The same for `name` in any letter case, in a table of upper-cased names. */
 int xb_names_find_upper(const xb_names *t, const char *name, size_t len, uint32_t *id);
 
+/* `prefix` (NUL-terminated), then `len` bytes of `name` upper-cased, NUL-terminated: in `buf` (`size` bytes) when
+ * they fit, else in memory that xb_name_upper_free releases. */
+char *xb_name_upper(const char *prefix, const char *name, size_t len, char *buf, size_t size);
+void xb_name_upper_free(char *upper, const char *buf);
+
 #endif

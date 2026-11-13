@@ -150,6 +150,13 @@ Instruction *Builder::send(std::string message, Value *object, const std::vector
   return i;
 }
 
+Instruction *Builder::sendMacro(Value *text, bool assign, Value *object, const std::vector<Value *> &args) {
+  Instruction *i = make(Op::SendMacro, Type::Item, {text, object});
+  for (Value *a : args) i->addOperand(a);
+  i->index = assign ? 1 : 0;
+  return i;
+}
+
 Instruction *Builder::classNew(int32_t classIndex) {
   Instruction *i = make(Op::ClassNew, Type::Item, {});
   i->classIndex = classIndex;

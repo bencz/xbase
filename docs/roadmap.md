@@ -44,8 +44,9 @@ design of the larger parts.
   `Type()`, compiled by the runtime's own expression compiler and cached
   ([runtime.md](runtime.md#macro-operator), [compiler.md](compiler.md#grammar)).
 - Done also: aliases in and before macros (`&cAlias->field`, `( expr )->( ... )` inside the text).
-- Missing: `o:&message`, `@&name`, `PCount()`/`PValue()` inside a macro, and the reference's macro lists (`&c` spread
-  into arguments, its own extension).
+- Done also: macro messages (`o:&message`) and `PCount()`/`PValue()` inside a macro
+  ([runtime.md](runtime.md#macro-operator)).
+- Missing: `@&name`, and the reference's macro lists (`&c` spread into arguments, its own extension).
 
 ### Errors
 

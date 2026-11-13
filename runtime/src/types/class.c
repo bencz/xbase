@@ -612,7 +612,7 @@ void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def 
     const xb_object *o = argv[0].v.p;
     member *m;
     size_t slot;
-    if (argv[0].width == 0 && cache_find(cache, o->cls, &m, &slot)) { /* a class the cache holds the member for */
+    if (cache && argv[0].width == 0 && cache_find(cache, o->cls, &m, &slot)) { /* a class the cache holds it for */
       perform(ctx, r, m, slot, argc, argv);
       return;
     }

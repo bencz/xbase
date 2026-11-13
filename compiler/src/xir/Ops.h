@@ -19,6 +19,7 @@ enum class Op : uint8_t {
   FromBool,       // Bool -> Item: .T. or .F.
   Call,           // callee; args... -> Item                [may fail]
   Send,           // message; object, args... -> Item       [may fail]
+  SendMacro,      // text, object, args... -> Item: the message the text names (index 1: assigns) [may fail]
   ArrayLit,       // elems... -> Item
   HashLit,        // key, value, key, value... -> Item       [may fail]
   Index,          // base, index -> Item                    [may fail]

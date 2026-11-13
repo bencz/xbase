@@ -102,8 +102,12 @@ bool Parser::atStmtKw(const char *kw) const {
       if (std::strcmp(k, kw) == 0) return true;
     // YIELD is no Clipper keyword: `yield++` increments a variable, `YIELD ++n` yields
     return std::strcmp(kw, "YIELD") == 0 && ahead(2).kind != Tok::EndOfStmt && ahead(2).kind != Tok::Eof;
-  case Tok::Colon: // a message to a variable named like the keyword; in WITH OBJECT, `RETURN :name` is the keyword
-    return !withObjects_.empty() && ahead().spaceBefore && ahead(2).kind == Tok::Ident;
+  case Tok::Colon: // a message to a variable named like the keyword; in WITH OBJECT, `RETURN :name` (or `:&c`) is
+                   // the keyword
+    return !withObjects_.empty() && ahead().spaceBefore &&
+           (ahead(2).kind == Tok::Ident ||
+            (ahead(2).kind == Tok::Amp &&
+             ((ahead(3).kind == Tok::Ident && !ahead(3).spaceBefore) || ahead(3).kind == Tok::LParen)));
   case Tok::Arrow: case Tok::LBracket: case Tok::Eq:
     return false;
   default:

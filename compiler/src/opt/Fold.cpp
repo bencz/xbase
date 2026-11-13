@@ -269,6 +269,7 @@ void Folder::fold(ExprPtr &e) {
   }
   case ExprKind::Send: {
     auto &m = static_cast<SendExpr &>(*e);
+    if (m.messageText) fold(m.messageText);
     fold(m.object);
     for (auto &a : m.args) fold(a);
     break;

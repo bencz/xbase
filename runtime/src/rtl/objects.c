@@ -8,21 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* A name argument upper-cased in `buf` (`size` bytes), or in memory the caller
- * frees when it is longer; NULL when the argument is not a string. */
+/* A name argument upper-cased in `buf`, or in memory xb_name_upper_free
+ * releases when it is longer; NULL when the argument is not a string. */
 #define NAME_SIZE 128
 static char *upper_name(const xb_item *it, char buf[NAME_SIZE]) {
-  if (it->type != XB_T_STRING) return NULL;
-  const xb_str *s = it->v.s;
-  char *out = s->len < NAME_SIZE ? buf : malloc(s->len + 1);
-  if (!out) xb_gc_fatal("out of memory");
-  for (size_t k = 0; k < s->len; ++k) out[k] = xb_ascii_upper(s->data[k]);
-  out[s->len] = '\0';
-  return out;
-}
-
-static void free_name(char *name, const char buf[NAME_SIZE]) {
-  if (name != buf) free(name);
+  return it->type == XB_T_STRING ? xb_name_upper("", it->v.s->data, it->v.s->len, buf, NAME_SIZE) : NULL;
 }
 
 static const xb_object *object_arg(uint32_t argc, const xb_item *argv) {
@@ -38,7 +28,7 @@ void xbf_OBJISKINDOF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   char *name = argc > 1 ? upper_name(&argv[1], buf) : NULL;
   int yes = 0;
   if (o && name) yes = o->cls->compiled ? xb_class_kind_of(o, name) : strcmp(o->cls->name, name) == 0;
-  if (name) free_name(name, buf);
+  if (name) xb_name_upper_free(name, buf);
   xb_set_logical(ret, yes);
 }
 
@@ -54,7 +44,7 @@ static void has(xb_item *ret, uint32_t argc, xb_item *argv, int method) {
       for (uint32_t k = 0; k < o->cls->nvars && !yes; ++k) yes = strcmp(o->cls->vars[k].name, name) == 0;
     }
   }
-  if (name) free_name(name, buf);
+  if (name) xb_name_upper_free(name, buf);
   xb_set_logical(ret, yes);
 }
 
@@ -115,12 +105,12 @@ void xbf_CLASSASSOCIATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv)
   char buf[NAME_SIZE];
   char *type = argc > 1 ? upper_name(&argv[1], buf) : NULL;
   if (!o || !o->cls->compiled || !type) {
-    if (type) free_name(type, buf);
+    if (type) xb_name_upper_free(type, buf);
     xb_fn_arg_error(ctx, ret, 0, "CLASSASSOCIATE", argc, argv);
     return;
   }
   int done = xb_class_associate(o, type);
-  free_name(type, buf);
+  xb_name_upper_free(type, buf);
   if (done < 0) {
     xb_error_described(ctx, ret, EG_ARG, 3005, "Scalar class cannot have instance variables", "CLASSASSOCIATE",
                        0, argc, argv);
@@ -141,5 +131,5 @@ void xbf_OBJSEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   argv[1] = argv[0]; /* the receiver, then the arguments */
   xb_op_send(ctx, ret, message, argc - 1, argv + 1);
-  free_name(message, buf);
+  xb_name_upper_free(message, buf);
 }

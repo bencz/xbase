@@ -658,8 +658,12 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
   it is `EG_NOVAR` or `EG_NOALIAS` (a variable, field or alias found missing only then), `"UE"` otherwise; else the
   letter `ValType()` would give. A PRIVATE the
   evaluation creates is the calling function's (`PRIVATES` in `rtl.ch`). Anything but a string is `BASE/1121`.
-- Not yet: `o:&message`, `@&name`. `PCount()` inside a macro expression counts the arguments of the function or
-  codeblock running it; inside a codeblock the macro made, the codeblock's own (`PValue()` gives them as passed).
+- `o:&text` (`xb_macro_send`) sends the message the text names (blanks around it dropped, any letter case; `_` and
+  the name for an assignment), from the method it is written in as a compiled send is, so scopes apply alike; a
+  value that is not a string is `1065`, a text that is not a name `1449`. The reference has no `Super:&text`.
+- `PCount()` inside a macro expression counts the arguments of the function or codeblock running it; inside a
+  codeblock the macro made, the codeblock's own (`PValue()` gives them as passed).
+- Not yet: `@&name`.
 
 ## Calling convention
 

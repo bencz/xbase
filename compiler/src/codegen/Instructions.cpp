@@ -412,19 +412,23 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::FuncRef:
     copyItem(dest(i), funcRef(i.callee));
     break;
-  case Op::Send: {
+  case Op::Send:
+  case Op::SendMacro: { // a macro's: the text, then the object and the arguments, in consecutive slots; no cache
     Value *argv = operandGroup(i);
     Value *d = dest(i);
     setNil(d);
-    // The send's own inline cache (xb_send_cache: pointer-sized words, which the runtime fills).
-    auto *cacheTy = ArrayType::get(intPtrTy_, XB_SEND_CACHE_WORDS);
-    auto *cache = new GlobalVariable(mod_, cacheTy, false, GlobalValue::PrivateLinkage,
-                                     ConstantAggregateZero::get(cacheTy), "xb.send.cache");
     Constant *from = i.classIndex < 0 ? static_cast<Constant *>(ConstantPointerNull::get(ptrTy_))
                                       : classDef(i.classIndex);
+    Value *super = ConstantInt::get(i32_, i.superSend ? 1 : 0);
+    Constant *cache = nullptr;
+    if (i.op == xir::Op::Send) { // the send's own inline cache (xb_send_cache: pointer-sized words the runtime fills)
+      auto *cacheTy = ArrayType::get(intPtrTy_, XB_SEND_CACHE_WORDS);
+      cache = new GlobalVariable(mod_, cacheTy, false, GlobalValue::PrivateLinkage, ConstantAggregateZero::get(cacheTy),
+                                 "xb.send.cache");
+    }
     auto send = [&](Value *n, Value *items) {
-      b_.CreateCall(rtSendFrom_, {fnCtx_, d, messageName(i.message), from, ConstantInt::get(i32_, i.superSend ? 1 : 0),
-                                  cache, n, items});
+      if (cache) b_.CreateCall(rtSendFrom_, {fnCtx_, d, messageName(i.message), from, super, cache, n, items});
+      else b_.CreateCall(rtMacroSend_, {fnCtx_, d, from, super, ConstantInt::get(i32_, i.index), n, items});
     };
     if (i.hasRest()) withRest(i, argv, send);
     else send(ConstantInt::get(i32_, ops.size()), argv);

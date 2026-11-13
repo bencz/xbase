@@ -165,6 +165,7 @@ void CallResolver::expr(Expr &e) {
   }
   case ExprKind::Send: {
     auto &m = static_cast<SendExpr &>(e);
+    if (m.messageText) expr(*m.messageText);
     expr(*m.object);
     for (auto &a : m.args) expr(*a);
     break;

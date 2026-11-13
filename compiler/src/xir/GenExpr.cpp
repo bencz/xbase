@@ -60,10 +60,11 @@ Value *Generator::genExpr(const Expr &e) {
   case ExprKind::Block: return genCodeblock(static_cast<const BlockExpr &>(e));
   case ExprKind::Send: {
     auto &m = static_cast<const SendExpr &>(e);
+    Value *text = m.messageText ? genExpr(*m.messageText) : nullptr; // a macro message's text comes first
     Value *object = genExpr(*m.object);
     std::vector<Value *> args = genArgs(m.args);
     b.setLoc(m.loc);
-    return sendFrom(m.message, object, args, m.super); // a method receives values (see CodeGen::withRest)
+    return sendFrom(m, text, false, object, args); // a method receives values (see CodeGen::withRest)
   }
   case ExprKind::Ref: { // a call argument passed by reference, or a function reference
     const Expr &target = *static_cast<const RefExpr &>(e).target;
@@ -232,22 +233,23 @@ Value *Generator::genIndexAssign(const IndexExpr &target, const AssignExpr *assi
 // Instance variable assignment, each operand once: the object first, then
 //   o:x := v           v, then the message _X with it;
 //   o:x op= v, o:x++   the message X, then v, then _X with the new value.
+// A macro message's text (o:&c) is evaluated once, before the object.
 // The expression's value is what _X returns (a variable may keep a converted
 // value, or ignore it), except for o:x++ and o:x--, whose value is the old one.
 Value *Generator::genSendAssign(const SendExpr &target, const AssignExpr *assign, const IncDecExpr *incdec) {
   Builder &b = *cur_.b;
+  Value *text = target.messageText ? genExpr(*target.messageText) : nullptr;
   Value *object = genExpr(*target.object);
-  std::string setter = "_" + target.message;
   if (assign && !assign->compound) {
     Value *value = genExpr(*assign->value);
     b.setLoc(target.loc);
-    return sendFrom(setter, object, {value}, target.super);
+    return sendFrom(target, text, true, object, {value});
   }
   b.setLoc(target.loc);
-  Value *old = sendFrom(target.message, object, {}, target.super);
+  Value *old = sendFrom(target, text, false, object, {});
   Value *now = assign ? b.binary(assign->op, old, genExpr(*assign->value)) : b.stepByOne(incdec->increment, old);
   b.setLoc(target.loc);
-  Value *result = sendFrom(setter, object, {now}, target.super);
+  Value *result = sendFrom(target, text, true, object, {now});
   return incdec && !incdec->prefix ? old : result;
 }
 

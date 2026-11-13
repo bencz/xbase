@@ -133,6 +133,7 @@ void CodeGen::initTypes() {
   rtMacroGet_ = rt("xb_macro_get", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtMacroSet_ = rt("xb_macro_set", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtMacroCall_ = rt("xb_macro_call", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtMacroSend_ = rt("xb_macro_send", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, i32_, i32_, ptrTy_});
   rtMacroPrivate_ = rt("xb_macro_private", voidTy, {ptrTy_, ptrTy_, i32_});
   rtMacroPublic_ = rt("xb_macro_public", voidTy, {ptrTy_, ptrTy_});
   rtMacroText_ = rt("xb_macro_text", voidTy, {ptrTy_, ptrTy_, ptrTy_});

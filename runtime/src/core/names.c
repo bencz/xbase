@@ -53,12 +53,23 @@ int xb_names_find(const xb_names *t, const char *name, size_t len, uint32_t *id)
 }
 
 int xb_names_find_upper(const xb_names *t, const char *name, size_t len, uint32_t *id) {
-  if (len == 0) return xb_names_find(t, name, 0, id); /* nothing to turn upper case */
   char small[64];
-  char *upper = len <= sizeof small ? small : malloc(len);
-  if (!upper) xb_gc_fatal("out of memory");
-  for (size_t i = 0; i < len; ++i) upper[i] = xb_ascii_upper(name[i]);
+  char *upper = xb_name_upper("", name, len, small, sizeof small);
   int found = xb_names_find(t, upper, len, id);
-  if (upper != small) free(upper);
+  xb_name_upper_free(upper, small);
   return found;
+}
+
+char *xb_name_upper(const char *prefix, const char *name, size_t len, char *buf, size_t size) {
+  size_t n = strlen(prefix);
+  char *out = n + len < size ? buf : malloc(n + len + 1);
+  if (!out) xb_gc_fatal("out of memory");
+  memcpy(out, prefix, n);
+  for (size_t i = 0; i < len; ++i) out[n + i] = xb_ascii_upper(name[i]);
+  out[n + len] = '\0';
+  return out;
+}
+
+void xb_name_upper_free(char *upper, const char *buf) {
+  if (upper != buf) free(upper);
 }

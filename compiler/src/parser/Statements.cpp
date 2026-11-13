@@ -144,7 +144,7 @@ StmtPtr Parser::parseStmtKind() {
   case ExprKind::Macro: case ExprKind::MacroCall: // a macro runs code
     break;
   case ExprKind::Send:
-    if (static_cast<const SendExpr &>(*e).withArgs) break;
+    if (static_cast<const SendExpr &>(*e).withArgs || static_cast<const SendExpr &>(*e).messageText) break;
     [[fallthrough]];
   default:
     diag_.warning(e->loc, "meaningless use of expression");

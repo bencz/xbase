@@ -278,7 +278,8 @@ private:
   llvm::GlobalVariable *classTable_ = nullptr; // the module's xb_class_def array, or null
   void genClasses(const xir::Module &m);
   llvm::Constant *classDef(int32_t index);
-  llvm::FunctionCallee rtMacroGet_, rtMacroSet_, rtMacroCall_, rtMacroPrivate_, rtMacroPublic_, rtMacroText_;
+  llvm::FunctionCallee rtMacroGet_, rtMacroSet_, rtMacroCall_, rtMacroSend_, rtMacroPrivate_, rtMacroPublic_;
+  llvm::FunctionCallee rtMacroText_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
 
   // state of the object (every module added)

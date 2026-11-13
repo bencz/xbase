@@ -115,9 +115,9 @@ private:
     bool generator = false;        // a generator's resume function: YIELD suspends, RETURN ends the enumeration
     std::vector<BasicBlock *> resumes; // where each YIELD goes on (state k + 1)
   };
-  // A message sent from the current function: from a method (or its codeblocks), with its class.
-  Instruction *sendFrom(const std::string &message, Value *object, const std::vector<Value *> &args,
-                        bool super = false);
+  // The message of `m` (its getter, or with `assign` its setter) sent from the current function: from a method (or
+  // its codeblocks), with its class. `text`: the value of a macro message's text, else null.
+  Instruction *sendFrom(const SendExpr &m, Value *text, bool assign, Value *object, const std::vector<Value *> &args);
   void declareClasses(const xb::Module &ast);
   std::unordered_map<const ClassDecl *, int32_t> classIndex_;
   FnState cur_;

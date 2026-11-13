@@ -199,7 +199,7 @@ public:
   std::string message;                // Send: upper-cased, "_NAME" to assign NAME; Mv*: the variable's name;
                                       // Field*: the field's name
   std::string alias;                  // Field* without an area operand: the work area's alias ("" the current one)
-  uint32_t index = 0;                 // MvParam: the argument, from 0; GenYield: the state it resumes in
+  uint32_t index = 0; // MvParam: the argument, from 0; GenYield: the state it resumes in; SendMacro: 1 to assign
   // Send from a method: the index of its class in Module::classes (what the send may reach), -1 elsewhere, and
   // whether it is Super:message; ClassNew: the class.
   int32_t classIndex = -1;
