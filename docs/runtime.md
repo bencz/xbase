@@ -832,7 +832,9 @@ Conventions:
   and gets wrapped values, so results for such arguments (`SubStr( c, 1e20 )`, `Round( n, -1e20 )`) may differ.
 - A string result equal to its argument shares it instead of copying it.
 - Number results carry the display width Clipper gives them: `Year` 5 columns, `Month`/`Day`/`DoW` 3, `Val` the
-  width of the text it read (blanks, sign and every character before the dot) and the decimals after it.
+  width of the text it read (blanks, sign and every character before the dot) and the decimals after it; its value is
+  the correctly rounded double of the digits read (`strtod`, as numeric literals in compiled code and in macros), also
+  past 2^53 and with many decimals.
 - `Str( n [, nWidth [, nDec]] )`: `nWidth` is the whole field; without it the number's own field is used (at most 90
   columns), and a `nWidth` below 1 means 10 columns. A field with no room for its decimals (`nDec >= nWidth`, or no
   integer column left) is all `*`. `StrZero` is `Str` with leading blanks as zeros.

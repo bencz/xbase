@@ -136,18 +136,24 @@ void xb_num_parse(const char *s, size_t len, xb_item *r) {
   if (pos < len && (s[pos] == '-' || s[pos] == '+')) neg = s[pos++] == '-';
   size_t width = pos, dec = 0, decRest = 0;
   int64_t iv = 0;
-  double dv = 0.0;
+  /* The digits read and the point, for the double's correctly rounded value (strtod, as the compiler's and the macro
+   * compiler's literals: the runtime never changes the C locale). */
+  char small[64];
+  char *text = len + 2 <= sizeof small ? small : malloc(len + 2);
+  if (!text) xb_gc_fatal("out of memory");
+  size_t n = 0;
   int isDouble = 0, inDec = 0;
   for (; pos < len; ++pos) {
     char c = s[pos];
     if (c >= '0' && c <= '9') {
       if (!isDouble && (xb_mul_overflow(iv, 10, &iv) || xb_add_overflow(iv, c - '0', &iv))) isDouble = 1;
-      dv = dv * 10.0 + (c - '0');
+      text[n++] = c;
       if (inDec) ++dec;
       else ++width;
     } else if (c == '.' && !inDec) {
       inDec = 1;
       isDouble = 1;
+      text[n++] = '.';
     } else {
       while (!inDec && pos < len) { /* characters up to a dot widen the field */
         if (s[pos++] == '.') inDec = 1;
@@ -160,7 +166,9 @@ void xb_num_parse(const char *s, size_t len, xb_item *r) {
       break;
     }
   }
-  if (dec) dv /= pow(10.0, (double)dec);
+  text[n] = '\0';
+  double dv = isDouble ? strtod(text, NULL) : (double)iv;
+  if (text != small) free(text);
   dec += decRest;
   double d = neg ? -dv : dv;
   int64_t i = neg ? (int64_t)(0 - (uint64_t)iv) : iv; /* iv may have wrapped (a double then) */
