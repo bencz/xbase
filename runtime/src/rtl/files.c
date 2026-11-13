@@ -90,8 +90,10 @@ void xbf_FREAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (target->type != XB_T_STRING) return;
   int64_t n = xb_num_to_i64(&argv[2]);
   size_t len = target->v.s->len;
-  if (n < 1 || (uint64_t)n > len) {
-    ctx->env->file_error = 0;
+  if (n < 1 || (uint64_t)n > len) { /* nothing is read, but the handle is still checked: FError() 6 for a bad one */
+    char none;
+    int32_t err = 0;
+    set_error(ctx, xb_platform_file_read(f, &none, 0, &err) >= 0, err);
     return;
   }
   xb_str *buf = xb_str_alloc(len);

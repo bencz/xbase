@@ -1,0 +1,20 @@
+
+open missing         -1          2 .F.
+create .T.          0 .T.          3          0          2          0          2          0          0          0          2          0          4          0          0          0          2          0
+seek         15          0          3          5         13         13         25        100         15         15         25          0
+close .T.          0 .F.          6          0          6          0          6
+mode          0 .T.          0          4          0 [abcd]          0          6
+mode          1 .T.          0          0          6 [    ]          1          0
+mode          2 .T.          0          4          0 [Zbcd]          1          0
+mode         64 .T.          0          4          0 [Zbcd]          0          6
+mode         32 .T.          0          4          0 [Zbcd]          0          6
+mode         99 .F.          5          0          6 [    ]          0          6
+read          3 [Zbc]          2 [dZc]          0 [dZc]          0          0          0
+readstr [Zbcd] [Zijmno] []          0
+empty buffer          0 []          0
+invalid          0          0          0          6 .F.          6          0          6 []          6
+memo [ZbcdZijmno<0>p<200>qr] .T. [line<13><10>two] []
+rename          0          0 .F. .T.         -1          2         -1          5
+directory file_matrix_a         15 D C A file_matrix_c         10 D C A
+recreate .T.          0          0
+erase          0          0         -1          2          0 .F. .F.          0

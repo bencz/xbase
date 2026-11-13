@@ -1087,7 +1087,8 @@ variables](#memory-variables)) use this layer too.
   the code of its outcome for `FError()` (`xb_env.file_error`, 0 after a success); an argument of the wrong type gives
   the function's failure value and leaves `FError()` alone, but a name that is not a string is `FOpen()`'s `BASE/2021`,
   and an access of 3 is 5. `FRead( nHandle, @cBuffer, nBytes )` replaces the first bytes of the buffer, which keeps its
-  length; without the buffer passed by reference, or with `nBytes` below 1 or past its length, it reads nothing.
+  length; without the buffer passed by reference, or with `nBytes` below 1 or past its length, it reads nothing (a bad
+  handle is still `FError()` 6).
   `FWrite` writes the whole buffer for a count past its length or below 0, and writes nothing, successfully, for a count
   of 0. A seek before the start is 25 from any origin (an unknown origin is the start) and leaves the position, which
   `FSeek` returns. `CurDir()` gives the current drive's directory without its drive and leading separators (its argument
