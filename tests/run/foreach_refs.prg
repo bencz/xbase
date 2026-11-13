@@ -2,14 +2,13 @@
 // codeblocks created in the loop, STATIC loop variables read by other functions.
 STATIC s_v := "sv"
 PROCEDURE Main()
-   LOCAL a := { 1, 2, 3 }, s := "abc", c, v, b, bl := {}, i := 0, w := "orig", m
+   LOCAL a := { 1, 2, 3 }, s := "abc", c, v, b, bl := {}, i, w := "orig", m
    FOR EACH c IN s
       c := c + "!"
       ?? c, ""
    NEXT
    ? s, c
-   FOR EACH v IN a
-      i++
+   FOR EACH i => v IN a
       b := { || v }
       a[ i ] := v * 10
       ?? Eval( b ), v, ""
@@ -26,9 +25,7 @@ PROCEDURE Main()
    a := { 1, 2, 3 }
    SetFirst( a )
    ? a[1]
-   i := 0
-   FOR EACH v IN a
-      i++
+   FOR EACH i => v IN a
       a[ i ] := v * 100
    NEXT
    ? a[1], a[2], a[3]

@@ -6,7 +6,8 @@
 MEMVAR x, y
 
 PROCEDURE Main()
-   LOCAL aVal, aPlaces, aBase, nCases := 0, nDiffs := 0, c, vx, vy
+   LOCAL aVal, aPlaces, aBase, nCases := 0, nDiffs := 0, c, k, vx, vy
+   LOCAL aOne := { {|| Abs( x ) }, {|| Sqrt( x ) }, {|| Exp( x ) }, {|| Log( x ) }, {|| Int( x ) } }
    PRIVATE x, y
    aVal := { 0, 0.0 * -1, 1, -1, 5, -5, 2.5, -2.5, 2.675, -2.675, 0.125, 1000000000000000.5, ;
       4503599627370497 * 1.0, 9223372036854775807, -9223372036854775807 - 1, 10 ^ 300 * 10 ^ 300, ;
@@ -16,9 +17,8 @@ PROCEDURE Main()
    ErrorBlock( {| e | iif( e:canSubstitute, -99, Break( e ) ) } )
    FOR EACH vx IN aVal
       x := vx
-      FOR EACH c IN { { "Abs", {|| Abs( x ) } }, { "Sqrt", {|| Sqrt( x ) } }, { "Exp", {|| Exp( x ) } }, ;
-            { "Log", {|| Log( x ) } }, { "Int", {|| Int( x ) } } }
-         Compare( c[ 1 ] + "( x )", c[ 2 ], c[ 1 ] + "( M->x )", @nCases, @nDiffs )
+      FOR EACH k => c IN { "Abs", "Sqrt", "Exp", "Log", "Int" }
+         Compare( c + "( x )", aOne[ k ], c + "( M->x )", @nCases, @nDiffs )
       NEXT
       FOR EACH vy IN aPlaces
          y := vy
