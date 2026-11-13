@@ -845,7 +845,10 @@ Conventions:
   half is added to ten times the scaled value and the result, divided back, is multiplied by `1 + DBL_EPSILON`
   (about one unit in the last place) before truncating, so decimal halves stored just below `.5` (`2.675`) round up
   while `0.4999999999` rounds down. That product is rounded once (`fma`), so a floating-point unit that computes with
-  more bits (x87) gets the same result. A scaling that overflows gives a non-finite result (shown as stars). `Int`
+  more bits (x87) gets the same result. A number whose scaled value reaches 2^52 (`XB_DBL_INTEGRAL`: the doubles there
+  are at least a rounding step apart) is already the nearest double to its rounding and comes back as it is (the
+  reference, as that formula, moves `4503599627370497` to `...499`). A scaling that overflows gives a non-finite
+  result (shown as stars). `Int`
   truncates without that adjustment.
 - `Sqrt` of a negative number and an `Exp` that overflows give 0; `Log` of a negative number gives minus infinity, like
   `Log( 0 )`.

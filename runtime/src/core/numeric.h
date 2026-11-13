@@ -46,6 +46,9 @@ static inline void xb_num_shown_field(const xb_ctx *ctx, const xb_item *it, int 
  * decimals: two, and two per SET DECIMALS decimal (Clipper's field). */
 static inline int xb_num_fixed_int_extra(const xb_ctx *ctx) { return 2 + 2 * (int)xb_decimals(ctx); }
 
+/* 2^52: every double of this magnitude or more is an integer (the step between doubles is 1 or more there). */
+#define XB_DBL_INTEGRAL 4503599627370496.0
+
 /* A number item's value as a double. */
 static inline double xb_num_value(const xb_item *it) { return it->type == XB_T_INT ? (double)it->v.i : it->v.d; }
 

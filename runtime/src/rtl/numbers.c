@@ -107,7 +107,8 @@ void xbf_ABS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * divided back, which is how Clipper gets its results in the last bit, then
  * raised by about one unit in the last place (times 1 + DBL_EPSILON) before
  * truncating, so that a decimal half stored just below it, like 2.675, still
- * rounds up. Int() truncates the value as it is. */
+ * rounds up; a value whose scaled magnitude reaches 2^52 is already its own
+ * nearest rounding. Int() truncates the value as it is. */
 void xbf_ROUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 2 || !xb_is_number(&argv[0]) || !xb_is_number(&argv[1])) {
     xb_fn_arg_error(ctx, ret, 1094, "ROUND", argc, argv);
@@ -119,6 +120,8 @@ void xbf_ROUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   double r;
   if (v == 0.0 || (d < 0 && xb_dbl_infinite(p))) {
     r = 0.0;
+  } else if (d >= 0 && fabs(v) * p >= XB_DBL_INTEGRAL) {
+    r = v; /* the doubles near v are at least a step apart: v is already the nearest to its rounding */
   } else {
     double tenfold = (d >= 0 ? v * p : v / p) * 10.0;
     tenfold += tenfold < 0 ? -5.0 : 5.0;
