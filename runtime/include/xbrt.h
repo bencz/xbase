@@ -19,6 +19,7 @@
 #ifndef XBRT_H
 #define XBRT_H
 
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -903,6 +904,161 @@ static inline uint16_t xb_num_const_int_width(int64_t i) {
   uint16_t w = 10;
   for (; i >= 1000000000; i /= 10) ++w;
   return w;
+}
+
+/* 64-bit integer arithmetic reporting overflow (returns non-zero) instead of
+ * invoking undefined behavior. */
+static inline int xb_add_overflow(int64_t a, int64_t b, int64_t *r) {
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_add_overflow(a, b, r);
+#else
+  if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) return 1;
+  *r = a + b;
+  return 0;
+#endif
+}
+
+static inline int xb_sub_overflow(int64_t a, int64_t b, int64_t *r) {
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_sub_overflow(a, b, r);
+#else
+  if ((b < 0 && a > INT64_MAX + b) || (b > 0 && a < INT64_MIN + b)) return 1;
+  *r = a - b;
+  return 0;
+#endif
+}
+
+static inline int xb_mul_overflow(int64_t a, int64_t b, int64_t *r) {
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_mul_overflow(a, b, r);
+#else
+  if (a > 0 ? (b > 0 ? a > INT64_MAX / b : b < INT64_MIN / a)
+            : (b > 0 ? a < INT64_MIN / b : (a != 0 && b < INT64_MAX / a)))
+    return 1;
+  *r = a * b;
+  return 0;
+#endif
+}
+
+/* A number known before the code runs, as the folding of constants computes
+ * with it (the compiler's, on its syntax tree and its xIR, and the macro
+ * compiler's): an integer with its display width (0: a computed one, as the
+ * run-time operators make them, else a program constant's,
+ * xb_num_const_int_width), or a double with the default width and its
+ * decimals, XB_DEC_AT_RUN when they are SET DECIMALS when the code runs (a
+ * quotient, a remainder, a power: the code sets them then). */
+#define XB_DEC_AT_RUN 255
+typedef struct xb_folded {
+  int is_int;
+  int64_t i;
+  double d;
+  uint16_t width, dec;
+} xb_folded;
+typedef enum xb_fold_op { XB_FOLD_ADD, XB_FOLD_SUB, XB_FOLD_MUL, XB_FOLD_DIV, XB_FOLD_MOD, XB_FOLD_POW } xb_fold_op;
+
+static inline xb_folded xb_folded_int(int64_t v, int computed) {
+  xb_folded r = {1, v, 0.0, 0, 0};
+  if (!computed) r.width = xb_num_const_int_width(v);
+  return r;
+}
+static inline xb_folded xb_folded_double(double v, uint16_t dec) {
+  xb_folded r = {0, 0, v, 0, dec};
+  return r;
+}
+
+/* `a op b` into *r, or 0 when it is left to run time (a division by zero).
+ * Without `runtime`, as literals fold (Clipper's compile-time rules: an exact
+ * division of two integers is an integer, an integer product that overflows a
+ * double with no decimals, a quotient's decimals SET DECIMALS when the code
+ * runs); with it, as the run-time operator makes it from two values (an
+ * integer is a computed one; /, %, ^ and an integer product that overflows,
+ * whose decimals are SET DECIMALS, and a product with more decimals than a
+ * literal holds, give 0). */
+static inline int xb_fold_numbers(xb_fold_op op, const xb_folded *a, const xb_folded *b, int runtime, xb_folded *r) {
+  int ints = a->is_int && b->is_int;
+  int computed = runtime || (a->is_int && a->width == 0) || (b->is_int && b->width == 0);
+  double x = a->is_int ? (double)a->i : a->d, y = b->is_int ? (double)b->i : b->d;
+  int64_t v;
+  switch (op) {
+  case XB_FOLD_ADD:
+  case XB_FOLD_SUB:
+    if (!ints)
+      *r = xb_folded_double(op == XB_FOLD_ADD ? x + y : x - y, (uint16_t)(a->dec > b->dec ? a->dec : b->dec));
+    else if (!(op == XB_FOLD_ADD ? xb_add_overflow(a->i, b->i, &v) : xb_sub_overflow(a->i, b->i, &v)))
+      *r = xb_folded_int(v, computed);
+    else
+      *r = xb_folded_double(op == XB_FOLD_ADD ? x + y : x - y, 0);
+    return 1;
+  case XB_FOLD_MUL:
+    if (ints) {
+      if (!xb_mul_overflow(a->i, b->i, &v)) *r = xb_folded_int(v, computed);
+      else if (runtime) return 0; /* the run-time operator's double has SET DECIMALS decimals */
+      else *r = xb_folded_double(x * y, 0);
+      return 1;
+    }
+    if (runtime && a->dec + b->dec >= XB_DEC_AT_RUN) return 0; /* decimals no literal holds */
+    *r = xb_folded_double(x * y, (uint16_t)(a->dec + b->dec < XB_DEC_AT_RUN ? a->dec + b->dec : XB_DEC_AT_RUN));
+    return 1;
+  case XB_FOLD_DIV:
+    if (runtime || y == 0.0) return 0; /* a division by zero is the run-time error */
+    if (ints && !(a->i == INT64_MIN && b->i == -1) && a->i % b->i == 0) *r = xb_folded_int(a->i / b->i, computed);
+    else *r = xb_folded_double(x / y, XB_DEC_AT_RUN);
+    return 1;
+  case XB_FOLD_MOD:
+    if (runtime || y == 0.0) return 0;
+    if (ints) *r = xb_folded_int(b->i == -1 ? 0 : a->i % b->i, computed); /* INT64_MIN % -1 is undefined in C */
+    else *r = xb_folded_double(fmod(x, y), XB_DEC_AT_RUN);
+    return 1;
+  case XB_FOLD_POW:
+    if (runtime) return 0;
+    *r = xb_folded_double(pow(x, y), XB_DEC_AT_RUN);
+    return 1;
+  }
+  return 0;
+}
+
+/* The comparisons folding computes, of an order (-1, 0, 1: xb_order_is): = and == (the same for two numbers or
+ * logicals), !=, <, <=, >, >=. */
+typedef enum xb_fold_cmp { XB_FOLD_EQ, XB_FOLD_NE, XB_FOLD_LT, XB_FOLD_LE, XB_FOLD_GT, XB_FOLD_GE } xb_fold_cmp;
+static inline int xb_fold_compare(xb_fold_cmp op, int order) {
+  switch (op) {
+  case XB_FOLD_EQ: return xb_order_is(order, 0, 1, 0);
+  case XB_FOLD_NE: return !xb_order_is(order, 0, 1, 0);
+  case XB_FOLD_LT: return xb_order_is(order, 1, 0, 0);
+  case XB_FOLD_LE: return xb_order_is(order, 1, 1, 0);
+  case XB_FOLD_GT: return xb_order_is(order, 0, 0, 1);
+  case XB_FOLD_GE: return xb_order_is(order, 0, 1, 1);
+  }
+  return 0;
+}
+/* The order of two numbers: integers exactly, else as doubles (xb_order_double). */
+static inline int xb_folded_order(const xb_folded *a, const xb_folded *b) {
+  if (a->is_int && b->is_int) return (a->i > b->i) - (a->i < b->i);
+  return xb_order_double(a->is_int ? (double)a->i : a->d, b->is_int ? (double)b->i : b->d);
+}
+
+/* `x op y` of two strings when SET EXACT cannot change it, into *r (0: left to run time): == compares the bytes;
+ * = and != the bytes of strings of one length (SET EXACT changes only how a longer string compares with a shorter
+ * one); $ finds x in y (an empty x nowhere). */
+typedef enum xb_fold_str { XB_FOLD_STR_EXACT, XB_FOLD_STR_EQ, XB_FOLD_STR_NE, XB_FOLD_STR_IN } xb_fold_str;
+static inline int xb_fold_strings(xb_fold_str op, const char *x, size_t lx, const char *y, size_t ly, int *r) {
+  if (op == XB_FOLD_STR_IN) {
+    *r = 0;
+    for (size_t k = 0; lx && k + lx <= ly && !*r; ++k) *r = memcmp(y + k, x, lx) == 0;
+    return 1;
+  }
+  if (op != XB_FOLD_STR_EXACT && lx != ly) return 0;
+  int same = lx == ly && (lx == 0 || memcmp(x, y, lx) == 0);
+  *r = op == XB_FOLD_STR_NE ? !same : same;
+  return 1;
+}
+
+/* -n, folded as `xb_fold_numbers` folds (with `runtime`, as the run-time
+ * operator makes it): a double keeps its decimals, -INT64_MIN is a double. */
+static inline xb_folded xb_fold_negate(const xb_folded *n, int runtime) {
+  if (!n->is_int) return xb_folded_double(-n->d, n->dec);
+  if (n->i == INT64_MIN) return xb_folded_double(-(double)n->i, 0);
+  return xb_folded_int(-n->i, runtime || n->width == 0);
 }
 
 /* Display width of a numeric literal's integer part, written with

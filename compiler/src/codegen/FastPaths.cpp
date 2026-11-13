@@ -183,20 +183,35 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
     return;
   }
   bool fused = fusedComparisons_.count(&i) != 0;
-  BasicBlock *intBB = newBlock("int"), *notInt = newBlock("not.int"), *numBB = newBlock("num");
-  BasicBlock *dblBB = newBlock("double"), *mixed = newBlock("mixed");
+  // The paths the operands' types allow (what type inference knows of them): two integers, two doubles, a double
+  // with an integer, two strings for an equality; the others are not emitted.
+  xir::TypeSet typesA = plan_->types().of(i.operand(0)), typesB = plan_->types().of(i.operand(1));
+  auto both = [&](xb_type x, xb_type y) { return (typesA & xir::typeBit(x)) && (typesB & xir::typeBit(y)); };
+  bool mayInt = both(XB_T_INT, XB_T_INT);
+  bool mayDouble = both(XB_T_DOUBLE, XB_T_DOUBLE);
+  bool mayMixed = both(XB_T_INT, XB_T_DOUBLE) || both(XB_T_DOUBLE, XB_T_INT);
+  bool equality = i.binop == BinOp::Eq || i.binop == BinOp::ExactEq || i.binop == BinOp::NotEq;
+  bool mayStrings = equality && both(XB_T_STRING, XB_T_STRING);
+  BasicBlock *intBB = mayInt ? newBlock("int") : nullptr;
+  BasicBlock *dblBB = mayDouble ? newBlock("double") : nullptr;
+  BasicBlock *numBB = mayMixed ? newBlock("num") : nullptr;
   BasicBlock *slow = newBlock("op"), *join = newBlock("join");
   Value *ta = typeOf(i.operand(0), a);
   Value *tb = typeOf(i.operand(1), bv);
-  b_.CreateCondBr(bothInts(ta, tb), intBB, notInt); // both paths are fast: neither is cold
-  b_.SetInsertPoint(notInt);
+  if (mayInt) { // both paths are fast: neither is cold
+    BasicBlock *notInt = newBlock("not.int");
+    b_.CreateCondBr(bothInts(ta, tb), intBB, notInt);
+    b_.SetInsertPoint(notInt);
+  }
   Value *isDouble = ConstantInt::get(i32_, XB_T_DOUBLE);
-  b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble)), dblBB, mixed);
+  if (mayDouble) {
+    BasicBlock *mixed = newBlock("mixed");
+    b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble)), dblBB, mixed);
+    b_.SetInsertPoint(mixed);
+  }
   // Both operands are read before `d`, which may be one of them, is written.
   std::vector<std::pair<Value *, BasicBlock *>> bools; // the comparison's result on each fast path
-  b_.SetInsertPoint(mixed);
-  bool equality = i.binop == BinOp::Eq || i.binop == BinOp::ExactEq || i.binop == BinOp::NotEq;
-  if (equality) { // two one-character strings (ValType( x ) == "C"): their bytes, for = and == alike
+  if (mayStrings) { // two one-character strings (ValType( x ) == "C"): their bytes, for = and == alike
     BasicBlock *strBB = newBlock("str1"), *notStr = newBlock("not.str1");
     Value *isStr = ConstantInt::get(i32_, XB_T_STRING);
     BasicBlock *strings = newBlock("strings");
@@ -214,22 +229,25 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
     b_.CreateBr(join);
     b_.SetInsertPoint(notStr);
   }
-  branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow); // an integer with a double: converted when exact
-  b_.SetInsertPoint(intBB);
-  Value *x = intValue(a), *y = intValue(bv);
-  if (compare) {
-    Value *r = b_.CreateICmp(llvmPredicate(pred), x, y);
-    if (!fused) storeLogical(d, r);
-    bools.push_back({r, b_.GetInsertBlock()});
-  } else {
-    Value *r = b_.CreateBinaryIntrinsic(arith, x, y);
-    BasicBlock *done = newBlock("int.done");
-    MDBuilder md(ctx_);
-    b_.CreateCondBr(b_.CreateExtractValue(r, 1), slow, done, md.createUnlikelyBranchWeights()); // overflow
-    b_.SetInsertPoint(done);
-    storeInt(d, b_.CreateExtractValue(r, 0));
+  if (mayMixed) branchLikely(exactNumbers(a, ta, bv, tb), numBB, slow); // an integer with a double: when exact
+  else b_.CreateBr(slow);
+  if (mayInt) {
+    b_.SetInsertPoint(intBB);
+    Value *x = intValue(a), *y = intValue(bv);
+    if (compare) {
+      Value *r = b_.CreateICmp(llvmPredicate(pred), x, y);
+      if (!fused) storeLogical(d, r);
+      bools.push_back({r, b_.GetInsertBlock()});
+    } else {
+      Value *r = b_.CreateBinaryIntrinsic(arith, x, y);
+      BasicBlock *done = newBlock("int.done");
+      MDBuilder md(ctx_);
+      b_.CreateCondBr(b_.CreateExtractValue(r, 1), slow, done, md.createUnlikelyBranchWeights()); // overflow
+      b_.SetInsertPoint(done);
+      storeInt(d, b_.CreateExtractValue(r, 0));
+    }
+    b_.CreateBr(join);
   }
-  b_.CreateBr(join);
 
   // The operation on two doubles `fx`, `fy` with decimals `da`, `db`.
   auto doubles = [&](Value *fx, Value *fy, Value *da, Value *db) {
@@ -247,11 +265,15 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
     }
     b_.CreateBr(join);
   };
-  b_.SetInsertPoint(dblBB); // two doubles, the usual case of the double paths: their bits and decimals as they are
-  doubles(b_.CreateBitCast(intValue(a), b_.getDoubleTy()), b_.CreateBitCast(intValue(bv), b_.getDoubleTy()),
-          numberDec(a, isDouble), numberDec(bv, isDouble));
-  b_.SetInsertPoint(numBB);
-  doubles(numberAsDouble(a, ta), numberAsDouble(bv, tb), numberDec(a, ta), numberDec(bv, tb));
+  if (mayDouble) { // two doubles, the usual case of the double paths: their bits and decimals as they are
+    b_.SetInsertPoint(dblBB);
+    doubles(b_.CreateBitCast(intValue(a), b_.getDoubleTy()), b_.CreateBitCast(intValue(bv), b_.getDoubleTy()),
+            numberDec(a, isDouble), numberDec(bv, isDouble));
+  }
+  if (mayMixed) {
+    b_.SetInsertPoint(numBB);
+    doubles(numberAsDouble(a, ta), numberAsDouble(bv, tb), numberDec(a, ta), numberDec(bv, tb));
+  }
 
   b_.SetInsertPoint(slow);
   if (i.byOne) callItemOp(i.binop == BinOp::Add ? rtInc_ : rtDec_, d, {a}); // ++ or --: their own error

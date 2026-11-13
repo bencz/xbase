@@ -132,6 +132,7 @@ private:
   // Literals.cpp
   llvm::StructType *strType(llvm::Type *data);
   llvm::Constant *literalItem(uint32_t type, uint16_t width, uint16_t dec, llvm::Constant *payload);
+  llvm::Constant *constantPayloadWord(llvm::Constant *payload);
   llvm::Constant *literal(const xir::Constant &c);
   llvm::Constant *stringLiteral(const std::string &s);
   llvm::Constant *messageName(const std::string &message);
@@ -293,6 +294,9 @@ private:
   std::unordered_map<std::string, llvm::Constant *> strLits_;
   std::unordered_map<std::string, llvm::Constant *> numLits_;
   std::unordered_map<std::string, llvm::Constant *> messages_;
+  // The words of each literal item whose value word is a constant (a string's only where its pointer fills the
+  // word): a copy of the literal stores them instead of loading them.
+  std::unordered_map<const llvm::Value *, std::pair<llvm::Constant *, llvm::Constant *>> literalWords_;
   llvm::Constant *nilLit_ = nullptr;
   llvm::Constant *trueLit_ = nullptr, *falseLit_ = nullptr;
 

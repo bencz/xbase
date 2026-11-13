@@ -1,6 +1,7 @@
 #pragma once
 
 #include "parser/AST.h"
+#include "xbrt.h" // the folding rules
 
 #include <optional>
 #include <string>
@@ -8,14 +9,16 @@
 namespace xb {
 
 // Decimal count of a number whose decimals are "the SET DECIMALS value at run
-// time" (the result of folding `/`, `%` on doubles, or `^`). Never reaches the
-// runtime: code generation materializes such numbers with a runtime call.
-constexpr uint16_t kDefaultDecimals = 255;
+// time" (the result of folding `/`, `%` on doubles, or `^`; XB_DEC_AT_RUN of the folding rules in xbrt.h). Never
+// reaches the runtime: code generation materializes such numbers with a runtime call.
+constexpr uint16_t kDefaultDecimals = XB_DEC_AT_RUN;
 
-// The result of `x op y` for two strings and a comparison for equality (=, ==, !=), when it does not depend on SET
-// EXACT at run time: == compares the bytes; = and != compare the bytes of strings of one length (SET EXACT changes
-// only how a longer string compares with a shorter one).
-std::optional<bool> stringEquality(BinOp op, const std::string &x, const std::string &y);
+// The result of `x op y` for two strings and a comparison for equality (=, ==, !=) or `$`, when it does not depend on
+// SET EXACT at run time: == compares the bytes; = and != compare the bytes of strings of one length (SET EXACT changes
+// only how a longer string compares with a shorter one); `$` finds x in y (an empty x nowhere).
+std::optional<bool> stringTest(BinOp op, const std::string &x, const std::string &y);
+// `x op y` for two strings and `+` or `-` (x's trailing spaces moved to the end), or nothing for another operator.
+std::optional<std::string> stringJoin(BinOp op, const std::string &x, const std::string &y);
 
 // `a op b` for two numbers and an arithmetic or bit operator, as a number literal, or null when it is left to run
 // time (a division by zero, and so on). Without `runtime`, as literals fold (an exact division of two integers is an

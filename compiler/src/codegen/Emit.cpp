@@ -8,12 +8,17 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Scalar/EarlyCSE.h>
+#include <llvm/Transforms/Scalar/SROA.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
 
 using namespace llvm;
 
@@ -85,12 +90,37 @@ std::unique_ptr<TargetMachine> createTargetMachine(const TargetConfig &cfg, std:
 // one per level.
 constexpr unsigned kGuardRounds = 3;
 
+// A function of more instructions than this (as code generation makes it, before any optimization) is too large for
+// the default pipeline and code generation, which take time growing faster than its size: it has passes whose time
+// grows with its size (its locals become registers, common subexpressions and constants fold, its control flow
+// simplifies), is generated as -O0 does, and is never inlined.
+constexpr unsigned kLargeFunction = 50000;
+
+// Marks the functions too large to optimize fully (kLargeFunction) and gives them their own passes.
+static void optimizeLargeFunctions(Module &m, FunctionAnalysisManager &fam) {
+  FunctionPassManager fpm;
+  fpm.addPass(SROAPass(SROAOptions::ModifyCFG));
+  fpm.addPass(EarlyCSEPass());
+  fpm.addPass(InstCombinePass());
+  fpm.addPass(SimplifyCFGPass());
+  for (Function &f : m) {
+    if (f.isDeclaration() || f.getInstructionCount() <= kLargeFunction) continue;
+    fpm.run(f, fam);
+    f.addFnAttr(Attribute::NoInline);
+    f.addFnAttr(Attribute::OptimizeNone);
+  }
+}
+
 void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   LoopAnalysisManager lam;
   FunctionAnalysisManager fam;
   CGSCCAnalysisManager cgam;
   ModuleAnalysisManager mam;
-  PassBuilder pb(&tm);
+  // The pipeline skips the functions marked optnone (optimizeLargeFunctions).
+  PassInstrumentationCallbacks pic;
+  OptNoneInstrumentation optNone(/*DebugLogging=*/false);
+  optNone.registerCallbacks(pic);
+  PassBuilder pb(&tm, PipelineTuningOptions(), std::nullopt, &pic);
   pb.registerModuleAnalyses(mam);
   pb.registerCGSCCAnalyses(cgam);
   pb.registerFunctionAnalyses(fam);
@@ -101,6 +131,7 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
                         : optLevel == 1 ? OptimizationLevel::O1
                         : optLevel == 3 ? OptimizationLevel::O3
                                         : OptimizationLevel::O2;
+  if (optLevel != 0) optimizeLargeFunctions(m, fam);
   ModulePassManager mpm = optLevel == 0 ? pb.buildO0DefaultPipeline(lvl) : pb.buildPerModuleDefaultPipeline(lvl);
   mpm.run(m, mam);
   if (optLevel == 0) return;
@@ -111,7 +142,7 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   auto again = [&](bool (*change)(Function &, FunctionAnalysisManager &), const char *what) {
     std::vector<Function *> changed;
     for (Function &f : m)
-      if (!f.isDeclaration() && change(f, fam)) {
+      if (!f.isDeclaration() && !f.hasOptNone() && change(f, fam)) {
         changed.push_back(&f);
         fam.invalidate(f, PreservedAnalyses::none());
       }

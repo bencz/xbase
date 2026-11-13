@@ -47,6 +47,10 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_set_logical(ret, ctx->env->set_exact);
       if (value) ctx->env->set_exact = set_logical(value, ctx->env->set_exact);
       break;
+    case _SET_FIXED:
+      xb_set_logical(ret, ctx->env->set_fixed);
+      if (value) ctx->env->set_fixed = set_logical(value, ctx->env->set_fixed);
+      break;
     case _SET_DECIMALS:
       xb_set_int(ret, ctx->set_decimals);
       if (value && xb_is_number(value)) {

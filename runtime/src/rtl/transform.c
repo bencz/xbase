@@ -131,8 +131,10 @@ static size_t transform_number(xb_ctx *ctx, const xb_item *value, const char *pi
     if (number_placeholder(pic[i])) ++width;
   }
   int pointFirst = 0; /* ".99": the field is "0.99" without its zero */
-  if (width == 0) {
+  if (width == 0) { /* the number's own field */
     xb_num_field(value, &width, &dec);
+    if (ctx->env->set_fixed && value->type == XB_T_INT) width += xb_num_fixed_int_extra(ctx);
+    else if (ctx->env->set_fixed) dec = xb_decimals(ctx);
     if (dec) width += dec + 1;
   } else if (dec > 0 && width - dec == 1) {
     pointFirst = 1;
@@ -323,7 +325,11 @@ void xbf_TRANSFORM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (picture->type == XB_T_NIL || picture->v.s->len == 0) { /* no picture: the value's plain text */
     if (kind == 1) *ret = *value;
     else if (kind == 4) xb_set_str(ret, xb_str_new(value->v.l ? "T" : "F", 1));
-    else xb_set_str(ret, xb_item_display(ctx, value));
+    else if (value->type == XB_T_INT && ctx->env->set_fixed) {
+      int width, dec;
+      xb_num_field(value, &width, &dec);
+      xb_set_str(ret, xb_num_to_str(value, width + xb_num_fixed_int_extra(ctx), 0));
+    } else xb_set_str(ret, xb_item_display(ctx, value));
     return;
   }
   const char *pic = picture->v.s->data;

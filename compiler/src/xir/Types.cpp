@@ -10,6 +10,7 @@ constexpr TypeSet kString = typeBit(XB_T_STRING);
 constexpr TypeSet kDate = typeBit(XB_T_DATE);
 constexpr TypeSet kDouble = typeBit(XB_T_DOUBLE);
 constexpr TypeSet kLogical = typeBit(XB_T_LOGICAL);
+constexpr TypeSet kObject = typeBit(XB_T_OBJECT);
 
 // The cases of each arithmetic operator that give a result, from core/ops.c:
 // operands of the types `a` and `b` give a value of the types `result`.
@@ -167,7 +168,12 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
     const Constant *c = asConstant(i.operand(1));
     bool nonZero = c && ((c->lit == Constant::Lit::Integer && c->ival != 0) ||
                          (c->lit == Constant::Lit::Double && c->dval != 0.0));
-    return {binaryResult(i.binop, a, b), binaryMayFail(i.binop, a, b, !nonZero)};
+    // An object's class may define the operator (core/ops.c), whose method gives the result: where no error can
+    // come of the operands (an equality with NIL, == of two objects), that result is of any type; elsewhere the
+    // operator without a method fails, which already makes it so.
+    bool equality = i.binop == BinOp::Eq || i.binop == BinOp::NotEq || i.binop == BinOp::ExactEq;
+    TypeSet r = equality && (a & kObject) ? kAnyType : binaryResult(i.binop, a, b);
+    return {r, binaryMayFail(i.binop, a, b, !nonZero)};
   }
   case Op::Unary: {
     TypeSet a = t.of(i.operand(0));
@@ -183,6 +189,9 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   case Op::ArrayLit: return {typeBit(XB_T_ARRAY), false};
   case Op::HashLit: return {typeBit(XB_T_HASH), false};
   case Op::MakeBlock: return {typeBit(XB_T_BLOCK), false};
+  case Op::Call:
+  case Op::CallForward: // what the module's function returns (its errors are its own: none substitutes the call)
+    return {i.callee.function ? i.callee.function->returnTypes & kAnyType : kAnyType, false};
   default: return {kAnyType, false}; // read from memory, or made by the runtime
   }
 }
@@ -196,6 +205,18 @@ bool checked(const Instruction &i) {
 }
 
 } // namespace
+
+TypeSet returnTypes(const Function &f) {
+  CFG cfg(f);
+  TypeInfo types(cfg);
+  TypeSet r = 0;
+  for (BasicBlock *b : cfg.order())
+    for (auto &i : b->insts) {
+      if (i->op == Op::GenYield) return kAnyType;
+      if (i->op == Op::Ret) r |= i->operands().empty() ? typeBit(XB_T_NIL) : types.of(i->operand(0));
+    }
+  return r;
+}
 
 bool TypeInfo::maySubstitute(const Instruction &i) const { return ownResult(i, *this).substitutable; }
 

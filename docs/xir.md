@@ -92,15 +92,28 @@ it is known: calls are devirtualized through class hierarchy analysis, and varia
 an optimistic fixpoint over the SSA form in reverse postorder, where block parameters start empty and grow with the
 values their branches pass, `binary` follows its operands with the runtime operators' rules (a table, `binaryResult`:
 two integers give an integer or, on overflow, a double; a double with a number gives a double; two strings a string;
-dates and numbers a date; the bit operators on numbers an integer; ...), `unary` (`~` gives an integer), `from_bool`,
-literals and the constructors give their type, and anything read from memory (a variable, an element, a call's result)
-may hold any type. The lowering uses it to keep values that never refer to a heap object out of the frame
-([compiler.md](compiler.md#xir-to-llvm)), and where a value has a single possible type, the lowering uses it as a
-constant instead of reading it. The error block may substitute a value of any type for the result of an operation that
-fails ([Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that may fail
-may produce any type: `binaryMayFail` tells when operands can make a `binary` fail (an operand type pair it does not
-take, a divisor that may be zero: not a non-zero constant), `unary` and `switch.check` fail for types they do not take.
-An operation that `subst.check` follows gives only its own types (see `typed-continuations` in [Passes](#passes)).
+dates and numbers a date; the bit operators on numbers an integer; ...; `=`, `==` and `!=` with an object on the
+left, any type: its class may define the operator, whose method gives the result even where the operands make no
+error, as in `o == NIL`; other operators on an object fail without one, which counts),
+`unary` (`~` gives an integer), `from_bool`,
+literals and the constructors give their type, a call of a function of the module (or `call.forward`) gives the types
+its `RETURN`s give (`Function::returnTypes`, below), and anything else read from memory (a variable, an element,
+another call's result) may hold any type. The lowering uses it to keep values that never refer to a heap object out of
+the frame ([compiler.md](compiler.md#xir-to-llvm)), where a value has a single possible type, uses it as a constant
+instead of reading it, and emits only the fast paths the operands' types allow.
+
+The return types of a function (`returnTypes`): the union of the types of the values its `ret`s give (`NIL` for a
+`ret` without one), with the function's own type inference; every type for a generator's resume function. The pass
+manager sets `Function::returnTypes` once it has optimized the function (every type until then), so its callers,
+optimized after it, use them; a function of a call cycle entered before it gives every type there. The function's own
+errors cannot substitute the call's result (an error inside it substitutes the failed operation's, and the type
+inference of its `ret`s counts that), and a call it never enters (the stack's end) unwinds.
+
+The error block may substitute a value of any type for the result of an operation that fails ([Control flow for
+errors and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that may fail may produce any type:
+`binaryMayFail` tells when operands can make a `binary` fail (an operand type pair it does not take, a divisor that may
+be zero: not a non-zero constant), `unary` and `switch.check` fail for types they do not take. An operation that
+`subst.check` follows gives only its own types (see `typed-continuations` in [Passes](#passes)).
 `Substitution::None` types every operation as if no error block substituted anything.
 
 ## Passes
@@ -112,22 +125,29 @@ the call graph: a body is inlined optimized, its own calls inlined already), the
 (so that a body inlined elsewhere is copied before them), and verifies the function after every pass that changed
 it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
 
-- Inlining (`Inline.cpp`), first: a call runs its callee's body in place, between `inline.enter` (which names the
-  callee: the call stack shows it, as its call would) and `inline.leave`; each `ret` becomes `inline.leave` and a
-  branch passing the result to the rest of the caller's block. The callee's parameters and `LOCAL`s become frame
-  variables of the function, stored directly on every entry (the arguments, `NIL` past the last and for the `LOCAL`s)
-  and set to `NIL` before each `inline.leave` (as its frame would be gone: what they held is no longer kept): a call
-  starts with fresh variables, and a shared one gets a fresh cell when a block captures it, the store having replaced
-  the cell an earlier entry left. A codeblock's captures are the variables it captured; the module's `STATIC`s stay.
-  When an argument is a reference (`@x`, `@a[i]`), the variables of its parameters are marked `param` (they keep
-  reading and writing through what they hold), and so do the callee's variables marked so already (the parameters of
-  a body inlined in it before). A callee that reads the arguments it received (`readsArgs`: `PCount()`) gets them as
-  `inline.enter`'s operands, the inlined frame's arguments, until no call of an `ARGS` function in its body is left
-  (`Callee::readsCallerArgs`; a branch folded away may take the last one): then they are no longer passed. A body in
-  which nothing can see the call stack any more (no call, nothing that can fail or run code, no loop, whose back edge
-  polls and may run destructors, no body inlined in it: what folding leaves of `Mul( 2, 3 )`) needs no frame: its
-  `inline.enter` and `inline.leave` go (`trimInlinedBodies`, at the start of `inline-functions`; a leave several
-  bodies reach keeps them all). A body is inlined only at a call without `...` in a block that unwinds to the
+- `drop-reference-bodies` (`Versioning.cpp`), once on the module before the others: a `STATIC FUNCTION` (not a method,
+  not `INIT` or `EXIT`) is called only by the module's own calls (no macro, no other module, no message reaches it);
+  when none passes a reference (`@x`, `@a[i]`, `@name`) or `...` (whose arguments may be references) and none forwards
+  its arguments (`call.forward`), its parameters never hold a reference: its `params.ref` test becomes false, the
+  branch to its other body goes, and that body (`NAME.byref`), which nothing else calls, leaves the module with the
+  codeblocks it makes; the module's functions are verified after it.
+
+- Inlining (`Inline.cpp`), first of the passes on each function: a call runs its callee's body in place, between
+  `inline.enter` (which names the callee: the call stack shows it, as its call would) and `inline.leave`; each `ret`
+  becomes `inline.leave` and a branch passing the result to the rest of the caller's block. The callee's parameters and
+  `LOCAL`s become frame variables of the function, stored directly on every entry (the arguments, `NIL` past the last
+  and for the `LOCAL`s) and set to `NIL` before each `inline.leave` (as its frame would be gone: what they held is no
+  longer kept): a call starts with fresh variables, and a shared one gets a fresh cell when a block captures it, the
+  store having replaced the cell an earlier entry left. A codeblock's captures are the variables it captured; the
+  module's `STATIC`s stay. When an argument is a reference (`@x`, `@a[i]`), the variables of its parameters are marked
+  `param` (they keep reading and writing through what they hold), and so do the callee's variables marked so already
+  (the parameters of a body inlined in it before). A callee that reads the arguments it received (`readsArgs`:
+  `PCount()`) gets them as `inline.enter`'s operands, the inlined frame's arguments, until no call of an `ARGS` function
+  in its body is left (`Callee::readsCallerArgs`; a branch folded away may take the last one): then they are no longer
+  passed. A body in which nothing can see the call stack any more (no call, nothing that can fail or run code, no loop,
+  whose back edge polls and may run destructors, no body inlined in it: what folding leaves of `Mul( 2, 3 )`) needs no
+  frame: its `inline.enter` and `inline.leave` go (`trimInlinedBodies`, at the start of `inline-functions`; a leave
+  several bodies reach keeps them all). A body is inlined only at a call without `...` in a block that unwinds to the
   function's exit, and only when the callee reads no parameters in its frame slots (`readsParams`: `PValue()`; the
   inlined frame has none), creates no `PRIVATE` (nor calls a function that creates its caller's: it would be the
   function's, released later), and has no unwind block, no `...` and no `YIELD`; nothing is inlined into a generator,
@@ -173,8 +193,9 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   the comparisons of two number constants, as the run-time operators compute them from two values (`foldNumbers`,
   `foldNumber` and `compareNumbers` of `opt/Fold`, with `runtime`: an integer result is a computed one, of width 0; a
   double's decimals are the operator's; `/`, `%`, `^` and an integer product that overflows, whose decimals are SET
-  DECIMALS at run time, stay), `=`, `==` and `!=` of two string constants when SET
-  EXACT cannot change the result (`stringEquality` in `opt/Fold`, which the syntax tree's folding uses too),
+  DECIMALS at run time, stay), `+` and `-` of two string constants (`stringJoin`), `=`, `==` and `!=` of two
+  string constants when SET EXACT cannot change the result, and their `$` (`stringTest`; both in `opt/Fold`, which
+  the syntax tree's folding uses too),
   `ValType()` of a value whose types all have one letter (`XB_TYPE_LETTERS`; not a string, which may be a memo field's
   value: an array, codeblock or hash literal, a number, a logical), and `cond_br` on a constant becomes `br`. A folded
   instruction is removed at once, also one that can fail in general (`truth`) but not with these operands.

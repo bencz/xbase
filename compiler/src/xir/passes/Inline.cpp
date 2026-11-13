@@ -87,10 +87,6 @@ Constant *copyConstant(Function &f, const Constant &c) {
 // A frame variable with no cell and no reference passed in: read and written directly.
 bool plain(const Var *v) { return v && v->kind == Var::Kind::Frame && !mayBeInCell(*v); }
 
-bool isReference(const Value *v) {
-  return asInstruction(v, Op::RefVar) || asInstruction(v, Op::RefIndex) || asInstruction(v, Op::MvRef);
-}
-
 bool anyReference(const std::vector<Value *> &args) {
   return std::any_of(args.begin(), args.end(), isReference);
 }
@@ -308,14 +304,6 @@ std::optional<Inlined> blockOf(const Function &f, const Instruction &call,
   return Inlined{blk, std::move(body), blk->entry(), 1, mk->captures};
 }
 
-// A function versioned for references starts with `params.ref` and a branch to the call of its other body (`byref`)
-// or to its own (`body`): that branch, or null.
-const Instruction *versioning(const Function &f) {
-  const Instruction *t = f.entry()->terminator();
-  if (!t || t->op != Op::CondBr || !asInstruction(t->operand(0), Op::ParamsRef)) return nullptr;
-  return t;
-}
-
 // A call of a function of the module, or of a public function of a carried runtime source (`from` its module): what
 // runs in its place, or nothing. Arguments without references run the body for them (after the versioning test, which
 // they pass); with one, the body versioned for references.
@@ -332,7 +320,7 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
   if (const Instruction *test = versioning(*callee)) {
     BasicBlock *forward = test->targets[0].block;
     if (anyReference(operandsFrom(call, 0))) {
-      callee = forward->insts.front()->callee.function;
+      callee = referenceBody(*test);
       if (callee == &f) return std::nullopt;
       body = allBlocks(*callee);
       start = callee->entry();

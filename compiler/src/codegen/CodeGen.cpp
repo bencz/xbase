@@ -815,9 +815,15 @@ void CodeGen::storeWords(Value *dst, Value *header, Value *payload) {
 // integers (bit for bit, on any target): code generation merges a pair of
 // accesses of one type into a single 16-byte one, which then spans the two
 // stores that wrote the item and cannot be forwarded from them. A Local item
-// becomes registers, where the word keeps its integer type.
+// becomes registers, where the word keeps its integer type. A literal's words
+// are constants, stored as such: a choice between two literals is then one of
+// constants, not of loads (which code generation would turn into branches).
 void CodeGen::copyItem(Value *dst, Value *src) {
   if (dst == src) return;
+  if (auto lit = literalWords_.find(src); lit != literalWords_.end()) {
+    storeWords(dst, lit->second.first, lit->second.second);
+    return;
+  }
   bool registers = localItems_.count(dst) || localItems_.count(src);
   Type *word = registers ? static_cast<Type *>(i64_) : FixedVectorType::get(i32_, 2);
   Mem m = itemMemory(src);

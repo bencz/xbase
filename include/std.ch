@@ -206,6 +206,8 @@
 #command SET DECIMALS TO               => Set( _SET_DECIMALS, 0 )
 #command SET EXACT <x:ON,OFF,&>        => Set( _SET_EXACT, <(x)> )
 #command SET EXACT (<x>)               => Set( _SET_EXACT, <x> )
+#command SET FIXED <x:ON,OFF,&>        => Set( _SET_FIXED, <(x)> )
+#command SET FIXED (<x>)               => Set( _SET_FIXED, <x> )
 
 #define _DFSET( x, y ) Set( _SET_DATEFORMAT, iif( __SetCentury(), x, y ) )
 #command SET DATE [TO] AMERICAN        => _DFSET( "mm/dd/yyyy", "mm/dd/yy" )

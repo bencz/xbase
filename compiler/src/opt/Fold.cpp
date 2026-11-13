@@ -3,41 +3,52 @@
 #include "common/BitFunctions.h"
 #include "xbrt.h" // shared numeric rules
 
-#include <llvm/Support/MathExtras.h>
 
-#include <algorithm>
-#include <cmath>
-#include <limits>
 #include <unordered_map>
 
 namespace xb {
 
-std::optional<bool> stringEquality(BinOp op, const std::string &x, const std::string &y) {
-  if (op != BinOp::ExactEq && op != BinOp::Eq && op != BinOp::NotEq) return std::nullopt;
-  if (op != BinOp::ExactEq && x.size() != y.size()) return std::nullopt;
-  return (x == y) == (op != BinOp::NotEq);
+std::optional<bool> stringTest(BinOp op, const std::string &x, const std::string &y) {
+  xb_fold_str f;
+  switch (op) {
+  case BinOp::ExactEq: f = XB_FOLD_STR_EXACT; break;
+  case BinOp::Eq: f = XB_FOLD_STR_EQ; break;
+  case BinOp::NotEq: f = XB_FOLD_STR_NE; break;
+  case BinOp::In: f = XB_FOLD_STR_IN; break;
+  default: return std::nullopt;
+  }
+  int r;
+  if (!xb_fold_strings(f, x.data(), x.size(), y.data(), y.size(), &r)) return std::nullopt;
+  return r != 0;
+}
+
+std::optional<std::string> stringJoin(BinOp op, const std::string &x, const std::string &y) {
+  if (op == BinOp::Add) return x + y;
+  if (op != BinOp::Sub) return std::nullopt;
+  std::string r(x.size() + y.size(), ' ');
+  xb_str_minus(r.data(), x.data(), x.size(), y.data(), y.size());
+  return r;
 }
 
 namespace {
 
 bool isConstant(const Expr &e);
 
-// A folded integer is an integer constant of the program, unless an operand is
-// a computed integer (width 0, a folded bit function): then it is computed too,
-// as at run time. A folded double has the default display width (width 0).
-ExprPtr makeInt(SourceLoc loc, int64_t v, bool computed = false) {
-  return std::make_unique<NumberExpr>(loc, true, v, 0.0, 0, computed ? 0 : xb_num_const_int_width(v));
+// A number as the folding rules (xbrt.h) hold it, and back.
+xb_folded folded(const NumberExpr &n) {
+  xb_folded f = {n.isInt ? 1 : 0, n.ival, n.dval, n.width, n.dec};
+  return f;
 }
 
-bool isComputedInt(const NumberExpr &n) { return n.isInt && n.width == 0; }
-
-ExprPtr makeDouble(SourceLoc loc, double v, uint16_t dec) {
-  return std::make_unique<NumberExpr>(loc, false, 0, v, dec, 0);
+ExprPtr numberOf(SourceLoc loc, const xb_folded &f) {
+  return std::make_unique<NumberExpr>(loc, f.is_int != 0, f.i, f.d, f.dec, f.width);
 }
+
+// A folded integer: a constant of the program, or a computed one (a bit operation's).
+ExprPtr makeInt(SourceLoc loc, int64_t v, bool computed = false) { return numberOf(loc, xb_folded_int(v, computed)); }
 
 ExprPtr makeLogical(SourceLoc loc, bool v) { return std::make_unique<LogicalExpr>(loc, v); }
 
-double asDouble(const NumberExpr &n) { return n.isInt ? (double)n.ival : n.dval; }
 int64_t asInteger(const NumberExpr &n) { return n.isInt ? n.ival : xb_dbl_to_i64(n.dval); } // as the runtime takes it
 
 const NumberExpr *num(const ExprPtr &e) {
@@ -52,69 +63,48 @@ const LogicalExpr *logical(const ExprPtr &e) {
 
 } // namespace
 
-ExprPtr foldNumbers(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberExpr &b, bool runtime) {
-  bool ints = a.isInt && b.isInt;
-  bool computed = runtime || isComputedInt(a) || isComputedInt(b);
-  int64_t r;
+namespace {
+
+std::optional<xb_fold_op> foldOp(BinOp op) {
   switch (op) {
-  case BinOp::Add:
-  case BinOp::Sub:
-    if (ints) {
-      bool overflow = op == BinOp::Add ? llvm::AddOverflow(a.ival, b.ival, r) : llvm::SubOverflow(a.ival, b.ival, r);
-      if (!overflow) return makeInt(loc, r, computed);
-      double d = op == BinOp::Add ? (double)a.ival + (double)b.ival : (double)a.ival - (double)b.ival;
-      return makeDouble(loc, d, 0);
-    } else {
-      double d = op == BinOp::Add ? asDouble(a) + asDouble(b) : asDouble(a) - asDouble(b);
-      return makeDouble(loc, d, std::max(a.dec, b.dec)); // an integer has 0 decimals
-    }
-  case BinOp::Mul:
-    if (ints) {
-      if (!llvm::MulOverflow(a.ival, b.ival, r)) return makeInt(loc, r, computed);
-      if (runtime) return nullptr; // the run-time operator's double has SET DECIMALS decimals
-      return makeDouble(loc, (double)a.ival * (double)b.ival, 0);
-    }
-    if (runtime && a.dec + b.dec >= kDefaultDecimals) return nullptr; // decimals no literal holds
-    return makeDouble(loc, asDouble(a) * asDouble(b), (uint16_t)std::min<int>(a.dec + b.dec, kDefaultDecimals));
-  case BinOp::Div:
-    // A division by zero is left for the run-time error; at run time, a quotient has SET DECIMALS decimals.
-    if (runtime || asDouble(b) == 0.0) return nullptr;
-    if (ints && !(a.ival == std::numeric_limits<int64_t>::min() && b.ival == -1) && a.ival % b.ival == 0)
-      return makeInt(loc, a.ival / b.ival, computed);
-    return makeDouble(loc, asDouble(a) / asDouble(b), kDefaultDecimals);
-  case BinOp::Mod:
-    if (runtime || asDouble(b) == 0.0) return nullptr; // at run time a double with SET DECIMALS decimals
-    // x % -1 is 0 (and INT64_MIN % -1 is UB).
-    if (ints) return makeInt(loc, b.ival == -1 ? 0 : a.ival % b.ival, computed);
-    return makeDouble(loc, std::fmod(asDouble(a), asDouble(b)), kDefaultDecimals);
-  case BinOp::Pow:
-    if (runtime) return nullptr; // SET DECIMALS decimals
-    return makeDouble(loc, std::pow(asDouble(a), asDouble(b)), kDefaultDecimals);
-  default:
-    if (const xb_bit_function *f = bitOperator(op)) // an integer without a display width, as the runtime makes it
-      return makeInt(loc, xb_bit_apply(f->op, asInteger(a), asInteger(b)), true);
-    return nullptr;
+  case BinOp::Add: return XB_FOLD_ADD;
+  case BinOp::Sub: return XB_FOLD_SUB;
+  case BinOp::Mul: return XB_FOLD_MUL;
+  case BinOp::Div: return XB_FOLD_DIV;
+  case BinOp::Mod: return XB_FOLD_MOD;
+  case BinOp::Pow: return XB_FOLD_POW;
+  default: return std::nullopt;
   }
+}
+
+} // namespace
+
+ExprPtr foldNumbers(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberExpr &b, bool runtime) {
+  if (std::optional<xb_fold_op> f = foldOp(op)) {
+    xb_folded x = folded(a), y = folded(b), r;
+    return xb_fold_numbers(*f, &x, &y, runtime ? 1 : 0, &r) ? numberOf(loc, r) : nullptr;
+  }
+  if (const xb_bit_function *f = bitOperator(op)) // an integer without a display width, as the runtime makes it
+    return makeInt(loc, xb_bit_apply(f->op, asInteger(a), asInteger(b)), true);
+  return nullptr;
 }
 
 namespace {
 
-// Result of a comparison operator given the operands' order c (xb_order_is).
+// Result of a comparison operator given the operands' order c (xb_fold_compare).
 bool comparisonResult(BinOp op, int c, bool &result) {
+  xb_fold_cmp f;
   switch (op) {
-  case BinOp::Eq: case BinOp::ExactEq: result = xb_order_is(c, 0, 1, 0); return true;
-  case BinOp::NotEq: result = !xb_order_is(c, 0, 1, 0); return true;
-  case BinOp::Lt: result = xb_order_is(c, 1, 0, 0); return true;
-  case BinOp::Le: result = xb_order_is(c, 1, 1, 0); return true;
-  case BinOp::Gt: result = xb_order_is(c, 0, 0, 1); return true;
-  case BinOp::Ge: result = xb_order_is(c, 0, 1, 1); return true;
+  case BinOp::Eq: case BinOp::ExactEq: f = XB_FOLD_EQ; break;
+  case BinOp::NotEq: f = XB_FOLD_NE; break;
+  case BinOp::Lt: f = XB_FOLD_LT; break;
+  case BinOp::Le: f = XB_FOLD_LE; break;
+  case BinOp::Gt: f = XB_FOLD_GT; break;
+  case BinOp::Ge: f = XB_FOLD_GE; break;
   default: return false;
   }
-}
-
-int order(const NumberExpr &a, const NumberExpr &b) {
-  if (a.isInt && b.isInt) return (a.ival > b.ival) - (a.ival < b.ival);
-  return xb_order_double(asDouble(a), asDouble(b));
+  result = xb_fold_compare(f, c) != 0;
+  return true;
 }
 
 } // namespace
@@ -122,14 +112,14 @@ int order(const NumberExpr &a, const NumberExpr &b) {
 ExprPtr foldNumber(SourceLoc loc, UnOp op, const NumberExpr &n, bool runtime) {
   if (op == UnOp::BitNot) return makeInt(loc, xb_bit_apply(XB_BIT_NOT, asInteger(n), 0), true);
   if (op != UnOp::Neg) return nullptr;
-  if (!n.isInt) return makeDouble(loc, -n.dval, n.dec);
-  if (n.ival == std::numeric_limits<int64_t>::min()) return makeDouble(loc, -(double)n.ival, 0);
-  return makeInt(loc, -n.ival, runtime || isComputedInt(n));
+  xb_folded x = folded(n);
+  return numberOf(loc, xb_fold_negate(&x, runtime ? 1 : 0));
 }
 
 std::optional<bool> compareNumbers(BinOp op, const NumberExpr &a, const NumberExpr &b) {
   bool result;
-  if (comparisonResult(op, order(a, b), result)) return result;
+  xb_folded x = folded(a), y = folded(b);
+  if (comparisonResult(op, xb_folded_order(&x, &y), result)) return result;
   return std::nullopt;
 }
 
@@ -344,25 +334,10 @@ ExprPtr Folder::foldBinary(BinaryExpr &b) {
   }
   const StringExpr *sa = str(b.lhs), *sb = str(b.rhs);
   if (!sa || !sb) return nullptr;
-  const std::string &x = sa->value, &y = sb->value;
-  switch (b.op) {
-  case BinOp::Add:
-    return std::make_unique<StringExpr>(loc, x + y);
-  case BinOp::Sub: {
-    std::string r(x.size() + y.size(), ' ');
-    xb_str_minus(r.data(), x.data(), x.size(), y.data(), y.size());
-    return std::make_unique<StringExpr>(loc, std::move(r));
-  }
-  case BinOp::ExactEq:
-  case BinOp::Eq:
-  case BinOp::NotEq:
-    if (std::optional<bool> r = stringEquality(b.op, x, y)) return makeLogical(loc, *r);
-    return nullptr;
-  case BinOp::In:
-    return makeLogical(loc, !x.empty() && y.find(x) != std::string::npos);
-  default:
-    return nullptr;
-  }
+  if (std::optional<std::string> r = stringJoin(b.op, sa->value, sb->value))
+    return std::make_unique<StringExpr>(loc, std::move(*r));
+  if (std::optional<bool> r = stringTest(b.op, sa->value, sb->value)) return makeLogical(loc, *r);
+  return nullptr;
 }
 
 // A logical literal on the left decides the result or leaves the right

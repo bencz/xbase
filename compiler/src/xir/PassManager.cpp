@@ -2,6 +2,7 @@
 // after each one.
 #include "xir/PassManager.h"
 
+#include "xir/Types.h"
 #include "xir/Verifier.h"
 #include "xir/passes/Passes.h"
 
@@ -90,13 +91,21 @@ std::string optimize(Module &m, bool final) {
       bad = std::string("after ") + p.name + ": " + report;
     return true;
   };
-  for (Function *f : calleesFirst(m))
+  if (dropReferenceBodies(m))
+    for (auto &f : m.functions)
+      if (std::string report = verify(m, *f); !report.empty() && bad.empty())
+        bad = "after drop-reference-bodies: " + report;
+  for (Function *f : calleesFirst(m)) {
     for (unsigned round = 0; round < kMaxRounds && bad.empty(); ++round) {
       bool changed = false;
       for (const Pass &p : kPipeline)
         if (bad.empty()) changed |= run(p, *f);
       if (!changed) break;
     }
+    // What its callers, optimized after it, know of its result (a function of a cycle entered before it is not
+    // narrowed yet, so it gives every type there).
+    f->returnTypes = returnTypes(*f);
+  }
   if (final) // on the functions inlining copied in too (optimized where they come from)
     for (auto &f : m.functions)
       for (const Pass &p : kFinal)

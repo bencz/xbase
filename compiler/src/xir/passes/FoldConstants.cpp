@@ -78,7 +78,8 @@ Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
     }
     const Constant *x = asString(ops[0]), *y = asString(ops[1]);
     if (!x || !y) return nullptr;
-    std::optional<bool> r = stringEquality(i.binop, x->str, y->str);
+    if (std::optional<std::string> r = stringJoin(i.binop, x->str, y->str)) return b.string(*r);
+    std::optional<bool> r = stringTest(i.binop, x->str, y->str);
     return r ? b.logical(*r) : nullptr;
   }
   case Op::Call:

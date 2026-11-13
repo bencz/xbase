@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 213 of 551 done. Commands (`std.ch` families): 72 of 157 done.
+Functions: 213 of 551 done. Commands (`std.ch` families): 73 of 157 done.
 
 ## Statements (grammar)
 
@@ -32,7 +32,7 @@ ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET CE
 command), *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*,
 **SET DECIMALS**, *SET DEFAULT*, **SET DELETED**, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET
 DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, **SET EXCLUSIVE**,
-*SET FILECASE*, **SET FILTER**, *SET FIXED*, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, **SET
+*SET FILECASE*, **SET FILTER**, **SET FIXED**, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, **SET
 INDEX**, *SET INTENSITY*, *SET KEY*, **SET LANGUAGE** (an xbase command), *SET MARGIN*, *SET MBLOCKSIZE*, *SET
 MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, **SET ORDER**, *SET PATH*, *SET PRINTER*, *SET
 PROCEDURE*, **SET RELATION**, *SET SAFETY*, **SET SCOPE**, **SET SCOPEBOTTOM**, **SET SCOPETOP**, *SET SCOREBOARD*,

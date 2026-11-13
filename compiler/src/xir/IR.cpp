@@ -187,6 +187,16 @@ BasicBlock *BasicBlock::successor(size_t k) const {
   return k < targets ? t->targets[k].block : unwind;
 }
 
+Instruction *versioning(const Function &f) {
+  Instruction *t = f.entry()->terminator();
+  if (!t || t->op != Op::CondBr || !asInstruction(t->operand(0), Op::ParamsRef)) return nullptr;
+  return t;
+}
+
+Function *referenceBody(const Instruction &versioning) {
+  return versioning.targets[0].block->insts.front()->callee.function;
+}
+
 // Values are freed in an arbitrary order (blocks, then constants), so every
 // use is undone first: no destructor touches a value already freed.
 Function::~Function() {

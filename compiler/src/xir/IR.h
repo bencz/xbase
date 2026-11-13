@@ -220,6 +220,16 @@ inline const Instruction *asInstruction(const Value *v, Op op) {
   return i->op == op ? i : nullptr;
 }
 
+// A function versioned for references (Gen.cpp) starts with `params.ref` and a branch to the call of its other body
+// (`NAME.byref`) or to its own (`body`): that branch, or null; and the other body that branch's call runs.
+Instruction *versioning(const Function &f);
+Function *referenceBody(const Instruction &versioning);
+
+// A reference to a variable or an element, as an argument passed by reference (@x, @a[i], @name) is.
+inline bool isReference(const Value *v) {
+  return asInstruction(v, Op::RefVar) || asInstruction(v, Op::RefIndex) || asInstruction(v, Op::MvRef);
+}
+
 class BasicBlock {
 public:
   BasicBlock(Function *in, std::string label) : parent(in), name(std::move(label)) {}
@@ -277,6 +287,9 @@ public:
   bool method = false;            // a method: its first parameter is Self, which PCount() and PValue() skip
   bool byRefBody = false;         // the body versioned for references (NAME.byref), reached by call.forward
   bool usesRest = false;          // has an args.rest (`...`)
+  // The types its result may hold (a TypeSet, Types.h): every type until the pass manager, having optimized it,
+  // narrows them to what its RETURNs give (returnTypes).
+  uint32_t returnTypes = ~0u;
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   std::vector<std::unique_ptr<Constant>> constants;

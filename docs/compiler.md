@@ -427,7 +427,9 @@ emits the object file.
   an operand goes through a scratch item, and a result is written there and copied back (`callArg`, `callResult`). When
   type inference finds a single possible type for an operand (`typeOf`), the fast paths take its tag as a constant, and
   LLVM removes the tests and the paths of other types: arithmetic on values known to be doubles is plain floating-point
-  code.
+  code. A fast path the operands' types exclude is not emitted at all (`emitBinary`: two integers, two doubles, an
+  integer with a double, two one-byte strings for an equality): an operation on strings, or on a function's result of
+  known types, is its runtime call alone.
 - Alias information (TBAA): every load and store of generated code whose memory is known is tagged with its class,
   classes that never overlap (`CodeGen::Mem`): items outside the heap (an `alloca` or a global of the module: frames,
   `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements, cells,
@@ -441,7 +443,9 @@ emits the object file.
   come from the target's layout, `headerShift`): a load is served by the store that wrote it (store forwarding) only
   when that store covers it. Between items in memory the value word is copied as two 32-bit integers (bit for bit), a
   type different from the header's, so that code generation does not merge the pair into one 16-byte access spanning two
-  stores.
+  stores. A copy of a literal item stores its two words as constants (`literalWords_`; a string literal's only on
+  targets where its pointer fills the value word, a narrower one being widened by an instruction): a choice between two
+  literals (`iif( l, "T", "F" )`) is then one between constants, where loads would become branches in code generation.
 - The entry block allocates the frame of the planned size on the stack (`pushFrame`: an `alloca` of `xb_frame`, see
   [runtime.md](runtime.md#frames)), copies the parameters into the first slots (in a direct entry, from the words in
   registers; otherwise branch-free from a selected source, `argv[k]` or a `NIL` constant: `argItem`), clears the other
@@ -624,9 +628,12 @@ emits the object file.
 `opt/Fold.*` evaluates expressions on literals before semantic checks, so that checks on constants (`STATIC`
 initializers, `SWITCH` cases) see the folded values. Folding is part of the language semantics: the
 folded result's type and decimals follow Clipper's compile-time rules, which differ from the run-time operators. The
-same functions (`foldNumbers`, `foldNumber`, `compareNumbers`, `stringEquality`) also fold the xIR's constants, which
-are values the program computes at run time, with the run-time operators' rules instead (`runtime`:
-[xir.md](xir.md#passes)).
+same functions (`foldNumbers`, `foldNumber`, `compareNumbers`, `stringJoin`, `stringTest`) also fold the xIR's
+constants, which are values the program computes at run time, with the run-time operators' rules instead (`runtime`:
+[xir.md](xir.md#passes)). The rules are those of `xbrt.h`: `xb_fold_numbers` and `xb_fold_negate` for numbers (on
+`xb_folded`, with `XB_DEC_AT_RUN` for decimals SET DECIMALS gives when the code runs), `xb_fold_compare` and
+`xb_folded_order` for comparisons, `xb_fold_strings` for strings; the macro compiler folds with them too
+([runtime.md](runtime.md#macro-operator)): a text gives the same value compiled or as a macro.
 
 | Expression on literals | Result |
 |---|---|
@@ -639,7 +646,7 @@ are values the program computes at run time, with the run-time operators' rules 
 | unary `-` | the negated number, same decimals |
 | bit operators `&` `\|` `^^` `<<` `>>` `~` on numbers | an integer without a display width of its own (`xb_bit_apply`, the operands taken as integers by `xb_dbl_to_i64`) |
 | comparisons of numbers or logicals | `.T.`/`.F.` |
-| strings `+`, `-`, `==`, `$`; `=`/`!=` of two strings of one length | the result (`=` of strings of different lengths depends on SET EXACT and is not folded; `stringEquality`) |
+| strings `+`, `-`, `==`, `$`; `=`/`!=` of two strings of one length | the result (`=` of strings of different lengths depends on SET EXACT and is not folded; `stringJoin`, `stringTest`) |
 | `.NOT.`, `.AND.`/`.OR.` with a logical literal on the left, `IIF` with a logical literal condition | the result or the remaining operand |
 | a call to a `FOLD` function with constant arguments | its result, from the evaluator table in `opt/Fold.cpp`: `Len` of a string literal (its length) or of an array literal of constants (its element count); the bit functions on number constants (an integer without a display width of its own, as the runtime makes it; arithmetic on such an integer gives one too) |
 
@@ -671,11 +678,22 @@ host), runs LLVM's default optimization pipeline for the `-O` level (new pass ma
 loops whose fast paths have cold edges (`LoopSplit.*`, below), places the polls of the loops' back edges (`LoopPolls.*`,
 below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds), each followed by the function
 simplification pipeline on the functions it changed, and writes the object with the target's object writer (code
-generation runs on the legacy pass manager: in LLVM 22 it is the one every target implements). Code is position
-independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one, so programs run on any CPU of the
-target (a processor that keeps doubles with more precision than 64 bits between operations, as some 32-bit processors
-do, can give a different last digit in rounding edge cases; xbase does not change a processor's floating-point mode);
-`--cpu=native` (host target only) uses the CPU and features of the machine xbc runs on.
+generation runs on the legacy pass manager: in LLVM 22 it is the one every target implements).
+
+A function of more than 50000 instructions as code generation makes it (`kLargeFunction`: a procedure of a few
+thousand statements) does not go through that pipeline: several of its passes and of code generation's take time
+that grows faster than a function's size (merging stores into `memset`s, turning selects into branches, which
+recomputes the dominator tree each time), and such a function took minutes. It gets passes whose time follows its size
+(`optimizeLargeFunctions`: SROA, which keeps its `Local` items in registers, early CSE, instruction combining, CFG
+simplification), then is marked `optnone` and `noinline`: the pipeline skips it (`OptNoneInstrumentation`), the loop
+passes above leave it, nothing is inlined into it nor it into its caller, and code generation selects its instructions
+as at `-O0`. Its xIR is optimized as any other function's. The size is the one before LLVM inlines anything: a
+function that inlining makes that large goes through the pipeline (its time, not its result, is at stake).
+
+Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one, so programs run
+on any CPU of the target (a processor that keeps doubles with more precision than 64 bits between operations, as some
+32-bit processors do, can give a different last digit in rounding edge cases; xbase does not change a processor's
+floating-point mode); `--cpu=native` (host target only) uses the CPU and features of the machine xbc runs on.
 
 Loops without slow paths (`codegen/LoopSplit.*`): every inline fast path keeps a call to the runtime for the other
 cases, behind an edge weighted unlikely (`branchLikely`: edges to runtime calls, and to the rare double index; a choice

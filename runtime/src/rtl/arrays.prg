@@ -87,8 +87,8 @@ FUNCTION AScan( aTarget, xSearch, nStart, nCount )
 RETURN 0
 
 // AFill( aTarget, xValue, [nStart], [nCount] ): the range from nStart, up to nCount elements (the rest of the array
-// without it; none when it is 0 or less) takes the value; without a value nothing changes. Returns aTarget; anything
-// but an array is BASE/6004.
+// without it; none when it is 0; a negative count, as in Clipper, is the rest from the first element and nothing from
+// another) takes the value; without a value nothing changes. Returns aTarget; anything but an array is BASE/6004.
 FUNCTION AFill( aTarget, xValue, nStart, nCount )
    LOCAL i, nLast
    IF ValType( aTarget ) != "A"
@@ -103,10 +103,12 @@ FUNCTION AFill( aTarget, xValue, nStart, nCount )
    ENDIF
    nLast := Len( aTarget )
    IF ValType( nCount ) == "N"
-      IF Int( nCount ) <= 0
+      IF Int( nCount ) == 0 .OR. ( Int( nCount ) < 0 .AND. nStart != 1 )
          RETURN aTarget
       ENDIF
-      nLast := Min( nLast, nStart + Int( nCount ) - 1 )
+      IF Int( nCount ) > 0
+         nLast := Min( nLast, nStart + Int( nCount ) - 1 )
+      ENDIF
    ENDIF
    FOR i := nStart TO nLast
       aTarget[ i ] := xValue

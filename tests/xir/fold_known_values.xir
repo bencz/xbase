@@ -14,24 +14,8 @@ function MUL internal params 2 {
   $f0 = frame 0 "A"
   $f1 = frame 1 "B"
 entry:
-  %0 = params.ref $f0 $f1
-  cond_br %0, byref, body
-byref:
-  %2 = call.forward MUL.byref
-  ret %2
-body:
-  %4 = load $f0
-  %5 = load $f1
-  %6 = binary mul %4, %5
-  ret %6
-}
-
-function MUL.byref internal params 2 {
-  $f0 = frame 0 "A"
-  $f1 = frame 1 "B"
-entry:
-  %0 = load $f0 maybe_ref
-  %1 = load $f1 maybe_ref
+  %0 = load $f0
+  %1 = load $f1
   %2 = binary mul %0, %1
   ret %2
 }

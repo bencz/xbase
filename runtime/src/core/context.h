@@ -21,6 +21,7 @@ typedef struct xb_env {
   struct xb_private *privates;
   uint32_t  privateLen, privateCap;
   int      set_exact;
+  int      set_fixed;       /* SET FIXED: numbers shown with SET DECIMALS decimals (core/numeric.h) */
   char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
   int32_t  epoch;           /* SET EPOCH */
   int      century;         /* SET CENTURY */

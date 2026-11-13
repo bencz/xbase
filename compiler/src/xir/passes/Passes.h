@@ -7,6 +7,10 @@ namespace xb::xir {
 // The optimization passes on xIR (docs/xir.md, Passes). Each one transforms a
 // function in place and returns whether it changed anything.
 
+// A STATIC FUNCTION whose calls in the module pass no reference never runs its body versioned for references
+// (`NAME.byref`): its versioning test becomes false and that body leaves the module (Versioning.cpp).
+bool dropReferenceBodies(Module &m);
+
 // A call of a small function of the module, or of a function of the runtime's carried sources (Module::library), runs
 // its body in place, shown on the call stack as the function (inline.enter, inline.leave), its variables the caller's
 // own (Inline.cpp).

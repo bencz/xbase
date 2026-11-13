@@ -83,8 +83,8 @@ typedef enum mop {
 #define XB_MACRO_NO_ALIAS    UINT32_MAX
 #define XB_MACRO_STACK_ALIAS (UINT32_MAX - 1)
 
-/* MO_UNARY operands. */
-enum { MU_NEG, MU_NOT, MU_BITNOT };
+/* MO_UNARY operands; MU_DEC_AT_RUN gives the double on the top SET DECIMALS decimals (a folded quotient's). */
+enum { MU_NEG, MU_NOT, MU_BITNOT, MU_DEC_AT_RUN };
 /* MO_BINARY operands. */
 enum {
   MB_ADD, MB_SUB, MB_MUL, MB_DIV, MB_MOD, MB_POW, MB_EQ, MB_EXACTEQ, MB_NE, MB_LT, MB_LE, MB_GT, MB_GE, MB_IN,

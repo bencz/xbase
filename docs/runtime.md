@@ -577,8 +577,14 @@ frame of the activation that created it and the binding it hid (`xb_env.privates
 the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar) for the forms).
 
 - The grammar is the compiler's expression grammar, with its precedence, evaluation order and literal rules (the width
-  of a numeric literal is `xb_num_literal_width`, shared). A macro sees memory variables, the program's public functions
-  and the runtime's functions, by name; never a function's `LOCAL`s or `STATIC`s, nor a `STATIC FUNCTION`. `M->name` and
+  of a numeric literal is `xb_num_literal_width`, shared), and operators on number literals fold as the compiler folds
+  them, with the rules of `xbrt.h` (`xb_fold_*`): numbers through the operators, the bit operators and functions and
+  `Len()` of a literal (the runtime's: not a function of the program of that name), logicals through `.NOT.`, `.AND.`,
+  `.OR.` and comparisons, an `IIF()` on a folded condition and a list whose leading values are constants (`&( "999999999
+  / 3" )` is the integer 333333333, `&( "1000000000 * 1" )` keeps a constant's width; a quotient that is not exact is a
+  constant with SET DECIMALS decimals when it runs, `MU_DEC_AT_RUN`). A macro sees memory variables, the program's
+  public functions and the runtime's functions, by name; never a function's `LOCAL`s or `STATIC`s, nor a `STATIC
+  FUNCTION`. `M->name` and
   `MEMVAR->name` are memory variables; a name alone is a field of the current work area before a memory variable
   (`MO_MV_FIELD`), and the aliases of [rdd.md](rdd.md#field-references) name fields (`alias->name`, `FIELD->name`,
   `FIELD->alias->name`, `( expr )->name`, `&( expr )->name`) or evaluate in a work area (`alias->( expr, ... )`, `( expr
@@ -793,7 +799,11 @@ codeblocks, objects and hashes as nothing, and
 numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`):
 
 - the field has the item's width (or `xb_num_int_width`/`xb_num_dbl_width`) for the sign and integer digits, then a
-  dot and the item's decimals;
+  dot and the item's decimals; with SET FIXED ON, SET DECIMALS decimals for every number but one of width 1, which
+  keeps its own, as in Clipper (`xb_num_shown_field`, also for padding and `Transform()` without a template). In
+  `Transform()` with no template, or one of functions only, an integer's field is instead two columns wider and two
+  per decimal, without decimals (`xb_num_fixed_int_extra`), and with one of functions only a double of any width
+  takes SET DECIMALS decimals; `Str()` and templates with digits are not affected;
 - doubles keep 16 significant digits (later digits print as `0`) and are rounded half-up to the decimals;
 - a minus sign appears only when a non-zero digit is shown (`-0.001` with 2 decimals prints `0.00`);
 - a value that does not fit, and any infinite or NaN value, fills the field with `*`.
@@ -822,7 +832,8 @@ Conventions:
   columns), and a `nWidth` below 1 means 10 columns. A field with no room for its decimals (`nDec >= nWidth`, or no
   integer column left) is all `*`. `StrZero` is `Str` with leading blanks as zeros.
 - `Int( n )` is the integer part with `n`'s display width: a field's integer columns (`N(6,2)`: 3), a number's own
-  width otherwise; an integer comes back as it is.
+  width otherwise; an integer comes back as it is. `Abs( n )` of an integer not below zero is `n` as it is (its
+  width); otherwise the magnitude with the default width (a double keeps its decimals).
 - `Round` rounds half away from zero; a negative number of decimals rounds to tens, hundreds, ... As in Clipper, the
   half is added to ten times the scaled value and the result, divided back, is multiplied by `1 + DBL_EPSILON`
   (about one unit in the last place) before truncating, so decimal halves stored just below `.5` (`2.675`) round up
@@ -848,8 +859,10 @@ Conventions:
   @! @D @E @Z @S`, and `@L`/`@0` leading zeros) and templates for strings, numbers, dates and logicals, with their
   corner cases (`@R` on a date inserts the picture's separators again, `@E` on a string trades characters 1-2 and 4-5,
   a field too narrow is stars). Dates follow SET DATE and SET CENTURY (`xb_date_format_digits` formats the
-  `"99999999"` template). SET FIXED does not exist yet, so numbers keep their own decimals. Without a picture: a
-  string as it is, a number as `Str`, a date as `DToC`, a logical as `T`/`F`; any other value, or a picture that is
+  `"99999999"` template). A template without digits takes the number's own field, under SET FIXED with SET DECIMALS
+  decimals (an integer's two columns wider and two per decimal: [Display](#display)). Without a picture: a string as
+  it is, a number as `?` shows it (under SET FIXED an integer in that wider field), a date as `DToC`, a logical as
+  `T`/`F`; any other value, or a picture that is
   not a string, is error 1122. Compared with the reference over random values, pictures and settings, the results are
   the same.
 - The memo-line functions (`rtl/memoline.c`) cut a text into lines of a width (79 by default; tab size 4, word wrap on):
@@ -872,7 +885,7 @@ Conventions:
 - `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array and the empty date.
 - `Set( n [, x] )` returns the setting before the call. `_SET_EXACT` takes a logical or a string starting with
   `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020);
-  `_SET_DELETED`, `_SET_SOFTSEEK` and `_SET_UNIQUE` take a logical or `ON`/`OFF` as `_SET_EXACT` does
+  `_SET_FIXED`, `_SET_DELETED`, `_SET_SOFTSEEK` and `_SET_UNIQUE` take a logical or `ON`/`OFF` as `_SET_EXACT` does
   ([rdd.md](rdd.md#orders));
   `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more, off
   otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it in front when the picture
@@ -895,8 +908,9 @@ Conventions:
   (missing or 0: 1; past the end or negative: the last position), as many elements as fit, and returns `aTarget`
   (`NIL` unless both are arrays). Every store into an array goes through the write barrier.
 - `AFill( a, xValue, [nStart], [nCount] )` stores `xValue` in `nCount` elements from `nStart` and returns the array;
-  `nStart` follows `ASort`'s rule, `nCount` missing or reaching past the end means the rest, and 0 or negative fills
-  nothing, as does a missing `xValue`. Anything but an array is an argument error (`BASE/6004`). Each store goes
+  `nStart` follows `ASort`'s rule, `nCount` missing or reaching past the end means the rest, 0 fills nothing, a
+  negative one the rest from the first element and nothing from another (Clipper's rule), and a missing `xValue`
+  nothing. Anything but an array is an argument error (`BASE/6004`). Each store goes
   through the write barrier.
 - `ASort( a, [nStart], [nCount], [bOrder] )` sorts in place and returns the array (`NIL` for anything else). `nStart` 0,
   missing or not a number is 1, one past the end or negative sorts nothing (`xb_range_start`, which `AFill` shares);

@@ -94,8 +94,11 @@ void xbf_ABS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1089, "ABS", argc, argv);
     return;
   }
-  if (argv[0].type == XB_T_INT && argv[0].v.i != INT64_MIN)
-    xb_set_int(ret, argv[0].v.i < 0 ? -argv[0].v.i : argv[0].v.i);
+  if (argv[0].type == XB_T_INT && argv[0].v.i >= 0) {
+    *ret = argv[0]; /* the integer as it is: its display width stays */
+    return;
+  }
+  if (argv[0].type == XB_T_INT && argv[0].v.i != INT64_MIN) xb_set_int(ret, -argv[0].v.i);
   else xb_set_double(ret, fabs(xb_num_value(&argv[0])), argv[0].type == XB_T_DOUBLE ? argv[0].dec : 0);
 }
 

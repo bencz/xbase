@@ -1096,24 +1096,209 @@ static void gen_call(gen *g, fn *f, const node *n) {
   word(f, n->n);
 }
 
-static void gen_expr(gen *g, fn *f, const node *n) {
+/* Folding, as the compiler folds the same text (opt/Fold: the rules of xbrt.h, xb_fold_*), so that a text gives the
+ * same value, width and decimals compiled or in a macro: numbers through the operators, the bit operators and
+ * functions and Len() of a literal; logicals through .NOT., .AND., .OR. and comparisons; an IIF() on a folded
+ * condition and a list whose leading values are constants are what they choose. */
+static int folded_number(const node *n, xb_folded *out);
+static int folded_logical(const node *n, int *out);
+
+/* A value known when compiling whose evaluation does nothing else (the compiler's isConstant, after folding). */
+static int constant_node(const node *n) {
+  xb_folded v;
+  int l;
+  if (n->kind == N_NIL || n->kind == N_STRING) return 1;
+  if (n->kind == N_ARRAY) {
+    for (uint32_t k = 0; k < n->n; ++k)
+      if (!constant_node(n->list[k])) return 0;
+    return 1;
+  }
+  return folded_number(n, &v) || folded_logical(n, &l);
+}
+
+/* The last element of a list whose others are constants (evaluated for nothing), or NULL. */
+static const node *list_value(const node *n) {
+  if (n->kind != N_LIST || n->n == 0) return NULL;
+  for (uint32_t k = 0; k + 1 < n->n; ++k)
+    if (!constant_node(n->list[k])) return NULL;
+  return n->list[n->n - 1];
+}
+
+/* What a folded IIF() or .AND./.OR. with a literal on the left gives (the expression it reduces to), or NULL. */
+static const node *chosen(const node *n) {
+  int c;
+  if (n->kind == N_IIF) return folded_logical(n->a, &c) ? (c ? n->b : n->c) : NULL;
+  if ((n->kind == N_AND || n->kind == N_OR) && folded_logical(n->a, &c) && c == (n->kind == N_AND)) return n->b;
+  return list_value(n);
+}
+
+static int bit_op_of(int op, xb_bit_op *out) {
+  switch (op) {
+  case MB_BITAND: *out = XB_BIT_AND; return 1;
+  case MB_BITOR: *out = XB_BIT_OR; return 1;
+  case MB_BITXOR: *out = XB_BIT_XOR; return 1;
+  case MB_SHL: *out = XB_BIT_SHL; return 1;
+  case MB_SHR: *out = XB_BIT_SAR; return 1;
+  default: return 0;
+  }
+}
+
+static int64_t folded_integer(const xb_folded *v) { return v->is_int ? v->i : xb_dbl_to_i64(v->d); }
+
+/* Len() and the bit functions of the runtime (not a function of the program of that name) on folded arguments. */
+static int folded_call(const node *n, xb_folded *out) {
+  const xb_symbol_entry *e = xb_symbol_find(n->name, n->nameLen);
+  if (!e || !e->native) return 0;
+  if (!strcmp(n->name, "LEN") && n->n == 1) {
+    const node *a = n->list[0];
+    if (a->kind == N_STRING) *out = xb_folded_int((int64_t)(a->tok->len - 2), 0);
+    else if (a->kind == N_ARRAY && constant_node(a)) *out = xb_folded_int((int64_t)a->n, 0);
+    else return 0;
+    return 1;
+  }
+  for (uint32_t k = 0; k < XB_BIT_OP_COUNT; ++k) {
+    const xb_bit_function *f = xb_bit_function_of((xb_bit_op)k);
+    if (!f->name || strcmp(n->name, f->name) || n->n != f->arity) continue;
+    xb_folded v[2];
+    for (uint32_t a = 0; a < f->arity; ++a)
+      if (!folded_number(n->list[a], &v[a])) return 0;
+    *out = xb_folded_int(xb_bit_apply(f->op, folded_integer(&v[0]), f->arity > 1 ? folded_integer(&v[1]) : 0), 1);
+    return 1;
+  }
+  return 0;
+}
+
+static int folded_number(const node *n, xb_folded *out) {
+  xb_folded a, b;
+  xb_bit_op bit;
+  const node *c;
   switch (n->kind) {
+  case N_NUMBER:
+    out->is_int = n->tok->isInt;
+    out->i = n->tok->ival;
+    out->d = n->tok->dval;
+    out->width = n->tok->width;
+    out->dec = n->tok->isInt ? 0 : n->tok->dec;
+    return 1;
+  case N_UNARY:
+    if (!folded_number(n->a, &a)) return 0;
+    if (n->op == MU_NEG) *out = xb_fold_negate(&a, 0);
+    else if (n->op == MU_BITNOT) *out = xb_folded_int(xb_bit_apply(XB_BIT_NOT, folded_integer(&a), 0), 1);
+    else if (n->op == -1) *out = a;
+    else return 0;
+    return 1;
+  case N_BINARY: {
+    if (!folded_number(n->a, &a) || !folded_number(n->b, &b)) return 0;
+    if (bit_op_of(n->op, &bit)) {
+      *out = xb_folded_int(xb_bit_apply(bit, folded_integer(&a), folded_integer(&b)), 1);
+      return 1;
+    }
+    xb_fold_op op;
+    switch (n->op) {
+    case MB_ADD: op = XB_FOLD_ADD; break;
+    case MB_SUB: op = XB_FOLD_SUB; break;
+    case MB_MUL: op = XB_FOLD_MUL; break;
+    case MB_DIV: op = XB_FOLD_DIV; break;
+    case MB_MOD: op = XB_FOLD_MOD; break;
+    case MB_POW: op = XB_FOLD_POW; break;
+    default: return 0;
+    }
+    return xb_fold_numbers(op, &a, &b, 0, out);
+  }
+  case N_CALL:
+    return folded_call(n, out);
+  default:
+    return (c = chosen(n)) != NULL && folded_number(c, out);
+  }
+}
+
+static int fold_cmp_of(int op, xb_fold_cmp *out) {
+  switch (op) {
+  case MB_EQ: case MB_EXACTEQ: *out = XB_FOLD_EQ; return 1;
+  case MB_NE: *out = XB_FOLD_NE; return 1;
+  case MB_LT: *out = XB_FOLD_LT; return 1;
+  case MB_LE: *out = XB_FOLD_LE; return 1;
+  case MB_GT: *out = XB_FOLD_GT; return 1;
+  case MB_GE: *out = XB_FOLD_GE; return 1;
+  default: return 0;
+  }
+}
+
+static int folded_logical(const node *n, int *out) {
+  xb_folded x, y;
+  int a, b;
+  xb_fold_cmp cmp;
+  const node *c;
+  switch (n->kind) {
+  case N_TRUE: *out = 1; return 1;
+  case N_FALSE: *out = 0; return 1;
+  case N_UNARY:
+    if (n->op != MU_NOT || !folded_logical(n->a, &a)) return 0;
+    *out = !a;
+    return 1;
+  case N_AND:
+  case N_OR:
+    if (!folded_logical(n->a, &a)) return 0;
+    if (a != (n->kind == N_AND)) { /* .F. .AND. x, .T. .OR. x */
+      *out = a;
+      return 1;
+    }
+    return folded_logical(n->b, out);
+  case N_BINARY:
+    if (n->a->kind == N_STRING && n->b->kind == N_STRING) {
+      xb_fold_str op;
+      switch (n->op) {
+      case MB_EXACTEQ: op = XB_FOLD_STR_EXACT; break;
+      case MB_EQ: op = XB_FOLD_STR_EQ; break;
+      case MB_NE: op = XB_FOLD_STR_NE; break;
+      case MB_IN: op = XB_FOLD_STR_IN; break;
+      default: return 0;
+      }
+      return xb_fold_strings(op, n->a->tok->text + 1, n->a->tok->len - 2, n->b->tok->text + 1, n->b->tok->len - 2,
+                             out);
+    }
+    if (!fold_cmp_of(n->op, &cmp)) return 0;
+    if (folded_number(n->a, &x) && folded_number(n->b, &y)) {
+      *out = xb_fold_compare(cmp, xb_folded_order(&x, &y));
+      return 1;
+    }
+    if (folded_logical(n->a, &a) && folded_logical(n->b, &b)) { /* .F. < .T. */
+      *out = xb_fold_compare(cmp, a - b);
+      return 1;
+    }
+    return 0;
+  default:
+    return (c = chosen(n)) != NULL && folded_logical(c, out);
+  }
+}
+
+/* A number literal, or an operator on them as its folded value: 1 when it was. */
+static int gen_folded(fn *f, const node *n) {
+  xb_folded v;
+  if (!folded_number(n, &v)) return 0;
+  xb_item it;
+  if (v.is_int) {
+    xb_put(&it, xb_header_word(XB_T_INT, v.width, 0), (uint64_t)v.i);
+  } else {
+    uint64_t bits;
+    memcpy(&bits, &v.d, 8);
+    xb_put(&it, xb_header_word(XB_T_DOUBLE, v.width, v.dec == XB_DEC_AT_RUN ? 0 : v.dec), bits);
+  }
+  emit1(f, MO_CONST, add_const(f, &it), 0, 1);
+  if (!v.is_int && v.dec == XB_DEC_AT_RUN) emit1(f, MO_UNARY, MU_DEC_AT_RUN, 1, 1);
+  return 1;
+}
+
+static void gen_expr(gen *g, fn *f, const node *n) {
+  if ((n->kind == N_UNARY || n->kind == N_BINARY || n->kind == N_CALL || n->kind == N_IIF || n->kind == N_LIST ||
+       n->kind == N_AND || n->kind == N_OR) &&
+      gen_folded(f, n))
+    return;
+  switch (n->kind) {
+  case N_NUMBER: gen_folded(f, n); return;
   case N_NIL: emit(f, MO_NIL, 0, 1); return;
   case N_TRUE: emit(f, MO_TRUE, 0, 1); return;
   case N_FALSE: emit(f, MO_FALSE, 0, 1); return;
-  case N_NUMBER: {
-    const mtoken *t = n->tok;
-    xb_item v;
-    if (t->isInt) {
-      xb_put(&v, xb_header_word(XB_T_INT, t->width, 0), (uint64_t)t->ival);
-    } else {
-      uint64_t bits;
-      memcpy(&bits, &t->dval, 8);
-      xb_put(&v, xb_header_word(XB_T_DOUBLE, t->width, t->dec), bits);
-    }
-    emit1(f, MO_CONST, add_const(f, &v), 0, 1);
-    return;
-  }
   case N_STRING: emit1(f, MO_CONST, add_string(f, n->tok->text + 1, n->tok->len - 2), 0, 1); return;
   case N_VAR:
   case N_ARG: gen_load(g, f, n); return;

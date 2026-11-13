@@ -35,6 +35,17 @@ static inline void xb_num_field(const xb_item *it, int *width, int *dec) {
   }
 }
 
+/* The field a number shows in (display, QOut(), Transform() without a template, padding): its own, with SET FIXED
+ * ON SET DECIMALS decimals, unless its width is 1 (as Clipper, which then keeps the number's). */
+static inline void xb_num_shown_field(const xb_ctx *ctx, const xb_item *it, int *width, int *dec) {
+  xb_num_field(it, width, dec);
+  if (ctx->env->set_fixed && *width > 1) *dec = xb_decimals(ctx);
+}
+
+/* With SET FIXED ON, an integer that Transform() shows by its own field is that many columns wider, with no
+ * decimals: two, and two per SET DECIMALS decimal (Clipper's field). */
+static inline int xb_num_fixed_int_extra(const xb_ctx *ctx) { return 2 + 2 * (int)xb_decimals(ctx); }
+
 /* A number item's value as a double. */
 static inline double xb_num_value(const xb_item *it) { return it->type == XB_T_INT ? (double)it->v.i : it->v.d; }
 
@@ -42,40 +53,6 @@ static inline double xb_num_value(const xb_item *it) { return it->type == XB_T_I
  * int64 range (NaN gives 0) instead of invoking undefined behavior. */
 static inline int64_t xb_num_to_i64(const xb_item *it) {
   return it->type == XB_T_INT ? it->v.i : xb_dbl_to_i64(it->v.d);
-}
-
-/* 64-bit integer arithmetic reporting overflow (returns non-zero) instead of
- * invoking undefined behavior. */
-static inline int xb_add_overflow(int64_t a, int64_t b, int64_t *r) {
-#if defined(__GNUC__) || defined(__clang__)
-  return __builtin_add_overflow(a, b, r);
-#else
-  if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) return 1;
-  *r = a + b;
-  return 0;
-#endif
-}
-
-static inline int xb_sub_overflow(int64_t a, int64_t b, int64_t *r) {
-#if defined(__GNUC__) || defined(__clang__)
-  return __builtin_sub_overflow(a, b, r);
-#else
-  if ((b < 0 && a > INT64_MAX + b) || (b > 0 && a < INT64_MIN + b)) return 1;
-  *r = a - b;
-  return 0;
-#endif
-}
-
-static inline int xb_mul_overflow(int64_t a, int64_t b, int64_t *r) {
-#if defined(__GNUC__) || defined(__clang__)
-  return __builtin_mul_overflow(a, b, r);
-#else
-  if (a > 0 ? (b > 0 ? a > INT64_MAX / b : b < INT64_MIN / a)
-            : (b > 0 ? a < INT64_MIN / b : (a != 0 && b < INT64_MAX / a)))
-    return 1;
-  *r = a * b;
-  return 0;
-#endif
 }
 
 /* a * b for sizes, saturated: a product past UINT64_MAX is UINT64_MAX, which

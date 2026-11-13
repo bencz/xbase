@@ -29,7 +29,21 @@ Constant *CodeGen::literalItem(uint32_t type, uint16_t width, uint16_t dec, Cons
   auto *gv = new GlobalVariable(mod_, st, true, GlobalValue::PrivateLinkage, ConstantStruct::get(st, vals), ".xb.lit");
   gv->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   gv->setAlignment(itemAlign_);
+  if (Constant *word = constantPayloadWord(payload)) literalWords_[gv] = {headerWord(type, width, dec), word};
   return gv;
+}
+
+// The value word of an item holding the constant `payload` (as payloadWord makes it), or null where it is no constant:
+// a pointer narrower than the word, which only an instruction widens.
+Constant *CodeGen::constantPayloadWord(Constant *payload) {
+  if (auto *fp = dyn_cast<ConstantFP>(payload))
+    return ConstantInt::get(i64_, fp->getValueAPF().bitcastToAPInt().getZExtValue());
+  if (auto *ci = dyn_cast<ConstantInt>(payload)) {
+    unsigned bits = ci->getBitWidth();
+    return ConstantInt::get(i64_, ci->getValue().zext(64).getZExtValue() << valueShift(bits));
+  }
+  if (payload->getType()->isPointerTy() && intPtrTy_ == i64_) return ConstantExpr::getPtrToInt(payload, i64_);
+  return nullptr;
 }
 
 // The static item of an xIR item constant; equal constants share one.

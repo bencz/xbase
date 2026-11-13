@@ -46,9 +46,13 @@ spacing. Expressions on literals are folded at compile time, with results that c
 (`10 / 5` is `2`, `n / 5` is `2.00`): tests of run-time operators use variables.
 
 A rule is tested across its inputs, not on one example: every pair of a list of values with every operator
-(`number_matrix`: integers and doubles, signs, fractions, the display widths' limits, products past 64 bits), and each
-pair as a program meets it: literals (folded when compiled), values computed at run time (elements of an array made
-then), values the compiler knows once calls are inlined (folded in xIR), and input (`Val()` of the command line).
+(`number_matrix`: integers and doubles, signs, fractions, the display widths' limits, products past 64 bits;
+`string_matrix`: empty, blank and one-byte strings, case, trailing spaces, NUL and bytes above 127, with every
+comparison under both SET EXACT settings), and each pair as a program meets it: literals (folded when compiled),
+values computed at run time (elements of an array made then), values the compiler knows once calls are inlined
+(folded in xIR), macros compiled from text, and input (`Val()` of the command line, or its text with `<n>` for
+`Chr( n )`). Code shapes get theirs too: a function far past the optimizer's size limit (`large_function`), what each
+kind of function returns as its callers see it (`return_types`).
 Code that takes text at run time is tested with text read as input (`eval_input`: codeblocks compiled from the
 command line, run with every kind of argument, and the errors bad text and bad arguments give). The reference shows
 what a rule gives; where it is wrong, xbase does better, and the difference is documented.

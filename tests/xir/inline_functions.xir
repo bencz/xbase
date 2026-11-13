@@ -27,15 +27,9 @@ entry:
 function SQ internal params 1 {
   $f0 = frame 0 "X"
 entry:
-  %0 = params.ref $f0
-  cond_br %0, byref, body
-byref:
-  %2 = call.forward SQ.byref
-  ret %2
-body:
-  %4 = load $f0
-  %5 = binary mul %4, %4
-  ret %5
+  %0 = load $f0
+  %1 = binary mul %0, %0
+  ret %1
 }
 
 function BUMP internal params 1 {
@@ -55,32 +49,17 @@ body:
 function FACT internal params 1 {
   $f0 = frame 0 "K"
 entry:
-  %0 = params.ref $f0
-  cond_br %0, byref, body
-byref:
-  %2 = call.forward FACT.byref
-  ret %2
-body:
-  %4 = load $f0
-  %5 = binary le %4, 1:w10
-  %6 = truth %5
-  cond_br %6, iif.end(1:w10), iif.else
+  %0 = load $f0
+  %1 = binary le %0, 1:w10
+  %2 = truth %1
+  cond_br %2, iif.end(1:w10), iif.else
 iif.else:
-  %8 = binary sub %4, 1:w10
-  %9 = call FACT %8
-  %10 = binary mul %4, %9
-  br iif.end(%10)
-iif.end(%12: item):
-  ret %12
-}
-
-function SQ.byref internal params 1 {
-  $f0 = frame 0 "X"
-entry:
-  %0 = load $f0 maybe_ref
-  %1 = load $f0 maybe_ref
-  %2 = binary mul %0, %1
-  ret %2
+  %4 = binary sub %0, 1:w10
+  %5 = call FACT %4
+  %6 = binary mul %0, %5
+  br iif.end(%6)
+iif.end(%8: item):
+  ret %8
 }
 
 function BUMP.byref internal params 1 {
@@ -91,22 +70,4 @@ entry:
   store $f0 maybe_ref, %1
   barrier $f0 maybe_ref
   ret
-}
-
-function FACT.byref internal params 1 {
-  $f0 = frame 0 "K"
-entry:
-  %0 = load $f0 maybe_ref
-  %1 = binary le %0, 1:w10
-  %2 = truth %1
-  cond_br %2, iif.end(1:w10), iif.else
-iif.else:
-  %4 = load $f0 maybe_ref
-  %5 = load $f0 maybe_ref
-  %6 = binary sub %5, 1:w10
-  %7 = call FACT %6
-  %8 = binary mul %4, %7
-  br iif.end(%8)
-iif.end(%10: item):
-  ret %10
 }

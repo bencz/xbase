@@ -7,9 +7,11 @@ xb_str *xb_item_display(const xb_ctx *ctx, const xb_item *it) {
     case XB_T_LOGICAL:
       return xb_str_new(it->v.l ? ".T." : ".F.", 3);
     case XB_T_INT:
-      return xb_num_to_str(it, it->width ? it->width : xb_num_int_width(it->v.i), it->dec);
-    case XB_T_DOUBLE:
-      return xb_num_to_str(it, it->width ? it->width : xb_num_dbl_width(it->v.d), it->dec);
+    case XB_T_DOUBLE: {
+      int width, dec;
+      xb_num_shown_field(ctx, it, &width, &dec);
+      return xb_num_to_str(it, width, dec);
+    }
     case XB_T_STRING:
       return it->v.s;
     case XB_T_DATE: {

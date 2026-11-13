@@ -186,6 +186,10 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     }
     case MO_UNARY: {
       uint32_t u = word(&pc);
+      if (u == MU_DEC_AT_RUN) { /* a folded double: SET DECIMALS decimals, as the compiled code's */
+        xb_set_double(&s[sp], s[sp].v.d, xb_decimals(ctx));
+        break;
+      }
       xb_set_nil(r);
       if (u == MU_NEG) xb_op_neg(ctx, r, &s[sp]);
       else if (u == MU_NOT) xb_op_not(ctx, r, &s[sp]);
