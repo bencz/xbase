@@ -20,7 +20,7 @@ typedef enum xb_gc_kind {
 typedef struct xb_gc_hdr {
   uint32_t size;            /* object bytes: the lines a block object covers, statistics (saturates for large) */
   uint8_t  kind;            /* xb_gc_kind */
-  uint8_t  state;           /* XB_GC_MARKED | XB_GC_REMEMBERED */
+  uint8_t  state;           /* XB_GC_MARKED | XB_GC_REMEMBERED | ... | XB_GC_SHARED */
   uint16_t flags;           /* XB_GC_HDR_LARGE, XB_GC_HDR_PINNED, XB_GC_HDR_MOVED */
 } xb_gc_hdr;
 
@@ -43,6 +43,10 @@ typedef struct xb_gc_hdr {
 /* Young and survived one young collection: the next one that reaches it
  * promotes it. */
 #define XB_GC_AGED       0x10u
+/* Reachable by more than one flow of execution: its items are read under a
+ * sequence counter and written under a lock (core/shared.h). Kept by every
+ * collection. */
+#define XB_GC_SHARED     XB_GC_STATE_SHARED
 
 _Static_assert(sizeof(xb_gc_hdr) - offsetof(xb_gc_hdr, state) == XB_GC_STATE_BACK, "state byte position (xbrt.h)");
 

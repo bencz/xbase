@@ -71,6 +71,8 @@ void xb_thread_join(xb_thread t) {
   free(t);
 }
 
+void xb_thread_yield(void) { SwitchToThread(); }
+
 struct xb_mutex_impl {
   SRWLOCK lock;
 };

@@ -70,7 +70,9 @@ Running big-endian programs needs a target sysroot and an emulator (for example 
 ## Sanitizers
 
 A build of its own, configured with the sanitizer in `CMAKE_C_FLAGS`, `CMAKE_CXX_FLAGS` and `CMAKE_EXE_LINKER_FLAGS`,
-runs the whole suite (AddressSanitizer with UndefinedBehaviorSanitizer) or the platform tests (ThreadSanitizer). The
+runs the whole suite (AddressSanitizer with UndefinedBehaviorSanitizer) or the platform tests (ThreadSanitizer, built
+with Clang: GCC refuses the fences of `platform/atomic.h` under it; its runs need the address space the sanitizer
+reserves, so no `ulimit -v`). The
 AddressSanitizer build adds `-fsanitize-address-use-after-return=never`: the collector scans the threads' stacks for the
 addresses they hold ([runtime.md](runtime.md#garbage-collector)), and the "fake stack" frames that option would
 otherwise use keep local variables off the stack, where no scan finds them. `run.space_too_large`, which asks for more

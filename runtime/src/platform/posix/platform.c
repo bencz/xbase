@@ -18,9 +18,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
-#if defined(__linux__)
 #include <sched.h>
-#endif
 #if defined(__FreeBSD__) || defined(__DragonFly__)
 #include <pthread_np.h>
 #endif
@@ -123,6 +121,8 @@ void xb_thread_join(xb_thread t) {
   pthread_join(t->thread, NULL);
   free(t);
 }
+
+void xb_thread_yield(void) { sched_yield(); }
 
 struct xb_mutex_impl {
   pthread_mutex_t m;

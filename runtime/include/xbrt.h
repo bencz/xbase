@@ -813,6 +813,7 @@ static inline void xb_set_ptr(xb_item *it, xb_type type, void *p) {
 #define XB_GC_STATE_BACK     3u
 #define XB_GC_STATE_OLD      1u   /* bit: survived a collection */
 #define XB_GC_STATE_RECORDED 2u   /* bit: in the remembered set, to be traced whole */
+#define XB_GC_STATE_SHARED   0x20u /* bit: reachable by more than one flow (docs/concurrency.md) */
 void xb_gc_remember(void *obj);
 static inline void xb_gc_write(void *obj) {
   /* Other threads set bits of the byte (atomically): it is read atomically too. */

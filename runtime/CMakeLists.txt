@@ -9,6 +9,7 @@ add_library(xbrt STATIC
   src/core/language.c
   src/core/main.c
   src/core/memvar.c
+  src/core/shared.c
   src/core/module.c
   src/core/names.c
   src/core/symbols.c

@@ -1178,7 +1178,8 @@ The program's code runs on one thread today; the services below are what tasks a
   one environment, made with it; the program's exit code is the process's.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
-  reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`), mutexes (`xb_mutex`, with
+  reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_yield`, a waiter's
+  back-off), mutexes (`xb_mutex`, with
   `trylock`), condition variables (`xb_cond`, with waits timed on the monotonic clock: POSIX binds the condition to it,
   macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks (`xb_rwlock`; on glibc
   of the kind where a waiting writer goes before readers that come after it, elsewhere with the system's policy), the
@@ -1208,6 +1209,17 @@ The program's code runs on one thread today; the services below are what tasks a
   waiter of the address that came first, or every one. Waiters queue in arrival order in one of 256 buckets chosen by
   the address (each made when first used) and sleep on a condition of their own, so a wake reaches only the waiters
   it marks; the value is tested under the bucket's lock, which the waker takes after changing it, so no wake is lost.
+- Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the operations on arrays, hashes and
+  objects use them in a next step): `XB_GC_SHARED` in an object's header (`XB_GC_STATE_SHARED`, kept by every
+  collection) marks one that more than one flow can reach. `xb_share` marks what an item refers to and all it reaches
+  (an explicit stack, stopping at what is shared already, literal strings left alone, a growing string no longer
+  growing in place); it allocates nothing. A shared object's items are read under the sequence counter of its stripe,
+  one of 1024 chosen by its address, each on a cache line of its own (`xb_seq_read_begin`, the items' words loaded
+  with acquire order, `xb_seq_read_valid`; `xb_seq_get` for one item), and written under the stripe's lock
+  (`xb_seq_lock`, which makes the counter odd, the words stored with release order, `xb_seq_unlock`; `xb_seq_put`),
+  with no fences, so the thread sanitizer follows them. A waiter spins, then yields (a reader), or sleeps on the lock
+  word through `xb_blocking_run` (a writer); a writer never reaches a safepoint while it holds a stripe, so a reader
+  that waits never holds up a collection.
 
 ## Program startup
 

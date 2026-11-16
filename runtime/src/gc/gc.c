@@ -773,6 +773,9 @@ void xb_gc_root_push(xb_ctx *ctx, xb_item *it) {
 
 void xb_gc_root_pop(xb_ctx *ctx, unsigned n) { ctx->rootLen -= n; }
 
+/* A collection's state for an object (while the world is stopped), its sharing kept. */
+static void set_state(xb_gc_hdr *h, uint8_t state) { h->state = (uint8_t)((h->state & XB_GC_SHARED) | state); }
+
 /* The lines a block object covers get the collection's epoch, and become
  * old lines with `old`. */
 static void mark_lines(const xb_gc_hdr *h, int old) {
@@ -1142,7 +1145,7 @@ static void settle_young(void) {
   }
   if (!heap.aging) { /* reached aged objects were made old by push */
     for (size_t i = 0; i < heap.agedLen; ++i)
-      if (heap.aged[i]->state & XB_GC_MARKED) heap.aged[i]->state = XB_GC_MARKED;
+      if (heap.aged[i]->state & XB_GC_MARKED) set_state(heap.aged[i], XB_GC_MARKED);
     heap.agedLen = 0;
     heap.oldBytes += heap.markedBytes;
     return;
@@ -1152,11 +1155,11 @@ static void settle_young(void) {
   for (size_t i = 0; i < heap.survivorsLen; ++i) {
     xb_gc_hdr *h = heap.survivors[i];
     if (h->state & XB_GC_AGED) {
-      h->state = XB_GC_MARKED;
+      set_state(h, XB_GC_MARKED);
       mark_lines(h, 1);
       promoted += h->size;
     } else {
-      h->state = XB_GC_AGED;
+      set_state(h, XB_GC_AGED);
       stack_push(&heap.aged, &heap.agedLen, &heap.agedCap, h);
     }
   }
@@ -1226,7 +1229,7 @@ static void unmark_all(void) {
     xb_hblock *b = heap.blocks[k];
     if (b->cls) {
       size_t size = heap.classSize[b->cls - 1];
-      for (char *p = block_data(b); p + size <= (char *)b + XB_GC_BLOCK_SIZE; p += size) ((xb_gc_hdr *)p)->state = 0;
+      for (char *p = block_data(b); p + size <= (char *)b + XB_GC_BLOCK_SIZE; p += size) set_state((xb_gc_hdr *)p, 0);
       continue;
     }
     memset(b->lineOld, 0, sizeof b->lineOld); /* the marks of lines go stale with the next epoch */
@@ -1234,10 +1237,10 @@ static void unmark_all(void) {
       for (uint32_t bits = b->starts[l]; bits; bits &= bits - 1) {
         unsigned k8 = 0;
         while (!((bits >> k8) & 1u)) ++k8;
-        ((xb_gc_hdr *)((char *)b + l * XB_GC_LINE_SIZE + k8 * XB_GC_ALIGN))->state = 0;
+        set_state((xb_gc_hdr *)((char *)b + l * XB_GC_LINE_SIZE + k8 * XB_GC_ALIGN), 0);
       }
   }
-  for (xb_large *l = heap.large; l; l = l->link.next) l->hdr.state = 0;
+  for (xb_large *l = heap.large; l; l = l->link.next) set_state(&l->hdr, 0);
   heap.rememberedLen = 0;
   heap.agedLen = 0;
 }
@@ -1390,7 +1393,7 @@ static void collect(int full, int due) {
   for (size_t i = 0; i < heap.rememberedLen; ++i) {
     xb_gc_hdr *h = heap.remembered[i];
     uint8_t how = h->state & (XB_GC_REMEMBERED | XB_GC_CARDED);
-    h->state = XB_GC_MARKED;
+    set_state(h, XB_GC_MARKED);
     int young = (how & XB_GC_REMEMBERED) ? trace(h) : trace_cards((xb_array *)(h + 1));
     if (young) retain(h, (how & XB_GC_REMEMBERED) ? XB_GC_REMEMBERED : XB_GC_CARDED);
   }
