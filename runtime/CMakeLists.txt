@@ -18,6 +18,7 @@ add_library(xbrt STATIC
   src/core/set.c
   src/core/shared_file.c
   src/core/sync.c
+  src/core/text.c
   src/platform/blocking.c
   src/gc/gc.c
   src/types/array.c
@@ -55,6 +56,7 @@ add_library(xbrt STATIC
   src/rtl/numbers.c
   src/rtl/objects.c
   src/rtl/strings.c
+  src/rtl/threads.c
   src/rtl/transform.c
   src/macro/compile.c
   src/macro/lex.c

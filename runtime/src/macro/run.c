@@ -376,28 +376,9 @@ static void block_fn(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb
 static int name_start(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
 static int name_char(char c) { return name_start(c) || (c >= '0' && c <= '9'); }
 
-/* A growing run of bytes. */
-typedef struct buffer {
-  char *p;
-  size_t len, cap;
-} buffer;
-
-static void put(buffer *t, const char *p, size_t n) {
-  if (t->cap - t->len < n) {
-    size_t cap = t->cap ? t->cap : 64;
-    while (cap - t->len < n) cap *= 2;
-    char *grown = realloc(t->p, cap);
-    if (!grown) xb_gc_fatal("out of memory");
-    t->p = grown;
-    t->cap = cap;
-  }
-  memcpy(t->p + t->len, p, n);
-  t->len += n;
-}
-
 /* Puts `n` bytes in front of what is left to scan, kept reversed. */
-static void put_reversed(buffer *rest, const char *p, size_t n) {
-  for (size_t i = n; i-- > 0;) put(rest, &p[i], 1);
+static void put_reversed(xb_buffer *rest, const char *p, size_t n) {
+  for (size_t i = n; i-- > 0;) xb_buffer_put(rest, &p[i], 1);
 }
 
 /* Clipper's text substitution: each `&name` or `&name.` in `s` whose name is a
@@ -408,14 +389,14 @@ static void put_reversed(buffer *rest, const char *p, size_t n) {
  * an insertion is an append. */
 static xb_str *substitute(xb_ctx *ctx, xb_str *s) {
   if (!memchr(s->data, '&', s->len)) return s;
-  buffer out = {0}, rest = {0}, name = {0};
+  xb_buffer out = {0}, rest = {0}, name = {0};
   put_reversed(&rest, s->data, s->len);
   unsigned idle = 0;
   int changed = 0;
   while (rest.len > 0) {
     const char *next = rest.p + rest.len; /* next[-1] is the next byte, next[-2] the one after it */
     if (next[-1] != '&' || rest.len < 2 || !name_start(next[-2])) {
-      put(&out, &next[-1], 1);
+      xb_buffer_put(&out, &next[-1], 1);
       --rest.len;
       idle = 0;
       continue;
@@ -423,15 +404,15 @@ static xb_str *substitute(xb_ctx *ctx, xb_str *s) {
     size_t k = 1; /* the name's length */
     while (k + 1 < rest.len && name_char(next[-2 - (ptrdiff_t)k])) ++k;
     name.len = 0;
-    for (size_t i = 0; i < k; ++i) put(&name, &next[-2 - (ptrdiff_t)i], 1);
+    for (size_t i = 0; i < k; ++i) xb_buffer_put(&name, &next[-2 - (ptrdiff_t)i], 1);
     xb_item value; /* its bytes are copied before anything allocates */
     const xb_item *v = NULL;
     if (idle < MAX_IDLE_INSERTIONS && (k > 1 || name.p[0] != '_') && xb_memvar_peek(ctx, name.p, k, &value))
       v = &value; /* `&_` names nothing */
     if (v && (v->type != XB_T_STRING || out.len + rest.len + v->v.s->len > MAX_TEXT_BYTES)) v = NULL;
     if (!v) { /* `&name` as written */
-      put(&out, &next[-1], 1);
-      put(&out, name.p, k);
+      xb_buffer_put(&out, &next[-1], 1);
+      xb_buffer_put(&out, name.p, k);
       rest.len -= 1 + k;
       continue;
     }
@@ -442,9 +423,9 @@ static xb_str *substitute(xb_ctx *ctx, xb_str *s) {
     changed = 1;
   }
   xb_str *result = changed ? xb_str_new(out.p ? out.p : "", out.len) : s;
-  free(out.p);
-  free(rest.p);
-  free(name.p);
+  xb_buffer_free(&out);
+  xb_buffer_free(&rest);
+  xb_buffer_free(&name);
   return result;
 }
 

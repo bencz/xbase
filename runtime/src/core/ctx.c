@@ -1,5 +1,6 @@
 #include "xbrt_int.h"
 
+#include "core/shared.h"
 #include "core/shared_file.h"
 
 #include <stdio.h>
@@ -24,6 +25,32 @@ static void env_free(xb_env *env) {
   free(env->date_format);
   free(env->areas);
   free(env);
+}
+
+void xb_env_share(xb_ctx *creator) {
+  xb_share(&creator->env->error_block);
+  xb_share(&creator->env->language);
+  xb_memvar_share(creator);
+}
+
+void xb_env_inherit(xb_ctx *ctx, const xb_ctx *creator) {
+  const xb_env *from = creator->env;
+  xb_env *env = ctx->env;
+  ctx->set_decimals = creator->set_decimals;
+  env->error_block = from->error_block;
+  env->set_exact = from->set_exact;
+  env->set_fixed = from->set_fixed;
+  xb_ctx_set_date_format(ctx, from->date_format, strlen(from->date_format));
+  env->epoch = from->epoch;
+  env->century = from->century;
+  env->language = from->language;
+  env->codepage = from->codepage;
+  env->set_deleted = from->set_deleted;
+  env->set_shared = from->set_shared;
+  env->set_softseek = from->set_softseek;
+  env->set_unique = from->set_unique;
+  env->rddDefault = from->rddDefault;
+  xb_memvar_inherit(ctx, creator);
 }
 
 /* The monotonic clock when the first context was made, as the program started: ElapsedMs() counts from it. */

@@ -1,10 +1,11 @@
 # Concurrency: tasks, async/await and threads
 
 *Planned*, except phase 1 (the platform's threads and synchronization,
-[runtime.md](runtime.md#threads-and-synchronization)): the design the work follows, in the order of
-[Phases](#phases). The goal is a runtime where one process serves hundreds of thousands of concurrent requests (a web
-server with as many connections, each awaiting the network and the database), on every core, without a data race
-ever corrupting memory, and where Clipper code that knows nothing of tasks keeps working inside them.
+[runtime.md](runtime.md#threads-and-synchronization)) and what phase 2 marks done ([Threads](#threads)): the design
+the work follows, in the order of [Phases](#phases). The goal is a runtime where one process serves hundreds of
+thousands of concurrent requests (a web server with as many connections, each awaiting the network and the database),
+on every core, without a data race ever corrupting memory, and where Clipper code that knows nothing of tasks keeps
+working inside them.
 
 ## Decisions
 
@@ -87,9 +88,10 @@ Classes and functions, listed in [coverage.md](coverage.md) as each one comes:
   operation of the runtime takes one.
 - `Channel( [nCapacity] )`: `SendAsync`, `ReceiveAsync`, `TrySend`, `TryReceive`, `Close`; enumerable with `AWAIT FOR
   EACH`. The way to hand data between tasks.
-- Threads: `ThreadStart( bWork, ... )` (a task on a dedicated thread of its own, for work that blocks or computes for
-  long), `Join()`; `Mutex` (`Lock`, `Unlock`, `TryLock`; `USING oMutex:Hold()`), `Condition`, `Semaphore` (also
-  `WaitAsync`), `AsyncLock` (held across `AWAIT`), `AtomicInt` (`Add`, `CompareExchange`, `Value`), `Lazy( bInit )`.
+- Threads: `ThreadStart( bWork, ... )` (a flow on a thread of its own, for work that blocks or computes for long),
+  `Join()`, `IsAlive()`; `Mutex()` (`Lock`, `Unlock`, `TryLock`); `AtomicInt()` (`Add`, `CompareExchange`, `Value`):
+  done, see [Threads](#threads). Planned: `USING oMutex:Hold()`, `Condition`, `Semaphore` (also `WaitAsync`),
+  `AsyncLock` (held across `AWAIT`), `Lazy( bInit )`; a thread becomes a task once tasks exist.
 - Statements of xbase's own over them, rules in `std.ch`: `SYNCHRONIZED oMutex ... END` (held for the body, released
   in any way it ends).
 
@@ -111,12 +113,48 @@ Environments are copied on write: sequential code shares one and sees every `SET
 forks (a task started with `TaskRun`, an `ASYNC` call that suspends while its caller goes on without awaiting it), both
 sides keep the same environment until one of them changes it, which copies it first. So a callee's `SET` reaches its
 caller when they run in sequence, never across concurrent branches. A new flow (`TaskRun`, `ThreadStart`) starts with
-a copy of its creator's environment and a table of work areas of its own, empty; concurrent branches of one flow share
-its table (each area serializes its operations) and each has its own current area.
+a copy of its creator's environment and a table of work areas of its own, empty (done for `ThreadStart`); concurrent
+branches of one flow share its table (each area serializes its operations) and each has its own current area.
 
-`PUBLIC` variables are program-wide, in one shared table (read without locking, created under a lock); `PRIVATE`
-variables belong to the environment. Module `STATIC`s and class variables are shared by every task and thread, and
+`PUBLIC` variables are program-wide, in one shared table (read without locking, created under a lock: done,
+[runtime.md](runtime.md#memory-variables)); `PRIVATE` variables belong to the environment, and a new flow sees the ones
+its creator sees, the same variables. Module `STATIC`s and class variables are shared by every task and thread, and
 are [shared objects](#shared-objects) themselves.
+
+### Threads
+
+Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); the functions are xbase's own.
+
+- `ThreadStart( bWork, [xArgs...] )` runs `Eval( bWork, xArgs... )` on a new thread (a codeblock or a function
+  reference; anything else is the argument error `BASE/9016`, and a thread the system cannot make `BASE/9017`) and
+  returns its `Thread` object. The arguments are values (one written `@` passes its value), and they and the block
+  are shared before the thread starts. `oThread:Join()` waits
+  for the thread to end and returns what the block returned (`NIL` when a `BREAK` left it); a thread that joins itself
+  gets `BASE/9018` `Thread joins itself` (substitutable). `oThread:IsAlive()` tells whether it still runs.
+- The thread starts with a copy of its creator's environment: the `SET` values (`SET DECIMALS` too), `ErrorBlock()`,
+  the language and the code page, the default driver, and the memory variables its creator sees: a `PRIVATE` visible
+  then is the same variable in both (assigned in one, seen by the other); no work area is open. What the thread
+  changes in its own environment (a `SET`, a `PRIVATE` it creates) stays there.
+- An error goes to the thread's error block, the creator's: a block that `BREAK`s ends the thread with `NIL`; the
+  default handler reports the error and quits. `QUIT` in any thread (an error nobody handles too) ends the program:
+  every other thread is asked to `QUIT` (a waiting `Join()` or `Lock()` looks for the request every 50 ms), the
+  program waits for them, then runs its `EXIT` procedures, with the exit code `ErrorLevel()` set. The program also ends
+  when its start procedure returns: the threads still running are asked to `QUIT` the same way and waited for. A thread
+  started meanwhile quits at once; the `EXIT` procedures may start threads, which end the same way when they return. A
+  thread inside a system call that does not return (a read of the standard input, a file lock another program never
+  releases) holds the program's end until it returns. A thread that ends holding a `Mutex` leaves it held.
+- `Mutex()` makes a lock that the thread holding it may take again: `Lock()` waits while another thread holds it (a
+  blocking operation: collections go on without the waiter), `TryLock()` takes it only when no other thread holds it
+  and tells whether it did, `Unlock()` releases it once (it is free when released as many times as taken); `Unlock()`
+  by a thread that does not hold it is `BASE/9019` `Mutex not held`.
+- `AtomicInt( [nValue] )` holds a 64-bit integer (0 without a value; a number is truncated toward zero, saturated):
+  `Value` reads it, `Value := n` stores n, `Add( n )` adds n and returns the new value (wrapping as two's complement
+  does), `CompareExchange( nExpected, nNew )` stores nNew when the value is nExpected and tells whether it did; each in
+  one step whatever other threads do. An argument that is no number is `BASE/9020`.
+- Console output: what one `QOut()`, `QQOut()`, `OutStd()` or `OutErr()` call writes, and the runtime's report of an
+  unrecoverable error, is written whole: the outputs of threads never split one another
+  ([runtime.md](runtime.md#functions-written-in-xbase)). The default error handler's report is several `OutErr()`
+  calls: another thread's lines may come between them.
 
 ### Scheduler
 
@@ -211,8 +249,8 @@ environments, and the variables made in them, come with `ThreadStart`) and the f
   hashes, object variables, cells, references, the elements `FOR EACH` reads and generators take the shared path when
   the bit is set. (3, done) Compiled code's in-place reads and writes test the bit, measured on the benchmarks (ABI 44).
   (4, done) Publication: a store into a shared object shares the value stored first; `STATIC`s, class variables and
-  memory variables are shared storage once a second thread exists (ABI 45). Then step 2e (`ThreadStart`, `Mutex`,
-  `AtomicInt`).
+  memory variables are shared storage once a second thread exists (ABI 45). (2e, done) `ThreadStart`, `Mutex`,
+  `AtomicInt`, the program-wide `PUBLIC` table and line-atomic console output ([Threads](#threads)).
 - **Runtime caches and tables** filled at run time (done, [runtime.md](runtime.md#threads-and-synchronization)): a
   send cache is a sequence lock, a field cache one 64-bit word (generation, index) from an atomic counter, the memory
   variable names are found under a reader-writer lock and read by number from chunks that never move, and classes
@@ -299,8 +337,8 @@ Each phase ends with its tests, its benchmarks measured before and after, the do
 2. **A thread-safe runtime**: the runtime caches and global state made thread-safe (done), the context split and
    environments with the stack error (done); stop-the-world collections with back-edge polls (ABI), every stack scanned,
    atomic headers, per-thread remembered sets, the finalizer task; shared objects (header bit, publication, sequence
-   counters and locks, compiled fast paths); line-atomic console output; `ThreadStart`, `Mutex`, `Condition`,
-   `Semaphore`, `AtomicInt`, `SYNCHRONIZED`. The first visible feature: threads sharing memory safely.
+   counters and locks, compiled fast paths); line-atomic console output, `ThreadStart`, `Mutex`, `AtomicInt` (done);
+   `Condition`, `Semaphore`, `SYNCHRONIZED`. The first visible feature: threads sharing memory safely.
 3. **Scheduler and tasks**: workers, deques, stealing, parking, blocking handoff and its monitor, timers, the
    blocking pool; `Task`, `TaskRun`, `TaskDelay`, `TaskWhenAll`/`Any`, `TaskCompletionSource`, cancellation,
    `Channel`, usable from synchronous code (`Wait()`, `ContinueWith`).

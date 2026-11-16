@@ -91,6 +91,12 @@ void xb_object_put_shared(xb_object *o, uint32_t k, const xb_item *v) {
   xb_seq_unlock(o);
 }
 
+const xb_class_method *xb_class_method_of(const xb_class *cls, const char *name) {
+  for (uint32_t k = 0; k < cls->nmethods; ++k)
+    if (strcmp(cls->methods[k].name, name) == 0) return &cls->methods[k];
+  return NULL;
+}
+
 void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
   int assign = message[0] == '_';
   const char *name = message + assign;
@@ -112,6 +118,11 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
         }
         return;
       }
+    const xb_class_method *m = xb_class_method_of(cls, message); /* an assignment's is named _NAME */
+    if (m) {
+      m->fn(ctx, r, argc, argv);
+      return;
+    }
     if (xb_is_generator(&argv[0]) && xb_gen_message(ctx, r, message, argc, argv)) return; /* after its variables */
   }
   if (!xb_class_scalar_send(ctx, r, message, NULL, 0, argc, argv)) xb_object_message(ctx, r, message, argc, argv);

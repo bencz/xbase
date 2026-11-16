@@ -42,6 +42,8 @@ static void has(xb_item *ret, uint32_t argc, xb_item *argv, int method) {
       yes = xb_class_has(o, name, method);
     } else if (!method) {
       for (uint32_t k = 0; k < o->cls->nvars && !yes; ++k) yes = xb_var_answers(&o->cls->vars[k], name);
+    } else {
+      yes = xb_class_method_of(o->cls, name) != NULL;
     }
   }
   if (name) xb_name_upper_free(name, buf);
@@ -66,11 +68,16 @@ static void names(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int m
     xb_fn_arg_error(ctx, ret, 0, fn, argc, argv);
     return;
   }
-  uint32_t n = o->cls->compiled ? xb_class_names(o, methods, NULL) : methods ? 0 : o->cls->nvars;
+  uint32_t n = o->cls->compiled ? xb_class_names(o, methods, NULL) : methods ? o->cls->nmethods : o->cls->nvars;
   const char **list = malloc((n ? n : 1) * sizeof *list);
   if (!list) xb_gc_fatal("out of memory");
   if (o->cls->compiled) {
     xb_class_names(o, methods, list);
+  } else if (methods) { /* an assignment's method is the access's */
+    uint32_t kept = 0;
+    for (uint32_t k = 0; k < n; ++k)
+      if (o->cls->methods[k].name[0] != '_') list[kept++] = o->cls->methods[k].name;
+    n = kept;
   } else { /* a runtime class's own variables have names no message spells: they are left out */
     uint32_t kept = 0;
     for (uint32_t k = 0; k < n; ++k)

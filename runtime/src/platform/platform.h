@@ -79,11 +79,13 @@ void xb_platform_flush(FILE *stream);
 /* Threads. xb_thread_start runs fn(arg) on a new thread whose stack can grow to `stack_size` bytes (reserved, committed
  * as it is used; rounded up to the system's page and minimum; 0: the system's default): 0 when it could not be
  * created. xb_thread_join waits for the thread to end
- * and frees it; every thread started is joined once. xb_thread_yield lets another thread that is ready run on the
- * caller's processor (a waiter's back-off). */
+ * and frees it; xb_thread_detach lets it go, freed when it ends (it may have ended already): every thread started is
+ * joined or detached once. xb_thread_yield lets another thread that is ready run on the caller's processor (a
+ * waiter's back-off). */
 typedef struct xb_thread_impl *xb_thread;
 int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *arg);
 void xb_thread_join(xb_thread t);
+void xb_thread_detach(xb_thread t);
 void xb_thread_yield(void);
 
 /* The calling thread's stack as the system reserved it: `*low` the lowest address code may use (above its guard

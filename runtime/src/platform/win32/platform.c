@@ -44,11 +44,13 @@ struct xb_thread_impl {
   HANDLE thread;
   void (*fn)(void *);
   void *arg;
+  LONG holders; /* the thread and its starter; when it was detached, the last of them to let go frees it */
 };
 
 static DWORD WINAPI run_thread(LPVOID p) {
   xb_thread t = p;
   t->fn(t->arg);
+  if (InterlockedDecrement(&t->holders) == 0) free(t); /* detached already */
   return 0;
 }
 
@@ -57,6 +59,7 @@ int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *a
   if (!*t) return 0;
   (*t)->fn = fn;
   (*t)->arg = arg;
+  (*t)->holders = 2;
   (*t)->thread = CreateThread(NULL, stack_size, run_thread, *t, stack_size ? STACK_SIZE_PARAM_IS_A_RESERVATION : 0,
                               NULL);
   if ((*t)->thread) return 1;
@@ -69,6 +72,11 @@ void xb_thread_join(xb_thread t) {
   WaitForSingleObject(t->thread, INFINITE);
   CloseHandle(t->thread);
   free(t);
+}
+
+void xb_thread_detach(xb_thread t) {
+  CloseHandle(t->thread);
+  if (InterlockedDecrement(&t->holders) == 0) free(t); /* it has ended */
 }
 
 void xb_thread_yield(void) { SwitchToThread(); }

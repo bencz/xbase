@@ -82,6 +82,7 @@ static int start_up(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
 void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
   xb_symbols_seal();
   if (start_up(ctx, argc, argv)) call(ctx, start, argc, argv);
+  xb_threads_end(ctx);
   xb_pending_clear(ctx, XB_PENDING_UNWIND); /* the request is served: the exit code stays */
   xb_set_nil(&ctx->break_value);
   if (xb_gc_finalizable_count()) { /* what the start function alone kept: destroyed before the EXIT procedures */
@@ -96,6 +97,7 @@ void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
       call(ctx, m->procs[m->ninit + k], 0, argv); /* no arguments; argv stays a valid address */
       stopped = unwinding(ctx);
     }
+  xb_threads_end(ctx); /* those the EXIT procedures started */
   uint32_t requests = xb_pending_get(ctx) & XB_PENDING_UNWIND; /* the tables are closed whatever ended the program */
   xb_pending_clear(ctx, XB_PENDING_UNWIND);
   xb_area_close_all(ctx);

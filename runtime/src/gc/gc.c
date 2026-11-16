@@ -343,13 +343,14 @@ uint32_t xb_storage_shared;
 
 /* Publication (docs/concurrency.md): the program's storage becomes shared storage when a second thread attaches,
  * every other thread stopped (the lock held): what the roots outside frames hold (the STATICs, the class variables),
- * and every context's memory variables, are shared, then the flag tells compiled code and the runtime. Sharing
- * allocates nothing. */
+ * every context's memory variables and the PUBLICs are shared, then the flag tells compiled code and the runtime.
+ * Sharing allocates nothing. */
 static void publish(void) {
   stop_world(NULL);
   for (xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) xb_share(&r->items[i]);
   for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) xb_memvar_share(ctx);
+  xb_memvar_share_publics();
   xb_atomic_store32(&xb_storage_shared, 1, XB_RELEASE);
   start_world();
 }
@@ -763,6 +764,13 @@ void xb_gc_unregister(xb_ctx *ctx) {
     heap.finalizer = heap.contexts;
     request_finalize();
   }
+  xb_mutex_unlock(&heap.lock);
+}
+
+void xb_gc_raise_all(const xb_ctx *except, uint32_t bits) {
+  lock_between_collections();
+  for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
+    if (ctx != except) xb_pending_set(ctx, bits);
   xb_mutex_unlock(&heap.lock);
 }
 
@@ -1191,6 +1199,11 @@ static void settle_young(void) {
   heap.retainedLen = 0;
 }
 
+static void mark_public(xb_item *it, void *data) {
+  XB_UNUSED(data);
+  mark_item(it);
+}
+
 static void mark_roots(void) {
   for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) {
     for (xb_frame *f = ctx->frames; f; f = f->prev)
@@ -1206,6 +1219,7 @@ static void mark_roots(void) {
   }
   for (const xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
+  xb_memvar_publics_each(mark_public, NULL);
   for (size_t i = heap.finalizedHead; i < heap.finalizedLen; ++i) mark_item(&heap.finalized[i]);
 }
 

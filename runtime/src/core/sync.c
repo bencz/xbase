@@ -98,33 +98,60 @@ uint32_t xb_park_wake(const uint32_t *addr, int all) {
 typedef struct park_args {
   const uint32_t *addr;
   uint32_t expected;
+  int64_t ns;
 } park_args;
 
-static void park_forever(void *p) {
+static void park(void *p) {
   const park_args *a = p;
-  xb_park_wait(a->addr, a->expected, -1);
+  xb_park_wait(a->addr, a->expected, a->ns);
 }
 
+void xb_park_wait_blocking(const uint32_t *addr, uint32_t expected, int64_t ns) {
+  park_args a = {addr, expected, ns};
+  xb_blocking_run(park, &a);
+}
+
+/* The holder's number is written only by that thread, so a thread that reads its own there holds the lock. */
+static void hold(xb_rwords w) {
+  xb_atomic_store32(w.owner, xb_thread_self(), XB_RELAXED);
+  *w.depth = 1;
+}
+
+int xb_rwords_try(xb_rwords w) {
+  if (xb_atomic_load32(w.owner, XB_RELAXED) == xb_thread_self()) {
+    ++*w.depth;
+    return 1;
+  }
+  uint32_t free_state = 0;
+  if (!xb_atomic_cas32(w.state, &free_state, 1, XB_ACQUIRE)) return 0;
+  hold(w);
+  return 1;
+}
+
+int xb_rwords_claim(xb_rwords w) {
+  if (xb_atomic_xchg32(w.state, 2, XB_ACQUIRE) != 0) return 0;
+  hold(w);
+  return 1;
+}
+
+int xb_rwords_release(xb_rwords w) {
+  if (xb_atomic_load32(w.owner, XB_RELAXED) != xb_thread_self()) return 0;
+  if (--*w.depth) return 1;
+  xb_atomic_store32(w.owner, 0, XB_RELAXED);
+  if (xb_atomic_xchg32(w.state, 0, XB_RELEASE) == 2) xb_park_wake(w.state, 0);
+  return 1;
+}
+
+static xb_rwords rlock_words(xb_rlock *l) { return (xb_rwords){&l->state, &l->owner, &l->depth}; }
+
 void xb_rlock_lock(xb_rlock *l) {
-  uint32_t self = xb_thread_self();
-  if (xb_atomic_load32(&l->owner, XB_RELAXED) == self) { /* only this thread writes its own number there */
-    ++l->depth;
-    return;
-  }
-  uint32_t owner = 0;
-  while (!xb_atomic_cas32(&l->owner, &owner, self, XB_ACQUIRE)) {
-    park_args a = {&l->owner, owner}; /* its holder may run code that waits for a collection: a blocking operation */
-    xb_blocking_run(park_forever, &a);
-    owner = 0;
-  }
-  l->depth = 1;
+  xb_rwords w = rlock_words(l);
+  if (xb_rwords_try(w)) return;
+  while (!xb_rwords_claim(w)) xb_park_wait_blocking(&l->state, 2, -1); /* its holder may wait for a collection */
 }
 
 void xb_rlock_unlock(xb_rlock *l) {
-  if (xb_atomic_load32(&l->owner, XB_RELAXED) != xb_thread_self()) abort(); /* only its holder releases it */
-  if (--l->depth) return;
-  xb_atomic_store32(&l->owner, 0, XB_RELEASE);
-  xb_park_wake(&l->owner, 0);
+  if (!xb_rwords_release(rlock_words(l))) abort(); /* only its holder releases it */
 }
 
 void xb_once(xb_once_flag *flag, void (*fn)(void)) {
@@ -139,3 +166,17 @@ void xb_once(xb_once_flag *flag, void (*fn)(void)) {
   }
   while (xb_atomic_load32(&flag->state, XB_ACQUIRE) != 2) xb_park_wait(&flag->state, 1, -1);
 }
+
+static xb_mutex output;
+static xb_once_flag outputMade = XB_ONCE_INIT;
+
+static void make_output_lock(void) {
+  if (!xb_mutex_init(&output)) abort();
+}
+
+void xb_output_lock(void) {
+  xb_once(&outputMade, make_output_lock);
+  xb_mutex_lock(&output);
+}
+
+void xb_output_unlock(void) { xb_mutex_unlock(&output); }

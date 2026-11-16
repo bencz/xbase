@@ -17,9 +17,9 @@ enum {
   ERR_ARGS, ERR_CANDEFAULT, ERR_CANRETRY, ERR_CANSUBSTITUTE, ERR_CARGO, ERR_DESCRIPTION, ERR_FILENAME, ERR_GENCODE,
   ERR_OPERATION, ERR_OSCODE, ERR_SEVERITY, ERR_SUBCODE, ERR_SUBSYSTEM, ERR_TRIES, ERR_COUNT_
 };
-_Static_assert(sizeof error_vars / sizeof error_vars[0] == ERR_COUNT_, "one ERR_ index per Error variable");
+_Static_assert(XB_TABLE_SIZE(error_vars) == ERR_COUNT_, "one ERR_ index per Error variable");
 
-static const xb_class error_class = {"ERROR", ERR_COUNT_, error_vars, NULL};
+static const xb_class error_class = {"ERROR", ERR_COUNT_, error_vars, NULL, 0, NULL};
 
 void xbf_ERRORNEW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
@@ -40,6 +40,7 @@ typedef struct report {
  * it): it reads the frames and their functions' names, no object. */
 static void write_report(void *p) {
   const report *r = p;
+  xb_output_lock();
   fflush(stdout);
   fprintf(stderr, "\nUnrecoverable error %d: %s", r->code, r->text);
   uint32_t shown = 0;
@@ -53,6 +54,7 @@ static void write_report(void *p) {
     if (f->proc->file) fprintf(stderr, " in %s", f->proc->file);
   }
   fputc('\n', stderr);
+  xb_output_unlock();
 }
 
 /* An error the program cannot recover from: reported (with the innermost XB_CALLS_SHOWN calls), and the program ends

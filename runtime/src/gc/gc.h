@@ -76,6 +76,8 @@ void  xb_gc_collect(void);                 /* a full collection */
 void  xb_gc_collect_young(void);           /* a young collection */
 void  xb_gc_register(xb_ctx *ctx);
 void  xb_gc_unregister(xb_ctx *ctx);
+/* Raises the requests `bits` on every registered context but `except` (the program's QUIT from any thread). */
+void  xb_gc_raise_all(const xb_ctx *except, uint32_t bits);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */
 /* The barrier after storing items `from` .. `to` - 1 of an array (xb_gc_write_item for each card they cover). */
 void   xb_gc_write_items(xb_array *a, size_t from, size_t to);

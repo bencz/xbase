@@ -705,7 +705,7 @@ void xb_classes_finalize(xb_ctx *ctx) {
       if (!destructor) continue;
       uint32_t before = xb_pending_get(ctx) & XB_PENDING_UNWIND; /* the requests pending wait, with their BREAK value */
       breakValue = ctx->break_value;
-      xb_pending_clear(ctx, XB_PENDING_UNWIND);
+      xb_pending_clear(ctx, before); /* those alone: a QUIT another thread raises meanwhile stays */
       uint32_t trap = ctx->error_trap; /* a Type() evaluating: the destructor's errors are not its own */
       int32_t trapped = ctx->error_trapped;
       ctx->error_trap = 0;

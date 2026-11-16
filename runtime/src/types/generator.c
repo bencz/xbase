@@ -15,7 +15,7 @@ enum { GEN_CURRENT = XB_GEN_CURRENT, GEN_STATE, GEN_FRAME, GEN_RESUME, GEN_COUNT
 static const xb_class_var gen_vars[] = {
   {"CURRENT", XB_VAR_READ}, {"(STATE)", XB_VAR_ANY}, {"(FRAME)", XB_VAR_ANY}, {"(RESUME)", XB_VAR_ANY},
 };
-const xb_class xb_generator_class = {"GENERATOR", GEN_COUNT_, gen_vars, NULL};
+_Static_assert(XB_TABLE_SIZE(gen_vars) == GEN_COUNT_, "one GEN_ index per generator variable");
 
 /* The state of an enumerator that has ended (or is running a step: a step that fails ends it). A step of a shared
  * enumerator is claimed first, under its lock: its state `s` becomes -(s + 2), which only that step's xb_gen_restore
@@ -122,15 +122,19 @@ int xb_gen_move_next(xb_ctx *ctx, const xb_item *gen) {
   return ret.type == XB_T_LOGICAL && ret.v.l;
 }
 
+static void gen_move_next(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  xb_set_logical(r, xb_gen_move_next(ctx, &argv[0]));
+}
+
+static const xb_class_method gen_methods[] = {{"MOVENEXT", gen_move_next}};
+const xb_class xb_generator_class = {"GENERATOR", GEN_COUNT_, gen_vars, NULL, XB_TABLE_SIZE(gen_methods), gen_methods};
+
 /* The runtime's Enumerable() (runtime/src/rtl/collections.prg): a program's class of that name is another. */
 void xbf_ENUMERABLE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 static xb_class_def *enumerable;
 
 int xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
-  if (strcmp(message, "MOVENEXT") == 0) {
-    xb_set_logical(r, xb_gen_move_next(ctx, &argv[0]));
-    return 1;
-  }
   if (strcmp(message, "CLASSNAME") == 0) return 0; /* its own: GENERATOR */
   return xb_class_send_as(ctx, r, xbf_ENUMERABLE, &enumerable, message, argc, argv); /* Select, Where, ToArray ... */
 }

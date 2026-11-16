@@ -189,6 +189,11 @@ EXTERN FUNCTION TString( nSeconds ) NATIVE
 EXTERN FUNCTION Type( cExpression ) NATIVE RESERVED CHECKED PRIVATES
 EXTERN FUNCTION ValType( xValue ) NATIVE RESERVED CHECKED ABBREV 4
 
+// Threads (xbase functions): the objects they make answer messages (docs/concurrency.md#threads)
+EXTERN FUNCTION AtomicInt( [nValue] ) NATIVE CHECKED
+EXTERN FUNCTION Mutex() NATIVE CHECKED
+EXTERN FUNCTION ThreadStart( bWork, ... ) NATIVE CHECKED
+
 // Databases (work areas)
 EXTERN FUNCTION Alias( [nArea] ) NATIVE
 EXTERN FUNCTION Bof() NATIVE RESERVED CHECKED
@@ -338,7 +343,7 @@ EXTERN FUNCTION QQOut( ... ) NATIVE
 // Internal functions used by std.ch commands, by tests and by the runtime's xBase code
 EXTERN FUNCTION __ArgError( nSubCode, [lSubstitute] ) NATIVE ARGS
 EXTERN FUNCTION __Break( [xValue] ) NATIVE
-EXTERN FUNCTION __ConsoleWrite( xValue ) NATIVE
+EXTERN FUNCTION __ConsoleWrite( lNewLine, ... ) NATIVE
 EXTERN FUNCTION __DirScan( [cSpec] ) NATIVE
 EXTERN FUNCTION __GcCollect( [lYoung] ) NATIVE
 EXTERN FUNCTION __IsCollection( xValue ) NATIVE
@@ -356,4 +361,4 @@ EXTERN FUNCTION __ScanValue( xTarget, xSearch, nStart, nCount ) NATIVE
 EXTERN FUNCTION __ValueLess( x, y ) NATIVE
 EXTERN FUNCTION __ValueMatches( xValue, xSearch ) NATIVE
 EXTERN FUNCTION __SetCentury( [lOn] ) NATIVE
-EXTERN FUNCTION __StdWrite( nHandle, xValue ) NATIVE
+EXTERN FUNCTION __StdWrite( nHandle, ... ) NATIVE

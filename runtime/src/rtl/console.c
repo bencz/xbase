@@ -2,47 +2,57 @@
 
 #include <stdio.h>
 
-/* A write to the standard output or error, which blocks while the system takes the bytes (a pipe that is full): run
- * as a blocking operation, the text rooted meanwhile (the display of a number is a new string). */
+/* What one call writes: a new line first or not, then the display forms of the values separated by spaces. The bytes
+ * are gathered first (a number's display is a new string, which a collection may move: copied as soon as it is
+ * made), then written at once under the output lock (no other thread's output splits them), as a blocking operation
+ * (the system may hold it while a pipe is full). */
+#define BYTES_IN_PLACE 256u
+
 typedef struct text_write {
-  const xb_str *s;
+  const xb_buffer *text;
   FILE *out;
 } text_write;
 
 static void run_write(void *p) {
   const text_write *w = p;
-  if (w->s->len == 1) fputc((unsigned char)w->s->data[0], w->out); /* a separator: much cheaper than fwrite */
-  else fwrite(w->s->data, 1, w->s->len, w->out);
+  xb_output_lock();
+  if (w->out == stderr) fflush(stdout); /* the two keep their order on a terminal */
+  fwrite(w->text->p, 1, w->text->len, w->out);
+  xb_output_unlock();
 }
 
-static void write_text(xb_ctx *ctx, const xb_str *s, FILE *out) {
-  xb_item held;
-  xb_set_str(&held, (xb_str *)(uintptr_t)s);
-  xb_gc_root_push(ctx, &held);
-  text_write w = {s, out};
-  xb_blocking_run(run_write, &w);
-  xb_gc_root_pop(ctx, 1);
+static void write_list(xb_ctx *ctx, FILE *out, int newLine, uint32_t argc, const xb_item *argv) {
+  char in_place[BYTES_IN_PLACE];
+  xb_buffer text = {in_place, 0, sizeof in_place, 0};
+  if (newLine) xb_buffer_put(&text, "\n", 1);
+  for (uint32_t k = 0; k < argc; ++k) {
+    if (k) xb_buffer_put(&text, " ", 1);
+    const xb_str *s = xb_item_display(ctx, &argv[k]);
+    xb_buffer_put(&text, s->data, s->len);
+  }
+  if (text.len) {
+    text_write w = {&text, out};
+    xb_blocking_run(run_write, &w);
+  }
+  xb_buffer_free(&text);
 }
 
-/* __ConsoleWrite( xValue ): writes the display form of xValue (a string as it
- * is, numbers, dates and logicals as QOut() shows them) to the console. The
+/* __ConsoleWrite( lNewLine, [xValues...] ): a new line when lNewLine is .T., then the display forms of the values
+ * (a string as it is, numbers, dates and logicals as QOut() shows them) separated by spaces, to the console. The
  * console is the standard output until the terminal layer exists. */
 void xbf___CONSOLEWRITE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   if (!argc) return;
-  write_text(ctx, xb_item_display(ctx, &argv[0]), stdout);
+  write_list(ctx, stdout, argv[0].type == XB_T_LOGICAL && argv[0].v.l, argc - 1, argv + 1);
 }
 
-/* __StdWrite( nHandle, xValue ): writes the display form of xValue to the
- * standard output (handle 1) or the standard error (handle 2), never to the
- * console; anything else is ignored. The standard output is flushed before
- * the standard error is written, so the two keep their order on a terminal. */
+/* __StdWrite( nHandle, [xValues...] ): the display forms of the values separated by spaces, to the standard output
+ * (handle 1) or the standard error (handle 2), never to the console; any other handle is ignored. The standard output
+ * is flushed before the standard error is written, so the two keep their order on a terminal. */
 void xbf___STDWRITE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
-  if (argc < 2 || !xb_is_number(&argv[0])) return;
+  if (!argc || !xb_is_number(&argv[0])) return;
   int64_t handle = xb_num_to_i64(&argv[0]);
   if (handle != 1 && handle != 2) return;
-  FILE *out = handle == 1 ? stdout : stderr;
-  if (out == stderr) xb_platform_flush(stdout);
-  write_text(ctx, xb_item_display(ctx, &argv[1]), out);
+  write_list(ctx, handle == 1 ? stdout : stderr, 0, argc - 1, argv + 1);
 }

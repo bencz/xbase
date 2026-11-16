@@ -11,6 +11,7 @@
 #define _DARWIN_C_SOURCE
 #endif
 
+#include "platform/atomic.h"
 #include "platform/os.h"
 
 #include <dirent.h>
@@ -84,11 +85,13 @@ struct xb_thread_impl {
   pthread_t thread;
   void (*fn)(void *);
   void *arg;
+  uint32_t holders; /* the thread and its starter; when it was detached, the last of them to let go frees it */
 };
 
 static void *run_thread(void *p) {
   xb_thread t = p;
   t->fn(t->arg);
+  if (xb_atomic_add32(&t->holders, (uint32_t)-1, XB_ACQ_REL) == 1) free(t); /* detached already */
   return NULL;
 }
 
@@ -98,6 +101,7 @@ int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *a
   if (!*t) return 0;
   (*t)->fn = fn;
   (*t)->arg = arg;
+  (*t)->holders = 2;
   if (stack_size) { /* systems refuse a size below their minimum, and some one that is no whole number of pages */
     long page = sysconf(_SC_PAGESIZE);
     size_t unit = page > 0 ? (size_t)page : 4096u;
@@ -120,6 +124,11 @@ int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *a
 void xb_thread_join(xb_thread t) {
   pthread_join(t->thread, NULL);
   free(t);
+}
+
+void xb_thread_detach(xb_thread t) {
+  pthread_detach(t->thread);
+  if (xb_atomic_add32(&t->holders, (uint32_t)-1, XB_ACQ_REL) == 1) free(t); /* it has ended */
 }
 
 void xb_thread_yield(void) { sched_yield(); }

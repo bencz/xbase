@@ -2,8 +2,10 @@
  * xb_mv_* functions in xbrt.h). Names get numbers when modules register, and
  * when RESTORE meets a name no module uses, while the program runs: so
  * ctx->env->memvars may move whenever xBase code runs (an error block). Each
- * context keeps, by number, the binding visible now, and the PRIVATEs alive
- * with the bindings they hid.
+ * environment keeps, by number, the PRIVATE binding visible now (or one its
+ * thread's creator had visible), and the PRIVATEs alive with the bindings they
+ * hid; the PUBLICs are the program's, in one table every thread reads. A
+ * name with no binding in the environment is the PUBLIC's, if there is one.
  * A binding is a cell (an XB_T_CELL item): what an argument @name passes, and
  * what PARAMETERS shares with an argument passed by reference (a cell holding
  * an element's reference reaches the element). */
@@ -40,6 +42,12 @@ static xb_rwlock *names_lock(void) {
   xb_once(&namesLockMade, make_names_lock);
   return &namesLock;
 }
+
+/* The PUBLIC variables, by number: chunks of SPELLED_CHUNK items, made when a PUBLIC first needs one and never moved
+ * or freed, roots of the collector. An item is NIL or the variable's cell (shared once the program's storage is): a
+ * PUBLIC is created under the names' write lock, its cell stored before its type (release), read without a lock, its
+ * type first (acquire), and released by its type made NIL. */
+static xb_item *publics[SPELLED_CHUNKS];
 
 /* The number of a name (any letter case), if it has one. */
 static int find_name(const char *name, size_t len, uint32_t *id) {
@@ -89,7 +97,29 @@ const char *xb_memvar_name(uint32_t id, size_t *len) {
   return chunk[id % SPELLED_CHUNK].name; /* names live as long as the program */
 }
 
-/* The binding of variable `id` in the context: NIL for none. */
+/* The cell an item of the PUBLICs' table holds, NULL for none: its type first, then the cell. */
+static void *public_cell(xb_item *p) {
+  return xb_atomic_load32(&p->type, XB_ACQUIRE) == XB_T_CELL ? xb_atomic_loadptr(&p->v.p, XB_RELAXED) : NULL;
+}
+
+/* The PUBLIC numbered `id` into `*out` (its cell): 0 when there is none. */
+static int public_get(uint32_t id, xb_item *out) {
+  xb_item *chunk = xb_atomic_loadptr((void *const *)&publics[id / SPELLED_CHUNK], XB_ACQUIRE);
+  void *cell = chunk ? public_cell(&chunk[id % SPELLED_CHUNK]) : NULL;
+  if (cell) xb_set_ptr(out, XB_T_CELL, cell);
+  return cell != NULL;
+}
+
+void xb_memvar_publics_each(void (*fn)(xb_item *it, void *data), void *data) {
+  uint32_t chunks = (xb_memvar_count() + SPELLED_CHUNK - 1) / SPELLED_CHUNK;
+  for (uint32_t c = 0; c < chunks; ++c) {
+    xb_item *chunk = xb_atomic_loadptr((void *const *)&publics[c], XB_ACQUIRE);
+    if (chunk)
+      for (uint32_t i = 0; i < SPELLED_CHUNK; ++i) fn(&chunk[i], data);
+  }
+}
+
+/* The environment's binding of variable `id`: NIL for none. */
 static xb_item *binding(xb_ctx *ctx, uint32_t id) {
   if (id >= ctx->env->memvarCap) {
     uint32_t cap = xb_memvar_count(); /* every name numbered so far */
@@ -100,6 +130,16 @@ static xb_item *binding(xb_ctx *ctx, uint32_t id) {
     ctx->env->memvarCap = cap;
   }
   return &ctx->env->memvars[id];
+}
+
+/* The binding visible for variable `id` into `*out`: the environment's, else the PUBLIC's; 0 when there is none. */
+static int visible_binding(xb_ctx *ctx, uint32_t id, xb_item *out) {
+  const xb_item *b = binding(ctx, id);
+  if (b->type == XB_T_CELL) {
+    *out = *b;
+    return 1;
+  }
+  return public_get(id, out);
 }
 
 /* A new binding of its own, holding `value`, stored in `*r`. */
@@ -158,36 +198,34 @@ void xb_mv_release(xb_ctx *ctx, uint32_t mark) {
   }
 }
 
-/* The binding visible for `m`; with none, error 1003, which the block may
- * retry: NULL when it does not. */
-static xb_item *visible(xb_ctx *ctx, const xb_memvar *m) {
+/* The binding visible for `m` into `*b`; with none, error 1003, which the
+ * block may retry: 0 when it does not. */
+static int visible(xb_ctx *ctx, const xb_memvar *m, xb_item *b) {
   for (uint16_t tries = 1;; ++tries) {
-    xb_item *b = binding(ctx, m->id);
-    if (b->type == XB_T_CELL) return b;
-    if (!xb_error_retry(ctx, EG_NOVAR, 1003, m->name, tries)) return NULL;
+    if (visible_binding(ctx, m->id, b)) return 1;
+    if (!xb_error_retry(ctx, EG_NOVAR, 1003, m->name, tries)) return 0;
   }
 }
 
 void xb_mv_get(xb_ctx *ctx, xb_item *r, const xb_memvar *m) {
-  xb_item *b = visible(ctx, m);
-  if (!b) return;
-  xb_item binding = *b; /* rooted: the table may move, or the variable go, while a lock is waited for */
+  xb_item binding; /* a copy, rooted: the table may move, or the variable go, while a lock is waited for */
+  if (!visible(ctx, m, &binding)) return;
   xb_gc_root_push(ctx, &binding);
   xb_ref_get(ctx, &binding, r);
   xb_gc_root_pop(ctx, 1);
 }
 
 void xb_mv_ref(xb_ctx *ctx, xb_item *r, const xb_memvar *m) {
-  xb_item *b = visible(ctx, m);
-  if (b) *r = *b;
+  xb_item b;
+  if (visible(ctx, m, &b)) *r = b;
 }
 
 /* Variable `id` takes `v`: the one visible, else a new PRIVATE. The binding
  * is copied and rooted: reaching an element may run the error block, which
  * may create variables (moving ctx->env->memvars) or release this one. */
 static void assign(xb_ctx *ctx, uint32_t id, const xb_item *v) {
-  xb_item b = *binding(ctx, id);
-  if (b.type != XB_T_CELL) {
+  xb_item b;
+  if (!visible_binding(ctx, id, &b)) {
     push_private(ctx, id, v);
     return;
   }
@@ -205,19 +243,42 @@ void xb_mv_private(xb_ctx *ctx, const xb_memvar *m, uint32_t mark) {
   push_private(ctx, m->id, &nil);
 }
 
+/* PUBLIC m: a new variable of the program, unless one of that name is visible. Its cell is made (and shared, when the
+ * program's storage is) before the lock is taken: nothing under it allocates or waits for a collection. */
 void xb_mv_public(xb_ctx *ctx, const xb_memvar *m) {
-  xb_item *b = binding(ctx, m->id);
-  if (b->type == XB_T_CELL) return;
+  xb_item cell;
+  if (visible_binding(ctx, m->id, &cell)) return;
   xb_item value;
   xb_set_logical(&value, strcmp(m->name, "CLIPPER") == 0); /* Clipper's rule: PUBLIC Clipper is .T. */
-  new_binding(ctx, b, &value); /* not a PRIVATE: no activation ends it */
+  new_binding(ctx, &cell, &value);
+  if (xb_storage_is_shared()) xb_share(&cell);
+  uint32_t c = m->id / SPELLED_CHUNK;
+  xb_rwlock_write_lock(names_lock());
+  if (!publics[c]) {
+    xb_item *chunk = malloc(SPELLED_CHUNK * sizeof *chunk);
+    if (!chunk) xb_gc_fatal("out of memory");
+    for (uint32_t i = 0; i < SPELLED_CHUNK; ++i) xb_set_nil(&chunk[i]);
+    xb_atomic_storeptr((void **)&publics[c], chunk, XB_RELEASE);
+  }
+  xb_item *p = &publics[c][m->id % SPELLED_CHUNK];
+  if (!public_cell(p)) { /* another thread may have made it meanwhile: that one stays */
+    xb_atomic_storeptr(&p->v.p, cell.v.p, XB_RELAXED);
+    xb_atomic_store32(&p->type, XB_T_CELL, XB_RELEASE);
+  }
+  xb_rwlock_write_unlock(names_lock());
+}
+
+/* PUBLIC `id` no longer exists. */
+static void public_release(uint32_t id) {
+  xb_item *chunk = xb_atomic_loadptr((void *const *)&publics[id / SPELLED_CHUNK], XB_ACQUIRE);
+  if (chunk) xb_atomic_store32(&chunk[id % SPELLED_CHUNK].type, XB_T_NIL, XB_RELEASE);
 }
 
 void xb_mv_param(xb_ctx *ctx, const xb_memvar *m, const xb_item *arg) { push_private(ctx, m->id, arg); }
 
 int xb_memvar_value(xb_ctx *ctx, uint32_t id, xb_item *out) {
-  xb_item b = *binding(ctx, id);
-  if (b.type != XB_T_CELL) return 0;
+  xb_item b;
+  if (!visible_binding(ctx, id, &b)) return 0;
   xb_gc_root_push(ctx, &b); /* as in xb_mv_get */
   xb_ref_get(ctx, &b, out);
   xb_gc_root_pop(ctx, 1);
@@ -239,14 +300,16 @@ uint32_t xb_memvar_number(const char *name, size_t len) {
   return id;
 }
 
-int xb_memvar_exists(xb_ctx *ctx, uint32_t id) { return binding(ctx, id)->type == XB_T_CELL; }
+int xb_memvar_exists(xb_ctx *ctx, uint32_t id) {
+  xb_item b;
+  return visible_binding(ctx, id, &b);
+}
 
 int xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len, xb_item *out) {
   uint32_t id;
-  if (!find_name(name, len, &id)) return 0;
-  const xb_item *b = binding(ctx, id);
-  if (b->type != XB_T_CELL) return 0;
-  xb_cell_get(b->v.p, out); /* whole: the cell may be shared */
+  xb_item b;
+  if (!find_name(name, len, &id) || !visible_binding(ctx, id, &b)) return 0;
+  xb_cell_get(b.v.p, out); /* whole: the cell may be shared */
   return out->type != XB_T_REF; /* an element passed to PARAMETERS: read only with its checks */
 }
 
@@ -254,8 +317,18 @@ void xb_memvar_assign(xb_ctx *ctx, const char *name, size_t len, const xb_item *
   assign(ctx, xb_memvar_number(name, len), value);
 }
 
+typedef struct cell_search {
+  const void *cell;
+  int found;
+} cell_search;
+
+static void find_public_cell(xb_item *it, void *data) {
+  cell_search *s = data;
+  if (public_cell(it) == s->cell) s->found = 1;
+}
+
 /* Whether cell `c` is a memory variable's binding (visible, or hidden by a
- * PRIVATE) anywhere but at `self`. */
+ * PRIVATE, or a PUBLIC) anywhere but at `self`. */
 static int memvar_cell(const xb_ctx *ctx, const void *c, const xb_item *self) {
   for (uint32_t i = 0; i < ctx->env->memvarCap; ++i) {
     const xb_item *b = &ctx->env->memvars[i];
@@ -265,7 +338,19 @@ static int memvar_cell(const xb_ctx *ctx, const void *c, const xb_item *self) {
     const xb_item *b = &ctx->env->privates[i].hidden;
     if (b != self && b->type == XB_T_CELL && b->v.p == c) return 1;
   }
-  return 0;
+  cell_search s = {c, 0};
+  xb_memvar_publics_each(find_public_cell, &s);
+  return s.found;
+}
+
+/* The variable of binding `b` holds NIL where it is (what designates it sees NIL). The binding is copied and rooted, as
+ * in xb_mv_get. */
+static void cell_to_nil(xb_ctx *ctx, const xb_item *b) {
+  xb_item cell = *b, nil;
+  xb_set_nil(&nil);
+  xb_gc_root_push(ctx, &cell);
+  xb_ref_set(ctx, &cell, &nil);
+  xb_gc_root_pop(ctx, 1);
 }
 
 /* PRIVATE `i` holds NIL. A PARAMETERS one that received a LOCAL, a STATIC or
@@ -278,16 +363,13 @@ static void private_to_nil(xb_ctx *ctx, uint32_t i) {
   for (uint32_t j = i + 1; j < ctx->env->privateLen && !b; ++j)
     if (ctx->env->privates[j].id == p->id) b = &ctx->env->privates[j].hidden;
   if (!b) b = binding(ctx, p->id);
-  xb_item nil;
-  xb_set_nil(&nil);
   if (p->borrowed && !memvar_cell(ctx, b->v.p, b)) {
+    xb_item nil;
+    xb_set_nil(&nil);
     new_binding(ctx, b, &nil);
     p->borrowed = 0;
   } else {
-    xb_item cell = *b; /* rooted, as in xb_mv_get */
-    xb_gc_root_push(ctx, &cell);
-    xb_ref_set(ctx, &cell, &nil);
-    xb_gc_root_pop(ctx, 1);
+    cell_to_nil(ctx, b);
   }
 }
 
@@ -317,11 +399,12 @@ void xb_memvar_clear(xb_ctx *ctx) {
     xb_set_nil(&ctx->env->privates[i].hidden);
   }
   for (uint32_t i = 0; i < ctx->env->memvarCap; ++i) xb_set_nil(&ctx->env->memvars[i]);
+  for (uint32_t id = 0, n = xb_memvar_count(); id < n; ++id) public_release(id);
 }
 
 /* __MemRelease( cName, ... ): RELEASE name, ...: the PRIVATE visible by each
- * name holds NIL; a PUBLIC no longer exists. A name with no variable is
- * skipped. */
+ * name holds NIL (one the thread's creator had visible too); a PUBLIC no
+ * longer exists. A name with no variable is skipped. */
 void xbf___MEMRELEASE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   for (uint32_t k = 0; k < argc && !(xb_pending_get(ctx) & XB_PENDING_UNWIND); ++k) {
@@ -329,11 +412,14 @@ void xbf___MEMRELEASE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     if (argv[k].type != XB_T_STRING || !find_name(argv[k].v.s->data, argv[k].v.s->len, &id))
       continue;
     xb_item *b = binding(ctx, id);
-    if (b->type != XB_T_CELL) continue;
+    if (b->type != XB_T_CELL) {
+      public_release(id);
+      continue;
+    }
     uint32_t i = ctx->env->privateLen;
     while (i > 0 && ctx->env->privates[i - 1].id != id) --i;
     if (i > 0) private_to_nil(ctx, i - 1); /* the PRIVATE of that name created last is the one visible */
-    else xb_set_nil(b);
+    else cell_to_nil(ctx, b);              /* inherited from the thread's creator: the same variable */
   }
 }
 
@@ -394,4 +480,22 @@ void xb_memvar_share(xb_ctx *ctx) {
   if (!env) return;
   for (uint32_t i = 0; i < env->memvarCap; ++i) xb_share(&env->memvars[i]);
   for (uint32_t i = 0; i < env->privateLen; ++i) xb_share(&env->privates[i].hidden);
+}
+
+static void share_public(xb_item *it, void *data) {
+  XB_UNUSED(data);
+  xb_share(it);
+}
+
+void xb_memvar_share_publics(void) { xb_memvar_publics_each(share_public, NULL); }
+
+void xb_memvar_inherit(xb_ctx *ctx, const xb_ctx *creator) {
+  const xb_env *from = creator->env;
+  if (!from->memvarCap) return;
+  xb_item *mv = malloc(from->memvarCap * sizeof *mv);
+  if (!mv) xb_gc_fatal("out of memory");
+  memcpy(mv, from->memvars, from->memvarCap * sizeof *mv);
+  free(ctx->env->memvars);
+  ctx->env->memvars = mv;
+  ctx->env->memvarCap = from->memvarCap;
 }

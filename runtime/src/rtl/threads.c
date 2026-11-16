@@ -1,0 +1,326 @@
+/* Threads, mutexes and atomic integers of the program (docs/concurrency.md#threads).
+ *
+ * The words threads wait on are 32-bit values (v.l) of the objects' own variables, changed atomically: an object
+ * moves only while every thread is stopped, and one a waiter waits on is pinned by its stack. A wait is a blocking
+ * operation (collections go on without the waiter) of a while at a time, so that a QUIT finds the waiter. */
+#include "xbrt_int.h"
+
+#include "core/shared.h"
+#include "core/sync.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
+
+/* The stack a thread of the program may grow to (reserved, committed as it is used). */
+#define THREAD_STACK ((size_t)16 << 20)
+
+/* How long a wait sleeps before it looks for a QUIT again. */
+#define WAIT_LOOK_NS ((int64_t)50 * XB_NS_PER_MS)
+
+/* xbase's own error codes of these functions (9001 to 9015 are the bit and character functions'). */
+enum { CODE_THREADSTART = 9016, CODE_THREAD_CREATE, CODE_THREAD_JOIN, CODE_MUTEX_UNLOCK, CODE_ATOMICINT };
+
+/* The threads ThreadStart() started that have not ended, which the program's end waits for; `ending` while threads are
+ * asked to QUIT (a QUIT, the start procedure returned): a thread that starts then quits at once. */
+static uint32_t running;
+static uint32_t ending;
+
+/* The word of an object's own variable `k`. */
+static uint32_t *word_of(const xb_item *object, uint32_t k) {
+  return (uint32_t *)&((xb_object *)object->v.p)->vars[k].v.l;
+}
+
+/* Waits while the word of `object`'s variable `k` is `value`: 1 once it changed, 0 when a QUIT asks this thread to end.
+ * `object` is an item that keeps the object (it may move between the waits). */
+static int wait_while(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value) {
+  for (;;) {
+    const uint32_t *word = word_of(object, k);
+    if (xb_atomic_load32(word, XB_ACQUIRE) != value) return 1;
+    if (xb_pending_get(ctx) & XB_PENDING_QUIT) return 0;
+    xb_park_wait_blocking(word, value, WAIT_LOOK_NS);
+  }
+}
+
+/* The program's end from any thread: every other context is asked to QUIT. */
+static void quit_all(const xb_ctx *ctx) {
+  xb_atomic_store32(&ending, 1, XB_SEQ_CST);
+  xb_gc_raise_all(ctx, XB_PENDING_QUIT);
+}
+
+void xb_threads_end(xb_ctx *ctx) {
+  if (xb_atomic_load32(&running, XB_ACQUIRE)) quit_all(ctx);
+  for (uint32_t seen; (seen = xb_atomic_load32(&running, XB_ACQUIRE)) != 0;)
+    xb_park_wait_blocking(&running, seen, WAIT_LOOK_NS);
+  xb_atomic_store32(&ending, 0, XB_SEQ_CST); /* none runs (a QUIT ended them too): threads may start again */
+}
+
+/* Threads: the result, whether it ended, the block and its arguments (an array, NIL once it ended), and the thread's
+ * xb_thread_self. */
+
+enum { T_RESULT, T_DONE, T_WORK, T_ID, T_COUNT_ };
+static const xb_class_var thread_vars[] = {
+  {"(RESULT)", XB_VAR_ANY}, {"(DONE)", XB_VAR_ANY}, {"(WORK)", XB_VAR_ANY}, {"(ID)", XB_VAR_ANY}};
+_Static_assert(XB_TABLE_SIZE(thread_vars) == T_COUNT_, "one T_ index per Thread variable");
+
+/* oThread:Join(): waits for the thread to end, and returns what its block returned. */
+static void thread_join(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  if (xb_atomic_load32(word_of(&argv[0], T_ID), XB_RELAXED) == xb_thread_self()) {
+    xb_error_described(ctx, r, EG_ARG, CODE_THREAD_JOIN, "Thread joins itself", "THREAD:JOIN", XB_ERR_SUBSTITUTE,
+                       argc, argv);
+    return;
+  }
+  if (!wait_while(ctx, &argv[0], T_DONE, 0)) return;
+  xb_object_get(argv[0].v.p, T_RESULT, r);
+}
+
+/* oThread:IsAlive(): whether the thread still runs. */
+static void thread_is_alive(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  xb_set_logical(r, xb_atomic_load32(word_of(&argv[0], T_DONE), XB_ACQUIRE) == 0);
+}
+
+static const xb_class_method thread_methods[] = {{"JOIN", thread_join}, {"ISALIVE", thread_is_alive}};
+static const xb_class thread_class = {
+  "THREAD", T_COUNT_, thread_vars, NULL, XB_TABLE_SIZE(thread_methods), thread_methods};
+
+/* What a new thread takes from its creator, which waits until it has (`ready`): the creator's stack keeps the thread
+ * object in place meanwhile. */
+typedef struct start {
+  xb_item thread;
+  xb_ctx *creator;
+  uint32_t ready;
+} start;
+
+/* The thread's end: its result (NIL when a BREAK or a QUIT ended it; a QUIT, or an error nobody handled, ends the
+ * program), then the joiners woken. */
+static void finish(xb_ctx *ctx, xb_item *thread, xb_item *result) {
+  uint32_t ended = xb_pending_get(ctx) & XB_PENDING_UNWIND;
+  if (ended & XB_PENDING_QUIT) quit_all(ctx);
+  if (ended) {
+    xb_pending_clear(ctx, XB_PENDING_UNWIND);
+    xb_set_nil(result);
+  }
+  xb_item nil;
+  xb_set_nil(&nil);
+  xb_object_put(thread->v.p, T_WORK, &nil);
+  xb_object_put(thread->v.p, T_RESULT, result);
+  xb_atomic_store32(word_of(thread, T_DONE), 1, XB_RELEASE);
+  xb_park_wake(word_of(thread, T_DONE), 1);
+}
+
+static void run(start *s) {
+  xb_ctx *ctx = xb_ctx_new();
+  const char *low, *high;
+  if (xb_platform_stack_bounds(&low, &high)) xb_ctx_set_stack(ctx, low);
+  xb_env_inherit(ctx, s->creator);
+  xb_item thread = s->thread, work, result;
+  xb_set_nil(&result);
+  xb_gc_root_push(ctx, &thread);
+  xb_gc_root_push(ctx, &result);
+  xb_atomic_store32(word_of(&thread, T_ID), xb_thread_self(), XB_RELAXED);
+  if (xb_atomic_load32(&ending, XB_SEQ_CST)) xb_pending_set(ctx, XB_PENDING_QUIT); /* registered before the look */
+  xb_atomic_store32(&s->ready, 1, XB_RELEASE);
+  xb_park_wake(&s->ready, 1); /* by address alone: the creator may be gone, with `s` */
+
+  xb_object_get(thread.v.p, T_WORK, &work);
+  uint32_t n = (uint32_t)xb_array_length(work.v.p);
+  xb_item *args = malloc(n * sizeof *args); /* the block, then its arguments: copies, which Eval may change */
+  if (!args) xb_gc_fatal("out of memory");
+  for (uint32_t k = 0; k < n; ++k) {
+    xb_array_get(work.v.p, k, &args[k]);
+    xb_gc_root_push(ctx, &args[k]);
+  }
+  if (!(xb_pending_get(ctx) & XB_PENDING_QUIT)) xbf_EVAL(ctx, &result, n, args);
+  xb_gc_root_pop(ctx, n);
+  free(args);
+  finish(ctx, &thread, &result);
+  xb_gc_root_pop(ctx, 2);
+  xb_ctx_free(ctx);
+}
+
+/* The thread's first function: its frame lies above every frame the program's code has (gc.c scans from it). */
+static void thread_main(void *p) {
+  xb_gc_thread_attach((const void *)&p); /* the second thread makes the program's storage shared */
+  run(p);
+  xb_gc_thread_detach();
+  if (xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL) == 1) xb_park_wake(&running, 1);
+}
+
+/* ThreadStart( bWork, [xArgs...] ): a Thread running Eval( bWork, xArgs... ). */
+void xbf_THREADSTART(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (!argc || (argv[0].type != XB_T_BLOCK && argv[0].type != XB_T_SYMBOL)) {
+    xb_fn_arg_error(ctx, ret, CODE_THREADSTART, "THREADSTART", argc, argv);
+    return;
+  }
+  xb_set_object(ret, xb_object_new(&thread_class)); /* rooted there from now on */
+  xb_array *work = xb_array_alloc(argc);
+  memcpy(work->items, argv, argc * sizeof *argv);
+  xb_gc_write_items(work, 0, argc);
+  xb_object *t = ret->v.p;
+  xb_set_array(&t->vars[T_WORK], work);
+  xb_set_logical(&t->vars[T_DONE], 0);
+  xb_set_logical(&t->vars[T_ID], 0);
+  xb_gc_write(t);
+  xb_share(ret); /* the thread, the block and its arguments: the new thread reaches them */
+  xb_env_share(ctx);
+  start s = {*ret, ctx, 0};
+  xb_atomic_add32(&running, 1, XB_ACQ_REL);
+  xb_thread h;
+  if (!xb_thread_start(&h, THREAD_STACK, thread_main, &s)) {
+    xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL);
+    xb_set_nil(ret); /* no thread: nothing to join */
+    xb_error_described(ctx, NULL, EG_CREATE, CODE_THREAD_CREATE, "Cannot start a thread", "THREADSTART", 0, 0, NULL);
+    return;
+  }
+  while (!xb_atomic_load32(&s.ready, XB_ACQUIRE)) /* blocked: its attach stops every other thread */
+    xb_park_wait_blocking(&s.ready, 0, -1);
+  xb_thread_detach(h);
+}
+
+/* Mutexes: the words of a recursive lock (xb_rwords, core/sync.h) in the object's variables. */
+
+enum { M_STATE, M_OWNER, M_DEPTH, M_COUNT_ };
+static const xb_class_var mutex_vars[] = {{"(STATE)", XB_VAR_ANY}, {"(OWNER)", XB_VAR_ANY}, {"(DEPTH)", XB_VAR_ANY}};
+_Static_assert(XB_TABLE_SIZE(mutex_vars) == M_COUNT_, "one M_ index per Mutex variable");
+
+static xb_rwords mutex_words(const xb_item *m) {
+  return (xb_rwords){word_of(m, M_STATE), word_of(m, M_OWNER), word_of(m, M_DEPTH)};
+}
+
+/* oMutex:Lock(): takes the lock, waiting while another thread holds it (or until a QUIT ends the wait). */
+static void mutex_lock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  xb_set_nil(r);
+  if (xb_rwords_try(mutex_words(&argv[0]))) return;
+  while (!xb_rwords_claim(mutex_words(&argv[0])))
+    if (!wait_while(ctx, &argv[0], M_STATE, 2)) return;
+}
+
+/* oMutex:TryLock(): takes the lock when no other thread holds it: whether it did. */
+static void mutex_try_lock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  xb_set_logical(r, xb_rwords_try(mutex_words(&argv[0])));
+}
+
+/* oMutex:Unlock(): releases the lock once; an error when this thread does not hold it. */
+static void mutex_unlock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  xb_set_nil(r);
+  if (!xb_rwords_release(mutex_words(&argv[0])))
+    xb_error_described(ctx, NULL, EG_ARG, CODE_MUTEX_UNLOCK, "Mutex not held", "MUTEX:UNLOCK", 0, argc, argv);
+}
+
+static const xb_class_method mutex_methods[] = {
+  {"LOCK", mutex_lock}, {"TRYLOCK", mutex_try_lock}, {"UNLOCK", mutex_unlock}};
+static const xb_class mutex_class = {"MUTEX", M_COUNT_, mutex_vars, NULL, XB_TABLE_SIZE(mutex_methods), mutex_methods};
+
+/* Mutex(): a mutex, free. */
+void xbf_MUTEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_object *m = xb_object_new(&mutex_class);
+  for (uint32_t k = 0; k < M_COUNT_; ++k) xb_set_logical(&m->vars[k], 0);
+  xb_set_object(ret, m);
+}
+
+/* Atomic integers: one integer, read whole and changed under the object's lock once it is shared (in place while it
+ * is local). */
+
+enum { A_VALUE, A_COUNT_ };
+static const xb_class_var atomic_vars[] = {{"(VALUE)", XB_VAR_ANY}};
+_Static_assert(XB_TABLE_SIZE(atomic_vars) == A_COUNT_, "one A_ index per AtomicInt variable");
+
+/* The integer of argument `k` (a number, truncated toward zero, saturated), or an argument error: 0. */
+static int integer_arg(xb_ctx *ctx, const char *what, uint32_t k, uint32_t argc, xb_item *argv, int64_t *n) {
+  if (k < argc && xb_is_number(&argv[k])) {
+    *n = xb_num_to_i64(&argv[k]);
+    return 1;
+  }
+  xb_error_described(ctx, NULL, EG_ARG, CODE_ATOMICINT, "Argument error", what, 0, argc, argv);
+  return 0;
+}
+
+/* The value replaced by next( value, args ) unless that returns 0, in one step: the value it had. */
+static int64_t atomic_step(const xb_item *a, int (*next)(int64_t value, const int64_t *args, int64_t *out),
+                           const int64_t *args) {
+  xb_object *o = a->v.p;
+  int shared = xb_is_shared(o);
+  if (shared) xb_seq_lock(o);
+  int64_t value = o->vars[A_VALUE].v.i, changed;
+  if (next(value, args, &changed)) {
+    xb_item v;
+    xb_set_int(&v, changed);
+    if (shared) xb_seq_store(&o->vars[A_VALUE], &v);
+    else o->vars[A_VALUE] = v; /* an integer: no barrier */
+  }
+  if (shared) xb_seq_unlock(o);
+  return value;
+}
+
+static int add(int64_t value, const int64_t *args, int64_t *out) {
+  *out = (int64_t)((uint64_t)value + (uint64_t)args[0]); /* wraps, as two's complement does */
+  return 1;
+}
+
+static int exchange_if(int64_t value, const int64_t *args, int64_t *out) {
+  *out = args[1];
+  return value == args[0];
+}
+
+static int store(int64_t value, const int64_t *args, int64_t *out) {
+  XB_UNUSED(value);
+  *out = args[0];
+  return 1;
+}
+
+/* oAtomic:Value: the integer. */
+static void atomic_value(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  xb_object_get(argv[0].v.p, A_VALUE, r);
+}
+
+/* oAtomic:Value := n: stores n (an integer). */
+static void atomic_set(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  int64_t n[1];
+  xb_set_nil(r);
+  if (!integer_arg(ctx, "ATOMICINT:VALUE", 1, argc, argv, &n[0])) return;
+  atomic_step(&argv[0], store, n);
+  xb_set_int(r, n[0]);
+}
+
+/* oAtomic:Add( n ): adds n (an integer) and returns the new value. */
+static void atomic_add(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  int64_t n[1];
+  xb_set_nil(r);
+  if (!integer_arg(ctx, "ATOMICINT:ADD", 1, argc, argv, &n[0])) return;
+  xb_set_int(r, (int64_t)((uint64_t)atomic_step(&argv[0], add, n) + (uint64_t)n[0]));
+}
+
+/* oAtomic:CompareExchange( nExpected, nNew ): nNew stored when the value is nExpected: whether it was. */
+static void atomic_compare_exchange(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  int64_t n[2];
+  xb_set_nil(r);
+  if (!integer_arg(ctx, "ATOMICINT:COMPAREEXCHANGE", 1, argc, argv, &n[0]) ||
+      !integer_arg(ctx, "ATOMICINT:COMPAREEXCHANGE", 2, argc, argv, &n[1]))
+    return;
+  xb_set_logical(r, atomic_step(&argv[0], exchange_if, n) == n[0]);
+}
+
+static const xb_class_method atomic_methods[] = {
+  {"VALUE", atomic_value}, {"_VALUE", atomic_set}, {"ADD", atomic_add}, {"COMPAREEXCHANGE", atomic_compare_exchange}};
+static const xb_class atomic_class = {
+  "ATOMICINT", A_COUNT_, atomic_vars, NULL, XB_TABLE_SIZE(atomic_methods), atomic_methods};
+
+/* AtomicInt( [nValue] ): an atomic integer holding nValue (0 without it). */
+void xbf_ATOMICINT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  int64_t n = 0;
+  if (argc && argv[0].type != XB_T_NIL && !integer_arg(ctx, "ATOMICINT", 0, argc, argv, &n)) return;
+  xb_object *a = xb_object_new(&atomic_class);
+  xb_set_int(&a->vars[A_VALUE], n);
+  xb_set_object(ret, a);
+}

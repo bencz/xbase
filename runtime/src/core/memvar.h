@@ -36,10 +36,21 @@ int xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len, xb_item *out);
 void xb_memvar_assign(xb_ctx *ctx, const char *name, size_t len, const xb_item *value);
 
 /* Shares the memory variables of the context's environment: the bindings visible and those PRIVATEs hid (publication,
- * every other thread stopped). */
+ * every other thread stopped; a new thread's creator, for the bindings the thread inherits). */
 void xb_memvar_share(xb_ctx *ctx);
 
-/* CLEAR MEMORY: no PRIVATE or PUBLIC exists any more. */
+/* Shares the PUBLIC variables (publication, every other thread stopped). */
+void xb_memvar_share_publics(void);
+
+/* Calls fn on each item of the PUBLICs' table (roots of the collector): `fn` may change an item only while every other
+ * thread is stopped (a collection, the publication); otherwise it reads the item as public_cell does. */
+void xb_memvar_publics_each(void (*fn)(xb_item *it, void *data), void *data);
+
+/* A new thread's environment (`ctx`'s, with no PRIVATE yet) sees the bindings its creator sees now: the same
+ * variables, shared by the creator before the thread started. */
+void xb_memvar_inherit(xb_ctx *ctx, const xb_ctx *creator);
+
+/* CLEAR MEMORY: no PRIVATE of the environment, and no PUBLIC of the program, exists any more. */
 void xb_memvar_clear(xb_ctx *ctx);
 
 /* Whether `name` (upper case) matches the skeleton `skel`: `*` stands for any

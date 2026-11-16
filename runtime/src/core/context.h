@@ -69,9 +69,10 @@ struct xb_ctx {
   uint8_t  macro_cache_goal[XB_MACRO_CACHE];
 };
 
-/* ctx->pending: other threads set requests there (a collection's safepoint, objects to finalize), so every change is
- * an atomic read-modify-write, and code that sets aside or ends requests touches only the flow's own (BREAK, QUIT,
- * TRAP: XB_PENDING_UNWIND), never another thread's. A request is set with release and read with acquire: whoever
+/* ctx->pending: other threads set requests there (a collection's safepoint, objects to finalize, the program's QUIT),
+ * so every change is an atomic read-modify-write, and code that sets aside or ends requests touches only the flow's
+ * own (BREAK, QUIT, TRAP: XB_PENDING_UNWIND), never another thread's; code that sets requests aside clears those it
+ * read, so a QUIT raised meanwhile stays. A request is set with release and read with acquire: whoever
  * sees it sees what was written before it (the collector's `stopping`). */
 static inline uint32_t xb_pending_get(const xb_ctx *ctx) { return xb_atomic_load32(&ctx->pending, XB_ACQUIRE); }
 static inline void xb_pending_set(xb_ctx *ctx, uint32_t bits) { xb_atomic_or32(&ctx->pending, bits, XB_RELEASE); }
@@ -82,6 +83,17 @@ void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 /* The lowest address of the stack of the context's thread that the program may use: compiled code raises the stack
  * error a reserve above it (core/ctx.c); NULL: unknown, no limit. */
 void xb_ctx_set_stack(xb_ctx *ctx, const char *low);
+
+/* A new flow's environment: xb_env_share, by the creator before the new thread can run, shares what the creator's
+ * environment holds (ErrorBlock(), the language's texts, the memory variables visible); xb_env_inherit, on the new
+ * thread, copies it into `ctx`'s new environment (the SET values, SET DECIMALS too, ErrorBlock(), the language and
+ * the code page, the default driver, the memory variables visible), its work areas left empty. */
+void xb_env_share(xb_ctx *creator);
+void xb_env_inherit(xb_ctx *ctx, const xb_ctx *creator);
+
+/* The program's end (rtl/threads.c): the threads ThreadStart() started that still run are asked to QUIT, and waited
+ * for: before the EXIT procedures run, and after them. */
+void xb_threads_end(xb_ctx *ctx);
 
 /* The program's exit code (ErrorLevel(), an unrecoverable error): the process's, whatever thread sets it. */
 int32_t xb_exit_code(void);

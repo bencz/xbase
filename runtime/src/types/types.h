@@ -138,6 +138,16 @@ static inline int xb_var_answers(const xb_class_var *v, const char *name) {
   return v->name[0] != '(' && strcmp(v->name, name) == 0;
 }
 
+/* The number of entries of a C table (a runtime class's variables or methods). */
+#define XB_TABLE_SIZE(table) ((uint32_t)(sizeof(table) / sizeof((table)[0])))
+
+/* A method of a runtime class: argv[0] is the object, the message's arguments follow; one named _NAME answers the
+ * assignment `:NAME := value`. */
+typedef struct xb_class_method {
+  const char *name; /* upper-cased */
+  void (*fn)(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv);
+} xb_class_method;
+
 /* A class: one the runtime defines in C, or one compiled from xBase
  * (`compiled`, types/class.c), whose variables all take any value. */
 typedef struct xb_class {
@@ -145,7 +155,12 @@ typedef struct xb_class {
   uint32_t nvars;
   const xb_class_var *vars;     /* in the order of an object's items */
   struct cls *compiled;         /* NULL for the runtime's own classes */
+  uint32_t nmethods;            /* a runtime class's methods (none: 0, NULL) */
+  const xb_class_method *methods;
 } xb_class;
+
+/* The method of runtime class `cls` named `name` (upper-cased), or NULL. */
+const xb_class_method *xb_class_method_of(const xb_class *cls, const char *name);
 
 /* An instance of a class: one item per variable, each starting as its rule's
  * empty value (NIL, .F., "" or 0). */

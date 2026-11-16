@@ -164,6 +164,9 @@ Hashes ([runtime.md](runtime.md#hashes)): **Hash**, **HAllocate**, **HCaseMatch*
 **HDel**, **HDelAt**, **HEval**, **HFill**, **HGet**, **HGetDef**, **HHasKey**, **HKeyAt**, **HKeys**, **HMerge**,
 **HPairAt**, **HPos**, **HScan**, **HSet**, **HSort**, **HValueAt**, **HValues**.
 
+Threads ([concurrency.md](concurrency.md#threads)): **AtomicInt**, **Mutex**, **ThreadStart** (the `Thread` object's
+`Join` and `IsAlive`).
+
 Objects ([runtime.md](runtime.md#classes)): **ClassAssociate** (`ASSOCIATE CLASS`), **Enumerable** (the class
 collections inherit; the built-in types' classes are `SCALAR CLASS`es), **ObjHasMethod**, **ObjHasVar**,
 **ObjIsKindOf**, **ObjMethods**, **ObjSend**, **ObjVars**.

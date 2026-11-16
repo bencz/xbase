@@ -226,7 +226,8 @@ rest of the runtime and compiled code use.
 - Threads: a thread that runs xBase code attaches (`xb_gc_thread_attach`, by its first function) and detaches before it
   ends; the second to attach publishes the program's storage first (`publish`: the world stopped as for a collection,
   the items of the roots outside frames, the `STATIC`s and class variables, shared with `xb_share`, every context's
-  memory variables with `xb_memvar_share`, then `xb_storage_shared` set; a root added later is shared as it is added).
+  memory variables with `xb_memvar_share` and the PUBLICs with `xb_memvar_share_publics`, then `xb_storage_shared` set;
+  a root added later is shared as it is added, and so is a PUBLIC made later).
   From then on `xb_ref_load` and `xb_ref_store` with the type `XB_T_NIL` read and write a `STATIC`'s own item under the
   stripe of its address (compiled code tells the runtime a `STATIC` is one: `is_static` of `xb_cell_of`, `xb_ref_of` and
   `xb_each_shared`, `XB_EACH_STATIC` in the `how` of the other `FOR EACH` functions; `xb_cell_move` moves one into a
@@ -357,11 +358,11 @@ missing name, which fails only when it is called; xbase reports the missing func
 ## Objects and messages
 
 An object (`xb_object` in `types/types.h`, `types/object.c`) is an instance of a class: its class and one item per
-instance variable. The runtime defines classes of its own in C (`xb_class`: name and variables), and programs define
-theirs in xBase ([Classes](#classes)). `xb_op_send(ctx, ret, message, argc, argv)` sends a message to `argv[0]` with
-the arguments `argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment `o:x := v` sends
-`_X` with `v`. Compiled code sends through `xb_op_send_from`, with the send's inline cache and the class of the method
-it is in ([Classes](#classes)).
+instance variable. The runtime defines classes of its own in C (`xb_class`: name, variables and methods), and
+programs define theirs in xBase ([Classes](#classes)). `xb_op_send(ctx, ret, message, argc, argv)` sends a message to
+`argv[0]` with the arguments `argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment
+`o:x := v` sends `_X` with `v`. Compiled code sends through `xb_op_send_from`, with the send's inline cache and the
+class of the method it is in ([Classes](#classes)).
 
 - An object's variables: `X` returns the variable (arguments are ignored), `_X` assigns it (without an argument, `NIL`).
   A variable's rule (`xb_var_rule`) says what it accepts: any value; only an array, a logical or a string (a value of
@@ -370,7 +371,12 @@ it is in ([Classes](#classes)).
   the variable's name as the operation. `_X` returns the value kept, except that an ignored array or logical gives
   `NIL`, a string variable returns its argument even when it ignores it, and a 16-bit variable returns the number
   wrapped to 32 bits only. That result is the value of `o:x := v` (see [compiler.md](compiler.md#syntax-tree-to-xir)).
-  A new object holds its rules' empty values (`NIL`, `.F.`, `""`, 0).
+  A new object holds its rules' empty values (`NIL`, `.F.`, `""`, 0). A variable whose name starts with `(` is the
+  runtime's own: no message reaches it, and `ObjVars` leaves it out.
+- A runtime class's methods (`xb_class_method`: an upper-cased name and a C function that receives the object as
+  `argv[0]`), found after its variables (`xb_class_method_of`): `X` calls the method named `X`, an assignment the one
+  named `_X`, which `ObjMethods` leaves out (`ObjHasMethod` finds the method `X`). Generators (`MoveNext`) and the
+  classes of [threads](#threads-and-synchronization) (`Thread`, `Mutex`, `AtomicInt`) answer their messages so.
 - `ClassName` works on every value: an object's class name, else `NUMERIC`, `CHARACTER`, `ARRAY`, `BLOCK`, `NIL`,
   `LOGICAL` or `DATE`.
 - Any other message raises `BASE/1004` `No exported method` (`BASE/1005` `No exported variable` for an assignment)
@@ -400,7 +406,8 @@ do not change.
 ### Generators
 
 `types/generator.c`. A generator's enumerator is an object of the runtime class `GENERATOR`: `Current` (a variable no
-message assigns, `XB_VAR_READ`) is the last element, `MoveNext()` runs one step (`xb_gen_move_next`), and its own
+message assigns, `XB_VAR_READ`) is the last element, `MoveNext()` (a method of the class) runs one step
+(`xb_gen_move_next`), its other messages are the `Enumerable` class's (`xb_gen_message`), and its own
 variables, whose names no message reaches (in parentheses: `xb_var_answers`, whatever text a message comes from,
 `ObjSend` or a macro), hold the state, the resume function (its address as an integer) and the frame between steps (an
 array). `xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the enumerator, the resume
@@ -568,8 +575,14 @@ the names of its file that no module uses, while the program runs, so `xb_env.me
 xBase code runs: C code keeps no pointer into it across an error block). The table of names is the process's: a name
 is found under a reader-writer lock and added under its write lock, so a macro or `RESTORE` may number a new name on
 any thread; a number's spelling is read without a lock, from chunks of entries that never move. Each environment keeps,
-by number, the binding visible now (`xb_env.memvars`), and the PRIVATEs alive, in creation order, each with the
-frame of the activation that created it and the binding it hid (`xb_env.privates`). Both are roots of the collector.
+by number, the PRIVATE binding visible now (`xb_env.memvars`), and the PRIVATEs alive, in creation order, each with the
+frame of the activation that created it and the binding it hid (`xb_env.privates`). The PUBLICs are the program's, in
+one table every thread reads by number without a lock: chunks of items that never move, made when a PUBLIC first needs
+one, an item NIL or the variable's cell, set under the names' write lock (the cell made, and shared once the program's
+storage is, before the lock is taken; the cell stored before the type, which a reader loads first) and released by its
+type made NIL. A name with no binding in the environment is the PUBLIC's, if there is one. All three are roots of the
+collector. A new thread's environment starts with the bindings its creator sees (`xb_memvar_inherit`, shared by the
+creator first), and no PRIVATE record: the same variables, which neither releases when its activations end.
 
 - A binding is a cell (an `XB_T_CELL` item): `@name` passes it, and a codeblock reaches the variable through the name
   when it runs, not through a capture.
@@ -592,15 +605,15 @@ frame of the activation that created it and the binding it hid (`xb_env.privates
   reference.
 - `RELEASE name, ...` (`__MemRelease()`): the PRIVATE visible by that name holds NIL where it is (what was passed
   `@name` sees NIL, and so does a memory variable passed by reference to `PARAMETERS`); a `PARAMETERS` one that received
-  a LOCAL, a STATIC or an element by reference lets it go for a NIL of its own. A PUBLIC no longer exists. A name with
-  no variable is skipped.
+  a LOCAL, a STATIC or an element by reference lets it go for a NIL of its own; one a thread's creator had visible
+  holds NIL too. A PUBLIC no longer exists, for every thread. A name with no variable is skipped.
 - `RELEASE ALL [LIKE | EXCEPT skeleton]` (`__MemReleaseAll()`): the same for the PRIVATEs that the function or
   codeblock running it created, those whose names match the skeleton (`LIKE`) or do not (`EXCEPT`); PUBLICs and the
   callers' PRIVATEs stay. In a skeleton `*` stands for any characters and `?` for one, letters match in any case. The
   reference takes a skeleton that starts with `*` for every name (`*B`); xbase matches the whole skeleton, so it never
   releases more than the skeleton names.
-- `CLEAR MEMORY` (`__MemClear()`): no PRIVATE or PUBLIC exists any more; the PRIVATEs' records stay until their
-  activations end, restoring nothing.
+- `CLEAR MEMORY` (`__MemClear()`): no PRIVATE of the environment, and no PUBLIC of the program, exists any more; the
+  PRIVATEs' records stay until their activations end, restoring nothing.
 - `SAVE TO file [ALL [LIKE | EXCEPT skeleton]]` (also `SAVE ALL LIKE | EXCEPT skeleton TO file`; `__MemSave()`,
   `rtl/memfile.c`) writes the variables visible, PRIVATE or PUBLIC, whose names match, to a `.mem` file (the extension
   is added when the name has none): Clipper's format, which `memfile.c` describes, holds strings (65534 bytes of each
@@ -993,7 +1006,8 @@ Conventions:
   operators raise the code of their operation: `&` 9001, `|` 9002, `^^` 9003, `~` 9005, `<<` 9006, and `>>`, an
   arithmetic shift (a count past 63 gives 0, or -1 for a negative number), 9008. The function names, operator symbols,
   operand counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too. The `Char*()`
-  functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)).
+  functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)), the thread functions 9016 to 9020
+  ([concurrency.md](concurrency.md#threads)).
 - `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
   program started from a monotonic clock (`xb_program_elapsed_ms`), for timing: the difference of two calls.
@@ -1024,11 +1038,16 @@ Each one moved from C is measured against its C version (callgrind).
   a program's calls of their functions may run in place ([xir.md](xir.md#passes)), with the same frames on the call
   stack: line 0, no source file, the hidden ones hidden. Their functions are written so that a call with a codeblock
   literal, inlined, folds to its array path (`ValType()` of a block or an array literal is known).
-- Primitives for them: `__ConsoleWrite( xValue )` writes the display form of a value ([Display](#display)) to the
-  console (standard output until the terminal layer exists), `__StdWrite( nHandle, xValue )` to the standard output (1)
-  or error (2), flushing the output before writing to the error; `__ArgError( nSubCode, [lSubstitute] )` raises the
-  calling function's argument error (`EG_ARG`, its name as the operation, the arguments it received), as its C
-  counterparts do: not substitutable, or with `lSubstitute` substitutable, the handler's value its result.
+- Primitives for them: `__ConsoleWrite( lNewLine, [xValues...] )` writes a new line when `lNewLine` is `.T.`, then
+  the display forms of the values ([Display](#display)) separated by spaces, to the console (standard output until the
+  terminal layer exists); `__StdWrite( nHandle, [xValues...] )` writes the values so to the standard output (1) or
+  error (2), flushing the output before writing to the error. A call gathers its bytes first (`xb_buffer`,
+  `core/text.h`: each display form copied as it is made), then writes them in one blocking operation under the output
+  lock (`xb_output_lock`, `core/sync.h`, which the report of an unrecoverable error takes too), so no other thread's
+  output splits them.
+  `__ArgError( nSubCode, [lSubstitute] )` raises the calling function's argument error (`EG_ARG`, its name as the
+  operation, the arguments it received), as its C counterparts do: not substitutable, or with `lSubstitute`
+  substitutable, the handler's value its result.
 - Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` and `AScan`
   (`rtl/arrays.prg`; they also go through collection objects, those `__IsCollection( xValue )` (`core/control.c`)
   finds `FOR EACH` goes through: an `Enumerable`, a generator's enumerator, from position `nStart`, `nCount` elements;
@@ -1188,19 +1207,34 @@ each time):
 
 ## Threads and synchronization
 
-The program's code runs on one thread today; the services below are what tasks and threads are built on
-([concurrency.md](concurrency.md)).
+The program's threads (`ThreadStart`, `Mutex`, `AtomicInt`: [concurrency.md](concurrency.md#threads)) and the
+services below, which tasks will be built on too ([concurrency.md](concurrency.md)).
 
 - Contexts (`core/context.h`): a thread context (`xb_ctx`) holds what the code running on its thread uses (the
   `[ABI]` head compiled code reads: pending requests, `SET DECIMALS`, the chain of frames, the stack
   limit; the C roots, a `BREAK` on its way, the error blocks running, `Type()`'s trap) and caches of its own (the macro
   cache), and points at the environment of the flow it runs (`xb_env`): `ErrorBlock()`, the memory variables, the `SET`
-  values, `FError()`, the language and the codepage, the work areas and their settings. Today each thread context has
-  one environment, made with it; the program's exit code is the process's.
+  values, `FError()`, the language and the codepage, the work areas and their settings. Each thread context has one
+  environment, made with it; a new thread's is a copy of its creator's (`xb_env_share` by the creator before the
+  thread runs, `xb_env_inherit` on the thread), its work areas none. The program's exit code is the process's.
+- Program threads (`rtl/threads.c`): `ThreadStart` makes the `Thread` object (its block and arguments in an array),
+  shares it and the creator's environment, and starts a thread with a 16 MB stack that attaches (the second attached
+  thread publishes the program's storage), makes its context, inherits the environment, stores its `xb_thread_self`
+  and tells the creator, which waits for that in a blocking operation (the thread object stays on its stack, pinned)
+  and then detaches the thread (`xb_thread_detach`). The thread evaluates the block, stores the result, sets its done
+  word and wakes the joiners, frees its context and detaches from the collector. A `Mutex` is three words in its
+  object's own variables (the state, 0 free, 1 held, 2 held with waiters; the holder's `xb_thread_self`; the depth), a
+  `Thread`'s done flag one: changed with atomic operations, waited on in the parking lot a while at a time (50 ms)
+  in a blocking operation, so collections go on and a `QUIT` is seen; the object a waiter waits on is pinned by its
+  stack. An `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local.
+  `QUIT` in a thread raises it on every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before
+  the `EXIT` procedures and after them) does too when threads still run, and waits until none does; a thread made
+  meanwhile quits at once. Their error codes are xbase's own: 9016 to 9020.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
-  reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_yield`, a waiter's
-  back-off), mutexes (`xb_mutex`, with
+  reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread
+  and its starter each letting go of its record, the last one freeing it; `xb_thread_yield`, a waiter's back-off),
+  mutexes (`xb_mutex`, with
   `trylock`), condition variables (`xb_cond`, with waits timed on the monotonic clock: POSIX binds the condition to it,
   macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks (`xb_rwlock`; on glibc
   of the kind where a waiting writer goes before readers that come after it, elsewhere with the system's policy), the
@@ -1223,13 +1257,16 @@ The program's code runs on one thread today; the services below are what tasks a
   every architecture; a build with `/volatile:iso` stops) and its `Interlocked` intrinsics.
 - On top of them, the same everywhere (`core/sync.c`): `xb_thread_self` (a number per thread, never 0, no other
   thread's until 2^32 threads have asked), `xb_once` (a function run once whatever threads ask at the same time, the
-  others waiting until it returns), a recursive lock (`xb_rlock`, made statically, for rare nesting work such as
-  preparing classes: the thread holding it takes it again, and holds it until it has released it as often), and a
-  parking lot: `xb_park_wait` sleeps while a 32-bit value at an address is the
-  one expected (with an optional limit in nanoseconds, which its own deadline decides), `xb_park_wake` wakes the
-  waiter of the address that came first, or every one. Waiters queue in arrival order in one of 256 buckets chosen by
-  the address (each made when first used) and sleep on a condition of their own, so a wake reaches only the waiters
-  it marks; the value is tested under the bucket's lock, which the waker takes after changing it, so no wake is lost.
+  others waiting until it returns), a recursive lock over three words (`xb_rwords`: the state, 0 free, 1 held, 2 held
+  and maybe waited for; the holder's number; the depth: the thread holding it takes it again, and holds it until it
+  has released it as often; a release wakes a waiter only when the state was 2), which `xb_rlock` keeps together (made
+  statically, for rare nesting work such as preparing classes) and a `Mutex` object in its variables, and a parking
+  lot: `xb_park_wait` sleeps while a 32-bit value at an address is the one expected (with an optional limit in
+  nanoseconds, which its own deadline decides), `xb_park_wake` wakes the waiter of the address that came first, or
+  every one. Waiters queue in arrival order in one of 256 buckets chosen by the address (each made when first used)
+  and sleep on a condition of their own, so a wake reaches only the waiters it marks; the value is tested under the
+  bucket's lock, which the waker takes after changing it, so no wake is lost. `xb_park_wait_blocking` waits so in a
+  blocking operation. The output lock (`xb_output_lock`) serializes the program's writes to the standard streams.
 - Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's operations on arrays,
   hashes, objects, cells and references use them, and compiled code tests the bit): `XB_GC_SHARED` in an object's header
   (`XB_GC_STATE_SHARED`, kept by every collection) marks one that more than one flow can reach. `xb_share` marks what an
