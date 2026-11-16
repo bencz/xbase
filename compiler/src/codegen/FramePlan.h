@@ -35,12 +35,15 @@ struct Home {
 // value used only there is computed straight into its slot of the group; a
 // branch argument used only there shares the slot of the block parameter; a
 // load whose single use follows with nothing in between that can write the
-// variable uses the variable's own item; a value used only by the store that
-// follows it, or by `ret`, is computed in place. A Place home's address (a
-// cell, an element reached through a reference) stays valid only because
-// nothing between its computation and its use runs user code or grows an
-// array; the object it lies in does not move meanwhile, since the collector
-// pins what the machine stack and registers point into. A value
+// variable uses the variable's own item (or, through a cell or a reference,
+// what is in place: a local cell's value, a loop variable's element of a
+// local collection or its reference's own item; else a shadow slot the
+// runtime copies the value into); a value used only by the store that
+// follows it, if it writes the variable's own item, or by `ret`, is computed
+// in place. A Place home's address in a cell or a collection stays valid only
+// because nothing between its computation and its use runs code, writes the
+// heap or grows an array; the object does not move meanwhile, since the
+// collector pins what the machine stack and registers point into. A value
 // that never refers to a heap object (xir::TypeInfo) and is not computed in
 // place is Local: it takes no slot.
 class FramePlan {
@@ -50,11 +53,15 @@ public:
   const xir::CFG &cfg() const { return cfg_; }
   const xir::TypeInfo &types() const { return types_; }
   uint32_t frameSize() const { return frameSize_; }
+  uint32_t savedSize() const { return savedSize_; } // the slots a resumable function's step keeps: all but shadows
   uint32_t slotOf(const xir::Var &v) const { return varSlot_.at(&v); } // a frame variable
   const Home &home(const xir::Value *v) const;
   uint32_t groupBase(const xir::Instruction *user) const { return groupBase_.at(user); }
   bool inGroup(const xir::Instruction *user, size_t operand) const; // computed straight into its group slot
   bool forwarded(const xir::Instruction *store) const { return forwardedStores_.count(store) != 0; }
+  // The slot an elided load through a cell or a reference reads into when its value is not in place (a shared cell,
+  // an element: the runtime copies it).
+  uint32_t shadowSlot(const xir::Instruction *load) const { return shadowSlot_.at(load); }
   // The slots an inline.leave sets to NIL: those of the values of its inlined body that are dead there, as the
   // callee's frame would be gone after its return (no other value holds them then).
   const std::vector<uint32_t> &clearsAt(const xir::Instruction *leave) const;
@@ -78,6 +85,7 @@ private:
   void findUnwritten();
   void computeLiveness();
   void allocate();
+  uint32_t scan(std::vector<uint32_t> order, uint32_t base);
   void extendArgumentGroups();
   void findBodyUnits();
   void placeClears();
@@ -88,7 +96,7 @@ private:
   const xir::Function &f_;
   xir::CFG cfg_;
   xir::TypeInfo types_;
-  uint32_t frameSize_ = 0;
+  uint32_t frameSize_ = 0, savedSize_ = 0;
   uint32_t numVarSlots_ = 0;
   std::unordered_map<const xir::Var *, uint32_t> varSlot_;
   std::unordered_set<const xir::Var *> unwritten_; // frame variables nothing writes: a load of one is its item
@@ -99,6 +107,8 @@ private:
   std::unordered_map<const xir::Value *, uint32_t> groupMember_;   // value -> operand index in its group
   std::unordered_map<const xir::Instruction *, uint32_t> groupUnit_, groupBase_;
   std::unordered_set<const xir::Instruction *> forwardedStores_;
+  std::unordered_set<const xir::Instruction *> shadowed_;               // elided loads that need a shadow slot
+  std::unordered_map<const xir::Instruction *, uint32_t> shadowSlot_;
   std::vector<Unit> units_;
   std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> bodyUnits_; // inline.leave -> units
   std::unordered_map<const xir::Instruction *, std::vector<uint32_t>> clears_;           // inline.leave -> slots

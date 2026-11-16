@@ -95,7 +95,9 @@ void FramePlan::elideLoads(const BasicBlock &b) {
         auto w = lastWrite.find(load.var);
         bool written = w != lastWrite.end() && w->second > at;
         if (!isPlain(*load.var, load.access)) written |= lastIndirect > at;
-        if (!written) homes_[&load] = {Home::Kind::Place, 0, &load};
+        if (written) continue;
+        homes_[&load] = {Home::Kind::Place, 0, &load};
+        if (load.access != Access::Direct) shadowed_.insert(&load);
       }
     }
     uint32_t p = pos_.at(&u);
@@ -104,22 +106,23 @@ void FramePlan::elideLoads(const BasicBlock &b) {
       if (u.var) lastWrite[u.var] = p;
       for (const Var *c : u.captures) lastWrite[c] = p;
     }
-    if (e & (WritesVar | WritesHeap | RunsCode | Substitutes)) lastIndirect = p;
+    // An operation that may fail runs the error block, the program's code (also a load through a reference).
+    if ((e & (WritesVar | WritesHeap | RunsCode | Substitutes)) || u.mayFail()) lastIndirect = p;
   }
 }
 
-// A value computed into the variable of the store right after it. A call may
-// only write into a plain frame variable: its result must not go straight
-// into a heap object (a cell, an element), and the callee must not see the
-// variable cleared. The address is reached before the operation, so a store
-// whose address can fail (through a reference) takes no operation that can:
-// the operation's error comes first. In a block that unwinds (to a BEGIN
-// SEQUENCE handler, which may read the variable, or a FOR EACH cleanup), an
-// operation that can fail is not computed in place either: a call may clear
-// its result first.
+// A value computed into the variable of the store right after it: only into
+// the variable's own item (a store through a cell or a reference may find a
+// shared cell or an element, which the runtime writes whole). A call may only
+// write into a plain frame variable: the callee must not see the variable
+// cleared (a STATIC it may read). In a block
+// that unwinds (to a BEGIN SEQUENCE handler, which may read the variable, or a
+// FOR EACH cleanup), an operation that can fail is not computed in place: a
+// call may clear its result first.
 bool FramePlan::canForward(const Instruction &value, const Instruction &store) const {
   if (store.op != Op::Store || store.operand(0) != &value || !value.hasOneUse()) return false;
-  if (value.mayFail() && (store.mayFail() || store.parent->unwind)) return false;
+  if (store.access != Access::Direct) return false;
+  if (value.mayFail() && store.parent->unwind) return false;
   switch (value.op) {
   case Op::Unary: case Op::Binary: case Op::Index: case Op::ArrayLit: case Op::MakeBlock: case Op::NumDefaultDec:
   case Op::FromBool:
@@ -227,7 +230,7 @@ void FramePlan::chooseHomes() {
     for (auto &p : b->params)
       if (p->type() == Type::Item && !homes_.count(p.get())) unitOf(p.get());
     for (auto &i : b->insts)
-      if (isItemResult(i.get()) && !homes_.count(i.get())) unitOf(i.get());
+      if ((isItemResult(i.get()) && !homes_.count(i.get())) || shadowed_.count(i.get())) unitOf(i.get());
   }
 }
 
@@ -281,14 +284,35 @@ void FramePlan::computeLiveness() {
 // value computed into its loop parameter's slot) are one unit already;
 // otherwise a result never shares a slot with an operand of the same
 // instruction (calls clear their result first).
+// Shadow slots come last, in a run of their own: none is live across a call or
+// a yield, so a resumable function's step keeps only the slots before them
+// (savedSize).
 void FramePlan::allocate() {
-  const uint32_t base = numVarSlots_;
-  std::vector<uint32_t> order(units_.size());
-  for (uint32_t k = 0; k < order.size(); ++k) order[k] = k;
+  std::unordered_set<uint32_t> shadowUnits;
+  for (auto &[v, u] : unit_)
+    if (v->kind() == Value::Kind::Instruction && shadowed_.count(static_cast<const Instruction *>(v)))
+      shadowUnits.insert(u);
+  std::vector<uint32_t> temps, shadows;
+  for (uint32_t k = 0; k < units_.size(); ++k) (shadowUnits.count(k) ? shadows : temps).push_back(k);
+  savedSize_ = numVarSlots_ + scan(temps, numVarSlots_);
+  frameSize_ = savedSize_ + scan(shadows, savedSize_);
+  for (auto &[user, u] : groupUnit_) groupBase_[user] = units_[u].slot;
+  for (auto &[v, u] : unit_) {
+    if (shadowUnits.count(u)) {
+      shadowSlot_[static_cast<const Instruction *>(v)] = units_[u].slot;
+      continue;
+    }
+    auto m = groupMember_.find(v);
+    homes_[v] = {Home::Kind::Slot, units_[u].slot + (m == groupMember_.end() ? 0 : m->second), nullptr};
+  }
+}
+
+// Linear scan of `order`'s units from slot `base`; returns the slots taken.
+uint32_t FramePlan::scan(std::vector<uint32_t> order, uint32_t base) {
   std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
     return units_[a].start != units_[b].start ? units_[a].start < units_[b].start : a < b;
   });
-  std::vector<bool> busy; // temporaries, from slot `base`
+  std::vector<bool> busy; // from slot `base`
   std::vector<uint32_t> active;
   uint32_t top = 0;
   for (uint32_t u : order) {
@@ -315,12 +339,7 @@ void FramePlan::allocate() {
     top = std::max(top, first + unit.size);
     active.push_back(u);
   }
-  frameSize_ = base + top;
-  for (auto &[user, u] : groupUnit_) groupBase_[user] = units_[u].slot;
-  for (auto &[v, u] : unit_) {
-    auto m = groupMember_.find(v);
-    homes_[v] = {Home::Kind::Slot, units_[u].slot + (m == groupMember_.end() ? 0 : m->second), nullptr};
-  }
+  return top;
 }
 
 // The arguments an inline.enter passes stay in their slots, the frame's argv, while its body runs: their group lives

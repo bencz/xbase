@@ -179,26 +179,29 @@ freed storage. The runtime rules both out:
   header byte; the shared bit lives in the same byte, so local stores cost nothing more.
 - **Access.** A shared object's items are read under its sequence counter (read, check, retry: no lock, no write) and
   written, grown and shrunk under its lock: those of its stripe, one of a table chosen by its address, whose lock word a
-  contended waiter sleeps on in the parking lot. *(Planned, step 3)*: compiled code's in-place reads of arrays, hashes
-  and object variables test the header bit first (one load and a branch, predicted) and take the shared path when it is
-  set. Strings are immutable; a shared string never grows in place (its append flag is cleared when it is shared).
-  Read-only operations that reorganize a hash (compaction, the position tree) run under the lock when it is shared.
+  contended waiter sleeps on in the parking lot. Compiled code's in-place reads and writes (an array's elements and
+  length, a hash's keys in `FOR EACH`, a cell's value, a loop's reference) test the header bit first (one byte loaded
+  and a branch, predicted; a fast loop that makes no call tests it once, before it, for an array it does not change:
+  [compiler.md](compiler.md#object-emission)) and call the runtime when it is set
+  ([compiler.md](compiler.md#xir-to-llvm)). Strings are immutable; a shared string never grows in place (its append flag
+  is cleared when it is shared). Read-only operations that reorganize a hash (compaction, the position tree) run under
+  the lock when it is shared.
 - **Lifetime.** A collection happens only at safepoints, and no code holds the address of a shared object's storage
-  across one: a read under the sequence counter has no safepoint inside, compiled code (step 3) tests the header bit at
-  each access and reads the storage's address again after every call, and the runtime's loops that run code between
-  accesses (a sort with a block) index the object again after each call. So storage another thread replaced (an array
-  that grew) dies at the next collection like any garbage, never under a reader. (Keeping alive what the stacks point
-  to, which a conservative scan could do, was measured: a stale word on a stack kept long chains of dead objects alive,
-  and destructors no longer ran when their objects died; the collector stays precise, and its stack scan only pins.)
+  across one: a read under the sequence counter has no safepoint inside, compiled code tests the header bit at each
+  access and reads the storage's address again after every call, and the runtime's loops that run code between accesses
+  (a sort with a block) index the object again after each call. So storage another thread replaced (an array that grew)
+  dies at the next collection like any garbage, never under a reader. (Keeping alive what the stacks point to, which a
+  conservative scan could do, was measured: a stale word on a stack kept long chains of dead objects alive, and
+  destructors no longer ran when their objects died; the collector stays precise, and its stack scan only pins.)
 - **Implementation steps.** (1, done: [runtime.md](runtime.md#threads-and-synchronization)) The header bit
   (`XB_GC_SHARED` in the state byte), sharing an object graph (an explicit stack, stopping at what is shared already; a
   string loses its append flag), and the sequence counters and locks: a table of stripes chosen by the object's address
   (an object moves only while every thread is stopped, between operations), each a counter (odd while a writer works)
   and a lock word parked on when contended; with C tests on threads. (2, done) The runtime's operations on arrays,
   hashes, object variables, cells, references, the elements `FOR EACH` reads and generators take the shared path when
-  the bit is set. (3) Compiled code's in-place reads and writes test the bit, measured on the benchmarks. (4)
-  Publication: the write barrier of a store into a shared object shares the value stored; `STATIC`s, class variables and
-  `PUBLIC`s are shared storage once a second thread exists. Then step 2e (`ThreadStart`, `Mutex`, `AtomicInt`).
+  the bit is set. (3, done) Compiled code's in-place reads and writes test the bit, measured on the benchmarks (ABI 44).
+  (4) Publication: the write barrier of a store into a shared object shares the value stored; `STATIC`s, class variables
+  and `PUBLIC`s are shared storage once a second thread exists. Then step 2e (`ThreadStart`, `Mutex`, `AtomicInt`).
 - **Runtime caches and tables** filled at run time (done, [runtime.md](runtime.md#threads-and-synchronization)): a
   send cache is a sequence lock, a field cache one 64-bit word (generation, index) from an atomic counter, the memory
   variable names are found under a reader-writer lock and read by number from chunks that never move, and classes

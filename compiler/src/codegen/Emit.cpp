@@ -94,7 +94,7 @@ constexpr unsigned kGuardRounds = 3;
 // the default pipeline and code generation, which take time growing faster than its size: it has passes whose time
 // grows with its size (its locals become registers, common subexpressions and constants fold, its control flow
 // simplifies), is generated as -O0 does, and is never inlined.
-constexpr unsigned kLargeFunction = 50000;
+constexpr unsigned kLargeFunction = 60000;
 
 // Marks the functions too large to optimize fully (kLargeFunction) and gives them their own passes.
 static void optimizeLargeFunctions(Module &m, FunctionAnalysisManager &fam) {
@@ -157,6 +157,8 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   // On the loops the simplification has rotated: a guard out of a loop makes what it guarded invariant, whose own test
   // may then go out too.
   for (unsigned round = 0; round < kGuardRounds; ++round) again(hoistLoopGuards, "loop guards");
+  // Then the tests a fast loop makes on what it does not change that are not its header's: tested once, before it.
+  again(versionInvariantColdExits, "loop versioning");
 }
 
 // Code generation runs on the legacy pass manager: in LLVM 22 it is the one

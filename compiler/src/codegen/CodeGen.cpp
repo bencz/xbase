@@ -1,5 +1,6 @@
 // Types, runtime declarations, the module, functions and their frames, item and basic block helpers.
 #include "codegen/CodeGen.h"
+#include "codegen/LoopSplit.h"
 #include "codegen/LoopPolls.h"
 
 #include "xbrt.h" // constants only (type tags, ABI version) - never layouts
@@ -110,8 +111,8 @@ void CodeGen::initTypes() {
   rtEachEnter_ = rt("xb_each_enter", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
   rtEachMove_ = rt("xb_each_move", voidTy, {ptrTy_, ptrTy_, i32_, i64_});
   rtEachLeave_ = rt("xb_each_leave", voidTy, {ptrTy_, i32_, ptrTy_});
-  rtRefTarget_ = rt("xb_ref_target", ptrTy_, {ptrTy_, ptrTy_});
-  rtRefWritten_ = rt("xb_ref_written", voidTy, {ptrTy_});
+  rtRefLoad_ = rt("xb_ref_load", voidTy, {ptrTy_, i32_, ptrTy_, ptrTy_});
+  rtRefStore_ = rt("xb_ref_store", voidTy, {ptrTy_, i32_, ptrTy_, ptrTy_});
   rtRefOf_ = rt("xb_ref_of", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtRefElem_ = rt("xb_ref_elem", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtGcRemember_ = rt("xb_gc_remember", voidTy, {ptrTy_});
@@ -146,7 +147,9 @@ void CodeGen::initTypes() {
   rtSendFrom_ = rt("xb_op_send_from", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_});
   rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
-  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtRefWritten_, rtCellOf_, rtBlockNew_, rtRootPush_,
+  for (FunctionCallee c : {rtWriteItem_, rtGcRemember_})
+    cast<Function>(c.getCallee())->addFnAttr(kBarrierAttr);
+  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtGcRemember_, rtCellOf_, rtBlockNew_, rtRootPush_,
                            rtRootPop_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
                            rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_,

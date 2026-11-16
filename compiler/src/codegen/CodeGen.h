@@ -146,15 +146,22 @@ private:
   llvm::Value *capturedCellAddress(llvm::Value *block, uint32_t index);
   llvm::Value *capturedCell(const xir::Var &v);
   llvm::Value *rawAddress(const xir::Var &v);
-  llvm::Value *varAddress(const xir::Var &v, xir::Access a, llvm::BasicBlock *unwind);
-  llvm::Value *refTarget(llvm::Value *ref, llvm::BasicBlock *unwind);
-  llvm::Value *derefIfRef(llvm::Value *item, llvm::BasicBlock *unwind);
-  llvm::Value *inlineRefTarget(llvm::Value *ref, llvm::BasicBlock *miss, bool others);
+  struct VarTarget {
+    llvm::Value *local = nullptr;       // the item in place, or null
+    llvm::BasicBlock *shared = nullptr; // the runtime's path, or null
+    llvm::Value *type = nullptr, *ptr = nullptr;
+  };
+  llvm::LoadInst *stateByte(llvm::Value *obj, llvm::AtomicOrdering order);
+  llvm::Value *isLocal(llvm::Value *obj, bool fromItem = true);
+  VarTarget varTarget(const xir::Var &v, xir::Access a, bool load = false);
+  llvm::Value *loadVar(const xir::Var &v, xir::Access a, llvm::Value *shadow, llvm::BasicBlock *unwind);
+  void storeVar(const xir::Var &v, xir::Access a, llvm::Value *src, llvm::BasicBlock *unwind);
+  llvm::Value *inlineRefTarget(llvm::Value *ref, llvm::BasicBlock *miss);
   llvm::Value *hashEntryAt(llvm::Value *hash, llvm::Value *pos0, llvm::BasicBlock *miss);
   llvm::BasicBlock *beginUnlikely(llvm::Value *cond, const char *name);
   void endUnlikely(llvm::BasicBlock *join);
   llvm::Value *holdsRef(llvm::Value *item);
-  void refWritten(llvm::Value *item);
+  void cellStoreWritten(llvm::Value *cell, bool fromItem);
   void cellWritten(llvm::Value *cell);
   void writeBarrier(const xir::Var &v, xir::Access a);
   void refOf(const xir::Var &v, llvm::Value *dst);
@@ -267,10 +274,11 @@ private:
   llvm::FunctionCallee rtArgsRest_;
   llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_, rtRootPush_,
       rtRootPop_;
-  llvm::FunctionCallee rtEnumLen_, rtEachSource_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefTarget_;
+  llvm::FunctionCallee rtEnumLen_, rtEachSource_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefLoad_;
+  llvm::FunctionCallee rtRefStore_;
   llvm::FunctionCallee rtSwitchCheck_;
   llvm::FunctionCallee rtSwitchMatch_;
-  llvm::FunctionCallee rtModuleRegister_, rtProgramRun_, rtGcRemember_, rtRefWritten_, rtRefOf_, rtRefElem_;
+  llvm::FunctionCallee rtModuleRegister_, rtProgramRun_, rtGcRemember_, rtRefOf_, rtRefElem_;
   llvm::FunctionCallee rtMvMark_, rtMvRelease_, rtMvGet_, rtMvSet_, rtMvRef_, rtMvPrivate_, rtMvPublic_, rtMvParam_;
   llvm::FunctionCallee rtMvField_, rtFieldGet_, rtFieldSet_;
   llvm::FunctionCallee rtSendFrom_, rtClassInstance_, rtClassesRegister_;

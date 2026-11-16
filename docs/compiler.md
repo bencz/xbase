@@ -432,13 +432,18 @@ emits the object file.
   shares the slot of its block parameter (on a loop's back edge, when the jump is the block's only way out and nothing
   after the argument reads the parameter); a `load` whose single use follows with nothing in between that can write the
   variable (for a variable others can reach: nothing that writes, runs code, or goes on after an error block ran)
-  uses the variable's own item (no copy), and so does every load of a frame variable nothing writes once the function
+  uses the variable's own item (no copy), or through a cell or a reference what is in place (a local cell's value, a
+  loop variable's element of a local collection or its reference's own item), else a shadow slot of its own into
+  which the runtime copies the value (`FramePlan::shadowSlot`:
+  the shadows come after the other slots, and since none is live across a call or a yield, a generator's step keeps
+  only the slots before them, `savedSize`), and so does every load of a frame variable nothing writes once the function
   runs (`FramePlan::findUnwritten`: a parameter the body versioned for references leaves to the other body, a `LOCAL`
-  never assigned); a value used only by the `store` right after it is computed into the
-  variable, and one used only by `ret` into the caller's result slot. A call's result is never computed straight into a
-  heap object (a cell, an element) and only into a plain frame variable, and an operation that can fail is not computed
-  in place through a reference (finding the element can fail too, and the operation's error comes first) or in a block
-  that unwinds (the handler may read the variable, and a call may clear its result first). Two edges from
+  never assigned); a value used only by the `store` right after it is computed into the variable when the store writes
+  the variable's own item (a store through a cell or a reference may find a shared cell or an element, which the
+  runtime writes whole), and one used only by `ret` into the caller's result slot. A call's result is computed straight
+  only into a plain frame variable (the callee must not see a `STATIC` cleared), and an operation that can fail is not
+  computed in place in a block that unwinds (the handler may read the variable, and a call may clear its result
+  first). Two edges from
   one block to the same block do not share their arguments' slots. A value that never refers to a heap object
   (`xir::TypeInfo`, [xir.md](xir.md#types)) and is not computed in a slot as above is `Local`: an item of its own
   outside the frame (an `alloca` reached only by loads and stores, which LLVM keeps in registers). Block parameters are
@@ -484,7 +489,8 @@ emits the object file.
   runtime gives (the larger for `+` and `-`, the sum for `*`); two doubles, the usual case of these paths, take a path
   of their own (their bits and decimals as they are, no test of exactness); the comparisons of two numbers (integers
   exactly, others as doubles with IEEE 754's comparisons, as `xb_compare` and `xb_order_is` make them); `for.test` with
-  an integer counter, limit and step; `index` and `index.set` of an array with an index within it, an integer or a
+  an integer counter, limit and step; `index` and `index.set` of a local array (its header's state byte tested first,
+  `isLocal`: a shared array's items are the runtime's to read and write whole) with an index within it, an integer or a
   truncated double (the array's `len` and `items`, `xb_array` in `xbrt.h`), where the store calls `xb_gc_write_item`
   only for a value of a heap type (`xb_type_is_heap`), and an index out of bounds calls the runtime, which raises the
   error. A comparison whose only use is the `truth` right after it gives that test its boolean directly, without the
@@ -494,7 +500,7 @@ emits the object file.
   NaN 0, as `xb_dbl_to_i64`); other operands call the runtime operator or function, which raises the error. `=`, `==`
   and `!=` of two one-character strings compare their bytes in place (so `ValType( x ) == "C"` calls nothing). Unary `-`
   of an integer other than INT64_MIN or of a double is done in place too. `InlineCalls.cpp` does a few runtime functions
-  in place when their arguments allow it, with their rules: `Len()` of a string or an array, `Asc()` of a string,
+  in place when their arguments allow it, with their rules: `Len()` of a string or a local array, `Asc()` of a string,
   `Chr()` of a number, `SubStr( c, n, 1 )` with `n` within `c` (the last two give the shared one-byte string,
   `xb_str_bytes`), and an `Asc()` whose argument is the `SubStr()` right before it, used nowhere else, reads the byte
   itself; `Int()` of an integer is it, of a double its truncation when that fits 64 bits (`xb_dbl_fits_i64`), with the
@@ -617,12 +623,15 @@ emits the object file.
   truth of what its slow path returned. `truth` tests the item type inline; a non-logical value calls `xb_cond_error`
   and leaves.
 - Variables: a captured variable's cell is loaded from `self->cells[]` (the `xb_block` layout is mirrored with the
-  target `DataLayout`); a `FOR EACH` variable, a `STATIC`, a shared or captured variable or a parameter tests its type
-  inline (one unsigned comparison covers `XB_T_CELL` and `XB_T_REF`) and follows a cell inline. An element
-  (`XB_T_REF`, `xb_ref` and `xb_hash` mirrored like `xb_array`) is read in place when it is one of an array within its
-  length, the entry at a position of a hash without holes, or the reference's own value for any other collection
-  (`inlineRefTarget`); the rest calls `xb_ref_target`, which finds a hash entry by key or with holes and raises the
-  bound error.
+  target `DataLayout`); a `STATIC`, a shared or captured variable or a parameter tests its type inline (one unsigned
+  comparison covers `XB_T_CELL` and `XB_T_REF`) and reaches a local cell's value in place (`varTarget`: the cell's
+  header state byte tested, `isLocal`, then its value's type). A read of a `FOR EACH` variable reads in place what
+  its local loop reference designates: an element of a local collection (`inlineRefTarget`), or the reference's own
+  item (a string's character, an enumerator's `Current`). The rest (a shared cell, a shared object, another element,
+  a store into a `FOR EACH` variable's element) goes to the runtime with the item's type and pointer: `xb_ref_load`
+  copies the value into the load's own item (or its shadow slot), `xb_ref_store` writes it and makes its write
+  barrier; they read and write the whole item under the object's counter or lock when it is shared, and raise the
+  bound error of an element gone.
 - `block` creates the block first into an item of its own (`block.tmp`), kept as a C root (`xb_gc_root_push`) while
   it obtains the cells (`xb_cell_of`: the variable's cell, made now if it has none, or a new cell holding the current
   element of a `FOR EACH` variable, which only the block refers to) and stores each one, then passes the barrier test
@@ -631,11 +640,14 @@ emits the object file.
   `ref` calls `xb_ref_of` (or builds the `XB_T_CELL` item of a captured variable's cell); `ref.index` calls
   `xb_ref_elem`. `each.enter` and `each.leave` call `xb_each_enter` and `xb_each_leave`; `each.move` stores the
   position in the loop's reference and calls `xb_each_move` only when the element is not one `inlineRefTarget` finds
-  in place (a string's character, an enumerator's, a hash with holes, the bound error); `each.key` stores the position
-  for anything but a hash, reads the key of a hash without holes in place, and calls `xb_each_key` for the rest.
-- `barrier` ([runtime.md](runtime.md#garbage-collector)): after a store into a cell, the cell's GC state byte is
-  tested inline and `xb_gc_remember` called for an old cell; after a store through an element reference,
-  `xb_ref_written` is called. Frame slots and `STATIC` storage are roots and need nothing.
+  in place (an element of a local array within it, the entry at a position of a local hash without holes; not a
+  string's character, an enumerator's, a shared collection, the bound error), or when the variable is in a shared cell
+  (whose reference only the runtime moves); `each.key` stores the position for anything but a hash, reads the key of a
+  local hash without holes in place, and calls `xb_each_key` for the rest.
+- `barrier` ([runtime.md](runtime.md#garbage-collector)): after a store into a local cell that holds no element (a
+  captured variable's, or the one a variable holds), the cell's GC state byte is tested inline and `xb_gc_remember`
+  called for an old cell (`cellStoreWritten`); a shared cell and an element took the value through `xb_ref_store`,
+  which made the barrier. Frame slots and `STATIC` storage are roots and need nothing.
 - Block parameters: item parameters live in slots, and branches copy their arguments in (through a staging buffer
   when a destination is also a source); machine parameters (`bool`, `i64`) become PHIs.
 - A module with `STATIC`s gets an internal global `xb.statics` (an array of NIL items) and its initialization
@@ -702,19 +714,22 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 `codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
 host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), then, from `-O1` on, splits the
 loops whose fast paths have cold edges (`LoopSplit.*`, below), places the polls of the loops' back edges (`LoopPolls.*`,
-below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds), each followed by the function
+below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds), versions the fast loops on
+their other invariant tests (`versionInvariantColdExits`, `LoopSplit.*`, below), each followed by the function
 simplification pipeline on the functions it changed, and writes the object with the target's object writer (code
 generation runs on the legacy pass manager: in LLVM 22 it is the one every target implements).
 
-A function of more than 50000 instructions as code generation makes it (`kLargeFunction`: a procedure of a few
-thousand statements) does not go through that pipeline: several of its passes and of code generation's take time
-that grows faster than a function's size (merging stores into `memset`s, turning selects into branches, which
-recomputes the dominator tree each time), and such a function took minutes. It gets passes whose time follows its size
-(`optimizeLargeFunctions`: SROA, which keeps its `Local` items in registers, early CSE, instruction combining, CFG
+A function of more than 60000 instructions as code generation makes it (`kLargeFunction`: a procedure of a few thousand
+statements) does not go through that pipeline: several of its passes and of code generation's take time that grows
+faster than a function's size (merging stores into `memset`s, turning selects into branches, which recomputes the
+dominator tree each time), and such a function took minutes. Measured through the whole pipeline (x86-64, a Release
+`xbc`): the `pi` benchmark's function of 50000 instructions takes 2.9 s, the statements of the `large_function` test cut
+to 60000 and 100000 instructions 0.9 s and 1.8 s, and all of them (408000) 31 s. It gets passes whose time follows its
+size (`optimizeLargeFunctions`: SROA, which keeps its `Local` items in registers, early CSE, instruction combining, CFG
 simplification), then is marked `optnone` and `noinline`: the pipeline skips it (`OptNoneInstrumentation`), the loop
 passes above leave it, nothing is inlined into it nor it into its caller, and code generation selects its instructions
-as at `-O0`. Its xIR is optimized as any other function's. The size is the one before LLVM inlines anything: a
-function that inlining makes that large goes through the pipeline (its time, not its result, is at stake).
+as at `-O0`. Its xIR is optimized as any other function's. The size is the one before LLVM inlines anything: a function
+that inlining makes that large goes through the pipeline (its time, not its result, is at stake).
 
 Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one, so programs run
 on any CPU of the target (a processor that keeps doubles with more precision than 64 bits between operations, as some
@@ -724,20 +739,25 @@ floating-point mode); `--cpu=native` (host target only) uses the CPU and feature
 Loops without slow paths (`codegen/LoopSplit.*`): every inline fast path keeps a call to the runtime for the other
 cases, behind an edge weighted unlikely (`branchLikely`: edges to runtime calls, and to the rare double index; a choice
 between two inline paths, such as an integer or a double operand, or a variable that holds a cell, is a plain branch).
-The innermost loops with such cold edges, found once per function, are put in simplified and LCSSA form and cloned
-twice: a generic copy and the loop again. In the original, every cold edge goes to the same block of the generic copy,
-which runs the rest of the iteration generically; its back edge goes to the loop again, through a preheader of its own,
-whose cold edges go to the generic copy as well. So one slow path (an error, a value of another type, a destructor or a
-collection's safepoint served by a poll) costs one generic iteration, and the next ones run fast paths again: the loop
-again knows less of the values that enter it than the original (their types and ranges come from the generic copy),
-so the original runs as long as no slow path is taken. `SSAUpdater` joins the values of the copies where several may
-arrive, and the exits receive the copies' values. The original and the loop again keep only the calls on their own
-paths (a `Len()` in a `FOR` limit stays), so the function simplification pipeline, run again on the functions that
-changed, optimizes them as fast loops: values keep the types their fast paths give them, and loads can leave them (the
-loop again computes what it hoisted in its preheader, after the generic iteration's calls). A loop of more than 2000
-instructions or 64 cold edges is left as it is, and the copies grow a function by at most twice its own size
-(`kMaxLoopInstructions`, `kMaxColdEdges`). The module is verified after the split (an invalid module is an internal
-error).
+The loops with such cold edges, found once per function, are put in simplified and LCSSA form and cloned twice: a
+generic copy and the loop again. A nest is split whole, from its outermost loop that fits the limits below and whose
+fast copy would make no call (`hotCall`: a call reached from the header without a cold edge; the write barriers, whose
+declarations carry `kBarrierAttr`, do not count), so that its inner loops' slow paths leave the nest's fast copies too;
+a nest that does not fit, or calls a function of the program anyway, is not, and its inner loops are looked at in turn.
+In the original, every cold edge goes to the same block of the generic copy, which runs the rest of the iteration
+generically; each back edge of the generic copy (the loop's, and in a nest each inner loop's with a single latch) goes
+to the same header of the loop again, through a preheader of its own, whose cold edges go to the generic copy as well
+(the values of the loop again that the generic copy may now bring are joined too). So one slow path (an error, a value
+of another type, a destructor or a collection's safepoint served by a poll) costs one generic iteration, and the next
+ones run fast paths again: the loop again knows less of the values that enter it than the original (their types and
+ranges come from the generic copy), so the original runs as long as no slow path is taken. `SSAUpdater` joins the values
+of the copies where several may arrive, and the exits receive the copies' values. The original and the loop again keep
+only the calls on their own paths (a `Len()` in a `FOR` limit stays), so the function simplification pipeline, run again
+on the functions that changed, optimizes them as fast loops: values keep the types their fast paths give them, and loads
+can leave them (the loop again computes what it hoisted in its preheader, after the generic iteration's calls). A loop
+of more than 3000 instructions or 256 cold edges is left as it is, and the copies grow a function by at most twice its
+own size (`kMaxLoopInstructions`, `kMaxColdEdges`; the `pi` benchmark's function, a nest of Brainfuck loops, then
+compiles in 5.9 s instead of 3.6 s). The module is verified after the split (an invalid module is an internal error).
 
 Loop polls (`codegen/LoopPolls.*`), on the loops the splitting left (its fast loops among them): a back edge's poll is a
 load and a branch on every pass, which in a loop of a few instructions costs as much as its work. A loop where a test
@@ -777,3 +797,20 @@ as before. What the test guarded (an element's loads) then runs on every pass, a
 the loop; its own test may then be the header's next invariant branch (one round per level of an array of arrays).
 LLVM's own unswitching does not do it: the exit receives values the loop changes. `matmul` takes 12% fewer cycles,
 `pi` 3%; the other benchmarks are unchanged.
+
+Loop versioning (`versionInvariantColdExits` in `codegen/LoopSplit.*`), after the guards: in an innermost loop, the
+branches whose condition can be computed on entry and whose cold side leaves the loop (into the generic copy) are tested
+once in the preheader, together (each condition frozen first: one the loop never reaches may be poison on entry). A
+condition can be computed on entry from what LLVM moved out of the loop (an array's type, an invariant index's bounds)
+and, in a loop that makes no call (the write barriers aside), from the sharing state of an object an item holds that the
+loop does not change (an array indexed by the loop's counter): the state load carries the item's layout (`kStateLoad`
+metadata, put by `isLocal`), and the preheader reads the item's type and, when it holds an array, a hash, a cell or a
+reference, the object's state byte, and computes the condition from them (an item in `STATIC` storage, which another
+thread may write, is not read so) (without a call, no object this thread alone reaches becomes shared). When any would
+leave, or an item holds no such object, an exact copy of the loop runs, which leaves where the loop would have;
+otherwise the loop runs with those branches gone. Values of the loop used past it become the join of the loop's and the
+copy's (`SSAUpdater`); a loop is versioned once, its copy never, and the copies grow a function by at most its own size.
+Unlike the guards, the branch need not be the header's: the copy, not the generic loop, takes the first pass. With the
+sharing tests of compiled code (step 3 of [concurrency.md](concurrency.md#shared-objects)), nests split whole and the
+versioning, measured against the code before them (the best of 7 runs, x86-64): `pi` 16 to 18% faster, `matmul` 6 to
+11%, `qsort` 7%, the others within their noise (`generator`, `sieve` and `fib` within 2%).

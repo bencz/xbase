@@ -120,14 +120,14 @@ void CodeGen::shareString(Value *item) {
 
 // `append`: a string the variable grows (XB_STR_APPEND) takes a string's
 // bytes in place when they fit its room (`hash`), as xb_op_append does;
-// anything else calls it.
+// anything else calls it. The variable is a plain LOCAL (xir.md: append).
 void CodeGen::emitAppend(const xir::Instruction &i) {
-  Value *var = varAddress(*i.var, i.access, unwind_);
+  Value *var = rawAddress(*i.var);
   Value *y = addr(i.operand(0));
+  BasicBlock *join = newBlock("join");
   StructType *ty = strType(ArrayType::get(i8_, 0));
   BasicBlock *strings = newBlock("append.strings"), *fits = newBlock("append.fits"), *one = newBlock("append.byte");
   BasicBlock *many = newBlock("append.bytes"), *end = newBlock("append.end"), *slow = newBlock("append.call");
-  BasicBlock *join = newBlock("join");
   Value *str = ConstantInt::get(i32_, XB_T_STRING);
   branchLikely(b_.CreateAnd(b_.CreateICmpEQ(itemType(var), str), b_.CreateICmpEQ(typeOf(i.operand(0), y), str)),
                strings, slow);
@@ -278,7 +278,7 @@ void CodeGen::findSharingLoads(const xir::Function &f, const xir::CFG &cfg) {
 void CodeGen::shareOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to) {
   auto edge = shareOnEdge_.find({from, to});
   if (edge == shareOnEdge_.end()) return;
-  for (const xir::Var *v : edge->second) shareString(varAddress(*v, xir::Access::Direct, unwind_));
+  for (const xir::Var *v : edge->second) shareString(rawAddress(*v));
 }
 
 bool CodeGen::emitInlineCall(const xir::Instruction &i) {
@@ -307,7 +307,11 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     b_.SetInsertPoint(other);
     branchLikely(isType(t, XB_T_ARRAY), arr, slow);
     b_.SetInsertPoint(arr);
-    storeInt(d, arrayLength(itemPointer(arg(0), "arr")));
+    Value *array = itemPointer(arg(0), "arr");
+    BasicBlock *local = newBlock("len.local"); // a shared array's length is the runtime's to read
+    branchLikely(isLocal(array), local, slow);
+    b_.SetInsertPoint(local);
+    storeInt(d, arrayLength(array));
     break;
   }
   case Inline::ValType: { // the shared one-byte string of the tag's letter (XB_TYPE_LETTERS); a reference or a memo

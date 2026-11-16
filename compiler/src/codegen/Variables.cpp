@@ -1,5 +1,6 @@
 // Where variables are: frame slots, cells of captured variables, STATICs, FOR EACH references; write barriers.
 #include "codegen/CodeGen.h"
+#include "codegen/LoopSplit.h"
 
 #include "xbrt.h" // constants only (type tags, GC state bits)
 
@@ -38,22 +39,147 @@ Value *CodeGen::rawAddress(const xir::Var &v) {
   return nullptr;
 }
 
-// The item a load or store of the variable reaches (see xir::Access).
-Value *CodeGen::varAddress(const xir::Var &v, xir::Access a, BasicBlock *unwind) {
-  Value *item = rawAddress(v);
-  switch (a) {
-  case xir::Access::Direct: return item;
-  case xir::Access::ThroughRef: return refTarget(item, unwind);
-  case xir::Access::MaybeRef: return derefIfRef(item, unwind);
-  }
-  return item;
+// The GC state byte of heap object `obj` (xbrt.h), loaded atomically with `order`.
+LoadInst *CodeGen::stateByte(Value *obj, AtomicOrdering order) {
+  Value *back = ConstantInt::getSigned(i64_, -static_cast<int64_t>(XB_GC_STATE_BACK));
+  auto *state = cast<LoadInst>(loadFrom(i8_, b_.CreateGEP(i8_, obj, back), Mem::GcState, "gc.state"));
+  state->setAtomic(order);
+  return state;
 }
 
-// The element an XB_T_REF item designates.
-Value *CodeGen::refTarget(Value *ref, BasicBlock *unwind) {
-  Value *target = heapItem(b_.CreateCall(rtRefTarget_, {fnCtx_, ref}, "elem"));
+// Whether the heap object `obj` is local, not shared (XB_GC_STATE_SHARED in its header's state byte, xbrt.h). An
+// unordered atomic load: other threads may set the byte's other bits, and only the thread that reaches a local object
+// can share it, so what this thread read holds until it calls something that could. For an object an item holds
+// (`fromItem`: `obj` is the item's pointer word), the load says where the item's header word and type are
+// (kStateLoad, for versionInvariantColdExits).
+Value *CodeGen::isLocal(Value *obj, bool fromItem) {
+  LoadInst *state = stateByte(obj, AtomicOrdering::Unordered);
+  if (fromItem) {
+    int64_t header = -static_cast<int64_t>(dl_.getStructLayout(itemTy_)->getElementOffset(FValue));
+    Metadata *where[] = {ConstantAsMetadata::get(ConstantInt::getSigned(i64_, header)),
+                         ConstantAsMetadata::get(ConstantInt::get(i64_, headerShift(FType)))};
+    state->setMetadata(kStateLoad, MDNode::get(ctx_, where));
+  }
+  return b_.CreateICmpEQ(b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_SHARED)), ConstantInt::get(i8_, 0));
+}
+
+// Where a load (`load`) or store of the variable reaches its value (see xir::Access). `local` is the item in place,
+// where the builder is left: the variable's own item, the value of a local cell that holds no element (a cell's value
+// is at offset 0), or for a load of a FOR EACH variable its local loop reference's element in a local collection or
+// own item; null when there is none (a store into a FOR EACH variable's element). The rest (a shared cell, a shared
+// object, another element) goes to `shared`, a new empty block for the runtime's call (xb_ref_load, xb_ref_store),
+// which takes the item's `type` (XB_T_CELL or XB_T_REF) and `ptr`.
+CodeGen::VarTarget CodeGen::varTarget(const xir::Var &v, xir::Access a, bool load) {
+  VarTarget t;
+  if (a == xir::Access::Direct) {
+    t.local = rawAddress(v);
+    return t;
+  }
+  t.shared = newBlock("var.shared");
+  if (a == xir::Access::ThroughRef) {
+    Value *item = rawAddress(v);
+    t.type = itemType(item);
+    t.ptr = itemPointer(item, "ref");
+    if (!load) { // a store into the element: the runtime's, which makes its write barrier
+      b_.CreateBr(t.shared);
+      return t;
+    }
+    // A read of a local loop reference's element in place: of a local collection (inlineRefTarget), or its own item
+    // (a string's character, an enumerator's Current). A variable in a cell, and the rest, read through the runtime.
+    BasicBlock *isRef = newBlock("each.ref"), *local = newBlock("each.local"), *inColl = newBlock("each.coll");
+    BasicBlock *own = newBlock("each.own"), *join = newBlock("each.var");
+    branchLikely(b_.CreateICmpEQ(t.type, ConstantInt::get(i32_, XB_T_REF)), isRef, t.shared);
+    b_.SetInsertPoint(isRef);
+    branchLikely(isLocal(t.ptr), local, t.shared);
+    b_.SetInsertPoint(local);
+    Value *collType = itemType(heapItem(b_.CreateStructGEP(refTy_, t.ptr, RefColl)));
+    b_.CreateCondBr(b_.CreateOr(b_.CreateICmpEQ(collType, ConstantInt::get(i32_, XB_T_ARRAY)),
+                                b_.CreateICmpEQ(collType, ConstantInt::get(i32_, XB_T_HASH))),
+                    inColl, own);
+    b_.SetInsertPoint(inColl);
+    Value *elem = inlineRefTarget(t.ptr, t.shared);
+    BasicBlock *collEnd = b_.GetInsertBlock();
+    b_.CreateBr(join);
+    b_.SetInsertPoint(own);
+    Value *ownItem = heapItem(b_.CreateStructGEP(refTy_, t.ptr, RefValue));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(join);
+    PHINode *phi = b_.CreatePHI(ptrTy_, 2, "each.value");
+    phi->addIncoming(elem, collEnd);
+    phi->addIncoming(ownItem, own);
+    t.local = phi;
+    return t;
+  }
+  if (v.kind == xir::Var::Kind::Capture) { // a codeblock's cell, which holds a value or an element
+    Value *cell = capturedCell(v);
+    t.type = ConstantInt::get(i32_, XB_T_CELL);
+    t.ptr = cell;
+    BasicBlock *notShared = newBlock("cell.local"), *local = newBlock("cell.value");
+    branchLikely(isLocal(cell, false), notShared, t.shared);
+    b_.SetInsertPoint(notShared);
+    branchLikely(b_.CreateICmpNE(itemType(cell), ConstantInt::get(i32_, XB_T_REF)), local, t.shared);
+    b_.SetInsertPoint(local);
+    t.local = cell;
+    return t;
+  }
+  // A frame variable or a STATIC: its own item, which may hold a cell (a plain branch, since a shared variable, or a
+  // parameter passed by reference, holds one all the time) or an element.
+  Value *item = rawAddress(v);
+  BasicBlock *from = b_.GetInsertBlock(), *ref = newBlock("ref"), *inCell = newBlock("ref.cell");
+  BasicBlock *value = newBlock("cell.value"), *join = newBlock("join");
+  b_.CreateCondBr(holdsRef(item), ref, join);
+  b_.SetInsertPoint(ref);
+  t.type = itemType(item);
+  t.ptr = itemPointer(item, "cell");
+  branchLikely(b_.CreateICmpEQ(t.type, ConstantInt::get(i32_, XB_T_CELL)), inCell, t.shared);
+  b_.SetInsertPoint(inCell);
+  branchLikely(isLocal(t.ptr), value, t.shared);
+  b_.SetInsertPoint(value);
+  Value *inner = heapItem(t.ptr);
+  branchLikely(b_.CreateICmpNE(itemType(inner), ConstantInt::get(i32_, XB_T_REF)), join, t.shared);
+  b_.SetInsertPoint(join);
+  PHINode *phi = b_.CreatePHI(ptrTy_, 2, "var");
+  phi->addIncoming(item, from);
+  phi->addIncoming(inner, value);
+  t.local = phi;
+  return t;
+}
+
+// A load of the variable: the address of its value, in place, or where the runtime copied it: `shadow`, or for a Local
+// `shadow` a scratch item the caller copies at once.
+Value *CodeGen::loadVar(const xir::Var &v, xir::Access a, Value *shadow, BasicBlock *unwind) {
+  VarTarget t = varTarget(v, a, true);
+  if (!t.shared) return t.local;
+  BasicBlock *localEnd = b_.GetInsertBlock(), *join = newBlock("var.loaded");
+  if (t.local) b_.CreateBr(join);
+  b_.SetInsertPoint(t.shared);
+  // A Local home is given the scratch item the runtime wrote, which the caller copies: its own address never joins a
+  // pointer (LLVM keeps it in registers).
+  Value *got = localItems_.count(shadow) ? scratchItem(0) : shadow;
+  b_.CreateCall(rtRefLoad_, {fnCtx_, t.type, t.ptr, got});
   checkPending(unwind);
-  return target;
+  BasicBlock *sharedEnd = b_.GetInsertBlock();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+  if (!t.local) return got;
+  PHINode *phi = b_.CreatePHI(ptrTy_, 2, "var");
+  phi->addIncoming(t.local, localEnd);
+  phi->addIncoming(got, sharedEnd);
+  return phi;
+}
+
+// A store of `src` into the variable: in place, or through the runtime (xb_ref_store).
+void CodeGen::storeVar(const xir::Var &v, xir::Access a, Value *src, BasicBlock *unwind) {
+  VarTarget t = varTarget(v, a);
+  if (t.local) copyItem(t.local, src);
+  if (!t.shared) return;
+  BasicBlock *join = newBlock("var.stored");
+  if (t.local) b_.CreateBr(join);
+  b_.SetInsertPoint(t.shared);
+  b_.CreateCall(rtRefStore_, {fnCtx_, t.type, t.ptr, callArg(src, 0)});
+  checkPending(unwind);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
 }
 
 // The 0-based entry `pos0` of a hash without holes (xb_hash, `used` == `len`), where position k is entry k - 1;
@@ -68,47 +194,42 @@ Value *CodeGen::hashEntryAt(Value *hash, Value *pos0, BasicBlock *miss) {
   return b_.CreateInBoundsGEP(hentryTy_, entries, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "entry");
 }
 
-// The item an xb_ref designates, found in place (see xb_ref in xbrt.h): an array's element within it, the entry at a
-// position of a hash without holes, and with `others` the reference's own value for any other collection; branches
-// to `miss` otherwise, where the runtime finds it or raises the bound error.
-Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss, bool others) {
+// The element an xb_ref designates, when it is in place (see xb_ref in xbrt.h): an array's element within it, or the
+// entry at a position of a hash without holes, of a local array or hash; branches to `miss` otherwise (a shared
+// collection, anything else), where the runtime finds it or raises the bound error.
+Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss) {
   Value *coll = heapItem(b_.CreateStructGEP(refTy_, ref, RefColl));
   Value *type = itemType(coll);
   Value *pos0 = b_.CreateSub(loadFrom(i64_, b_.CreateStructGEP(refTy_, ref, RefIndex), Mem::Unknown, "index"),
                              ConstantInt::get(i64_, 1));
   BasicBlock *arr = newBlock("ref.array"), *hash = newBlock("ref.hash"), *found = newBlock("ref.found");
-  BasicBlock *own = others ? newBlock("ref.own") : miss;
-  SwitchInst *sw = b_.CreateSwitch(type, own, 2);
+  SwitchInst *sw = b_.CreateSwitch(type, miss, 2);
   sw->addCase(ConstantInt::get(i32_, XB_T_ARRAY), arr);
   sw->addCase(ConstantInt::get(i32_, XB_T_HASH), hash);
   b_.SetInsertPoint(arr);
   Value *array = itemPointer(coll, "arr");
-  BasicBlock *arrIn = newBlock("ref.array.in");
-  b_.CreateCondBr(b_.CreateICmpULT(pos0, arrayLength(array)), arrIn, miss);
-  b_.SetInsertPoint(arrIn);
+  BasicBlock *arrayLocal = newBlock("ref.array.local");
+  branchLikely(isLocal(array), arrayLocal, miss);
+  b_.SetInsertPoint(arrayLocal);
+  BasicBlock *inArray = newBlock("ref.array.in");
+  branchLikely(b_.CreateICmpULT(pos0, arrayLength(array)), inArray, miss);
+  b_.SetInsertPoint(inArray);
   Value *elem = arrayElement(array, pos0);
   b_.CreateBr(found);
   b_.SetInsertPoint(hash);
   Value *keyType = itemType(heapItem(b_.CreateStructGEP(refTy_, ref, RefKey)));
+  Value *h = itemPointer(coll, "hash");
   BasicBlock *byPos = newBlock("ref.hash.pos"); // a reference that finds its entry by key goes to the runtime
-  b_.CreateCondBr(b_.CreateICmpEQ(keyType, ConstantInt::get(i32_, XB_T_NIL)), byPos, miss);
+  branchLikely(b_.CreateAnd(b_.CreateICmpEQ(keyType, ConstantInt::get(i32_, XB_T_NIL)), isLocal(h)), byPos, miss);
   b_.SetInsertPoint(byPos);
-  Value *value = heapItem(b_.CreateStructGEP(hentryTy_, hashEntryAt(itemPointer(coll, "hash"), pos0, miss),
-                                             HEntryValue));
+  Value *value = b_.CreateStructGEP(hentryTy_, hashEntryAt(h, pos0, miss), HEntryValue);
   BasicBlock *hashEnd = b_.GetInsertBlock();
   b_.CreateBr(found);
-  Value *ownValue = nullptr;
-  if (others) {
-    b_.SetInsertPoint(own);
-    ownValue = heapItem(b_.CreateStructGEP(refTy_, ref, RefValue));
-    b_.CreateBr(found);
-  }
   b_.SetInsertPoint(found);
-  PHINode *phi = b_.CreatePHI(ptrTy_, others ? 3 : 2, "target");
-  phi->addIncoming(elem, arrIn);
-  phi->addIncoming(value, hashEnd);
-  if (others) phi->addIncoming(ownValue, own);
-  return heapItem(phi);
+  PHINode *target = b_.CreatePHI(ptrTy_, 2, "target");
+  target->addIncoming(elem, inArray);
+  target->addIncoming(value, hashEnd);
+  return heapItem(target);
 }
 
 // Branches to a new block when `cond` holds (marked unlikely) and continues
@@ -136,69 +257,14 @@ Value *CodeGen::holdsRef(Value *item) {
   return b_.CreateICmpULE(offset, ConstantInt::get(i32_, XB_T_REF - XB_T_CELL));
 }
 
-// `item` itself, or the item it designates when it holds a reference. A
-// cell is followed inline (its value is at offset 0): a plain branch, since
-// a shared variable, or a parameter passed by reference, holds one all the
-// time; an element (an XB_T_REF, also inside a cell) is found in place when
-// it can be (inlineRefTarget), else by the runtime.
-Value *CodeGen::derefIfRef(Value *item, BasicBlock *unwind) {
-  BasicBlock *from = b_.GetInsertBlock();
-  BasicBlock *join = newBlock("join"), *then = newBlock("ref");
-  b_.CreateCondBr(holdsRef(item), then, join);
-  b_.SetInsertPoint(then);
-  Value *type = itemType(item);
-  Value *cell = heapItem(itemPointer(item, "cell"));
-  Value *inner = b_.CreateSelect(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), cell, item, "inner");
-  Value *innerType = itemType(inner);
-  BasicBlock *innerFrom = b_.GetInsertBlock();
-  BasicBlock *elemJoin = beginUnlikely(b_.CreateICmpEQ(innerType, ConstantInt::get(i32_, XB_T_REF)), "elem");
-  BasicBlock *miss = newBlock("elem.call"), *got = newBlock("elem.got");
-  Value *fast = inlineRefTarget(itemPointer(inner, "ref"), miss, true);
-  BasicBlock *fastEnd = b_.GetInsertBlock();
-  b_.CreateBr(got);
-  b_.SetInsertPoint(miss);
-  Value *slow = refTarget(inner, unwind);
-  BasicBlock *slowEnd = b_.GetInsertBlock();
-  b_.CreateBr(got);
-  b_.SetInsertPoint(got);
-  PHINode *target = b_.CreatePHI(ptrTy_, 2, "elem");
-  target->addIncoming(fast, fastEnd);
-  target->addIncoming(slow, slowEnd);
-  heapItem(target);
-  BasicBlock *elemEnd = b_.GetInsertBlock();
-  endUnlikely(elemJoin);
-  PHINode *followed = b_.CreatePHI(ptrTy_, 2, "followed");
-  followed->addIncoming(inner, innerFrom);
-  followed->addIncoming(target, elemEnd);
-  BasicBlock *refEnd = b_.GetInsertBlock();
-  endUnlikely(join);
-  PHINode *phi = b_.CreatePHI(ptrTy_, 2, "var");
-  phi->addIncoming(item, from);
-  phi->addIncoming(followed, refEnd);
-  return phi;
-}
-
-// After a store through `item` when it holds a reference: the write barrier
-// of the object holding the target. A cell's is the inline test of
-// cellWritten (a plain branch, as in derefIfRef); an element's (also inside a
-// cell) is xb_ref_written, on a cold edge.
-void CodeGen::refWritten(Value *item) {
-  BasicBlock *then = newBlock("ref.written"), *join = newBlock("join");
-  b_.CreateCondBr(holdsRef(item), then, join);
-  b_.SetInsertPoint(then);
-  Value *type = itemType(item);
-  BasicBlock *inCell = newBlock("cell.written");
-  BasicBlock *element = newBlock("elem.written");
-  branchLikely(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_CELL)), inCell, element);
-  b_.SetInsertPoint(element);
-  b_.CreateCall(rtRefWritten_, {item});
-  b_.CreateBr(join);
-  b_.SetInsertPoint(inCell);
-  Value *cell = heapItem(itemPointer(item, "cell"));
-  Value *cellType = itemType(cell);
-  BasicBlock *throughCell = beginUnlikely(b_.CreateICmpEQ(cellType, ConstantInt::get(i32_, XB_T_REF)), "elem");
-  b_.CreateCall(rtRefWritten_, {cell});
-  endUnlikely(throughCell);
+// After a store through a cell: the cell's barrier when the value went in place (a local cell that holds no element).
+// A shared cell and an element took the value through xb_ref_store, which recorded it.
+void CodeGen::cellStoreWritten(Value *cell, bool fromItem) {
+  BasicBlock *local = newBlock("cell.local"), *inPlace = newBlock("cell.written"), *join = newBlock("join");
+  branchLikely(isLocal(cell, fromItem), local, join);
+  b_.SetInsertPoint(local);
+  branchLikely(b_.CreateICmpNE(itemType(cell), ConstantInt::get(i32_, XB_T_REF)), inPlace, join);
+  b_.SetInsertPoint(inPlace);
   cellWritten(cell);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
@@ -206,9 +272,7 @@ void CodeGen::refWritten(Value *item) {
 
 // After a store into a cell: the inline test of xb_gc_write (xbrt.h).
 void CodeGen::cellWritten(Value *cell) {
-  Value *back = ConstantInt::getSigned(i64_, -static_cast<int64_t>(XB_GC_STATE_BACK));
-  Value *state = loadFrom(i8_, b_.CreateGEP(i8_, cell, back), Mem::GcState, "gc.state");
-  cast<LoadInst>(state)->setAtomic(AtomicOrdering::Monotonic); // other threads set its bits (xb_gc_write)
+  Value *state = stateByte(cell, AtomicOrdering::Monotonic); // other threads set its bits (xb_gc_write)
   Value *bits = b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
   BasicBlock *join = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gc.old");
   b_.CreateCall(rtGcRemember_, {cell});
@@ -216,20 +280,23 @@ void CodeGen::cellWritten(Value *cell) {
 }
 
 // Write barrier after a store into a variable (see xb_gc_write in xbrt.h). A
-// captured variable's cell is a heap object; a STATIC, a shared variable, a
-// parameter and a FOR EACH variable may hold a cell or a reference, whose
-// target lives in a heap object. Frame slots and STATIC storage are roots and
-// need nothing.
+// captured variable's cell is a heap object; a STATIC, a shared variable and
+// a parameter may hold a cell. A store through an element (a FOR EACH
+// variable's too) went through xb_ref_store. Frame slots and STATIC storage
+// are roots and need nothing.
 void CodeGen::writeBarrier(const xir::Var &v, xir::Access a) {
   if (v.kind == xir::Var::Kind::Capture) {
-    Value *cell = capturedCell(v);
-    cellWritten(cell);
-    refWritten(cell);
+    cellStoreWritten(capturedCell(v), false);
     return;
   }
+  if (a != xir::Access::MaybeRef) return;
   Value *item = rawAddress(v);
-  if (a == xir::Access::ThroughRef) b_.CreateCall(rtRefWritten_, {item});
-  else if (a == xir::Access::MaybeRef) refWritten(item);
+  BasicBlock *inCell = newBlock("cell"), *join = newBlock("join");
+  b_.CreateCondBr(b_.CreateICmpEQ(itemType(item), ConstantInt::get(i32_, XB_T_CELL)), inCell, join);
+  b_.SetInsertPoint(inCell);
+  cellStoreWritten(heapItem(itemPointer(item, "cell")), true);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
 }
 
 // A reference to the variable, for an argument passed by reference: its cell

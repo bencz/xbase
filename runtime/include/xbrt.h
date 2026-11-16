@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 43u
+#define XB_ABI_VERSION 44u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -390,12 +390,15 @@ void     xb_gc_root_pop(xb_ctx *ctx, unsigned n);
  * @var passes (`is_static`: a STATIC, always the variable itself);
  * xb_ref_elem the one @base[idx] passes, with the checks of xb_op_index.
  * A cell may hold an XB_T_REF (a FOR EACH variable); an element never holds
- * either. xb_ref_target returns the item `r` designates in the end (a bound
- * error if the array shrank); xb_ref_written is the write barrier after a
- * store there. */
+ * either. Compiled code reads and writes a local cell's value in place (a
+ * cell's value is at offset 0, its write barrier inline); everything else (a
+ * shared cell, an element) goes through xb_ref_load and xb_ref_store, given
+ * the item's type (XB_T_CELL or XB_T_REF) and pointer: the whole item, under
+ * the object's counter or lock when it is shared, its write barrier made (a
+ * bound error if the element is gone). */
 xb_cell *xb_cell_of(xb_ctx *ctx, xb_item *var);
-xb_item *xb_ref_target(xb_ctx *ctx, xb_item *r);
-void     xb_ref_written(const xb_item *r);
+void     xb_ref_load(xb_ctx *ctx, uint32_t type, void *target, xb_item *dst);
+void     xb_ref_store(xb_ctx *ctx, uint32_t type, void *target, const xb_item *v);
 void     xb_ref_of(xb_ctx *ctx, xb_item *r, xb_item *var, uint32_t is_static);
 void     xb_ref_elem(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
 

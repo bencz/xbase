@@ -93,8 +93,8 @@ void CodeGen::callItemOp(FunctionCallee fn, Value *result, std::initializer_list
 Value *CodeGen::dest(const xir::Instruction &i) {
   const Home &h = plan_->home(&i);
   if (h.kind == Home::Kind::Place) {
-    const xir::Instruction &store = *h.place;
-    Value *p = varAddress(*store.var, store.access, unwind_);
+    const xir::Instruction &store = *h.place; // its access is direct (FramePlan::canForward)
+    Value *p = rawAddress(*store.var);
     values_[&i] = p;
     return p;
   }
@@ -279,18 +279,18 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::Load: {
-    Value *p = varAddress(*i.var, i.access, unwind_);
-    if (sharingLoads_.count(&i)) shareString(p); // the value leaves the variable: its string stops growing
+    // The variable's own item serves the use (an elided load), or what the runtime read into the load's shadow slot.
     const Home &h = plan_->home(&i);
-    if (h.kind == Home::Kind::Place && h.place == &i) values_[&i] = p; // the variable's own item serves the use
-    else copyItem(addr(&i), p);
+    bool inPlace = h.kind == Home::Kind::Place && h.place == &i;
+    Value *own = inPlace ? (i.access == xir::Access::Direct ? nullptr : slot(plan_->shadowSlot(&i))) : addr(&i);
+    Value *p = loadVar(*i.var, i.access, own, unwind_);
+    if (sharingLoads_.count(&i)) shareString(p); // the value leaves the variable: its string stops growing
+    if (inPlace) values_[&i] = p;
+    else if (p != own) copyItem(own, p);
     break;
   }
   case Op::Store:
-    if (!plan_->forwarded(&i)) {
-      Value *src = addr(ops[0]);
-      copyItem(varAddress(*i.var, i.access, unwind_), src);
-    }
+    if (!plan_->forwarded(&i)) storeVar(*i.var, i.access, addr(ops[0]), unwind_);
     break;
   case Op::Append: emitAppend(i); break;
   case Op::Barrier: writeBarrier(*i.var, i.access); break;
@@ -509,13 +509,21 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtEachEnter_, {fnCtx_, dest(i), rawAddress(*i.var), inCell, callArg(addr(ops[1]), 0)});
     break;
   }
-  case Op::EachMove: { // in place to an element of an array or a hash without holes (xb_each_move for the rest)
+  case Op::EachMove: { // in place to an element of a local array or hash without holes (xb_each_move for the rest)
     Value *var = rawAddress(*i.var);
-    Value *base = b_.CreateSelect(value(ops[0]), heapItem(itemPointer(var, "cell")), var, "base"); // a cell's value
+    BasicBlock *slow = newBlock("each.move"), *join = newBlock("each.moved"), *local = newBlock("each.local");
+    Value *cell = itemPointer(var, "cell");
+    BasicBlock *from = b_.GetInsertBlock(), *inCell = newBlock("each.cell");
+    b_.CreateCondBr(value(ops[0]), inCell, local); // a variable a codeblock captured: its cell's value
+    b_.SetInsertPoint(inCell);
+    branchLikely(isLocal(cell), local, slow); // a shared cell's reference is the runtime's to move
+    b_.SetInsertPoint(local);
+    PHINode *base = b_.CreatePHI(ptrTy_, 2, "base");
+    base->addIncoming(var, from);
+    base->addIncoming(heapItem(cell), inCell);
     Value *ref = itemPointer(base, "ref");
     tag(b_.CreateStore(value(ops[1]), b_.CreateStructGEP(refTy_, ref, RefIndex)), Mem::Unknown);
-    BasicBlock *slow = newBlock("each.move"), *join = newBlock("each.moved");
-    inlineRefTarget(ref, slow, false);
+    inlineRefTarget(ref, slow);
     b_.CreateBr(join);
     b_.SetInsertPoint(slow);
     b_.CreateCall(rtEachMove_, {fnCtx_, var, b_.CreateZExt(value(ops[0]), i32_), value(ops[1])});
@@ -538,7 +546,11 @@ void CodeGen::emit(const xir::Instruction &i) {
     storeInt(d, value(ops[1]));
     b_.CreateBr(join);
     b_.SetInsertPoint(hash);
-    Value *entry = hashEntryAt(itemPointer(coll, "hash"), b_.CreateSub(value(ops[1]), ConstantInt::get(i64_, 1)), slow);
+    Value *h = itemPointer(coll, "hash");
+    BasicBlock *local = newBlock("each.key.local");
+    branchLikely(isLocal(h), local, slow);
+    b_.SetInsertPoint(local);
+    Value *entry = hashEntryAt(h, b_.CreateSub(value(ops[1]), ConstantInt::get(i64_, 1)), slow);
     copyItem(d, heapItem(b_.CreateStructGEP(hentryTy_, entry, HEntryKey)));
     b_.CreateBr(join);
     b_.SetInsertPoint(slow);
@@ -599,7 +611,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::GenRestore: // the frame's slots after the enumerator's own (parameter 0)
     values_[&i] = b_.CreateSExt(b_.CreateCall(rtGenRestore_, {fnCtx_, rawAddress(*i.var), fnBase_,
-                                                              ConstantInt::get(i32_, plan_->frameSize())}),
+                                                              ConstantInt::get(i32_, plan_->savedSize())}),
                                 i64_);
     break;
   case Op::GenDone: b_.CreateCall(rtGenDone_, {fnCtx_, rawAddress(*i.var)}); break;
@@ -674,7 +686,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   case Op::GenYield: // the frame and the element into the enumerator; the step returns .T.
     shareOnEdge(i.parent, i.targets[0].block); // the next step enters the target through gen.dispatch
-    b_.CreateCall(rtGenYield_, {fnCtx_, rawAddress(*i.var), fnBase_, ConstantInt::get(i32_, plan_->frameSize()),
+    b_.CreateCall(rtGenYield_, {fnCtx_, rawAddress(*i.var), fnBase_, ConstantInt::get(i32_, plan_->savedSize()),
                                 ConstantInt::get(i32_, i.index), addr(ops[0])});
     storeLogical(fnRet_, b_.getInt1(true));
     b_.CreateBr(fnExit_);

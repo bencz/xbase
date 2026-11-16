@@ -325,8 +325,10 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   call or a `send` and the elements of an array or hash literal form a group of consecutive slots; a value used only
   there (a block parameter too, such as the result of `IIF`) is computed straight into its slot of the group. A `load`
   whose single use follows with nothing in between that can write the variable uses the variable's own item instead of a
-  copy, and so does any load of a frame variable nothing writes; a value used only by the `store` that follows it, or by
-  `ret`, is computed in place.
+  copy (through a cell or a reference: what is in place, a local cell's value or a loop variable's element, else a
+  shadow slot the runtime copies into), and so does
+  any load of a frame variable nothing writes; a value used only by the `store` that follows it, when that writes the
+  variable's own item, or by `ret`, is computed in place.
 
 ## Phases
 

@@ -163,8 +163,8 @@ rest of the runtime and compiled code use.
   calls `xb_gc_write(obj)` after storing into a heap object (a grown array's item storage, a reference's character) and
   `xb_gc_write_item(array, index)` after storing an array element (it returns at once for a value of a type that refers
   to no object, `xb_type_is_heap`; compiled code that stores an element in place calls it only for such values);
-  compiled code tests the byte inline after storing into a captured variable's cell and calls `xb_gc_remember`, and
-  calls `xb_ref_written` after a store through a reference (a `FOR EACH` variable, a parameter passed by reference). The
+  compiled code tests the byte inline after storing into a local cell and calls `xb_gc_remember`; a store through
+  anything else goes through the runtime (`xb_ref_store`). The
   barrier comes after the store, with no allocation in between, and an item a call produces never goes straight into a
   heap object: it goes through a frame slot first (a root). A recorded object is traced by the next young collection and
   leaves the set. Threads record without a lock: the thread that sets an object's bit first (atomically) lists it in a
@@ -537,10 +537,13 @@ place.
   new `XB_T_REF` from `xb_ref_elem`, which raises the errors of reading `a[i]` (1068, 1132). So the callee, and a
   codeblock that captures its parameter, share the caller's variable. A reference records whether a loop made it,
   so a parameter given an element can be told from a loop variable.
-- `xb_ref_target` returns the item a reference designates in the end (through a cell, then an element); an element
-  is found again at every use, so it follows the array when it grows, and an index outside the array, after the array
-  shrank, raises `Bound error: array access` (1132). `xb_ref_written` is the write barrier after a store there: the
-  cell, the array, the hash, or the reference itself for a string's character (or after an error left no element).
+- Compiled code reads and writes a local cell's value in place, and reads a `FOR EACH` variable's element of a local
+  collection, or its loop reference's own item, in place; `xb_ref_load` and `xb_ref_store` take the rest, given an
+  item's type (`XB_T_CELL`, `XB_T_REF`) and pointer: through a cell, then an element, the whole item (`xb_ref_get`,
+  `xb_ref_set`, under the counter or lock of a shared object; `xb_ref_store` makes the write barrier). An element is
+  found again at every use, so it follows the array when it grows, and an index outside the array, after the array
+  shrank, raises `Bound error: array access` (1132). `xb_ref_load` copies a local reference's element of a local
+  array, or its own item, at once.
 
 ## Memory variables
 
@@ -1255,8 +1258,10 @@ The program's code runs on one thread today; the services below are what tasks a
   memory variables, macros' captures and variables, `PValue`, `FRead`, `FOR EACH` and the arguments `...` passes on. A
   `FOR EACH` variable in a cell (one a codeblock captured) is read and written through the cell, and its loop's
   reference keeps its index in one word and its own item (a string's character, an enumerator's `Current`) under its
-  counter or lock (`xb_ref_index`, `xb_ref_set_index`, `xb_ref_own_get`, `xb_ref_own_put`). Compiled code still reads
-  cells and references in place (`xb_ref_target`) until step 3 ([concurrency.md](concurrency.md#shared-objects)).
+  counter or lock (`xb_ref_index`, `xb_ref_set_index`, `xb_ref_own_get`, `xb_ref_own_put`).
+- Compiled code tests the header bit before reading or writing in place (an array's element, its length for `Len()`,
+  a hash's key in `FOR EACH`, a cell's value, a loop's reference) and calls the runtime for a shared object
+  (`xb_op_index`, `xb_ref_load`, ...; [compiler.md](compiler.md#xir-to-llvm)).
 
 ## Program startup
 

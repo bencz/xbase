@@ -9,7 +9,7 @@ PROCEDURE Main()
       keep[ i ] := Value( i, sizes[ i ] )
    NEXT
    FOR k := 1 TO 40000
-      seed := ( seed * 1103515245 + 12345 ) % 2147483648
+      seed := ( seed * 16807 ) % 2147483647 // products below 2^53: exact in any floating-point precision
       i := Int( seed % Len( keep ) ) + 1
       sizes[ i ] := Size( i, k )
       keep[ i ] := Value( i, sizes[ i ] )

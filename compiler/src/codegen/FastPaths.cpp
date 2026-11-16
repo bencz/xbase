@@ -5,6 +5,7 @@
 // xb_bit_apply, done in place; every other case, an integer overflow and an
 // index out of bounds included, calls the runtime, which raises the errors.
 #include "codegen/CodeGen.h"
+#include "codegen/LoopSplit.h"
 
 #include "common/BitFunctions.h"
 
@@ -532,10 +533,14 @@ void CodeGen::emitForTest(const xir::Instruction &i) {
 }
 
 // The element base[idx] when base is an array and idx a number within it
-// (1-based; a double is truncated, as xb_num_to_i64 does): its address, in the
-// block where that holds; any other case branches to `slow`. Also gives the
-// array and the 0-based position. An integer index, the usual one, has a path
-// of its own.
+// (1-based; a double is truncated, as xb_num_to_i64 does) and the array is
+// local: its address, in the block where that holds; any other case (a shared
+// array included, whose items the runtime reads and writes whole) branches to
+// `slow`. Also gives the array and the 0-based position. An integer index, the
+// usual one, has a path of its own. A shared array goes to the runtime first:
+// its length, read meanwhile, decides nothing. The sharing test is a branch
+// of its own (one byte tested): one on an invariant array leaves a fast loop
+// with the tests versionInvariantColdExits makes once, before it.
 Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx, BasicBlock *slow, Value *&array,
                                Value *&pos) {
   Value *baseType = typeOf(i.operand(0), base), *idxType = typeOf(i.operand(1), idx);
@@ -549,6 +554,9 @@ Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx
   branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
   auto arrayAndLen = [&](Value *&arr) {
     arr = itemPointer(base, "arr");
+    BasicBlock *local = newBlock("index.local");
+    branchLikely(isLocal(arr), local, slow);
+    b_.SetInsertPoint(local);
     return arrayLength(arr);
   };
   Value *one = ConstantInt::get(i64_, 1);

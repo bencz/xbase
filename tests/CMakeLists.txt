@@ -181,6 +181,11 @@ xb_add_codegen_test(loop_strip_mined x86_64-linux-gnu "\npoll\\.reached[0-9]*:" 
 xb_add_codegen_test(loop_count_down x86_64-linux-gnu "%poll\\.left[0-9.a-z]* = phi i32" loop_stops)
 # A loop's generic copy goes back on its back edge to a second fast copy of the loop, through a preheader of its own.
 xb_add_codegen_test(loop_reenter x86_64-linux-gnu "\n[A-Za-z0-9._]*\\.reenter:" loop_reenter)
+# A nest whose fast copy makes no call is split whole: its outer loop is entered again too (docs/compiler.md, object
+# emission).
+xb_add_codegen_test(loop_nest_split x86_64-linux-gnu "\nfor\\.test(\\.i)?\\.reenter:" loop_nest_split)
+# A loop that makes no call reads on entry the sharing state of a matrix it indexes by its counter.
+xb_add_codegen_test(loop_entry_state x86_64-linux-gnu "\n[A-Za-z0-9._]*\\.states[0-9]*:" loop_nests)
 
 # xIR tests: the xIR of tests/xir/<name>.prg (--dump-xir) must equal <name>.xir.
 file(GLOB XB_XIR_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/xir ${CMAKE_CURRENT_SOURCE_DIR}/xir/*.prg)
