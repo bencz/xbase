@@ -1,5 +1,7 @@
 #include "xbrt_int.h"
 
+#include "core/shared.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -68,13 +70,25 @@ static void assign_var(xb_ctx *ctx, xb_item *r, const xb_item *self, uint32_t k,
       }
       int64_t i = xb_num_wrap_int32(value);
       xb_set_int(r, i);
-      xb_set_int(&o->vars[k], var->rule == XB_VAR_UINT16 ? (uint16_t)i : i); /* no barrier: not a heap value */
+      xb_set_int(&kept, var->rule == XB_VAR_UINT16 ? (uint16_t)i : i);
+      xb_object_put(o, k, &kept);
       return;
     }
   }
-  o->vars[k] = kept;
-  xb_gc_write(o);
+  xb_object_put(o, k, &kept);
   *r = kept;
+}
+
+void xb_object_get_shared(const xb_object *o, uint32_t k, xb_item *dst) {
+  xb_seq_get(o, dst, &o->vars[k]); /* retried until whole: `dst` ends consistent */
+}
+
+void xb_object_put_shared(xb_object *o, uint32_t k, const xb_item *v) {
+  xb_share(v); /* before another thread can reach it */
+  xb_seq_lock(o);
+  xb_seq_store(&o->vars[k], v);
+  xb_gc_write(o);
+  xb_seq_unlock(o);
 }
 
 void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
@@ -88,9 +102,9 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
       return;
     }
     for (uint32_t k = 0; k < cls->nvars; ++k)
-      if (strcmp(cls->vars[k].name, name) == 0 && !(assign && cls->vars[k].rule == XB_VAR_READ)) {
+      if (xb_var_answers(&cls->vars[k], name) && !(assign && cls->vars[k].rule == XB_VAR_READ)) {
         if (!assign) {
-          *r = o->vars[k]; /* arguments are ignored */
+          xb_object_get(o, k, r); /* arguments are ignored */
         } else {
           xb_item nil;
           xb_set_nil(&nil);

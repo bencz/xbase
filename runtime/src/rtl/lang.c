@@ -133,14 +133,18 @@ void xbf_PVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!f || n < 1 || n > f->argc - self_of(f)) return;
   n += self_of(f);
   xb_item *arg = (uint64_t)n <= f->proc->nparams ? &f->slots[n - 1] : &f->argv[n - 1];
-  int ref = arg->type == XB_T_CELL || arg->type == XB_T_REF;
-  xb_item *target = ref ? xb_ref_target(ctx, arg) : arg;
-  if (xb_pending_get(ctx) && xb_pending(ctx)) return;
-  if (argc > 1) {
-    *target = argv[1];
-    if (ref) xb_ref_written(arg);
+  if (arg->type != XB_T_CELL && arg->type != XB_T_REF) {
+    if (argc > 1) *arg = argv[1];
+    *ret = *arg;
+    return;
   }
-  *ret = *target;
+  xb_item r = *arg; /* the reference, a frame's: rooted there */
+  if (argc > 1) {
+    xb_ref_set(ctx, &r, &argv[1]);
+    if (!(xb_pending_get(ctx) && xb_pending(ctx))) *ret = argv[1]; /* the value stored: one error at most */
+    return;
+  }
+  xb_ref_get(ctx, &r, ret);
 }
 
 /* __ArgError( nSubCode, [lSubstitute] ): the argument error (EG_ARG,

@@ -30,8 +30,8 @@ static void read_var(xb_ctx *ctx, xb_item *r, xb_item *var) {
     *r = *var;
     return;
   }
-  const xb_item *t = xb_ref_target(ctx, var);
-  if (t) *r = *t;
+  xb_item ref = *var; /* a frame slot's: rooted there */
+  xb_ref_get(ctx, &ref, r);
 }
 
 static void write_var(xb_ctx *ctx, xb_item *var, const xb_item *v) {
@@ -39,11 +39,8 @@ static void write_var(xb_ctx *ctx, xb_item *var, const xb_item *v) {
     *var = *v;
     return;
   }
-  xb_item *t = xb_ref_target(ctx, var);
-  if (t && !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
-    *t = *v;
-    xb_ref_written(var);
-  }
+  xb_item ref = *var; /* a frame slot's: rooted there */
+  xb_ref_set(ctx, &ref, v);
 }
 
 static void block_fn(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self);
@@ -427,9 +424,10 @@ static xb_str *substitute(xb_ctx *ctx, xb_str *s) {
     while (k + 1 < rest.len && name_char(next[-2 - (ptrdiff_t)k])) ++k;
     name.len = 0;
     for (size_t i = 0; i < k; ++i) put(&name, &next[-2 - (ptrdiff_t)i], 1);
+    xb_item value; /* its bytes are copied before anything allocates */
     const xb_item *v = NULL;
-    if (idle < MAX_IDLE_INSERTIONS && (k > 1 || name.p[0] != '_')) /* `&_` names nothing */
-      v = xb_memvar_peek(ctx, name.p, k);
+    if (idle < MAX_IDLE_INSERTIONS && (k > 1 || name.p[0] != '_') && xb_memvar_peek(ctx, name.p, k, &value))
+      v = &value; /* `&_` names nothing */
     if (v && (v->type != XB_T_STRING || out.len + rest.len + v->v.s->len > MAX_TEXT_BYTES)) v = NULL;
     if (!v) { /* `&name` as written */
       put(&out, &next[-1], 1);

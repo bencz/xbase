@@ -7,6 +7,8 @@
  * reaches the value through it. */
 #include "xbrt_int.h"
 
+#include "core/shared.h"
+
 xb_cell *xb_cell_move(xb_item *var) {
   if (var->type == XB_T_CELL) return var->v.p; /* shared already (a parameter: its caller's variable) */
   xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell)); /* `var` is a root: a frame slot or STATIC storage */
@@ -44,4 +46,16 @@ void xb_block_call(xb_ctx *ctx, xb_item *ret, const xb_item *block, uint32_t arg
   }
   xb_block *b = block->v.p;
   b->fn(ctx, ret, argc, argv, b);
+}
+
+void xb_cell_get_shared(const xb_cell *c, xb_item *dst) {
+  xb_seq_get(c, dst, &c->value); /* retried until whole: `dst` ends consistent */
+}
+
+void xb_cell_put_shared(xb_cell *c, const xb_item *v) {
+  xb_share(v);
+  xb_seq_lock(c);
+  xb_seq_store(&c->value, v);
+  xb_gc_write(c);
+  xb_seq_unlock(c);
 }

@@ -169,8 +169,10 @@ static xb_item *visible(xb_ctx *ctx, const xb_memvar *m) {
 void xb_mv_get(xb_ctx *ctx, xb_item *r, const xb_memvar *m) {
   xb_item *b = visible(ctx, m);
   if (!b) return;
-  const xb_item *v = xb_ref_target(ctx, b);
-  if (v) *r = *v;
+  xb_item binding = *b; /* rooted: the table may move, or the variable go, while a lock is waited for */
+  xb_gc_root_push(ctx, &binding);
+  xb_ref_get(ctx, &binding, r);
+  xb_gc_root_pop(ctx, 1);
 }
 
 void xb_mv_ref(xb_ctx *ctx, xb_item *r, const xb_memvar *m) {
@@ -188,11 +190,7 @@ static void assign(xb_ctx *ctx, uint32_t id, const xb_item *v) {
     return;
   }
   xb_gc_root_push(ctx, &b);
-  xb_item *target = xb_ref_target(ctx, &b);
-  if (target && !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
-    *target = *v;
-    xb_ref_written(&b);
-  }
+  xb_ref_set(ctx, &b, v);
   xb_gc_root_pop(ctx, 1);
 }
 
@@ -215,9 +213,13 @@ void xb_mv_public(xb_ctx *ctx, const xb_memvar *m) {
 
 void xb_mv_param(xb_ctx *ctx, const xb_memvar *m, const xb_item *arg) { push_private(ctx, m->id, arg); }
 
-const xb_item *xb_memvar_value(xb_ctx *ctx, uint32_t id) {
-  xb_item *b = binding(ctx, id);
-  return b->type == XB_T_CELL ? xb_ref_target(ctx, b) : NULL;
+int xb_memvar_value(xb_ctx *ctx, uint32_t id, xb_item *out) {
+  xb_item b = *binding(ctx, id);
+  if (b.type != XB_T_CELL) return 0;
+  xb_gc_root_push(ctx, &b); /* as in xb_mv_get */
+  xb_ref_get(ctx, &b, out);
+  xb_gc_root_pop(ctx, 1);
+  return 1;
 }
 
 uint32_t xb_memvar_number(const char *name, size_t len) {
@@ -237,13 +239,13 @@ uint32_t xb_memvar_number(const char *name, size_t len) {
 
 int xb_memvar_exists(xb_ctx *ctx, uint32_t id) { return binding(ctx, id)->type == XB_T_CELL; }
 
-const xb_item *xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len) {
+int xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len, xb_item *out) {
   uint32_t id;
-  if (!find_name(name, len, &id)) return NULL;
+  if (!find_name(name, len, &id)) return 0;
   const xb_item *b = binding(ctx, id);
-  if (b->type != XB_T_CELL) return NULL;
-  const xb_item *v = &((const xb_cell *)b->v.p)->value;
-  return v->type == XB_T_REF ? NULL : v; /* an element passed to PARAMETERS: read only with its checks */
+  if (b->type != XB_T_CELL) return 0;
+  xb_cell_get(b->v.p, out); /* whole: the cell may be shared */
+  return out->type != XB_T_REF; /* an element passed to PARAMETERS: read only with its checks */
 }
 
 void xb_memvar_assign(xb_ctx *ctx, const char *name, size_t len, const xb_item *value) {
@@ -280,8 +282,10 @@ static void private_to_nil(xb_ctx *ctx, uint32_t i) {
     new_binding(ctx, b, &nil);
     p->borrowed = 0;
   } else {
-    xb_item *target = xb_ref_target(ctx, b);
-    if (target) *target = nil; /* NIL holds no reference: no barrier */
+    xb_item cell = *b; /* rooted, as in xb_mv_get */
+    xb_gc_root_push(ctx, &cell);
+    xb_ref_set(ctx, &cell, &nil);
+    xb_gc_root_pop(ctx, 1);
   }
 }
 

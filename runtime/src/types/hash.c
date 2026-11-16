@@ -444,6 +444,18 @@ int xb_hash_value_at(xb_hash *h, int64_t pos, const xb_item *v, xb_item *now) {
   return e != NULL;
 }
 
+int xb_hash_replace(xb_hash *h, const xb_item *key, const xb_item *v) {
+  if (xb_is_shared(h)) xb_share(v);
+  int shared = lock_if_shared(h);
+  int64_t e = xb_hash_find(h, key);
+  if (e >= 0) {
+    h->entries[e].value = *v;
+    xb_gc_write(h);
+  }
+  unlock_if(h, shared);
+  return e >= 0;
+}
+
 int xb_hash_remove(xb_hash *h, const xb_item *key) {
   int shared = lock_if_shared(h);
   int found = xb_hash_del(h, key);

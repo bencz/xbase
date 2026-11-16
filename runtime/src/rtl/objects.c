@@ -41,7 +41,7 @@ static void has(xb_item *ret, uint32_t argc, xb_item *argv, int method) {
     if (o->cls->compiled) {
       yes = xb_class_has(o, name, method);
     } else if (!method) {
-      for (uint32_t k = 0; k < o->cls->nvars && !yes; ++k) yes = strcmp(o->cls->vars[k].name, name) == 0;
+      for (uint32_t k = 0; k < o->cls->nvars && !yes; ++k) yes = xb_var_answers(&o->cls->vars[k], name);
     }
   }
   if (name) xb_name_upper_free(name, buf);

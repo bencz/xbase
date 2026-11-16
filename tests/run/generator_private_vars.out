@@ -1,0 +1,9 @@
+
+.F. .F. .F. .T.
+error       1004 No exported method
+error       1004 No exported method
+error       1005 No exported variable
+error       1005 No exported variable
+error       1005 No exported variable
+error       1449 Syntax error
+value: NIL          1          2          3

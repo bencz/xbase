@@ -815,6 +815,10 @@ static inline void xb_set_ptr(xb_item *it, xb_type type, void *p) {
 #define XB_GC_STATE_RECORDED 2u   /* bit: in the remembered set, to be traced whole */
 #define XB_GC_STATE_SHARED   0x20u /* bit: reachable by more than one flow (docs/concurrency.md) */
 void xb_gc_remember(void *obj);
+/* The barrier's test on an object's state byte: an old object not yet recorded is recorded. */
+static inline int xb_gc_needs_record(uint8_t state) {
+  return (state & (XB_GC_STATE_OLD | XB_GC_STATE_RECORDED)) == XB_GC_STATE_OLD;
+}
 static inline void xb_gc_write(void *obj) {
   /* Other threads set bits of the byte (atomically): it is read atomically too. */
 #if defined(__GNUC__) || defined(__clang__)
@@ -822,7 +826,7 @@ static inline void xb_gc_write(void *obj) {
 #else
   uint8_t state = *((const volatile uint8_t *)obj - XB_GC_STATE_BACK);
 #endif
-  if ((state & (XB_GC_STATE_OLD | XB_GC_STATE_RECORDED)) == XB_GC_STATE_OLD) xb_gc_remember(obj);
+  if (xb_gc_needs_record(state)) xb_gc_remember(obj);
 }
 
 /* Whether a double converts to int64_t without overflow (false for NaN and

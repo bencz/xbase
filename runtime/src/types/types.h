@@ -3,6 +3,7 @@
 #define XB_TYPES_H
 
 #include "core/context.h"
+#include "core/shared.h"
 
 /* Uninitialized string of `len` bytes (plus the terminating NUL). */
 xb_str *xb_str_alloc(uint64_t len); /* 64-bit: checked before it is narrowed to size_t (32-bit hosts) */
@@ -80,6 +81,34 @@ static inline int xb_is_loop_ref(const xb_item *it) {
 /* Moves the value of the variable whose own item is `var` into a new cell
  * (unless it holds one) and returns the cell. */
 xb_cell *xb_cell_move(xb_item *var);
+/* A cell's value that other threads may reach (a codeblock's capture, a memory variable), read whole, or written
+ * (the value shared first) under the cell's lock when it is shared (core/shared.h); in place when it is local. */
+void     xb_cell_get_shared(const xb_cell *c, xb_item *dst);
+void     xb_cell_put_shared(xb_cell *c, const xb_item *v);
+static inline void xb_cell_get(const xb_cell *c, xb_item *dst) {
+  if (xb_is_shared(c)) xb_cell_get_shared(c, dst);
+  else *dst = c->value;
+}
+static inline void xb_cell_put(xb_cell *c, const xb_item *v) {
+  uint8_t state = xb_atomic_load8(&xb_gc_header(c)->state, XB_RELAXED); /* one load: sharing and the barrier's test */
+  if (state & XB_GC_SHARED) {
+    xb_cell_put_shared(c, v);
+    return;
+  }
+  c->value = *v;
+  if (xb_gc_needs_record(state)) xb_gc_remember(c);
+}
+/* What a reference (an XB_T_CELL or XB_T_REF item) designates, read into `dst` or written from `v`, whole, through
+ * the shared paths of cells, arrays and hashes: an element gone is the bound error, and then the reference's own
+ * item is read, or written when no request to unwind is pending (a substituted value lands there). */
+void     xb_ref_get(xb_ctx *ctx, const xb_item *r, xb_item *dst);
+/* A reference's index and own item (a string's character, an enumerator's Current) when another thread may reach the
+ * reference: a loop's, in a cell shared with a codeblock. */
+int64_t  xb_ref_index(const xb_ref *ref);
+void     xb_ref_set_index(xb_ref *ref, int64_t index);
+void     xb_ref_own_get(const xb_ref *ref, xb_item *dst);
+void     xb_ref_own_put(xb_ref *ref, const xb_item *v);
+void     xb_ref_set(xb_ctx *ctx, const xb_item *r, const xb_item *v);
 
 /* What an instance variable of a class accepts. A value of another type is
  * ignored by XB_VAR_ARRAY, _LOGICAL and _STRING; the numeric rules raise an
@@ -98,9 +127,15 @@ typedef enum xb_var_rule {
 } xb_var_rule;
 
 typedef struct xb_class_var {
-  const char *name;             /* upper-cased */
+  const char *name;             /* upper-cased; in parentheses: the runtime's own, which no message reaches */
   xb_var_rule rule;
 } xb_class_var;
+
+/* Whether a message may name the variable: not one of the runtime's own (a generator's state, frame and resume
+ * function), whatever text the message comes from (ObjSend, a macro). */
+static inline int xb_var_answers(const xb_class_var *v, const char *name) {
+  return v->name[0] != '(' && strcmp(v->name, name) == 0;
+}
 
 /* A class: one the runtime defines in C, or one compiled from xBase
  * (`compiled`, types/class.c), whose variables all take any value. */
@@ -120,6 +155,23 @@ typedef struct xb_object {
 } xb_object;
 
 xb_object *xb_object_new(const xb_class *cls);
+/* Variable `k` of an object that other threads may reach, read whole, or written (the value shared first) under the
+ * object's lock when it is shared (core/shared.h); in place when it is local. */
+void       xb_object_get_shared(const xb_object *o, uint32_t k, xb_item *dst);
+void       xb_object_put_shared(xb_object *o, uint32_t k, const xb_item *v);
+static inline void xb_object_get(const xb_object *o, uint32_t k, xb_item *dst) {
+  if (xb_is_shared(o)) xb_object_get_shared(o, k, dst);
+  else *dst = o->vars[k];
+}
+static inline void xb_object_put(xb_object *o, uint32_t k, const xb_item *v) {
+  uint8_t state = xb_atomic_load8(&xb_gc_header(o)->state, XB_RELAXED); /* one load: sharing and the barrier's test */
+  if (state & XB_GC_SHARED) {
+    xb_object_put_shared(o, k, v);
+    return;
+  }
+  o->vars[k] = *v;
+  if (xb_gc_needs_record(state)) xb_gc_remember(o); /* xb_gc_write's */
+}
 void       xb_set_object(xb_item *it, xb_object *o);
 /* A message to an object of a compiled class (types/class.c); one it does not
  * answer is the class's error ("Message not found"). Returns 1. */
@@ -151,7 +203,9 @@ static inline int xb_is_generator(const xb_item *it) {
   return it->type == XB_T_OBJECT && ((const xb_object *)it->v.p)->cls == &xb_generator_class;
 }
 int        xb_gen_move_next(xb_ctx *ctx, const xb_item *gen);
-const xb_item *xb_gen_current(const xb_item *gen);
+/* The element the last step yielded (its CURRENT variable, the first). */
+#define XB_GEN_CURRENT 0u
+static inline void xb_gen_current(const xb_item *gen, xb_item *dst) { xb_object_get(gen->v.p, XB_GEN_CURRENT, dst); }
 int        xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
 /* What every value answers (ClassName), else the error of a message no
  * class has: BASE/1004, or BASE/1005 for an assignment. */
@@ -239,6 +293,7 @@ int      xb_hash_lookup(xb_hash *h, const xb_item *key, xb_item *stored, xb_item
 int64_t  xb_hash_position(xb_hash *h, const xb_item *key);
 int      xb_hash_entry(xb_hash *h, int64_t pos, xb_item *key, xb_item *value);
 int      xb_hash_value_at(xb_hash *h, int64_t pos, const xb_item *v, xb_item *now);
+int      xb_hash_replace(xb_hash *h, const xb_item *key, const xb_item *v); /* an existing key's value only */
 int      xb_hash_remove(xb_hash *h, const xb_item *key);
 int      xb_hash_remove_at(xb_hash *h, int64_t pos);
 void     xb_hash_empty(xb_hash *h);

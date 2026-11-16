@@ -465,20 +465,20 @@ static void cache_put(xb_send_cache *cache, const void *c, const member *m, size
  * address of a class variable's value). */
 static void perform(xb_ctx *ctx, xb_item *r, const member *m, uintptr_t slot, uint32_t argc, xb_item *argv) {
   xb_item nil;
-  xb_set_nil(&nil);
   switch (m->kind) {
     case M_METHOD: m->fn(ctx, r, argc, argv); return;
     case M_CLASS_GET: *r = *(xb_item *)slot; return;
     case M_CLASS_SET: /* a root: no barrier */
+      xb_set_nil(&nil);
       *(xb_item *)slot = argc > 1 ? argv[1] : nil;
       *r = *(xb_item *)slot;
       return;
-    case M_GET: *r = ((xb_object *)argv[0].v.p)->vars[slot]; return; /* arguments are ignored */
+    case M_GET: xb_object_get(argv[0].v.p, (uint32_t)slot, r); return; /* arguments are ignored */
     case M_SET: {
-      xb_object *o = argv[0].v.p;
-      o->vars[slot] = argc > 1 ? argv[1] : nil;
-      xb_gc_write(o);
-      *r = o->vars[slot];
+      if (argc < 2) xb_set_nil(&nil);
+      const xb_item *v = argc > 1 ? &argv[1] : &nil;
+      xb_object_put(argv[0].v.p, (uint32_t)slot, v);
+      *r = *v;
       return;
     }
   }

@@ -85,33 +85,30 @@ void xbf_FREAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!handle_arg(argc, argv, 0, &f) || argc < 3 || (argv[1].type != XB_T_CELL && argv[1].type != XB_T_REF) ||
       !xb_is_number(&argv[2]))
     return;
-  const xb_item *target = xb_ref_target(ctx, &argv[1]);
-  if (xb_pending_get(ctx) && xb_pending(ctx)) return;
-  if (target->type != XB_T_STRING) return;
-  int64_t n = xb_num_to_i64(&argv[2]);
-  size_t len = target->v.s->len;
-  if (n < 1 || (uint64_t)n > len) { /* nothing is read, but the handle is still checked: FError() 6 for a bad one */
-    char none;
+  xb_item buffer[2]; /* the variable's value, then the copy read into: rooted through the allocation and the read */
+  xb_set_nil(&buffer[0]);
+  xb_set_nil(&buffer[1]);
+  xb_gc_root_push(ctx, &buffer[0]);
+  xb_gc_root_push(ctx, &buffer[1]);
+  xb_ref_get(ctx, &argv[1], &buffer[0]);
+  int64_t n = xb_num_to_i64(&argv[2]), got = 0;
+  if (!(xb_pending_get(ctx) && xb_pending(ctx)) && buffer[0].type == XB_T_STRING) {
+    size_t len = buffer[0].v.s->len;
     int32_t err = 0;
-    set_error(ctx, xb_platform_file_read(f, &none, 0, &err) >= 0, err);
-    return;
+    if (n < 1 || (uint64_t)n > len) { /* nothing is read, but the handle is still checked: FError() 6 for a bad one */
+      char none;
+      set_error(ctx, xb_platform_file_read(f, &none, 0, &err) >= 0, err);
+    } else {
+      xb_set_str(&buffer[1], xb_str_alloc(len));
+      memcpy(buffer[1].v.s->data, buffer[0].v.s->data, len);
+      got = xb_file_read_up_to(f, buffer[1].v.s->data, (size_t)n, &err); /* another thread may collect meanwhile */
+      set_error(ctx, got >= 0, err);
+      if (got > 0) xb_ref_set(ctx, &argv[1], &buffer[1]);
+      if (xb_pending_get(ctx) & XB_PENDING_UNWIND) got = 0; /* the variable was not written */
+    }
   }
-  xb_str *buf = xb_str_alloc(len);
-  target = xb_ref_target(ctx, &argv[1]); /* the variable as it is after the allocation */
-  if (target->type != XB_T_STRING || target->v.s->len != len) return;
-  memcpy(buf->data, target->v.s->data, len);
-  int32_t err = 0;
-  xb_item held; /* rooted while the read writes into it: another thread may collect meanwhile */
-  xb_set_str(&held, buf);
-  xb_gc_root_push(ctx, &held);
-  int64_t got = xb_file_read_up_to(f, buf->data, (size_t)n, &err);
-  xb_gc_root_pop(ctx, 1);
-  set_error(ctx, got >= 0, err);
-  if (got <= 0) return;
-  xb_item *var = xb_ref_target(ctx, &argv[1]);
-  xb_set_str(var, buf);
-  xb_ref_written(&argv[1]);
-  xb_set_int(ret, got);
+  xb_gc_root_pop(ctx, 2);
+  if (got > 0) xb_set_int(ret, got);
 }
 
 /* FWrite( nHandle, cBuffer, [nBytes] ): writes the first nBytes of the buffer (all of it without nBytes, or with one

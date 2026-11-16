@@ -387,17 +387,20 @@ do not change.
 
 `types/generator.c`. A generator's enumerator is an object of the runtime class `GENERATOR`: `Current` (a variable no
 message assigns, `XB_VAR_READ`) is the last element, `MoveNext()` runs one step (`xb_gen_move_next`), and its own
-variables, whose names no message can spell, hold the state, the resume function (its address as an integer) and the
-frame between steps (an array). `xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the
-enumerator, the resume function's argument); at each step `xb_gen_restore` copies the saved slots into the resume
-function's frame and returns the state, marking the enumerator ended until the step yields (a step that fails, or a
-`MoveNext` inside the step, ends it); `xb_gen_yield` saves the frame (one write barrier per card, `xb_gc_write_items`),
-the state and the element; `xb_gen_done` ends it and drops the frame, at the end of the body and after a step that fails
-(`Current` is then NIL). `FOR EACH` calls the step and reads `Current` directly; its other messages are those of the
-runtime's `Enumerable` (`g:Where( ... )`), the class its own class function makes (`xbf_ENUMERABLE`,
-`xb_class_send_as`): a program's class named `Enumerable` is another one. A message neither answers is the usual
-`GENERATOR:message` error. The `generator` benchmark (3,000,000 steps of one generator feeding another) takes about 80
-ms.
+variables, whose names no message reaches (in parentheses: `xb_var_answers`, whatever text a message comes from,
+`ObjSend` or a macro), hold the state, the resume function (its address as an integer) and the frame between steps (an
+array). `xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the enumerator, the resume
+function's argument); at each step `xb_gen_restore` copies the saved slots into the resume function's frame and returns
+the state, marking the enumerator ended until the step yields (a step that fails, or a `MoveNext` inside the step, ends
+it); a shared enumerator's step is claimed first, under its lock (its state `s` becomes `-(s + 2)` until the step
+yields), so a `MoveNext` from another thread meanwhile answers `.F.` and touches nothing, and one thread at a time
+touches the frame (a `MoveNext` and the `Current` after it are two operations: another thread may step between them);
+`xb_gen_yield` saves the frame (one write barrier per card, `xb_gc_write_items`), the state and the element;
+`xb_gen_done` ends it and drops the frame, at the end of the body and after a step that fails (`Current` is then NIL).
+`FOR EACH` calls the step and reads `Current` (`xb_gen_current`, whole); its other messages are those of the runtime's
+`Enumerable` (`g:Where( ... )`), the class its own class function makes (`xbf_ENUMERABLE`, `xb_class_send_as`): a
+program's class named `Enumerable` is another one. A message neither answers is the usual `GENERATOR:message` error. The
+`generator` benchmark (3,000,000 steps of one generator feeding another) takes about 80 ms.
 
 ## Classes
 
@@ -1210,8 +1213,8 @@ The program's code runs on one thread today; the services below are what tasks a
   waiter of the address that came first, or every one. Waiters queue in arrival order in one of 256 buckets chosen by
   the address (each made when first used) and sleep on a condition of their own, so a wake reaches only the waiters
   it marks; the value is tested under the bucket's lock, which the waker takes after changing it, so no wake is lost.
-- Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's operations on arrays
-  and hashes use them, those on objects, cells and references in a next step): `XB_GC_SHARED` in an object's header
+- Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's operations on arrays,
+  hashes, objects, cells and references use them; compiled code in a next step): `XB_GC_SHARED` in an object's header
   (`XB_GC_STATE_SHARED`, kept by every collection) marks one that more than one flow can reach. `xb_share` marks what an
   item refers to and all it reaches (an explicit stack, stopping at what is shared already, literal strings left alone,
   a growing string no longer growing in place); it allocates nothing. A shared object's items are read under the
@@ -1233,16 +1236,27 @@ The program's code runs on one thread today; the services below are what tasks a
   only the runtime reaches yet. `ASort` of a shared array sorts a copy (a block may run any code) and puts the sorted
   range back under the lock, as far as the array still reaches; a local one that its block shares meanwhile is sorted
   again so; its block reads elements whole.
-- Hashes (`types/hash.c`): every operation on a shared hash runs under its lock, reads too (a read may reorganize
-  the hash: the position tree, a compaction), and keys and values come out copied: `xb_hash_length`, `xb_hash_get`,
+- Hashes (`types/hash.c`): every operation on a shared hash runs under its lock, reads too (a read may reorganize the
+  hash: the position tree, a compaction), and keys and values come out copied: `xb_hash_length`, `xb_hash_get`,
   `xb_hash_lookup` (with the key as stored), `xb_hash_position`, `xb_hash_entry` (by position), `xb_hash_value_at`,
-  `xb_hash_remove`, `xb_hash_remove_at`, `xb_hash_empty`, `xb_hash_fill`, `xb_hash_case_match`; `xb_hash_put` and
-  `xb_hash_reserve_any` take a larger store, allocated before the lock (rooted meanwhile), under it when still
-  needed; `xb_hash_snapshot` and `xb_hash_copy_any` copy the entries as one locked read saw them. The index
-  operators, `$`, `Len`, `Empty`, the `H*` functions, `AScan`'s search, `AClone` and the count and keys of `FOR EACH`
-  use them (a local hash is still read in place where nothing else could reach it). `HSort` of a shared hash sorts a
-  copy and puts the order back under the lock (`xb_hash_take_order`): each key found as the hash is then, once, with
-  its value then, else the hash stays as it is; a local hash whose block shares it meanwhile is sorted again so.
+  `xb_hash_replace` (an existing key's value), `xb_hash_remove`, `xb_hash_remove_at`, `xb_hash_empty`, `xb_hash_fill`,
+  `xb_hash_case_match`; `xb_hash_put` and `xb_hash_reserve_any` take a larger store, allocated before the lock (rooted
+  meanwhile), under it when still needed; `xb_hash_snapshot` and `xb_hash_copy_any` copy the entries as one locked read
+  saw them. The index operators, `$`, `Len`, `Empty`, the `H*` functions, `AScan`'s search, `AClone` and the count and
+  keys of `FOR EACH` use them (a local hash is still read in place where nothing else could reach it). `HSort` of a
+  shared hash sorts a copy and puts the order back under the lock (`xb_hash_take_order`): each key found as the hash is
+  then, once, with its value then, else the hash stays as it is; a local hash whose block shares it meanwhile is sorted
+  again so.
+- Objects, cells and references: `xb_object_get` and `xb_object_put` (an object's variable: the messages that read and
+  assign them, compiled classes' and the runtime's), `xb_cell_get` and `xb_cell_put` (a codeblock's capture, a memory
+  variable), inline for a local one (one header load: sharing and the write barrier's test), under the counter or the
+  lock for a shared one; `xb_ref_get` and `xb_ref_set` read and write what a reference designates whole, through them
+  and through the array and hash functions (an element gone is the bound error, then the reference's own item), for
+  memory variables, macros' captures and variables, `PValue`, `FRead`, `FOR EACH` and the arguments `...` passes on. A
+  `FOR EACH` variable in a cell (one a codeblock captured) is read and written through the cell, and its loop's
+  reference keeps its index in one word and its own item (a string's character, an enumerator's `Current`) under its
+  counter or lock (`xb_ref_index`, `xb_ref_set_index`, `xb_ref_own_get`, `xb_ref_own_put`). Compiled code still reads
+  cells and references in place (`xb_ref_target`) until step 3 ([concurrency.md](concurrency.md#shared-objects)).
 
 ## Program startup
 

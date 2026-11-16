@@ -114,12 +114,13 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     size_t len;
     const char *name = xb_memvar_name(id, &len);
     if (xb_memvar_like(skel, name, len) != like) continue;
-    const xb_item *v = xb_memvar_value(ctx, id);
+    xb_item value; /* put in the record before anything allocates */
+    int has = xb_memvar_value(ctx, id, &value);
     if (xb_pending_get(ctx) & XB_PENDING_UNWIND) {
       free(out.p);
       return;
     }
-    if (v) put_record(&out, name, len, v);
+    if (has) put_record(&out, name, len, &value);
   }
   *grow(&out, 1) = MEM_END;
   char *path = xb_file_path_with_ext(argv[0].v.s->data, strlen(argv[0].v.s->data), ".mem");

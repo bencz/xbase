@@ -50,7 +50,7 @@ static int move_next(xb_ctx *ctx, const xb_item *e) {
 /* The current element of an enumerator; 0 after an error. */
 static int current(xb_ctx *ctx, xb_item *r, const xb_item *e) {
   if (xb_is_generator(e)) {
-    *r = *xb_gen_current(e);
+    xb_gen_current(e, r);
     return 1;
   }
   return send0(ctx, r, e, "CURRENT");
@@ -123,22 +123,30 @@ uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var) {
   return var->type == XB_T_CELL;
 }
 
-/* The item a FOR EACH loop works on (see xb_each_enter in xbrt.h). */
-static xb_item *each_base(xb_item *var, uint32_t in_cell) {
-  return in_cell ? &((xb_cell *)var->v.p)->value : var;
+/* The item a FOR EACH loop works on (see xb_each_enter in xbrt.h): the variable's, or its cell's (which another
+ * thread may reach, through a codeblock that captured the variable). */
+static void each_base(const xb_item *var, uint32_t in_cell, xb_item *dst) {
+  if (in_cell) xb_cell_get(var->v.p, dst);
+  else *dst = *var;
 }
 
-/* A store into the base is a store into the cell when the variable is shared. */
-static void each_written(xb_item *var, uint32_t in_cell) {
-  if (in_cell) xb_gc_write(var->v.p);
+static void each_set_base(xb_item *var, uint32_t in_cell, const xb_item *v) {
+  if (in_cell) xb_cell_put(var->v.p, v);
+  else *var = *v;
 }
 
 void xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, const xb_item *coll) {
-  XB_UNUSED(ctx);
-  xb_item *base = each_base(var, in_cell);
-  *saved = *base;
-  xb_ref_init(base, coll, 0, 1); /* `coll` and `saved` are frame slots, `base` is reachable: all rooted */
-  each_written(var, in_cell);
+  each_base(var, in_cell, saved); /* `coll` and `saved` are frame slots, `var` is reachable: all rooted */
+  if (!in_cell) {
+    xb_ref_init(var, coll, 0, 1);
+    return;
+  }
+  xb_item ref;
+  xb_set_nil(&ref);
+  xb_gc_root_push(ctx, &ref);
+  xb_ref_init(&ref, coll, 0, 1);
+  xb_cell_put(var->v.p, &ref);
+  xb_gc_root_pop(ctx, 1);
 }
 
 /* An enumerator's Current, into the loop reference's own item. Kept apart, so
@@ -147,34 +155,31 @@ XB_NOINLINE static void move_current(xb_ctx *ctx, xb_ref *ref) {
   xb_item value;
   xb_set_nil(&value);
   xb_gc_root_push(ctx, &value);
-  if (current(ctx, &value, &ref->coll)) {
-    ref->value = value; /* the reference is the loop's: alive, and pinned while this frame holds it */
-    xb_gc_write(ref);
-  }
+  if (current(ctx, &value, &ref->coll)) xb_ref_own_put(ref, &value); /* the loop's: alive, pinned by this frame */
   xb_gc_root_pop(ctx, 1);
 }
 
 void xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx) {
-  xb_item *base = each_base(var, in_cell); /* still holds the loop's reference: taking the variable copies it */
-  xb_ref *ref = base->v.p;
-  ref->index = idx;
+  xb_item base; /* still the loop's reference (taking the variable copies it), which `var` keeps */
+  each_base(var, in_cell, &base);
+  xb_ref *ref = base.v.p;
+  xb_ref_set_index(ref, idx);
   if (ref->coll.type == XB_T_ARRAY || ref->coll.type == XB_T_HASH) {
-    xb_ref_target(ctx, base); /* an array that shrank under the loop: bound error */
+    xb_item element; /* not kept: an element gone (an array that shrank under the loop) is the bound error */
+    xb_ref_get(ctx, &base, &element);
   } else if (ref->coll.type == XB_T_STRING) {
     const xb_str *s = ref->coll.v.s;
     if (idx >= 1 && (uint64_t)idx <= s->len) {
-      xb_set_str(&ref->value, xb_str_new(s->data + idx - 1, 1));
-      xb_gc_write(ref);
+      xb_item ch;
+      xb_set_str(&ch, xb_str_new(s->data + idx - 1, 1)); /* one byte: static, nothing allocated */
+      xb_ref_own_put(ref, &ch);
     }
   } else {
     move_current(ctx, ref);
   }
 }
 
-void xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved) {
-  *each_base(var, in_cell) = *saved;
-  each_written(var, in_cell);
-}
+void xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved) { each_set_base(var, in_cell, saved); }
 
 void xb_each_key(xb_ctx *ctx, xb_item *r, const xb_item *coll, int64_t idx) {
   if (coll->type != XB_T_HASH) {
@@ -206,9 +211,8 @@ int32_t xb_args_rest(xb_ctx *ctx, xb_item *dst, xb_item *rest, uint32_t n, uint3
       dst[k] = rest[k];
       continue;
     }
-    const xb_item *v = xb_ref_target(ctx, &rest[k]);
+    xb_ref_get(ctx, &rest[k], &dst[k]); /* `dst` is a frame's: rooted there */
     if (xb_pending_get(ctx) && xb_pending(ctx)) return 0;
-    dst[k] = *v;
   }
   return 1;
 }
