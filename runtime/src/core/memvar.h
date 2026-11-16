@@ -35,6 +35,10 @@ int xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len, xb_item *out);
  * holds it (that function ends it: PRIVATES in rtl.ch). */
 void xb_memvar_assign(xb_ctx *ctx, const char *name, size_t len, const xb_item *value);
 
+/* Shares the memory variables of the context's environment: the bindings visible and those PRIVATEs hid (publication,
+ * every other thread stopped). */
+void xb_memvar_share(xb_ctx *ctx);
+
 /* CLEAR MEMORY: no PRIVATE or PUBLIC exists any more. */
 void xb_memvar_clear(xb_ctx *ctx);
 

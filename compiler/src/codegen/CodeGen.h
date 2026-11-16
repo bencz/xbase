@@ -152,6 +152,7 @@ private:
     llvm::Value *type = nullptr, *ptr = nullptr;
   };
   llvm::LoadInst *stateByte(llvm::Value *obj, llvm::AtomicOrdering order);
+  llvm::Value *storageLocal();
   llvm::Value *isLocal(llvm::Value *obj, bool fromItem = true);
   VarTarget varTarget(const xir::Var &v, xir::Access a, bool load = false);
   llvm::Value *loadVar(const xir::Var &v, xir::Access a, llvm::Value *shadow, llvm::BasicBlock *unwind);
@@ -165,6 +166,8 @@ private:
   void cellWritten(llvm::Value *cell);
   void writeBarrier(const xir::Var &v, xir::Access a);
   void refOf(const xir::Var &v, llvm::Value *dst);
+  llvm::Value *isStaticArg(const xir::Var &v);
+  llvm::Value *eachHow(const xir::Instruction &i);
 
   // FastPaths.cpp: integer cases of operators inline
   llvm::Value *isInt(llvm::Value *item);
@@ -297,6 +300,7 @@ private:
   std::unordered_map<const xir::Function *, llvm::Function *> direct_;
 
   llvm::GlobalVariable *statics_ = nullptr;   // the STATICs of the module being added
+  llvm::Constant *storageShared_ = nullptr;  // xb_storage_shared (xbrt.h)
   llvm::Constant *file_ = nullptr;            // its source file name (xb_proc.file), or null
   // Its memory variables: the table of their xb_memvar (numbered by the runtime when the module registers), and the
   // address of each name's entry.

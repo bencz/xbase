@@ -501,9 +501,21 @@ static uint32_t grown(uint32_t cap, uint32_t need) {
   return want;
 }
 
+/* Room for one more entry in a local hash, made in place: a store that must grow is made first, an allocation and so a
+ * safepoint, where the program's storage may become shared (publication, docs/concurrency.md) and this hash with it,
+ * so it is tested again after it: 0 then, nothing changed, for the shared path to take over. */
+static int local_entry_room(xb_hash *h) {
+  if (h->used < h->cap || (h->cap && h->used - h->len >= h->cap / 4)) return !xb_is_shared(h); /* none to make */
+  uint32_t want = grown(h->cap, h->cap * 2);
+  xb_hentry *store = new_store(want); /* `h` is reachable; the store, until it is in place, by the stack's pin */
+  if (xb_is_shared(h)) return 0;
+  move_into(h, store, want);
+  return 1;
+}
+
 void xb_hash_put(xb_ctx *ctx, xb_hash *h, const xb_item *key, const xb_item *value) {
-  if (!xb_is_shared(h)) {
-    xb_hash_set(h, key, value);
+  if (!xb_is_shared(h) && local_entry_room(h)) {
+    xb_hash_set(h, key, value); /* room made: nothing allocates */
     return;
   }
   xb_share(key);
@@ -542,8 +554,13 @@ void xb_hash_put(xb_ctx *ctx, xb_hash *h, const xb_item *key, const xb_item *val
 
 void xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint32_t n) {
   if (!xb_is_shared(h)) {
-    xb_hash_reserve(h, n);
-    return;
+    if (n <= h->cap) return;
+    uint32_t want = grown(h->cap, n);
+    xb_hentry *store = new_store(want); /* a safepoint: tested again after it, as in local_entry_room */
+    if (!xb_is_shared(h)) {
+      move_into(h, store, want);
+      return;
+    }
   }
   xb_item spare;
   xb_set_nil(&spare);

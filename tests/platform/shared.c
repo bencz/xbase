@@ -40,7 +40,7 @@ static void graph(void) {
   xb_block_new(ctx, &blk, NULL, 1);
   xb_item var;
   xb_set_int(&var, 7);
-  xb_cell *cell = xb_cell_move(&var); /* `var` now holds the cell: the block's from here on */
+  xb_cell *cell = xb_cell_move(ctx, &var, 0); /* `var` now holds the cell: the block's from here on */
   ((xb_block *)blk.v.p)->cells[0] = cell;
   xb_set_str(&grown, xb_str_new("ab", 2));
   xb_set_str(&tail, xb_str_new("cd", 2));

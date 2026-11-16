@@ -176,7 +176,17 @@ freed storage. The runtime rules both out:
   `STATIC`s, `PUBLIC`s, class variables, a channel, a task's result), the arguments and captured cells of a new flow
   (`TaskRun`, `ThreadStart`), and the frame of an `ASYNC` call that suspends while its caller goes on without awaiting
   it. The write barrier, which every store into a heap object already passes through, tests the stored-into object's
-  header byte; the shared bit lives in the same byte, so local stores cost nothing more.
+  header byte; the shared bit lives in the same byte, so local stores cost nothing more. The program's storage (the
+  `STATIC`s, the class variables, the memory variables) becomes shared storage when a second thread attaches
+  (`xb_gc_thread_attach`): every other thread stopped, as for a collection, what it holds is shared (the memory
+  variables visible then: shared
+environments, and the variables made in them, come with `ThreadStart`) and the flag
+  `xb_storage_shared` set ([runtime.md](runtime.md#threads-and-synchronization)). From then on a `STATIC`'s own item is
+  read and written whole under the stripe of its address, a value stored shared first (compiled code tests the flag and
+  calls the runtime); a `STATIC` moved into a cell (captured, passed by reference, a `FOR EACH` variable) is moved under
+  that stripe, the cell shared first; a class variable is read and written so too, and a class prepared later shares
+  what it holds before another thread can reach it. An attached thread that waits for another (a join, a wait for a
+  flag) waits in a blocking operation, as for a collection.
 - **Access.** A shared object's items are read under its sequence counter (read, check, retry: no lock, no write) and
   written, grown and shrunk under its lock: those of its stripe, one of a table chosen by its address, whose lock word a
   contended waiter sleeps on in the parking lot. Compiled code's in-place reads and writes (an array's elements and
@@ -200,8 +210,9 @@ freed storage. The runtime rules both out:
   and a lock word parked on when contended; with C tests on threads. (2, done) The runtime's operations on arrays,
   hashes, object variables, cells, references, the elements `FOR EACH` reads and generators take the shared path when
   the bit is set. (3, done) Compiled code's in-place reads and writes test the bit, measured on the benchmarks (ABI 44).
-  (4) Publication: the write barrier of a store into a shared object shares the value stored; `STATIC`s, class variables
-  and `PUBLIC`s are shared storage once a second thread exists. Then step 2e (`ThreadStart`, `Mutex`, `AtomicInt`).
+  (4, done) Publication: a store into a shared object shares the value stored first; `STATIC`s, class variables and
+  memory variables are shared storage once a second thread exists (ABI 45). Then step 2e (`ThreadStart`, `Mutex`,
+  `AtomicInt`).
 - **Runtime caches and tables** filled at run time (done, [runtime.md](runtime.md#threads-and-synchronization)): a
   send cache is a sequence lock, a field cache one 64-bit word (generation, index) from an atomic counter, the memory
   variable names are found under a reader-writer lock and read by number from chunks that never move, and classes

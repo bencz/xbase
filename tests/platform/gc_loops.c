@@ -47,8 +47,14 @@ static void sum_over(void *unused) {
   xb_gc_thread_detach();
 }
 
-/* Waiting for a thread is a blocking operation: a collection never waits for the waiter. */
+/* Waiting for a thread is a blocking operation: a collection, or another thread's attaching (which makes the program's
+ * storage shared, every thread stopped), never waits for the waiter. */
 static void join_summer(void *t) { xb_thread_join(*(xb_thread *)t); }
+
+static void wait_started(void *unused) {
+  (void)unused;
+  while (xb_atomic_load32(&started, XB_ACQUIRE) != SPINNERS + 1) xb_platform_sleep_ms(1);
+}
 
 int main(void) {
   xb_platform_init();
@@ -58,7 +64,10 @@ int main(void) {
   xb_thread threads[SPINNERS], summer;
   for (size_t k = 0; k < SPINNERS; ++k) CHECK(xb_thread_start(&threads[k], (size_t)8 << 20, spin, (void *)k));
   CHECK(xb_thread_start(&summer, (size_t)8 << 20, sum_over, NULL));
-  while (xb_atomic_load32(&started, XB_ACQUIRE) != SPINNERS + 1) xb_platform_sleep_ms(1);
+  xb_blocking_run(wait_started, NULL);
+  /* Served as compiled code serves it after a call: the request of the first other thread's attach (the program's
+   * storage made shared, every thread stopped), raised before this one blocked. Its own collections ask it nothing. */
+  if (xb_pending_get(ctx)) xb_pending_gc(ctx);
   for (int k = 0; k < COLLECTIONS; ++k) xb_gc_collect();
   xb_atomic_store32(&stop, 1, XB_RELEASE);
   xb_blocking_run(join_summer, &summer);

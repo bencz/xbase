@@ -74,9 +74,11 @@ void xb_gen_yield(xb_ctx *ctx, const xb_item *gen, const xb_item *slots, uint32_
                   const xb_item *value) {
   xb_object *g = gen->v.p;
   xb_array *frame = g->vars[GEN_FRAME].v.p;
+  /* Its frame grown first: an allocation, a safepoint where the program's storage may become shared (publication,
+   * docs/concurrency.md), and the enumerator with it. */
+  if (frame->len < nslots) xb_array_resize_any(ctx, frame, nslots);
   if (!xb_is_shared(g)) { /* its frame too (only it reaches the frame): in place, as items built in locals and then
                             * copied would stall the copies' loads */
-    if (frame->len < nslots) xb_array_resize(frame, nslots); /* the enumerator holds it: reachable */
     memcpy(frame->items + 1, slots + 1, (nslots - 1) * sizeof *slots);
     xb_gc_write_items(frame, 1, nslots);
     g->vars[GEN_CURRENT] = *value;
@@ -84,7 +86,6 @@ void xb_gen_yield(xb_ctx *ctx, const xb_item *gen, const xb_item *slots, uint32_
     xb_gc_write(g);
     return;
   }
-  if (frame->len < nslots) xb_array_resize_any(ctx, frame, nslots);
   for (uint32_t k = 1; k < nslots; ++k) xb_array_put(frame, k, &slots[k]); /* the slots' values shared first */
   xb_object_put(g, GEN_CURRENT, value);
   xb_item s;

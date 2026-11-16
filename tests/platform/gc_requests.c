@@ -11,9 +11,13 @@ static uint32_t phase;
 static uint32_t served;        /* safepoint requests the other thread saw while it ran */
 static uint32_t askedBlocked;  /* the other thread found a request after its blocking operation */
 
-static void await_phase(uint32_t want) {
-  while (xb_atomic_load32(&phase, XB_ACQUIRE) != want) xb_platform_sleep_ms(1);
+static void wait_phase(void *want) {
+  while (xb_atomic_load32(&phase, XB_ACQUIRE) != *(uint32_t *)want) xb_platform_sleep_ms(1);
 }
+
+/* A wait of an attached thread is a blocking operation: a collection, or the other thread's attaching (which makes the
+ * program's storage shared, every thread stopped), never waits for the waiter. */
+static void await_phase(uint32_t want) { xb_blocking_run(wait_phase, &want); }
 
 static void blocked(void *unused) {
   (void)unused;
@@ -61,6 +65,9 @@ int main(void) {
   xb_thread thread;
   CHECK(xb_thread_start(&thread, (size_t)8 << 20, other, NULL));
   await_phase(RUNNING);
+  /* Served as compiled code serves it after a call: the request of the other thread's attach (the program's storage
+   * made shared, every thread stopped), when it came before this one blocked. Its own collections ask it nothing. */
+  if (xb_pending_get(ctx)) xb_pending_gc(ctx);
   xb_gc_collect(); /* the other thread runs: it is asked, and it serves the request */
   CHECK(xb_atomic_load32(&served, XB_RELAXED) >= 1);
   CHECK(!(xb_pending_get(ctx) & XB_PENDING_SAFEPOINT));

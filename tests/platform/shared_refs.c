@@ -126,7 +126,7 @@ int main(void) {
   xb_ref_init(&shared[1], &shared[0], 2, 0); /* @a[2] */
   xb_item var;
   xb_set_int(&var, 0);
-  xb_set_ptr(&shared[2], XB_T_CELL, xb_cell_move(&var)); /* a variable in a cell */
+  xb_set_ptr(&shared[2], XB_T_CELL, xb_cell_move(ctx, &var, 0)); /* a variable in a cell */
   xb_item hash, key, zero;
   xb_set_hash(&hash, xb_hash_alloc());
   xb_gc_root_push(ctx, &hash);
@@ -135,7 +135,7 @@ int main(void) {
   xb_set_int(&zero, 0);
   xb_hash_set(hash.v.p, &key, &zero);
   xb_ref_elem(ctx, &shared[3], &hash, &key); /* @h["key"], then in a cell: a parameter passed so */
-  xb_set_ptr(&shared[3], XB_T_CELL, xb_cell_move(&shared[3]));
+  xb_set_ptr(&shared[3], XB_T_CELL, xb_cell_move(ctx, &shared[3], 0));
   xb_gc_root_pop(ctx, 2);
   xbp_NEWBOX(ctx, &shared[4], 0, NULL);
   CHECK(shared[4].type == XB_T_OBJECT);

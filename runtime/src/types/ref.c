@@ -15,20 +15,22 @@ void xb_ref_init(xb_item *r, const xb_item *coll, int64_t index, uint32_t loop) 
 
 void xb_ref_copy(xb_item *r, const xb_item *ref) {
   xb_ref *copy = xb_gc_alloc(XB_GC_REF, sizeof(xb_ref));
-  *copy = *(const xb_ref *)ref->v.p;
+  const xb_ref *from = ref->v.p; /* a loop's, shared once the STATIC that holds it is: its index and item read whole */
+  *copy = *from;
+  copy->index = xb_ref_index(from);
+  xb_ref_own_get(from, &copy->value);
   if (copy->coll.type == XB_T_HASH && copy->key.type == XB_T_NIL) /* the current entry, by its key from now on */
     xb_hash_entry(copy->coll.v.p, copy->index, &copy->key, NULL); /* `copy` is new: no other thread reaches it */
   xb_set_ptr(r, XB_T_REF, copy);
 }
 
 void xb_ref_of(xb_ctx *ctx, xb_item *r, xb_item *var, uint32_t is_static) {
-  XB_UNUSED(ctx);
   /* `var` is a root: the copy and the cell are made while it is reachable */
   if (!is_static && xb_is_loop_ref(var)) {
     xb_ref_copy(r, var); /* the current element: the variable stays the loop's */
     return;
   }
-  xb_cell *cell = xb_cell_move(var);
+  xb_cell *cell = xb_cell_move(ctx, var, is_static);
   xb_set_ptr(r, XB_T_CELL, cell);
 }
 
@@ -129,7 +131,50 @@ void xb_ref_set(xb_ctx *ctx, const xb_item *r, const xb_item *v) {
   xb_gc_root_pop(ctx, 1);
 }
 
+/* A STATIC's own item (xb_ref_load and xb_ref_store with XB_T_NIL): read whole under the stripe of its address once the
+ * program's storage is shared, written there under its lock, a value stored shared first; through the cell or the
+ * element it holds (rooted: another thread may replace a loop's reference meanwhile). */
+static int holds_ref(const xb_item *it) { return it->type == XB_T_CELL || it->type == XB_T_REF; }
+
+static void storage_load(xb_ctx *ctx, const xb_item *var, xb_item *dst) {
+  xb_item own;
+  if (xb_storage_is_shared()) xb_seq_get(var, &own, var);
+  else own = *var;
+  if (!holds_ref(&own)) {
+    *dst = own;
+    return;
+  }
+  xb_gc_root_push(ctx, &own);
+  xb_ref_get(ctx, &own, dst);
+  xb_gc_root_pop(ctx, 1);
+}
+
+static void storage_store(xb_ctx *ctx, xb_item *var, const xb_item *v) {
+  xb_item own;
+  if (!xb_storage_is_shared()) {
+    own = *var;
+    if (!holds_ref(&own)) {
+      *var = *v; /* STATIC storage is a root: no barrier */
+      return;
+    }
+  } else {
+    xb_share(v);
+    xb_seq_lock(var);
+    own = *var;
+    if (!holds_ref(&own)) xb_seq_store(var, v);
+    xb_seq_unlock(var);
+    if (!holds_ref(&own)) return;
+  }
+  xb_gc_root_push(ctx, &own);
+  xb_ref_set(ctx, &own, v);
+  xb_gc_root_pop(ctx, 1);
+}
+
 void xb_ref_load(xb_ctx *ctx, uint32_t type, void *target, xb_item *dst) {
+  if (type == XB_T_NIL) {
+    storage_load(ctx, target, dst);
+    return;
+  }
   const xb_ref *ref = target;
   if (type == XB_T_REF && !xb_is_shared(ref)) { /* the usual one, a FOR EACH variable's element: local, in place */
     if (ref->coll.type == XB_T_ARRAY) {
@@ -149,6 +194,10 @@ void xb_ref_load(xb_ctx *ctx, uint32_t type, void *target, xb_item *dst) {
 }
 
 void xb_ref_store(xb_ctx *ctx, uint32_t type, void *target, const xb_item *v) {
+  if (type == XB_T_NIL) {
+    storage_store(ctx, target, v);
+    return;
+  }
   xb_item r;
   xb_set_ptr(&r, (xb_type)type, target);
   xb_ref_set(ctx, &r, v);

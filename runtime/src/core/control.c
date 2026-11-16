@@ -117,35 +117,45 @@ int64_t xb_enum_len(xb_ctx *ctx, const xb_item *coll) {
 
 /* A variable that holds an element passed to it by reference is shared like
  * a variable in a cell: it moves into one, and the loop works inside it. */
-uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var) {
-  XB_UNUSED(ctx);
-  if (var->type == XB_T_REF && !xb_is_loop_ref(var)) xb_cell_move(var);
+uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var, uint32_t is_static) {
+  if (is_static && xb_storage_is_shared()) { /* shared storage: the loop works through a cell */
+    xb_cell_move(ctx, var, is_static);
+    return 1;
+  }
+  if (var->type == XB_T_REF && !xb_is_loop_ref(var)) xb_cell_move(ctx, var, is_static);
   return var->type == XB_T_CELL;
 }
 
 /* The item a FOR EACH loop works on (see xb_each_enter in xbrt.h): the variable's, or its cell's (which another
  * thread may reach, through a codeblock that captured the variable). */
-static void each_base(const xb_item *var, uint32_t in_cell, xb_item *dst) {
-  if (in_cell) xb_cell_get(var->v.p, dst);
+static void each_base(const xb_item *var, uint32_t how, xb_item *dst) {
+  if (how & XB_EACH_IN_CELL) xb_cell_get(var->v.p, dst);
+  else if ((how & XB_EACH_STATIC) && xb_storage_is_shared()) xb_seq_get(var, dst, var); /* a loop begun before */
   else *dst = *var;
 }
 
-static void each_set_base(xb_item *var, uint32_t in_cell, const xb_item *v) {
-  if (in_cell) xb_cell_put(var->v.p, v);
-  else *var = *v;
+static void each_set_base(xb_item *var, uint32_t how, const xb_item *v) {
+  if (how & XB_EACH_IN_CELL) {
+    xb_cell_put(var->v.p, v);
+  } else if ((how & XB_EACH_STATIC) && xb_storage_is_shared()) { /* a STATIC's loop begun before threads ran */
+    xb_share(v);
+    xb_seq_put(var, var, v);
+  } else {
+    *var = *v;
+  }
 }
 
-void xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, const xb_item *coll) {
-  each_base(var, in_cell, saved); /* `coll` and `saved` are frame slots, `var` is reachable: all rooted */
-  if (!in_cell) {
+void xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t how, const xb_item *coll) {
+  each_base(var, how, saved); /* `coll` and `saved` are frame slots, `var` is reachable: all rooted */
+  if (!how) {
     xb_ref_init(var, coll, 0, 1);
     return;
   }
   xb_item ref;
   xb_set_nil(&ref);
   xb_gc_root_push(ctx, &ref);
-  xb_ref_init(&ref, coll, 0, 1);
-  xb_cell_put(var->v.p, &ref);
+  xb_ref_init(&ref, coll, 0, 1); /* an allocation: the base is written after it, as it is then */
+  each_set_base(var, how, &ref);
   xb_gc_root_pop(ctx, 1);
 }
 
@@ -159,14 +169,13 @@ XB_NOINLINE static void move_current(xb_ctx *ctx, xb_ref *ref) {
   xb_gc_root_pop(ctx, 1);
 }
 
-void xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx) {
-  xb_item base; /* still the loop's reference (taking the variable copies it), which `var` keeps */
-  each_base(var, in_cell, &base);
-  xb_ref *ref = base.v.p;
+/* The loop's reference `r` (an item that keeps it) pointed at element `idx`. */
+static void move_to(xb_ctx *ctx, const xb_item *r, int64_t idx) {
+  xb_ref *ref = r->v.p;
   xb_ref_set_index(ref, idx);
   if (ref->coll.type == XB_T_ARRAY || ref->coll.type == XB_T_HASH) {
     xb_item element; /* not kept: an element gone (an array that shrank under the loop) is the bound error */
-    xb_ref_get(ctx, &base, &element);
+    xb_ref_get(ctx, r, &element);
   } else if (ref->coll.type == XB_T_STRING) {
     const xb_str *s = ref->coll.v.s;
     if (idx >= 1 && (uint64_t)idx <= s->len) {
@@ -179,7 +188,22 @@ void xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx) {
   }
 }
 
-void xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved) { each_set_base(var, in_cell, saved); }
+void xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t how, int64_t idx) {
+  if (!how) { /* a frame variable: its item is the loop's reference (taking the variable copies it) */
+    if (var->type == XB_T_REF) move_to(ctx, var, idx);
+    return;
+  }
+  /* In a cell or a STATIC, which another thread may reach, the reference may be replaced (two loops over one
+   * variable: the program's race): a rooted copy of it, or nothing when the variable holds what the other loop left. */
+  xb_item base;
+  each_base(var, how, &base);
+  if (base.type != XB_T_REF) return;
+  xb_gc_root_push(ctx, &base);
+  move_to(ctx, &base, idx);
+  xb_gc_root_pop(ctx, 1);
+}
+
+void xb_each_leave(xb_item *var, uint32_t how, const xb_item *saved) { each_set_base(var, how, saved); }
 
 void xb_each_key(xb_ctx *ctx, xb_item *r, const xb_item *coll, int64_t idx) {
   if (coll->type != XB_T_HASH) {

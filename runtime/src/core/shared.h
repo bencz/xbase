@@ -38,4 +38,11 @@ void     xb_seq_store(xb_item *dst, const xb_item *src);
 /* The item `dst` of a shared object set to `src`, under its lock. */
 void     xb_seq_put(const void *obj, xb_item *dst, const xb_item *src);
 
+/* The program's storage (docs/concurrency.md, publication): once a second thread attaches (xb_storage_shared), what
+ * the STATICs, the class variables and the memory variables then visible hold is shared, and a STATIC's own item is
+ * read and written whole under the stripe of its address (types/ref.c, types/block.c, core/control.c). Publication
+ * stops the other threads at safepoints, an allocation among them: a local path that allocates tests the object's bit
+ * again after it (types/array.c, types/hash.c). */
+static inline int xb_storage_is_shared(void) { return xb_atomic_load32(&xb_storage_shared, XB_ACQUIRE) != 0; }
+
 #endif

@@ -128,19 +128,33 @@ static void resize_shared(xb_ctx *ctx, xb_array *a, size_t len) {
   xb_gc_root_pop(ctx, 1);
 }
 
+/* Room for `len` items in a local array, made in place: the allocation is a safepoint, where the program's storage
+ * may become shared (publication, docs/concurrency.md) and this array with it, so it is tested again after it: 0
+ * then, nothing changed, for the shared path to take over. */
+static int local_room(xb_array *a, size_t len) {
+  if (len <= a->cap) return !xb_is_shared(a);
+  size_t cap = grown_cap(a->cap, len);
+  xb_item *items = storage(cap); /* `a` is reachable */
+  if (xb_is_shared(a)) return 0;
+  if (a->len) memcpy(items, a->items, a->len * sizeof(xb_item));
+  a->items = items;
+  a->cap = cap;
+  xb_gc_write(a); /* new storage: the whole array is traced */
+  return 1;
+}
+
 void xb_array_resize_any(xb_ctx *ctx, xb_array *a, uint64_t newLen) {
-  if (!xb_is_shared(a)) {
-    xb_array_resize(a, newLen);
+  if (newLen > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
+  if (!xb_is_shared(a) && local_room(a, (size_t)newLen)) {
+    xb_array_resize(a, newLen); /* within its room: nothing allocates */
     return;
   }
-  if (newLen > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
   resize_shared(ctx, a, (size_t)newLen);
 }
 
 void xb_array_append(xb_ctx *ctx, xb_array *a, const xb_item *v) {
-  if (!xb_is_shared(a)) {
-    xb_array_resize(a, (uint64_t)a->len + 1);
-    a->items[a->len - 1] = *v;
+  if (!xb_is_shared(a) && local_room(a, a->len + 1)) {
+    a->items[a->len++] = *v;
     xb_gc_write_item(a, a->len - 1);
     return;
   }

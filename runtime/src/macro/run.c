@@ -314,7 +314,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       for (uint32_t k = 0; k < ncap; ++k) {
         uint32_t from = word(&pc);
         c = from & XB_MACRO_FROM_CAPTURE ? self->cells[1 + (from & ~XB_MACRO_FROM_CAPTURE)]
-                                         : xb_cell_of(ctx, &s[1 + from]); /* the parameter's slot holds the cell */
+                                         : xb_cell_of(ctx, &s[1 + from], 0); /* the parameter's slot holds the cell */
         b = s[sp].v.p;
         b->cells[1 + k] = c;
         xb_gc_write(b);

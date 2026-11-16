@@ -480,9 +480,10 @@ void CodeGen::emit(const xir::Instruction &i) {
     // the block's home may be), then the block, which receives them: nothing
     // can allocate between its creation and the last cell store.
     std::vector<Value *> cells;
-    for (const xir::Var *c : i.captures)
-      cells.push_back(c->kind == xir::Var::Kind::Capture ? capturedCell(*c)
-                                                          : b_.CreateCall(rtCellOf_, {fnCtx_, rawAddress(*c)}, "cell"));
+    for (const xir::Var *c : i.captures) {
+      if (c->kind == xir::Var::Kind::Capture) cells.push_back(capturedCell(*c));
+      else cells.push_back(b_.CreateCall(rtCellOf_, {fnCtx_, rawAddress(*c), isStaticArg(*c)}, "cell"));
+    }
     Value *d = dest(i);
     Value *block = b_.CreateCall(rtBlockNew_, {fnCtx_, d, functions_.at(i.blockFn),
                                                ConstantInt::get(i32_, i.captures.size())}, "block");
@@ -500,18 +501,22 @@ void CodeGen::emit(const xir::Instruction &i) {
     checkPending(unwind_);
     break;
   case Op::EachInCell: {
-    Value *shared = b_.CreateCall(rtEachShared_, {fnCtx_, rawAddress(*i.var)}, "shared");
+    Value *shared = b_.CreateCall(rtEachShared_, {fnCtx_, rawAddress(*i.var), isStaticArg(*i.var)}, "shared");
     values_[&i] = b_.CreateICmpNE(shared, ConstantInt::get(i32_, 0));
     break;
   }
   case Op::EachEnter: {
-    Value *inCell = b_.CreateZExt(value(ops[0]), i32_);
-    b_.CreateCall(rtEachEnter_, {fnCtx_, dest(i), rawAddress(*i.var), inCell, callArg(addr(ops[1]), 0)});
+    b_.CreateCall(rtEachEnter_, {fnCtx_, dest(i), rawAddress(*i.var), eachHow(i), callArg(addr(ops[1]), 0)});
     break;
   }
   case Op::EachMove: { // in place to an element of a local array or hash without holes (xb_each_move for the rest)
     Value *var = rawAddress(*i.var);
     BasicBlock *slow = newBlock("each.move"), *join = newBlock("each.moved"), *local = newBlock("each.local");
+    if (i.var->kind == xir::Var::Kind::Static) { // shared storage: the runtime reads the variable whole
+      BasicBlock *own = newBlock("static.local");
+      branchLikely(storageLocal(), own, slow);
+      b_.SetInsertPoint(own);
+    }
     Value *cell = itemPointer(var, "cell");
     BasicBlock *from = b_.GetInsertBlock(), *inCell = newBlock("each.cell");
     b_.CreateCondBr(value(ops[0]), inCell, local); // a variable a codeblock captured: its cell's value
@@ -522,19 +527,21 @@ void CodeGen::emit(const xir::Instruction &i) {
     base->addIncoming(var, from);
     base->addIncoming(heapItem(cell), inCell);
     Value *ref = itemPointer(base, "ref");
+    BasicBlock *refLocal = newBlock("each.ref.local"); // a loop's reference other threads reach: the runtime's
+    branchLikely(isLocal(ref), refLocal, slow);
+    b_.SetInsertPoint(refLocal);
     tag(b_.CreateStore(value(ops[1]), b_.CreateStructGEP(refTy_, ref, RefIndex)), Mem::Unknown);
     inlineRefTarget(ref, slow);
     b_.CreateBr(join);
     b_.SetInsertPoint(slow);
-    b_.CreateCall(rtEachMove_, {fnCtx_, var, b_.CreateZExt(value(ops[0]), i32_), value(ops[1])});
+    b_.CreateCall(rtEachMove_, {fnCtx_, var, eachHow(i), value(ops[1])});
     checkPending(unwind_);
     b_.CreateBr(join);
     b_.SetInsertPoint(join);
     break;
   }
   case Op::EachLeave: {
-    Value *inCell = b_.CreateZExt(value(ops[0]), i32_);
-    b_.CreateCall(rtEachLeave_, {rawAddress(*i.var), inCell, callArg(addr(ops[1]), 0)});
+    b_.CreateCall(rtEachLeave_, {rawAddress(*i.var), eachHow(i), callArg(addr(ops[1]), 0)});
     break;
   }
   case Op::EachKey: { // the position itself, or a key read in place from a hash without holes (else xb_each_key)

@@ -79,8 +79,9 @@ static inline int xb_is_loop_ref(const xb_item *it) {
 }
 
 /* Moves the value of the variable whose own item is `var` into a new cell
- * (unless it holds one) and returns the cell. */
-xb_cell *xb_cell_move(xb_item *var);
+ * (unless it holds one) and returns the cell; a STATIC's under its stripe once
+ * the program's storage is shared. */
+xb_cell *xb_cell_move(xb_ctx *ctx, xb_item *var, uint32_t is_static);
 /* A cell's value that other threads may reach (a codeblock's capture, a memory variable), read whole, or written
  * (the value shared first) under the cell's lock when it is shared (core/shared.h); in place when it is local. */
 void     xb_cell_get_shared(const xb_cell *c, xb_item *dst);

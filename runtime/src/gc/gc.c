@@ -77,6 +77,9 @@
  * collection starts. */
 #include "xbrt_int.h"
 
+#include "core/memvar.h"
+#include "core/shared.h"
+
 #include "rdd/rdd.h"
 
 #include <stdio.h>
@@ -336,6 +339,21 @@ static void start_world(void) {
   xb_cond_broadcast(&heap.resumed);
 }
 
+uint32_t xb_storage_shared;
+
+/* Publication (docs/concurrency.md): the program's storage becomes shared storage when a second thread attaches,
+ * every other thread stopped (the lock held): what the roots outside frames hold (the STATICs, the class variables),
+ * and every context's memory variables, are shared, then the flag tells compiled code and the runtime. Sharing
+ * allocates nothing. */
+static void publish(void) {
+  stop_world(NULL);
+  for (xb_root *r = heap.roots; r; r = r->next)
+    for (size_t i = 0; i < r->count; ++i) xb_share(&r->items[i]);
+  for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) xb_memvar_share(ctx);
+  xb_atomic_store32(&xb_storage_shared, 1, XB_RELEASE);
+  start_world();
+}
+
 void xb_gc_safepoint(void) {
   xb_tlh *t = tlh;
   if (!t || !xb_atomic_load32(&heap.stopping, XB_SEQ_CST)) return;
@@ -408,6 +426,7 @@ void xb_gc_thread_attach(const void *base) {
   const char *low, *high;
   t->stackBase = xb_platform_stack_bounds(&low, &high) ? high : base; /* the system's end of the stack, when it tells */
   lock_between_collections(); /* not attached yet: it waits unparked, and no collection counts it */
+  if (heap.threadCount == 1 && !xb_atomic_load32(&xb_storage_shared, XB_RELAXED)) publish(); /* a second thread */
   t->next = heap.threads;
   heap.threads = t;
   xb_atomic_add32(&heap.threadCount, 1, XB_RELAXED);
@@ -752,6 +771,8 @@ void xb_gc_add_root(xb_item *items, size_t count) {
   xb_root *r = xmalloc(sizeof *r);
   r->items = items;
   r->count = count;
+  if (xb_storage_is_shared()) /* storage added once threads run: shared from the start, as the rest */
+    for (size_t i = 0; i < count; ++i) xb_share(&items[i]);
   xb_mutex_lock(&heap.lock);
   r->next = heap.roots;
   heap.roots = r;

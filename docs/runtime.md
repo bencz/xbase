@@ -223,23 +223,37 @@ rest of the runtime and compiled code use.
   operation (the registry of shared files', whose holder may park on its way back from a file operation; the lock of
   class preparations, whose holder runs xBase code) is waited for in a blocking operation; others (the heap's, the
   memory variable names') are never held across one.
-- Threads: a thread that runs xBase code attaches (`xb_gc_thread_attach`, by its first function) and detaches before
-  it ends; the allocation fast path takes no lock, the global structures one (`xb_mutex`). A collection stops the
-  world: the collecting thread sets `stopping` and `XB_PENDING_SAFEPOINT` on the contexts of the other threads still
-  running (each context knows the thread that registered it; a request served for nothing would send that thread's
-  loops to their generic copy for an iteration, [compiler.md](compiler.md#object-emission)), then waits (on a
-  condition) until no other attached thread is running. A running thread parks at its next safepoint (a poll of
-  compiled code that serves the request, `xb_pending_gc`; the slow path of an allocation; a change of the contexts),
-  its registers saved on its stack, until the collection ends. The request is set with release and read with acquire,
-  and the collector raises it again each millisecond it waits, so a thread that served it before `stopping` reached
-  it parks at its next poll. A thread in a blocking operation counts as stopped: the operation runs inside
-  `xb_platform_with_registers`, so the registers of every caller stay saved on the stack while it runs (a thread that is
-  the only one attached skips that, nothing else collecting then, and marks itself `unsaved`: a thread that attaches
-  meanwhile and collects moves nothing until the operation ends); the thread
-  publishes where its stack is in use and its state (sequentially consistent, as the collector's `stopping` is, so
-  neither misses the other), and on its way back it parks if a collection runs. A second thread that wants to collect
-  parks until the first one's collection ends, then sees whether its own is still needed. What holds a collection up
-  is code that reaches no safepoint: a runtime loop of C alone (a sort without a block) for as long as it runs.
+- Threads: a thread that runs xBase code attaches (`xb_gc_thread_attach`, by its first function) and detaches before it
+  ends; the second to attach publishes the program's storage first (`publish`: the world stopped as for a collection,
+  the items of the roots outside frames, the `STATIC`s and class variables, shared with `xb_share`, every context's
+  memory variables with `xb_memvar_share`, then `xb_storage_shared` set; a root added later is shared as it is added).
+  From then on `xb_ref_load` and `xb_ref_store` with the type `XB_T_NIL` read and write a `STATIC`'s own item under the
+  stripe of its address (compiled code tells the runtime a `STATIC` is one: `is_static` of `xb_cell_of`, `xb_ref_of` and
+  `xb_each_shared`, `XB_EACH_STATIC` in the `how` of the other `FOR EACH` functions; `xb_cell_move` moves one into a
+  cell under that stripe, the cell shared first, and `xb_each_shared` makes a `FOR EACH` over one go through its cell;
+  `xb_each_move` leaves alone a variable that no longer holds its loop's reference, which another thread's loop over the
+  same variable replaced), class variables are read and written under the stripes of their items, and a class prepared
+  later shares its initial values and class variables before it is ready. Publication stops a thread at any safepoint,
+  an allocation's among them: a local path that allocates (an array's or a hash's growth, a generator's frame, a
+  `STATIC`'s cell) tests the object's bit again after the allocation and goes on as for a shared object when it was
+  shared meanwhile. Memory variables made after it stay the environment's (shared environments come with `ThreadStart`).
+  An attached thread that waits for another waits in a blocking operation, as for a collection; the allocation fast path
+  takes no lock, the global structures one (`xb_mutex`). A collection stops the world: the collecting thread sets
+  `stopping` and `XB_PENDING_SAFEPOINT` on the contexts of the other threads still running (each context knows the
+  thread that registered it; a request served for nothing would send that thread's loops to their generic copy for an
+  iteration, [compiler.md](compiler.md#object-emission)), then waits (on a condition) until no other attached thread is
+  running. A running thread parks at its next safepoint (a poll of compiled code that serves the request,
+  `xb_pending_gc`; the slow path of an allocation; a change of the contexts), its registers saved on its stack, until
+  the collection ends. The request is set with release and read with acquire, and the collector raises it again each
+  millisecond it waits, so a thread that served it before `stopping` reached it parks at its next poll. A thread in a
+  blocking operation counts as stopped: the operation runs inside `xb_platform_with_registers`, so the registers of
+  every caller stay saved on the stack while it runs (a thread that is the only one attached skips that, nothing else
+  collecting then, and marks itself `unsaved`: a thread that attaches meanwhile and collects moves nothing until the
+  operation ends); the thread publishes where its stack is in use and its state (sequentially consistent, as the
+  collector's `stopping` is, so neither misses the other), and on its way back it parks if a collection runs. A second
+  thread that wants to collect parks until the first one's collection ends, then sees whether its own is still needed.
+  What holds a collection up is code that reaches no safepoint: a runtime loop of C alone (a sort without a block) for
+  as long as it runs.
 
 `__GcCollect( [lYoung] )` runs a full collection (a young one with `.T.`), then the destructors of the objects it
 found unreachable ([Classes](#classes)), and returns the number of live objects the last full collection found (tests
@@ -1217,7 +1231,7 @@ The program's code runs on one thread today; the services below are what tasks a
   the address (each made when first used) and sleep on a condition of their own, so a wake reaches only the waiters
   it marks; the value is tested under the bucket's lock, which the waker takes after changing it, so no wake is lost.
 - Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's operations on arrays,
-  hashes, objects, cells and references use them; compiled code in a next step): `XB_GC_SHARED` in an object's header
+  hashes, objects, cells and references use them, and compiled code tests the bit): `XB_GC_SHARED` in an object's header
   (`XB_GC_STATE_SHARED`, kept by every collection) marks one that more than one flow can reach. `xb_share` marks what an
   item refers to and all it reaches (an explicit stack, stopping at what is shared already, literal strings left alone,
   a growing string no longer growing in place); it allocates nothing. A shared object's items are read under the

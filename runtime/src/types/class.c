@@ -310,6 +310,11 @@ static cls *prepare_locked(xb_ctx *ctx, xb_class_def *def) {
     return NULL;
   }
   start_class_vars(c);
+  if (xb_storage_is_shared()) { /* threads run: what the class holds is shared before another one can reach it */
+    for (uint32_t i = 0; i < c->def->nvars + c->def->nclassVars; ++i) xb_share(&c->initial[i]);
+    for (uint32_t k = 0, n = c->classArea[c->nline - 1] + c->line[c->nline - 1]->nclassVars; k < n; ++k)
+      xb_share(&c->classValues[k]);
+  }
   set_state(c, C_READY);
   return c;
 }
@@ -467,12 +472,22 @@ static void perform(xb_ctx *ctx, xb_item *r, const member *m, uintptr_t slot, ui
   xb_item nil;
   switch (m->kind) {
     case M_METHOD: m->fn(ctx, r, argc, argv); return;
-    case M_CLASS_GET: *r = *(xb_item *)slot; return;
-    case M_CLASS_SET: /* a root: no barrier */
-      xb_set_nil(&nil);
-      *(xb_item *)slot = argc > 1 ? argv[1] : nil;
-      *r = *(xb_item *)slot;
+    case M_CLASS_GET: /* the program's storage: whole under the stripe of its address once it is shared */
+      if (xb_storage_is_shared()) xb_seq_get((void *)slot, r, (xb_item *)slot);
+      else *r = *(xb_item *)slot;
       return;
+    case M_CLASS_SET: { /* a root: no barrier */
+      xb_set_nil(&nil);
+      xb_item v = argc > 1 ? argv[1] : nil;
+      if (xb_storage_is_shared()) {
+        xb_share(&v);
+        xb_seq_put((void *)slot, (xb_item *)slot, &v);
+      } else {
+        *(xb_item *)slot = v;
+      }
+      *r = v;
+      return;
+    }
     case M_GET: xb_object_get(argv[0].v.p, (uint32_t)slot, r); return; /* arguments are ignored */
     case M_SET: {
       if (argc < 2) xb_set_nil(&nil);

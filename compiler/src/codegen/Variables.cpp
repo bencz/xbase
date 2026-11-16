@@ -47,6 +47,14 @@ LoadInst *CodeGen::stateByte(Value *obj, AtomicOrdering order) {
   return state;
 }
 
+// Whether the program's storage is still the first thread's alone (xb_storage_shared clear, xbrt.h): set while every
+// other thread is stopped, so what this thread read holds until it calls something.
+Value *CodeGen::storageLocal() {
+  auto *flag = cast<LoadInst>(loadFrom(i32_, storageShared_, Mem::Unknown, "storage.shared"));
+  flag->setAtomic(AtomicOrdering::Unordered);
+  return b_.CreateICmpEQ(flag, ConstantInt::get(i32_, 0));
+}
+
 // Whether the heap object `obj` is local, not shared (XB_GC_STATE_SHARED in its header's state byte, xbrt.h). An
 // unordered atomic load: other threads may set the byte's other bits, and only the thread that reaches a local object
 // can share it, so what this thread read holds until it calls something that could. For an object an item holds
@@ -71,15 +79,29 @@ Value *CodeGen::isLocal(Value *obj, bool fromItem) {
 // which takes the item's `type` (XB_T_CELL or XB_T_REF) and `ptr`.
 CodeGen::VarTarget CodeGen::varTarget(const xir::Var &v, xir::Access a, bool load) {
   VarTarget t;
+  Value *storageType = nullptr; // a STATIC: every runtime path is its own item's (XB_T_NIL), from wherever it starts
+  if (v.kind == xir::Var::Kind::Static) {
+    t.shared = newBlock("var.shared");
+    t.type = storageType = ConstantInt::get(i32_, XB_T_NIL);
+    t.ptr = rawAddress(v);
+    BasicBlock *local = newBlock("static.local");
+    branchLikely(storageLocal(), local, t.shared); // shared storage once a second thread runs (xb_storage_shared)
+    b_.SetInsertPoint(local);
+  }
+  auto runtimeArgs = [&](Value *type, Value *ptr) {
+    if (storageType) return;
+    t.type = type;
+    t.ptr = ptr;
+  };
   if (a == xir::Access::Direct) {
     t.local = rawAddress(v);
     return t;
   }
-  t.shared = newBlock("var.shared");
+  if (!t.shared) t.shared = newBlock("var.shared");
   if (a == xir::Access::ThroughRef) {
     Value *item = rawAddress(v);
-    t.type = itemType(item);
-    t.ptr = itemPointer(item, "ref");
+    Value *itemTy = itemType(item), *ref = itemPointer(item, "ref");
+    runtimeArgs(itemTy, ref);
     if (!load) { // a store into the element: the runtime's, which makes its write barrier
       b_.CreateBr(t.shared);
       return t;
@@ -88,20 +110,20 @@ CodeGen::VarTarget CodeGen::varTarget(const xir::Var &v, xir::Access a, bool loa
     // (a string's character, an enumerator's Current). A variable in a cell, and the rest, read through the runtime.
     BasicBlock *isRef = newBlock("each.ref"), *local = newBlock("each.local"), *inColl = newBlock("each.coll");
     BasicBlock *own = newBlock("each.own"), *join = newBlock("each.var");
-    branchLikely(b_.CreateICmpEQ(t.type, ConstantInt::get(i32_, XB_T_REF)), isRef, t.shared);
+    branchLikely(b_.CreateICmpEQ(itemTy, ConstantInt::get(i32_, XB_T_REF)), isRef, t.shared);
     b_.SetInsertPoint(isRef);
-    branchLikely(isLocal(t.ptr), local, t.shared);
+    branchLikely(isLocal(ref), local, t.shared);
     b_.SetInsertPoint(local);
-    Value *collType = itemType(heapItem(b_.CreateStructGEP(refTy_, t.ptr, RefColl)));
+    Value *collType = itemType(heapItem(b_.CreateStructGEP(refTy_, ref, RefColl)));
     b_.CreateCondBr(b_.CreateOr(b_.CreateICmpEQ(collType, ConstantInt::get(i32_, XB_T_ARRAY)),
                                 b_.CreateICmpEQ(collType, ConstantInt::get(i32_, XB_T_HASH))),
                     inColl, own);
     b_.SetInsertPoint(inColl);
-    Value *elem = inlineRefTarget(t.ptr, t.shared);
+    Value *elem = inlineRefTarget(ref, t.shared);
     BasicBlock *collEnd = b_.GetInsertBlock();
     b_.CreateBr(join);
     b_.SetInsertPoint(own);
-    Value *ownItem = heapItem(b_.CreateStructGEP(refTy_, t.ptr, RefValue));
+    Value *ownItem = heapItem(b_.CreateStructGEP(refTy_, ref, RefValue));
     b_.CreateBr(join);
     b_.SetInsertPoint(join);
     PHINode *phi = b_.CreatePHI(ptrTy_, 2, "each.value");
@@ -129,13 +151,13 @@ CodeGen::VarTarget CodeGen::varTarget(const xir::Var &v, xir::Access a, bool loa
   BasicBlock *value = newBlock("cell.value"), *join = newBlock("join");
   b_.CreateCondBr(holdsRef(item), ref, join);
   b_.SetInsertPoint(ref);
-  t.type = itemType(item);
-  t.ptr = itemPointer(item, "cell");
-  branchLikely(b_.CreateICmpEQ(t.type, ConstantInt::get(i32_, XB_T_CELL)), inCell, t.shared);
+  Value *itemTy = itemType(item), *cell = itemPointer(item, "cell");
+  runtimeArgs(itemTy, cell);
+  branchLikely(b_.CreateICmpEQ(itemTy, ConstantInt::get(i32_, XB_T_CELL)), inCell, t.shared);
   b_.SetInsertPoint(inCell);
-  branchLikely(isLocal(t.ptr), value, t.shared);
+  branchLikely(isLocal(cell), value, t.shared);
   b_.SetInsertPoint(value);
-  Value *inner = heapItem(t.ptr);
+  Value *inner = heapItem(cell);
   branchLikely(b_.CreateICmpNE(itemType(inner), ConstantInt::get(i32_, XB_T_REF)), join, t.shared);
   b_.SetInsertPoint(join);
   PHINode *phi = b_.CreatePHI(ptrTy_, 2, "var");
@@ -292,11 +314,30 @@ void CodeGen::writeBarrier(const xir::Var &v, xir::Access a) {
   if (a != xir::Access::MaybeRef) return;
   Value *item = rawAddress(v);
   BasicBlock *inCell = newBlock("cell"), *join = newBlock("join");
+  if (v.kind == xir::Var::Kind::Static) { // shared storage: the runtime stored the value (xb_ref_store)
+    BasicBlock *local = newBlock("static.local");
+    branchLikely(storageLocal(), local, join);
+    b_.SetInsertPoint(local);
+  }
   b_.CreateCondBr(b_.CreateICmpEQ(itemType(item), ConstantInt::get(i32_, XB_T_CELL)), inCell, join);
   b_.SetInsertPoint(inCell);
   cellStoreWritten(heapItem(itemPointer(item, "cell")), true);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
+}
+
+// Whether `v` is a STATIC, as the runtime takes it (shared storage once threads run).
+Value *CodeGen::isStaticArg(const xir::Var &v) {
+  return ConstantInt::get(i32_, v.kind == xir::Var::Kind::Static ? 1 : 0);
+}
+
+// What a FOR EACH operation of the runtime is told of its variable (`how`, xbrt.h): in a cell (the loop's first
+// operand), a STATIC.
+Value *CodeGen::eachHow(const xir::Instruction &i) {
+  static_assert(XB_EACH_IN_CELL == 1, "the loop's boolean is the bit");
+  Value *how = b_.CreateZExt(value(i.operand(0)), i32_);
+  if (i.var->kind == xir::Var::Kind::Static) how = b_.CreateOr(how, ConstantInt::get(i32_, XB_EACH_STATIC));
+  return how;
 }
 
 // A reference to the variable, for an argument passed by reference: its cell
@@ -307,8 +348,7 @@ void CodeGen::refOf(const xir::Var &v, Value *dst) {
     storeTagged(dst, XB_T_CELL, capturedCell(v));
     return;
   }
-  Value *isStatic = ConstantInt::get(i32_, v.kind == xir::Var::Kind::Static ? 1 : 0);
-  b_.CreateCall(rtRefOf_, {fnCtx_, dst, rawAddress(v), isStatic});
+  b_.CreateCall(rtRefOf_, {fnCtx_, dst, rawAddress(v), isStaticArg(v)});
 }
 
 } // namespace xb

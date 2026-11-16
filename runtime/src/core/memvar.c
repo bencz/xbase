@@ -9,6 +9,8 @@
  * an element's reference reaches the element). */
 #include "xbrt_int.h"
 
+#include "core/shared.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -385,4 +387,11 @@ void xbf_MEMVARBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_int(&c->value, id);
   b->cells[0] = c;
   xb_gc_write(b);
+}
+
+void xb_memvar_share(xb_ctx *ctx) {
+  xb_env *env = ctx->env;
+  if (!env) return;
+  for (uint32_t i = 0; i < env->memvarCap; ++i) xb_share(&env->memvars[i]);
+  for (uint32_t i = 0; i < env->privateLen; ++i) xb_share(&env->privates[i].hidden);
 }

@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 44u
+#define XB_ABI_VERSION 45u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -385,9 +385,10 @@ void     xb_gc_root_pop(xb_ctx *ctx, unsigned n);
  * any variable passed by reference). A LOCAL or parameter that holds the
  * reference of a FOR EACH loop is not moved: whoever takes it gets the
  * current element, and the variable stays the loop's.
- * xb_cell_of returns the cell a codeblock captures for the frame variable
- * whose own item is `var`; xb_ref_of stores in `r` the reference an argument
- * @var passes (`is_static`: a STATIC, always the variable itself);
+ * xb_cell_of returns the cell a codeblock captures for the variable whose own
+ * item is `var` (`is_static`: a STATIC's, shared storage once threads run);
+ * xb_ref_of stores in `r` the reference an argument @var passes (`is_static`:
+ * a STATIC, always the variable itself);
  * xb_ref_elem the one @base[idx] passes, with the checks of xb_op_index.
  * A cell may hold an XB_T_REF (a FOR EACH variable); an element never holds
  * either. Compiled code reads and writes a local cell's value in place (a
@@ -395,8 +396,14 @@ void     xb_gc_root_pop(xb_ctx *ctx, unsigned n);
  * shared cell, an element) goes through xb_ref_load and xb_ref_store, given
  * the item's type (XB_T_CELL or XB_T_REF) and pointer: the whole item, under
  * the object's counter or lock when it is shared, its write barrier made (a
- * bound error if the element is gone). */
-xb_cell *xb_cell_of(xb_ctx *ctx, xb_item *var);
+ * bound error if the element is gone). With the type XB_T_NIL the pointer is a
+ * STATIC's own item, in the program's storage: read and written whole under
+ * its stripe, through the cell or element it holds (xb_storage_shared). */
+xb_cell *xb_cell_of(xb_ctx *ctx, xb_item *var, uint32_t is_static);
+/* [ABI] Nonzero once a second thread has attached: the program's storage (the STATICs, the class variables, the memory
+ * variables visible then) is shared from then on (docs/concurrency.md, publication), so compiled code reads and writes
+ * a STATIC through xb_ref_load and xb_ref_store with the type XB_T_NIL. Set while every other thread is stopped. */
+extern uint32_t xb_storage_shared;
 void     xb_ref_load(xb_ctx *ctx, uint32_t type, void *target, xb_item *dst);
 void     xb_ref_store(xb_ctx *ctx, uint32_t type, void *target, const xb_item *v);
 void     xb_ref_of(xb_ctx *ctx, xb_item *r, xb_item *var, uint32_t is_static);
@@ -405,21 +412,25 @@ void     xb_ref_elem(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item
 /* FOR EACH: a collection's length (-1 after an error). The loop works on a
  * base item: the variable's cell when it is shared, else `var`, its own item.
  * `in_cell` comes from xb_each_shared, when the loop starts (for a STATIC, at
- * every call: it is one variable for everyone); a variable holding an element
- * passed to it by reference moves into a cell then. xb_each_enter saves the
- * base's value in `saved` and puts a reference to the collection there;
- * xb_each_move points it at element `idx` (1-based); xb_each_leave restores
- * the saved value. */
+ * every call: it is one variable for everyone; once the program's storage is
+ * shared, it moves into a cell then); a variable holding an element passed to
+ * it by reference moves into a cell then. `how` has XB_EACH_IN_CELL for that,
+ * and XB_EACH_STATIC for a STATIC (whose own item, shared storage once threads
+ * run, is read and written whole). xb_each_enter saves the base's value in
+ * `saved` and puts a reference to the collection there; xb_each_move points it
+ * at element `idx` (1-based); xb_each_leave restores the saved value. */
+#define XB_EACH_IN_CELL 1u
+#define XB_EACH_STATIC  2u
 int64_t  xb_enum_len(xb_ctx *ctx, const xb_item *coll);
 /* What a FOR EACH loop goes through, in `r`, once before it starts: the
  * collection itself, or for an object its enumerator (GetEnumerator(), else
  * the object when it answers MoveNext and Current, after Reset() when it has
  * one); with `descend`, that enumerator's elements in an array. */
 void     xb_each_source(xb_ctx *ctx, xb_item *r, const xb_item *coll, uint32_t descend);
-uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var);
-void     xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t in_cell, const xb_item *coll);
-void     xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t in_cell, int64_t idx);
-void     xb_each_leave(xb_item *var, uint32_t in_cell, const xb_item *saved);
+uint32_t xb_each_shared(xb_ctx *ctx, xb_item *var, uint32_t is_static);
+void     xb_each_enter(xb_ctx *ctx, xb_item *saved, xb_item *var, uint32_t how, const xb_item *coll);
+void     xb_each_move(xb_ctx *ctx, xb_item *var, uint32_t how, int64_t idx);
+void     xb_each_leave(xb_item *var, uint32_t how, const xb_item *saved);
 /* FOR EACH k => v: the key of the hash entry at `idx` (1-based), the index
  * itself for an array or a string. */
 void     xb_each_key(xb_ctx *ctx, xb_item *r, const xb_item *coll, int64_t idx);
