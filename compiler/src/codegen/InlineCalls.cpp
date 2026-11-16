@@ -24,7 +24,9 @@ namespace xb {
 
 namespace {
 
-enum class Inline { None, Len, Asc, Chr, SubStr, PCount, PValue, Int, ValType, Abs, Max, Min, Round, Sqrt, Exp, Log, Mod };
+enum class Inline {
+  None, Len, Asc, Chr, SubStr, PCount, PValue, Int, ValType, Abs, Max, Min, Round, Sqrt, Exp, Log, Mod
+};
 
 // The powers of ten Round() scales by, exact as doubles up to 10^22 (pow( 10, n ) gives the same).
 constexpr int kRoundPlaces = 22;

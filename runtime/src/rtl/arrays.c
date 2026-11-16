@@ -1,6 +1,8 @@
 /* Array functions of the language. */
 #include "rtl/collections.h"
 
+#include "core/shared.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,13 +43,10 @@ void xbf_AADD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1123, "AADD", argc, argv);
     return;
   }
-  xb_array *a = argv[0].v.p;
-  xb_array_resize(a, a->len + 1);
-  if (argc > 1) {
-    a->items[a->len - 1] = argv[1];
-    xb_gc_write_item(a, a->len - 1);
-  }
-  *ret = a->items[a->len - 1];
+  xb_item nil;
+  xb_set_nil(&nil);
+  xb_array_append(ctx, argv[0].v.p, argc > 1 ? &argv[1] : &nil); /* argv[1] is rooted (a frame slot) */
+  *ret = argc > 1 ? argv[1] : nil;
 }
 
 void xbf_ASIZE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -56,15 +55,14 @@ void xbf_ASIZE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
-  xb_array_resize(argv[0].v.p, n < 0 ? 0 : (uint64_t)n);
+  xb_array_resize_any(ctx, argv[0].v.p, n < 0 ? 0 : (uint64_t)n);
   *ret = argv[0];
 }
 
 void xbf_ATAIL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
-  const xb_array *a = argv[0].v.p;
-  if (a->len) *ret = a->items[a->len - 1];
+  xb_array_last(argv[0].v.p, ret);
 }
 
 /* AClone( aSource ): a copy, the arrays and hashes inside it copied too
@@ -95,10 +93,8 @@ static int sort_less(void *arg, size_t i, size_t j) {
   sorter *s = arg;
   if (s->failed) return 0;
   const xb_array *a = s->array->v.p;
-  if (s->block) {
-    if (i >= a->len || j >= a->len) return 0; /* the block shrank the array */
-    s->call[0] = a->items[i];
-    s->call[1] = a->items[j];
+  if (s->block) { /* the block may shrink the array, or share it: the elements are read whole */
+    if (!xb_array_get(a, i, &s->call[0]) || !xb_array_get(a, j, &s->call[1])) return 0;
     if (!xb_calls_run(s->ctx, s->block, s->call, 2)) {
       s->failed = 1;
       return 0;
@@ -191,8 +187,9 @@ void xbf___SCANVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   size_t end = (size_t)(start - 1 + count);
   if (argv[0].type == XB_T_ARRAY) {
     const xb_array *a = argv[0].v.p;
-    for (size_t i = (size_t)start - 1; i < a->len && i < end; ++i)
-      if (xb_value_matches(ctx, &a->items[i], &argv[1])) {
+    xb_item v;
+    for (size_t i = (size_t)start - 1; i < end && xb_array_get(a, i, &v); ++i)
+      if (xb_value_matches(ctx, &v, &argv[1])) {
         xb_set_int(ret, (int64_t)i + 1);
         return;
       }
@@ -237,10 +234,11 @@ void xbf___RANGECOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 /* The 1-based position argument of AIns and ADel (0 or missing is 1), as a
- * 0-based index, or -1 when it is outside the array. */
-static int64_t element_index(const xb_array *a, uint32_t argc, const xb_item *argv) {
+ * 0-based index, or -1 below the first (the array leaves one past its end alone). */
+static int64_t element_index(uint32_t argc, const xb_item *argv) {
   int64_t n = argc > 1 && xb_is_number(&argv[1]) ? xb_num_to_i64(&argv[1]) : 0;
-  return xb_array_index(a, n == 0 ? 1 : n);
+  if (n == 0) n = 1;
+  return n >= 1 && (uint64_t)(n - 1) <= SIZE_MAX ? n - 1 : -1; /* the array tells whether it is within it */
 }
 
 /* AIns( aTarget, nPosition ): the elements from nPosition (0 is 1) move one place up
@@ -250,14 +248,8 @@ void xbf_AINS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
   *ret = argv[0];
-  xb_array *a = argv[0].v.p;
-  int64_t at = element_index(a, argc, argv);
-  if (at < 0) return;
-  for (size_t i = a->len - 1; i > (size_t)at; --i) {
-    a->items[i] = a->items[i - 1];
-    xb_gc_write_item(a, i);
-  }
-  xb_set_nil(&a->items[at]);
+  int64_t at = element_index(argc, argv);
+  if (at >= 0) xb_array_insert(argv[0].v.p, (size_t)at);
 }
 
 /* ADel( aTarget, nPosition ): the elements after nPosition (0 is 1) move one
@@ -267,29 +259,62 @@ void xbf_ADEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
   *ret = argv[0];
-  xb_array *a = argv[0].v.p;
-  int64_t at = element_index(a, argc, argv);
-  if (at < 0) return;
-  for (size_t i = (size_t)at; i + 1 < a->len; ++i) {
-    a->items[i] = a->items[i + 1];
-    xb_gc_write_item(a, i);
-  }
-  xb_set_nil(&a->items[a->len - 1]);
+  int64_t at = element_index(argc, argv);
+  if (at >= 0) xb_array_delete(argv[0].v.p, (size_t)at);
 }
 
-void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
-  const size_t len = ((const xb_array *)argv[0].v.p)->len;
-  *ret = argv[0];
+/* The range ASort( aTarget, [nStart], [nCount], [bOrder] ) sorts in an array of `len` elements: 0 when it has fewer
+ * than two. */
+static size_t sort_range(uint32_t argc, const xb_item *argv, size_t len, size_t *first) {
   uint64_t start = xb_range_start(argc, argv, 1, len);
-  if (!start) return;
+  if (!start) return 0;
   uint64_t rest = len - start + 1, count = rest;
   if (argc > 2 && xb_is_number(&argv[2])) {
     int64_t v = xb_num_to_i64(&argv[2]);
     if (v >= 1 && (uint64_t)v < rest) count = (uint64_t)v;
   }
-  if (count < 2 || count > XB_ARRAY_MAX_LEN) return; /* no array is longer: bounds the buffer below */
-  size_t n = (size_t)count, first = (size_t)(start - 1);
+  if (count < 2 || count > XB_ARRAY_MAX_LEN) return 0; /* no array is longer: bounds the buffer below */
+  *first = (size_t)(start - 1);
+  return (size_t)count;
+}
+
+void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
+
+/* ASort of a shared array: a block may run any code, so a copy (all the elements as one read saw them) is sorted,
+ * and its range goes back under the lock, as far as the array still reaches (another thread may have shrunk it). */
+static void sort_shared(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
+  xb_item args[4], sorted;
+  xb_set_nil(&sorted);
+  for (uint32_t k = 0; k < 4; ++k) xb_set_nil(&args[k]);
+  for (uint32_t k = 1; k < argc && k < 4; ++k) args[k] = argv[k];
+  for (uint32_t k = 0; k < 4; ++k) xb_gc_root_push(ctx, &args[k]);
+  xb_gc_root_push(ctx, &sorted);
+  xb_set_array(&args[0], xb_array_snapshot(argv[0].v.p));
+  size_t first = 0, n = sort_range(argc, argv, ((const xb_array *)args[0].v.p)->len, &first);
+  if (n) xbf_ASORT(ctx, &sorted, argc < 4 ? argc : 4, args);
+  if (n && !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
+    const xb_array *copy = args[0].v.p;
+    xb_array *a = argv[0].v.p;
+    xb_seq_lock(a);
+    for (size_t k = first; k < first + n && k < a->len; ++k) {
+      xb_seq_store(&a->items[k], &copy->items[k]);
+      xb_gc_write_item(a, k);
+    }
+    xb_seq_unlock(a);
+  }
+  xb_gc_root_pop(ctx, 5);
+}
+
+void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
+  *ret = argv[0];
+  if (xb_is_shared(argv[0].v.p)) {
+    sort_shared(ctx, argc, argv);
+    return;
+  }
+  const size_t len = ((const xb_array *)argv[0].v.p)->len;
+  size_t first = 0, n = sort_range(argc, argv, len, &first);
+  if (!n) return;
   size_t *pos = malloc(2 * n * sizeof *pos);
   if (!pos) xb_gc_fatal("out of memory");
   for (size_t k = 0; k < n; ++k) pos[k] = first + k;
@@ -304,6 +329,11 @@ void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   else if (!done && same == XB_T_DOUBLE) sort_doubles(pos, pos + n, n, items);
   else if (!done) xb_merge_sort(pos, pos + n, n, sort_less, &s);
   xb_calls_end(ctx, &frame, 3);
+  if (!s.failed && xb_is_shared(argv[0].v.p)) { /* the block shared it (it stored it where others reach) */
+    free(pos);
+    sort_shared(ctx, argc, argv);
+    return;
+  }
   if (!s.failed) {
     xb_array *a = argv[0].v.p;
     /* A block may have shrunk the array: the positions still in it go first. */

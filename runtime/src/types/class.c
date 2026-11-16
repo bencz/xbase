@@ -19,7 +19,8 @@
  * answers. HIDDEN members answer F's own methods only, PROTECTED ones the
  * methods of their class and its subclasses, and a READONLY variable is
  * assigned as if one scope narrower (EXPORTED as PROTECTED, PROTECTED as
- * HIDDEN); anything else is a scope violation (BASE/41, BASE/42). Without a method of its own, a class answers New (it sends Init
+ * HIDDEN); anything else is a scope violation (BASE/41, BASE/42). Without a
+ * method of its own, a class answers New (it sends Init
  * with the arguments, as its own method would, and returns the object) and
  * Init (the object).
  *

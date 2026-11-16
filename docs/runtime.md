@@ -1209,17 +1209,29 @@ The program's code runs on one thread today; the services below are what tasks a
   waiter of the address that came first, or every one. Waiters queue in arrival order in one of 256 buckets chosen by
   the address (each made when first used) and sleep on a condition of their own, so a wake reaches only the waiters
   it marks; the value is tested under the bucket's lock, which the waker takes after changing it, so no wake is lost.
-- Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the operations on arrays, hashes and
-  objects use them in a next step): `XB_GC_SHARED` in an object's header (`XB_GC_STATE_SHARED`, kept by every
-  collection) marks one that more than one flow can reach. `xb_share` marks what an item refers to and all it reaches
-  (an explicit stack, stopping at what is shared already, literal strings left alone, a growing string no longer
-  growing in place); it allocates nothing. A shared object's items are read under the sequence counter of its stripe,
-  one of 1024 chosen by its address, each on a cache line of its own (`xb_seq_read_begin`, the items' words loaded
-  with acquire order, `xb_seq_read_valid`; `xb_seq_get` for one item), and written under the stripe's lock
-  (`xb_seq_lock`, which makes the counter odd, the words stored with release order, `xb_seq_unlock`; `xb_seq_put`),
-  with no fences, so the thread sanitizer follows them. A waiter spins, then yields (a reader), or sleeps on the lock
-  word through `xb_blocking_run` (a writer); a writer never reaches a safepoint while it holds a stripe, so a reader
-  that waits never holds up a collection.
+- Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's array operations use
+  them, those on hashes, objects, cells and references in a next step): `XB_GC_SHARED` in an object's header
+  (`XB_GC_STATE_SHARED`, kept by every collection) marks one that more than one flow can reach. `xb_share` marks what an
+  item refers to and all it reaches (an explicit stack, stopping at what is shared already, literal strings left alone,
+  a growing string no longer growing in place); it allocates nothing. A shared object's items are read under the
+  sequence counter of its stripe, one of 1024 chosen by its address, each on a cache line of its own
+  (`xb_seq_read_begin`, the items' words loaded with acquire order, `xb_seq_read_valid`; `xb_seq_get` for one item), and
+  written under the stripe's lock (`xb_seq_lock`, which makes the counter odd, the words stored with release order,
+  `xb_seq_unlock`; `xb_seq_put`), with no fences, so the thread sanitizer follows them. A waiter spins, then yields (a
+  reader), or sleeps on the lock word through `xb_blocking_run` (a writer); a writer never reaches a safepoint while it
+  holds a stripe, so a reader that waits never holds up a collection.
+- Arrays (`types/array.c`): `xb_array_length`, `xb_array_get` and `xb_array_put` read and write an element whole (under
+  the array's sequence counter or lock when it is shared, in place when it is local; a read a writer overlapped never
+  reaches its destination; a value stored into a shared array is shared first), and the index operators, `Len`, `Empty`,
+  `AScan`'s search and the count of `FOR EACH` use them; `xb_array_last` (`ATail`) reads the length and the last element
+  in one read, and `xb_array_snapshot` (`AClone`, `ASort`) copies all the elements as one read saw them;
+  `xb_array_append` (`AAdd`) adds an element at once whatever other threads add, `xb_array_insert` and `xb_array_delete`
+  (`AIns`, `ADel`) shift under the lock, and `xb_array_resize_any` (`ASize`) changes the length. A shared array's `len`,
+  `cap` and `items` change under its lock with release stores, and storage it grows into is allocated before the lock is
+  taken (rooted meanwhile; a capacity only grows, so it is still enough under the lock); `xb_array_resize` is for arrays
+  only the runtime reaches yet. `ASort` of a shared array sorts a copy (a block may run any code) and puts the sorted
+  range back under the lock, as far as the array still reaches; a local one that its block shares meanwhile is sorted
+  again so; its block reads elements whole.
 
 ## Program startup
 

@@ -40,8 +40,29 @@ static inline int64_t xb_array_index(const xb_array *a, int64_t n) {
 
 /* Lengths are 64-bit so that a length past XB_ARRAY_MAX_LEN is caught before
  * it is narrowed to size_t (on 32-bit hosts). */
-xb_array *xb_array_alloc(uint64_t len);              /* `len` NIL items */
-void      xb_array_resize(xb_array *a, uint64_t len); /* new items are NIL; `a` must be reachable */
+xb_array *xb_array_alloc(uint64_t len); /* `len` NIL items */
+/* The visible length set to `len`, new items NIL; `a` must be reachable. xb_array_resize is for an array no other
+ * thread reaches (one the runtime has just made); xb_array_resize_any for any, where a shared one (core/shared.h)
+ * grows into storage allocated before its lock is taken (rooted in `ctx` meanwhile) and changes under the lock. */
+void      xb_array_resize(xb_array *a, uint64_t len);
+void      xb_array_resize_any(xb_ctx *ctx, xb_array *a, uint64_t len);
+/* An array that other threads may reach: its length, the element at 0-based `i` into *dst (0 past its end) and `v`
+ * into element `i` (0 past its end; a shared array shares the value first), each whole under the array's sequence
+ * counter or lock when it is shared, in place when it is local. */
+size_t    xb_array_length(const xb_array *a);
+int       xb_array_get(const xb_array *a, size_t i, xb_item *dst);
+int       xb_array_put(xb_array *a, size_t i, const xb_item *v);
+/* The last element into *dst, 0 when there is none, in one read (ATail). */
+int       xb_array_last(const xb_array *a, xb_item *dst);
+/* A new local array of the elements, all of them as one read saw them (an array other threads change is copied again
+ * until a read of all its items finds no writer between); `a` must be reachable. */
+xb_array *xb_array_snapshot(const xb_array *a);
+/* `v` added after the last element, at once whatever other threads add (AAdd); `v` must be rooted. */
+void      xb_array_append(xb_ctx *ctx, xb_array *a, const xb_item *v);
+/* The elements from 0-based `at` move one place up, the last one lost, and `at` becomes NIL (AIns); the elements after
+ * `at` move one place down and the last becomes NIL (ADel). Nothing when `at` is past the end. */
+void      xb_array_insert(xb_array *a, size_t at);
+void      xb_array_delete(xb_array *a, size_t at);
 void      xb_set_array(xb_item *it, xb_array *a);
 void      xb_array_bound_error(xb_ctx *ctx, const xb_item *base, const xb_item *idx); /* reading outside 1 .. Len() */
 

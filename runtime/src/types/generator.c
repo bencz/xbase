@@ -47,7 +47,7 @@ void xb_gen_yield(xb_ctx *ctx, const xb_item *gen, const xb_item *slots, uint32_
   XB_UNUSED(ctx);
   xb_object *g = gen->v.p;
   xb_array *frame = g->vars[GEN_FRAME].v.p;
-  if (frame->len < nslots) xb_array_resize(frame, nslots); /* the enumerator holds it: reachable */
+  if (frame->len < nslots) xb_array_resize_any(ctx, frame, nslots); /* the enumerator holds it: reachable */
   memcpy(frame->items + 1, slots + 1, (nslots - 1) * sizeof *slots);
   xb_gc_write_items(frame, 1, nslots);
   g->vars[GEN_CURRENT] = *value;
@@ -60,7 +60,7 @@ void xb_gen_done(xb_ctx *ctx, const xb_item *gen) {
   xb_object *g = gen->v.p;
   xb_set_nil(&g->vars[GEN_CURRENT]);
   xb_set_int(&g->vars[GEN_STATE], GEN_ENDED);
-  xb_array_resize(g->vars[GEN_FRAME].v.p, 0); /* the frame's values can go */
+  xb_array_resize_any(ctx, g->vars[GEN_FRAME].v.p, 0); /* the frame's values can go */
 }
 
 int xb_gen_move_next(xb_ctx *ctx, const xb_item *gen) {

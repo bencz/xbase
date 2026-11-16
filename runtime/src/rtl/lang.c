@@ -20,7 +20,7 @@ void xbf_LEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   if (argc && argv[0].type == XB_T_ARRAY) {
-    xb_set_int(ret, (int64_t)((const xb_array *)argv[0].v.p)->len);
+    xb_set_int(ret, (int64_t)xb_array_length(argv[0].v.p));
     return;
   }
   if (argc && argv[0].type == XB_T_HASH) {

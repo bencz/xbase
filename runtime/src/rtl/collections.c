@@ -1,5 +1,7 @@
 #include "rtl/collections.h"
 
+#include "core/shared.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -134,10 +136,7 @@ static int clone_item(clone_map *m, xb_item *it) {
     return 1;
   }
   if (it->type == XB_T_ARRAY) {
-    const xb_array *a = src;
-    xb_array *copy = xb_array_alloc(a->len);
-    memcpy(copy->items, a->items, a->len * sizeof(xb_item));
-    xb_set_array(it, copy);
+    xb_set_array(it, xb_array_snapshot(src)); /* all the elements as one read saw them */
   } else {
     xb_set_hash(it, xb_hash_alloc());
   }

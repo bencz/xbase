@@ -109,7 +109,7 @@ XB_NOINLINE static int64_t enum_len_other(xb_ctx *ctx, const xb_item *coll) {
  * hashes (their values) and enumerators (each MoveNext() that is .T. one more
  * element: a length as large as can be, else 0); indexes are 1-based. */
 int64_t xb_enum_len(xb_ctx *ctx, const xb_item *coll) {
-  if (coll->type == XB_T_ARRAY) return (int64_t)((const xb_array *)coll->v.p)->len;
+  if (coll->type == XB_T_ARRAY) return (int64_t)xb_array_length(coll->v.p);
   if (coll->type == XB_T_STRING) return (int64_t)coll->v.s->len;
   if (coll->type == XB_T_HASH) return (int64_t)((const xb_hash *)coll->v.p)->len;
   return enum_len_other(ctx, coll);
