@@ -3,6 +3,8 @@
  * the program's start function (see xb_program_run in xbrt.h). */
 #include "xbrt_int.h"
 
+#include "core/sched.h"
+
 #include "rdd/rdd.h"
 
 #include <stdlib.h>
@@ -37,13 +39,18 @@ void xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics
 static int unwinding(xb_ctx *ctx) { return xb_pending_get(ctx) && xb_pending(ctx); }
 
 /* Calls `fn` with the arguments, its result in a rooted item and dropped. */
-static void call(xb_ctx *ctx, xb_func fn, uint32_t argc, xb_item *argv) {
+/* Calls `fn`; with `start` (the start function), a result that is a task (an asynchronous start procedure's) is
+ * waited for. */
+static void call_as(xb_ctx *ctx, xb_func fn, uint32_t argc, xb_item *argv, int start) {
   xb_item ret;
   xb_set_nil(&ret);
   xb_gc_root_push(ctx, &ret);
   fn(ctx, &ret, argc, argv);
+  if (start && !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) xb_task_await_start(ctx, &ret);
   xb_gc_root_pop(ctx, 1);
 }
+
+static void call(xb_ctx *ctx, xb_func fn, uint32_t argc, xb_item *argv) { call_as(ctx, fn, argc, argv, 0); }
 
 /* Calls `fn` with a rooted copy of the arguments: a function may replace the
  * arguments it received (PValue()), and the next one receives them as given. */
@@ -81,7 +88,7 @@ static int start_up(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
 
 void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
   xb_symbols_seal();
-  if (start_up(ctx, argc, argv)) call(ctx, start, argc, argv);
+  if (start_up(ctx, argc, argv)) call_as(ctx, start, argc, argv, 1);
   xb_threads_end(ctx);
   xb_pending_clear(ctx, XB_PENDING_UNWIND); /* the request is served: the exit code stays */
   xb_set_nil(&ctx->break_value);
@@ -98,8 +105,5 @@ void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
       stopped = unwinding(ctx);
     }
   xb_threads_end(ctx); /* those the EXIT procedures started */
-  uint32_t requests = xb_pending_get(ctx) & XB_PENDING_UNWIND; /* the tables are closed whatever ended the program */
-  xb_pending_clear(ctx, XB_PENDING_UNWIND);
-  xb_area_close_all(ctx);
-  xb_pending_set(ctx, requests);
+  xb_env_close_areas(ctx); /* the tables are closed whatever ended the program */
 }

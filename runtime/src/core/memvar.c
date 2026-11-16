@@ -476,10 +476,10 @@ void xbf_MEMVARBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 void xb_memvar_share(xb_ctx *ctx) {
-  xb_env *env = ctx->env;
-  if (!env) return;
-  for (uint32_t i = 0; i < env->memvarCap; ++i) xb_share(&env->memvars[i]);
-  for (uint32_t i = 0; i < env->privateLen; ++i) xb_share(&env->privates[i].hidden);
+  for (xb_env *env = ctx->env; env; env = env->outer) {
+    for (uint32_t i = 0; i < env->memvarCap; ++i) xb_share(&env->memvars[i]);
+    for (uint32_t i = 0; i < env->privateLen; ++i) xb_share(&env->privates[i].hidden);
+  }
 }
 
 static void share_public(xb_item *it, void *data) {
@@ -489,13 +489,31 @@ static void share_public(xb_item *it, void *data) {
 
 void xb_memvar_share_publics(void) { xb_memvar_publics_each(share_public, NULL); }
 
-void xb_memvar_inherit(xb_ctx *ctx, const xb_ctx *creator) {
-  const xb_env *from = creator->env;
-  if (!from->memvarCap) return;
-  xb_item *mv = malloc(from->memvarCap * sizeof *mv);
-  if (!mv) xb_gc_fatal("out of memory");
-  memcpy(mv, from->memvars, from->memvarCap * sizeof *mv);
-  free(ctx->env->memvars);
-  ctx->env->memvars = mv;
-  ctx->env->memvarCap = from->memvarCap;
+void xb_memvar_capture(xb_ctx *ctx, xb_item *r) {
+  uint32_t n = 0;
+  for (uint32_t i = 0; i < ctx->env->memvarCap; ++i) n += ctx->env->memvars[i].type == XB_T_CELL;
+  if (!n) {
+    xb_set_nil(r);
+    return;
+  }
+  xb_array *a = xb_array_alloc(2 * (uint64_t)n); /* `a`, on the stack, stays where it is; the cells are rooted */
+  xb_set_array(r, a);
+  uint32_t k = 0;
+  for (uint32_t i = 0; i < ctx->env->memvarCap && k < 2 * n; ++i) {
+    if (ctx->env->memvars[i].type != XB_T_CELL) continue;
+    xb_set_int(&a->items[k++], i);
+    a->items[k++] = ctx->env->memvars[i];
+  }
+  xb_gc_write(a);
+}
+
+void xb_memvar_restore(xb_ctx *ctx, const xb_item *pairs) {
+  if (pairs->type != XB_T_ARRAY) return;
+  size_t n = xb_array_length(pairs->v.p);
+  for (size_t k = 0; k + 1 < n; k += 2) {
+    xb_item id;
+    xb_array_get(pairs->v.p, k, &id);
+    xb_item *b = binding(ctx, (uint32_t)id.v.i); /* may grow the table: the address after it */
+    xb_array_get(pairs->v.p, k + 1, b);
+  }
 }

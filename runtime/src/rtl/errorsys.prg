@@ -7,8 +7,10 @@ PROCEDURE ErrorSys()
    ErrorBlock( {| oError | DefError( oError ) } )
 RETURN
 
-// A division by zero gives 0; any other error is reported to the standard error with the call stack (its innermost
-// XB_CALLS_SHOWN calls), and ends the program with exit code 1. (The choice between quitting, retrying and the
+// A division by zero gives 0; in a task, any other error fails the task (its waiter gets the error; no BEGIN SEQUENCE
+// of the task takes it);
+// elsewhere it is reported to the standard error with the call stack (its innermost XB_CALLS_SHOWN calls), and ends
+// the program with exit code 1. (The choice between quitting, retrying and the
 // default comes with the terminal layer's Alert().) This function and the block are hidden from the call stack: level
 // 0 is where the error happened.
 STATIC FUNCTION DefError( oError )
@@ -21,6 +23,9 @@ STATIC FUNCTION DefError( oError )
    IF ( ( oError:genCode == EG_OPEN .AND. oError:osCode == 32 ) .OR. oError:genCode == EG_APPENDLOCK ) .AND. ;
       oError:canDefault
       NetErr( .T. )
+      RETURN .F.
+   ENDIF
+   IF __TaskFail( oError ) // in a task: it fails with the error, whatever sequence is around
       RETURN .F.
    ENDIF
    OutErr( Chr( 10 ) + ErrorMessage( oError ) )

@@ -84,42 +84,16 @@ typedef struct failure {
   uint32_t argc;
   const xb_item *args;
   uint16_t tries;           /* the attempt, from 1, of an error that may be retried */
+  const xb_item *error;     /* an Error object raised again (a task's failure), NULL: one made of the above */
 } failure;
 
-/* Raises the error (see xb_error_in). 0: fail; 1: substituted, or the
- * default action; 2: retry. */
-static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
-  const char *frame = f->frame;
+/* The Error object of failure `f`, in `*r` (rooted). Each allocation may collect: the object is rooted, and every store
+ * into it is followed by the barrier. */
+static void make_error(xb_ctx *ctx, const failure *f, xb_item *r) {
   uint32_t flags = f->flags, argc = f->argc;
   const xb_item *args = f->args;
-  if (ctx->error_trap) { /* Type() evaluating: it ends here */
-    ctx->error_trapped = f->gencode ? f->gencode : -1;
-    xb_pending_set(ctx, XB_PENDING_TRAP);
-    return 0;
-  }
-  xb_proc proc = XB_RUNTIME_PROC(frame, 0);
-  xb_frame inside;
-  if (frame) xb_frame_push(ctx, &inside, &proc);
-  if (ctx->env->error_block.type != XB_T_BLOCK || ctx->error_depth >= XB_ERROR_MAX_DEPTH) {
-    if (ctx->env->error_block.type != XB_T_BLOCK) unrecoverable(ctx, 9002, "No ERRORBLOCK() for error");
-    else unrecoverable(ctx, 9003, "Too many recursive error handler calls");
-    if (frame) xb_frame_pop(ctx, &inside);
-    return 0;
-  }
-  /* The arguments may be the only references to their values (a substituted
-   * result the caller holds in C): rooted until they are in the object. */
-  for (uint32_t i = 0; i < argc; ++i) xb_gc_root_push(ctx, (xb_item *)&args[i]);
-  /* The block runs from a rooted copy: it may replace the context's error
-   * block (ErrorBlock()) while it runs. */
-  xb_item call[3]; /* the Error object, the block's result, the block */
-  for (int k = 0; k < 3; ++k) {
-    xb_set_nil(&call[k]);
-    xb_gc_root_push(ctx, &call[k]);
-  }
   xb_object *e = xb_object_new(&error_class);
-  xb_set_object(&call[0], e);
-  /* Each allocation below may collect: the object is rooted, and every store
-   * into it is followed by the barrier. */
+  xb_set_object(r, e);
   if (argc) { /* without arguments, `args` stays NIL, as in the reference */
     xb_array *a = xb_array_alloc(argc);
     for (uint32_t i = 0; i < argc; ++i) a->items[i] = args[i];
@@ -146,7 +120,49 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
   xb_set_logical(&e->vars[ERR_CANRETRY], (flags & XB_ERR_RETRY) != 0);
   xb_set_logical(&e->vars[ERR_CANDEFAULT], (flags & XB_ERR_DEFAULT) != 0);
   xb_set_int(&e->vars[ERR_TRIES], f->tries);
+}
 
+/* Raises the error (see xb_error_in). 0: fail; 1: substituted, or the
+ * default action; 2: retry. */
+static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
+  const char *frame = f->frame;
+  uint32_t flags = f->flags, argc = f->argc;
+  const xb_item *args = f->args;
+  int32_t gencode = f->gencode;
+  if (f->error) {
+    xb_item g;
+    xb_object_get(f->error->v.p, ERR_GENCODE, &g);
+    gencode = xb_is_number(&g) ? (int32_t)xb_num_to_i64(&g) : 0;
+  }
+  if (ctx->error_trap) { /* Type() evaluating: it ends here */
+    ctx->error_trapped = gencode ? gencode : -1;
+    xb_pending_set(ctx, XB_PENDING_TRAP);
+    return 0;
+  }
+  xb_proc proc = XB_RUNTIME_PROC(frame, 0);
+  xb_frame inside;
+  if (frame) xb_frame_push(ctx, &inside, &proc);
+  if (ctx->env->error_block.type != XB_T_BLOCK || ctx->error_depth >= XB_ERROR_MAX_DEPTH) {
+    if (ctx->env->error_block.type != XB_T_BLOCK) unrecoverable(ctx, 9002, "No ERRORBLOCK() for error");
+    else unrecoverable(ctx, 9003, "Too many recursive error handler calls");
+    if (frame) xb_frame_pop(ctx, &inside);
+    return 0;
+  }
+  /* The arguments may be the only references to their values (a substituted
+   * result the caller holds in C): rooted until they are in the object. */
+  for (uint32_t i = 0; i < argc; ++i) xb_gc_root_push(ctx, (xb_item *)&args[i]);
+  /* The block runs from a rooted copy: it may replace the context's error
+   * block (ErrorBlock()) while it runs. */
+  xb_item call[3]; /* the Error object, the block's result, the block */
+  for (int k = 0; k < 3; ++k) {
+    xb_set_nil(&call[k]);
+    xb_gc_root_push(ctx, &call[k]);
+  }
+  if (f->error) {
+    call[0] = *f->error;
+  } else {
+    make_error(ctx, f, &call[0]);
+  }
   call[2] = ctx->env->error_block;
   ++ctx->error_depth;
   xb_block_call(ctx, &call[1], &call[2], 1, &call[0]);
@@ -171,33 +187,43 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
 
 int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
-  const failure f = {frame, NULL, NULL, gencode, subcode, operation, NULL, 0, flags, argc, args, 0};
+  const failure f = {frame, NULL, NULL, gencode, subcode, operation, NULL, 0, flags, argc, args, 0, NULL};
   return raise(ctx, &f, result) == 1;
 }
 
 int xb_error_described(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *description,
                        const char *operation, uint32_t flags, uint32_t argc, const xb_item *args) {
-  const failure f = {NULL, NULL, description, gencode, subcode, operation, NULL, 0, flags, argc, args, 0};
+  const failure f = {NULL, NULL, description, gencode, subcode, operation, NULL, 0, flags, argc, args, 0, NULL};
   return raise(ctx, &f, result) == 1;
 }
 
 int xb_error_retry(xb_ctx *ctx, int32_t gencode, int32_t subcode, const char *operation, uint16_t tries) {
-  const failure f = {NULL, NULL, NULL, gencode, subcode, operation, NULL, 0, XB_ERR_RETRY, 0, NULL, tries};
+  const failure f = {NULL, NULL, NULL, gencode, subcode, operation, NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL};
   return raise(ctx, &f, NULL) == 2;
 }
 
 int xb_error_file(xb_ctx *ctx, const char *frame, int32_t gencode, int32_t subcode, const char *filename,
                   int32_t oscode, uint16_t tries) {
   const failure f = {frame, NULL, NULL, gencode, subcode, "", filename, oscode, XB_ERR_RETRY | XB_ERR_DEFAULT, 0, NULL,
-                     tries};
+                     tries, NULL};
   return raise(ctx, &f, NULL);
 }
 
 int xb_error_of(xb_ctx *ctx, const char *subsystem, int32_t gencode, int32_t subcode, const char *operation,
                 const char *filename, int32_t oscode, uint32_t flags, uint32_t argc, const xb_item *args,
                 uint16_t tries, xb_item *result) {
-  const failure f = {NULL, subsystem, NULL, gencode, subcode, operation, filename, oscode, flags, argc, args, tries};
+  const failure f = {NULL, subsystem, NULL, gencode, subcode, operation, filename, oscode, flags, argc, args, tries,
+                     NULL};
   return raise(ctx, &f, result);
+}
+
+int xb_error_is(const xb_item *it) {
+  return it->type == XB_T_OBJECT && ((const xb_object *)it->v.p)->cls == &error_class;
+}
+
+int xb_error_raise(xb_ctx *ctx, xb_item *result, const xb_item *error) {
+  const failure f = {NULL, NULL, NULL, 0, 0, "", NULL, 0, XB_ERR_SUBSTITUTE, 0, NULL, 0, error};
+  return raise(ctx, &f, result) == 1;
 }
 
 /* ErrorBlock( [bNew] ): the current error block; a codeblock argument

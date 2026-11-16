@@ -189,11 +189,16 @@ EXTERN FUNCTION TString( nSeconds ) NATIVE
 EXTERN FUNCTION Type( cExpression ) NATIVE RESERVED CHECKED PRIVATES
 EXTERN FUNCTION ValType( xValue ) NATIVE RESERVED CHECKED ABBREV 4
 
-// Threads (xbase functions): the objects they make answer messages (docs/concurrency.md#threads)
+// Threads and tasks (xbase functions): the objects they make answer messages (docs/concurrency.md)
 EXTERN FUNCTION AtomicInt( [nValue] ) NATIVE CHECKED
 EXTERN FUNCTION Condition() NATIVE CHECKED
 EXTERN FUNCTION Mutex() NATIVE CHECKED
 EXTERN FUNCTION Semaphore( nInitial, [nMaximum] ) NATIVE CHECKED
+EXTERN FUNCTION TaskCompletionSource() NATIVE CHECKED
+EXTERN FUNCTION TaskFromResult( [xValue] ) NATIVE CHECKED
+EXTERN FUNCTION TaskRun( bWork, ... ) NATIVE CHECKED
+EXTERN FUNCTION TaskWhenAll( aTasks ) NATIVE CHECKED
+EXTERN FUNCTION TaskWhenAny( aTasks ) NATIVE CHECKED
 EXTERN FUNCTION ThreadStart( bWork, ... ) NATIVE CHECKED
 
 // Databases (work areas)
@@ -365,3 +370,4 @@ EXTERN FUNCTION __ValueLess( x, y ) NATIVE
 EXTERN FUNCTION __ValueMatches( xValue, xSearch ) NATIVE
 EXTERN FUNCTION __SetCentury( [lOn] ) NATIVE
 EXTERN FUNCTION __StdWrite( nHandle, ... ) NATIVE
+EXTERN FUNCTION __TaskFail( [xValue] ) NATIVE

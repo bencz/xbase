@@ -38,6 +38,8 @@ typedef struct xb_env {
   int      set_unique;     /* SET UNIQUE: orders made keep one entry per key */
   const struct xb_rdd *rddDefault;
   int      netErr;
+  struct xb_env *outer;    /* the environment set aside while this one runs (xb_env_enter), NULL: none; a root too */
+  int32_t  outerDecimals;  /* SET DECIMALS of the code that set it aside, back when this one ends */
 } xb_env;
 
 /* A thread's context: what compiled code reaches (the [ABI] head), the state of the code running on the thread now
@@ -56,6 +58,7 @@ struct xb_ctx {
   unsigned rootLen, rootCap;
   xb_item  break_value;     /* the value of a pending BREAK (a root of the collector) */
   uint32_t error_depth;     /* error blocks running */
+  uint32_t task_depth;      /* tasks running on the thread (one inside another that waits for it): __InTask() */
   /* Type() evaluating (error_trap > 0): an error runs no block, it ends the
    * evaluation (XB_PENDING_TRAP, which no BEGIN SEQUENCE catches) and sets
    * error_trapped to its generic code (never 0). */
@@ -84,16 +87,34 @@ void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
  * error a reserve above it (core/ctx.c); NULL: unknown, no limit. */
 void xb_ctx_set_stack(xb_ctx *ctx, const char *low);
 
-/* A new flow's environment: xb_env_share, by the creator before the new thread can run, shares what the creator's
- * environment holds (ErrorBlock(), the language's texts, the memory variables visible); xb_env_inherit, on the new
- * thread, copies it into `ctx`'s new environment (the SET values, SET DECIMALS too, ErrorBlock(), the language and
- * the code page, the default driver, the memory variables visible), its work areas left empty. */
-void xb_env_share(xb_ctx *creator);
-void xb_env_inherit(xb_ctx *ctx, const xb_ctx *creator);
+/* A new flow's environment (a thread's, a task's). xb_env_capture makes in `*r` (rooted) a snapshot of `ctx`'s, an
+ * array the new flow keeps: the SET values (SET DECIMALS too), the date format, ErrorBlock(), the language's texts,
+ * the code page, the default driver and the memory variables visible (the same variables); its work areas are not in
+ * it. xb_env_restore gives `ctx`'s environment, new and empty, the values of a snapshot. xb_env_enter sets `ctx`'s
+ * environment aside for a new one restored from a snapshot (a task that runs on the thread), xb_env_leave closes the
+ * new one's work areas, frees it and puts the one set aside back (SET DECIMALS too). */
+void xb_env_capture(xb_ctx *ctx, xb_item *r);
+void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot);
+void xb_env_enter(xb_ctx *ctx, const xb_item *snapshot);
+void xb_env_leave(xb_ctx *ctx);
 
-/* The program's end (rtl/threads.c): the threads ThreadStart() started that still run are asked to QUIT, and waited
- * for: before the EXIT procedures run, and after them. */
+/* Closes the work areas of `ctx`'s environment whatever ended its flow: the requests pending (and a BREAK's value) set
+ * aside meanwhile and back after; what closing raised dropped, but a QUIT (also one another thread raised). */
+void xb_env_close_areas(xb_ctx *ctx);
+
+/* The program's threads (rtl/threads.c). xb_program_thread_start runs body( ctx, arg ) on a new thread, attached to
+ * the collector, with a context of its own (QUIT pending when the program is ending): 0 when the system could not
+ * make one. xb_quit_all ends the program from any thread: every other context is asked to QUIT, and the scheduler's
+ * workers to stop. xb_threads_end is the program's end: the threads that still run (ThreadStart()'s, the workers)
+ * are asked to QUIT and waited for, and the tasks that did not start are canceled: before the EXIT procedures run,
+ * and after them. */
+int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg);
+void xb_quit_all(const xb_ctx *ctx);
 void xb_threads_end(xb_ctx *ctx);
+
+/* Eval( block, args... ) of an array that holds the block (or function reference) and its arguments: a thread's
+ * work, a task's. */
+void xb_eval_work(xb_ctx *ctx, xb_item *r, const xb_item *work);
 
 /* The program's exit code (ErrorLevel(), an unrecoverable error): the process's, whatever thread sets it. */
 int32_t xb_exit_code(void);

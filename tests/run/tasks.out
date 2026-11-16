@@ -1,0 +1,33 @@
+
+result:         42 TASK .T. .F. .F. NIL .T.
+symbol: abab nil: NIL
+count          1          3 .T.
+count         10        660 .T.
+count        300   13635300 .T.
+nested:         16
+chain:        200
+after failure: failed +
+all: 10,20,30,40,50          0
+all failed: .T. first
+all canceled: .T.
+any: .T. ready
+source: .F. .T.         42 .F. .F. .F.         41 TASKCOMPLETIONSOURCE TASK,SETRESULT,SETERROR,SETCANCELED,TRYSETRESULT,TRYSETERROR,TRYSETCANCELED
+wait limit: .F. .F.
+methods: RESULT,WAIT,ISCOMPLETED,ISFAILED,ISCANCELED,ERROR,CONTINUEWITH          0
+raised: BASE/1/1081 + Argument error
+raised: break value
+raised: BASE/0/9026 TASK:RESULT Task canceled
+raised: BASE/1/9025 TASKCOMPLETIONSOURCE:SETERROR Task already completed
+raised: BASE/1/9024 TASKRUN Argument error
+raised: BASE/1/9024 TASKWHENALL Argument error
+raised: BASE/1/9024 TASKWHENALL Argument error
+raised: BASE/1/9024 TASKWHENANY Argument error
+raised: BASE/1/9024 TASK:CONTINUEWITH Argument error
+raised: BASE/1/9024 TASK:WAIT Argument error
+env: 2026.11.16          0.3333 creator
+private: task task
+own SET:          4          4
+legacy sequence: .T. +
+deep combinators: end
+changing array:       3000
+collections:         40

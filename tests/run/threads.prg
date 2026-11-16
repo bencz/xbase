@@ -6,8 +6,9 @@
 // at the ends of the 64-bit range and its argument errors; the environment a thread starts with (SET values,
 // ErrorBlock(), the PRIVATEs visible, which it shares with its creator, and releases) and what does not come back (its
 // SETs, its PRIVATEs), a PUBLIC created or released by a thread, one that eight threads create at once, CLEAR MEMORY in
-// a thread; arguments passed @ (their values); threads that start threads; collections while threads allocate; and
-// lines written at once by several threads (more than eight values, more than 256 bytes), each whole.
+// a thread; arguments passed @ (their values); threads that start threads; collections while threads allocate; lines
+// written at once by several threads (more than eight values, more than 256 bytes), each whole; and a table a thread
+// leaves open, closed (written) when it ends.
 STATIC s_nStatic := 0
 MEMVAR gPublic, gMade, pShared, gRace, gGone
 
@@ -92,7 +93,21 @@ PROCEDURE Main()
    PUBLIC gGone := 1
    ThreadStart( {|| __MemClear() } ):Join()
    ? "cleared:", Type( "gGone" ), Type( "gPublic" ), pShared
+
+   DbCreate( "thread_table", { { "N", "N", 5, 0 } } )
+   ThreadStart( {|| Appends() } ):Join()
+   USE thread_table
+   ? "thread's table closed:", LastRec(), N
+   USE
+   FErase( "thread_table.dbf" )
 RETURN
+
+// Appends a record, leaving the table open: the thread's end closes it (its record written).
+STATIC FUNCTION Appends()
+   USE thread_table EXCLUSIVE
+   APPEND BLANK
+   REPLACE N WITH 7
+RETURN NIL
 
 // Eight threads create the same PUBLIC at once: one variable, which each adds 1 to.
 STATIC FUNCTION Race()

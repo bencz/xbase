@@ -2,6 +2,7 @@
 
 #include "core/shared.h"
 #include "core/shared_file.h"
+#include "rdd/rdd.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,30 +28,90 @@ static void env_free(xb_env *env) {
   free(env);
 }
 
-void xb_env_share(xb_ctx *creator) {
-  xb_share(&creator->env->error_block);
-  xb_share(&creator->env->language);
-  xb_memvar_share(creator);
+/* The scalar SET values of a snapshot, kept as the bytes of a string: no item refers to the heap. */
+typedef struct env_sets {
+  int32_t decimals, epoch;
+  int exact, fixed, century, deleted, shared, softseek, unique;
+  const struct xb_codepage *codepage;
+  const struct xb_rdd *rddDefault;
+} env_sets;
+
+enum { SNAP_SETS, SNAP_DATE_FORMAT, SNAP_ERROR_BLOCK, SNAP_LANGUAGE, SNAP_MEMVARS, SNAP_COUNT_ };
+
+void xb_env_capture(xb_ctx *ctx, xb_item *r) {
+  const xb_env *env = ctx->env;
+  xb_array *a = xb_array_alloc(SNAP_COUNT_); /* `a`, on the stack, stays where it is */
+  xb_set_array(r, a);
+  env_sets sets = {ctx->set_decimals, env->epoch,       env->set_exact,    env->set_fixed, env->century,
+                   env->set_deleted,  env->set_shared,  env->set_softseek, env->set_unique, env->codepage,
+                   env->rddDefault};
+  xb_set_str(&a->items[SNAP_SETS], xb_str_new((const char *)&sets, sizeof sets));
+  xb_gc_write(a);
+  xb_set_str(&a->items[SNAP_DATE_FORMAT], xb_str_new(env->date_format, strlen(env->date_format)));
+  xb_gc_write(a);
+  a->items[SNAP_ERROR_BLOCK] = env->error_block;
+  a->items[SNAP_LANGUAGE] = env->language;
+  xb_gc_write(a);
+  xb_item memvars;
+  xb_set_nil(&memvars);
+  xb_gc_root_push(ctx, &memvars);
+  xb_memvar_capture(ctx, &memvars);
+  a->items[SNAP_MEMVARS] = memvars;
+  xb_gc_write(a);
+  xb_gc_root_pop(ctx, 1);
 }
 
-void xb_env_inherit(xb_ctx *ctx, const xb_ctx *creator) {
-  const xb_env *from = creator->env;
+void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
   xb_env *env = ctx->env;
-  ctx->set_decimals = creator->set_decimals;
-  env->error_block = from->error_block;
-  env->set_exact = from->set_exact;
-  env->set_fixed = from->set_fixed;
-  xb_ctx_set_date_format(ctx, from->date_format, strlen(from->date_format));
-  env->epoch = from->epoch;
-  env->century = from->century;
-  env->language = from->language;
-  env->codepage = from->codepage;
-  env->set_deleted = from->set_deleted;
-  env->set_shared = from->set_shared;
-  env->set_softseek = from->set_softseek;
-  env->set_unique = from->set_unique;
-  env->rddDefault = from->rddDefault;
-  xb_memvar_inherit(ctx, creator);
+  xb_item it;
+  env_sets sets;
+  xb_array_get(snapshot->v.p, SNAP_SETS, &it);
+  memcpy(&sets, it.v.s->data, sizeof sets);
+  ctx->set_decimals = sets.decimals;
+  env->epoch = sets.epoch;
+  env->set_exact = sets.exact;
+  env->set_fixed = sets.fixed;
+  env->century = sets.century;
+  env->set_deleted = sets.deleted;
+  env->set_shared = sets.shared;
+  env->set_softseek = sets.softseek;
+  env->set_unique = sets.unique;
+  env->codepage = sets.codepage;
+  env->rddDefault = sets.rddDefault;
+  xb_array_get(snapshot->v.p, SNAP_DATE_FORMAT, &it);
+  xb_ctx_set_date_format(ctx, it.v.s->data, it.v.s->len);
+  xb_array_get(snapshot->v.p, SNAP_ERROR_BLOCK, &env->error_block);
+  xb_array_get(snapshot->v.p, SNAP_LANGUAGE, &env->language);
+  xb_array_get(snapshot->v.p, SNAP_MEMVARS, &it);
+  xb_memvar_restore(ctx, &it);
+}
+
+void xb_env_enter(xb_ctx *ctx, const xb_item *snapshot) {
+  xb_env *env = env_new();
+  env->outer = ctx->env;
+  env->outerDecimals = ctx->set_decimals;
+  ctx->env = env;
+  xb_env_restore(ctx, snapshot);
+}
+
+void xb_env_close_areas(xb_ctx *ctx) {
+  uint32_t requests = xb_pending_get(ctx) & XB_PENDING_UNWIND;
+  xb_item value = ctx->break_value;
+  xb_gc_root_push(ctx, &value);
+  xb_pending_clear(ctx, requests);
+  xb_area_close_all(ctx);
+  xb_pending_clear(ctx, XB_PENDING_UNWIND & ~(uint32_t)XB_PENDING_QUIT); /* what closing raised; a QUIT stays */
+  xb_pending_set(ctx, requests);
+  ctx->break_value = value;
+  xb_gc_root_pop(ctx, 1);
+}
+
+void xb_env_leave(xb_ctx *ctx) {
+  xb_env *env = ctx->env;
+  xb_env_close_areas(ctx);
+  ctx->env = env->outer;
+  ctx->set_decimals = env->outerDecimals;
+  env_free(env);
 }
 
 /* The monotonic clock when the first context was made, as the program started: ElapsedMs() counts from it. */

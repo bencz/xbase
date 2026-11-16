@@ -1,11 +1,11 @@
 # Concurrency: tasks, async/await and threads
 
 *Planned*, except phase 1 (the platform's threads and synchronization,
-[runtime.md](runtime.md#threads-and-synchronization)) and what phase 2 marks done ([Threads](#threads)): the design
-the work follows, in the order of [Phases](#phases). The goal is a runtime where one process serves hundreds of
-thousands of concurrent requests (a web server with as many connections, each awaiting the network and the database),
-on every core, without a data race ever corrupting memory, and where Clipper code that knows nothing of tasks keeps
-working inside them.
+[runtime.md](runtime.md#threads-and-synchronization)), phase 2 ([Threads](#threads)) and what phase 3 marks done
+([Scheduler](#scheduler), [Tasks](#tasks)): the design the work follows, in the order of [Phases](#phases). The goal is
+a runtime where one process serves hundreds of thousands of concurrent requests (a web server with as many connections,
+each awaiting the network and the database), on every core, without a data race ever corrupting memory, and where
+Clipper code that knows nothing of tasks keeps working inside them.
 
 ## Decisions
 
@@ -56,8 +56,10 @@ NEXT
 - `AWAIT expr`: a unary operator, anywhere in an expression of an `ASYNC` function, also inside `BEGIN SEQUENCE`,
   `TRY`/`CATCH`/`FINALLY`, `ALWAYS`, `FOR EACH`, `WITH OBJECT`. A task gives its result, or raises its error in the
   awaiter (below); a value that is no task is its own result, so `AWAIT` of a function that may or may not be `ASYNC`
-  is valid. `AWAIT` outside an `ASYNC` function is a compile error, except in the start procedure, which may await
-  (the program then ends when it returns).
+  is valid. `AWAIT` outside an `ASYNC` function is a compile error, except in the start procedure, which may await,
+  and may be `ASYNC` itself: the runtime waits for the task it returns before the program ends (done: a start
+  procedure that returns a `Task` is waited for, its failure raised as `Result` raises it, so an error nobody handled
+  is reported and ends the program with exit code 1; [runtime.md](runtime.md#program-startup)).
 - Asynchronous generators: `YIELD` in an `ASYNC` function. Calling it returns an asynchronous enumerator
   (`MoveNextAsync()` gives a task of a logical, `Current`); `AWAIT FOR EACH x IN expr ... NEXT` awaits each step.
   `AWAIT FOR EACH` over an ordinary enumerator awaits each element that is a task (a collection of tasks in order).
@@ -69,9 +71,11 @@ NEXT
   that hold resources (files, sockets, connections, locks) answer both.
 - Errors: an error in a task goes to the task's error block, as in any code (it may substitute a value, retry, or
   `BREAK`). One that leaves the task's body (a `BREAK`, or the default handler that would end the program) completes
-  the task as failed with the error object; `AWAIT` of a failed task raises it in the awaiter as `Break( oErr )`, so
-  `RECOVER USING oErr` and `CATCH oErr` take it. A failed task nobody awaits is reported (on standard error, and to a
-  handler the program may set) when the collector finds it unreachable. `QUIT` in any task ends the program.
+  the task as failed with the error object; `AWAIT` of a failed task raises it in the awaiter as `Result` does
+  ([Tasks](#tasks)): the Error object through the awaiter's error block (so `CATCH oErr` takes it, and so does
+  `RECOVER USING oErr` under an error block that breaks), another value as `Break( value )`. A failed task nobody
+  awaits is reported (on standard error, and to a handler the program may set) when the collector finds it
+  unreachable. `QUIT` in any task ends the program.
 - Restrictions, as for generators: no `AWAIT` in a codeblock (asynchronous codeblocks later), no `...`, `PCount()`,
   `PValue()` or `PARAMETERS` in an `ASYNC` function, and it creates no `PRIVATE` (whose dynamic scope would outlive a
   suspension); a function it calls creates them as usual.
@@ -83,9 +87,9 @@ NEXT
 Classes and functions, listed in [coverage.md](coverage.md) as each one comes:
 
 - `Task`: `Result` (waits), `Wait( [nMs] )`, `IsCompleted`, `IsFailed`, `IsCanceled`, `Error`, `ContinueWith( b )`;
-  `TaskRun( bWork, ... )` (on the pool), `TaskDelay( nMs, [oToken] )`, `TaskYield()`, `TaskWhenAll( aTasks )`,
-  `TaskWhenAny( aTasks )`, `TaskFromResult( x )`, `TaskTimeout( oTask, nMs )`.
-- `TaskCompletionSource`: a task completed by code (callbacks, other threads).
+  `TaskRun( bWork, ... )` (on the pool), `TaskWhenAll( aTasks )`, `TaskWhenAny( aTasks )`, `TaskFromResult( x )`:
+  done ([Tasks](#tasks)). Planned: `TaskDelay( nMs, [oToken] )`, `TaskYield()`, `TaskTimeout( oTask, nMs )`.
+- `TaskCompletionSource`: a task completed by code (callbacks, other threads): done ([Tasks](#tasks)).
 - `CancellationTokenSource` / `CancellationToken`: cooperative cancellation, timeouts, linked tokens; every awaitable
   operation of the runtime takes one.
 - `Channel( [nCapacity] )`: `SendAsync`, `ReceiveAsync`, `TrySend`, `TryReceive`, `Close`; enumerable with `AWAIT FOR
@@ -109,8 +113,9 @@ The context is split in two (done, [runtime.md](runtime.md#threads-and-synchroni
   macro cache), and a pointer to the current flow's environment.
 - The **environment** of a flow of execution (`xb_env`): the `SET` values, `ErrorBlock`, the memory variables, the
   current work area number, `SET LANGUAGE` and `SET CODEPAGE`, `FError()`, the default RDD, and the flow's work areas.
-  *(Planned)*: a worker running a task points its context at the task's environment, and `SET DECIMALS` moves into the
-  environment, copied into the context when it does; switching tasks is a pointer store and that copy.
+  A task runs in an environment of its own, made from the snapshot its creator's gave it, in front of the thread's
+  (done). *(Planned)*: `SET DECIMALS` moves into the environment, copied into the context when it changes, so that
+  switching between suspended tasks is a pointer store and that copy.
 
 Environments are copied on write: sequential code shares one and sees every `SET` as Clipper does; where execution
 forks (a task started with `TaskRun`, an `ASYNC` call that suspends while its caller goes on without awaiting it), both
@@ -180,33 +185,64 @@ Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); th
 
 ### Scheduler
 
-- Workers: one per core by default (a runtime option of the command line sets it, `//WORKERS:n`); the program's start
-  procedure runs as the first task.
-- Each worker has a work-stealing deque (Chase-Lev) and a slot for the task it just woke (run next, for locality);
-  tasks from outside the pool go to a global injection queue. An idle worker steals half of a random victim's deque,
-  polls its I/O reactor and the timers, then parks.
+Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but where marked planned:
+
+- Workers: threads started when tasks first need them; one per processor runs tasks at once by default, `//WORKERS:n`
+  on the command line sets it (an argument that starts with `//` is a runtime option, which the program does not
+  receive). *(Planned)*: the program's start procedure runs as the first task; today it runs on the program's thread,
+  which submits tasks to the pool and waits for them as any other thread (a task it returns is waited for at its end).
+- Each worker has a queue of its own, a ring of 256 tasks it fills at the tail and takes from at the head, and a slot
+  for the task it made last (run next, for locality); tasks from outside the pool, and the half a full ring sheds, go
+  to the pool's queue, which a worker looks at first once every 61 tasks, taking its share of what waits. A worker
+  that finds nothing steals half of another's ring (that worker's next task when its ring is empty), then parks; a
+  submission wakes a parked worker, or starts one, while fewer are active than the target.
 - **Blocking handoff**: every operation that may block the thread (file and lock I/O, `Mutex` waits, `Wait()`,
-  console input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run` (done for the
-  collector). While a
-  worker blocks with work waiting, another thread takes its place (started on demand, kept for a while, capped); the
-  blocked one gives its place back when it returns. A monitor thread also sees a task that runs for long without a
-  suspension point (a computation) and adds a thread the same way. Legacy synchronous code inside tasks therefore
-  costs threads, never liveness.
-- Timers: a hierarchical timing wheel per worker for `TaskDelay`, timeouts and cancellation after a delay; hundreds of
-  thousands of pending timeouts cost constant time each.
-- A blocking pool, separate from the workers, runs work that has no asynchronous form (`getaddrinfo`, file I/O where
-  the system has no asynchronous files, foreign libraries).
+  console input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run`. While a worker running
+  a task blocks with work waiting, another takes its place (woken or started, up to 1024 workers); the blocked one is
+  active again when it returns, and a worker beyond the target that stays idle 2 seconds ends. A thread that waits
+  with no limit for a task still to start runs it itself (inline). Legacy synchronous code inside tasks therefore
+  costs threads, never liveness. *(Planned)*: a monitor thread that sees a task running long without a suspension
+  point (a computation) and adds a worker the same way.
+- *(Planned)* Timers: a hierarchical timing wheel per worker for `TaskDelay`, timeouts and cancellation after a delay;
+  hundreds of thousands of pending timeouts cost constant time each.
+- *(Planned)* A blocking pool, separate from the workers, runs work that has no asynchronous form (`getaddrinfo`, file
+  I/O where the system has no asynchronous files, foreign libraries).
 
 ### Tasks
 
-- A task object holds its state (running, suspended, completed, failed, canceled), its result or error, its
-  continuations (one inline, more in a list), its environment, its cancellation token and, while suspended, its frame
-  and resume function.
-- Completing a task schedules its continuations on the completing worker (run next) or, for one that must not run
-  inline, on the pool. `AWAIT` of a completed task continues inline with no allocation.
-- Cost targets (measured, [Testing and measurement](#testing-and-measurement)): an `AWAIT` of a completed task in tens
-  of nanoseconds, a suspension and resumption in a few hundred, a suspended task in well under 1 KB beyond what its
-  own variables hold.
+- A task object holds its state (created, scheduled, running, then completed, failed or canceled), its result or the
+  value of its failure, its continuations, its block and the snapshot of its creator's environment until it runs
+  (done), its cancellation token and, while suspended, its frame and resume function *(planned)*.
+- `TaskRun( bWork, [xArgs...] )` runs `Eval( bWork, xArgs... )` on the pool (`BASE/9024` for anything but a block or
+  a function reference), in an environment made from a snapshot of its creator's at `TaskRun()`: the `SET` values,
+  `ErrorBlock()`, the language and the code page, the default driver, and the PRIVATE variables visible (the same
+  variables); work areas of its own, closed when it ends. What it changes in its own environment stays there.
+- `oTask:Result` waits for the task and gives its result. A failure that carries an Error object is raised again in
+  the waiter, through its error block (so `TRY`'s `CATCH` takes it, the default handler reports it); one that carries
+  another value is raised as `Break( value )`; a cancellation is the error `BASE/9026` `Task canceled` (no generic
+  code; the error block may substitute the result). `Wait( [nMs] )`
+  waits (up to nMs milliseconds; a limit that is no number, `BASE/9024`) and tells whether the task ended; `IsCompleted`
+  (ended, in any way), `IsFailed`, `IsCanceled`, `Error` (the failure's value, else NIL). A thread that waits for a
+  task with no limit runs it itself when it has not started.
+- An error in a task goes to its error block, its creator's; the default handler (`ErrorSys`) fails the task with the
+  error instead of ending the program: a request that no `BEGIN SEQUENCE` of the task takes (a `RECOVER` meant for the
+  code's own `BREAK`s does not swallow it), as outside a task it would end the program. A task run inline inside
+  `Type()` has errors of its own, not `Type()`'s. A `BREAK` that leaves the block fails it with the `BREAK`'s value.
+  `QUIT` ends the program, the task canceled; a wait for a task (or a `Mutex`, a `Condition`...) ends when the program
+  is ending, also in code an `ALWAYS` runs meanwhile. At the program's end the tasks that never started are canceled.
+- `oTask:ContinueWith( bWork )`: a task that runs `Eval( bWork, oTask )` once oTask ended (completed, failed or
+  canceled), scheduled to run next on the worker that completed it (on the pool when another thread did).
+  `TaskWhenAll( aTasks )`: a task that completes once all did, with their results in an array in their order; failed
+  with the first failure in that order, canceled when one was; an empty array, completed with an empty one.
+  `TaskWhenAny( aTasks )` (not empty): completed with the first task that ended. Both wait for the tasks the array held
+  as one read saw it, and a chain of them of any length completes. Anything but an array of tasks is `BASE/9024`.
+  `TaskFromResult( x )`: a task completed with x.
+- `TaskCompletionSource()`: `Task` is a task that its methods complete: `SetResult( x )`, `SetError( x )` (failed with
+  x), `SetCanceled()`, each `.T.`, and `BASE/9025` `Task already completed` when it was; `TrySetResult`, `TrySetError`,
+  `TrySetCanceled` tell whether they did.
+- *(Planned)* `AWAIT` of a completed task continues inline with no allocation. Cost targets (measured,
+  [Testing and measurement](#testing-and-measurement)): an `AWAIT` of a completed task in tens of nanoseconds, a
+  suspension and resumption in a few hundred, a suspended task in well under 1 KB beyond what its own variables hold.
 
 ### I/O reactor
 
@@ -362,9 +398,10 @@ Each phase ends with its tests, its benchmarks measured before and after, the do
    atomic headers, per-thread remembered sets, the finalizer task; shared objects (header bit, publication, sequence
    counters and locks, compiled fast paths); line-atomic console output, `ThreadStart`, `Mutex`, `AtomicInt`,
    `Condition`, `Semaphore`, `SYNCHRONIZED` (done). The first visible feature: threads sharing memory safely.
-3. **Scheduler and tasks**: workers, deques, stealing, parking, blocking handoff and its monitor, timers, the
-   blocking pool; `Task`, `TaskRun`, `TaskDelay`, `TaskWhenAll`/`Any`, `TaskCompletionSource`, cancellation,
-   `Channel`, usable from synchronous code (`Wait()`, `ContinueWith`).
+3. **Scheduler and tasks**: workers, run queues, stealing, parking, blocking handoff, `//WORKERS:n`, `Task`,
+   `TaskRun`, `TaskWhenAll`/`Any`, `TaskFromResult`, `TaskCompletionSource`, a start procedure's task waited for
+   (done, step 3a); the handoff's monitor, timers, `TaskDelay`, `TaskTimeout`, cancellation (step 3b); `Channel` and
+   the blocking pool (step 3c); usable from synchronous code (`Wait()`, `Result`, `ContinueWith`).
 4. **The compiler**: `ASYNC` functions, procedures and methods, `AWAIT` everywhere in them, the start procedure
    awaiting, errors and cancellation across `AWAIT`, the completed fast path; asynchronous generators and `AWAIT FOR
    EACH`; `AWAIT USING` (`USING` is done).

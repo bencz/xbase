@@ -78,6 +78,7 @@
 #include "xbrt_int.h"
 
 #include "core/memvar.h"
+#include "core/sched.h"
 #include "core/shared.h"
 
 #include "rdd/rdd.h"
@@ -408,6 +409,7 @@ void xb_blocking_run(void (*fn)(void *), void *arg) {
     return;
   }
   blocked_call c = {fn, arg, t};
+  xb_sched_blocking(1); /* a worker running a task: another may take its place meanwhile */
   t->blocking = 1;
   if (xb_atomic_load32(&heap.threadCount, XB_RELAXED) > 1) {
     xb_platform_with_registers(run_blocked, &c);
@@ -417,6 +419,7 @@ void xb_blocking_run(void (*fn)(void *), void *arg) {
     xb_atomic_store32(&t->unsaved, 0, XB_RELAXED);
   }
   t->blocking = 0;
+  xb_sched_blocking(0);
 }
 
 void xb_gc_thread_attach(const void *base) {
@@ -1204,22 +1207,27 @@ static void mark_public(xb_item *it, void *data) {
   mark_item(it);
 }
 
+static void mark_env(xb_env *env) {
+  mark_item(&env->error_block);
+  mark_item(&env->language);
+  xb_areas_mark(env, mark_item);
+  for (uint32_t i = 0; i < env->memvarCap; ++i) mark_item(&env->memvars[i]);
+  for (uint32_t i = 0; i < env->privateLen; ++i) mark_item(&env->privates[i].hidden);
+}
+
 static void mark_roots(void) {
   for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) {
     for (xb_frame *f = ctx->frames; f; f = f->prev)
       for (uint32_t i = 0; i < f->nslots; ++i) mark_item(&f->slots[i]);
     for (unsigned i = 0; i < ctx->rootLen; ++i) mark_item(ctx->roots[i]);
-    mark_item(&ctx->env->error_block);
     mark_item(&ctx->break_value);
-    mark_item(&ctx->env->language);
-    xb_areas_mark(ctx, mark_item);
-    for (uint32_t i = 0; i < ctx->env->memvarCap; ++i) mark_item(&ctx->env->memvars[i]);
-    for (uint32_t i = 0; i < ctx->env->privateLen; ++i) mark_item(&ctx->env->privates[i].hidden);
+    for (xb_env *env = ctx->env; env; env = env->outer) mark_env(env);
     for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) mark_item(&ctx->macro_cache[i]);
   }
   for (const xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
   xb_memvar_publics_each(mark_public, NULL);
+  xb_sched_mark(mark_item);
   for (size_t i = heap.finalizedHead; i < heap.finalizedLen; ++i) mark_item(&heap.finalized[i]);
 }
 

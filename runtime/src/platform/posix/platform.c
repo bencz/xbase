@@ -31,6 +31,9 @@
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__GLIBC__) /* defined by the headers above */
+#include <malloc.h>
+#endif
 
 int64_t xb_platform_monotonic_ns(void) {
   struct timespec now;
@@ -38,7 +41,16 @@ int64_t xb_platform_monotonic_ns(void) {
   return (int64_t)now.tv_sec * XB_NS_PER_SEC + now.tv_nsec;
 }
 
-void xb_platform_init(void) {}
+/* glibc gives each thread that allocates an arena of its own, up to eight per processor, each reserving 64 MB of
+ * address space on a 64-bit system: with a worker per processor, and more for blocked ones, gigabytes reserved for
+ * the little the runtime allocates there (its objects live in the collector's heap). A few arenas serve it. */
+#define MALLOC_ARENAS 4
+
+void xb_platform_init(void) {
+#if defined(__GLIBC__)
+  mallopt(M_ARENA_MAX, MALLOC_ARENAS);
+#endif
+}
 
 int xb_platform_stack_bounds(const char **low, const char **high) {
   *low = *high = NULL;

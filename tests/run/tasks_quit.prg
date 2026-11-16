@@ -1,0 +1,25 @@
+// QUIT in a task ends the program with the exit code ErrorLevel() set: the start procedure, waiting for that task,
+// goes no further, but its FINALLY runs; a wait there (for a continuation whose antecedent never completes) ends at
+// once, since the program is ending; then the EXIT procedures run.
+PROCEDURE Main()
+   LOCAL s := TaskCompletionSource(), c, t
+   c := s:Task:ContinueWith( {|| "never" } )
+   t := TaskRun( {|| Quits() } )
+   TRY
+      t:Wait()
+      ? "not reached"
+   FINALLY
+      ? "finally"
+      c:Wait()
+      ? "after the wait", c:IsCompleted
+   END
+RETURN
+
+EXIT PROCEDURE Bye()
+   ? "bye", ErrorLevel()
+RETURN
+
+STATIC FUNCTION Quits()
+   ErrorLevel( 5 )
+   QUIT
+RETURN NIL

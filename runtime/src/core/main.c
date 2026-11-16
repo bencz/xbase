@@ -1,5 +1,7 @@
 #include "xbrt_int.h"
 
+#include "core/sched.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,10 +19,27 @@ typedef struct program {
   char **argv;
 } program;
 
-/* The command-line arguments after the program's name become strings in a
- * frame of their own, linked first into the context's chain (so the collector
- * sees them), which the start function receives as its parameters. */
+/* A runtime option, an argument that starts with //, which the program does not receive: //WORKERS:n sets the
+ * workers that run tasks at once (core/sched.c); any other is ignored. Letters in any case. */
+static void runtime_option(const char *arg) {
+  static const char workers[] = "WORKERS:";
+  size_t k = 0;
+  while (workers[k] && xb_ascii_upper(arg[k]) == workers[k]) ++k;
+  if (workers[k]) return;
+  unsigned long n = strtoul(arg + k, NULL, 10);
+  if (n) xb_sched_set_workers(n > UINT32_MAX ? UINT32_MAX : (unsigned)n);
+}
+
+/* The command-line arguments after the program's name, but the runtime options, become strings in a frame of their
+ * own, linked first into the context's chain (so the collector sees them), which the start function receives as its
+ * parameters. */
 XB_NOINLINE static void run(program *p) {
+  int kept = 1;
+  for (int i = 1; i < p->argc; ++i) {
+    if (strncmp(p->argv[i], "//", 2) == 0) runtime_option(p->argv[i] + 2);
+    else p->argv[kept++] = p->argv[i];
+  }
+  p->argc = kept;
   xb_ctx *ctx = xb_ctx_new();
   const char *low, *high;
   xb_platform_stack_bounds(&low, &high);

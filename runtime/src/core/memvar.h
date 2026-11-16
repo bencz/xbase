@@ -35,8 +35,8 @@ int xb_memvar_peek(xb_ctx *ctx, const char *name, size_t len, xb_item *out);
  * holds it (that function ends it: PRIVATES in rtl.ch). */
 void xb_memvar_assign(xb_ctx *ctx, const char *name, size_t len, const xb_item *value);
 
-/* Shares the memory variables of the context's environment: the bindings visible and those PRIVATEs hid (publication,
- * every other thread stopped; a new thread's creator, for the bindings the thread inherits). */
+/* Shares the memory variables of the context's environments (the one running and those set aside): the bindings
+ * visible and those PRIVATEs hid (publication, every other thread stopped). */
 void xb_memvar_share(xb_ctx *ctx);
 
 /* Shares the PUBLIC variables (publication, every other thread stopped). */
@@ -46,9 +46,11 @@ void xb_memvar_share_publics(void);
  * thread is stopped (a collection, the publication); otherwise it reads the item as public_cell does. */
 void xb_memvar_publics_each(void (*fn)(xb_item *it, void *data), void *data);
 
-/* A new thread's environment (`ctx`'s, with no PRIVATE yet) sees the bindings its creator sees now: the same
- * variables, shared by the creator before the thread started. */
-void xb_memvar_inherit(xb_ctx *ctx, const xb_ctx *creator);
+/* The bindings `ctx` sees in its environment (PRIVATEs, its own or its creator's), in `*r` (rooted): an array of pairs,
+ * the name's number and the cell, or NIL for none. xb_memvar_restore makes them visible in `ctx`'s environment, new
+ * (a snapshot's: xb_env_capture): the same variables. */
+void xb_memvar_capture(xb_ctx *ctx, xb_item *r);
+void xb_memvar_restore(xb_ctx *ctx, const xb_item *pairs);
 
 /* CLEAR MEMORY: no PRIVATE of the environment, and no PUBLIC of the program, exists any more. */
 void xb_memvar_clear(xb_ctx *ctx);

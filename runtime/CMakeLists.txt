@@ -16,6 +16,7 @@ add_library(xbrt STATIC
   src/core/numfmt.c
   src/core/ops.c
   src/core/set.c
+  src/core/sched.c
   src/core/shared_file.c
   src/core/sync.c
   src/core/text.c
@@ -56,6 +57,7 @@ add_library(xbrt STATIC
   src/rtl/numbers.c
   src/rtl/objects.c
   src/rtl/strings.c
+  src/rtl/tasks.c
   src/rtl/threads.c
   src/rtl/transform.c
   src/macro/compile.c

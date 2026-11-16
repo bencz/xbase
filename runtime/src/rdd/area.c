@@ -409,23 +409,24 @@ int xb_area_open_with(xb_ctx *ctx, uint32_t n, const xb_rdd *rdd, const char *pa
   return area_open(ctx, n, rdd, path, NULL, 0, readonly, exclusive, text);
 }
 
-void xb_areas_mark(xb_ctx *ctx, int (*mark)(xb_item *)) {
-  for (uint32_t k = 0; k < ctx->env->areaCap; ++k)
-    if (ctx->env->areas[k]) {
-      mark(&ctx->env->areas[k]->filter);
-      mark(&ctx->env->areas[k]->filter_text);
-      mark(&ctx->env->areas[k]->locate);
-      xb_order_conditions *c = &ctx->env->areas[k]->pending;
-      mark(&c->cond);
-      mark(&c->condText);
-      mark(&c->whileBlock);
-      mark(&c->evalBlock);
-      for (uint32_t i = 0; i < ctx->env->areas[k]->norders; ++i) xb_order_mark(ctx->env->areas[k]->orders[i], mark);
-      for (uint32_t i = 0; i < ctx->env->areas[k]->nrelations; ++i) {
-        mark(&ctx->env->areas[k]->relations[i]->block);
-        mark(&ctx->env->areas[k]->relations[i]->text);
-      }
+void xb_areas_mark(xb_env *env, int (*mark)(xb_item *)) {
+  for (uint32_t k = 0; k < env->areaCap; ++k) {
+    xb_area *a = env->areas[k];
+    if (!a) continue;
+    mark(&a->filter);
+    mark(&a->filter_text);
+    mark(&a->locate);
+    xb_order_conditions *c = &a->pending;
+    mark(&c->cond);
+    mark(&c->condText);
+    mark(&c->whileBlock);
+    mark(&c->evalBlock);
+    for (uint32_t i = 0; i < a->norders; ++i) xb_order_mark(a->orders[i], mark);
+    for (uint32_t i = 0; i < a->nrelations; ++i) {
+      mark(&a->relations[i]->block);
+      mark(&a->relations[i]->text);
     }
+  }
 }
 
 /* Makes `recno` the current record, raw: the blank record after the last outside 1 .. lastrec. A record that cannot

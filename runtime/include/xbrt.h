@@ -127,8 +127,9 @@ enum {
   XB_PENDING_SAFEPOINT = 1u << 3,
   XB_PENDING_TRAP      = 1u << 4,
   XB_PENDING_FINALIZE  = 1u << 5, /* objects to finalize: xb_pending_gc runs their destructors */
+  XB_PENDING_FAIL      = 1u << 6, /* a task fails (its value in break_value): no sequence takes it, its end does */
 };
-#define XB_PENDING_UNWIND (XB_PENDING_BREAK | XB_PENDING_QUIT | XB_PENDING_TRAP)
+#define XB_PENDING_UNWIND (XB_PENDING_BREAK | XB_PENDING_QUIT | XB_PENDING_TRAP | XB_PENDING_FAIL)
 
 /* [ABI] An array: `len` items at `items`, which start in the same
  * allocation (`inline_items`); when it grows past that, they move to an
