@@ -1,0 +1,15 @@
+
+lexical cases:        654 wrong:          0
+recursive cases:         75 wrong:          0
+EXIT 1: ended ok
+EXIT 2: ended ok
+EXIT 4: ended ok
+EXIT 6: ended ok
+LOOP 1: ended ok
+LOOP 2: ended ok
+LOOP 4: ended ok
+LOOP 6: ended ok
+RETURN 1: returned ok
+RETURN 2: returned ok
+RETURN 4: returned ok
+RETURN 6: returned ok
