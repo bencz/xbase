@@ -309,13 +309,19 @@ static int same_value(const xb_ctx *ctx, const xb_item *x, const xb_item *y) {
 void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_IN, a, b, NULL)) return;
   if (b->type == XB_T_HASH && xb_hash_key_ok(a)) {
-    xb_set_logical(r, xb_hash_find(b->v.p, a) >= 0);
+    xb_set_logical(r, xb_hash_get(b->v.p, a, NULL));
     return;
   }
-  if (b->type == XB_T_HASH && a->type == XB_T_HASH && ((xb_hash *)a->v.p)->len == 1) {
-    const xb_hentry *pair = xb_hash_at(a->v.p, 1);
-    int64_t e = xb_hash_find(b->v.p, &pair->key);
-    xb_set_logical(r, e >= 0 && same_value(ctx, &((xb_hash *)b->v.p)->entries[e].value, &pair->value));
+  if (b->type == XB_T_HASH && a->type == XB_T_HASH && xb_hash_length(a->v.p) == 1) {
+    xb_item pair[3]; /* the key, its value, the other hash's value: rooted while the other hash's lock is waited for */
+    for (int k = 0; k < 3; ++k) {
+      xb_set_nil(&pair[k]);
+      xb_gc_root_push(ctx, &pair[k]);
+    }
+    int in = xb_hash_entry(a->v.p, 1, &pair[0], &pair[1]) && xb_hash_get(b->v.p, &pair[0], &pair[2]) &&
+             same_value(ctx, &pair[2], &pair[1]);
+    xb_gc_root_pop(ctx, 3);
+    xb_set_logical(r, in);
     return;
   }
   if (a->type != XB_T_STRING || b->type != XB_T_STRING) { arg_error2(ctx, r, 1109, "$", a, b); return; }

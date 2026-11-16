@@ -154,7 +154,7 @@ void xb_clone_deep(xb_item *ret, const xb_item *root) {
     clone_visit v = m.order[next];
     if (v.copy.type == XB_T_HASH) {
       xb_hash *h = v.copy.v.p;
-      xb_hash_copy(h, v.src);
+      xb_hash_copy_any(h, (xb_hash *)v.src);
       for (uint32_t i = 0; i < h->len; ++i)
         if (clone_item(&m, &h->entries[i].value)) xb_gc_write(h);
     } else {

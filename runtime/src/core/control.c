@@ -111,7 +111,7 @@ XB_NOINLINE static int64_t enum_len_other(xb_ctx *ctx, const xb_item *coll) {
 int64_t xb_enum_len(xb_ctx *ctx, const xb_item *coll) {
   if (coll->type == XB_T_ARRAY) return (int64_t)xb_array_length(coll->v.p);
   if (coll->type == XB_T_STRING) return (int64_t)coll->v.s->len;
-  if (coll->type == XB_T_HASH) return (int64_t)((const xb_hash *)coll->v.p)->len;
+  if (coll->type == XB_T_HASH) return (int64_t)xb_hash_length(coll->v.p);
   return enum_len_other(ctx, coll);
 }
 
@@ -181,11 +181,7 @@ void xb_each_key(xb_ctx *ctx, xb_item *r, const xb_item *coll, int64_t idx) {
     xb_set_int(r, idx);
     return;
   }
-  const xb_hentry *e = xb_hash_at(coll->v.p, idx);
-  if (e) {
-    *r = e->key;
-    return;
-  }
+  if (xb_hash_entry(coll->v.p, idx, r, NULL)) return;
   xb_item i;
   xb_set_int(&i, idx);
   xb_array_bound_error(ctx, coll, &i); /* the hash shrank under the loop */

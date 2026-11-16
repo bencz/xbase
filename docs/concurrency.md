@@ -194,8 +194,8 @@ freed storage. The runtime rules both out:
   (`XB_GC_SHARED` in the state byte), sharing an object graph (an explicit stack, stopping at what is shared already; a
   string loses its append flag), and the sequence counters and locks: a table of stripes chosen by the object's address
   (an object moves only while every thread is stopped, between operations), each a counter (odd while a writer works)
-  and a lock word parked on when contended; with C tests on threads. (2) The runtime's operations on arrays (done),
-  hashes, object variables, cells, references, the elements `FOR EACH` reads and generators take the shared path when
+  and a lock word parked on when contended; with C tests on threads. (2) The runtime's operations on arrays and hashes
+  (done), object variables, cells, references, the elements `FOR EACH` reads and generators take the shared path when
   the bit is set. (3) Compiled code's in-place reads and writes test the bit, measured on the benchmarks. (4)
   Publication: the write barrier of a store into a shared object shares the value stored; `STATIC`s, class variables and
   `PUBLIC`s are shared storage once a second thread exists. Then step 2e (`ThreadStart`, `Mutex`, `AtomicInt`).

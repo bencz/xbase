@@ -32,23 +32,24 @@ const xb_array *xb_language(xb_ctx *ctx) {
 }
 
 /* The value of numeric key `key` in a hash item, or NULL (not a hash, or no such key). */
-static const xb_item *find_number(const xb_item *hash, int64_t key) {
-  if (hash->type != XB_T_HASH) return NULL;
-  const xb_hash *h = hash->v.p;
+static int find_number(const xb_item *hash, int64_t key, xb_item *out) {
+  if (hash->type != XB_T_HASH) return 0;
   xb_item k;
   xb_set_int(&k, key);
-  int64_t e = xb_hash_find(h, &k);
-  return e < 0 ? NULL : &h->entries[e].value;
+  return xb_hash_get(hash->v.p, &k, out); /* the table may be shared: read whole */
 }
 
 /* The description of an error in the current language, by its subcode's own text, else its generic code's. */
 xb_str *xb_language_error(xb_ctx *ctx, int32_t gencode, int32_t subcode) {
   const xb_array *texts = xb_language(ctx);
-  if (!texts || texts->len < LANG_SUBCODES) return NULL;
-  const xb_item *subcodes = find_number(&texts->items[LANG_SUBCODES - 1], gencode);
-  const xb_item *text = subcodes ? find_number(subcodes, subcode) : NULL;
-  if (!text || text->type != XB_T_STRING) text = find_number(&texts->items[LANG_ERRORS - 1], gencode);
-  return text && text->type == XB_T_STRING ? text->v.s : NULL;
+  if (!texts || xb_array_length(texts) < LANG_SUBCODES) return NULL;
+  xb_item part, subcodes, text; /* the table, a root, keeps them */
+  int found = xb_array_get(texts, LANG_SUBCODES - 1, &part) && find_number(&part, gencode, &subcodes) &&
+              find_number(&subcodes, subcode, &text) && text.type == XB_T_STRING;
+  if (!found)
+    found = xb_array_get(texts, LANG_ERRORS - 1, &part) && find_number(&part, gencode, &text) &&
+            text.type == XB_T_STRING;
+  return found ? text.v.s : NULL;
 }
 
 /* __LanguageCurrent(): the texts of the current language (language.ch numbers their parts), the ones the runtime

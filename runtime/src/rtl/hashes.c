@@ -5,6 +5,8 @@
  * position, and see the hash as it is at each call. */
 #include "rtl/collections.h"
 
+#include "core/shared.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,12 +26,14 @@ static int hash_and_key(xb_ctx *ctx, const char *fn, uint32_t argc, xb_item *arg
   return 0;
 }
 
-/* The entry at position argument 1 of `fn`, or NULL after the bound error. */
-static xb_hentry *entry_arg(xb_ctx *ctx, const char *fn, xb_hash *h, uint32_t argc, xb_item *argv) {
-  int64_t pos = argc > 1 && xb_is_number(&argv[1]) ? xb_num_to_i64(&argv[1]) : 0;
-  xb_hentry *e = xb_hash_at(h, pos);
-  if (!e) xb_error_in(ctx, fn, NULL, EG_BOUND, 1187, fn, 0, argc, argv);
-  return e;
+/* The position argument 1 of `fn` (0 for none). */
+static int64_t pos_arg(uint32_t argc, const xb_item *argv) {
+  return argc > 1 && xb_is_number(&argv[1]) ? xb_num_to_i64(&argv[1]) : 0;
+}
+
+/* The bound error of a position outside the hash. */
+static void pos_error(xb_ctx *ctx, const char *fn, uint32_t argc, xb_item *argv) {
+  xb_error_in(ctx, fn, NULL, EG_BOUND, 1187, fn, 0, argc, argv);
 }
 
 /* Hash( [xKey, xValue, ...] ): a new hash of the pairs. A key without a value
@@ -59,9 +63,7 @@ void xbf_HASH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_HGET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h;
   if (!hash_and_key(ctx, "HGET", argc, argv, &h)) return;
-  int64_t e = xb_hash_find(h, &argv[1]);
-  if (e < 0) xb_array_bound_error(ctx, &argv[0], &argv[1]);
-  else *ret = h->entries[e].value;
+  if (!xb_hash_get(h, &argv[1], ret)) xb_array_bound_error(ctx, &argv[0], &argv[1]);
 }
 
 /* HGetDef( hHash, xKey, [xDefault] ): the value, or xDefault when the key is
@@ -69,9 +71,7 @@ void xbf_HGET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_HGETDEF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h;
   if (!hash_and_key(ctx, "HGETDEF", argc, argv, &h)) return;
-  int64_t e = xb_hash_find(h, &argv[1]);
-  if (e >= 0) *ret = h->entries[e].value;
-  else if (argc > 2) *ret = argv[2];
+  if (!xb_hash_get(h, &argv[1], ret) && argc > 2) *ret = argv[2];
 }
 
 /* HSet( hHash, xKey, xValue ): sets the key (adding it last when new);
@@ -81,75 +81,84 @@ void xbf_HSET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!hash_and_key(ctx, "HSET", argc, argv, &h)) return;
   xb_item nil;
   xb_set_nil(&nil);
-  xb_hash_set(h, &argv[1], argc > 2 ? &argv[2] : &nil);
+  xb_hash_put(ctx, h, &argv[1], argc > 2 ? &argv[2] : &nil);
   *ret = argv[0];
 }
 
 /* HHasKey( hHash, xKey ): whether the key is there. */
 void xbf_HHASKEY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h;
-  if (hash_and_key(ctx, "HHASKEY", argc, argv, &h)) xb_set_logical(ret, xb_hash_find(h, &argv[1]) >= 0);
+  if (hash_and_key(ctx, "HHASKEY", argc, argv, &h)) xb_set_logical(ret, xb_hash_get(h, &argv[1], NULL));
 }
 
 /* HDel( hHash, xKey ): removes the key if it is there; returns hHash. */
 void xbf_HDEL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h;
   if (!hash_and_key(ctx, "HDEL", argc, argv, &h)) return;
-  xb_hash_del(h, &argv[1]);
+  xb_hash_remove(h, &argv[1]);
   *ret = argv[0];
 }
 
 /* HDelAt( hHash, nPos ): removes the entry at nPos; returns hHash. */
 void xbf_HDELAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HDELAT", argc, argv, 0);
-  if (!h || !entry_arg(ctx, "HDELAT", h, argc, argv)) return;
-  xb_hash_del_at(h, xb_num_to_i64(&argv[1]));
-  *ret = argv[0];
+  if (!h) return;
+  if (!xb_hash_remove_at(h, pos_arg(argc, argv))) pos_error(ctx, "HDELAT", argc, argv);
+  else *ret = argv[0];
 }
 
 /* HPos( hHash, xKey ): the key's position, 0 when it is missing. */
 void xbf_HPOS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h;
-  if (hash_and_key(ctx, "HPOS", argc, argv, &h)) xb_set_int(ret, xb_hash_pos(h, &argv[1]));
+  if (hash_and_key(ctx, "HPOS", argc, argv, &h)) xb_set_int(ret, xb_hash_position(h, &argv[1]));
 }
 
 /* HKeyAt( hHash, nPos ): the key at nPos. */
 void xbf_HKEYAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HKEYAT", argc, argv, 0);
-  const xb_hentry *e = h ? entry_arg(ctx, "HKEYAT", h, argc, argv) : NULL;
-  if (e) *ret = e->key;
+  if (h && !xb_hash_entry(h, pos_arg(argc, argv), ret, NULL)) pos_error(ctx, "HKEYAT", argc, argv);
 }
 
 /* HValueAt( hHash, nPos, [xNew] ): the value at nPos, which xNew replaces. */
 void xbf_HVALUEAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HVALUEAT", argc, argv, 0);
-  xb_hentry *e = h ? entry_arg(ctx, "HVALUEAT", h, argc, argv) : NULL;
-  if (!e) return;
-  if (argc > 2) {
-    e->value = argv[2];
-    xb_gc_write(h);
-  }
-  *ret = e->value;
+  if (h && !xb_hash_value_at(h, pos_arg(argc, argv), argc > 2 ? &argv[2] : NULL, ret))
+    pos_error(ctx, "HVALUEAT", argc, argv);
 }
 
 /* HPairAt( hHash, nPos ): { key, value } at nPos. */
 void xbf_HPAIRAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HPAIRAT", argc, argv, 0);
-  const xb_hentry *e = h ? entry_arg(ctx, "HPAIRAT", h, argc, argv) : NULL;
-  if (!e) return;
-  xb_array *a = xb_array_alloc(2); /* a collection moves nothing: `e` stays valid */
-  a->items[0] = e->key;
-  a->items[1] = e->value;
-  xb_set_array(ret, a);
+  if (!h) return;
+  xb_item pair[2]; /* rooted through the allocation: another thread may remove the entry */
+  xb_set_nil(&pair[0]);
+  xb_set_nil(&pair[1]);
+  xb_gc_root_push(ctx, &pair[0]);
+  xb_gc_root_push(ctx, &pair[1]);
+  if (xb_hash_entry(h, pos_arg(argc, argv), &pair[0], &pair[1])) {
+    xb_array *a = xb_array_alloc(2);
+    a->items[0] = pair[0];
+    a->items[1] = pair[1];
+    xb_set_array(ret, a);
+  } else {
+    pos_error(ctx, "HPAIRAT", argc, argv);
+  }
+  xb_gc_root_pop(ctx, 2);
 }
 
 /* The keys (0) or the values (1) as an array. */
 static void hash_column(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, const char *fn, int values) {
   xb_hash *h = hash_arg(ctx, fn, argc, argv, 0);
   if (!h) return;
-  xb_array *a = xb_array_alloc(h->len);
-  xb_hash_compact(h);
-  for (uint32_t k = 0; k < h->len; ++k) a->items[k] = values ? h->entries[k].value : h->entries[k].key;
+  const xb_item *from = &argv[0]; /* a local hash in place; a shared one through a copy, rooted in `ret` */
+  if (xb_is_shared(h)) {
+    xb_hash_snapshot(ret, h);
+    from = ret;
+  }
+  xb_array *a = xb_array_alloc(((const xb_hash *)from->v.p)->len);
+  xb_hash *src = from->v.p; /* where it is after the allocation */
+  xb_hash_compact(src);
+  for (uint32_t k = 0; k < src->len; ++k) a->items[k] = values ? src->entries[k].value : src->entries[k].key;
   xb_set_array(ret, a);
 }
 
@@ -163,18 +172,8 @@ void xbf_HVALUES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* Room for `n` entries; past the largest hash, the fatal error of a size
  * that cannot be allocated (as for arrays). */
-static void reserve(xb_hash *h, uint64_t n) {
-  xb_hash_reserve(h, n > XB_HASH_MAX_LEN ? XB_HASH_MAX_LEN + 1 : (uint32_t)n);
-}
-
-/* Adds the entries of `src` from `start`, `count` of them, to `dest` (a key
- * there gets the new value). Both are reachable; a collection moves nothing,
- * so `src`'s entries stay where they are while `dest` grows. */
-static void copy_entries(xb_hash *dest, xb_hash *src, uint64_t start, uint64_t count) {
-  reserve(dest, (uint64_t)dest->len + count);
-  xb_hash_compact(src);
-  for (uint64_t k = start - 1; k < start - 1 + count; ++k)
-    xb_hash_set(dest, &src->entries[k].key, &src->entries[k].value);
+static void reserve(xb_ctx *ctx, xb_hash *h, uint64_t n) {
+  xb_hash_reserve_any(ctx, h, n > XB_HASH_MAX_LEN ? XB_HASH_MAX_LEN + 1 : (uint32_t)n);
 }
 
 /* HClone( hHash ): a copy, the arrays and hashes inside it copied too
@@ -190,8 +189,28 @@ void xbf_HCOPY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *dest = src ? hash_arg(ctx, "HCOPY", argc, argv, 1) : NULL;
   if (!dest) return;
   *ret = argv[1];
-  uint64_t start = xb_range_start(argc, argv, 2, src->len);
-  if (start) copy_entries(dest, src, start, xb_range_count(argc, argv, 3, src->len - start + 1));
+  xb_item copy; /* a shared source's entries as one locked read saw them; a local one is read in place */
+  xb_set_nil(&copy);
+  xb_gc_root_push(ctx, &copy);
+  const xb_item *from = &argv[0];
+  if (xb_is_shared(src)) {
+    xb_hash_snapshot(&copy, src);
+    from = &copy;
+  }
+  xb_hash_compact(from->v.p); /* positions are entries */
+  uint32_t len = ((const xb_hash *)from->v.p)->len;
+  uint64_t start = xb_range_start(argc, argv, 2, len);
+  if (start) {
+    uint64_t count = xb_range_count(argc, argv, 3, len - start + 1);
+    reserve(ctx, argv[1].v.p, (uint64_t)xb_hash_length(argv[1].v.p) + count);
+    for (uint64_t k = start - 1; k < start - 1 + count; ++k) {
+      xb_hash *s = from->v.p; /* read again after each put: a collection may move it */
+      if (k >= s->len) break; /* a local source that is the destination grows only: never */
+      xb_item pair[2] = {s->entries[k].key, s->entries[k].value}; /* `from` keeps them alive */
+      xb_hash_put(ctx, argv[1].v.p, &pair[0], &pair[1]);
+    }
+  }
+  xb_gc_root_pop(ctx, 1);
 }
 
 
@@ -207,6 +226,10 @@ typedef struct {
 static int key_less(void *arg, size_t i, size_t j) {
   hash_sorter *s = arg;
   if (s->failed) return 0;
+  if (xb_is_shared(s->h)) { /* the block shared it: no more reads here; it is sorted again as a shared one */
+    s->failed = 1;
+    return 0;
+  }
   if (s->h->len != s->len) {
     s->failed = 1;
     return 0;
@@ -224,6 +247,25 @@ static int key_less(void *arg, size_t i, size_t j) {
 
 static const xb_proc hsort_proc = XB_RUNTIME_PROC("HSORT", 0);
 
+void xbf_HSORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
+
+/* HSort of a shared hash: a block may run any code, so a copy (the entries as one locked read saw them) is sorted,
+ * and its entries go back under the lock when the hash still has as many (else it stays as another thread left it). */
+static void sort_shared(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
+  xb_item args[2], sorted;
+  xb_set_nil(&args[0]);
+  xb_set_nil(&args[1]);
+  xb_set_nil(&sorted);
+  if (argc > 1) args[1] = argv[1];
+  xb_gc_root_push(ctx, &args[0]);
+  xb_gc_root_push(ctx, &args[1]);
+  xb_gc_root_push(ctx, &sorted);
+  xb_hash_snapshot(&args[0], argv[0].v.p);
+  xbf_HSORT(ctx, &sorted, argc > 1 ? 2 : 1, args);
+  if (!(xb_pending_get(ctx) & XB_PENDING_UNWIND)) xb_hash_take_order(argv[0].v.p, args[0].v.p);
+  xb_gc_root_pop(ctx, 3);
+}
+
 /* HSort( hHash, [bOrder] ): orders the entries by key, stably, by bOrder(
  * key1, key2 ) (whether the first goes first) or in the hash's key order
  * (xb_hash_key_order); returns hHash. */
@@ -231,6 +273,10 @@ void xbf_HSORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HSORT", argc, argv, 0);
   if (!h) return;
   *ret = argv[0];
+  if (xb_is_shared(h)) {
+    sort_shared(ctx, argc, argv);
+    return;
+  }
   size_t n = h->len;
   if (n < 2) return;
   xb_hash_compact(h); /* the comparisons find positions directly */
@@ -243,6 +289,11 @@ void xbf_HSORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   hash_sorter s = {ctx, h, argc > 1 && argv[1].type == XB_T_BLOCK ? &argv[1] : NULL, call, h->len, 0};
   xb_merge_sort(pos, pos + n, n, key_less, &s);
   xb_calls_end(ctx, &frame, 3);
+  if (xb_is_shared(argv[0].v.p) && !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) { /* the block shared it */
+    free(pos);
+    sort_shared(ctx, argc, argv);
+    return;
+  }
   if (!s.failed && h->len == n) {
     xb_hash_compact(h); /* positions are entries */
     xb_hentry *sorted = malloc(n * sizeof *sorted);
@@ -259,7 +310,7 @@ void xbf_HSORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_HCLEAR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HCLEAR", argc, argv, 0);
   if (!h) return;
-  xb_hash_clear(h);
+  xb_hash_empty(h);
   *ret = argv[0];
 }
 
@@ -269,9 +320,7 @@ void xbf_HFILL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!h) return;
   xb_item nil;
   xb_set_nil(&nil);
-  xb_hash_compact(h);
-  for (uint32_t k = 0; k < h->len; ++k) h->entries[k].value = argc > 1 ? argv[1] : nil;
-  xb_gc_write(h);
+  xb_hash_fill(h, argc > 1 ? &argv[1] : &nil);
   *ret = argv[0];
 }
 
@@ -280,7 +329,7 @@ void xbf_HALLOCATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HALLOCATE", argc, argv, 0);
   if (!h) return;
   int64_t n = argc > 1 && xb_is_number(&argv[1]) ? xb_num_to_i64(&argv[1]) : 0;
-  if (n > 0) reserve(h, (uint64_t)n);
+  if (n > 0) reserve(ctx, h, (uint64_t)n);
   *ret = argv[0];
 }
 
@@ -290,7 +339,6 @@ void xbf_HALLOCATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_HCASEMATCH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HCASEMATCH", argc, argv, 0);
   if (!h) return;
-  xb_set_logical(ret, !(h->flags & XB_HASH_IGNORECASE));
-  if (argc > 1 && argv[1].type == XB_T_LOGICAL)
-    xb_hash_set_flags(h, argv[1].v.l ? h->flags & ~XB_HASH_IGNORECASE : h->flags | XB_HASH_IGNORECASE);
+  int change = argc > 1 && argv[1].type == XB_T_LOGICAL;
+  xb_set_logical(ret, xb_hash_case_match(h, change, change && argv[1].v.l));
 }

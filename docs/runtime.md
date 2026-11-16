@@ -254,7 +254,8 @@ the context that runs the destructors (the first one registered, then another wh
 
 `types/hash.c` holds the hash itself, `rtl/hashes.c` the `H*` functions (`HEval`, `HScan` and `HMerge` are in
 `rtl/arrays.prg`), and `rtl/collections.c` what they share with the array functions: argument ranges, block calls
-from C, the order of values, the stable merge sort and deep copies.
+from C, the order of values, the stable merge sort and deep copies. A hash other threads may reach is used through
+the functions that take its lock when it is shared ([Threads and synchronization](#threads-and-synchronization)).
 
 - Keys are strings, numbers and dates; values are anything. A number that equals an integer is that integer as a key,
   so `1`, `1.0` and `-0.0` against `0` are each one key, also in a literal (`{ 1 => "a", 1.0 => "b" }` has one entry,
@@ -1209,8 +1210,8 @@ The program's code runs on one thread today; the services below are what tasks a
   waiter of the address that came first, or every one. Waiters queue in arrival order in one of 256 buckets chosen by
   the address (each made when first used) and sleep on a condition of their own, so a wake reaches only the waiters
   it marks; the value is tested under the bucket's lock, which the waker takes after changing it, so no wake is lost.
-- Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's array operations use
-  them, those on hashes, objects, cells and references in a next step): `XB_GC_SHARED` in an object's header
+- Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's operations on arrays
+  and hashes use them, those on objects, cells and references in a next step): `XB_GC_SHARED` in an object's header
   (`XB_GC_STATE_SHARED`, kept by every collection) marks one that more than one flow can reach. `xb_share` marks what an
   item refers to and all it reaches (an explicit stack, stopping at what is shared already, literal strings left alone,
   a growing string no longer growing in place); it allocates nothing. A shared object's items are read under the
@@ -1232,6 +1233,16 @@ The program's code runs on one thread today; the services below are what tasks a
   only the runtime reaches yet. `ASort` of a shared array sorts a copy (a block may run any code) and puts the sorted
   range back under the lock, as far as the array still reaches; a local one that its block shares meanwhile is sorted
   again so; its block reads elements whole.
+- Hashes (`types/hash.c`): every operation on a shared hash runs under its lock, reads too (a read may reorganize
+  the hash: the position tree, a compaction), and keys and values come out copied: `xb_hash_length`, `xb_hash_get`,
+  `xb_hash_lookup` (with the key as stored), `xb_hash_position`, `xb_hash_entry` (by position), `xb_hash_value_at`,
+  `xb_hash_remove`, `xb_hash_remove_at`, `xb_hash_empty`, `xb_hash_fill`, `xb_hash_case_match`; `xb_hash_put` and
+  `xb_hash_reserve_any` take a larger store, allocated before the lock (rooted meanwhile), under it when still
+  needed; `xb_hash_snapshot` and `xb_hash_copy_any` copy the entries as one locked read saw them. The index
+  operators, `$`, `Len`, `Empty`, the `H*` functions, `AScan`'s search, `AClone` and the count and keys of `FOR EACH`
+  use them (a local hash is still read in place where nothing else could reach it). `HSort` of a shared hash sorts a
+  copy and puts the order back under the lock (`xb_hash_take_order`): each key found as the hash is then, once, with
+  its value then, else the hash stays as it is; a local hash whose block shares it meanwhile is sorted again so.
 
 ## Program startup
 

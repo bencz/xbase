@@ -226,6 +226,32 @@ void     xb_hash_set_flags(xb_hash *h, uint32_t flags);
 /* Rehashes the keys and rebuilds the index after the caller reordered the
  * entries of a hash without holes (xb_hash_compact first). */
 void     xb_hash_reindex(xb_hash *h);
+/* A hash that other threads may reach (core/shared.h): each of these runs under its lock when it is shared, reads
+ * too, and copies keys and values out; a stored key or value is shared first. Its length; the value of a key (0 when
+ * missing; `value` may be NULL); a key's position (0 when missing); the key and value at a position (0 outside);
+ * the value at a position replaced by `v` when given, its value then into `now`; a key or a position removed; every
+ * entry removed; every value set to `v`; whether letter case matters, changed when `change`. xb_hash_put sets a key
+ * (a store it needs allocated before the lock, rooted in `ctx`), xb_hash_reserve_any makes room, and
+ * xb_hash_snapshot puts into `out` (a root) a new local hash of the entries as one locked read saw them. */
+uint32_t xb_hash_length(const xb_hash *h);
+int      xb_hash_get(xb_hash *h, const xb_item *key, xb_item *value);
+int      xb_hash_lookup(xb_hash *h, const xb_item *key, xb_item *stored, xb_item *value); /* also its key as stored */
+int64_t  xb_hash_position(xb_hash *h, const xb_item *key);
+int      xb_hash_entry(xb_hash *h, int64_t pos, xb_item *key, xb_item *value);
+int      xb_hash_value_at(xb_hash *h, int64_t pos, const xb_item *v, xb_item *now);
+int      xb_hash_remove(xb_hash *h, const xb_item *key);
+int      xb_hash_remove_at(xb_hash *h, int64_t pos);
+void     xb_hash_empty(xb_hash *h);
+void     xb_hash_fill(xb_hash *h, const xb_item *v);
+int      xb_hash_case_match(xb_hash *h, int change, int match);
+void     xb_hash_put(xb_ctx *ctx, xb_hash *h, const xb_item *key, const xb_item *value);
+void     xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint32_t n);
+void     xb_hash_snapshot(xb_item *out, xb_hash *h);
+/* xb_hash_copy from a hash other threads may reach into an empty one only this one reaches (`dst` reachable). */
+void     xb_hash_copy_any(xb_hash *dst, xb_hash *src);
+/* The entries of `h` put in the order of `sorted` (a local, compacted copy of it sorted), under its lock: its keys,
+ * found in `h` as it is now, each once, with their values now; else `h` stays as it is. */
+void     xb_hash_take_order(xb_hash *h, const xb_hash *sorted);
 
 /* The empty string, never collected. */
 xb_str *xb_str_empty(void);

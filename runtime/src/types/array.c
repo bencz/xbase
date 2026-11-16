@@ -260,22 +260,17 @@ static int64_t read_position(xb_ctx *ctx, xb_item *r, const xb_item *base, const
   return i;
 }
 
-/* The value of `idx` in the hash `base`, or NULL after raising the error:
- * for a key that cannot be one, the error of an index that is not a number
- * (whose handler may substitute the value, into `r` when given). */
-static xb_item *hash_value(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
-  xb_hash *h = base->v.p;
+/* The value of `idx` in the hash `base` into `out`, or 0 after raising the error: for a key that cannot be one, the
+ * error of an index that is not a number (whose handler may substitute the value, into `r` when given). */
+static int hash_value(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx, xb_item *out) {
   if (!xb_hash_key_ok(idx)) {
     xb_item args[2] = {*base, *idx};
     xb_error(ctx, r, EG_ARG, 1068, "array access", r ? XB_ERR_SUBSTITUTE : 0, 2, args);
-    return NULL;
+    return 0;
   }
-  int64_t e = xb_hash_find(h, idx);
-  if (e < 0) {
-    xb_array_bound_error(ctx, base, idx);
-    return NULL;
-  }
-  return &h->entries[e].value;
+  if (xb_hash_get(base->v.p, idx, out)) return 1;
+  xb_array_bound_error(ctx, base, idx);
+  return 0;
 }
 
 /* Compiled code reads and stores elements in place for an array and a number
@@ -284,8 +279,8 @@ static xb_item *hash_value(xb_ctx *ctx, xb_item *r, const xb_item *base, const x
 void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
   if (base->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_INDEX, base, idx, NULL)) return;
   if (base->type == XB_T_HASH) {
-    const xb_item *v = hash_value(ctx, r, base, idx);
-    if (v) *r = *v;
+    xb_item v;
+    if (hash_value(ctx, r, base, idx, &v)) *r = v;
     return;
   }
   if (base->type != XB_T_ARRAY || !xb_is_number(idx)) {
@@ -299,10 +294,20 @@ void xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *id
 
 void xb_ref_elem(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx) {
   if (base->type == XB_T_HASH) { /* the reference designates the key's entry */
-    if (!hash_value(ctx, NULL, base, idx)) return;
-    xb_ref_init(r, base, 0, 0); /* `base` and `idx` are frame slots other than `r`'s */
-    xb_hash *h = base->v.p;
-    ((xb_ref *)r->v.p)->key = h->entries[xb_hash_find(h, idx)].key; /* the entry's own key, as it is spelled */
+    xb_item key;
+    if (!xb_hash_key_ok(idx)) {
+      hash_value(ctx, NULL, base, idx, &key); /* the error */
+      return;
+    }
+    xb_set_nil(&key);
+    xb_gc_root_push(ctx, &key); /* through the allocation below: another thread may remove the entry */
+    if (xb_hash_lookup(base->v.p, idx, &key, NULL)) {
+      xb_ref_init(r, base, 0, 0); /* `base` and `idx` are frame slots other than `r`'s */
+      ((xb_ref *)r->v.p)->key = key; /* the entry's own key, as it is spelled */
+    } else {
+      xb_array_bound_error(ctx, base, idx);
+    }
+    xb_gc_root_pop(ctx, 1);
     return;
   }
   int64_t i = read_position(ctx, NULL, base, idx);
@@ -318,7 +323,7 @@ void xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const
   xb_item ignored;
   if (base->type == XB_T_OBJECT && xb_class_operator(ctx, &ignored, XB_OPERATOR_INDEX, base, idx, value)) return;
   if (base->type == XB_T_HASH && xb_hash_key_ok(idx)) {
-    xb_hash_set(base->v.p, idx, value);
+    xb_hash_put(ctx, base->v.p, idx, value);
     return;
   }
   if (base->type != XB_T_ARRAY || !xb_is_number(idx)) {

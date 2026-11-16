@@ -24,7 +24,7 @@ void xbf_LEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   if (argc && argv[0].type == XB_T_HASH) {
-    xb_set_int(ret, (int64_t)((const xb_hash *)argv[0].v.p)->len);
+    xb_set_int(ret, (int64_t)xb_hash_length(argv[0].v.p));
     return;
   }
   xb_fn_arg_error(ctx, ret, 1111, "LEN", argc, argv);

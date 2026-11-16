@@ -1,6 +1,9 @@
 /* Hashes (see xb_hash in types.h). */
 #include "xbrt_int.h"
 
+#include "core/shared.h"
+
+#include <stdlib.h>
 #include <string.h>
 
 #define MIN_CAPACITY 8u
@@ -170,15 +173,21 @@ void xb_hash_compact(xb_hash *h) {
   index_entries(h);
 }
 
-/* A new store for `cap` entries holding the live ones; `h` is reachable. */
-static void restore(xb_hash *h, uint32_t cap) {
+/* A store for `cap` entries: NIL items, free slots. */
+static xb_hentry *new_store(uint32_t cap) {
   uint32_t slots = 2 * cap;
   /* computed in 64 bits and checked before it is narrowed to size_t (32-bit hosts) */
   uint64_t size = (uint64_t)cap * (sizeof(xb_hentry) + 2 * sizeof(uint32_t)) + (uint64_t)slots * sizeof(uint32_t);
   if (cap > XB_HASH_MAX_LEN || size > XB_STR_MAX_LEN) xb_gc_fatal("out of memory");
   size_t bytes = (size_t)size;
   xb_hentry *entries = xb_gc_alloc(XB_GC_HSTORE, bytes);
-  memset(entries, 0, bytes); /* NIL items, free slots */
+  memset(entries, 0, bytes);
+  return entries;
+}
+
+/* The live entries moved into `entries`, a new store for `cap` of them; nothing allocates. */
+static void move_into(xb_hash *h, xb_hentry *entries, uint32_t cap) {
+  uint32_t slots = 2 * cap;
   uint32_t *hashes = (uint32_t *)(entries + cap);
   uint32_t n = 0;
   for (uint32_t e = 0; e < h->used; ++e) {
@@ -198,6 +207,9 @@ static void restore(xb_hash *h, uint32_t cap) {
   xb_gc_write(h);
 }
 
+/* A new store for `cap` entries holding the live ones; `h` is reachable. */
+static void restore(xb_hash *h, uint32_t cap) { move_into(h, new_store(cap), cap); }
+
 void xb_hash_reserve(xb_hash *h, uint32_t n) {
   if (n <= h->cap) return;
   uint32_t cap = h->cap ? h->cap : MIN_CAPACITY;
@@ -205,10 +217,10 @@ void xb_hash_reserve(xb_hash *h, uint32_t n) {
   restore(h, cap);
 }
 
-void xb_hash_copy(xb_hash *dst, const xb_hash *src) {
+/* The live entries of `src` into `dst`, empty with room for them; nothing allocates. */
+static void copy_into(xb_hash *dst, const xb_hash *src) {
   dst->flags = src->flags;
   if (!src->len) return;
-  xb_hash_reserve(dst, src->len);
   uint32_t n = 0;
   for (uint32_t e = 0; e < src->used; ++e) {
     if (src->entries[e].key.type == XB_T_NIL) continue;
@@ -221,12 +233,29 @@ void xb_hash_copy(xb_hash *dst, const xb_hash *src) {
   xb_gc_write(dst);
 }
 
+void xb_hash_copy(xb_hash *dst, const xb_hash *src) {
+  xb_hash_reserve(dst, src->len);
+  copy_into(dst, src);
+}
+
 /* Room for one more entry: the holes compacted away when they are a quarter
  * of the store, else a store twice as large. */
 static void make_room(xb_hash *h) {
   if (h->used < h->cap) return;
   if (h->cap && h->used - h->len >= h->cap / 4) xb_hash_compact(h);
   else xb_hash_reserve(h, h->cap ? h->cap * 2 : MIN_CAPACITY);
+}
+
+/* A new key, room made for it. */
+static void add_entry(xb_hash *h, const xb_item *key, const xb_item *value, uint32_t hv) {
+  uint32_t e = h->used++;
+  h->entries[e].key = *key;
+  h->entries[e].value = *value;
+  h->hashes[e] = hv;
+  h->index[slot_of(h, key, hv)] = e + 1;
+  ++h->len;
+  if (h->tree) tree_update(h, e, 1);
+  xb_gc_write(h);
 }
 
 int64_t xb_hash_find(const xb_hash *h, const xb_item *key) {
@@ -246,14 +275,7 @@ void xb_hash_set(xb_hash *h, const xb_item *key, const xb_item *value) {
     }
   }
   make_room(h);
-  uint32_t e = h->used++;
-  h->entries[e].key = *key;
-  h->entries[e].value = *value;
-  h->hashes[e] = hv;
-  h->index[slot_of(h, key, hv)] = e + 1;
-  ++h->len;
-  if (h->tree) tree_update(h, e, 1);
-  xb_gc_write(h);
+  add_entry(h, key, value, hv);
 }
 
 /* Frees index slot `i`, moving back the slots after it that probing would no
@@ -360,4 +382,225 @@ void xb_hash_set_flags(xb_hash *h, uint32_t flags) {
 void xb_hash_reindex(xb_hash *h) {
   for (uint32_t e = 0; e < h->used; ++e) h->hashes[e] = key_hash(h, &h->entries[e].key);
   if (h->cap) index_entries(h);
+}
+
+/* Shared hashes (core/shared.h): every operation runs under the hash's lock, reads too (one may reorganize it: the
+ * position tree, a compaction), so nothing is read under its sequence counter; values and keys come out copied. A
+ * store a key needs is allocated before the lock is taken (rooted meanwhile) and taken under it when still needed. */
+static int lock_if_shared(const xb_hash *h) {
+  int shared = xb_is_shared(h);
+  if (shared) xb_seq_lock(h);
+  return shared;
+}
+
+static void unlock_if(const xb_hash *h, int shared) {
+  if (shared) xb_seq_unlock(h);
+}
+
+uint32_t xb_hash_length(const xb_hash *h) {
+  int shared = lock_if_shared(h);
+  uint32_t n = h->len;
+  unlock_if(h, shared);
+  return n;
+}
+
+int xb_hash_get(xb_hash *h, const xb_item *key, xb_item *value) { return xb_hash_lookup(h, key, NULL, value); }
+
+int xb_hash_lookup(xb_hash *h, const xb_item *key, xb_item *stored, xb_item *value) {
+  int shared = lock_if_shared(h);
+  int64_t e = xb_hash_find(h, key);
+  if (e >= 0 && stored) *stored = h->entries[e].key;
+  if (e >= 0 && value) *value = h->entries[e].value;
+  unlock_if(h, shared);
+  return e >= 0;
+}
+
+int64_t xb_hash_position(xb_hash *h, const xb_item *key) {
+  int shared = lock_if_shared(h);
+  int64_t pos = xb_hash_pos(h, key);
+  unlock_if(h, shared);
+  return pos;
+}
+
+int xb_hash_entry(xb_hash *h, int64_t pos, xb_item *key, xb_item *value) {
+  int shared = lock_if_shared(h);
+  const xb_hentry *e = xb_hash_at(h, pos);
+  if (e && key) *key = e->key;
+  if (e && value) *value = e->value;
+  unlock_if(h, shared);
+  return e != NULL;
+}
+
+int xb_hash_value_at(xb_hash *h, int64_t pos, const xb_item *v, xb_item *now) {
+  if (v && xb_is_shared(h)) xb_share(v);
+  int shared = lock_if_shared(h);
+  xb_hentry *e = xb_hash_at(h, pos);
+  if (e && v) {
+    e->value = *v;
+    xb_gc_write(h);
+  }
+  if (e && now) *now = e->value;
+  unlock_if(h, shared);
+  return e != NULL;
+}
+
+int xb_hash_remove(xb_hash *h, const xb_item *key) {
+  int shared = lock_if_shared(h);
+  int found = xb_hash_del(h, key);
+  unlock_if(h, shared);
+  return found;
+}
+
+int xb_hash_remove_at(xb_hash *h, int64_t pos) {
+  int shared = lock_if_shared(h);
+  int found = xb_hash_at(h, pos) != NULL;
+  if (found) xb_hash_del_at(h, pos);
+  unlock_if(h, shared);
+  return found;
+}
+
+void xb_hash_empty(xb_hash *h) {
+  int shared = lock_if_shared(h);
+  xb_hash_clear(h);
+  unlock_if(h, shared);
+}
+
+void xb_hash_fill(xb_hash *h, const xb_item *v) {
+  if (xb_is_shared(h)) xb_share(v);
+  int shared = lock_if_shared(h);
+  xb_hash_compact(h);
+  for (uint32_t k = 0; k < h->len; ++k) h->entries[k].value = *v;
+  xb_gc_write(h);
+  unlock_if(h, shared);
+}
+
+int xb_hash_case_match(xb_hash *h, int change, int match) {
+  int shared = lock_if_shared(h);
+  int was = !(h->flags & XB_HASH_IGNORECASE);
+  if (change) xb_hash_set_flags(h, match ? h->flags & ~XB_HASH_IGNORECASE : h->flags | XB_HASH_IGNORECASE);
+  unlock_if(h, shared);
+  return was;
+}
+
+/* The capacity a store of `cap` grows to for `need` entries. */
+static uint32_t grown(uint32_t cap, uint32_t need) {
+  uint32_t want = cap ? cap : MIN_CAPACITY;
+  while (want < need) want *= 2;
+  return want;
+}
+
+void xb_hash_put(xb_ctx *ctx, xb_hash *h, const xb_item *key, const xb_item *value) {
+  if (!xb_is_shared(h)) {
+    xb_hash_set(h, key, value);
+    return;
+  }
+  xb_share(key);
+  xb_share(value);
+  xb_item spare;
+  xb_set_nil(&spare);
+  xb_gc_root_push(ctx, &spare);
+  uint32_t room = 0;
+  for (;;) {
+    xb_seq_lock(h);
+    uint32_t hv = key_hash(h, key); /* under the lock: the letter case rule may change */
+    uint32_t e = h->len ? h->index[slot_of(h, key, hv)] : 0;
+    if (e) {
+      h->entries[e - 1].value = *value;
+      xb_gc_write(h);
+    } else {
+      if (h->used == h->cap && !(h->cap && h->used - h->len >= h->cap / 4)) { /* holes enough to compact: no store */
+        uint32_t want = grown(h->cap, h->cap * 2);
+        if (room < want) {
+          xb_seq_unlock(h);
+          room = want;
+          /* The tag only keeps it alive: a store is traced through its hash. */
+          xb_set_ptr(&spare, XB_T_HASH, new_store(room));
+          continue;
+        }
+        move_into(h, spare.v.p, room);
+      }
+      make_room(h); /* a compaction at most */
+      add_entry(h, key, value, hv);
+    }
+    xb_seq_unlock(h);
+    break;
+  }
+  xb_gc_root_pop(ctx, 1);
+}
+
+void xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint32_t n) {
+  if (!xb_is_shared(h)) {
+    xb_hash_reserve(h, n);
+    return;
+  }
+  xb_item spare;
+  xb_set_nil(&spare);
+  xb_gc_root_push(ctx, &spare);
+  uint32_t room = 0;
+  for (;;) {
+    xb_seq_lock(h);
+    if (n > h->cap) {
+      uint32_t want = grown(h->cap, n);
+      if (room < want) {
+        xb_seq_unlock(h);
+        room = want;
+        xb_set_ptr(&spare, XB_T_HASH, new_store(room));
+        continue;
+      }
+      move_into(h, spare.v.p, room);
+    }
+    xb_seq_unlock(h);
+    break;
+  }
+  xb_gc_root_pop(ctx, 1);
+}
+
+void xb_hash_copy_any(xb_hash *dst, xb_hash *src) {
+  if (!xb_is_shared(src)) {
+    xb_hash_copy(dst, src);
+    return;
+  }
+  for (;;) { /* room for the entries seen, then all of them in one locked copy when they still fit */
+    xb_hash_reserve(dst, xb_hash_length(src));
+    xb_seq_lock(src);
+    int fits = src->len <= dst->cap;
+    if (fits) copy_into(dst, src);
+    xb_seq_unlock(src);
+    if (fits) return;
+  }
+}
+
+void xb_hash_snapshot(xb_item *out, xb_hash *h) {
+  xb_set_hash(out, xb_hash_alloc());
+  xb_hash_copy_any(out->v.p, h);
+}
+
+void xb_hash_take_order(xb_hash *h, const xb_hash *sorted) {
+  int shared = lock_if_shared(h);
+  uint32_t n = h->len;
+  if (n == sorted->len && n) {
+    /* The order only: each key of the copy found in the hash as it is now (with its letter case rule now), once, its
+     * entry as it is now; anything else (a key gone, two keys one under a new rule) leaves the hash as it is. */
+    xb_hentry *order = malloc(n * sizeof *order);
+    uint8_t *taken = calloc(h->used, 1);
+    if (!order || !taken) xb_gc_fatal("out of memory");
+    int same = 1;
+    for (uint32_t k = 0; same && k < n; ++k) {
+      int64_t e = xb_hash_find(h, &sorted->entries[k].key); /* `sorted` is compacted: positions are entries */
+      same = e >= 0 && !taken[e];
+      if (same) {
+        taken[e] = 1;
+        order[k] = h->entries[e];
+      }
+    }
+    if (same) {
+      xb_hash_compact(h);
+      memcpy(h->entries, order, n * sizeof *order);
+      xb_hash_reindex(h);
+      xb_gc_write(h);
+    }
+    free(order);
+    free(taken);
+  }
+  unlock_if(h, shared);
 }

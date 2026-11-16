@@ -193,11 +193,18 @@ void xbf___SCANVALUE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
         xb_set_int(ret, (int64_t)i + 1);
         return;
       }
-  } else if (argv[0].type == XB_T_HASH) {
+  } else if (argv[0].type == XB_T_HASH && !xb_is_shared(argv[0].v.p)) {
     xb_hash *h = argv[0].v.p;
     xb_hash_compact(h); /* positions are entries */
     for (size_t i = (size_t)start - 1; i < h->len && i < end; ++i)
       if (xb_value_matches(ctx, &h->entries[i].value, &argv[1])) {
+        xb_set_int(ret, (int64_t)i + 1);
+        return;
+      }
+  } else if (argv[0].type == XB_T_HASH) {
+    xb_item v; /* compared before anything else runs: no root needed */
+    for (size_t i = (size_t)start - 1; i < end && xb_hash_entry(argv[0].v.p, (int64_t)i + 1, NULL, &v); ++i)
+      if (xb_value_matches(ctx, &v, &argv[1])) {
         xb_set_int(ret, (int64_t)i + 1);
         return;
       }
