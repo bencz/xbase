@@ -44,9 +44,11 @@ void xb_rlock_unlock(xb_rlock *l);
 
 /* Waiting on an address (a parking lot): xb_park_wait waits while the 32-bit value at `addr` is `expected`, until a
  * xb_park_wake on the same address, or `ns` nanoseconds of the monotonic clock (ns < 0: no limit); 0 when it timed out.
- * The value is tested under the lock xb_park_wake takes, so a thread that changes it and then wakes the address never
- * misses a waiter. A wait may also end for no reason: the waiter tests its condition again. xb_park_wake wakes the
- * waiter of the address that came first (`all`: every one) and returns how many it woke. */
+ * A waiter counts itself in its bucket, then reads the value (both sequentially consistent); the waker, after it
+ * changed the value, reads the count (after a full fence): when it is 0 the wake costs no lock, else the waiter's test
+ * and the waker's wake are ordered by the bucket's lock, so a thread that changes the value and then wakes the address
+ * never misses a waiter. A wait may also end for no reason: the waiter tests its condition again. xb_park_wake wakes
+ * the waiter of the address that came first (`all`: every one) and returns how many it woke. */
 int xb_park_wait(const uint32_t *addr, uint32_t expected, int64_t ns);
 uint32_t xb_park_wake(const uint32_t *addr, int all);
 

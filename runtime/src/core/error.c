@@ -217,6 +217,12 @@ int xb_error_of(xb_ctx *ctx, const char *subsystem, int32_t gencode, int32_t sub
   return raise(ctx, &f, result);
 }
 
+void xb_error_object(xb_ctx *ctx, xb_item *r, int32_t gencode, int32_t subcode, const char *description,
+                     const char *operation) {
+  const failure f = {NULL, NULL, description, gencode, subcode, operation, NULL, 0, 0, 0, NULL, 0, NULL};
+  make_error(ctx, &f, r);
+}
+
 int xb_error_is(const xb_item *it) {
   return it->type == XB_T_OBJECT && ((const xb_object *)it->v.p)->cls == &error_class;
 }

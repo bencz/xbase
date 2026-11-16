@@ -34,6 +34,10 @@ int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode
  * whose result `result` takes (1); 0 with a request to unwind pending. */
 int xb_error_raise(xb_ctx *ctx, xb_item *result, const xb_item *error);
 
+/* A new Error object in `*r` (rooted), not raised: a failure's value (a task timed out). */
+void xb_error_object(xb_ctx *ctx, xb_item *r, int32_t gencode, int32_t subcode, const char *description,
+                     const char *operation);
+
 /* Whether the item is an Error object. */
 int xb_error_is(const xb_item *it);
 

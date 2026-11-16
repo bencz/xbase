@@ -24,6 +24,7 @@ typedef struct parked {
 
 typedef struct bucket {
   uint32_t state;
+  uint32_t waiting; /* threads parked (or about to) in it: a wake that finds none takes no lock */
   xb_mutex lock;
   parked *head, *tail;
 } bucket;
@@ -54,7 +55,9 @@ int xb_park_wait(const uint32_t *addr, uint32_t expected, int64_t ns) {
   parked me = {addr, NULL, 0, NULL};
   if (!xb_cond_init(&me.wake)) abort();
   xb_mutex_lock(&b->lock);
-  if (xb_atomic_load32(addr, XB_ACQUIRE) != expected) {
+  xb_atomic_add32(&b->waiting, 1, XB_SEQ_CST); /* before the value is read: a waker that changed it sees this */
+  if (xb_atomic_load32(addr, XB_SEQ_CST) != expected) {
+    xb_atomic_add32(&b->waiting, (uint32_t)-1, XB_RELAXED);
     xb_mutex_unlock(&b->lock);
     xb_cond_destroy(&me.wake);
     return 1;
@@ -76,6 +79,7 @@ int xb_park_wait(const uint32_t *addr, uint32_t expected, int64_t ns) {
   if (prev) prev->next = me.next;
   else b->head = me.next;
   if (b->tail == &me) b->tail = prev;
+  xb_atomic_add32(&b->waiting, (uint32_t)-1, XB_RELAXED);
   xb_mutex_unlock(&b->lock);
   xb_cond_destroy(&me.wake);
   return me.woken || left > 0;
@@ -83,6 +87,8 @@ int xb_park_wait(const uint32_t *addr, uint32_t expected, int64_t ns) {
 
 uint32_t xb_park_wake(const uint32_t *addr, int all) {
   bucket *b = bucket_of(addr);
+  xb_atomic_fence(XB_SEQ_CST); /* the value the caller changed, before the count is read: see xb_park_wait */
+  if (!xb_atomic_load32(&b->waiting, XB_SEQ_CST)) return 0;
   uint32_t n = 0;
   xb_mutex_lock(&b->lock);
   for (parked *w = b->head; w && (all || !n); w = w->next) {

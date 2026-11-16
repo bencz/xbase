@@ -1,0 +1,9 @@
+
+fan: 20000 results, 0 wrong
+tree:       4096
+delays: 5000 ran, 0 early
+cancellations: 5000 delays canceled, 5000 callbacks
+races:       1000
+failures: 1000 errors, 1000 breaks, first 1
+continuations:      10000
+chain:       2000

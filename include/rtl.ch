@@ -191,12 +191,16 @@ EXTERN FUNCTION ValType( xValue ) NATIVE RESERVED CHECKED ABBREV 4
 
 // Threads and tasks (xbase functions): the objects they make answer messages (docs/concurrency.md)
 EXTERN FUNCTION AtomicInt( [nValue] ) NATIVE CHECKED
+EXTERN FUNCTION CancellationTokenSource( ... ) NATIVE CHECKED
+EXTERN FUNCTION Channel( [nCapacity] ) NATIVE CHECKED
 EXTERN FUNCTION Condition() NATIVE CHECKED
 EXTERN FUNCTION Mutex() NATIVE CHECKED
 EXTERN FUNCTION Semaphore( nInitial, [nMaximum] ) NATIVE CHECKED
 EXTERN FUNCTION TaskCompletionSource() NATIVE CHECKED
+EXTERN FUNCTION TaskDelay( nMs, [oToken] ) NATIVE CHECKED
 EXTERN FUNCTION TaskFromResult( [xValue] ) NATIVE CHECKED
 EXTERN FUNCTION TaskRun( bWork, ... ) NATIVE CHECKED
+EXTERN FUNCTION TaskTimeout( oTask, nMs ) NATIVE CHECKED
 EXTERN FUNCTION TaskWhenAll( aTasks ) NATIVE CHECKED
 EXTERN FUNCTION TaskWhenAny( aTasks ) NATIVE CHECKED
 EXTERN FUNCTION ThreadStart( bWork, ... ) NATIVE CHECKED

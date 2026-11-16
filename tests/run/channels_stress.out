@@ -1,0 +1,10 @@
+
+order          1          0
+order          7          0
+order          0          0
+kinds: .T.
+canceled receivers: 1334 taken (0 out of order), 666 canceled, 666 left, sum 2001000
+close in the flow: 200 failed, then kept
+many waiting:       1000
+memory, canceled receives: bounded (canceled, then works)
+memory, canceled sends: bounded (canceled, then works)

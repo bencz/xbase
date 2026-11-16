@@ -3,10 +3,16 @@
 
 #include <string.h>
 
-/* Whether the object, of a compiled class, answers `message`: with a method, or with a variable too (`orVar`). */
+/* Whether the object answers `message`: with a method (a compiled class's, or a runtime class's), or with a variable
+ * too (`orVar`). */
 static int answers(const xb_item *it, const char *message, int orVar) {
-  if (it->type != XB_T_OBJECT || !((const xb_object *)it->v.p)->cls->compiled) return 0;
-  return xb_class_has(it->v.p, message, 1) || (orVar && xb_class_has(it->v.p, message, 0));
+  if (it->type != XB_T_OBJECT) return 0;
+  const xb_object *o = it->v.p;
+  if (o->cls->compiled) return xb_class_has(it->v.p, message, 1) || (orVar && xb_class_has(it->v.p, message, 0));
+  if (xb_class_method_of(o->cls, message)) return 1;
+  for (uint32_t k = 0; orVar && k < o->cls->nvars; ++k)
+    if (xb_var_answers(&o->cls->vars[k], message)) return 1;
+  return 0;
 }
 
 /* `message` sent to `obj` with no arguments, its result in `r`; 0 after an error. */

@@ -14,6 +14,9 @@ void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 /* The stack a thread of the program may grow to (reserved, committed as it is used). */
 #define THREAD_STACK ((size_t)16 << 20)
 
+/* The looks at a held lock's state before its waiter sleeps (no pause instruction: loads only). */
+#define LOCK_SPINS 128u
+
 /* How long a wait sleeps before it looks for a QUIT again. */
 #define WAIT_LOOK_NS ((int64_t)50 * XB_NS_PER_MS)
 
@@ -53,8 +56,8 @@ int xb_deadline_arg(xb_ctx *ctx, const char *what, int32_t code, uint32_t k, uin
     xb_flow_arg_error(ctx, code, what, argc, argv);
     return 0;
   }
-  int64_t ms = xb_num_to_i64(&argv[k]), limit = INT64_MAX / 2 / XB_NS_PER_MS; /* far enough, and no overflow */
-  if (ms >= 0) *deadline = xb_platform_monotonic_ns() + (ms < limit ? ms : limit) * XB_NS_PER_MS;
+  int64_t ms = xb_num_to_i64(&argv[k]);
+  if (ms >= 0) *deadline = xb_deadline_after_ms(ms);
   return 1;
 }
 
@@ -244,17 +247,23 @@ enum { M_STATE, M_OWNER, M_DEPTH, M_COUNT_ };
 static const xb_class_var mutex_vars[] = {{"(STATE)", XB_VAR_ANY}, {"(OWNER)", XB_VAR_ANY}, {"(DEPTH)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(mutex_vars) == M_COUNT_, "one M_ index per Mutex variable");
 
-static xb_rwords mutex_words(const xb_item *m) {
-  return (xb_rwords){xb_object_word(m, M_STATE), xb_object_word(m, M_OWNER), xb_object_word(m, M_DEPTH)};
+xb_rwords xb_object_rwords(const xb_item *object, uint32_t k) {
+  return (xb_rwords){xb_object_word(object, k), xb_object_word(object, k + 1), xb_object_word(object, k + 2)};
 }
 
-/* The lock taken by this thread, waiting while another thread holds it: 1; 0 when a QUIT ended the wait. */
-static int mutex_take(xb_ctx *ctx, const xb_item *m) {
-  if (xb_rwords_try(mutex_words(m))) return 1;
-  while (!xb_rwords_claim(mutex_words(m)))
-    if (!xb_wait_while(ctx, m, M_STATE, 2)) return 0;
+int xb_object_lock(xb_ctx *ctx, const xb_item *object, uint32_t k) {
+  for (uint32_t spin = 0; spin < LOCK_SPINS; ++spin) /* a holder's work is short: worth a look before sleeping */
+    if ((spin == 0 || !xb_atomic_load32(xb_object_word(object, k), XB_RELAXED)) &&
+        xb_rwords_try(xb_object_rwords(object, k)))
+      return 1;
+  while (!xb_rwords_claim(xb_object_rwords(object, k)))
+    if (!xb_wait_while(ctx, object, k, 2)) return 0;
   return 1;
 }
+
+static xb_rwords mutex_words(const xb_item *m) { return xb_object_rwords(m, M_STATE); }
+
+static int mutex_take(xb_ctx *ctx, const xb_item *m) { return xb_object_lock(ctx, m, M_STATE); }
 
 static int is_mutex(const xb_item *it);
 

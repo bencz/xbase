@@ -1,0 +1,28 @@
+
+delay: .T. .T. .T. NIL
+token: CANCELLATIONTOKEN CANCELLATIONTOKENSOURCE .F. .F.
+canceled: .T. .T. .T.
+already: .T.
+in time:          7 .T. .T.
+too late: .T.       9027 Task timed out TASKTIMEOUT
+after: callback .T.
+linked: .T. .F.
+not yet: none
+throw: BASE/0/9028 CANCELLATIONTOKEN:THROWIFCANCELLATIONREQUESTED Operation canceled
+error: BASE/1/9024 TASKDELAY Argument error
+error: BASE/1/9024 TASKDELAY Argument error
+error: BASE/1/9024 TASKTIMEOUT Argument error
+error: BASE/1/9024 TASKTIMEOUT Argument error
+error: BASE/1/9024 CANCELLATIONTOKENSOURCE Argument error
+error: BASE/1/9024 CANCELLATIONTOKENSOURCE:CANCELAFTER Argument error
+error: BASE/1/9024 CANCELLATIONTOKEN:REGISTER Argument error
+monitor: .T. .T.
+at once: .T. .T. .T. .T.
+postponed: .F.
+sooner again: .T.
+after the cancellation: ran .T. .T.
+canceled stays: .T.
+disposed link: .F. .T.
+timeout of an ended task:          0
+memory, timeouts: bounded
+memory, linked sources: bounded

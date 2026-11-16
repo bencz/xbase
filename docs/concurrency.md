@@ -88,12 +88,14 @@ Classes and functions, listed in [coverage.md](coverage.md) as each one comes:
 
 - `Task`: `Result` (waits), `Wait( [nMs] )`, `IsCompleted`, `IsFailed`, `IsCanceled`, `Error`, `ContinueWith( b )`;
   `TaskRun( bWork, ... )` (on the pool), `TaskWhenAll( aTasks )`, `TaskWhenAny( aTasks )`, `TaskFromResult( x )`:
-  done ([Tasks](#tasks)). Planned: `TaskDelay( nMs, [oToken] )`, `TaskYield()`, `TaskTimeout( oTask, nMs )`.
+  `TaskDelay( nMs, [oToken] )`, `TaskTimeout( oTask, nMs )`: done ([Tasks](#tasks)). Planned: `TaskYield()`.
 - `TaskCompletionSource`: a task completed by code (callbacks, other threads): done ([Tasks](#tasks)).
-- `CancellationTokenSource` / `CancellationToken`: cooperative cancellation, timeouts, linked tokens; every awaitable
-  operation of the runtime takes one.
-- `Channel( [nCapacity] )`: `SendAsync`, `ReceiveAsync`, `TrySend`, `TryReceive`, `Close`; enumerable with `AWAIT FOR
-  EACH`. The way to hand data between tasks.
+- `CancellationTokenSource` / `CancellationToken`: cooperative cancellation, timeouts, linked tokens (done:
+  [Tasks](#tasks)); the awaitable operations of the runtime take one (`TaskDelay`, a channel's; planned: the
+  asynchronous waits of phase 4 and the I/O of phase 5).
+- `Channel( [nCapacity] )`: `SendAsync`, `ReceiveAsync`, `TrySend`, `TryReceive`, `Close`, `Count`, `IsClosed`;
+  enumerable with `FOR EACH` (done: [Channels](#channels)), and with `AWAIT FOR EACH` (phase 4). The way to hand
+  data between tasks.
 - Threads: `ThreadStart( bWork, ... )` (a flow on a thread of its own, for work that blocks or computes for long),
   `Join()`, `IsAlive()`; `Mutex()` (`Lock`, `Unlock`, `TryLock`, `Hold`); `Condition()` (`Wait`, `Notify`,
   `NotifyAll`); `Semaphore()` (`Wait`, `Release`, `Count`); `AtomicInt()` (`Add`, `CompareExchange`, `Value`): done,
@@ -201,10 +203,12 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   a task blocks with work waiting, another takes its place (woken or started, up to 1024 workers); the blocked one is
   active again when it returns, and a worker beyond the target that stays idle 2 seconds ends. A thread that waits
   with no limit for a task still to start runs it itself (inline). Legacy synchronous code inside tasks therefore
-  costs threads, never liveness. *(Planned)*: a monitor thread that sees a task running long without a suspension
-  point (a computation) and adds a worker the same way.
-- *(Planned)* Timers: a hierarchical timing wheel per worker for `TaskDelay`, timeouts and cancellation after a delay;
-  hundreds of thousands of pending timeouts cost constant time each.
+  costs threads, never liveness. A monitor sees a task that runs long (20 ms) without blocking while others wait in
+  the queues, and puts another worker beside it the same way.
+- Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): a binary heap of deadlines that one thread serves, started with
+  the pool: it sleeps until the earliest deadline and fires what is due; it is also the monitor, looking every 10 ms
+  while tasks wait in the queues (with no timer and nothing queued it sleeps until there is). *(Planned)*: a
+  hierarchical timing wheel per worker, so that hundreds of thousands of pending timeouts cost constant time each.
 - *(Planned)* A blocking pool, separate from the workers, runs work that has no asynchronous form (`getaddrinfo`, file
   I/O where the system has no asynchronous files, foreign libraries).
 
@@ -237,12 +241,54 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   `TaskWhenAny( aTasks )` (not empty): completed with the first task that ended. Both wait for the tasks the array held
   as one read saw it, and a chain of them of any length completes. Anything but an array of tasks is `BASE/9024`.
   `TaskFromResult( x )`: a task completed with x.
+- `TaskDelay( nMs, [oToken] )`: a task that completes nMs milliseconds from now (0 or less: at once), canceled when
+  the token is canceled first. `TaskTimeout( oTask, nMs )`: a task that ends as oTask does when it does within nMs
+  milliseconds, else failed with the error `BASE/9027` `Task timed out`.
+- `CancellationTokenSource( [oToken...] )`: a source of cancellation, linked to the tokens given (canceled when one
+  of them is): `Token`, `Cancel()` (once; again does nothing), `CancelAfter( nMs )`, `IsCancellationRequested`. A
+  `CancellationToken`: `IsCancellationRequested`, `Register( bWork )` (a task that runs `Eval( bWork )` on the pool
+  once the token is canceled), `ThrowIfCancellationRequested()` (the error `BASE/9028` `Operation canceled`,
+  substitutable). Argument errors are `BASE/9024`.
+- Timers fire in order of their deadlines, never before. A delay, a timeout or a `CancelAfter` still pending when the
+  program ends is ended then: the delay and the timeout canceled, the source canceled (its `Register` tasks, scheduled
+  then, are canceled with the program's other tasks that never started), so an `EXIT` procedure that waits for them is
+  not held. A later `CancelAfter` replaces the time an earlier one set. `oSource:Dispose()` lets go
+  of what the source is linked to and of its timer (`USING`): a long-lived token linked to again and again, as by
+  each request of a server, keeps only the sources not disposed; a timeout settled before its deadline keeps nothing
+  either (its timer is dropped once the heap grows).
 - `TaskCompletionSource()`: `Task` is a task that its methods complete: `SetResult( x )`, `SetError( x )` (failed with
   x), `SetCanceled()`, each `.T.`, and `BASE/9025` `Task already completed` when it was; `TrySetResult`, `TrySetError`,
   `TrySetCanceled` tell whether they did.
 - *(Planned)* `AWAIT` of a completed task continues inline with no allocation. Cost targets (measured,
   [Testing and measurement](#testing-and-measurement)): an `AWAIT` of a completed task in tens of nanoseconds, a
   suspension and resumption in a few hundred, a suspended task in well under 1 KB beyond what its own variables hold.
+
+### Channels
+
+Done (`rtl/channels.c`). `Channel( [nCapacity] )` keeps up to nCapacity values
+sent and not received yet (without it, or 0: any number; a capacity below 0, past 2^31 - 1 or no number,
+`BASE/9029`).
+
+- `SendAsync( xValue, [oToken] )`: a task that completes (`.T.`) once the channel took the value: at once when a
+  receiver waits (it gets it) or there is room; else when a receiver makes room, in the order senders came; the token
+  cancels the wait (the value is not kept then). `ReceiveAsync( [oToken] )`: a task that completes with the next value:
+  at once when there is one; else when a sender gives one, receivers served in the order they came; the token cancels
+  the wait, and a value goes only to a receiver that takes it. A token that is no token is `BASE/9024`.
+- `TrySend( xValue )` and `TryReceive( [aSlot] )` never wait: whether the value was taken, or one was received (into
+  `aSlot[ 1 ]`). `Count()`: the values kept; `IsClosed`.
+- `Close()`: nothing is sent any more: waiting senders and receivers fail with `BASE/9030` `Channel closed`, the values
+  kept are still received, then `ReceiveAsync` fails so too; closing again does nothing.
+- One sender's values arrive in the order it sent them. `FOR EACH x IN oChannel` takes the values as they come, waiting
+  for each, until the channel is closed and empty (an enumerator of its own for each `FOR EACH`, in C: the hot path of
+  a consumer).
+- Cost (measured): a `TrySend` and `TryReceive` pair about 65 ns, a `SendAsync` and `ReceiveAsync` pair that waits for
+  nothing about 80 ns; a value handed between tasks that block waiting for each other costs a thread's wake (about a
+  microsecond), which `AWAIT` (phase 4) removes: a waiting task suspends instead of blocking its thread.
+- A receiver or a sender that a token canceled gives its place up: the channel drops such waiters when its ring of
+  them is full, before growing it, so waits canceled again and again on a quiet channel keep nothing.
+- The channel's state is its own object's, under its lock (the three words a `Mutex` has: a waiter blocks, and
+  collections go on): rings over arrays for the values, the receivers waiting and the senders waiting; a send that
+  waits for nothing returns one task completed with `.T.` that all such sends share, so it allocates nothing.
 
 ### I/O reactor
 
@@ -400,8 +446,9 @@ Each phase ends with its tests, its benchmarks measured before and after, the do
    `Condition`, `Semaphore`, `SYNCHRONIZED` (done). The first visible feature: threads sharing memory safely.
 3. **Scheduler and tasks**: workers, run queues, stealing, parking, blocking handoff, `//WORKERS:n`, `Task`,
    `TaskRun`, `TaskWhenAll`/`Any`, `TaskFromResult`, `TaskCompletionSource`, a start procedure's task waited for
-   (done, step 3a); the handoff's monitor, timers, `TaskDelay`, `TaskTimeout`, cancellation (step 3b); `Channel` and
-   the blocking pool (step 3c); usable from synchronous code (`Wait()`, `Result`, `ContinueWith`).
+   (done, step 3a); the handoff's monitor, timers, `TaskDelay`, `TaskTimeout`, cancellation (done, step 3b); `Channel`
+   (done, step 3c); usable from synchronous code (`Wait()`, `Result`, `ContinueWith`). The blocking pool comes with the
+   asynchronous I/O that needs it (phase 5).
 4. **The compiler**: `ASYNC` functions, procedures and methods, `AWAIT` everywhere in them, the start procedure
    awaiting, errors and cancellation across `AWAIT`, the completed fast path; asynchronous generators and `AWAIT FOR
    EACH`; `AWAIT USING` (`USING` is done).
