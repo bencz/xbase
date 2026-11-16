@@ -270,6 +270,12 @@ void CallResolver::block(Block &b) {
       block(q.always);
       break;
     }
+    case StmtKind::Using: {
+      auto &u = static_cast<UsingStmt &>(*st);
+      expr(*u.value);
+      block(u.seq);
+      break;
+    }
     case StmtKind::Exit: case StmtKind::Loop:
       break;
     }

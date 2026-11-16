@@ -1,0 +1,7 @@
+using oMutex:Hold()
+Synchronize( "a" )
+Sync( 1, 2 )
+Synch()
+end
+using aLocks[ 2 ]:Hold()
+end

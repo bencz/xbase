@@ -1,4 +1,4 @@
-/* Runtime support of FOR EACH, SWITCH and `...`. */
+/* Runtime support of FOR EACH, SWITCH, USING and `...`. */
 #include "xbrt_int.h"
 
 #include <string.h>
@@ -239,4 +239,10 @@ int32_t xb_args_rest(xb_ctx *ctx, xb_item *dst, xb_item *rest, uint32_t n, uint3
     if (xb_pending_get(ctx) && xb_pending(ctx)) return 0;
   }
   return 1;
+}
+
+/* __Dispose( xValue ): the end of a USING statement: xValue:Dispose(), unless xValue is NIL. */
+void xbf___DISPOSE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (!argc || argv[0].type == XB_T_NIL) return;
+  xb_op_send(ctx, ret, "DISPOSE", 1, argv);
 }

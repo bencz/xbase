@@ -205,6 +205,12 @@ void Folder::stmt(Stmt &s) {
     block(q.always);
     break;
   }
+  case StmtKind::Using: {
+    auto &u = static_cast<UsingStmt &>(s);
+    fold(u.value);
+    block(u.seq);
+    break;
+  }
   case StmtKind::Exit:
   case StmtKind::Loop:
   case StmtKind::Parameters:

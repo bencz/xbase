@@ -281,7 +281,7 @@ struct IIfExpr : Expr {
 
 enum class StmtKind : uint8_t {
   Expr, Local, Static, Private, Public, Parameters, Memvar, Field, Return, If, While, For, ForEach, Switch, Sequence,
-  Exit, Loop, WithObject, Yield
+  Exit, Loop, WithObject, Yield, Using
 };
 
 struct Stmt {
@@ -392,12 +392,24 @@ struct SequenceStmt : Stmt {
   Block body;
   ExprPtr handler;               // WITH expr (TRY: the block that breaks with the error), or null
   bool isTry = false;
+  bool leavable = false;         // RETURN, EXIT and LOOP may leave the body (TRY, USING)
   bool hasRecover = false;
   ExprPtr usingVar;              // a VarExpr, or null
   Block recover;
   bool hasAlways = false;
   Block always;
   explicit SequenceStmt(SourceLoc l) : Stmt(StmtKind::Sequence, l) {}
+};
+
+// USING [v :=] expr body END (END USING too): expr is evaluated once into a LOCAL of its own (`hidden`, a name no
+// program can write), then `seq` runs: one sequence whose body assigns v (when written) and goes on with the
+// statement's body, and whose ALWAYS code is __Dispose( hidden ) (its Dispose() unless NIL), on every way out of the
+// body, RETURN, EXIT and LOOP too; a BREAK or an error goes on after it.
+struct UsingStmt : Stmt {
+  ExprPtr value;
+  LocalDecl hidden;
+  Block seq;
+  explicit UsingStmt(SourceLoc l) : Stmt(StmtKind::Using, l) {}
 };
 
 struct JumpStmt : Stmt { // EXIT / LOOP

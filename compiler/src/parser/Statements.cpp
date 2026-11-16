@@ -40,9 +40,10 @@ StmtPtr Parser::parseStmtKind() {
   if (atStmtKw("BEGIN") && isKw(ahead(), "SEQUENCE")) return parseSequence();
   if (atStmtKw("TRY") && ahead().kind == Tok::EndOfStmt) return parseTry();
   if (atStmtKw("WITH") && isKw(ahead(), "OBJECT")) return parseWithObject();
+  if (atStmtKw("USING") && aheadOperand()) return parseUsing(); // USING( ... ) is a call, as YIELD( ... )
   if (atStmtKw("FOR")) return isKw(ahead(), "EACH") && !isAssignAfterEach() ? parseForEach() : parseFor();
   // YIELD( ... ) stays a call of a function Yield(), as in Clipper
-  if (atStmtKw("YIELD") && ahead().kind != Tok::EndOfStmt && ahead().kind != Tok::Eof && ahead().kind != Tok::LParen) {
+  if (atStmtKw("YIELD") && aheadOperand()) {
     advance();
     ExprPtr v = parseExpr();
     endOfStmt();
@@ -396,6 +397,43 @@ StmtPtr Parser::parseWithObject() {
   return st;
 }
 
+// Whether the keyword at hand is followed by an operand, not by what ends the statement or calls a function of its name
+// (an assignment, an index, a message or an alias makes it a variable already: atStmtKw).
+bool Parser::aheadOperand() const {
+  Tok k = ahead().kind;
+  return k != Tok::EndOfStmt && k != Tok::Eof && k != Tok::Semicolon && k != Tok::LParen;
+}
+
+// USING [v :=] expr ... END (std.ch makes END USING an END). `v := expr` becomes an assignment from the hidden
+// variable inside the sequence: an assignment that fails still disposes the value.
+StmtPtr Parser::parseUsing() {
+  SourceLoc openLoc = cur().loc;
+  advance(); // USING
+  auto st = std::make_unique<UsingStmt>(openLoc);
+  st->hidden.loc = openLoc;
+  st->hidden.name = "(USING " + std::to_string(++usingCount_) + ")";
+  auto seq = std::make_unique<SequenceStmt>(openLoc);
+  ExprPtr value = parseExpr();
+  if (value->kind == ExprKind::Assign && !static_cast<AssignExpr &>(*value).compound) {
+    auto &assign = static_cast<AssignExpr &>(*value);
+    st->value = std::move(assign.value);
+    assign.value = std::make_unique<VarExpr>(openLoc, st->hidden.name);
+    seq->body.push_back(std::make_unique<ExprStmt>(openLoc, std::move(value)));
+  } else {
+    st->value = std::move(value);
+  }
+  endOfStmt();
+  seq->leavable = true;
+  seq->hasAlways = true;
+  auto dispose = std::make_unique<CallExpr>(openLoc, "__DISPOSE");
+  dispose->args.push_back(std::make_unique<VarExpr>(openLoc, st->hidden.name));
+  seq->always.push_back(std::make_unique<ExprStmt>(openLoc, std::move(dispose)));
+  for (StmtPtr &b : parseBlock({"END"})) seq->body.push_back(std::move(b));
+  closeBlock({"END"}, "USING", openLoc);
+  st->seq.push_back(std::move(seq));
+  return st;
+}
+
 // TRY ... [CATCH [var]] ... [FINALLY] ... END (std.ch makes END TRY an END): a sequence whose error block breaks
 // with the error, {| e | Break( e ) }.
 StmtPtr Parser::parseTry() {
@@ -404,6 +442,7 @@ StmtPtr Parser::parseTry() {
   endOfStmt();
   auto st = std::make_unique<SequenceStmt>(openLoc);
   st->isTry = true;
+  st->leavable = true;
   auto block = std::make_unique<BlockExpr>(openLoc);
   block->params.push_back({openLoc, "E"});
   auto call = std::make_unique<CallExpr>(openLoc, "BREAK");

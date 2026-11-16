@@ -429,13 +429,21 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::Yield:
     expr(*static_cast<YieldStmt &>(st).value, s);
-    if (s.inAlways) diag_.error(st.loc, "YIELD cannot be inside a BEGIN SEQUENCE with ALWAYS or a TRY with FINALLY");
+    if (s.inAlways)
+      diag_.error(st.loc, "YIELD cannot be inside a BEGIN SEQUENCE with ALWAYS, a TRY with FINALLY or a USING");
     break;
   case StmtKind::WithObject: {
     auto &w = static_cast<WithObjectStmt &>(st);
     expr(*w.object, s);
     declare(w.hidden, false, s);
     nestedBlock(w.body, s);
+    break;
+  }
+  case StmtKind::Using: {
+    auto &u = static_cast<UsingStmt &>(st);
+    expr(*u.value, s);
+    declare(u.hidden, false, s);
+    block(u.seq, s);
     break;
   }
   case StmtKind::Sequence: {
@@ -452,7 +460,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
       s.next = inner.next;
       s.seenExecutable = inner.seenExecutable;
     };
-    if (q.isTry) nestedBlock(q.body, s);
+    if (q.leavable) nestedBlock(q.body, s);
     else fenced(q.body, "a BEGIN SEQUENCE");
     if (q.usingVar) expr(*q.usingVar, s);
     nestedBlock(q.recover, s);

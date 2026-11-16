@@ -78,6 +78,8 @@ private:
   StmtPtr parseSequence();
   StmtPtr parseTry();
   StmtPtr parseWithObject();
+  StmtPtr parseUsing();
+  bool aheadOperand() const;
   void parseSequenceParts(SequenceStmt &st, const char *recoverWord, const char *alwaysWord, const char *what,
                           SourceLoc openLoc);
   StmtPtr parseFor();
@@ -126,6 +128,7 @@ private:
   std::string lastClass_;        // the class a METHOD implementation without CLASS belongs to
   std::vector<std::string> withObjects_; // the hidden LOCALs of the WITH OBJECTs open, innermost last
   unsigned withCount_ = 0;
+  unsigned usingCount_ = 0;
   unsigned braceBlocks_ = 0;     // extended codeblocks open: a statement starting with } ends their body
   FuncDecl *parsingFunc_ = nullptr; // the function whose body is being parsed (YIELD marks it a generator)
   // ANNOUNCE and EXTERNAL anywhere in the module, given to it at its end.

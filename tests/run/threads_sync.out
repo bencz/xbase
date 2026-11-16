@@ -1,0 +1,41 @@
+
+count          1          1          1          1
+count          1        500        500        500
+count          1       2000       2000       2000
+count          2          1          2          2
+count          2        500       1000       1000
+count          2       2000       4000       4000
+count          4          1          4          4
+count          4        500       2000       2000
+count          4       2000       8000       8000
+count          8          1          8          8
+count          8        500       4000       4000
+count          8       2000      16000      16000
+ends: end free return free exit free loop free break free error free
+nested: .T. .T.
+after: .F.
+holder: MUTEXHOLDER .T. DISPOSE LOCK,TRYLOCK,UNLOCK,HOLD
+other thread: .T.
+disposed: .F.
+twice: .F.
+assignment fails:       1133 .F.
+queue:          1          9         30
+notify:          1 all:          3
+timed: .F. .F.
+depth kept: .F.
+semaphore: 2,2/2/2 1,1/1/1 4,4/4/4
+count:          1 .T.          0 .F.          0          2 .T.          1
+error: BASE/1/9021 CONDITION:WAIT Mutex not held
+error: BASE/1/9021 CONDITION:WAIT Mutex not held
+error: BASE/1/9021 CONDITION:WAIT Mutex not held
+error: BASE/1/9021 CONDITION:WAIT Argument error
+error: BASE/31/9023 SEMAPHORE:RELEASE Semaphore full
+error: BASE/1/9022 SEMAPHORE:RELEASE Argument error
+error: BASE/1/9022 SEMAPHORE:RELEASE Argument error
+error: BASE/1/9022 SEMAPHORE:WAIT Argument error
+error: BASE/1/9022 SEMAPHORE Argument error
+error: BASE/1/9022 SEMAPHORE Argument error
+error: BASE/1/9022 SEMAPHORE Argument error
+error: BASE/1/9022 SEMAPHORE Argument error
+error: BASE/1/9022 SEMAPHORE Argument error
+unchanged:          2 .F.

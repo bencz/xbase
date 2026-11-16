@@ -123,10 +123,10 @@ Statements:
   [runtime.md](runtime.md#generators)) whose `MoveNext()` runs the body up to the next `YIELD`, the element in
   `Current`; `FOR EACH` goes through it. `YIELD` followed by `(` is a call of a function `Yield()`, as in Clipper: the
   element is never written in parentheses right after `YIELD`. `RETURN` (without a value) and the end of the body end
-  it. Not in a codeblock, nor in any part of a `BEGIN SEQUENCE` with `ALWAYS` or a `TRY` with `FINALLY` (a generator
-  left before its end would never run that code); in another sequence an error of a later step reaches its `RECOVER` or
-  `CATCH`, and between the steps the caller runs with its own error block. A generator takes no `...`, reads no
-  arguments as received (`PCount()`, `PValue()`, `PARAMETERS`) and creates no `PRIVATE` or `PUBLIC`.
+  it. Not in a codeblock, nor in any part of a `BEGIN SEQUENCE` with `ALWAYS`, a `TRY` with `FINALLY` or a `USING` (a
+  generator left before its end would never run that code); in another sequence an error of a later step reaches its
+  `RECOVER` or `CATCH`, and between the steps the caller runs with its own error block. A generator takes no `...`,
+  reads no arguments as received (`PCount()`, `PValue()`, `PARAMETERS`) and creates no `PRIVATE` or `PUBLIC`.
 - `WITH OBJECT expr ... END` (`END WITH` too): inside, `:name` (also `:name( args )`, assigned, `++`) is a message to
   the object, evaluated once into a `LOCAL` of its own (`WithObjectStmt::hidden`, a name no program can write). A
   codeblock made there captures that variable, as it would any `LOCAL`: it sends to the object the statement holds,
@@ -135,6 +135,13 @@ Statements:
 - `TRY ... [CATCH [v] ...] [FINALLY ...] END` (`END TRY` too): a sequence whose error block is `{| e | Break( e ) }`,
   so an error reaches `CATCH` as its `Error` object and a `Throw( x )` as `x`; `FINALLY` is its `ALWAYS`. `RETURN`,
   `EXIT` and `LOOP` may leave its body and `CATCH` (`FINALLY` runs first), not `FINALLY`.
+- `USING [v :=] expr ... END` (`END USING` too): `expr` is evaluated once into a `LOCAL` of its own
+  (`UsingStmt::hidden`, a name no program can write), then `v` (when written) is assigned from it and the body runs;
+  however they end (their end, `RETURN`, `EXIT`, `LOOP`, a `BREAK`, an error, `QUIT`), `__Dispose()` sends the value
+  `Dispose()` unless it is NIL, and a `BREAK` or an error goes on after it. Not `YIELD` inside. `USING`, like `YIELD`,
+  starts the statement unless the name is followed by what makes it a variable or a function (an assignment, `(`, `[`,
+  `:`, `->`, the end of the statement).
+  `std.ch` builds `SYNCHRONIZED` on it ([concurrency.md](concurrency.md#threads)).
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
 - Classes ([runtime.md](runtime.md#classes)), at file level: `[STATIC | CREATE | SCALAR] CLASS name [INHERIT | FROM
   parent, ...]`, then members, then `ENDCLASS` (or `END [CLASS]`): `EXPORTED:` (`EXPORT:`, `VISIBLE:`), `PROTECTED:` and
@@ -395,7 +402,10 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   `ALWAYS` code is generated where the body and `RECOVER` join, in an unwind block of its own (`seq.suspend` and
   `seq.value` before it, `seq.resume` after it, then onward), and before each `RETURN`, `EXIT` or `LOOP` that leaves
   the sequence (`Generator::exitCleanups`, which also puts the error block back), in a block that unwinds where the
-  sequence does. `TRY` is the parser's `SequenceStmt` with the handler block built in.
+  sequence does. `TRY` is the parser's `SequenceStmt` with the handler block built in; `USING` is a `SequenceStmt` too
+  (the one statement of `UsingStmt::seq`) that the parser builds: the assignment of `v` from the hidden variable, then
+  the body, leavable (`SequenceStmt::leavable`, as `TRY`'s), no `RECOVER`, and `__Dispose` of the hidden variable as
+  its `ALWAYS` code.
 - A generator (`FuncDecl::generator`, set by the parser; Sema adds the enumerator as parameter 0) becomes two xIR
   functions (`Generator::genGenerator`): the function itself, which returns `gen.new` of its resume function with its
   arguments, and `NAME.resume`, the body: it starts with `gen.restore` and a dispatch on the state it returns (0: the

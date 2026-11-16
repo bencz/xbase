@@ -21,7 +21,7 @@ unlock free: BASE          1       9019 Mutex not held MUTEX:UNLOCK
 unlock by another:       9019
 waiting: .T.
 waits: got it
-methods: LOCK,TRYLOCK,UNLOCK          0 .T. .F. .F.
+methods: LOCK,TRYLOCK,UNLOCK,HOLD          0 .T. .F. .F.
 join itself: 9018 Thread joins itself THREAD:JOIN .F. THREAD JOIN,ISALIVE
 atomic: ATOMICINT          0          5         -2         -2         10         10
 exchange: .F.         10 .T.          1

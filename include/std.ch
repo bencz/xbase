@@ -28,6 +28,10 @@
 
 #command REQUEST <vars,...>            => EXTERNAL <vars>
 
+/* SYNCHRONIZED oMutex ... END: the body runs holding the mutex, released however it ends (USING, the compiler's). The
+ * whole word only: Sync(), Synchronize() stay calls. */
+#xcommand SYNCHRONIZED <m>             => using <m>:Hold()
+
 /* Memory variables: a name or a skeleton (* any characters, ? one) is matched when the code runs. */
 #command RELEASE <vars,...>            => __MemRelease( <"vars"> )
 #command RELEASE ALL                   => __MemReleaseAll( "*", .T. )

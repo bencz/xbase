@@ -61,10 +61,12 @@ NEXT
 - Asynchronous generators: `YIELD` in an `ASYNC` function. Calling it returns an asynchronous enumerator
   (`MoveNextAsync()` gives a task of a logical, `Current`); `AWAIT FOR EACH x IN expr ... NEXT` awaits each step.
   `AWAIT FOR EACH` over an ordinary enumerator awaits each element that is a task (a collection of tasks in order).
-- `USING [AWAIT] v := expr ... END [USING]`: the body runs, then `v:Dispose()` (with `AWAIT`, `AWAIT
-  v:DisposeAsync()`) when it ends in any way (`RETURN`, `EXIT`, an error, `BREAK`), as `ALWAYS` would; `v` is a
-  `LOCAL` of the statement. Classes of the runtime that hold resources (files, sockets, connections, locks) answer
-  both.
+- `USING [AWAIT] [v :=] expr ... END [USING]`: the body runs, then the value's `Dispose()` (with `AWAIT`, `AWAIT
+  DisposeAsync()`) when it ends in any way (`RETURN`, `EXIT`, `LOOP`, an error, `BREAK`, `QUIT`), as `ALWAYS` would.
+  Without `AWAIT` it is done ([compiler.md](compiler.md#grammar)): the value is kept in a variable of the statement's
+  own, so the one disposed is the one evaluated, a NIL value is not disposed, and `v`, when written, is an ordinary
+  variable that the value is assigned to (an assignment that fails disposes the value too). Classes of the runtime
+  that hold resources (files, sockets, connections, locks) answer both.
 - Errors: an error in a task goes to the task's error block, as in any code (it may substitute a value, retry, or
   `BREAK`). One that leaves the task's body (a `BREAK`, or the default handler that would end the program) completes
   the task as failed with the error object; `AWAIT` of a failed task raises it in the awaiter as `Break( oErr )`, so
@@ -89,11 +91,12 @@ Classes and functions, listed in [coverage.md](coverage.md) as each one comes:
 - `Channel( [nCapacity] )`: `SendAsync`, `ReceiveAsync`, `TrySend`, `TryReceive`, `Close`; enumerable with `AWAIT FOR
   EACH`. The way to hand data between tasks.
 - Threads: `ThreadStart( bWork, ... )` (a flow on a thread of its own, for work that blocks or computes for long),
-  `Join()`, `IsAlive()`; `Mutex()` (`Lock`, `Unlock`, `TryLock`); `AtomicInt()` (`Add`, `CompareExchange`, `Value`):
-  done, see [Threads](#threads). Planned: `USING oMutex:Hold()`, `Condition`, `Semaphore` (also `WaitAsync`),
-  `AsyncLock` (held across `AWAIT`), `Lazy( bInit )`; a thread becomes a task once tasks exist.
+  `Join()`, `IsAlive()`; `Mutex()` (`Lock`, `Unlock`, `TryLock`, `Hold`); `Condition()` (`Wait`, `Notify`,
+  `NotifyAll`); `Semaphore()` (`Wait`, `Release`, `Count`); `AtomicInt()` (`Add`, `CompareExchange`, `Value`): done,
+  see [Threads](#threads). Planned: `Semaphore`'s `WaitAsync`, `AsyncLock` (held across `AWAIT`), `Lazy( bInit )`; a
+  thread becomes a task once tasks exist.
 - Statements of xbase's own over them, rules in `std.ch`: `SYNCHRONIZED oMutex ... END` (held for the body, released
-  in any way it ends).
+  in any way it ends; done).
 
 ## Execution model
 
@@ -146,7 +149,26 @@ Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); th
 - `Mutex()` makes a lock that the thread holding it may take again: `Lock()` waits while another thread holds it (a
   blocking operation: collections go on without the waiter), `TryLock()` takes it only when no other thread holds it
   and tells whether it did, `Unlock()` releases it once (it is free when released as many times as taken); `Unlock()`
-  by a thread that does not hold it is `BASE/9019` `Mutex not held`.
+  by a thread that does not hold it is `BASE/9019` `Mutex not held`. `Hold()` takes it as `Lock()` does and returns a
+  holder (`MutexHolder`) whose `Dispose()` releases it once, from the thread holding it (from another, it does
+  nothing), for `USING`; NIL when a `QUIT` ended the wait or came as it took the lock (then released).
+- `SYNCHRONIZED oMutex ... END` (`END SYNCHRONIZED` too) runs the body holding the mutex and releases it however the
+  body ends: a `std.ch` rule, `USING oMutex:Hold()` (`oMutex` is a variable, an element, a call or a message: an
+  operator around it would bind before `:Hold()`). `RETURN`, `EXIT` and `LOOP` may leave it.
+- `Condition()` makes a condition variable. `oCondition:Wait( oMutex, [nMs] )` releases `oMutex`, which the thread
+  must hold (else `BASE/9021` `Mutex not held`; a limit that is no number, `BASE/9021` `Argument error`), however
+  many times it took it, waits for a `Notify()` or `NotifyAll()` or nMs milliseconds (without nMs, NIL or a negative
+  one: no limit), takes `oMutex` back as it held it, and tells whether it was notified. `Notify()` lets one waiting
+  thread go on, `NotifyAll()` every one; a notification no thread waits for is lost, so a waiter tests its condition in
+  a loop, holding the mutex. A `QUIT` ends the wait without the mutex. Up to 65535 threads wait on a condition at
+  once; one more waits for a place with the mutex released, then takes it back and returns `.F.`, as if it had timed
+  out.
+- `Semaphore( nInitial, [nMaximum] )` counts free places (0 .. nMaximum, at most 2^31 - 1, its default; a value out
+  of range, or nMaximum below nInitial, is `BASE/9022` `Argument error`). `Wait( [nMs] )` takes a place, waiting while
+  none is free (nMs as `Wait()`'s above; one that is no number is `BASE/9022`; a `QUIT` ends the wait), and tells
+  whether it took one; `Release( [nCount] )` gives back nCount
+  places (1 without it; below 1, `BASE/9022`) and returns the count before, or, past the maximum, raises
+  `BASE/9023` `Semaphore full` (`EG_LIMIT`) and changes nothing; `Count()` gives the places free.
 - `AtomicInt( [nValue] )` holds a 64-bit integer (0 without a value; a number is truncated toward zero, saturated):
   `Value` reads it, `Value := n` stores n, `Add( n )` adds n and returns the new value (wrapping as two's complement
   does), `CompareExchange( nExpected, nNew )` stores nNew when the value is nExpected and tells whether it did; each in
@@ -250,7 +272,8 @@ environments, and the variables made in them, come with `ThreadStart`) and the f
   the bit is set. (3, done) Compiled code's in-place reads and writes test the bit, measured on the benchmarks (ABI 44).
   (4, done) Publication: a store into a shared object shares the value stored first; `STATIC`s, class variables and
   memory variables are shared storage once a second thread exists (ABI 45). (2e, done) `ThreadStart`, `Mutex`,
-  `AtomicInt`, the program-wide `PUBLIC` table and line-atomic console output ([Threads](#threads)).
+  `AtomicInt`, the program-wide `PUBLIC` table and line-atomic console output; then `Condition`, `Semaphore`, `USING`
+  and `SYNCHRONIZED` ([Threads](#threads)).
 - **Runtime caches and tables** filled at run time (done, [runtime.md](runtime.md#threads-and-synchronization)): a
   send cache is a sequence lock, a field cache one 64-bit word (generation, index) from an atomic counter, the memory
   variable names are found under a reader-writer lock and read by number from chunks that never move, and classes
@@ -337,14 +360,14 @@ Each phase ends with its tests, its benchmarks measured before and after, the do
 2. **A thread-safe runtime**: the runtime caches and global state made thread-safe (done), the context split and
    environments with the stack error (done); stop-the-world collections with back-edge polls (ABI), every stack scanned,
    atomic headers, per-thread remembered sets, the finalizer task; shared objects (header bit, publication, sequence
-   counters and locks, compiled fast paths); line-atomic console output, `ThreadStart`, `Mutex`, `AtomicInt` (done);
-   `Condition`, `Semaphore`, `SYNCHRONIZED`. The first visible feature: threads sharing memory safely.
+   counters and locks, compiled fast paths); line-atomic console output, `ThreadStart`, `Mutex`, `AtomicInt`,
+   `Condition`, `Semaphore`, `SYNCHRONIZED` (done). The first visible feature: threads sharing memory safely.
 3. **Scheduler and tasks**: workers, deques, stealing, parking, blocking handoff and its monitor, timers, the
    blocking pool; `Task`, `TaskRun`, `TaskDelay`, `TaskWhenAll`/`Any`, `TaskCompletionSource`, cancellation,
    `Channel`, usable from synchronous code (`Wait()`, `ContinueWith`).
 4. **The compiler**: `ASYNC` functions, procedures and methods, `AWAIT` everywhere in them, the start procedure
    awaiting, errors and cancellation across `AWAIT`, the completed fast path; asynchronous generators and `AWAIT FOR
-   EACH`; `USING` and `AWAIT USING`.
+   EACH`; `AWAIT USING` (`USING` is done).
 5. **Asynchronous I/O**: the reactors (io_uring and epoll, kqueue, IOCP), sockets, asynchronous files, name resolution
    on the blocking pool; the echo server benchmark.
 6. **The database**: awaitable operations on the blocking pool for every driver, lock waits with timeouts and tokens,

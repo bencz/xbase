@@ -1,0 +1,14 @@
+
+plain: body plain | dispose plain C
+loop: end of body | dispose pass1 | dispose pass2 | dispose pass3
+return: early late dispose early | dispose late
+break: dispose break | recover value
+error: dispose error | catch +
+nested: dispose inner | dispose outer | recover LEN
+nil: nil body
+assignment fails: dispose assigned | catch 1133
+no Dispose: body | 13 1004 DISPOSE
+Dispose breaks: body | dispose breaks | recover from Dispose
+generator: start | dispose generator | got 1 | got 2
+names:         11          2
+disposed: quit

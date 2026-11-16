@@ -376,7 +376,8 @@ class of the method it is in ([Classes](#classes)).
 - A runtime class's methods (`xb_class_method`: an upper-cased name and a C function that receives the object as
   `argv[0]`), found after its variables (`xb_class_method_of`): `X` calls the method named `X`, an assignment the one
   named `_X`, which `ObjMethods` leaves out (`ObjHasMethod` finds the method `X`). Generators (`MoveNext`) and the
-  classes of [threads](#threads-and-synchronization) (`Thread`, `Mutex`, `AtomicInt`) answer their messages so.
+  classes of [threads](#threads-and-synchronization) (`Thread`, `Mutex`, `MutexHolder`, `Condition`, `Semaphore`,
+  `AtomicInt`) answer their messages so.
 - `ClassName` works on every value: an object's class name, else `NUMERIC`, `CHARACTER`, `ARRAY`, `BLOCK`, `NIL`,
   `LOGICAL` or `DATE`.
 - Any other message raises `BASE/1004` `No exported method` (`BASE/1005` `No exported variable` for an assignment)
@@ -1006,7 +1007,7 @@ Conventions:
   operators raise the code of their operation: `&` 9001, `|` 9002, `^^` 9003, `~` 9005, `<<` 9006, and `>>`, an
   arithmetic shift (a count past 63 gives 0, or -1 for a negative number), 9008. The function names, operator symbols,
   operand counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too. The `Char*()`
-  functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)), the thread functions 9016 to 9020
+  functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)), the thread functions 9016 to 9023
   ([concurrency.md](concurrency.md#threads)).
 - `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
@@ -1229,7 +1230,12 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   stack. An `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local.
   `QUIT` in a thread raises it on every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before
   the `EXIT` procedures and after them) does too when threads still run, and waits until none does; a thread made
-  meanwhile quits at once. Their error codes are xbase's own: 9016 to 9020.
+  meanwhile quits at once. A `Mutex`'s `Hold()` returns a `MutexHolder` (the mutex in its own variable) whose
+  `Dispose()` releases it once. A `Condition` keeps its waiters and the signals given to them in one word (16 bits
+  each: a waiter takes a signal and leaves in one compare-and-swap, so a signal never outlives the waiters it was for)
+  and a generation each signal changes, which waiters park on; a `Semaphore` its count and maximum (a `Release()` wakes
+  waiters when the count leaves 0, and a waiter that takes a place and leaves others wakes the next). Their waits take a
+  limit in milliseconds on the monotonic clock. Their error codes are xbase's own: 9016 to 9023.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread

@@ -57,6 +57,12 @@ void Generator::genStmt(const Stmt &s) {
     genBlock(w.body);
     break;
   }
+  case StmtKind::Using: {
+    auto &u = static_cast<const UsingStmt &>(s);
+    initLocal(u.hidden, genExpr(*u.value));
+    genBlock(u.seq);
+    break;
+  }
   case StmtKind::Exit:
   case StmtKind::Loop: {
     size_t target = cur_.loops.size(); // EXIT: the innermost loop or SWITCH; LOOP: the innermost loop

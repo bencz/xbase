@@ -191,7 +191,9 @@ EXTERN FUNCTION ValType( xValue ) NATIVE RESERVED CHECKED ABBREV 4
 
 // Threads (xbase functions): the objects they make answer messages (docs/concurrency.md#threads)
 EXTERN FUNCTION AtomicInt( [nValue] ) NATIVE CHECKED
+EXTERN FUNCTION Condition() NATIVE CHECKED
 EXTERN FUNCTION Mutex() NATIVE CHECKED
+EXTERN FUNCTION Semaphore( nInitial, [nMaximum] ) NATIVE CHECKED
 EXTERN FUNCTION ThreadStart( bWork, ... ) NATIVE CHECKED
 
 // Databases (work areas)
@@ -345,6 +347,7 @@ EXTERN FUNCTION __ArgError( nSubCode, [lSubstitute] ) NATIVE ARGS
 EXTERN FUNCTION __Break( [xValue] ) NATIVE
 EXTERN FUNCTION __ConsoleWrite( lNewLine, ... ) NATIVE
 EXTERN FUNCTION __DirScan( [cSpec] ) NATIVE
+EXTERN FUNCTION __Dispose( xValue ) NATIVE
 EXTERN FUNCTION __GcCollect( [lYoung] ) NATIVE
 EXTERN FUNCTION __IsCollection( xValue ) NATIVE
 EXTERN FUNCTION __LanguageCurrent() NATIVE
