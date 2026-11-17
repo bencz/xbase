@@ -722,7 +722,16 @@ constants, which are values the program computes at run time, with the run-time 
 | comparisons of numbers or logicals | `.T.`/`.F.` |
 | strings `+`, `-`, `==`, `$`; `=`/`!=` of two strings of one length | the result (`=` of strings of different lengths depends on SET EXACT and is not folded; `stringJoin`, `stringTest`) |
 | `.NOT.`, `.AND.`/`.OR.` with a logical literal on the left, `IIF` with a logical literal condition | the result or the remaining operand |
-| a call to a `FOLD` function with constant arguments | its result, from the evaluator table in `opt/Fold.cpp`: `Len` of a string literal (its length) or of an array literal of constants (its element count); the bit functions on number constants (an integer without a display width of its own, as the runtime makes it; arithmetic on such an integer gives one too) |
+| a call the language evaluates when compiling, of a `FOLD` function with literal arguments | its result, a literal that folds further (`Len( Chr( 65 ) ) / 1` is the integer 1, while `Len( SubStr( "ab", 2 ) ) / 1` is `1.00`): `Len` of a string literal (its length) or of an array literal of constants (its element count); `Chr`; `Asc` and `At` (integers with a program constant's width, as `Len`'s); `Upper` of a text of ASCII letters, digits and spaces only (`xb_upper_folds`); `Empty` of a constant, of a codeblock literal, of an array or hash literal of such literals (one that evaluates anything else, such as a call, is left to run time, which keeps its effects); the bit functions on number constants (an integer without a display width of its own, as the runtime makes it; arithmetic on such an integer gives one too) |
+
+The evaluators of the `FOLD` functions are one table in `opt/Fold.cpp` (`evaluateCall`), on the rules `xbrt.h` shares
+with the runtime functions (`xb_bytes_find`, `xb_substr_range`, `xb_trim_range`, `xb_take_count`, `xb_count_arg`,
+`xb_chr_byte`, `xb_asc_code`, `xb_is_blank`, `xb_upper_folds`, `XB_TRIM_*`). On the syntax tree (`literal`) only the
+calls above are evaluated; the xIR's `fold-constants` evaluates every call of a `FOLD` function on constants
+([xir.md](xir.md#passes)), the others too (`Lower`, `Upper` of any ASCII text, `SubStr`, `Left`, `Right`, `Trim`,
+`RTrim`, `LTrim`, `AllTrim`, `RAt`, `Replicate` and `Space` up to 4096 bytes), with the value the function returns at
+run time (an integer is a computed one), so that what follows keeps the run-time rules. A call with arguments of another
+type, too few or too many, is left to run time, with its error.
 
 Division or `%` by a literal zero is not folded, so the error happens at run time. A folded integer is a program
 constant (`xb_num_const_int_width`); a folded double has the default display width for its value. "SET DECIMALS

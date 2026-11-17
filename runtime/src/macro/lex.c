@@ -11,7 +11,6 @@ static int is_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <=
 static int is_ident_start(char c) { return is_alpha(c) || c == '_'; }
 static int is_ident_char(char c) { return is_ident_start(c) || is_digit(c); }
 static int is_hex(char c) { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
-static int is_blank(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 
 void xb_mlex_init(mlexer *lx, const char *src, size_t len) {
   lx->pos = src;
@@ -131,7 +130,7 @@ void xb_mlex_next(mlexer *lx) {
   mtoken *t = &lx->tok;
   memset(t, 0, sizeof *t);
   const char *before = lx->pos;
-  while (lx->pos < lx->end && is_blank(*lx->pos)) ++lx->pos;
+  while (lx->pos < lx->end && xb_is_blank(*lx->pos)) ++lx->pos;
   t->spaceBefore = lx->pos != before;
   t->text = lx->pos;
   if (lx->pos >= lx->end) {

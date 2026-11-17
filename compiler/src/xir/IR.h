@@ -145,6 +145,7 @@ struct Callee {
   std::string name;             // upper-cased xBase name
   bool native = false;          // external: written in C (runtime prefix), else another module's
   bool readsCallerArgs = false; // ARGS: it reads the arguments its caller received (PCount(), __ArgError())
+  bool fold = false;            // FOLD: a call on constants is evaluated when compiling (opt/Fold's evaluateCall)
   // The arguments it takes as references (bit k: argument k, bit 31: argument 31 and after; xb_refs_take, as
   // xb_funcref's): a native function's declared ones, every one for an xBase function. A call with `...` passes the
   // arguments on as they are there, references included; a send or an array literal passes their values.

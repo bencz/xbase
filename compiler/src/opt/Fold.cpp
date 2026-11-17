@@ -1,8 +1,7 @@
 #include "opt/Fold.h"
 
 #include "common/BitFunctions.h"
-#include "xbrt.h" // shared numeric rules
-
+#include "xbrt.h" // the shared folding rules
 
 #include <unordered_map>
 
@@ -380,36 +379,175 @@ bool isConstant(const Expr &e) {
   }
 }
 
+// The longest string a call is folded into on xIR constants (Replicate(), Space()): a longer one is made at run time.
+constexpr size_t kFoldedStringMax = 4096;
+
+using Args = std::vector<ExprPtr>;
+
+ExprPtr makeString(SourceLoc loc, std::string v) { return std::make_unique<StringExpr>(loc, std::move(v)); }
+
+// Each evaluator gets the call's arguments and `literal`: true on the syntax tree, where a call is evaluated only
+// when the language evaluates it when compiling (its result is then a literal, which the rules of literals fold
+// further), false on xIR constants, where the result is the value the function returns at run time.
+
 // Len( x ): the length of a string literal, or the element count of an array
 // literal of constants (the array itself is not needed).
-ExprPtr evalLen(const CallExpr &c) {
-  if (c.args.size() != 1) return nullptr;
-  if (const StringExpr *s = str(c.args[0])) return makeInt(c.loc, (int64_t)s->value.size());
-  if (c.args[0]->kind == ExprKind::ArrayLit && isConstant(*c.args[0]))
-    return makeInt(c.loc, (int64_t)static_cast<const ArrayLitExpr &>(*c.args[0]).elems.size());
+ExprPtr evalLen(const std::string &, SourceLoc loc, const Args &a, bool) {
+  if (a.size() != 1) return nullptr;
+  if (const StringExpr *s = str(a[0])) return makeInt(loc, (int64_t)s->value.size());
+  if (a[0]->kind == ExprKind::ArrayLit && isConstant(*a[0]))
+    return makeInt(loc, (int64_t)static_cast<const ArrayLitExpr &>(*a[0]).elems.size());
   return nullptr;
 }
 
 // A bit function on number constants: an integer without a display width
 // of its own, like the one the runtime computes.
-ExprPtr evalBit(const CallExpr &c) {
-  const xb_bit_function *f = findBitFunction(c.callee->name);
-  if (!f || c.args.size() != f->arity) return nullptr;
+ExprPtr evalBit(const std::string &name, SourceLoc loc, const Args &a, bool) {
+  const xb_bit_function *f = findBitFunction(name);
+  if (!f || a.size() != f->arity) return nullptr;
   int64_t v[2] = {0, 0};
   for (size_t k = 0; k < f->arity; ++k) {
-    const NumberExpr *n = num(c.args[k]);
+    const NumberExpr *n = num(a[k]);
     if (!n) return nullptr;
     v[k] = asInteger(*n);
   }
-  return makeInt(c.loc, xb_bit_apply(f->op, v[0], v[1]), true);
+  return makeInt(loc, xb_bit_apply(f->op, v[0], v[1]), true);
 }
 
-// Compile-time evaluators of the functions declared FOLD; each returns null
-// when its arguments are not constant enough.
-using Evaluator = ExprPtr (*)(const CallExpr &);
+ExprPtr evalChr(const std::string &, SourceLoc loc, const Args &a, bool) {
+  const NumberExpr *n = a.size() == 1 ? num(a[0]) : nullptr;
+  return n ? makeString(loc, std::string(1, xb_chr_byte(asInteger(*n)))) : nullptr;
+}
+
+// Asc() and At() on the syntax tree give a literal: a program constant's width, as Len() does.
+ExprPtr evalAsc(const std::string &, SourceLoc loc, const Args &a, bool literal) {
+  const StringExpr *s = a.size() == 1 ? str(a[0]) : nullptr;
+  return s ? makeInt(loc, xb_asc_code(s->value.data(), s->value.size()), !literal) : nullptr;
+}
+
+// Upper(), Lower() of ASCII text (the case of other bytes is the codepage's when the code runs); on the syntax tree,
+// Upper() of the text xb_upper_folds accepts only.
+ExprPtr evalCase(const std::string &name, SourceLoc loc, const Args &a, bool literal) {
+  const StringExpr *s = a.size() == 1 ? str(a[0]) : nullptr;
+  bool upper = name == "UPPER";
+  if (!s || (literal && (!upper || !xb_upper_folds(s->value.data(), s->value.size())))) return nullptr;
+  std::string r = s->value;
+  for (char &c : r) {
+    if ((unsigned char)c > 0x7F) return nullptr;
+    c = upper ? xb_ascii_upper(c) : xb_ascii_lower(c);
+  }
+  return makeString(loc, std::move(r));
+}
+
+ExprPtr evalSubStr(const std::string &, SourceLoc loc, const Args &a, bool literal) {
+  if (literal || a.size() < 2 || a.size() > 3) return nullptr;
+  const StringExpr *s = str(a[0]);
+  const NumberExpr *start = num(a[1]), *count = a.size() > 2 ? num(a[2]) : nullptr;
+  if (!s || !start || (a.size() > 2 && !count)) return nullptr;
+  int64_t first, n = xb_substr_range((int64_t)s->value.size(), asInteger(*start), count != nullptr,
+                                     count ? asInteger(*count) : 0, &first);
+  return makeString(loc, n ? s->value.substr((size_t)first, (size_t)n) : std::string());
+}
+
+ExprPtr evalLeftRight(const std::string &name, SourceLoc loc, const Args &a, bool literal) {
+  const StringExpr *s = a.size() == 2 ? str(a[0]) : nullptr;
+  const NumberExpr *n = a.size() == 2 ? num(a[1]) : nullptr;
+  if (literal || !s || !n) return nullptr;
+  size_t take = xb_take_count(asInteger(*n), s->value.size());
+  return makeString(loc, name == "LEFT" ? s->value.substr(0, take) : s->value.substr(s->value.size() - take));
+}
+
+ExprPtr evalTrim(const std::string &name, SourceLoc loc, const Args &a, bool literal) {
+  const StringExpr *s = a.size() == 1 ? str(a[0]) : nullptr;
+  if (literal || !s) return nullptr;
+  int which = name == "LTRIM"     ? XB_TRIM_LEADING
+              : name == "ALLTRIM" ? XB_TRIM_LEADING | XB_TRIM_TRAILING
+                                  : XB_TRIM_TRAILING;
+  size_t from, n = xb_trim_range(s->value.data(), s->value.size(), which, &from);
+  return makeString(loc, s->value.substr(from, n));
+}
+
+// Replicate( c, n ), Space( n ): a text of at most kFoldedStringMax bytes.
+ExprPtr evalRepeat(const std::string &name, SourceLoc loc, const Args &a, bool literal) {
+  bool space = name == "SPACE";
+  if (literal || a.size() != (space ? 1u : 2u)) return nullptr;
+  const StringExpr *s = space ? nullptr : str(a[0]);
+  const NumberExpr *n = num(a[space ? 0 : 1]);
+  if (!n || (!space && !s)) return nullptr;
+  std::string unit = space ? std::string(" ") : s->value;
+  uint64_t count = unit.empty() ? 0 : xb_count_arg(asInteger(*n));
+  if (count > kFoldedStringMax / (unit.empty() ? 1 : unit.size())) return nullptr;
+  std::string r;
+  r.reserve((size_t)count * unit.size());
+  for (uint64_t k = 0; k < count; ++k) r += unit;
+  return makeString(loc, std::move(r));
+}
+
+// At(), and RAt() on xIR constants.
+ExprPtr evalFind(const std::string &name, SourceLoc loc, const Args &a, bool literal) {
+  bool last = name == "RAT";
+  const StringExpr *x = a.size() == 2 ? str(a[0]) : nullptr, *y = a.size() == 2 ? str(a[1]) : nullptr;
+  if ((literal && last) || !x || !y) return nullptr;
+  size_t at = xb_bytes_find(x->value.data(), x->value.size(), y->value.data(), y->value.size(), last);
+  return makeInt(loc, (int64_t)at, !literal);
+}
+
+// A literal whose evaluation does nothing but make its value: a constant, a codeblock literal, an array or hash
+// literal of such literals.
+bool effectless(const Expr &e) {
+  switch (e.kind) {
+  case ExprKind::Block: return true;
+  case ExprKind::ArrayLit:
+    for (auto &el : static_cast<const ArrayLitExpr &>(e).elems)
+      if (!effectless(*el)) return false;
+    return true;
+  case ExprKind::HashLit: {
+    const auto &h = static_cast<const HashLitExpr &>(e);
+    for (size_t k = 0; k < h.keys.size(); ++k)
+      if (!effectless(*h.keys[k]) || !effectless(*h.values[k])) return false;
+    return true;
+  }
+  default: return isConstant(e);
+  }
+}
+
+// Empty() of a constant, of a codeblock literal (never empty), of an array or hash literal (empty when it has no
+// element) that evaluates nothing else.
+ExprPtr evalEmpty(const std::string &, SourceLoc loc, const Args &a, bool) {
+  if (a.size() != 1) return nullptr;
+  const Expr &e = *a[0];
+  switch (e.kind) {
+  case ExprKind::Nil: return makeLogical(loc, true);
+  case ExprKind::Logical: return makeLogical(loc, !static_cast<const LogicalExpr &>(e).value);
+  case ExprKind::Number: {
+    const auto &n = static_cast<const NumberExpr &>(e);
+    return makeLogical(loc, n.isInt ? n.ival == 0 : n.dval == 0.0);
+  }
+  case ExprKind::String: {
+    const std::string &v = static_cast<const StringExpr &>(e).value;
+    size_t from;
+    return makeLogical(loc, xb_trim_range(v.data(), v.size(), XB_TRIM_LEADING, &from) == 0);
+  }
+  case ExprKind::Block: return makeLogical(loc, false);
+  case ExprKind::ArrayLit:
+    return effectless(e) ? makeLogical(loc, static_cast<const ArrayLitExpr &>(e).elems.empty()) : nullptr;
+  case ExprKind::HashLit:
+    return effectless(e) ? makeLogical(loc, static_cast<const HashLitExpr &>(e).keys.empty()) : nullptr;
+  default: return nullptr;
+  }
+}
+
+// Compile-time evaluators of the functions declared FOLD, by name; each returns null when the arguments are not
+// constant enough, or at a stage that does not evaluate the call.
+using Evaluator = ExprPtr (*)(const std::string &, SourceLoc, const Args &, bool);
 const std::unordered_map<std::string, Evaluator> &evaluators() {
   static const std::unordered_map<std::string, Evaluator> table = [] {
-    std::unordered_map<std::string, Evaluator> t = {{"LEN", evalLen}};
+    std::unordered_map<std::string, Evaluator> t = {
+        {"LEN", evalLen},          {"CHR", evalChr},       {"ASC", evalAsc},        {"UPPER", evalCase},
+        {"LOWER", evalCase},       {"SUBSTR", evalSubStr}, {"LEFT", evalLeftRight}, {"RIGHT", evalLeftRight},
+        {"TRIM", evalTrim},        {"RTRIM", evalTrim},    {"LTRIM", evalTrim},     {"ALLTRIM", evalTrim},
+        {"REPLICATE", evalRepeat}, {"SPACE", evalRepeat},  {"AT", evalFind},        {"RAT", evalFind},
+        {"EMPTY", evalEmpty}};
     for (uint32_t k = 0; k < XB_BIT_OP_COUNT; ++k)
       if (const char *name = xb_bit_function_of((xb_bit_op)k)->name) t[name] = evalBit;
     return t;
@@ -419,13 +557,17 @@ const std::unordered_map<std::string, Evaluator> &evaluators() {
 
 } // namespace
 
+ExprPtr evaluateCall(const std::string &name, SourceLoc loc, const std::vector<ExprPtr> &args, bool literal) {
+  auto it = evaluators().find(name);
+  return it == evaluators().end() ? nullptr : it->second(name, loc, args, literal);
+}
+
 bool Folder::canEvaluate(const std::string &name) { return evaluators().count(name) != 0; }
 
 // A call to a FOLD function whose arguments are constant becomes its result.
 ExprPtr Folder::foldCall(CallExpr &c) {
   if (!c.callee || !c.callee->fold) return nullptr;
-  auto it = evaluators().find(c.callee->name);
-  return it == evaluators().end() ? nullptr : it->second(c);
+  return evaluateCall(c.callee->name, c.loc, c.args, true);
 }
 
 } // namespace xb

@@ -1127,14 +1127,31 @@ static inline int xb_folded_order(const xb_folded *a, const xb_folded *b) {
   return xb_order_double(a->is_int ? (double)a->i : a->d, b->is_int ? (double)b->i : b->d);
 }
 
+/* Where the bytes x occur in y: the 1-based position of the first occurrence (`last`: of the last one), 0 when
+ * nowhere or x is empty (At(), RAt(), `$`). */
+static inline size_t xb_bytes_find(const char *x, size_t lx, const char *y, size_t ly, int last) {
+  if (lx == 0 || lx > ly) return 0;
+  const char *end = y + ly - lx + 1; /* candidates are before `end` */
+  if (last) {
+    for (const char *p = end; p-- > y;)
+      if (*p == *x && memcmp(p + 1, x + 1, lx - 1) == 0) return (size_t)(p - y) + 1;
+    return 0;
+  }
+  for (const char *p = y; p < end; ++p) {
+    p = (const char *)memchr(p, *x, (size_t)(end - p));
+    if (!p) return 0;
+    if (memcmp(p + 1, x + 1, lx - 1) == 0) return (size_t)(p - y) + 1;
+  }
+  return 0;
+}
+
 /* `x op y` of two strings when SET EXACT cannot change it, into *r (0: left to run time): == compares the bytes;
  * = and != the bytes of strings of one length (SET EXACT changes only how a longer string compares with a shorter
  * one); $ finds x in y (an empty x nowhere). */
 typedef enum xb_fold_str { XB_FOLD_STR_EXACT, XB_FOLD_STR_EQ, XB_FOLD_STR_NE, XB_FOLD_STR_IN } xb_fold_str;
 static inline int xb_fold_strings(xb_fold_str op, const char *x, size_t lx, const char *y, size_t ly, int *r) {
   if (op == XB_FOLD_STR_IN) {
-    *r = 0;
-    for (size_t k = 0; lx && k + lx <= ly && !*r; ++k) *r = memcmp(y + k, x, lx) == 0;
+    *r = xb_bytes_find(x, lx, y, ly, 0) != 0;
     return 1;
   }
   if (op != XB_FOLD_STR_EXACT && lx != ly) return 0;
@@ -1169,6 +1186,52 @@ static inline void xb_str_minus(char *out, const char *a, size_t la, const char 
   for (size_t i = 0; i < keep; ++i) out[i] = a[i];
   for (size_t i = 0; i < lb; ++i) out[keep + i] = b[i];
   for (size_t i = keep + lb; i < la + lb; ++i) out[i] = ' ';
+}
+
+/* The rules of the string functions that the compiler also evaluates on constants (opt/Fold.cpp), so that a call
+ * with literal arguments gives the value the run-time function gives:
+ * - xb_is_blank: the blanks that leading trimming, Empty() and Val() skip;
+ * - xb_trim_range: the part trimming keeps of `len` bytes (`which`: XB_TRIM_LEADING drops leading blanks,
+ *   XB_TRIM_TRAILING trailing spaces), from *from;
+ * - xb_substr_range: SubStr()'s units of a text of `len` units from `start` (negative: counted from the end; before
+ *   the first: the first), `count` of them (`hasCount` 0: to the end): how many (0: none), from *first (0-based);
+ * - xb_take_count: how many units Left() and Right() take of `units` for `n`: none for n <= 0;
+ * - xb_count_arg: a repetition count (Replicate(), Space()): none when not positive;
+ * - xb_chr_byte: Chr()'s byte, the code's low 8 bits; xb_asc_code: Asc()'s code, 0 for "";
+ * - xb_upper_folds: whether the language evaluates Upper() of a literal when compiling: when it holds ASCII letters,
+ *   digits and spaces only (the compiler, and the macro compiler, then treat its result as a literal). */
+static inline int xb_is_blank(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+enum { XB_TRIM_LEADING = 1, XB_TRIM_TRAILING = 2 };
+static inline size_t xb_trim_range(const char *p, size_t len, int which, size_t *from) {
+  size_t a = 0, b = len;
+  if (which & XB_TRIM_LEADING)
+    while (a < b && xb_is_blank(p[a])) ++a;
+  if (which & XB_TRIM_TRAILING)
+    while (b > a && p[b - 1] == ' ') --b;
+  *from = a;
+  return b - a;
+}
+static inline int64_t xb_substr_range(int64_t len, int64_t start, int hasCount, int64_t count, int64_t *first) {
+  if (start < 0) start += len + 1;
+  if (start < 1) start = 1;
+  if (!hasCount) count = len;
+  *first = start - 1;
+  if (start > len || count <= 0) return 0;
+  return count > len - start + 1 ? len - start + 1 : count;
+}
+static inline size_t xb_take_count(int64_t n, size_t units) {
+  if (n <= 0) return 0;
+  return (uint64_t)n > units ? units : (size_t)n;
+}
+static inline uint64_t xb_count_arg(int64_t n) { return n > 0 ? (uint64_t)n : 0; }
+static inline char xb_chr_byte(int64_t code) { return (char)(unsigned char)(code & 0xFF); }
+static inline int64_t xb_asc_code(const char *p, size_t len) { return len ? (unsigned char)p[0] : 0; }
+static inline int xb_upper_folds(const char *p, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    char c = p[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ')) return 0;
+  }
+  return 1;
 }
 
 /* Formats a value the way ? / QOut() shows it. Returns a new string. */

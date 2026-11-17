@@ -1110,22 +1110,54 @@ static void gen_call(gen *g, fn *f, const node *n) {
 
 /* Folding, as the compiler folds the same text (opt/Fold: the rules of xbrt.h, xb_fold_*), so that a text gives the
  * same value, width and decimals compiled or in a macro: numbers through the operators, the bit operators and
- * functions and Len() of a literal; logicals through .NOT., .AND., .OR. and comparisons; an IIF() on a folded
- * condition and a list whose leading values are constants are what they choose. */
+ * functions, Len(), Asc() and At(); strings through + and -, Chr() and Upper() (xb_upper_folds); logicals through
+ * .NOT., .AND., .OR., comparisons and Empty(); an IIF() on a folded condition and a list whose leading values are
+ * constants are what they choose. Only folded numbers are emitted as constants: folded strings and logicals matter
+ * only to what is folded from them. */
 static int folded_number(const node *n, xb_folded *out);
 static int folded_logical(const node *n, int *out);
 
+/* A folded string: its bytes, in `own` when they were made here (fstr_free frees them). */
+typedef struct fstr {
+  const char *p;
+  size_t len;
+  char *own;
+} fstr;
+static int folded_string(const node *n, fstr *out);
+static void fstr_free(fstr *s) {
+  free(s->own);
+  s->own = NULL;
+}
+
 /* A value known when compiling whose evaluation does nothing else (the compiler's isConstant, after folding). */
+static const node *chosen(const node *n);
 static int constant_node(const node *n) {
   xb_folded v;
   int l;
-  if (n->kind == N_NIL || n->kind == N_STRING) return 1;
+  fstr s;
+  const node *c = chosen(n); /* once: each folding below would choose again, at every level of a nested list */
+  if (c) return constant_node(c);
+  if (n->kind == N_NIL) return 1;
   if (n->kind == N_ARRAY) {
     for (uint32_t k = 0; k < n->n; ++k)
       if (!constant_node(n->list[k])) return 0;
     return 1;
   }
+  if (folded_string(n, &s)) {
+    fstr_free(&s);
+    return 1;
+  }
   return folded_number(n, &v) || folded_logical(n, &l);
+}
+
+/* A literal whose evaluation does nothing but make its value (the compiler's `effectless`): a constant, a codeblock,
+ * an array or hash literal of such literals. */
+static int effectless_node(const node *n) {
+  if (n->kind == N_BLOCK) return 1;
+  if (n->kind != N_ARRAY && n->kind != N_HASH) return constant_node(n);
+  for (uint32_t k = 0; k < n->n; ++k)
+    if (!effectless_node(n->list[k])) return 0;
+  return 1;
 }
 
 /* The last element of a list whose others are constants (evaluated for nothing), or NULL. */
@@ -1157,23 +1189,94 @@ static int bit_op_of(int op, xb_bit_op *out) {
 
 static int64_t folded_integer(const xb_folded *v) { return v->is_int ? v->i : xb_dbl_to_i64(v->d); }
 
-/* Len() and the bit functions of the runtime (not a function of the program of that name) on folded arguments. */
-static int folded_call(const node *n, xb_folded *out) {
+/* A call of the runtime's function `name` (not a function of the program of that name) with `argc` arguments. */
+static int runtime_call(const node *n, const char *name, uint32_t argc) {
+  if (n->kind != N_CALL || n->n != argc || strcmp(n->name, name)) return 0;
   const xb_symbol_entry *e = xb_symbol_find(n->name, n->nameLen);
-  if (!e || !e->ref.native) return 0;
-  if (!strcmp(n->name, "LEN") && n->n == 1) {
-    const node *a = n->list[0];
-    if (a->kind == N_STRING) *out = xb_folded_int((int64_t)(a->tok->len - 2), 0);
-    else if (a->kind == N_ARRAY && constant_node(a)) *out = xb_folded_int((int64_t)a->n, 0);
-    else return 0;
+  return e && e->ref.native;
+}
+
+static int folded_string(const node *n, fstr *out) {
+  fstr a, b;
+  xb_folded v;
+  const node *c;
+  out->own = NULL;
+  if (n->kind == N_STRING) {
+    out->p = n->tok->text + 1;
+    out->len = n->tok->len - 2;
     return 1;
+  }
+  if (n->kind == N_BINARY && (n->op == MB_ADD || n->op == MB_SUB)) {
+    if (!folded_string(n->a, &a)) return 0;
+    if (!folded_string(n->b, &b)) {
+      fstr_free(&a);
+      return 0;
+    }
+    out->len = a.len + b.len;
+    out->own = malloc(out->len + 1);
+    if (out->own && n->op == MB_ADD) {
+      memcpy(out->own, a.p, a.len);
+      memcpy(out->own + a.len, b.p, b.len);
+    } else if (out->own) {
+      xb_str_minus(out->own, a.p, a.len, b.p, b.len);
+    }
+    out->p = out->own;
+    fstr_free(&a);
+    fstr_free(&b);
+    return out->own != NULL;
+  }
+  if (runtime_call(n, "CHR", 1) && folded_number(n->list[0], &v)) {
+    out->own = malloc(1);
+    if (!out->own) return 0;
+    out->own[0] = xb_chr_byte(v.is_int ? v.i : xb_dbl_to_i64(v.d));
+    out->p = out->own;
+    out->len = 1;
+    return 1;
+  }
+  if (runtime_call(n, "UPPER", 1) && folded_string(n->list[0], &a)) {
+    out->own = xb_upper_folds(a.p, a.len) ? malloc(a.len + 1) : NULL;
+    for (size_t k = 0; out->own && k < a.len; ++k) out->own[k] = xb_ascii_upper(a.p[k]);
+    out->p = out->own;
+    out->len = a.len;
+    fstr_free(&a);
+    return out->own != NULL;
+  }
+  return (c = chosen(n)) != NULL && folded_string(c, out);
+}
+
+/* Len(), Asc(), At() and the bit functions of the runtime on folded arguments. */
+static int folded_call(const node *n, xb_folded *out) {
+  fstr a, b;
+  if (runtime_call(n, "LEN", 1)) {
+    if (folded_string(n->list[0], &a)) {
+      *out = xb_folded_int((int64_t)a.len, 0);
+      fstr_free(&a);
+      return 1;
+    }
+    if (n->list[0]->kind != N_ARRAY || !constant_node(n->list[0])) return 0;
+    *out = xb_folded_int((int64_t)n->list[0]->n, 0);
+    return 1;
+  }
+  if (runtime_call(n, "ASC", 1) && folded_string(n->list[0], &a)) {
+    *out = xb_folded_int(xb_asc_code(a.p, a.len), 0);
+    fstr_free(&a);
+    return 1;
+  }
+  if (runtime_call(n, "AT", 2) && folded_string(n->list[0], &a)) {
+    int ok = folded_string(n->list[1], &b);
+    if (ok) {
+      *out = xb_folded_int((int64_t)xb_bytes_find(a.p, a.len, b.p, b.len, 0), 0);
+      fstr_free(&b);
+    }
+    fstr_free(&a);
+    return ok;
   }
   for (uint32_t k = 0; k < XB_BIT_OP_COUNT; ++k) {
     const xb_bit_function *f = xb_bit_function_of((xb_bit_op)k);
-    if (!f->name || strcmp(n->name, f->name) || n->n != f->arity) continue;
+    if (!f->name || !runtime_call(n, f->name, f->arity)) continue;
     xb_folded v[2];
-    for (uint32_t a = 0; a < f->arity; ++a)
-      if (!folded_number(n->list[a], &v[a])) return 0;
+    for (uint32_t j = 0; j < f->arity; ++j)
+      if (!folded_number(n->list[j], &v[j])) return 0;
     *out = xb_folded_int(xb_bit_apply(f->op, folded_integer(&v[0]), f->arity > 1 ? folded_integer(&v[1]) : 0), 1);
     return 1;
   }
@@ -1236,6 +1339,35 @@ static int fold_cmp_of(int op, xb_fold_cmp *out) {
   }
 }
 
+/* Empty() of the runtime on a constant, a codeblock (never empty), an array or hash literal that evaluates nothing
+ * else (empty with no element). */
+static int folded_empty(const node *n, int *out) {
+  xb_folded v;
+  fstr s;
+  int l;
+  if (!runtime_call(n, "EMPTY", 1)) return 0;
+  const node *a = n->list[0];
+  if (a->kind == N_NIL) {
+    *out = 1;
+  } else if (a->kind == N_BLOCK) {
+    *out = 0;
+  } else if (a->kind == N_ARRAY || a->kind == N_HASH) {
+    if (!effectless_node(a)) return 0;
+    *out = a->n == 0;
+  } else if (folded_string(a, &s)) {
+    size_t from;
+    *out = xb_trim_range(s.p, s.len, XB_TRIM_LEADING, &from) == 0;
+    fstr_free(&s);
+  } else if (folded_number(a, &v)) {
+    *out = v.is_int ? v.i == 0 : v.d == 0.0;
+  } else if (folded_logical(a, &l)) {
+    *out = !l;
+  } else {
+    return 0;
+  }
+  return 1;
+}
+
 static int folded_logical(const node *n, int *out) {
   xb_folded x, y;
   int a, b;
@@ -1256,18 +1388,26 @@ static int folded_logical(const node *n, int *out) {
       return 1;
     }
     return folded_logical(n->b, out);
-  case N_BINARY:
-    if (n->a->kind == N_STRING && n->b->kind == N_STRING) {
-      xb_fold_str op;
-      switch (n->op) {
-      case MB_EXACTEQ: op = XB_FOLD_STR_EXACT; break;
-      case MB_EQ: op = XB_FOLD_STR_EQ; break;
-      case MB_NE: op = XB_FOLD_STR_NE; break;
-      case MB_IN: op = XB_FOLD_STR_IN; break;
-      default: return 0;
+  case N_CALL:
+    return folded_empty(n, out);
+  case N_BINARY: {
+    fstr s, t;
+    if (folded_string(n->a, &s)) {
+      int ok = folded_string(n->b, &t);
+      if (ok) {
+        xb_fold_str op = XB_FOLD_STR_EXACT;
+        switch (n->op) {
+        case MB_EXACTEQ: op = XB_FOLD_STR_EXACT; break;
+        case MB_EQ: op = XB_FOLD_STR_EQ; break;
+        case MB_NE: op = XB_FOLD_STR_NE; break;
+        case MB_IN: op = XB_FOLD_STR_IN; break;
+        default: ok = 0; break;
+        }
+        ok = ok && xb_fold_strings(op, s.p, s.len, t.p, t.len, out);
+        fstr_free(&t);
       }
-      return xb_fold_strings(op, n->a->tok->text + 1, n->a->tok->len - 2, n->b->tok->text + 1, n->b->tok->len - 2,
-                             out);
+      fstr_free(&s);
+      return ok;
     }
     if (!fold_cmp_of(n->op, &cmp)) return 0;
     if (folded_number(n->a, &x) && folded_number(n->b, &y)) {
@@ -1279,6 +1419,7 @@ static int folded_logical(const node *n, int *out) {
       return 1;
     }
     return 0;
+  }
   default:
     return (c = chosen(n)) != NULL && folded_logical(c, out);
   }

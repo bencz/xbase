@@ -1,0 +1,217 @@
+
+calls
+Chr( 65 )                                          "A" same
+Chr( 0 )                                           "\0" same
+Chr( 255 )                                         "\255" same
+Chr( 256 )                                         "\0" same
+Chr( -1 )                                          "\255" same
+Chr( 65.9 )                                        "A" same
+Chr( -0.5 )                                        "\0" same
+Chr( 10000000066.5 )                               "B" same
+Asc( "A" )                                         N[        65] same
+Asc( "" )                                          N[         0] same
+Asc( "AB" )                                        N[        65] same
+Asc( Chr( 200 ) + "x" )                            N[       200] same
+Asc( Chr( 0 ) )                                    N[         0] same
+Upper( "ab" )                                      "AB" same
+Upper( "aZ 09" )                                   "AZ 09" same
+Upper( "a_b.c!" )                                  "A_B.C!" same
+Upper( "" )                                        "" same
+Upper( Chr( 200 ) + "a" )                          "\200A" same
+Lower( "AB" )                                      "ab" same
+Lower( "Ab_C 9" )                                  "ab_c 9" same
+Lower( Chr( 200 ) + "B" )                          "\200b" same
+SubStr( "abcdef", 2 )                              "bcdef" same
+SubStr( "abcdef", 2, 3 )                           "bcd" same
+SubStr( "abcdef", -2 )                             "ef" same
+SubStr( "abcdef", -2, 1 )                          "e" same
+SubStr( "abcdef", 0 )                              "abcdef" same
+SubStr( "abcdef", 0, 2 )                           "ab" same
+SubStr( "abcdef", 7 )                              "" same
+SubStr( "abcdef", 6 )                              "f" same
+SubStr( "abcdef", 2, 0 )                           "" same
+SubStr( "abcdef", 2, -1 )                          "" same
+SubStr( "abcdef", 2, 100 )                         "bcdef" same
+SubStr( "abcdef", -100, 2 )                        "ab" same
+SubStr( "abcdef", 2.9, 1.9 )                       "b" same
+SubStr( "", 1 )                                    "" same
+SubStr( "abcdef", 100000000000000000000.0 )        "" same
+SubStr( "abcdef", -6 )                             "abcdef" same
+SubStr( "abcdef", -7, 3 )                          "abc" same
+Left( "abc", 2 )                                   "ab" same
+Left( "abc", 0 )                                   "" same
+Left( "abc", -1 )                                  "" same
+Left( "abc", 5 )                                   "abc" same
+Left( "", 1 )                                      "" same
+Left( "abc", 2.9 )                                 "ab" same
+Right( "abc", 2 )                                  "bc" same
+Right( "abc", 0 )                                  "" same
+Right( "abc", -1 )                                 "" same
+Right( "abc", 5 )                                  "abc" same
+Right( "", 1 )                                     "" same
+Right( "abc", 1.9 )                                "c" same
+Trim( "  a b  " )                                  "  a b" same
+RTrim( Chr( 9 ) + " a" + Chr( 9 ) + " " )          "\9 a\9" same
+LTrim( Chr( 9 ) + " a" + Chr( 9 ) + " " )          "a\9 " same
+AllTrim( Chr( 10 ) + "x" + Chr( 13 ) + " " )       "x\13" same
+AllTrim( "" )                                      "" same
+AllTrim( "   " )                                   "" same
+LTrim( "   " )                                     "" same
+Trim( "a" + Chr( 0 ) + " " )                       "a\0" same
+Replicate( "ab", 3 )                               "ababab" same
+Replicate( "ab", 0 )                               "" same
+Replicate( "ab", -1 )                              "" same
+Replicate( "", 5 )                                 "" same
+Replicate( "ab", 2048 )                            C4096["ababab".."ababab"] same
+Replicate( "ab", 2049 )                            C4098["ababab".."ababab"] same
+Replicate( "abc", 2.9 )                            "abcabc" same
+Space( 3 )                                         "   " same
+Space( 0 )                                         "" same
+Space( -2 )                                        "" same
+Space( 4096 )                                      C4096["      ".."      "] same
+Space( 4097 )                                      C4097["      ".."      "] same
+At( "b", "abcb" )                                  N[         2] same
+At( "", "abc" )                                    N[         0] same
+At( "abcd", "abc" )                                N[         0] same
+At( "c", "c" )                                     N[         1] same
+At( "x", "abc" )                                   N[         0] same
+At( "bc", "abcbc" )                                N[         2] same
+At( "", "" )                                       N[         0] same
+RAt( "b", "abcb" )                                 N[         4] same
+RAt( "", "abc" )                                   N[         0] same
+RAt( "abcd", "abc" )                               N[         0] same
+RAt( "bc", "abcbc" )                               N[         4] same
+RAt( "a", "a" )                                    N[         1] same
+Empty( NIL )                                       .T. same
+Empty( .T. )                                       .F. same
+Empty( .F. )                                       .T. same
+Empty( 0 )                                         .T. same
+Empty( 0.0 )                                       .T. same
+Empty( -0.0 )                                      .T. same
+Empty( 5 )                                         .F. same
+Empty( 0.001 )                                     .F. same
+Empty( "" )                                        .T. same
+Empty( "  " )                                      .T. same
+Empty( Chr( 9 ) + Chr( 10 ) + Chr( 13 ) + " " )    .T. same
+Empty( Chr( 0 ) )                                  .F. same
+Empty( "x" )                                       .F. same
+Empty( {} )                                        .T. same
+Empty( { NIL } )                                   .F. same
+Empty( {=>} )                                      .T. same
+Empty( { 1 => 2 } )                                .F. same
+Len( "abc" )                                       N[         3] same
+Len( "" )                                          N[         0] same
+Len( { 1, 2 } )                                    N[         2] same
+Len( {} )                                          N[         0] same
+errors kept
+error 1102 UPPER
+error 1110 SUBSTR
+error 1104 CHR
+error 1107 ASC
+error 1108 AT
+error 1106 REPLICATE
+error 1105 SPACE
+error 1124 LEFT
+nested          1
+expressions, decimals          2
+Asc( "A" ) / 5                                     N[        13] N[        13]
+Asc( Chr( 66 ) ) / 2                               N[        33] N[        33]
+At( "c", "abcd" ) / 3                              N[         1] N[         1]
+RAt( "c", "abcd" ) / 3                             N[         1.00] N[         1.00]
+Len( Chr( 65 ) ) / 1                               N[         1] N[         1]
+Len( Upper( "ab" ) ) / 2                           N[         1] N[         1]
+Len( Upper( "a_" ) ) / 2                           N[         1.00] N[         1.00]
+Len( Upper( "a1 Z" ) ) / 4                         N[         1] N[         1]
+Len( Lower( "AB" ) ) / 2                           N[         1.00] N[         1.00]
+Len( SubStr( "abcd", 2 ) ) / 3                     N[         1.00] N[         1.00]
+Len( Left( "abc", 2 ) ) / 2                        N[         1.00] N[         1.00]
+Len( Right( "abc", 2 ) ) / 2                       N[         1.00] N[         1.00]
+Len( Trim( "a " ) ) / 1                            N[         1.00] N[         1.00]
+Len( AllTrim( " a " ) ) / 1                        N[         1.00] N[         1.00]
+Len( Replicate( "ab", 2 ) ) / 2                    N[         2.00] N[         2.00]
+Len( Space( 4 ) ) / 2                              N[         2.00] N[         2.00]
+Len( "a" + "b" ) / 2                               N[         1] N[         1]
+Len( "a " - "b" ) / 3                              N[         1] N[         1]
+Len( Chr( 65 ) + "b" ) / 2                         N[         1] N[         1]
+Asc( Upper( Chr( 97 ) ) ) / 5                      N[        13] N[        13]
+iif( Empty( "" ), 1, 2 ) / 1                       N[         1] N[         1]
+iif( Empty( NIL ), 1, 2 ) / 1                      N[         1] N[         1]
+iif( Empty( {} ), 1, 2 ) / 1                       N[         1] N[         1]
+iif( Empty( {=>} ), 1, 2 ) / 1                     N[         1] N[         1]
+iif( Empty( 0 ), 1, 2 ) / 1                        N[         1] N[         1]
+iif( Empty( .F. ), 1, 2 ) / 1                      N[         1] N[         1]
+iif( Empty( "x" ), 1, 2 ) / 1                      N[         2] N[         2]
+iif( Empty( Chr( 9 ) ), 1, 2 ) / 1                 N[         1] N[         1]
+iif( Chr( 65 ) == "A", 6, 0 ) / 3                  N[         2] N[         2]
+iif( "AB" $ Upper( "xaby" ), 6, 0 ) / 3            N[         2] N[         2]
+At( Upper( "b" ), Upper( "abc" ) ) / 2             N[         1] N[         1]
+Len( iif( .T., "ab", "c" ) ) / 2                   N[         1] N[         1]
+Len( Chr( 300 ) ) / 1                              N[         1] N[         1]
+Asc( Chr( -1 ) ) / 5                               N[        51] N[        51]
+Asc( "" ) / 1                                      N[         0] N[         0]
+At( "", "" ) / 1                                   N[         0] N[         0]
+Len( Upper( "é" ) ) / 2                           N[         1.00] N[         1.00]
+Len( Upper( "" ) ) / 1                             N[         0] N[         0]
+Asc( "AB" ) / 5                                    N[        13] N[        13]
+iif( Empty( { 1 } ), 1, 2 ) / 1                    N[         2] N[         2]
+Str( Asc( "A" ) * 1000000000 )                     " 65000000000" " 65000000000"
+Str( At( "b", "ab" ) + 1000000000 )                " 1000000002" " 1000000002"
+Str( Asc( Chr( 255 ) ) * 100000000 )               " 25500000000" " 25500000000"
+Str( Len( "ab" ) * 1000000000 )                    " 2000000000" " 2000000000"
+iif( Empty( {|| 1 } ), 1, 2 ) / 1                  N[         2] N[         2]
+iif( Empty( { {=>} } ), 1, 2 ) / 1                 N[         2] N[         2]
+iif( Empty( { {} } ), 1, 2 ) / 1                   N[         2] N[         2]
+iif( Empty( { 1 => {|| 2 } } ), 1, 2 ) / 1         N[         2] N[         2]
+Len( Upper( "ab" + Chr( 0 ) ) ) / 3                N[         1.00] N[         1.00]
+Len( Upper( "a" + "b" ) ) / 2                      N[         1] N[         1]
+expressions, decimals          5
+Asc( "A" ) / 5                                     N[        13] N[        13]
+Asc( Chr( 66 ) ) / 2                               N[        33] N[        33]
+At( "c", "abcd" ) / 3                              N[         1] N[         1]
+RAt( "c", "abcd" ) / 3                             N[         1.00000] N[         1.00000]
+Len( Chr( 65 ) ) / 1                               N[         1] N[         1]
+Len( Upper( "ab" ) ) / 2                           N[         1] N[         1]
+Len( Upper( "a_" ) ) / 2                           N[         1.00000] N[         1.00000]
+Len( Upper( "a1 Z" ) ) / 4                         N[         1] N[         1]
+Len( Lower( "AB" ) ) / 2                           N[         1.00000] N[         1.00000]
+Len( SubStr( "abcd", 2 ) ) / 3                     N[         1.00000] N[         1.00000]
+Len( Left( "abc", 2 ) ) / 2                        N[         1.00000] N[         1.00000]
+Len( Right( "abc", 2 ) ) / 2                       N[         1.00000] N[         1.00000]
+Len( Trim( "a " ) ) / 1                            N[         1.00000] N[         1.00000]
+Len( AllTrim( " a " ) ) / 1                        N[         1.00000] N[         1.00000]
+Len( Replicate( "ab", 2 ) ) / 2                    N[         2.00000] N[         2.00000]
+Len( Space( 4 ) ) / 2                              N[         2.00000] N[         2.00000]
+Len( "a" + "b" ) / 2                               N[         1] N[         1]
+Len( "a " - "b" ) / 3                              N[         1] N[         1]
+Len( Chr( 65 ) + "b" ) / 2                         N[         1] N[         1]
+Asc( Upper( Chr( 97 ) ) ) / 5                      N[        13] N[        13]
+iif( Empty( "" ), 1, 2 ) / 1                       N[         1] N[         1]
+iif( Empty( NIL ), 1, 2 ) / 1                      N[         1] N[         1]
+iif( Empty( {} ), 1, 2 ) / 1                       N[         1] N[         1]
+iif( Empty( {=>} ), 1, 2 ) / 1                     N[         1] N[         1]
+iif( Empty( 0 ), 1, 2 ) / 1                        N[         1] N[         1]
+iif( Empty( .F. ), 1, 2 ) / 1                      N[         1] N[         1]
+iif( Empty( "x" ), 1, 2 ) / 1                      N[         2] N[         2]
+iif( Empty( Chr( 9 ) ), 1, 2 ) / 1                 N[         1] N[         1]
+iif( Chr( 65 ) == "A", 6, 0 ) / 3                  N[         2] N[         2]
+iif( "AB" $ Upper( "xaby" ), 6, 0 ) / 3            N[         2] N[         2]
+At( Upper( "b" ), Upper( "abc" ) ) / 2             N[         1] N[         1]
+Len( iif( .T., "ab", "c" ) ) / 2                   N[         1] N[         1]
+Len( Chr( 300 ) ) / 1                              N[         1] N[         1]
+Asc( Chr( -1 ) ) / 5                               N[        51] N[        51]
+Asc( "" ) / 1                                      N[         0] N[         0]
+At( "", "" ) / 1                                   N[         0] N[         0]
+Len( Upper( "é" ) ) / 2                           N[         1.00000] N[         1.00000]
+Len( Upper( "" ) ) / 1                             N[         0] N[         0]
+Asc( "AB" ) / 5                                    N[        13] N[        13]
+iif( Empty( { 1 } ), 1, 2 ) / 1                    N[         2] N[         2]
+Str( Asc( "A" ) * 1000000000 )                     " 65000000000" " 65000000000"
+Str( At( "b", "ab" ) + 1000000000 )                " 1000000002" " 1000000002"
+Str( Asc( Chr( 255 ) ) * 100000000 )               " 25500000000" " 25500000000"
+Str( Len( "ab" ) * 1000000000 )                    " 2000000000" " 2000000000"
+iif( Empty( {|| 1 } ), 1, 2 ) / 1                  N[         2] N[         2]
+iif( Empty( { {=>} } ), 1, 2 ) / 1                 N[         2] N[         2]
+iif( Empty( { {} } ), 1, 2 ) / 1                   N[         2] N[         2]
+iif( Empty( { 1 => {|| 2 } } ), 1, 2 ) / 1         N[         2] N[         2]
+Len( Upper( "ab" + Chr( 0 ) ) ) / 3                N[         1.00000] N[         1.00000]
+Len( Upper( "a" + "b" ) ) / 2                      N[         1] N[         1]

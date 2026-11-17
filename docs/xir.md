@@ -199,6 +199,8 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   DECIMALS at run time, stay), `+` and `-` of two string constants (`stringJoin`), `=`, `==` and `!=` of two
   string constants when SET EXACT cannot change the result, and their `$` (`stringTest`; both in `opt/Fold`, which
   the syntax tree's folding uses too),
+  a call of a `FOLD` function on constants (`evaluateCall` of `opt/Fold`, without `literal`: the value the function
+  returns at run time, an integer a computed one; [compiler.md](compiler.md#constant-folding)),
   `ValType()` of a value whose types all have one letter (`XB_TYPE_LETTERS`; not a string, which may be a memo field's
   value: an array, codeblock or hash literal, a number, a logical), and `cond_br` on a constant becomes `br`. A folded
   instruction is removed at once, also one that can fail in general (`truth`) but not with these operands.

@@ -325,14 +325,8 @@ void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
     return;
   }
   if (a->type != XB_T_STRING || b->type != XB_T_STRING) { arg_error2(ctx, r, 1109, "$", a, b); return; }
-  const xb_str *x = a->v.s, *y = b->v.s;
-  int found = 0;
-  if (x->len == 0) found = 0; /* Clipper: "" $ "abc" is .F. */
-  else if (x->len <= y->len) {
-    for (size_t i = 0; i + x->len <= y->len; ++i)
-      if (memcmp(y->data + i, x->data, x->len) == 0) { found = 1; break; }
-  }
-  xb_set_logical(r, found);
+  /* Clipper: "" $ "abc" is .F. */
+  xb_set_logical(r, xb_bytes_find(a->v.s->data, a->v.s->len, b->v.s->data, b->v.s->len, 0) != 0);
 }
 
 int32_t xb_cond_error(xb_ctx *ctx, const xb_item *a) {

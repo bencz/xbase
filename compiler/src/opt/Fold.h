@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace xb {
 
@@ -31,6 +32,13 @@ ExprPtr foldNumbers(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberEx
 ExprPtr foldNumber(SourceLoc loc, UnOp op, const NumberExpr &n, bool runtime);
 // `a op b` for two numbers and a comparison operator (as xb_compare orders them), or nothing for another operator.
 std::optional<bool> compareNumbers(BinOp op, const NumberExpr &a, const NumberExpr &b);
+
+// A call of runtime function `name` (one declared FOLD) on literal arguments, as the function computes it, or null
+// when it is left to run time (no evaluator, arguments it does not take, errors included). With `literal`, on the
+// syntax tree: only a call the language evaluates when compiling (Len, Chr, Asc, At, Upper of the text
+// xb_upper_folds accepts, Empty, the bit functions), whose result is a literal; without it, on xIR constants: every
+// call that has an evaluator, giving the value the function returns at run time.
+ExprPtr evaluateCall(const std::string &name, SourceLoc loc, const std::vector<ExprPtr> &args, bool literal);
 
 // Compile-time evaluation of expressions on literals (constant folding). It
 // runs after call resolution and before Sema; calls are evaluated only for

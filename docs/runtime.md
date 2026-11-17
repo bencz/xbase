@@ -671,9 +671,12 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
 
 - The grammar is the compiler's expression grammar, with its precedence, evaluation order and literal rules (the width
   of a numeric literal is `xb_num_literal_width`, shared), and operators on number literals fold as the compiler folds
-  them, with the rules of `xbrt.h` (`xb_fold_*`): numbers through the operators, the bit operators and functions and
-  `Len()` of a literal (the runtime's: not a function of the program of that name), logicals through `.NOT.`, `.AND.`,
-  `.OR.` and comparisons, an `IIF()` on a folded condition and a list whose leading values are constants (`&( "999999999
+  them, with the rules of `xbrt.h` (`xb_fold_*`): numbers through the operators, the bit operators and functions,
+  `Len()`, `Asc()` and `At()` (the runtime's: not a function of the program of that name), strings through `+`, `-`,
+  `Chr()` and `Upper()` (`xb_upper_folds`), logicals through `.NOT.`, `.AND.`, `.OR.`, comparisons and `Empty()`, an
+  `IIF()` on a folded condition and a list whose leading values are constants: the calls the language evaluates when
+  compiling ([compiler.md](compiler.md#constant-folding); only folded numbers are emitted, folded strings and logicals
+  matter to what is folded from them: `&( 'Len( Chr( 65 ) + "b" ) / 2' )` is the integer 1; `&( "999999999
   / 3" )` is the integer 333333333, `&( "1000000000 * 1" )` keeps a constant's width; a quotient that is not exact is a
   constant with SET DECIMALS decimals when it runs, `MU_DEC_AT_RUN`). A macro sees memory variables, the program's
   public functions and the runtime's functions, by name; never a function's `LOCAL`s or `STATIC`s, nor a `STATIC
@@ -994,7 +997,8 @@ Conventions:
 - Trimming from the left, `Val` and `Empty` skip blanks, tabs, carriage returns and line feeds (`xb_is_blank`); trimming
   from the right removes spaces only. Case changes and the character classes (`IsAlpha`, `IsUpper`, `IsLower`) read
   letters as SET CODEPAGE says ([Codepages](#codepages)); `IsDigit` takes ASCII digits.
-- `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array and the empty date.
+- `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array, an empty hash and the empty
+  date.
 - `Set( n [, x] )` returns the setting before the call. `_SET_EXACT` takes a logical or a string starting with
   `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020);
   `_SET_FIXED`, `_SET_DELETED`, `_SET_SOFTSEEK` and `_SET_UNIQUE` take a logical or `ON`/`OFF` as `_SET_EXACT` does

@@ -1,7 +1,7 @@
 // Constant folding on xIR: machine operations on constants, the truth test of
 // a constant or of a logical just made, arithmetic (also - and ~ of one) and
 // comparisons of number constants (as the run-time operators compute them), comparisons of string
-// constants for equality, ValType() of a value whose type is known, and
+// constants for equality, calls of FOLD functions on constants, ValType() of a value whose type is known, and
 // branches on known conditions.
 #include "xir/passes/Passes.h"
 
@@ -60,6 +60,36 @@ std::optional<char> typeLetter(TypeSet t) {
   return letter;
 }
 
+// A call of a FOLD function on constants: the value it returns at run time (opt/Fold's evaluateCall).
+Value *foldedCall(const Instruction &i, Builder &b) {
+  if (!i.callee.fold) return nullptr;
+  std::vector<ExprPtr> args;
+  for (const Value *v : i.operands()) {
+    const Constant *c = asConstant(v);
+    if (!c) return nullptr;
+    switch (c->lit) {
+    case Constant::Lit::Integer:
+    case Constant::Lit::Double: args.push_back(std::make_unique<NumberExpr>(*asNumber(v))); break;
+    case Constant::Lit::String: args.push_back(std::make_unique<StringExpr>(SourceLoc{}, c->str)); break;
+    case Constant::Lit::Logical: args.push_back(std::make_unique<LogicalExpr>(SourceLoc{}, c->logical)); break;
+    case Constant::Lit::Nil: args.push_back(std::make_unique<NilExpr>(SourceLoc{})); break;
+    default: return nullptr;
+    }
+  }
+  ExprPtr r = evaluateCall(i.callee.name, {}, args, false);
+  if (!r) return nullptr;
+  switch (r->kind) {
+  case ExprKind::Number: { // a run-time function's integer is a computed one (xb_set_int)
+    auto &n = static_cast<NumberExpr &>(*r);
+    if (n.isInt) n.width = 0;
+    return b.number(n);
+  }
+  case ExprKind::String: return b.string(static_cast<const StringExpr &>(*r).value);
+  case ExprKind::Logical: return b.logical(static_cast<const LogicalExpr &>(*r).value);
+  default: return nullptr;
+  }
+}
+
 // The value `i` always gives, or null. Counters wrap like the machine
 // arithmetic they lower to.
 Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
@@ -83,8 +113,9 @@ Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
     return r ? b.logical(*r) : nullptr;
   }
   case Op::Call:
-    if (i.callee.function || !i.callee.native || i.callee.name != "VALTYPE" || ops.size() != 1 || i.hasRest())
-      return nullptr;
+    if (i.callee.function || !i.callee.native || i.hasRest()) return nullptr;
+    if (Value *v = foldedCall(i, b)) return v;
+    if (i.callee.name != "VALTYPE" || ops.size() != 1) return nullptr;
     if (std::optional<char> letter = typeLetter(types.of(ops[0]))) return b.string(std::string(1, *letter));
     return nullptr;
   case Op::IntAdd: case Op::IntSub: {
