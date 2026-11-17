@@ -658,6 +658,17 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
   with it. The entry knows each user's sharing (exclusive or shared): a second exclusive opening, or an exclusive one
   while others use the file, is refused inside the process, before a handle is opened, exactly as another process
   would be refused by the OS.
+- **Files opened outside the registry** (`xb_shared_plain_open`, `_create`, `_close`: `FOpen()`, `FCreate()`,
+  `FClose()` and what is written over them, such as `MemoRead()`; `SAVE TO`/`RESTORE FROM` files; text files). The
+  registry knows each file's users, so, on every system, an opening that would keep them from the file (`FO_EXCLUSIVE`,
+  `FO_DENYREAD`, `FO_DENYWRITE` while a user writes) is refused with 32, as another program would be, and so is a
+  creation, which would empty a table under its areas (the reference empties it on POSIX systems). On POSIX systems a
+  handle closed while its file has users is kept with them and closes with the last one, so `FClose()` of a table's
+  file never drops an area's locks; an opening of the file for the same access takes a kept handle again (from the
+  start), so a program that opens and closes it again and again holds one. A kept handle is not open for the program:
+  closing it again is error 6, and so are reading, writing and seeking it (`xb_shared_plain_live`); closing a number
+  that is a user's handle is error 6 too, and the user's handle stays open. On Windows, where locks belong to a
+  handle, a handle closes as asked.
 - **Lock manager**: each shared file keeps the locks its users hold (range, shared or exclusive, owner: the user,
   that is the area's opening). A request is checked first against the other users in the process, then taken from the
   OS only for bytes the process does not hold yet; a release gives back to the OS only the bytes no other user still

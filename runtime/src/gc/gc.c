@@ -1454,8 +1454,14 @@ void xb_gc_write_items(xb_array *a, size_t from, size_t to) {
   xb_gc_hdr *h = xb_gc_header(a);
   if ((xb_atomic_load8(&h->state, XB_RELAXED) & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED)
     return; /* young, or traced whole anyway */
-  for (size_t k = from; k < to; k = (k | (((size_t)1 << XB_ARRAY_CARD_SHIFT) - 1)) + 1) /* one per card */
-    xb_gc_write_item(a, k);
+  for (size_t k = from; k < to;) { /* each card once, by an item of it that refers to an object (any past the length) */
+    size_t end = (k | (((size_t)1 << XB_ARRAY_CARD_SHIFT) - 1)) + 1;
+    if (end > to) end = to;
+    while (k < end && k < a->len && !xb_type_is_heap(a->items[k].type)) ++k;
+    if (k < end) xb_gc_write_item(a, k);
+    if (xb_atomic_load8(&h->state, XB_RELAXED) & XB_GC_REMEMBERED) return; /* recorded whole: no card counts */
+    k = end;
+  }
 }
 
 /* Marks what an item refers to, the item set to where it is now; true when that stays young (see mark_ref). */

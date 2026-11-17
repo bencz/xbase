@@ -171,7 +171,7 @@ Threads ([concurrency.md](concurrency.md#threads)): **AtomicInt**, **Condition**
 
 Tasks ([concurrency.md](concurrency.md#tasks)): **CancellationTokenSource** (and its token), **Channel**,
 **TaskCompletionSource**, **TaskDelay**, **TaskFromResult**, **TaskRun**, **TaskTimeout**, **TaskWhenAll**,
-**TaskWhenAny** (the `Task` object's `Result`, `Wait`, `IsCompleted`, `IsFailed`, `IsCanceled`, `Error`,
+**TaskWhenAny**, **TaskYield** (the `Task` object's `Result`, `Wait`, `IsCompleted`, `IsFailed`, `IsCanceled`, `Error`,
 `ContinueWith`).
 
 Objects ([runtime.md](runtime.md#classes)): **ClassAssociate** (`ASSOCIATE CLASS`), **Enumerable** (the class

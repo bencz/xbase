@@ -90,7 +90,8 @@ size_t xb_gc_heap_bytes(void);
 /* Whether the heap's books agree (tests, after a collection): every free block in use listed as free, no block given
  * back or never handed out among those in use, the counts of spare blocks right. */
 int    xb_gc_consistent(void);             /* the heap's memory the system has given it now (blocks in use, large) */
-/* The barrier after storing items `from` .. `to` - 1 of an array (xb_gc_write_item for each card they cover). */
+/* The barrier after storing items `from` .. `to` - 1 of an array: each card they cover recorded when one of its items
+ * among them refers to an object. */
 void   xb_gc_write_items(xb_array *a, size_t from, size_t to);
 /* Finalization: an object registered with xb_gc_finalizable that a
  * collection finds unreachable is kept alive, queued, and every context gets

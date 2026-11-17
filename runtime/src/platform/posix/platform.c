@@ -373,6 +373,13 @@ static int32_t dos_error(int e) {
   return XB_FERR_FAILURE;
 }
 
+/* The DOS error number of a failed read or write of handle `f`: a handle that is open but whose access does not allow
+ * the operation (reading one opened FO_WRITE, writing one opened FO_READ) is "access denied" (5), as on DOS and
+ * Windows, where POSIX says EBADF as for a handle that is not open (6). */
+static int32_t io_error(xb_file f, int e) {
+  return e == EBADF && fcntl((int)f, F_GETFL) != -1 ? 5 : dos_error(e);
+}
+
 /* The DOS error number of a failure on `path`: a missing directory on the way is "path not found" (3), as on
  * Windows, where errno says ENOENT whichever part is missing. */
 static int32_t path_error(const char *path, int e) {
@@ -428,7 +435,7 @@ int64_t xb_os_file_read(xb_file f, void *buf, size_t n, int32_t *err) {
   do {
     got = read((int)f, buf, n);
   } while (got < 0 && errno == EINTR);
-  if (got < 0) *err = dos_error(errno);
+  if (got < 0) *err = io_error(f, errno);
   return got;
 }
 
@@ -437,7 +444,7 @@ int64_t xb_os_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t 
   do {
     got = pread((int)f, buf, n, (off_t)pos);
   } while (got < 0 && errno == EINTR);
-  if (got < 0) *err = dos_error(errno);
+  if (got < 0) *err = io_error(f, errno);
   return got;
 }
 
@@ -448,7 +455,7 @@ static int write_all(xb_file f, int64_t pos, const void *buf, size_t n, int32_t 
     ssize_t put = pos < 0 ? write((int)f, p, n) : pwrite((int)f, p, n, (off_t)pos);
     if (put < 0 && errno == EINTR) continue;
     if (put <= 0) {
-      *err = put < 0 ? dos_error(errno) : XB_FERR_DISK_FULL; /* nothing written: no room */
+      *err = put < 0 ? io_error(f, errno) : XB_FERR_DISK_FULL; /* nothing written: no room */
       return 0;
     }
     p += put;

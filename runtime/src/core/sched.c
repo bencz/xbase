@@ -30,8 +30,8 @@
  * Timers: a binary heap of {deadline, target} under the timers' lock, which one program thread serves (started with
  * the pool): it sleeps until the earliest deadline, then fires what is due (xb_task_timer), one at a time, without
  * the lock. It is also the monitor: while tasks wait in the queues it looks every MONITOR_NS for workers that run one
- * task long, and puts another worker in their place; with no timer and nothing queued it sleeps until a timer comes
- * or a submission finds every worker busy (`timerIdle`).
+ * task long, and puts another worker in their place; with nothing queued it sleeps until its next timer (or a new,
+ * earlier one) at most, and a submission that finds every worker busy wakes it (`timerIdle`).
  *
  * The queues and the timers hold object addresses: the collector marks them (xb_sched_mark), every other thread
  * stopped. */
@@ -100,7 +100,8 @@ static timer *timers; /* a binary heap, the earliest deadline first */
 static size_t timerLen, timerCap;
 static uint32_t timerWake;    /* changed to wake the timers' thread: an earlier deadline, the program's end */
 static uint32_t timerRunning; /* its thread exists (the timers' lock) */
-static uint32_t timerIdle;    /* its thread sleeps with no limit: nothing to time, nothing queued */
+static uint32_t timerIdle;    /* its thread sleeps without watching the workers (nothing was queued), up to its next
+                                 timer at most */
 static size_t timerCompactAt = 1024; /* the heap's size that has it compacted (timers_compact) */
 
 static void timers_wake(void);
@@ -597,10 +598,13 @@ static void timer_body(xb_ctx *ctx, void *arg) {
       xb_pending_clear(ctx, XB_PENDING_UNWIND & ~(uint32_t)XB_PENDING_QUIT); /* what the firing left */
     }
     monitor();
-    int64_t now = xb_platform_monotonic_ns(), slice = xb_atomic_load32(&queued, XB_ACQUIRE) ? MONITOR_NS : -1;
+    int watching = xb_atomic_load32(&queued, XB_ACQUIRE) != 0; /* tasks wait: the monitor looks every MONITOR_NS */
+    int64_t now = xb_platform_monotonic_ns(), slice = watching ? MONITOR_NS : -1;
     if (next >= 0 && (slice < 0 || next - now < slice)) slice = next - now > 0 ? next - now : 0;
-    xb_atomic_store32(&timerIdle, slice < 0, XB_SEQ_CST);
-    if (slice >= 0 || !xb_atomic_load32(&queued, XB_SEQ_CST)) xb_park_wait_blocking(&timerWake, seen, slice);
+    /* Not watching, it says so before it reads the count again, as a submission counts its task before it reads that:
+     * one of the two sees the other, and a submission that finds every worker busy wakes it. */
+    xb_atomic_store32(&timerIdle, !watching, XB_SEQ_CST);
+    if (watching || !xb_atomic_load32(&queued, XB_SEQ_CST)) xb_park_wait_blocking(&timerWake, seen, slice);
     xb_atomic_store32(&timerIdle, 0, XB_RELAXED);
   }
 }

@@ -1,0 +1,8 @@
+
+no block: lost 0, sorted yes, length 800
+block: lost 0, sorted yes, length 800
+range: lost 0, sorted yes, length 800
+hot writer: 50 sorts in time
+turns: 100 writes in time
+self-writing block: last written, rest sorted yes, appended to yes
+copies: 0 bad

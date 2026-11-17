@@ -32,4 +32,20 @@ int xb_shared_lock(xb_shared *s, uint64_t pos, uint64_t len, int kind, int wait,
 /* Releases the user's lock of exactly that range (none: nothing). 1 when nothing failed. */
 int xb_shared_unlock(xb_shared *s, uint64_t pos, uint64_t len, int32_t *err);
 
+/* A file opened outside the registry: by the program (FOpen, FCreate) or by the runtime for a file of its own (a .mem
+ * file, a text file). Each goes as xb_platform_file_open, _create and _close do, with the users of the registry in
+ * mind. An opening that would keep the users from using the file is refused with 32, as another program would be
+ * (FO_EXCLUSIVE or FO_DENYREAD; FO_DENYWRITE while a user writes), and so is any creation, which would empty their
+ * file. On POSIX systems, where closing any handle of a file drops all the process's locks on it, a
+ * handle closed while the file has users is kept with them (closed with the last one), so FClose() of a table's file
+ * cannot drop the locks of an area that has it open; a later opening of the file for the same access (FO_READ,
+ * FO_WRITE, FO_READWRITE) takes it again, from the file's start, so a program that opens and closes the file again
+ * and again keeps one. Closing such a kept handle again, or a user's handle, is error 6, and xb_shared_plain_live
+ * gives the handle the program's file functions use: `f`, or one that is not open (-1) for a kept handle, so that it
+ * reads and writes nothing more once closed. */
+int xb_shared_plain_open(const char *path, int32_t mode, xb_file *f, int32_t *err);
+int xb_shared_plain_create(const char *path, int32_t attr, xb_file *f, int32_t *err);
+int xb_shared_plain_close(xb_file f, int32_t *err);
+xb_file xb_shared_plain_live(xb_file f);
+
 #endif

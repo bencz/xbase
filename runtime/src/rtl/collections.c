@@ -91,6 +91,7 @@ typedef struct clone_visit {
 } clone_visit;
 
 typedef struct clone_map { /* open addressing, power-of-two size */
+  xb_ctx *ctx;
   clone_entry *slots;
   size_t mask, count;
   clone_visit *order; /* the copies to visit, in creation order */
@@ -136,7 +137,7 @@ static int clone_item(clone_map *m, xb_item *it) {
     return 1;
   }
   if (it->type == XB_T_ARRAY) {
-    xb_set_array(it, xb_array_snapshot(src)); /* all the elements as one read saw them */
+    xb_set_array(it, xb_array_snapshot(m->ctx, src)); /* all the elements as one read saw them */
   } else {
     xb_set_hash(it, xb_hash_alloc());
   }
@@ -144,8 +145,8 @@ static int clone_item(clone_map *m, xb_item *it) {
   return 1;
 }
 
-void xb_clone_deep(xb_item *ret, const xb_item *root) {
-  clone_map m = {calloc(16, sizeof(clone_entry)), 15, 0, NULL, 0, 0};
+void xb_clone_deep(xb_ctx *ctx, xb_item *ret, const xb_item *root) {
+  clone_map m = {ctx, calloc(16, sizeof(clone_entry)), 15, 0, NULL, 0, 0};
   if (!m.slots) xb_gc_fatal("out of memory");
   xb_gc_hold(); /* the map keeps the sources' and copies' addresses, which no collection may change meanwhile */
   *ret = *root;

@@ -173,7 +173,7 @@ void xbf_HVALUES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* HClone( hHash ): a copy, the arrays and hashes inside it copied too
  * (xb_clone_deep), with the same letter case rule. */
 void xbf_HCLONE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  if (hash_arg(ctx, "HCLONE", argc, argv, 0)) xb_clone_deep(ret, &argv[0]);
+  if (hash_arg(ctx, "HCLONE", argc, argv, 0)) xb_clone_deep(ctx, ret, &argv[0]);
 }
 
 /* HCopy( hSource, hDest, [nStart], [nCount] ): adds the entries of hSource

@@ -329,7 +329,7 @@ void xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def) {
     const cls *x = runtime_of(c->line[k]);
     for (uint32_t i = 0; i < c->line[k]->nvars; ++i) {
       const xb_item *v = &x->initial[i];
-      if (v->type == XB_T_ARRAY || v->type == XB_T_HASH) xb_clone_deep(&copy, v); /* each object its own */
+      if (v->type == XB_T_ARRAY || v->type == XB_T_HASH) xb_clone_deep(ctx, &copy, v); /* each object its own */
       else copy = *v;
       o->vars[c->area[k] + i] = copy;
       xb_gc_write(o);

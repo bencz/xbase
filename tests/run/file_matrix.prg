@@ -4,7 +4,8 @@
 // holds, into a shorter buffer, at the end; operations on closed and invalid handles; FError() after each; File(),
 // FRename(), FErase(), MemoRead() and MemoWrit(); Directory() of the files made. Files start with "file_matrix". As
 // the reference, but where docs/runtime.md tells: a seek before the start is error 25 from any origin, an unknown
-// origin is the start, an access of 3 is error 5, and FRename() does not replace an existing file.
+// origin is the start, an access of 3 is error 5, reading or writing a handle whose access does not allow it is error
+// 5 (not 6), and FRename() does not replace an existing file.
 #include "fileio.ch"
 
 PROCEDURE Main()

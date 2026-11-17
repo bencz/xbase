@@ -10,7 +10,7 @@
 
 int main(void) {
   xb_platform_init();
-  int base;
+  int base = 0;
   xb_gc_thread_attach(&base);
   xb_ctx *ctx = xb_ctx_new();
   xb_item keep;

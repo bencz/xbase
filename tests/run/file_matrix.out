@@ -3,11 +3,11 @@ open missing         -1          2 .F.
 create .T.          0 .T.          3          0          2          0          2          0          0          0          2          0          4          0          0          0          2          0
 seek         15          0          3          5         13         13         25        100         15         15         25          0
 close .T.          0 .F.          6          0          6          0          6
-mode          0 .T.          0          4          0 [abcd]          0          6
-mode          1 .T.          0          0          6 [    ]          1          0
+mode          0 .T.          0          4          0 [abcd]          0          5
+mode          1 .T.          0          0          5 [    ]          1          0
 mode          2 .T.          0          4          0 [Zbcd]          1          0
-mode         64 .T.          0          4          0 [Zbcd]          0          6
-mode         32 .T.          0          4          0 [Zbcd]          0          6
+mode         64 .T.          0          4          0 [Zbcd]          0          5
+mode         32 .T.          0          4          0 [Zbcd]          0          5
 mode         99 .F.          5          0          6 [    ]          0          6
 read          3 [Zbc]          2 [dZc]          0 [dZc]          0          0          0
 readstr [Zbcd] [Zijmno] []          0

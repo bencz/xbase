@@ -68,8 +68,9 @@ int       xb_array_put(xb_array *a, size_t i, const xb_item *v);
 /* The last element into *dst, 0 when there is none, in one read (ATail). */
 int       xb_array_last(const xb_array *a, xb_item *dst);
 /* A new local array of the elements, all of them as one read saw them (an array other threads change is copied again
- * until a read of all its items finds no writer between); `a` must be reachable. */
-xb_array *xb_array_snapshot(const xb_array *a);
+ * until a read of all its items finds no writer between, under its lock after a few reads writers overtook); `a` must
+ * be reachable. */
+xb_array *xb_array_snapshot(xb_ctx *ctx, const xb_array *a);
 /* `v` added after the last element, at once whatever other threads add (AAdd); `v` must be rooted. */
 void      xb_array_append(xb_ctx *ctx, xb_array *a, const xb_item *v);
 /* The elements from 0-based `at` move one place up, the last one lost, and `at` becomes NIL (AIns); the elements after

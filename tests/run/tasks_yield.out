@@ -1,0 +1,11 @@
+
+queued work runs first:          1          1          1
+created: .F.
+waited: .T. .T. NIL
+result: NIL
+steps: 1000
+functions: .T.
+continue: U after .T.
+when all:          2
+when any: .T.
+timeout: NIL wait with a limit: .T.

@@ -27,9 +27,10 @@ enum { S_CREATED, S_SCHEDULED, S_RUNNING, S_CLAIMED, S_CLAIMED_CANCELED, S_COMPL
 
 /* What completes it: its block (TaskRun, ContinueWith), code (a promise), the tasks it waits for (the combinators), a
  * timer (TaskDelay: canceled by its token; a cancellation source's signal: also by the sources it is linked to), or
- * the task it waits for or its timer, the first (TaskTimeout), or an asynchronous function's steps (K_ASYNC: it waits
- * created while it is suspended, and is scheduled again when the task it awaits ends, as a continuation is). */
-enum { K_RUN, K_PROMISE, K_WHEN_ALL, K_WHEN_ANY, K_DELAY, K_SIGNAL, K_TIMEOUT, K_ASYNC };
+ * the task it waits for or its timer, the first (TaskTimeout), an asynchronous function's steps (K_ASYNC: it waits
+ * created while it is suspended, and is scheduled again when the task it awaits ends, as a continuation is), or the
+ * first wait for it (TaskYield: a continuation added, a thread that waits). */
+enum { K_RUN, K_PROMISE, K_WHEN_ALL, K_WHEN_ANY, K_DELAY, K_SIGNAL, K_TIMEOUT, K_ASYNC, K_YIELD };
 
 /* The variables: the state and the kind (words), the result (or the failure's value), the block and its arguments
  * and the environment's snapshot (until it runs), the continuations, a word (a combinator's count, when all: the tasks
@@ -225,8 +226,10 @@ static void fire(xb_ctx *ctx, const xb_item *target, const xb_item *antecedent, 
   case K_RUN:
   case K_ASYNC: { /* scheduled: a continuation runs, a suspended function goes on */
     uint32_t created = S_CREATED;
+    /* Next on this worker, but after a yield: behind the work queued already, which the yield lets run first. */
+    int next = !antecedent || xb_atomic_load32(xb_object_word(antecedent, V_KIND), XB_RELAXED) != K_YIELD;
     if (xb_atomic_cas32(xb_object_word(target, V_STATE), &created, S_SCHEDULED, XB_ACQ_REL))
-      xb_sched_submit(target->v.p, 1);
+      xb_sched_submit(target->v.p, next);
     break;
   }
   case K_WHEN_ALL:
@@ -344,6 +347,14 @@ static uint32_t prune(xb_ctx *ctx, xb_item *list) {
 
 #define PRUNE_AFTER 64u
 
+/* A task of TaskYield's completed, as something waits for it now; other tasks stay as they are. */
+static void yielded(xb_ctx *ctx, const xb_item *task) {
+  if (xb_atomic_load32(xb_object_word(task, V_KIND), XB_RELAXED) != K_YIELD || FINAL(state_of(task))) return;
+  xb_item nil;
+  xb_set_nil(&nil);
+  complete(ctx, task, S_COMPLETED, &nil);
+}
+
 /* `target` fires when `antecedent` completes; at once when it has. Targets that need it no more at the head of the
  * list are left out of the new node, and once as many were pushed as the list kept at its last pruning (and at least
  * PRUNE_AFTER), the whole list is pruned: a token or a task that lives long, linked to again and again, keeps only
@@ -358,6 +369,7 @@ static void add_continuation(xb_ctx *ctx, const xb_item *antecedent, const xb_it
   xb_gc_root_push(ctx, &head); /* kept alive: its address is what the push compares, and must stay its own */
   xb_gc_root_push(ctx, &kept);
   xb_gc_root_push(ctx, &stack);
+  yielded(ctx, antecedent);
   for (;;) {
     xb_object_get(antecedent->v.p, V_NEXT, &head);
     xb_object_get(antecedent->v.p, V_LINKS, &links);
@@ -538,6 +550,7 @@ void xb_task_cancel(xb_ctx *ctx, xb_item *task) {
 /* Waits for the task to end: one still to start runs on this thread (inline) when there is no limit. The
  * outcome of the wait (XB_WAIT_*). */
 static int wait_task(xb_ctx *ctx, const xb_item *task, int64_t deadline) {
+  yielded(ctx, task);
   if (deadline < 0 && state_of(task) == S_SCHEDULED && claim(task)) run_step(ctx, task);
   for (uint32_t spin = 0; spin < WAIT_SPINS && !FINAL(state_of(task)); ++spin) { /* another side may be about to */
   }
@@ -683,7 +696,7 @@ static void combinator(xb_ctx *ctx, xb_item *ret, uint32_t kind, const char *wha
     return;
   }
   xb_item tasks, it;
-  xb_set_array(&tasks, xb_array_snapshot(argv[0].v.p)); /* checked and used as one read saw it */
+  xb_set_array(&tasks, xb_array_snapshot(ctx, argv[0].v.p)); /* checked and used as one read saw it */
   xb_gc_root_push(ctx, &tasks);
   size_t n = xb_array_length(tasks.v.p);
   int ok = (n || kind == K_WHEN_ALL) && n < UINT32_MAX;
@@ -1059,6 +1072,17 @@ void xbf_TASKDELAY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_gc_root_push(ctx, &signal);
   if (delay_new(ctx, ret, argc, argv) && tokened) add_continuation(ctx, &signal, ret);
   xb_gc_root_pop(ctx, 1);
+}
+
+/* TaskYield(): a task that completes as soon as anything waits for it (AWAIT, Wait, Result, ContinueWith, a
+ * combinator, TaskTimeout): AWAIT of it in an asynchronous function always suspends the function, whose next step
+ * goes to the pool behind the work queued already (fire). */
+void xbf_TASKYIELD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  task_new(ret, K_YIELD, S_CREATED);
+  xb_share(ret);
 }
 
 /* TaskTimeout( oTask, nMs ): a task that ends as oTask does when it does within nMs milliseconds; else failed with the

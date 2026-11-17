@@ -201,7 +201,9 @@ rest of the runtime and compiled code use.
 - Card marking: array storage for 1024 items or more carries one card byte per 64 items after its last item. A store
   into such an old array marks the element's card and records the array for its cards only; the young collection
   scans the marked cards (eight card bytes per step) instead of the whole array. Storage that is replaced (the array
-  grew) records the whole array.
+  grew) records the whole array. The barrier after a run of stores (`xb_gc_write_items`: a frame saved between steps,
+  copied elements) records each card the run covers by an item of the run that refers to an object, whichever of
+  them does.
 - Collection: marking uses an explicit stack; an array of more than 4096 items is traced a slice of 4096 at a time
   (`xb_slice`), so the stack holds a slice's children, not a long array's all. The collector's vectors (the stack, the
   remembered set, the lists of survivors, aged, pinned and retained objects, the threads' lists) give back what they
@@ -477,7 +479,7 @@ the state, marking the enumerator ended until the step yields (a step that fails
 it); a shared enumerator's step is claimed first, under its lock (its state `s` becomes `-(s + 2)` until the step
 yields), so a `MoveNext` from another thread meanwhile answers `.F.` and touches nothing, and one thread at a time
 touches the frame (a `MoveNext` and the `Current` after it are two operations: another thread may step between them);
-`xb_gen_yield` saves the frame (one write barrier per card, `xb_gc_write_items`), the state and the element;
+`xb_gen_yield` saves the frame (the barrier for its run of items, `xb_gc_write_items`), the state and the element;
 `xb_gen_done` ends it and drops the frame, at the end of the body and after a step that fails (`Current` is then NIL).
 `FOR EACH` calls the step and reads `Current` (`xb_gen_current`, whole); its other messages are those of the runtime's
 `Enumerable` (`g:Where( ... )`), the class its own class function makes (`xbf_ENUMERABLE`, `xb_class_send_as`): a
@@ -1291,8 +1293,10 @@ variables](#memory-variables)) use this layer too.
 - `include/fileio.ch` (`FO_*` modes, `FS_*` origins, `FC_*` attributes, `F_ERROR`) is included by the runtime's C as
   well, as `set.ch` is; `include/directry.ch` names the positions of a `Directory()` entry.
 - `rtl/files.c`: `FOpen`, `FCreate`, `FRead`, `FWrite`, `FSeek`, `FClose`, `FError`, `FErase`, `FRename`, `CurDir`,
-  `DirChange`, `DiskSpace`, `GetEnv` and `__DirScan`. A handle is the system's handle as a number. Each function stores
-  the code of its outcome for `FError()` (`xb_env.file_error`, 0 after a success); an argument of the wrong type gives
+  `DirChange`, `DiskSpace`, `GetEnv` and `__DirScan`. A handle is the system's handle as a number; `FOpen`, `FCreate`
+  and `FClose` go through the registry of shared files, so closing a table's file keeps the areas' locks, and neither
+  empties a table nor keeps its areas from it ([rdd.md](rdd.md#inside-the-process)). Each function stores the code of
+  its outcome for `FError()` (`xb_env.file_error`, 0 after a success); an argument of the wrong type gives
   the function's failure value and leaves `FError()` alone, but a name that is not a string is `FOpen()`'s `BASE/2021`,
   and an access of 3 is 5. `FRead( nHandle, @cBuffer, nBytes )` replaces the first bytes of the buffer, which keeps its
   length; without the buffer passed by reference, or with `nBytes` below 1 or past its length, it reads nothing (a bad
@@ -1314,7 +1318,8 @@ variables](#memory-variables)) use this layer too.
   (`Chr( 26 )`) that ends it, `MemoWrit` writes the text and that mark; `FReadStr` reads and stops at the first NUL (the
   file position past all the bytes read).
 - Safer than the reference on POSIX systems, as DOS and Windows behave: a directory cannot be opened (`FOpen`) or
-  deleted (`FErase`): 5; `FRename` never replaces another existing file: 5; a read-only file shows `R`. POSIX systems
+  deleted (`FErase`): 5; `FRename` never replaces another existing file: 5; reading a handle opened `FO_WRITE`, or
+  writing one opened `FO_READ`, is 5 (access denied), not 6; a read-only file shows `R`. POSIX systems
   have no sharing modes (the sharing bits of `FOpen()` are ignored there), and they mark names starting with a dot
   hidden, which `Directory()` lists only with `H`, whatever the mask. `MemoRead` and `MemoWrit` leave the failure's code
   in `FError()`. On Windows, `FCreate` of an existing hidden or system file keeps those attributes. File offsets are 64
@@ -1435,8 +1440,9 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   each absence counts and is repaid once) tells whether it counts as active: not while it blocks or, seen by the
   monitor, runs one task longer than 20 ms while work waits. The monitor hands over at most one place per look, only
   when no task ended since its last look, and keeps no more workers long than the target. Timers are a binary heap of
-  `{deadline, target}` under the timers' lock, which one program thread serves (started with the pool; it sleeps with no
-  limit when there is no timer and nothing queued, and a submission that finds every worker busy wakes it): it fires
+  `{deadline, target}` under the timers' lock, which one program thread serves (started with the pool; with nothing
+  queued it sleeps until its next timer, or with no limit when there is none, and a submission that finds every worker
+  busy wakes it, whatever timers wait): it fires
   each due target without the lock (`xb_task_timer`: a delay completes, a cancellation source's signal is set, a timeout
   fails with `Task timed out`, an Error object made with `xb_error_object`), and is the monitor. The heap drops the
   timers whose targets need them no more (`xb_task_timer_dead`: settled, or replaced by a later `CancelAfter`, whose
@@ -1511,19 +1517,25 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   (`xb_seq_read_begin`, the items' words loaded with acquire order, `xb_seq_read_valid`; `xb_seq_get` for one item), and
   written under the stripe's lock (`xb_seq_lock`, which makes the counter odd, the words stored with release order,
   `xb_seq_unlock`; `xb_seq_put`), with no fences, so the thread sanitizer follows them. A waiter spins, then yields (a
-  reader), or sleeps on the lock word through `xb_blocking_run` (a writer); a writer never reaches a safepoint while it
-  holds a stripe, so a reader that waits never holds up a collection.
+  reader), or sleeps on the lock word through `xb_waiting_run` (a writer); a writer never reaches a safepoint while it
+  holds a stripe, so a reader that waits never holds up a collection. A writer that has waited a millisecond marks the
+  lock starving, and its release then hands the lock to a thread that slept waiting instead of freeing it: a thread
+  that takes the lock again and again (long operations such as `AIns` on a large array) cannot keep a waiting one out.
 - Arrays (`types/array.c`): `xb_array_length`, `xb_array_get` and `xb_array_put` read and write an element whole (under
   the array's sequence counter or lock when it is shared, in place when it is local; a read a writer overlapped never
   reaches its destination; a value stored into a shared array is shared first), and the index operators, `Len`, `Empty`,
   `AScan`'s search and the count of `FOR EACH` use them; `xb_array_last` (`ATail`) reads the length and the last element
-  in one read, and `xb_array_snapshot` (`AClone`, `ASort`) copies all the elements as one read saw them;
+  in one read, and `xb_array_snapshot` (`AClone`, `ASort`) copies all the elements as one read saw them (under the lock
+  after four reads that writers overtook, so a long copy ends while threads write without a pause);
   `xb_array_append` (`AAdd`) adds an element at once whatever other threads add, `xb_array_insert` and `xb_array_delete`
   (`AIns`, `ADel`) shift under the lock, and `xb_array_resize_any` (`ASize`) changes the length. A shared array's `len`,
   `cap` and `items` change under its lock with release stores, and storage it grows into is allocated before the lock is
   taken (rooted meanwhile; a capacity only grows, so it is still enough under the lock); `xb_array_resize` is for arrays
-  only the runtime reaches yet. `ASort` of a shared array sorts a copy (a block may run any code) and puts the sorted
-  range back under the lock, as far as the array still reaches; a local one that its block shares meanwhile is sorted
+  only the runtime reaches yet. `ASort` of a shared array is one operation among other threads' writes: it sorts a copy
+  (a block may run any code) and puts the sorted range back under the lock only when the array still holds what the
+  copy was made of (the same range, the same elements), else it starts again from a new copy, so no value another
+  thread stores meanwhile is lost; without a block it sorts the array itself under the lock after two such conflicts
+  (no code runs, nothing is allocated), so it always ends. A local array that its block shares meanwhile is sorted
   again so; its block reads elements whole.
 - Hashes (`types/hash.c`): every operation on a shared hash runs under its lock, reads too (a read may reorganize the
   hash: the position tree, a compaction), and keys and values come out copied: `xb_hash_length`, `xb_hash_get`,

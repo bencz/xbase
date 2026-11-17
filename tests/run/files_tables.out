@@ -1,0 +1,10 @@
+
+locked: .T.
+opened 3000 times, failed:          0 first byte:          3
+read 3000 times, failed:          0
+closes: .T.          0 .F.          6
+after the close:          0          6          0          6          0          6
+create:         -1         32 exclusive:         -1         32 deny read:         -1         32 deny write:         -1         32
+deny none: .T. .T. table kept:          1     0
+other area locks the record: .F. the file: .F.
+own lock kept: .T.

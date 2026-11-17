@@ -3,7 +3,8 @@
 // task in time: its result, failure or cancellation; too late: failed with "Task timed out"); cancellation sources
 // (Cancel, CancelAfter, linked sources, Register callbacks, ThrowIfCancellationRequested, cancelling twice); argument
 // errors; the monitor: a task that runs long while another waits in the queue gets another worker beside it (the
-// waiting task stops the long one: without the monitor, neither would end); a delay or a CancelAfter of 0 or less done
+// waiting task stops the long one: without the monitor, neither would end), also while the timers' thread sleeps until
+// a timer far away; a delay or a CancelAfter of 0 or less done
 // when the call returns; a later CancelAfter postponing an earlier one; Register after the cancellation, a link to a
 // token canceled already, CancelAfter on a canceled source; and memory: 100000 timeouts settled long before their
 // deadline, and 100000 sources linked to one long-lived token and disposed, keep nothing (the objects alive after a
@@ -50,8 +51,11 @@ PROCEDURE Main()
       ? "error:", Caught( e )
    NEXT
 
+   t := TaskDelay( 60000 )
+   TaskDelay( 30 ):Wait() /* the timers' thread then sleeps until the timer a minute away, with nothing queued */
    oLong := TaskRun( {|| Spin( aFlag ) } )
-   ? "monitor:", TaskRun( {|| aFlag[ 1 ] := .T. } ):Wait( 60000 ), oLong:Wait( 60000 )
+   ? "monitor:", TaskRun( {|| aFlag[ 1 ] := .T. } ):Wait( 10000 ), oLong:Wait( 10000 )
+   aFlag[ 1 ] := .T.
 
    s := CancellationTokenSource()
    s:CancelAfter( 0 )

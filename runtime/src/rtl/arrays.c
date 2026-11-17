@@ -81,7 +81,7 @@ void xbf_ATAIL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_ACLONE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   if (argc < 1 || argv[0].type != XB_T_ARRAY) return;
-  xb_clone_deep(ret, &argv[0]);
+  xb_clone_deep(ctx, ret, &argv[0]);
 }
 
 /* ASort( aTarget, [nStart], [nCount], [bOrder] ): sorts the elements from
@@ -103,16 +103,14 @@ typedef struct {
 static int sort_less(void *arg, size_t i, size_t j) {
   sorter *s = arg;
   if (s->failed) return 0;
+  /* The block may shrink the array, or share it: the elements are read whole. */
   const xb_array *a = s->array->v.p;
-  if (s->block) { /* the block may shrink the array, or share it: the elements are read whole */
-    if (!xb_array_get(a, i, &s->call[0]) || !xb_array_get(a, j, &s->call[1])) return 0;
-    if (!xb_calls_run(s->ctx, s->block, s->call, 2)) {
-      s->failed = 1;
-      return 0;
-    }
-    return xb_order_answer(&s->call[2]);
+  if (!xb_array_get(a, i, &s->call[0]) || !xb_array_get(a, j, &s->call[1])) return 0;
+  if (!xb_calls_run(s->ctx, s->block, s->call, 2)) {
+    s->failed = 1;
+    return 0;
   }
-  return xb_value_less(s->ctx, &a->items[i], &a->items[j]);
+  return xb_order_answer(&s->call[2]);
 }
 
 /* The order xb_value_less gives two integers, or two doubles (NaN before
@@ -183,6 +181,52 @@ static uint32_t common_type(const xb_item *items, size_t first, size_t n) {
 }
 
 static const xb_proc asort_proc = XB_RUNTIME_PROC("ASORT", 0);
+
+typedef struct {
+  const xb_ctx *ctx;
+  const xb_item *items;
+} value_order;
+
+static int value_less_at(void *arg, size_t i, size_t j) {
+  const value_order *v = arg;
+  return xb_value_less(v->ctx, &v->items[i], &v->items[j]);
+}
+
+/* pos[0 .. n-1], the positions first .. first+n-1 of items, put in the order xb_value_less gives their values,
+ * stable; pos has room for 2n (the merge sort's half). No code runs and the collector allocates nothing, so a shared
+ * array is sorted so under its lock. */
+static void order_values(const xb_ctx *ctx, size_t *pos, size_t first, size_t n, const xb_item *items) {
+  uint32_t same = common_type(items, first, n);
+  if ((same == XB_T_INT || same == XB_T_DOUBLE) && n >= RADIX_MIN && radix_sort(pos, n, items, same)) return;
+  if (same == XB_T_INT) {
+    sort_ints(pos, pos + n, n, items);
+  } else if (same == XB_T_DOUBLE) {
+    sort_doubles(pos, pos + n, n, items);
+  } else {
+    value_order v = {ctx, items};
+    xb_merge_sort(pos, pos + n, n, value_less_at, &v);
+  }
+}
+
+/* The elements at pos[0 .. n-1] put at first .. first+n-1 in that order, whole under the lock of a shared array (the
+ * caller holds it). Nothing allocates until they are back. */
+static void place(xb_array *a, const size_t *pos, size_t first, size_t n) {
+  xb_item *vals = malloc(n * sizeof *vals + 1);
+  if (!vals) xb_gc_fatal("out of memory");
+  for (size_t k = 0; k < n; ++k) vals[k] = a->items[pos[k]];
+  for (size_t k = 0; k < n; ++k) {
+    xb_seq_store(&a->items[first + k], &vals[k]);
+    xb_gc_write_item(a, first + k); /* a young element may move to another card */
+  }
+  free(vals);
+}
+
+static size_t *positions(size_t first, size_t n) {
+  size_t *pos = malloc(2 * n * sizeof *pos);
+  if (!pos) xb_gc_fatal("out of memory");
+  for (size_t k = 0; k < n; ++k) pos[k] = first + k;
+  return pos;
+}
 
 /* __ScanValue( xTarget, xSearch, nStart, nCount ): the position of the first
  * of the nCount elements of an array (or values of a hash) from nStart
@@ -298,29 +342,66 @@ static size_t sort_range(uint32_t argc, const xb_item *argv, size_t len, size_t 
 
 void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
-/* ASort of a shared array: a block may run any code, so a copy (all the elements as one read saw them) is sorted,
- * and its range goes back under the lock, as far as the array still reaches (another thread may have shrunk it). */
+/* ASort of a shared array without a block, under its lock: one operation among the other threads' writes. */
+static void sort_locked(const xb_ctx *ctx, uint32_t argc, const xb_item *argv, xb_array *a) {
+  xb_seq_lock(a);
+  size_t first = 0, n = sort_range(argc, argv, a->len, &first);
+  if (n) {
+    size_t *pos = positions(first, n);
+    order_values(ctx, pos, first, n, a->items);
+    place(a, pos, first, n);
+    free(pos);
+  }
+  xb_seq_unlock(a);
+}
+
+/* Copies of a shared array that other threads' writes may overtake before a sort ends otherwise. */
+#define SORT_TRIES 2
+
+/* ASort of a shared array, one operation among the other threads' writes. A copy (all the elements as one read saw
+ * them) is sorted, as a block may run any code, and the sorted range goes back under the lock only while the array
+ * still holds what the copy was made of: when another thread changed the range meanwhile (an element of it, or a
+ * length that gives another range), the sort starts again from a new copy. After SORT_TRIES such copies it always
+ * ends: without a block, which runs no code and allocates nothing, it sorts the array itself under the lock; with
+ * one (which may keep writing the array itself), the last copy goes back to the elements that still hold what it
+ * was made of, and those changed meanwhile keep their new values, as if those writes came after the sort. */
 static void sort_shared(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
-  xb_item args[4], sorted;
+  xb_array *a = argv[0].v.p;
+  const int block = argc > 3 && argv[3].type == XB_T_BLOCK;
+  xb_item args[4], seen, sorted;
+  xb_set_nil(&seen);
   xb_set_nil(&sorted);
   for (uint32_t k = 0; k < 4; ++k) xb_set_nil(&args[k]);
   for (uint32_t k = 1; k < argc && k < 4; ++k) args[k] = argv[k];
   for (uint32_t k = 0; k < 4; ++k) xb_gc_root_push(ctx, &args[k]);
+  xb_gc_root_push(ctx, &seen);
   xb_gc_root_push(ctx, &sorted);
-  xb_set_array(&args[0], xb_array_snapshot(argv[0].v.p));
-  size_t first = 0, n = sort_range(argc, argv, ((const xb_array *)args[0].v.p)->len, &first);
-  if (n) xbf_ASORT(ctx, &sorted, argc < 4 ? argc : 4, args);
-  if (n && !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
-    const xb_array *copy = args[0].v.p;
-    xb_array *a = argv[0].v.p;
+  for (unsigned tries = 0;; ++tries) {
+    if (!block && tries == SORT_TRIES) {
+      sort_locked(ctx, argc, argv, a);
+      break;
+    }
+    xb_set_array(&seen, xb_array_snapshot(ctx, a));
+    size_t first = 0, n = sort_range(argc, argv, ((const xb_array *)seen.v.p)->len, &first);
+    if (!n) break;
+    xb_set_array(&args[0], xb_array_snapshot(ctx, seen.v.p)); /* local: the block never sees it */
+    xbf_ASORT(ctx, &sorted, argc < 4 ? argc : 4, args);
+    if (xb_pending_get(ctx) & XB_PENDING_UNWIND) break;
+    int last = tries + 1 == SORT_TRIES; /* with a block */
+    size_t at = 0;
     xb_seq_lock(a);
-    for (size_t k = first; k < first + n && k < a->len; ++k) {
+    const xb_array *was = seen.v.p, *copy = args[0].v.p;
+    int same = sort_range(argc, argv, a->len, &at) == n && at == first &&
+               memcmp(&a->items[first], &was->items[first], n * sizeof(xb_item)) == 0;
+    for (size_t k = first; (same || last) && k < first + n && k < a->len; ++k) {
+      if (memcmp(&a->items[k], &was->items[k], sizeof(xb_item)) != 0) continue; /* written meanwhile */
       xb_seq_store(&a->items[k], &copy->items[k]);
       xb_gc_write_item(a, k);
     }
     xb_seq_unlock(a);
+    if (same || last) break;
   }
-  xb_gc_root_pop(ctx, 5);
+  xb_gc_root_pop(ctx, 6);
 }
 
 void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -333,39 +414,31 @@ void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const size_t len = ((const xb_array *)argv[0].v.p)->len;
   size_t first = 0, n = sort_range(argc, argv, len, &first);
   if (!n) return;
-  size_t *pos = malloc(2 * n * sizeof *pos);
-  if (!pos) xb_gc_fatal("out of memory");
-  for (size_t k = 0; k < n; ++k) pos[k] = first + k;
+  size_t *pos = positions(first, n);
+  xb_array *a = argv[0].v.p;
+  if (argc < 4 || argv[3].type != XB_T_BLOCK) { /* no code runs: the array stays local */
+    order_values(ctx, pos, first, n, a->items);
+    place(a, pos, first, n);
+    free(pos);
+    return;
+  }
   xb_item call[3];
   xb_frame frame;
   xb_calls_begin(ctx, call, 3, &frame, &asort_proc);
-  sorter s = {ctx, &argv[0], argc > 3 && argv[3].type == XB_T_BLOCK ? &argv[3] : NULL, call, 0};
-  const xb_item *items = ((const xb_array *)argv[0].v.p)->items;
-  uint32_t same = s.block ? XB_T_NIL : common_type(items, first, n); /* without a block nothing runs: no change */
-  int done = (same == XB_T_INT || same == XB_T_DOUBLE) && n >= RADIX_MIN && radix_sort(pos, n, items, same);
-  if (!done && same == XB_T_INT) sort_ints(pos, pos + n, n, items);
-  else if (!done && same == XB_T_DOUBLE) sort_doubles(pos, pos + n, n, items);
-  else if (!done) xb_merge_sort(pos, pos + n, n, sort_less, &s);
+  sorter s = {ctx, &argv[0], &argv[3], call, 0};
+  xb_merge_sort(pos, pos + n, n, sort_less, &s);
   xb_calls_end(ctx, &frame, 3);
   if (!s.failed && xb_is_shared(argv[0].v.p)) { /* the block shared it (it stored it where others reach) */
     free(pos);
     sort_shared(ctx, argc, argv);
     return;
   }
-  if (!s.failed) {
-    xb_array *a = argv[0].v.p;
-    /* A block may have shrunk the array: the positions still in it go first. */
+  if (!s.failed) { /* a block may have shrunk the array: the positions still in it go first */
+    a = argv[0].v.p;
     size_t kept = 0;
     for (size_t k = 0; k < n; ++k)
       if (pos[k] < a->len) pos[kept++] = pos[k];
-    xb_item *vals = malloc(kept * sizeof *vals + 1);
-    if (!vals) xb_gc_fatal("out of memory");
-    for (size_t k = 0; k < kept; ++k) vals[k] = a->items[pos[k]]; /* nothing allocates until they are back */
-    for (size_t k = 0; k < kept; ++k) {
-      a->items[first + k] = vals[k];
-      xb_gc_write_item(a, first + k); /* a young element may move to another card */
-    }
-    free(vals);
+    place(a, pos, first, kept);
   }
   free(pos);
 }

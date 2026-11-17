@@ -16,6 +16,7 @@
 #include "xbrt_int.h"
 
 #include "core/file.h"
+#include "core/shared_file.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -134,10 +135,10 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_file f;
     int32_t err = 0;
     int32_t gencode = EG_CREATE;
-    if (xb_platform_file_create(path, FC_NORMAL, &f, &err)) {
+    if (xb_shared_plain_create(path, FC_NORMAL, &f, &err)) {
       int written = xb_platform_file_write(f, out.p, out.len, &err);
       int32_t closeErr = 0;
-      int closed = xb_platform_file_close(f, &closeErr);
+      int closed = xb_shared_plain_close(f, &closeErr);
       if (written && closed) break;
       if (written) err = closeErr;
       gencode = EG_WRITE;
@@ -216,7 +217,7 @@ void xbf___MEMRESTORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int opened = 0;
   for (uint16_t tries = 1; !opened; ++tries) {
     int32_t err = 0;
-    opened = xb_platform_file_open(path, FO_READ, &f, &err);
+    opened = xb_shared_plain_open(path, FO_READ, &f, &err);
     if (!opened && xb_error_file(ctx, "__MEMRESTORE", EG_OPEN, 2005, argv[0].v.s->data, err, tries) != 2) break;
   }
   free(path);
@@ -231,5 +232,5 @@ void xbf___MEMRESTORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     if (len) xb_memvar_assign(ctx, name, len, &v);
   xb_gc_root_pop(ctx, 1);
   int32_t err;
-  xb_platform_file_close(f, &err);
+  xb_shared_plain_close(f, &err);
 }

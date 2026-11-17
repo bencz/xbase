@@ -103,7 +103,7 @@ Classes and functions, listed in [coverage.md](coverage.md) as each one comes:
 
 - `Task`: `Result` (waits), `Wait( [nMs] )`, `IsCompleted`, `IsFailed`, `IsCanceled`, `Error`, `ContinueWith( b )`;
   `TaskRun( bWork, ... )` (on the pool), `TaskWhenAll( aTasks )`, `TaskWhenAny( aTasks )`, `TaskFromResult( x )`:
-  `TaskDelay( nMs, [oToken] )`, `TaskTimeout( oTask, nMs )`: done ([Tasks](#tasks)). Planned: `TaskYield()`.
+  `TaskDelay( nMs, [oToken] )`, `TaskTimeout( oTask, nMs )`, `TaskYield()`: done ([Tasks](#tasks)).
 - `TaskCompletionSource`: a task completed by code (callbacks, other threads): done ([Tasks](#tasks)).
 - `CancellationTokenSource` / `CancellationToken`: cooperative cancellation, timeouts, linked tokens (done:
   [Tasks](#tasks)); the awaitable operations of the runtime take one (`TaskDelay`, a channel's; planned: the
@@ -234,8 +234,9 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   the queues, and puts another worker beside it the same way.
 - Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): a binary heap of deadlines that one thread serves, started with
   the pool: it sleeps until the earliest deadline and fires what is due; it is also the monitor, looking every 10 ms
-  while tasks wait in the queues (with no timer and nothing queued it sleeps until there is). *(Planned)*: a
-  hierarchical timing wheel per worker, so that hundreds of thousands of pending timeouts cost constant time each.
+  while tasks wait in the queues (with nothing queued it sleeps until its next timer, and a submission that finds every
+  worker busy wakes it). *(Planned)*: a hierarchical timing wheel per worker, so that hundreds of thousands of pending
+  timeouts cost constant time each.
 - *(Planned)* A blocking pool, separate from the workers, runs work that has no asynchronous form (`getaddrinfo`, file
   I/O where the system has no asynchronous files, foreign libraries).
 
@@ -270,7 +271,10 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   `TaskFromResult( x )`: a task completed with x.
 - `TaskDelay( nMs, [oToken] )`: a task that completes nMs milliseconds from now (0 or less: at once), canceled when
   the token is canceled first. `TaskTimeout( oTask, nMs )`: a task that ends as oTask does when it does within nMs
-  milliseconds, else failed with the error `BASE/9027` `Task timed out`.
+  milliseconds, else failed with the error `BASE/9027` `Task timed out`. `TaskYield()`: a task that completes (with
+  `NIL`) as soon as anything waits for it (`AWAIT`, `Wait()`, `Result`, `ContinueWith()`, a combinator,
+  `TaskTimeout()`), so `AWAIT TaskYield()` always suspends an `ASYNC` function, whose next step goes behind the work
+  queued already (on its worker too), which a short `TaskDelay` does only when the delay has not passed yet.
 - `CancellationTokenSource( [oToken...] )`: a source of cancellation, linked to the tokens given (canceled when one
   of them is): `Token`, `Cancel()` (once; again does nothing), `CancelAfter( nMs )`, `IsCancellationRequested`. A
   `CancellationToken`: `IsCancellationRequested`, `Register( bWork )` (a task that runs `Eval( bWork )` on the pool

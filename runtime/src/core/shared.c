@@ -6,8 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Each stripe on a cache line of its own: `seq` is odd while a writer works, `lock` is 0 when free, 1 when held and 2
- * when held with a thread waiting. Objects are XB_GC_ALIGN-aligned and at least two of those apart. */
+/* Each stripe on a cache line of its own: `seq` is odd while a writer works, `lock` is the writers' lock (its states
+ * below, at lock_slow). Objects are XB_GC_ALIGN-aligned and at least two of those apart. */
 #define STRIPES 1024u
 #define SPINS 64u
 typedef struct stripe {
@@ -92,27 +92,44 @@ void xb_seq_get(const void *obj, xb_item *dst, const xb_item *src) {
   }
 }
 
-typedef struct wait_args {
-  uint32_t *lock;
-} wait_args;
+/* A stripe's `lock`: free (0), held (LOCK_HELD), held while threads may sleep waiting for it (LOCK_WAITED: its release
+ * wakes the first), and so with a waiter that has waited STARVING_NS (LOCK_STARVING: its release hands the lock over,
+ * LOCK_HANDED, instead of freeing it). A handed lock is free for a thread that has slept waiting, not for a newcomer.
+ * Without the hand-over, a thread that takes the lock again and again would find it free at each release and take it
+ * before the woken thread could, which would find it taken again. */
+#define LOCK_HELD 1u
+#define LOCK_WAITED 2u
+#define LOCK_STARVING 4u
+#define LOCK_HANDED 8u
+#define STARVING_NS 1000000
 
-static void wait_lock(void *p) { xb_park_wait(((wait_args *)p)->lock, 2, -1); }
+static void lock_slow(stripe *s) {
+  int slept = 0, starving = 0;
+  int64_t since = xb_platform_monotonic_ns();
+  for (;;) {
+    uint32_t v = xb_atomic_load32(&s->lock, XB_RELAXED);
+    if (v == 0 || (v == LOCK_HANDED && slept)) { /* LOCK_WAITED: other threads may still sleep waiting */
+      if (xb_atomic_cas32(&s->lock, &v, LOCK_HELD | LOCK_WAITED, XB_ACQUIRE)) return;
+      continue;
+    }
+    uint32_t seen = v == LOCK_HANDED ? v : v | LOCK_WAITED | (starving ? LOCK_STARVING : 0u);
+    if (seen != v && !xb_atomic_cas32(&s->lock, &v, seen, XB_RELAXED)) continue;
+    xb_park_wait_short(&s->lock, seen, -1); /* a writer's work is short; collections go on without this thread */
+    slept = 1;
+    starving = starving || xb_platform_monotonic_ns() - since >= STARVING_NS;
+  }
+}
 
 void xb_seq_lock(const void *obj) {
   stripe *s = stripe_of(obj);
   uint32_t none = 0;
-  if (!xb_atomic_cas32(&s->lock, &none, 1, XB_ACQUIRE)) {
-    for (unsigned spins = 0;; ++spins) {
-      if (spins < SPINS) {
-        none = 0;
-        if (xb_atomic_cas32(&s->lock, &none, 1, XB_ACQUIRE)) break;
-        continue;
-      }
-      /* Marked as waited for, then asleep until the holder wakes it; meanwhile collections go on without it. */
-      if (xb_atomic_xchg32(&s->lock, 2, XB_ACQUIRE) == 0) break;
-      wait_args a = {&s->lock};
-      xb_waiting_run(wait_lock, &a); /* a writer's work is short */
+  if (!xb_atomic_cas32(&s->lock, &none, LOCK_HELD, XB_ACQUIRE)) {
+    unsigned spins = 0;
+    for (; spins < SPINS; ++spins) {
+      none = 0;
+      if (xb_atomic_cas32(&s->lock, &none, LOCK_HELD, XB_ACQUIRE)) break;
     }
+    if (spins == SPINS) lock_slow(s);
   }
   xb_atomic_add32(&s->seq, 1, XB_RELAXED); /* odd: readers wait or read again (before the writes: release stores) */
 }
@@ -120,7 +137,10 @@ void xb_seq_lock(const void *obj) {
 void xb_seq_unlock(const void *obj) {
   stripe *s = stripe_of(obj);
   xb_atomic_add32(&s->seq, 1, XB_RELEASE); /* even, after the writes */
-  if (xb_atomic_xchg32(&s->lock, 0, XB_RELEASE) == 2) xb_park_wake(&s->lock, 0);
+  uint32_t v = xb_atomic_load32(&s->lock, XB_RELAXED);
+  while (!xb_atomic_cas32(&s->lock, &v, v & LOCK_STARVING ? LOCK_HANDED : 0u, XB_RELEASE)) {
+  }
+  if (v & LOCK_WAITED) xb_park_wake(&s->lock, 0);
 }
 
 void xb_seq_put(const void *obj, xb_item *dst, const xb_item *src) {

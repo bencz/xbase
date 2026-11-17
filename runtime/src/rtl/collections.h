@@ -64,6 +64,6 @@ void xb_merge_sort(size_t *pos, size_t *tmp, size_t n, xb_less_fn less, void *ar
  * hashes inside copied too, keeping the structure: one reached twice is
  * copied once, so shared and cyclic ones stay so. Other values, objects
  * included, are shared. An explicit list of copies to visit, no recursion. */
-void xb_clone_deep(xb_item *ret, const xb_item *root);
+void xb_clone_deep(xb_ctx *ctx, xb_item *ret, const xb_item *root);
 
 #endif

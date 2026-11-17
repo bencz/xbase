@@ -8,6 +8,7 @@
 #include "rdd/rdd.h"
 
 #include "core/file.h"
+#include "core/shared_file.h"
 #include "core/numeric.h"
 
 #include <stdlib.h>
@@ -45,7 +46,7 @@ static int text_create(const xb_rdd *rdd, const char *path, const xb_field_info 
   XB_UNUSED(fields);
   XB_UNUSED(count);
   xb_file f;
-  return xb_platform_file_create(path, 0, &f, err) && xb_platform_file_close(f, err);
+  return xb_shared_plain_create(path, 0, &f, err) && xb_shared_plain_close(f, err);
 }
 
 static void grow(text *t, size_t need) {
@@ -356,15 +357,15 @@ static int text_open_with(xb_area *a, const char *path, const xb_field_info *fie
   t->writing = create;
   t->delimited = a->rdd->delimited;
   delimiters(t, delimiter);
-  int ok = create ? xb_platform_file_create(path, 0, &t->f, &why->oscode)
-                  : xb_platform_file_open(path, FO_READ | FO_SHARED, &t->f, &why->oscode);
+  int ok = create ? xb_shared_plain_create(path, 0, &t->f, &why->oscode)
+                  : xb_shared_plain_open(path, FO_READ | FO_SHARED, &t->f, &why->oscode);
   if (ok && !create) {
     t->win = malloc(TEXT_CHUNK);
     if (!t->win) xb_gc_fatal("out of memory");
   }
   if (ok && !create && !index_lines(t, &why->oscode)) {
     int32_t ignored;
-    xb_platform_file_close(t->f, &ignored);
+    xb_shared_plain_close(t->f, &ignored);
     ok = 0;
   }
   if (!ok) {
@@ -402,7 +403,7 @@ static int text_close(xb_area *a, int32_t *err) {
     ok = ok && drain(t, err);
   }
   int32_t closeErr = 0;
-  if (!xb_platform_file_close(t->f, &closeErr) && ok) {
+  if (!xb_shared_plain_close(t->f, &closeErr) && ok) {
     *err = closeErr;
     ok = 0;
   }

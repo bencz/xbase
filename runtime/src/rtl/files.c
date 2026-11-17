@@ -5,6 +5,7 @@
 #include "xbrt_int.h"
 
 #include "core/file.h"
+#include "core/shared_file.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -16,9 +17,10 @@ static const char *path_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
   return memchr(s->data, '\0', s->len) ? NULL : s->data;
 }
 
+/* A handle argument: one closed and kept by the registry of shared files is not open for the program. */
 static int handle_arg(uint32_t argc, const xb_item *argv, uint32_t k, xb_file *f) {
   if (argc <= k || !xb_is_number(&argv[k])) return 0;
-  *f = (xb_file)xb_num_to_i64(&argv[k]);
+  *f = xb_shared_plain_live((xb_file)xb_num_to_i64(&argv[k]));
   return 1;
 }
 
@@ -47,7 +49,7 @@ void xbf_FOPEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int32_t mode = (int32_t)num_or(argc, argv, 1, FO_READ);
   xb_file f = 0;
   int32_t err = (mode & 3) == 3 ? 5 : 2; /* access 3 is none of FO_READ, FO_WRITE and FO_READWRITE */
-  int ok = path && (mode & 3) != 3 && xb_platform_file_open(path, mode, &f, &err);
+  int ok = path && (mode & 3) != 3 && xb_shared_plain_open(path, mode, &f, &err);
   set_error(ctx, ok, err);
   xb_set_int(ret, ok ? (int64_t)f : -1);
 }
@@ -60,7 +62,7 @@ void xbf_FCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const char *path = path_arg(argc, argv, 0);
   xb_file f = 0;
   int32_t err = 2;
-  int ok = path && xb_platform_file_create(path, (int32_t)num_or(argc, argv, 1, FC_NORMAL), &f, &err);
+  int ok = path && xb_shared_plain_create(path, (int32_t)num_or(argc, argv, 1, FC_NORMAL), &f, &err);
   set_error(ctx, ok, err);
   if (ok) xb_set_int(ret, (int64_t)f);
 }
@@ -71,7 +73,7 @@ void xbf_FCLOSE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, 0);
   if (!handle_arg(argc, argv, 0, &f)) return;
   int32_t err = 0;
-  int ok = xb_platform_file_close(f, &err);
+  int ok = xb_shared_plain_close(f, &err);
   set_error(ctx, ok, err);
   xb_set_logical(ret, ok);
 }

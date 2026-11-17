@@ -53,14 +53,44 @@ int xb_array_last(const xb_array *a, xb_item *dst) {
   }
 }
 
-xb_array *xb_array_snapshot(const xb_array *a) {
+/* Optimistic reads of a shared array before its copy is made under the lock. */
+#define SNAPSHOT_TRIES 4
+
+/* The copy under the lock: storage for `room` items allocated first (rooted while the lock is waited for, when
+ * collections go on), then the items as the array holds them; NULL when it holds more than `room` now. */
+static xb_array *copy_locked(xb_ctx *ctx, const xb_array *a, size_t room) {
+  xb_item held;
+  xb_set_array(&held, xb_array_alloc(room));
+  xb_gc_root_push(ctx, &held);
+  xb_seq_lock(a);
+  size_t len = a->len;
+  xb_array *copy = held.v.p;
+  if (len <= room) memcpy(copy->items, a->items, len * sizeof(xb_item));
+  xb_seq_unlock(a);
+  xb_gc_root_pop(ctx, 1);
+  if (len > room) return NULL;
+  xb_gc_write(copy); /* a collection while the lock was waited for may have aged it */
+  xb_array_resize(copy, len); /* fewer now: the rest are NIL */
+  return copy;
+}
+
+xb_array *xb_array_snapshot(xb_ctx *ctx, const xb_array *a) {
   if (!xb_is_shared(a)) {
     xb_array *copy = xb_array_alloc(a->len); /* `a` is reachable */
     memcpy(copy->items, a->items, a->len * sizeof(xb_item));
     return copy;
   }
-  for (;;) { /* storage for the length seen, then all the items in one read of that length */
+  /* Storage for the length seen, then all the items in one read of that length. A long read that writers keep
+   * overtaking is made under the lock after SNAPSHOT_TRIES of them, with room for twice the length each time the
+   * array grew past it meanwhile. */
+  for (unsigned tries = 0;; ++tries) {
     size_t len = xb_atomic_loadsz(&a->len, XB_ACQUIRE);
+    if (tries >= SNAPSHOT_TRIES) {
+      for (size_t room = len;; room = room < XB_ARRAY_MAX_LEN / 2 ? 2 * room + 16 : XB_ARRAY_MAX_LEN) {
+        xb_array *copy = copy_locked(ctx, a, room);
+        if (copy) return copy;
+      }
+    }
     xb_array *copy = xb_array_alloc(len);
     uint32_t seq = xb_seq_read_begin(a);
     int same = xb_atomic_loadsz(&a->len, XB_ACQUIRE) == len;
