@@ -133,13 +133,13 @@ static void program_thread_main(void *p) {
   if (xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL) == 1) xb_park_wake(&running, 1);
 }
 
-int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg) {
+int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg, size_t stack) {
   program_thread *t = malloc(sizeof *t);
   if (!t) xb_gc_fatal("out of memory");
   *t = (program_thread){body, arg};
   xb_atomic_add32(&running, 1, XB_ACQ_REL);
   xb_thread h;
-  if (!xb_thread_start(&h, XB_PROGRAM_THREAD_STACK, program_thread_main, t)) {
+  if (!xb_thread_start(&h, stack, program_thread_main, t)) {
     xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL);
     free(t);
     return 0;
@@ -229,7 +229,7 @@ void xbf_THREADSTART(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_gc_root_pop(ctx, 1);
   xb_share(ret); /* the thread, the block, its arguments and the environment: the new thread reaches them */
   start s = {*ret, 0};
-  if (!xb_program_thread_start(thread_body, &s)) {
+  if (!xb_program_thread_start(thread_body, &s, XB_PROGRAM_THREAD_STACK)) {
     xb_set_nil(ret); /* no thread: nothing to join */
     xb_error_described(ctx, NULL, EG_CREATE, XB_CODE_THREAD_CREATE, "Cannot start a thread", "THREADSTART", 0, 0, NULL);
     return;

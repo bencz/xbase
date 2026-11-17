@@ -28,6 +28,8 @@ void xb_timer_add(xb_object *target, int64_t deadline);
 
 /* The number of workers that run tasks at once (//WORKERS:n; 0: one per processor the program may run on). */
 void xb_sched_set_workers(unsigned n);
+/* The workers alive now, the number that run tasks at once (the target) and the most there may be (TaskWorkers()). */
+void xb_sched_workers(uint32_t *alive, uint32_t *runAtOnce, uint32_t *most);
 
 /* The tasks the queues hold, for the collector (every other thread stopped): `mark` may move them. */
 void xb_sched_mark(int (*mark)(xb_item *));

@@ -179,9 +179,13 @@ void xb_env_close_areas(xb_ctx *ctx);
  * make one. xb_quit_all ends the program from any thread: every other context is asked to QUIT, and the scheduler's
  * workers to stop. xb_threads_end is the program's end: the threads that still run (ThreadStart()'s, the workers)
  * are asked to QUIT and waited for, and the tasks that did not start are canceled: before the EXIT procedures run,
- * and after them. XB_PROGRAM_THREAD_STACK is the stack each one may grow to (reserved, committed as it is used). */
+ * and after them. `stack` is the stack the thread may grow to (reserved, committed as it is used):
+ * XB_PROGRAM_THREAD_STACK for ThreadStart()'s threads, XB_WORKER_STACK for the scheduler's workers and its timers'
+ * thread, of which there may be hundreds (most of it for the program's calls, above the stack error's reserve,
+ * XB_STACK_RESERVE in core/ctx.c). */
 #define XB_PROGRAM_THREAD_STACK ((size_t)16 << 20)
-int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg);
+#define XB_WORKER_STACK ((size_t)4 << 20)
+int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg, size_t stack);
 void xb_quit_all(const xb_ctx *ctx);
 void xb_threads_end(xb_ctx *ctx);
 

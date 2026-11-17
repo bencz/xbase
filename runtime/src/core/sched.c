@@ -10,28 +10,30 @@
  * A worker with nothing to run searches for SEARCH_NS (it spins: one at a time, and only while another runs a task),
  * then parks on a word of its own, listed as idle under the pool's lock, after it looked once more for work (the count
  * of queued tasks, read after its listing, against a submission that counts its task before it looks for an idle
- * worker: one of the two sees the other). A submission wakes an idle worker, or starts one, while fewer than `target`
- * are active (searching or running, neither parked nor away: BLOCKED or LONG) and none searches (the searcher finds
- * the task; one that finds work wakes another for what is left, one that gives up looks at the count before it
- * parks; a worker woken from its park wakes none: more wakes cost more than the work they find, and the monitor puts
- * a worker beside one that runs long). A thief takes another worker's next task only once that worker's task has run
- * STEAL_NEXT_NS: a task that ends soon runs the task it made ready itself (a continuation, a value handed over),
- * without a thread switch. A worker running a task that enters an operation that
- * may block counts as inactive meanwhile: when work waits, another worker takes its place (blocking handoff), up to
- * the most workers (workersMax); a worker beyond the target that stays idle SURPLUS_IDLE_NS ends.
+ * worker: one of the two sees the other). A submission wakes an idle worker, or starts one (or leaves the start to the
+ * monitor, past twice the target: may_spawn_locked), while fewer than `target` are active (searching or running,
+ * neither parked nor away: BLOCKED or LONG) and none searches (the searcher finds the task; one that finds work wakes
+ * another for what is left, one that gives up looks at the count before it parks; a worker woken from its park wakes
+ * none: more wakes cost more than the work they find, and the monitor puts a worker beside one that runs long). A thief
+ * takes another worker's next task only once that worker's task has run STEAL_NEXT_NS: a task that ends soon runs the
+ * task it made ready itself (a continuation, a value handed over), without a thread switch. A worker running a task
+ * that enters an operation that may block counts as inactive meanwhile: when work waits, another worker takes its place
+ * (blocking handoff): one started at once while fewer than twice the target are alive, past that one at a time, paced
+ * (may_spawn_locked), up to the most workers (workersMax); a worker beyond the target that stays idle SURPLUS_IDLE_NS
+ * ends.
  *
  * A worker's `run` word says what it does: IDLE (no task), RUNNING one, BLOCKED in an operation that may block, or
  * LONG: running one longer than LONG_TASK_NS while work waits, seen by the monitor. The last two count as away (not
- * active: another worker takes the place); the word changes with compare-and-swap (RUNNING to BLOCKED or LONG and
- * back, any to IDLE at the task's end, which repays a LONG), so that each absence is counted and repaid once. The
- * monitor hands over at most one place per look, only when no task ended since the last look, and keeps the workers
- * away as LONG to the target's number (a computation never multiplies the threads past twice the target).
+ * active: another worker takes the place); the word changes with compare-and-swap (RUNNING to BLOCKED or LONG and back,
+ * any to IDLE at the task's end, which repays a LONG), so that each absence is counted and repaid once. The monitor
+ * hands over at most one place per look, only when no task ended since the last look, and keeps the workers away as
+ * LONG to the target's number (a computation never multiplies the threads past twice the target).
  *
- * Timers: a binary heap of {deadline, target} under the timers' lock, which one program thread serves (started with
- * the pool): it sleeps until the earliest deadline, then fires what is due (xb_task_timer), one at a time, without
- * the lock. It is also the monitor: while tasks wait in the queues it looks every MONITOR_NS for workers that run one
- * task long, and puts another worker in their place; with nothing queued it sleeps until its next timer (or a new,
- * earlier one) at most, and a submission that finds every worker busy wakes it (`timerIdle`).
+ * Timers: a binary heap of {deadline, target} under the timers' lock, which one program thread serves (started with the
+ * pool): it sleeps until the earliest deadline, then fires what is due (xb_task_timer), one at a time, without the
+ * lock. It is also the monitor: while tasks wait in the queues it looks every MONITOR_NS for workers that run one task
+ * long, and puts another worker in their place; with nothing queued it sleeps until its next timer (or a new, earlier
+ * one) at most, and a submission that finds every worker busy wakes it (`timerIdle`).
  *
  * The queues and the timers hold object addresses: the collector marks them (xb_sched_mark), every other thread
  * stopped. */
@@ -52,6 +54,9 @@
 #define SEARCH_NS ((int64_t)50 * XB_NS_PER_US)
 #define STEAL_NEXT_NS ((int64_t)5 * XB_NS_PER_US)
 #define STARVED_NS ((int64_t)2000 * XB_NS_PER_MS)
+/* The pace of new workers past twice the target: see may_spawn_locked. */
+#define SPAWN_STEP_NS ((int64_t)25 * XB_NS_PER_MS)
+#define SPAWN_MAX_NS ((int64_t)250 * XB_NS_PER_MS)
 #define SEARCH_LOOK 64u /* looks for work between looks at the clock (and yields of the processor) */
 #define SEARCH_RETRY 16u /* looks between two searches of the queues, which found nothing that waits there */
 
@@ -79,8 +84,8 @@ static uint32_t queued;  /* tasks in the queues */
 static uint32_t ended;   /* tasks ended (the monitor tells progress) */
 static uint32_t longCount; /* workers LONG */
 static uint32_t searching; /* workers searching for work before they park */
-static uint32_t unstarted; /* the last thread a worker was to run did not start (none started since) */
-static uint32_t target;  /* workers that run at once; 0 until the pool first starts */
+static int64_t lastSpawn;  /* when the last worker was started (the pool's lock) */
+static uint32_t target;  /* workers that run at once; 0 until the pool is made (make_pool) */
 static uint32_t stopping;
 static unsigned requested;
 
@@ -120,7 +125,7 @@ static void make_pool(void) {
   if (!xb_mutex_init(&poolLock) || !xb_mutex_init(&timerLock)) xb_gc_fatal("cannot create the scheduler's locks");
   uint64_t space = xb_platform_address_space();
   if (space > USER_SPACE) space = USER_SPACE;
-  uint64_t room = space / 4 / XB_PROGRAM_THREAD_STACK;
+  uint64_t room = space / 4 / XB_WORKER_STACK;
   if (room < workersMax) workersMax = room ? (uint32_t)room : 1;
   unsigned n = requested ? requested : xb_platform_cpu_count();
   if (n > workersMax) n = workersMax;
@@ -128,6 +133,13 @@ static void make_pool(void) {
 }
 
 void xb_sched_set_workers(unsigned n) { requested = n; }
+
+void xb_sched_workers(uint32_t *alive, uint32_t *runAtOnce, uint32_t *most) {
+  xb_once(&poolMade, make_pool);
+  *alive = xb_atomic_load32(&total, XB_ACQUIRE);
+  *runAtOnce = xb_atomic_load32(&target, XB_ACQUIRE);
+  *most = workersMax;
+}
 
 /* The pool's queue (under the pool's lock). */
 static void global_put(void *const *tasks, size_t n) {
@@ -287,31 +299,45 @@ static worker *spawn_locked(void) {
   xb_atomic_store32(&w->alive, 1, XB_RELEASE);
   xb_atomic_add32(&total, 1, XB_ACQ_REL);
   xb_atomic_add32(&active, 1, XB_ACQ_REL);
-  if (xb_program_thread_start(worker_body, w)) {
-    xb_atomic_store32(&unstarted, 0, XB_RELAXED);
-    return w;
-  }
-  xb_atomic_store32(&unstarted, 1, XB_RELAXED);
+  if (xb_program_thread_start(worker_body, w, XB_WORKER_STACK)) return w;
   xb_atomic_store32(&w->alive, 0, XB_RELEASE);
   xb_atomic_add32(&total, (uint32_t)-1, XB_ACQ_REL);
   xb_atomic_add32(&active, (uint32_t)-1, XB_ACQ_REL);
   return NULL;
 }
 
-/* An idle worker woken, or a new one started, for work that waits. */
+/* Whether a new worker may start now (the pool's lock): at once while fewer than twice the target are alive (the
+ * places of workers that block a moment are filled without delay); past that, one after the last by SPAWN_STEP_NS for
+ * each `target` workers beyond twice the target, at most SPAWN_MAX_NS: tasks that block for long, many of them, cost
+ * a few threads a second, not a thread each. */
+static int may_spawn_locked(int64_t now) {
+  uint32_t alive = xb_atomic_load32(&total, XB_RELAXED), t = xb_atomic_load32(&target, XB_RELAXED);
+  if (alive < 2 * t) return 1;
+  int64_t delay = SPAWN_STEP_NS * (int64_t)(1 + (alive - 2 * t) / t);
+  return now - lastSpawn >= (delay < SPAWN_MAX_NS ? delay : SPAWN_MAX_NS);
+}
+
+/* An idle worker woken, or a new one started when it may be, for work that waits; when none may start yet, the
+ * monitor, which looks again while work waits, is made to watch. */
 static void wake_or_spawn(void) {
+  int deferred = 0;
   xb_mutex_lock(&poolLock);
   worker *w = idle;
   if (w) {
     idle = w->idleNext;
     xb_atomic_add32(&active, 1, XB_ACQ_REL); /* for it: a second submission sees it active */
   } else {
-    spawn_locked();
+    int64_t now = xb_platform_monotonic_ns();
+    /* deferred to the monitor, which runs on the timers' thread: at once when that thread could not start */
+    if (!may_spawn_locked(now) && xb_atomic_load32(&timerRunning, XB_ACQUIRE)) deferred = 1;
+    else if (spawn_locked()) lastSpawn = now;
   }
   xb_mutex_unlock(&poolLock);
   if (w) {
     xb_atomic_store32(&w->wake, 1, XB_RELEASE);
     xb_park_wake(&w->wake, 1);
+  } else if (deferred && xb_atomic_load32(&timerIdle, XB_SEQ_CST)) {
+    timers_wake();
   }
 }
 
@@ -479,25 +505,29 @@ static void tell_starving(void *p) {
   const starving *s = p;
   xb_output_lock();
   fflush(stdout);
-  fprintf(stderr,
-          "\nxbrt: %u tasks have waited %d seconds while all %u workers wait or run long and no other can start: a "
-          "task that waits for a lock, a semaphore, a condition, a task or a channel holds its worker, which awaiting "
-          "it (LockAsync, WaitAsync, ReceiveAsync, AWAIT of the task) does not\n",
-          s->tasks, (int)(STARVED_NS / XB_NS_PER_MS / 1000), s->workers);
+  int seconds = (int)(STARVED_NS / XB_NS_PER_MS / 1000);
+  if (s->workers)
+    fprintf(stderr, "\nxbrt: %u tasks have waited %d seconds while all %u workers wait or run long, and more workers "
+                    "start only slowly",
+            s->tasks, seconds, s->workers);
+  else
+    fprintf(stderr, "\nxbrt: %u tasks have waited %d seconds and no worker could start", s->tasks, seconds);
+  fprintf(stderr, ": a task that waits for a lock, a semaphore, a condition, a task or a channel holds its worker, "
+                  "which awaiting it (LockAsync, WaitAsync, ReceiveAsync, AWAIT of the task) does not\n");
   fflush(stderr);
   xb_output_unlock();
 }
 
-/* Tasks starve when they wait in the queues, none ended for STARVED_NS, and no other worker can start: the most
- * workers, or fewer active than the target and the last thread the system was asked for did not start. The program's
- * standard error is told so once, until tasks end again. */
+/* Tasks starve when they wait in the queues, none ended for STARVED_NS, and then no worker is active: each one alive
+ * waits (blocked) or runs one task long, or none could start (`active`: a worker just started counts a moment, until
+ * it blocks too, so it is looked at when the time is up, not along it), whatever workers still start (paced,
+ * may_spawn_locked) or cannot (the most workers, threads the system refuses). It tells that the program's throughput
+ * is held by tasks that hold their workers, not that it is deadlocked: the standard error is told so once, until
+ * tasks end again. */
 static void starved(int progress, int waiting) {
   static int64_t since;
   static int told;
-  int full = xb_atomic_load32(&total, XB_ACQUIRE) >= workersMax ||
-             (xb_atomic_load32(&unstarted, XB_RELAXED) &&
-              xb_atomic_load32(&active, XB_ACQUIRE) < xb_atomic_load32(&target, XB_ACQUIRE));
-  if (progress || !waiting || !full) {
+  if (progress || !waiting) {
     since = 0;
     told = 0;
     return;
@@ -505,6 +535,7 @@ static void starved(int progress, int waiting) {
   int64_t now = xb_platform_monotonic_ns();
   if (!since) since = now;
   if (told || now - since < STARVED_NS) return;
+  if (xb_atomic_load32(&active, XB_ACQUIRE)) return;
   told = 1;
   starving s = {xb_atomic_load32(&queued, XB_ACQUIRE), xb_atomic_load32(&total, XB_ACQUIRE)};
   xb_blocking_run(tell_starving, &s); /* a full pipe holds the write */
@@ -585,7 +616,7 @@ static void timers_start(void) {
   xb_mutex_lock(&timerLock);
   if (!timerRunning && !xb_atomic_load32(&stopping, XB_ACQUIRE)) {
     xb_atomic_store32(&timerRunning, 1, XB_RELEASE);
-    if (!xb_program_thread_start(timer_body, NULL)) xb_atomic_store32(&timerRunning, 0, XB_RELEASE);
+    if (!xb_program_thread_start(timer_body, NULL, XB_WORKER_STACK)) xb_atomic_store32(&timerRunning, 0, XB_RELEASE);
   }
   xb_mutex_unlock(&timerLock);
 }
@@ -670,7 +701,7 @@ static void timer_body(xb_ctx *ctx, void *arg) {
 }
 
 void xb_sched_stop(void) {
-  if (!xb_atomic_load32(&target, XB_ACQUIRE)) return; /* the pool never started */
+  if (!xb_atomic_load32(&target, XB_ACQUIRE)) return; /* the pool was never made */
   xb_atomic_store32(&stopping, 1, XB_SEQ_CST);
   timers_wake();
   xb_mutex_lock(&poolLock);

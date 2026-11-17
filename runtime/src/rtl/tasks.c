@@ -1102,6 +1102,21 @@ void xbf_TASKDELAY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_gc_root_pop(ctx, 1);
 }
 
+/* TaskWorkers(): { the workers alive, the number that run tasks at once, the most there may be } of the scheduler's
+ * pool (a program's view of its threads, as it grows past the target while tasks block). */
+void xbf_TASKWORKERS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  uint32_t alive, runAtOnce, most;
+  xb_sched_workers(&alive, &runAtOnce, &most);
+  xb_array *a = xb_array_alloc(3);
+  xb_set_int(&a->items[0], alive);
+  xb_set_int(&a->items[1], runAtOnce);
+  xb_set_int(&a->items[2], most);
+  xb_set_array(ret, a);
+}
+
 /* TaskYield(): a task that completes as soon as anything waits for it (AWAIT, Wait, Result, ContinueWith, a
  * combinator, TaskTimeout): AWAIT of it in an asynchronous function always suspends the function, whose next step
  * goes to the pool behind the work queued already (fire). */

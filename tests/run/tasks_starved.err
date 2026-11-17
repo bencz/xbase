@@ -1,1 +1,1 @@
-workers wait or run long and no other can start: a task that waits for a lock, a semaphore, a condition, a task or a channel holds its worker, which awaiting it (LockAsync, WaitAsync, ReceiveAsync, AWAIT of the task) does not
+workers wait or run long, and more workers start only slowly: a task that waits for a lock, a semaphore, a condition, a task or a channel holds its worker, which awaiting it (LockAsync, WaitAsync, ReceiveAsync, AWAIT of the task) does not

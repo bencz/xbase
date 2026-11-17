@@ -1,0 +1,7 @@
+
+before any task:          3          0          2 .T.
+blocked tasks: grew .T. paced .T. ended .T.         40
+idle surplus ends: .T.
+deep on a worker: .T.       4000
+endless on a worker: .T. stack error after more than 1000 calls
+endless on a thread: stack error after more than 1000 calls

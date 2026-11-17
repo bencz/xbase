@@ -172,8 +172,8 @@ Threads ([concurrency.md](concurrency.md#threads)): **AtomicInt**, **Condition**
 
 Tasks ([concurrency.md](concurrency.md#tasks)): **CancellationTokenSource** (and its token), **Channel**,
 **TaskCompletionSource**, **TaskDelay**, **TaskFromResult**, **TaskRun**, **TaskTimeout**, **TaskWhenAll**,
-**TaskWhenAny**, **TaskYield** (the `Task` object's `Result`, `Wait`, `IsCompleted`, `IsFailed`, `IsCanceled`, `Error`,
-`ContinueWith`).
+**TaskWhenAny**, **TaskWorkers** (xbase: the pool's workers alive, its target and its most), **TaskYield** (the `Task`
+object's `Result`, `Wait`, `IsCompleted`, `IsFailed`, `IsCanceled`, `Error`, `ContinueWith`).
 
 Objects ([runtime.md](runtime.md#classes)): **ClassAssociate** (`ASSOCIATE CLASS`), **Enumerable** (the class
 collections inherit; the built-in types' classes are `SCALAR CLASS`es), **ObjHasMethod**, **ObjHasVar**,

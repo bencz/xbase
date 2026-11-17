@@ -1386,15 +1386,17 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   the program's end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): an
   asynchronous call allocates no environment; one that creates PRIVATEs copies the bindings it shares (once) and grows
   its own stack of PRIVATEs. The program's exit code is the process's.
-- Program threads (`rtl/threads.c`): `xb_program_thread_start` starts a thread with a 16 MB stack
-  (`XB_PROGRAM_THREAD_STACK`), detached (`xb_thread_detach`), counted until it ends, that attaches (the second attached
-  thread publishes the program's storage), makes its context (with a `QUIT` pending while the program ends) and runs its
-  body; `ThreadStart`'s and the scheduler's workers are such threads. `ThreadStart` makes the `Thread` object (its block
-  and arguments in an array, the snapshot of the creator's environment), shares it and starts the thread, which stores
-  its `xb_thread_self` and tells the creator, which waits for that in a blocking operation (the thread object stays on
-  its stack, pinned). The thread restores the environment, evaluates the block (`xb_eval_work`), stores the result, sets
-  its done word and wakes the joiners, frees its context and detaches from the collector. A `Mutex` is three words in
-  its object's own variables (the state, 0 free, 1 held, 2 held with waiters; the holder's `xb_flow_self`; the depth), a
+- Program threads (`rtl/threads.c`): `xb_program_thread_start` starts a thread with the stack it is given (reserved,
+  committed as used): 16 MB for `ThreadStart`'s (`XB_PROGRAM_THREAD_STACK`), 4 MB for the scheduler's workers and its
+  timers' thread (`XB_WORKER_STACK`: most of it for the program's calls, above the stack error's reserve,
+  `XB_STACK_RESERVE`), detached (`xb_thread_detach`), counted until it ends, that attaches (the second attached thread
+  publishes the program's storage), makes its context (with a `QUIT` pending while the program ends) and runs its body;
+  `ThreadStart`'s and the scheduler's workers are such threads. `ThreadStart` makes the `Thread` object (its block and
+  arguments in an array, the snapshot of the creator's environment), shares it and starts the thread, which stores its
+  `xb_thread_self` and tells the creator, which waits for that in a blocking operation (the thread object stays on its
+  stack, pinned). The thread restores the environment, evaluates the block (`xb_eval_work`), stores the result, sets its
+  done word and wakes the joiners, frees its context and detaches from the collector. A `Mutex` is three words in its
+  object's own variables (the state, 0 free, 1 held, 2 held with waiters; the holder's `xb_flow_self`; the depth), a
   `Thread`'s done flag one: changed with atomic operations, waited on in the parking lot a while at a time (50 ms) in a
   blocking operation, so collections go on and a `QUIT` is seen; the object a waiter waits on is pinned by its stack. An
   `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local. `QUIT` in a
@@ -1460,20 +1462,23 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   absence counts and is repaid once) tells whether it counts as active: not while it blocks or, seen by the monitor,
   runs one task longer than 20 ms while work waits. The monitor hands over at most one place per look, only when no task
   ended since its last look, and keeps no more workers long than the target; while work waits it fills again the places
-  that a thread which did not start left empty (`fill_place`), and when no other worker can start (the most workers,
-  `workersMax`: 1024, fewer when their stacks would take more than a quarter of the address space the process may map,
-  `xb_platform_address_space`; or the last thread did not start: `unstarted`) and no task ended for 2 seconds it tells
-  the standard error once (`starved`, until tasks end again). Timers are a binary heap of `{deadline, target}` under the
-  timers' lock, which one program thread serves (started with the pool; with nothing queued it sleeps until its next
-  timer, or with no limit when there is none, and a submission that finds every worker busy wakes it, whatever timers
-  wait): it fires each due target without the lock (`xb_task_timer`: a delay completes, a cancellation source's signal
-  is set, a timeout fails with `Task timed out`, an Error object made with `xb_error_object`), and is the monitor. The
-  heap drops the timers whose targets need them no more (`xb_task_timer_dead`: settled, or replaced by a later
-  `CancelAfter`, whose deadline the signal keeps) once it doubled; at the program's end the timers left fire as ending
-  (a delay and a timeout canceled, a source canceled). Cancellation: a source and its token share a signal, a task that
-  completes when the source is canceled, whose continuations are what waits for it (a delay with that token, a linked
-  source's signal, `Register`'s tasks). A list of continuations drops, at its head, the targets that need it no more
-  (ended, or the signal of a disposed source), and is pruned whole once as many were pushed as it kept at its last
+  that a thread which did not start left empty (`fill_place`). A new worker starts at once while fewer than twice the
+  target are alive, else when `may_spawn_locked` allows it (paced: `SPAWN_STEP_NS` more for each `target` workers past
+  twice the target, at most `SPAWN_MAX_NS`; the monitor tries again at each look while work waits), up to the most
+  workers (`workersMax`: 1024, fewer when their stacks would take more than a quarter of the address space the process
+  may map, `xb_platform_address_space`). When no task ended for 2 seconds while tasks wait, and then no worker is active
+  (each waits or runs long, or none could start), it tells the standard error once (`starved`, until tasks end again).
+  `TaskWorkers()` gives `{ alive, target, most }` (`xb_sched_workers`). Timers are a binary heap of `{deadline, target}`
+  under the timers' lock, which one program thread serves (started with the pool; with nothing queued it sleeps until
+  its next timer, or with no limit when there is none, and a submission that finds every worker busy wakes it, whatever
+  timers wait): it fires each due target without the lock (`xb_task_timer`: a delay completes, a cancellation source's
+  signal is set, a timeout fails with `Task timed out`, an Error object made with `xb_error_object`), and is the
+  monitor. The heap drops the timers whose targets need them no more (`xb_task_timer_dead`: settled, or replaced by a
+  later `CancelAfter`, whose deadline the signal keeps) once it doubled; at the program's end the timers left fire as
+  ending (a delay and a timeout canceled, a source canceled). Cancellation: a source and its token share a signal, a
+  task that completes when the source is canceled, whose continuations are what waits for it (a delay with that token, a
+  linked source's signal, `Register`'s tasks). A list of continuations drops, at its head, the targets that need it no
+  more (ended, or the signal of a disposed source), and is pruned whole once as many were pushed as it kept at its last
   pruning. Channels (`rtl/channels.c`, their rings and the claims of their waiters in `rtl/waiters.c`, shared with
   `Mutex` and `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a
   runtime class's object (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext`
