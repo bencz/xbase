@@ -62,15 +62,66 @@ bool readOnly(const xir::Instruction &load) {
 } // namespace
 
 // An Asc() call right after the SubStr() call that is its only argument and
-// the SubStr() result's only use: the pair is lowered as one.
+// the SubStr() result's only use, and an Int() call right after the division
+// that is its only argument and the quotient's only use: each pair is lowered
+// as one.
 void CodeGen::findFusedCalls(const xir::BasicBlock &b) {
   fusedCalls_.clear();
   for (size_t k = 0; k + 1 < b.insts.size(); ++k) {
     const xir::Instruction &i = *b.insts[k], &next = *b.insts[k + 1];
-    if (inlineKind(i) == Inline::SubStr && inlineKind(next) == Inline::Asc && i.hasOneUse() &&
-        i.users().front() == &next)
+    if (!i.hasOneUse() || i.users().front() != &next) continue;
+    if ((inlineKind(i) == Inline::SubStr && inlineKind(next) == Inline::Asc) ||
+        (i.op == xir::Op::Binary && i.binop == BinOp::Div && inlineKind(next) == Inline::Int))
       fusedCalls_.insert(&next);
   }
+}
+
+// The division fused with the Int() call that takes its quotient (findFusedCalls): lowered there.
+bool CodeGen::fusedDivision(const xir::Instruction &i) const {
+  return i.binop == BinOp::Div && i.hasOneUse() && fusedCalls_.count(i.users().front()) != 0;
+}
+
+// The width field, in place in a header word, of a number that has no width of its own (xb_num_dbl_width,
+// xb_num_int_width): XB_NUM_WIDE_WIDTH when `wide` (past XB_NUM_FITS_MAX or XB_NUM_FITS_MIN), else XB_NUM_WIDTH.
+Value *CodeGen::defaultWidth(Value *wide) {
+  auto word = [&](uint64_t w) { return ConstantInt::get(i64_, w << headerShift(FWidth)); };
+  return b_.CreateSelect(wide, word(XB_NUM_WIDE_WIDTH), word(XB_NUM_WIDTH), "width");
+}
+
+// Int( x / y ) of two integers in [-2^52, 2^52), y not 0: the truncated integer quotient, which the
+// double quotient truncated gives too (both are exact doubles, and the quotient's rounding error, below |x / y| *
+// 2^-53, is below 1 / |y|, its distance to the next integer, as |x| < 2^53), with the width Int() gives that double
+// (defaultWidth), stored in `d`, then on to `join`. A
+// quotient that is one of those bounds (the double then may lie past it), other operands and other values take the
+// division as it is (emitDivMod), then Int() as for any number from where this leaves off.
+void CodeGen::emitIntOfQuotient(const xir::Instruction &div, Value *d, BasicBlock *join) {
+  Value *a = addr(div.operand(0)), *bv = addr(div.operand(1));
+  BasicBlock *general = newBlock("idiv.general");
+  xir::TypeSet ints = xir::typeBit(XB_T_INT);
+  if ((plan_->types().of(div.operand(0)) & ints) && (plan_->types().of(div.operand(1)) & ints)) {
+    BasicBlock *both = newBlock("idiv.ints"), *divide = newBlock("idiv"), *quotient = newBlock("idiv.q");
+    branchLikely(bothInts(typeOf(div.operand(0), a), typeOf(div.operand(1), bv)), both, general);
+    b_.SetInsertPoint(both);
+    Value *x = intValue(a), *y = intValue(bv);
+    Value *limit = ConstantInt::get(i64_, (uint64_t)1 << 53), *half = ConstantInt::get(i64_, (uint64_t)1 << 52);
+    Value *small = b_.CreateAnd(b_.CreateICmpULT(b_.CreateAdd(x, half), limit),
+                                b_.CreateICmpULT(b_.CreateAdd(y, half), limit));
+    branchLikely(b_.CreateAnd(small, b_.CreateICmpNE(y, ConstantInt::get(i64_, 0))), divide, general);
+    b_.SetInsertPoint(divide);
+    Value *q = b_.CreateSDiv(x, y, "q");
+    Value *max = ConstantInt::get(i64_, (uint64_t)XB_NUM_FITS_MAX);
+    Value *min = ConstantInt::getSigned(i64_, XB_NUM_FITS_MIN);
+    branchLikely(b_.CreateAnd(b_.CreateICmpNE(q, max), b_.CreateICmpNE(q, min)), quotient, general);
+    b_.SetInsertPoint(quotient);
+    Value *wide = b_.CreateOr(b_.CreateICmpSGT(q, max), b_.CreateICmpSLT(q, min));
+    storeWords(d, b_.CreateOr(headerWord(XB_T_INT, 0, 0), defaultWidth(wide)), q);
+    b_.CreateBr(join);
+  } else {
+    b_.CreateBr(general);
+  }
+  b_.SetInsertPoint(general);
+  emitDivMod(div, a, bv, dest(div));
+  cacheWords(&div); // the quotient's words read here, where it is known (those read where the division stood are not)
 }
 
 Value *CodeGen::strLength(Value *str) {
@@ -394,6 +445,7 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
   }
   case Inline::Int: { // an integer as it is; a double truncated, an integer when it fits 64 bits (xb_dbl_fits_i64)
     // with the double's width, its own or else the default one (xb_num_dbl_width); the rest (NaN too): the runtime
+    if (fusedCalls_.count(&i)) emitIntOfQuotient(*static_cast<const xir::Instruction *>(i.operand(0)), d, join);
     BasicBlock *isInt = newBlock("int.int"), *other = newBlock("int.other"), *dbl = newBlock("int.double");
     BasicBlock *fits = newBlock("int.fits");
     Value *t = argType(0);
@@ -408,11 +460,9 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     b_.SetInsertPoint(dbl);
     Type *f64 = b_.getDoubleTy();
     Value *v = b_.CreateBitCast(intValue(arg(0)), f64);
-    auto widthWord = [&](uint64_t w) { return ConstantInt::get(i64_, w << headerShift(FWidth)); };
     Value *wide = b_.CreateOr(b_.CreateFCmpOGT(v, ConstantFP::get(f64, (double)XB_NUM_FITS_MAX)),
                               b_.CreateFCmpOLT(v, ConstantFP::get(f64, (double)XB_NUM_FITS_MIN)));
-    Value *width = b_.CreateSelect(b_.CreateICmpNE(own, ConstantInt::get(i64_, 0)), own,
-                                   b_.CreateSelect(wide, widthWord(XB_NUM_WIDE_WIDTH), widthWord(XB_NUM_WIDTH)));
+    Value *width = b_.CreateSelect(b_.CreateICmpNE(own, ConstantInt::get(i64_, 0)), own, defaultWidth(wide));
     // A double in [-2^63, 2^63) converts truncated, as trunc() then the conversion would (no double lies between
     // -2^63 - 1 and -2^63).
     Value *inRange = b_.CreateAnd(b_.CreateFCmpOGE(v, ConstantFP::get(f64, -9223372036854775808.0)),

@@ -1,0 +1,12 @@
+
+    3          3          5          1 {3,0} [abc]
+    4          3          5          1 {3,0} [abc ]
+    7          2          9         10 {2,0} [abc def]
+ huge          1         11         10 {1,8} [abc def ghi         ]
+ huge          1         11         10 {1,8} [abc def ghi         ]
+ huge          1         11         10 {1,8} [abc def ghi         ]
+ huge          1         11         10 {1,8} [abc def ghi         ]
+ huge          1         11         10 {1,8} [abc def ghi         ]
+MemoLine huge: error
+MemoLine huge: error
+MemoLine huge: error

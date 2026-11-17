@@ -47,7 +47,7 @@ static int scan_init(scan *m, uint32_t argc, const xb_item *argv, uint32_t at) {
   if (!argc || argv[0].type != XB_T_STRING || width <= 0) return 0;
   m->s = argv[0].v.s->data;
   m->len = argv[0].v.s->len;
-  m->width = (size_t)width;
+  m->width = xb_size_sat((uint64_t)width);
   int64_t tab = num_or(argc, argv, at, 4);
   m->tab = tab < 0 || (uint64_t)tab >= m->width ? m->width - 1 : (size_t)tab;
   if (m->tab == 0) m->tab = 1;
@@ -122,6 +122,10 @@ void xbf_MEMOLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_set_str(ret, xb_str_empty());
     return;
   }
+  if ((uint64_t)num_or(argc, argv, 1, 79) > XB_STR_MAX_LEN) { /* the line is padded to the width: past any string */
+    xb_error_overflow(ctx, ret, "MEMOLINE", argc, argv);
+    return;
+  }
   size_t from = m.off;
   scan_line(&m);
   char *out = malloc(m.width ? m.width : 1);
@@ -194,7 +198,7 @@ void xbf_MLCTOPOS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     /* a negative line or column is past every one */
     int64_t left = skip_lines(&m, line < 0 ? INT64_MAX : line - 1);
     if (col != 0 && left == 0) {
-      m.stopCol = m.width = col < 0 ? SIZE_MAX : (size_t)col;
+      m.stopCol = m.width = col < 0 ? SIZE_MAX : xb_size_sat((uint64_t)col);
       scan_line(&m);
     }
     pos = (int64_t)m.off;

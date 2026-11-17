@@ -18,7 +18,7 @@
  * STEAL_NEXT_NS: a task that ends soon runs the task it made ready itself (a continuation, a value handed over),
  * without a thread switch. A worker running a task that enters an operation that
  * may block counts as inactive meanwhile: when work waits, another worker takes its place (blocking handoff), up to
- * WORKERS_MAX; a worker beyond the target that stays idle SURPLUS_IDLE_NS ends.
+ * the most workers (workersMax); a worker beyond the target that stays idle SURPLUS_IDLE_NS ends.
  *
  * A worker's `run` word says what it does: IDLE (no task), RUNNING one, BLOCKED in an operation that may block, or
  * LONG: running one longer than LONG_TASK_NS while work waits, seen by the monitor. The last two count as away (not
@@ -109,10 +109,21 @@ static size_t timerCompactAt = 1024; /* the heap's size that has it compacted (t
 static void timers_wake(void);
 static void timers_compact(void);
 
+/* The most workers: WORKERS_MAX, or as many as have their stacks in a quarter of the address space the process may map
+ * when that is fewer (a 32-bit process, a limit set on the process): the rest is the heap's, which the collector
+ * needs to work, and the other threads'. The space is what the system allows, at most what user-space pointers reach
+ * (USER_SPACE). Set once, before any worker starts. */
+#define USER_SPACE (sizeof(void *) >= 8 ? (uint64_t)1 << 47 : (uint64_t)1 << 31)
+static uint32_t workersMax = WORKERS_MAX;
+
 static void make_pool(void) {
   if (!xb_mutex_init(&poolLock) || !xb_mutex_init(&timerLock)) xb_gc_fatal("cannot create the scheduler's locks");
+  uint64_t space = xb_platform_address_space();
+  if (space > USER_SPACE) space = USER_SPACE;
+  uint64_t room = space / 4 / XB_PROGRAM_THREAD_STACK;
+  if (room < workersMax) workersMax = room ? (uint32_t)room : 1;
   unsigned n = requested ? requested : xb_platform_cpu_count();
-  if (n > WORKERS_MAX) n = WORKERS_MAX;
+  if (n > workersMax) n = workersMax;
   xb_atomic_store32(&target, n ? n : 1, XB_RELEASE);
 }
 
@@ -261,7 +272,7 @@ static void worker_body(xb_ctx *ctx, void *arg);
 
 /* A worker made or reused, its thread started (under the pool's lock): NULL when none can be. */
 static worker *spawn_locked(void) {
-  if (xb_atomic_load32(&stopping, XB_ACQUIRE) || xb_atomic_load32(&total, XB_RELAXED) >= WORKERS_MAX) return NULL;
+  if (xb_atomic_load32(&stopping, XB_ACQUIRE) || xb_atomic_load32(&total, XB_RELAXED) >= workersMax) return NULL;
   worker *w = NULL;
   for (uint32_t k = 0; k < slots && !w; ++k)
     if (!xb_atomic_load32(&workers[k]->alive, XB_ACQUIRE)) w = workers[k];
@@ -483,7 +494,7 @@ static void tell_starving(void *p) {
 static void starved(int progress, int waiting) {
   static int64_t since;
   static int told;
-  int full = xb_atomic_load32(&total, XB_ACQUIRE) >= WORKERS_MAX ||
+  int full = xb_atomic_load32(&total, XB_ACQUIRE) >= workersMax ||
              (xb_atomic_load32(&unstarted, XB_RELAXED) &&
               xb_atomic_load32(&active, XB_ACQUIRE) < xb_atomic_load32(&target, XB_ACQUIRE));
   if (progress || !waiting || !full) {

@@ -15,15 +15,22 @@ static int str_args_ok(uint32_t argc, const xb_item *argv) {
 }
 
 /* The text of Str( n [, nWidth [, nDec]] ). A field too narrow for its
- * decimals is all stars. NULL when no memory holds the width asked (a size the program chose). */
-static xb_str *str_of(uint32_t argc, const xb_item *argv) {
+ * decimals is all stars. NULL with `*overflow` set when the width asked is
+ * past the widest field (INT32_MAX, which the formatter takes), NULL alone
+ * when no memory holds it (a size the program chose). */
+static xb_str *str_of(uint32_t argc, const xb_item *argv, int *overflow) {
   int width, dec;
+  *overflow = 0;
   xb_num_field(&argv[0], &width, &dec);
   if (width > XB_STR_MAX_WIDTH) width = XB_STR_MAX_WIDTH;
   int hasWidth = argc > 1;
   if (hasWidth) {
     int64_t w = xb_num_to_i64(&argv[1]);
-    width = w < 1 ? xb_num_int_width(0) : (w > INT32_MAX ? INT32_MAX : (int)w);
+    if (w > INT32_MAX) {
+      *overflow = 1;
+      return NULL;
+    }
+    width = w < 1 ? xb_num_int_width(0) : (int)w;
     dec = 0;
   }
   if (width > 1 && argc > 2) {
@@ -36,10 +43,13 @@ static xb_str *str_of(uint32_t argc, const xb_item *argv) {
   return s;
 }
 
-/* BASE/9032 Memory low: Str()'s width asked more than memory holds. */
-static int str_made(xb_ctx *ctx, xb_item *ret, const char *function, xb_str *s, uint32_t argc, xb_item *argv) {
+/* Str()'s text made: else BASE/1234 String overflow for a width past the widest field, BASE/9032 Memory low for one
+ * that memory does not hold. */
+static int str_made(xb_ctx *ctx, xb_item *ret, const char *function, xb_str *s, int overflow, uint32_t argc,
+                    xb_item *argv) {
   if (s) return 1;
-  xb_error_memory(ctx, ret, function, argc, argv);
+  if (overflow) xb_error_overflow(ctx, ret, function, argc, argv);
+  else xb_error_memory(ctx, ret, function, argc, argv);
   return 0;
 }
 
@@ -50,8 +60,9 @@ void xbf_STR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1099, "STR", argc, argv);
     return;
   }
-  xb_str *s = str_of(argc, argv);
-  if (str_made(ctx, ret, "STR", s, argc, argv)) xb_set_str(ret, s);
+  int overflow;
+  xb_str *s = str_of(argc, argv, &overflow);
+  if (str_made(ctx, ret, "STR", s, overflow, argc, argv)) xb_set_str(ret, s);
 }
 
 /* StrZero(): Str() with the leading blanks (after a sign) turned into zeros. */
@@ -60,8 +71,9 @@ void xbf_STRZERO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 6003, "STRZERO", argc, argv);
     return;
   }
-  xb_str *s = str_of(argc, argv);
-  if (!str_made(ctx, ret, "STRZERO", s, argc, argv)) return;
+  int overflow;
+  xb_str *s = str_of(argc, argv, &overflow);
+  if (!str_made(ctx, ret, "STRZERO", s, overflow, argc, argv)) return;
   xb_set_str(ret, s);
   size_t i = 0;
   int neg = 0;

@@ -55,7 +55,7 @@ static inline xb_gc_hdr *xb_gc_header(const void *obj) { return (xb_gc_hdr *)obj
 /* Items outside frames that stay alive for the whole run (module STATICs). */
 void  xb_gc_add_root(xb_item *items, size_t count); /* may run before the first context */
 
-/* xb_gc_write_item, the barrier for array elements, is in xbrt.h. */
+/* xb_gc_write_item and xb_gc_write_items, the barriers for array elements, are in xbrt.h. */
 
 void  xb_gc_init(void);                    /* by every context made: the heap is made once */
 /* Threads. A thread that runs xBase code attaches first and detaches before it ends; the end of its stack is the one
@@ -90,9 +90,6 @@ size_t xb_gc_heap_bytes(void);
 /* Whether the heap's books agree (tests, after a collection): every free block in use listed as free, no block given
  * back or never handed out among those in use, the counts of spare blocks right. */
 int    xb_gc_consistent(void);             /* the heap's memory the system has given it now (blocks in use, large) */
-/* The barrier after storing items `from` .. `to` - 1 of an array: each card they cover recorded when one of its items
- * among them refers to an object. */
-void   xb_gc_write_items(xb_array *a, size_t from, size_t to);
 /* Finalization: an object registered with xb_gc_finalizable that a
  * collection finds unreachable is kept alive, queued, and every context gets
  * XB_PENDING_FINALIZE; xb_gc_next_finalized hands the queued objects out, in

@@ -33,7 +33,7 @@ private: caller -> function, caller sees function
 own privates: mine/2 2 after: UU
 dates: 16/11/2026 16/11/2026 16/11/26 caller: mm/dd/yy
 tables:         21 .F.          1
-call stack: NAMES<MAIN, then NAMES<
+call stack: NAMES<, then NAMES<
 -- tasks
 when all: 101 2 202
 when any:        303

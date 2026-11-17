@@ -1,0 +1,15 @@
+
+SPACE      ok ok ok ok ok
+REPLICATE  ok ok ok ok ok
+PADL       ok ok ok ok ok
+PADR       ok ok ok ok ok
+PADC       ok ok ok ok ok
+ARRAY      ok ok ok ok ok
+ARRAY      ok ok ok ok ok
+ASIZE      ok ok ok ok ok
+HALLOCATE  ok ok ok ok ok
+MEMOLINE   ok ok ok ok ok
+STR        ok ok ok ok ok
+STRZERO    ok ok ok ok ok
+STR        ok ok ok ok ok
+goes on:       1000       1000

@@ -160,7 +160,7 @@ void xbf_ALLTRIM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static int result_fits(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item *argv, uint64_t len,
                        const char *function) {
   if (len <= XB_STR_MAX_LEN) return 1;
-  xb_error_in(ctx, function, ret, EG_STROVERFLOW, 1234, function, XB_ERR_SUBSTITUTE, argc, argv);
+  xb_error_overflow(ctx, ret, function, argc, argv);
   return 0;
 }
 

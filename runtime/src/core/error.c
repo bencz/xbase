@@ -352,3 +352,7 @@ void xb_seq_resume(xb_ctx *ctx, uint32_t requests, const xb_item *value) {
 void xb_error_memory(xb_ctx *ctx, xb_item *ret, const char *function, uint32_t argc, const xb_item *argv) {
   xb_error_in(ctx, function, ret, EG_MEM, XB_CODE_MEMORY, function, XB_ERR_SUBSTITUTE, argc, argv);
 }
+
+void xb_error_overflow(xb_ctx *ctx, xb_item *ret, const char *function, uint32_t argc, const xb_item *argv) {
+  xb_error_in(ctx, function, ret, EG_STROVERFLOW, XB_CODE_STROVERFLOW, function, XB_ERR_SUBSTITUTE, argc, argv);
+}

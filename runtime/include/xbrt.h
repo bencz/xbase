@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 48u
+#define XB_ABI_VERSION 49u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -370,8 +370,12 @@ void     xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc,
 /* Write barrier after storing into element `index` of an array: for a heap
  * value in an old array, a large array records the element's card, another
  * the whole array. Compiled code that stores an element in place calls it for
- * heap values only. */
+ * heap values only. xb_gc_write_items is the barrier after storing items
+ * `from` .. `to` - 1: each card they cover recorded when one of its items among
+ * them refers to an object; compiled code calls it when the array's state byte
+ * is old and not recorded (xb_gc_needs_record). */
 void     xb_gc_write_item(xb_array *a, size_t index);
+void     xb_gc_write_items(xb_array *a, size_t from, size_t to);
 /* [ABI] Temporary roots of a context, as many as nested calls need (a vector that grows; growing it is the only
  * allocation, and never a collection): C code, and compiled code while it makes a codeblock's cells. */
 void     xb_gc_root_push(xb_ctx *ctx, xb_item *it);
@@ -719,7 +723,20 @@ void     xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
  * starts with xb_gen_restore (its frame's other `nslots` - 1 slots back from
  * the enumerator; the state to resume in: 0 at the start), saves them and the
  * element with xb_gen_yield before it returns .T. (`state` goes on after that
- * YIELD), and calls xb_gen_done before it returns .F. at the end. */
+ * YIELD), and calls xb_gen_done before it returns .F. at the end. The
+ * enumerator's variables, which compiled code reads and writes in place while
+ * it is local (XB_GC_STATE_SHARED clear): the element the last step yielded;
+ * the state to resume in (an integer, XB_GEN_ENDED once it has ended and while
+ * a step runs); the frame between steps (always an array, whose item k is slot
+ * k: the arguments until the first YIELD saves them all, nothing after the
+ * end); the resume function. */
+#define XB_GEN_CURRENT 0u
+#define XB_GEN_STATE   1u
+#define XB_GEN_FRAME   2u
+#define XB_GEN_RESUME  3u
+#define XB_GEN_VARS    4u
+#define XB_GEN_ENDED   (-1)
+extern const xb_class xb_generator_class; /* the class of every generator's enumerator */
 void     xb_gen_new(xb_ctx *ctx, xb_item *r, xb_func resume, uint32_t argc, const xb_item *argv);
 int32_t  xb_gen_restore(xb_ctx *ctx, const xb_item *gen, xb_item *slots, uint32_t nslots);
 void     xb_gen_yield(xb_ctx *ctx, const xb_item *gen, const xb_item *slots, uint32_t nslots, uint32_t state,

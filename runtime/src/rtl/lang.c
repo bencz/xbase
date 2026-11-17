@@ -79,11 +79,13 @@ void xbf___GCMEMORY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 /* The call stack level `n` (0: the function calling, 1: its caller, ...)
- * from argument 0; a level below 0 is the asking function itself. */
+ * from argument 0; a level below 0 is the asking function itself. In a task
+ * the stack ends with the task's own calls (task_base). */
 static const xb_frame *stack_level(const xb_ctx *ctx, uint32_t argc, const xb_item *argv, int64_t *n) {
   *n = argc && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 0;
   int64_t k = *n;
-  for (const xb_frame *f = ctx->frames; f; f = f->prev)
+  const xb_frame *end = ctx->task_depth ? ctx->task_base : NULL;
+  for (const xb_frame *f = ctx->frames; f && f != end; f = f->prev)
     if (xb_frame_shown(f) && k-- == 0) return f;
   return NULL;
 }

@@ -11,9 +11,6 @@
 
 void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
-/* The stack a thread of the program may grow to (reserved, committed as it is used). */
-#define THREAD_STACK ((size_t)16 << 20)
-
 /* The looks at a held lock's state before its waiter sleeps (no pause instruction: loads only). */
 #define LOCK_SPINS 128u
 
@@ -142,7 +139,7 @@ int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg) {
   *t = (program_thread){body, arg};
   xb_atomic_add32(&running, 1, XB_ACQ_REL);
   xb_thread h;
-  if (!xb_thread_start(&h, THREAD_STACK, program_thread_main, t)) {
+  if (!xb_thread_start(&h, XB_PROGRAM_THREAD_STACK, program_thread_main, t)) {
     xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL);
     free(t);
     return 0;

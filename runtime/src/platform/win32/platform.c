@@ -82,6 +82,13 @@ size_t xb_platform_resident_bytes(void) {
   return counters.WorkingSetSize;
 }
 
+size_t xb_platform_address_space(void) {
+  MEMORYSTATUSEX status;
+  status.dwLength = sizeof status;
+  if (!GlobalMemoryStatusEx(&status) || status.ullTotalVirtual > SIZE_MAX) return SIZE_MAX;
+  return (size_t)status.ullTotalVirtual;
+}
+
 struct xb_thread_impl {
   HANDLE thread;
   void (*fn)(void *);

@@ -426,16 +426,23 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   functions (`Generator::genGenerator`): the function itself, which returns `gen.new` of its resume function with its
   arguments, and `NAME.resume`, the body: it starts with `gen.restore` and a dispatch on the state it returns (0: the
   start; k: after the k-th `YIELD`), `YIELD` is the terminator `gen.yield` (the frame and the element saved, `.T.`
-  returned) whose target is where state k goes on, and `RETURN` and the end are `gen.done` and `.F.`. Inside a sequence
-  `WITH` a handler (also `TRY`), the error block it replaced lives in a frame variable of its own
-  (`Cleanup::oldBlockVar`, `Generator::hiddenVar`): before `gen.yield` each such handler, innermost first, is read
-  (`seq.with` of NIL) and the replaced block put back; after it, outermost first, `seq.with` puts the handler back and
-  stores the caller's block of the moment as the one to put back in the end. Then `makeResumable`
-  (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that lives across a
-  `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a `Bool` or `I64`
-  boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone. The dispatch
-  goes only to the points a step can stop at: those of code nothing reaches (a copy of `ALWAYS` code after a `RETURN`)
-  are left out with it.
+  returned) whose target is where state k goes on, and `RETURN` and the end are `gen.done` and `.F.`. Code generation
+  (`FastPaths.cpp`) does `gen.restore` and `gen.yield` in place for a local enumerator whose frame holds every saved
+  slot (its length at least the saved slots: every step after the first `YIELD`, and a first step whose arguments fill
+  them): the slots copied with a constant length, the state read and set, the element stored, with the barriers
+  (`xb_gc_write_items` for an old frame not recorded, the enumerator's state byte); a shared enumerator or a shorter
+  frame calls `xb_gen_restore` and `xb_gen_yield`. `enum.len` of a local generator's enumerator that has not ended calls
+  its resume function itself (`emitEnumLen`, as `xb_gen_move_next` does: a step that fails ends it with `xb_gen_done`),
+  and `each.move` of a local loop reference over one copies its `Current` into the reference's own item; other
+  collections and enumerators take `xb_enum_len` and `xb_each_move`. Inside a sequence `WITH` a handler (also `TRY`),
+  the error block it replaced lives in a frame variable of its own (`Cleanup::oldBlockVar`, `Generator::hiddenVar`):
+  before `gen.yield` each such handler, innermost first, is read (`seq.with` of NIL) and the replaced block put back;
+  after it, outermost first, `seq.with` puts the handler back and stores the caller's block of the moment as the one to
+  put back in the end. Then `makeResumable` (`xir/passes/Resumable.cpp`) moves every value whose definition does not
+  dominate a use (one that lives across a `YIELD`) into a frame variable of its own, stored where it is computed and
+  loaded before each use (a `Bool` or `I64` boxed with `box.bool`/`box.i64`); promote-variables and typed continuations
+  leave generators alone. The dispatch goes only to the points a step can stop at: those of code nothing reaches (a copy
+  of `ALWAYS` code after a `RETURN`) are left out with it.
 - An `ASYNC` function is generated the same way (`Generator::genResumable`, `FuncDecl::async`, the task as parameter
   0): its entry returns `async.new` of its resume function with its arguments, its entry named (`Instruction::blockFn`,
   kept when the entry is inlined); the resume function starts with `async.restore` and the same dispatch, `RETURN`
@@ -547,13 +554,17 @@ emits the object file.
   itself; `Int()` of an integer is it, of a double its conversion when it lies in [-2^63, 2^63) (truncated, as
   `xb_dbl_fits_i64` of its truncation would allow), with the double's width, its own or else the default one
   (`xb_num_dbl_width`'s rule, from the constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`,
-  `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too) calls the runtime; `Abs()` of an integer not below 0 is it, of a
-  negative one (not INT64_MIN) its negation, of a double its magnitude with its decimals; `Max()` and `Min()` of two
-  numbers (compared as doubles) or two dates copy the first when it wins or ties, else the second; `Round( n, d )` with
-  an integer `d` within 22 places is `xbf_ROUND`'s formula (a table of the exact powers of ten, `fma`,
-  `XB_DBL_INTEGRAL`; the truncation `truncDouble`, through an integer below 2^52, since `llvm.trunc` is a call of the C
-  library where the target lacks the instruction, as x86-64 without SSE4.1 does, and so is `doubleRemainder`'s test of
-  integral operands); `Sqrt()`, `Exp()` and `Log()` of a number are the C library's (`llvm.sqrt`, `llvm.exp`,
+  `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too) calls the runtime; `Int( x / y )`, whose division is right before
+  it and used nowhere else, is lowered as one (`emitIntOfQuotient`): two integers in [-2^52, 2^52), `y` not 0,
+  give their truncated integer quotient (`sdiv`, which the double quotient truncated equals) with the width `Int()`
+  would give that double, unless the quotient is `XB_NUM_FITS_MAX` or `XB_NUM_FITS_MIN`, where the double may lie past
+  the bound; anything else is the division (`emitDivMod`) and then `Int()` as above; `Abs()` of an integer not below 0
+  is it, of a negative one (not INT64_MIN) its negation, of a double its magnitude with its decimals; `Max()` and
+  `Min()` of two numbers (compared as doubles) or two dates copy the first when it wins or ties, else the second;
+  `Round( n, d )` with an integer `d` within 22 places is `xbf_ROUND`'s formula (a table of the exact powers of ten,
+  `fma`, `XB_DBL_INTEGRAL`; the truncation `truncDouble`, through an integer below 2^52, since `llvm.trunc` is a call of
+  the C library where the target lacks the instruction, as x86-64 without SSE4.1 does, and so is `doubleRemainder`'s
+  test of integral operands); `Sqrt()`, `Exp()` and `Log()` of a number are the C library's (`llvm.sqrt`, `llvm.exp`,
   `llvm.log`) with Clipper's results outside the reals and SET DECIMALS decimals; `Mod()` of two numbers and a base
   other than 0 is `doubleRemainder` moved to the base's sign; outside an inlined body, `PCount()` is the function's own
   `argc` (less `Self` in a method), and `PValue( n )` with an integer `n` copies the parameter's slot or the argument as

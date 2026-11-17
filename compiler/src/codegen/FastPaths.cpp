@@ -164,6 +164,7 @@ static Value *doubleCompare(IRBuilderBase &b, xir::IntPred pred, Value *x, Value
 // which one is a double are done here, with xb_op_add's, xb_op_sub's,
 // xb_op_mul's and xb_compare's rules; everything else calls the operator.
 void CodeGen::emitBinary(const xir::Instruction &i) {
+  if (fusedDivision(i)) return; // with the Int() of its quotient
   if (const xb_bit_function *f = bitOperator(i.binop)) {
     emitBitOperator(i, *f);
     return;
@@ -777,6 +778,137 @@ void CodeGen::emitIndexSet(const xir::Instruction &i) {
   checkPending(unwind_);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
+}
+
+// The frame of a local enumerator `gen` (its object) whose length is at least savedSize (every step after the first
+// YIELD, and a first step whose arguments fill the slots), its GC state byte in `state`; a shared enumerator or a
+// shorter frame goes to `slow`.
+Value *CodeGen::genFrame(Value *gen, BasicBlock *slow, Value *&state) {
+  Value *var = objectVariable(gen, ConstantInt::get(i32_, XB_GEN_FRAME), slow, state);
+  Value *frame = itemPointer(var, "frame"); // always an array (xbrt.h)
+  BasicBlock *whole = newBlock("gen.frame");
+  branchLikely(b_.CreateICmpUGE(arrayLength(frame), ConstantInt::get(i64_, plan_->savedSize())), whole, slow);
+  b_.SetInsertPoint(whole);
+  return frame;
+}
+
+// gen.restore: a local enumerator's frame copied into the step's slots after its own (slot 0), and the state to resume
+// in, the state then XB_GEN_ENDED until the step yields, as xb_gen_restore does; the rest (a frame shorter than the
+// slots, a shared enumerator) through it.
+void CodeGen::emitGenRestore(const xir::Instruction &i) {
+  uint32_t n = plan_->savedSize();
+  Value *genItem = rawAddress(*i.var);
+  Value *gen = itemPointer(genItem, "gen");
+  BasicBlock *slow = newBlock("gen.restore"), *join = newBlock("gen.restored");
+  Value *state;
+  Value *frame = genFrame(gen, slow, state);
+  if (n > 1)
+    b_.CreateMemCpy(slot(1), MaybeAlign(itemAlign_), arrayElement(frame, ConstantInt::get(i64_, 1)),
+                    MaybeAlign(itemAlign_), (uint64_t)(n - 1) * itemSize_);
+  Value *stateVar = b_.CreateInBoundsGEP(itemTy_, b_.CreateStructGEP(objectTy_, gen, ObjectVars),
+                                         ConstantInt::get(i64_, XB_GEN_STATE), "gen.state");
+  Value *fast = b_.CreateSExt(b_.CreateTrunc(intValue(stateVar), i32_), i64_);
+  storeInt(stateVar, ConstantInt::getSigned(i64_, XB_GEN_ENDED)); // an integer: no barrier
+  BasicBlock *fastEnd = b_.GetInsertBlock();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  Value *called = b_.CreateSExt(
+      b_.CreateCall(rtGenRestore_, {fnCtx_, genItem, fnBase_, ConstantInt::get(i32_, n)}), i64_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+  PHINode *r = b_.CreatePHI(i64_, 2, "gen.resume.state");
+  r->addIncoming(fast, fastEnd);
+  r->addIncoming(called, slow);
+  values_[&i] = r;
+}
+
+// gen.yield: the step's slots after the enumerator's own copied into a local enumerator's frame (then the frame's
+// barrier: xb_gc_write_items when it is old and not recorded), its element and the state to resume in stored, as
+// xb_gen_yield does; the rest through it.
+void CodeGen::emitGenYield(const xir::Instruction &i) {
+  uint32_t n = plan_->savedSize();
+  Value *genItem = rawAddress(*i.var);
+  Value *gen = itemPointer(genItem, "gen");
+  Value *value = addr(i.operand(0));
+  BasicBlock *slow = newBlock("gen.yield"), *join = newBlock("gen.yielded");
+  Value *state;
+  Value *frame = genFrame(gen, slow, state);
+  if (n > 1) {
+    b_.CreateMemCpy(arrayElement(frame, ConstantInt::get(i64_, 1)), MaybeAlign(itemAlign_), slot(1),
+                    MaybeAlign(itemAlign_), (uint64_t)(n - 1) * itemSize_);
+    Value *bits = b_.CreateAnd(stateByte(frame, AtomicOrdering::Monotonic),
+                               ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
+    BasicBlock *done = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gen.frame.old");
+    b_.CreateCall(rtWriteItems_, {frame, ConstantInt::get(intPtrTy_, 1), ConstantInt::get(intPtrTy_, n)});
+    endUnlikely(done);
+  }
+  Value *vars = b_.CreateStructGEP(objectTy_, gen, ObjectVars);
+  copyItem(b_.CreateInBoundsGEP(itemTy_, vars, ConstantInt::get(i64_, XB_GEN_CURRENT), "gen.current"), value);
+  storeInt(b_.CreateInBoundsGEP(itemTy_, vars, ConstantInt::get(i64_, XB_GEN_STATE), "gen.state"),
+           ConstantInt::get(i64_, i.index));
+  recordIfOld(gen, state);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  b_.CreateCall(rtGenYield_, {fnCtx_, genItem, fnBase_, ConstantInt::get(i32_, n), ConstantInt::get(i32_, i.index),
+                              value});
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// The object of `coll`, an object item, when it is a local generator's enumerator; any other object goes to `other`.
+Value *CodeGen::localGenerator(Value *coll, BasicBlock *other) {
+  if (!generatorClass_)
+    generatorClass_ = new GlobalVariable(mod_, i8_, true, GlobalValue::ExternalLinkage, nullptr, "xb_generator_class");
+  Value *obj = itemPointer(coll, "obj");
+  Value *cls = loadFrom(ptrTy_, b_.CreateStructGEP(objectTy_, obj, ObjectCls), Mem::Unknown, "cls");
+  BasicBlock *gen = newBlock("gen");
+  b_.CreateCondBr(b_.CreateICmpEQ(cls, generatorClass_), gen, other);
+  b_.SetInsertPoint(gen);
+  BasicBlock *local = newBlock("gen.local");
+  branchLikely(isLocal(obj), local, other);
+  b_.SetInsertPoint(local);
+  return obj;
+}
+
+// enum.len of a local generator's enumerator that has not ended: its next step run here, its resume function called
+// as xb_gen_move_next calls it (INT64_MAX when the step yields, else 0; a step that fails ends the generator); the
+// rest through xb_enum_len.
+void CodeGen::emitEnumLen(const xir::Instruction &i) {
+  Value *coll = callArg(addr(i.operand(0)), 0);
+  BasicBlock *object = newBlock("enum.object"), *slow = newBlock("enum.len"), *join = newBlock("enum.len.end");
+  b_.CreateCondBr(b_.CreateICmpEQ(typeOf(i.operand(0), coll), ConstantInt::get(i32_, XB_T_OBJECT)), object, slow);
+  b_.SetInsertPoint(object);
+  Value *gen = localGenerator(coll, slow);
+  Value *vars = b_.CreateStructGEP(objectTy_, gen, ObjectVars);
+  auto var = [&](uint32_t k) { return b_.CreateInBoundsGEP(itemTy_, vars, ConstantInt::get(i64_, k)); };
+  BasicBlock *step = newBlock("gen.step");
+  branchLikely(b_.CreateICmpSGE(intValue(var(XB_GEN_STATE)), ConstantInt::get(i64_, 0)), step, slow);
+  b_.SetInsertPoint(step);
+  Value *resume = b_.CreateIntToPtr(intValue(var(XB_GEN_RESUME)), ptrTy_, "resume");
+  Value *ret = scratchItem(1);
+  setNil(ret);
+  b_.CreateCall(xbFuncTy_, resume, {fnCtx_, ret, ConstantInt::get(i32_, 1), coll});
+  Value *pending = loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxPending), Mem::Ctx, "pending");
+  cast<LoadInst>(pending)->setAtomic(AtomicOrdering::Monotonic);
+  Value *failed = b_.CreateICmpNE(b_.CreateAnd(pending, ConstantInt::get(i32_, XB_PENDING_UNWIND)),
+                                  ConstantInt::get(i32_, 0));
+  BasicBlock *ended = beginUnlikely(failed, "gen.failed");
+  b_.CreateCall(rtGenDone_, {fnCtx_, coll});
+  endUnlikely(ended);
+  Value *yielded = b_.CreateAnd(b_.CreateNot(failed),
+                                b_.CreateAnd(b_.CreateICmpEQ(itemType(ret), ConstantInt::get(i32_, XB_T_LOGICAL)),
+                                             logicalValue(ret)));
+  Value *stepped = b_.CreateSelect(yielded, ConstantInt::get(i64_, INT64_MAX), ConstantInt::get(i64_, 0));
+  BasicBlock *steppedEnd = b_.GetInsertBlock();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  Value *called = b_.CreateCall(rtEnumLen_, {fnCtx_, coll});
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+  PHINode *n = b_.CreatePHI(i64_, 2, "enum.len");
+  n->addIncoming(stepped, steppedEnd);
+  n->addIncoming(called, slow);
+  values_[&i] = n;
 }
 
 } // namespace xb

@@ -353,7 +353,8 @@ ASYNC FUNCTION Tables()
    n := n * 10 + FIELD->N
 RETURN n
 
-// The call stack: the caller below the first step; nothing below a later step (it runs on a worker).
+// The call stack: the task's own calls only, in the first step (which runs on the caller's thread, above the caller's
+// frames) as in a later one (on a worker): nothing below the function either time.
 ASYNC FUNCTION Names()
    LOCAL c := ProcName( 0 ) + "<" + ProcName( 1 )
    AWAIT TaskDelay( 1 )

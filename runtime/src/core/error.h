@@ -33,6 +33,9 @@ int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode
 /* BASE/9032 Memory low (XB_CODE_MEMORY) raised inside `function` for a size the program chose that no memory holds; the
  * error block's value, if it returns, is the function's result. */
 void xb_error_memory(xb_ctx *ctx, xb_item *ret, const char *function, uint32_t argc, const xb_item *argv);
+/* BASE/1234 String overflow (XB_CODE_STROVERFLOW) raised inside `function` for a string the program asked longer than
+ * any it can make (past XB_STR_MAX_LEN, or a field past the widest one); the error block's value is the result. */
+void xb_error_overflow(xb_ctx *ctx, xb_item *ret, const char *function, uint32_t argc, const xb_item *argv);
 
 /* Raises an Error object again (a task's failure, for the code that waits for it): the error block evaluated with it,
  * whose result `result` takes (1); 0 with a request to unwind pending. */

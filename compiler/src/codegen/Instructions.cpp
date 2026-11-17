@@ -495,7 +495,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::ForTest: emitForTest(i); break;
   case Op::EnumLen:
-    values_[&i] = b_.CreateCall(rtEnumLen_, {fnCtx_, callArg(addr(ops[0]), 0)});
+    emitEnumLen(i);
     checkPending(unwind_);
     break;
   case Op::EachSource:
@@ -511,7 +511,8 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtEachEnter_, {fnCtx_, dest(i), rawAddress(*i.var), eachHow(i), callArg(addr(ops[1]), 0)});
     break;
   }
-  case Op::EachMove: { // in place to an element of a local array or hash without holes (xb_each_move for the rest)
+  case Op::EachMove: { // in place: to an element of a local array or hash without holes, or a local generator's Current
+    // into the loop's own item (xb_each_move for the rest)
     Value *var = rawAddress(*i.var);
     BasicBlock *slow = newBlock("each.move"), *join = newBlock("each.moved"), *local = newBlock("each.local");
     if (i.var->kind == xir::Var::Kind::Static) { // shared storage: the runtime reads the variable whole
@@ -533,6 +534,18 @@ void CodeGen::emit(const xir::Instruction &i) {
     branchLikely(isLocal(ref), refLocal, slow);
     b_.SetInsertPoint(refLocal);
     tag(b_.CreateStore(value(ops[1]), b_.CreateStructGEP(refTy_, ref, RefIndex)), Mem::Unknown);
+    Value *coll = heapItem(b_.CreateStructGEP(refTy_, ref, RefColl));
+    BasicBlock *object = newBlock("each.object"), *other = newBlock("each.collection");
+    b_.CreateCondBr(b_.CreateICmpEQ(itemType(coll), ConstantInt::get(i32_, XB_T_OBJECT)), object, other);
+    b_.SetInsertPoint(object); // a local generator's Current into the loop's own item, as xb_ref_own_put puts it
+    Value *gen = localGenerator(coll, slow);
+    Value *refState = stateByte(ref, AtomicOrdering::Monotonic);
+    Value *vars = b_.CreateStructGEP(objectTy_, gen, ObjectVars);
+    copyItem(b_.CreateStructGEP(refTy_, ref, RefValue),
+             b_.CreateInBoundsGEP(itemTy_, vars, ConstantInt::get(i64_, XB_GEN_CURRENT), "gen.current"));
+    recordIfOld(ref, refState);
+    b_.CreateBr(join);
+    b_.SetInsertPoint(other);
     inlineRefTarget(ref, slow);
     b_.CreateBr(join);
     b_.SetInsertPoint(slow);
@@ -618,11 +631,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtGenNew_, {fnCtx_, d, functions_.at(i.callee.function), ConstantInt::get(i32_, ops.size()), argv});
     break;
   }
-  case Op::GenRestore: // the frame's slots after the enumerator's own (parameter 0)
-    values_[&i] = b_.CreateSExt(b_.CreateCall(rtGenRestore_, {fnCtx_, rawAddress(*i.var), fnBase_,
-                                                              ConstantInt::get(i32_, plan_->savedSize())}),
-                                i64_);
-    break;
+  case Op::GenRestore: emitGenRestore(i); break;
   case Op::GenDone: b_.CreateCall(rtGenDone_, {fnCtx_, rawAddress(*i.var)}); break;
   case Op::AsyncNew: { // the task, after its first step ran here: a QUIT there goes on unwinding
     Value *argv = operandGroup(i);
@@ -728,8 +737,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   case Op::GenYield: // the frame and the element into the enumerator; the step returns .T.
     shareOnEdge(i.parent, i.targets[0].block); // the next step enters the target through gen.dispatch
-    b_.CreateCall(rtGenYield_, {fnCtx_, rawAddress(*i.var), fnBase_, ConstantInt::get(i32_, plan_->savedSize()),
-                                ConstantInt::get(i32_, i.index), addr(ops[0])});
+    emitGenYield(i);
     storeLogical(fnRet_, b_.getInt1(true));
     b_.CreateBr(fnExit_);
     break;

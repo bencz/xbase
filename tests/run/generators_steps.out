@@ -1,0 +1,12 @@
+
+old frame:      20100
+old current: .T.         59
+old loop variable: .T.         30
+failed step:          3       1340 / .F. NIL
+shared: NIL 2345 .F.
+captured:         10         30
+methods: 122335566
+arguments: abcdef
+fewer arguments: CNUUUU6 UUUUUU6 UUUUUN6
+chained:       1330
+endless:       1000

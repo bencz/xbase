@@ -35,9 +35,14 @@ static inline uint8_t *xb_array_cards(const xb_array *a) {
 #define XB_ARRAY_MAX_LEN (SIZE_MAX / sizeof(xb_item) / 4)
 /* Longest string: its size with the header must not wrap. */
 #define XB_STR_MAX_LEN (SIZE_MAX / 2)
+/* A count the program gave, as a size_t: SIZE_MAX when it is past what size_t holds (32-bit hosts), never the count
+ * narrowed (2^32 + 5 is no 5). For a bound (a width, a column) that is as good as no bound. */
+static inline size_t xb_size_sat(uint64_t n) { return n > SIZE_MAX ? SIZE_MAX : (size_t)n; }
 /* BASE/9032 Memory low (EG_MEM): a string or an array of a size the program chose finds no memory, even after a full
  * collection; the program may handle it (the reference ends). */
 #define XB_CODE_MEMORY 9032
+/* BASE/1234 String overflow (EG_STROVERFLOW): a string longer than the largest one (xb_error_overflow). */
+#define XB_CODE_STROVERFLOW 1234
 /* CHARACTER:Split, and CHARACTER:StartsWith and EndsWith, given an argument that is no string. */
 #define XB_CODE_SPLIT 9033
 #define XB_CODE_AFFIX 9034
@@ -236,16 +241,19 @@ int        xb_class_send_as(xb_ctx *ctx, xb_item *r, xb_func classFunction, xb_c
 /* Generators (types/generator.c): whether `it` is a generator's enumerator;
  * one step (MoveNext: .T. while it yields an element, its CURRENT variable);
  * the messages it answers besides its CURRENT variable (1 when it did). */
-extern const xb_class xb_generator_class;
 static inline int xb_is_generator(const xb_item *it) {
   return it->type == XB_T_OBJECT && ((const xb_object *)it->v.p)->cls == &xb_generator_class;
 }
 int        xb_gen_move_next(xb_ctx *ctx, const xb_item *gen);
-/* The element the last step yielded (its CURRENT variable, the first). */
-#define XB_GEN_CURRENT 0u
+/* The element the last step yielded (its CURRENT variable). */
 static inline void xb_gen_current(const xb_item *gen, xb_item *dst) { xb_object_get(gen->v.p, XB_GEN_CURRENT, dst); }
 int        xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
 
+/* Items 1 .. n - 1 of `from` copied into `to` (frame slots after the holder's): a frame has a few slots, which a call
+ * of memcpy would cost more than the copy. */
+static inline void xb_frame_copy(xb_item *to, const xb_item *from, uint32_t n) {
+  for (uint32_t k = 1; k < n; ++k) to[k] = from[k];
+}
 /* The frame of a resumable function (a generator's, an asynchronous function's) between its steps: an array whose
  * items 1 .. are its slots (slot 0 is its holder, the step's argument). xb_frame_load copies them back into `slots`
  * (as many as both have); xb_frame_store saves `slots` into the array of the holder's variable `k` (made at the first
@@ -253,7 +261,7 @@ int        xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t
  * time runs a step. */
 static inline void xb_frame_load(const xb_array *frame, xb_item *slots, uint32_t nslots) {
   uint32_t n = nslots < frame->len ? nslots : (uint32_t)frame->len;
-  if (n > 1) memcpy(slots + 1, frame->items + 1, (n - 1) * sizeof *slots); /* one thread at a time runs a step */
+  xb_frame_copy(slots, frame->items, n); /* one thread at a time runs a step */
 }
 void       xb_frame_store_slow(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots, uint32_t nslots);
 static inline void xb_frame_store(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots,
@@ -263,7 +271,7 @@ static inline void xb_frame_store(xb_ctx *ctx, const xb_item *holder, uint32_t k
                                                             * items built in locals and then copied would stall */
     xb_array *frame = o->vars[k].v.p;
     if (frame->len >= nslots) {
-      memcpy(frame->items + 1, slots + 1, (nslots - 1) * sizeof *slots);
+      xb_frame_copy(frame->items, slots, nslots);
       xb_gc_write_items(frame, 1, nslots);
       return;
     }

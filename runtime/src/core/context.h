@@ -74,6 +74,9 @@ struct xb_ctx {
   xb_item  break_value;     /* the value of a pending BREAK (a root of the collector) */
   uint32_t error_depth;     /* error blocks running */
   uint32_t task_depth;      /* tasks running on the thread (one inside another that waits for it): __TaskFail() */
+  /* The frames when the innermost task's step began (with task_depth): the task's calls are those above them, the
+   * same whether the step runs on a worker or inline on the thread of its caller or waiter (ProcName() and its kin). */
+  const xb_frame *task_base;
   /* The step of an asynchronous function that runs on the thread (rtl/tasks.c, on the C stack): its resume function
    * finds its arguments, its frame and its task there. */
   struct xb_async_step *async_step;
@@ -176,7 +179,8 @@ void xb_env_close_areas(xb_ctx *ctx);
  * make one. xb_quit_all ends the program from any thread: every other context is asked to QUIT, and the scheduler's
  * workers to stop. xb_threads_end is the program's end: the threads that still run (ThreadStart()'s, the workers)
  * are asked to QUIT and waited for, and the tasks that did not start are canceled: before the EXIT procedures run,
- * and after them. */
+ * and after them. XB_PROGRAM_THREAD_STACK is the stack each one may grow to (reserved, committed as it is used). */
+#define XB_PROGRAM_THREAD_STACK ((size_t)16 << 20)
 int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg);
 void xb_quit_all(const xb_ctx *ctx);
 void xb_threads_end(xb_ctx *ctx);

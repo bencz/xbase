@@ -502,6 +502,8 @@ static void run_step(xb_ctx *ctx, const xb_item *task) {
   int32_t trapped = ctx->error_trapped;
   ctx->error_trap = 0;
   ++ctx->task_depth;
+  const xb_frame *base = ctx->task_base;
+  ctx->task_base = ctx->frames;
   if (xb_atomic_load32(xb_object_word(task, V_KIND), XB_RELAXED) == K_ASYNC) {
     xb_item it;
     xb_object_get(task->v.p, V_ENV, &it);
@@ -525,6 +527,7 @@ static void run_step(xb_ctx *ctx, const xb_item *task) {
     xb_flow_leave(&flow);
     xb_env_leave(ctx); /* its tables closed: errors there are still the task's */
   }
+  ctx->task_base = base;
   --ctx->task_depth;
   ctx->error_trap = trap;
   ctx->error_trapped = trapped;
@@ -1144,8 +1147,11 @@ void xb_async_new(xb_ctx *ctx, xb_item *r, xb_func entry, xb_func resume, uint32
   int32_t trapped = ctx->error_trapped;
   ctx->error_trap = 0;
   ++ctx->task_depth;
+  const xb_frame *base = ctx->task_base;
+  ctx->task_base = ctx->frames;
   st.env = xb_env_inherit(ctx);
   async_step_run(ctx, &st, &result);
+  ctx->task_base = base;
   --ctx->task_depth;
   ctx->error_trap = trap;
   ctx->error_trapped = trapped;

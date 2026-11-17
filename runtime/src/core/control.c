@@ -106,7 +106,7 @@ void xb_each_source(xb_ctx *ctx, xb_item *r, const xb_item *coll, uint32_t desce
 
 /* An enumerator's length so far, or the error of a value that is no collection. */
 XB_NOINLINE static int64_t enum_len_other(xb_ctx *ctx, const xb_item *coll) {
-  if (xb_is_generator(coll) || answers(coll, "MOVENEXT", 0)) return move_next(ctx, coll) ? INT64_MAX : 0;
+  if (answers(coll, "MOVENEXT", 0)) return move_next(ctx, coll) ? INT64_MAX : 0;
   xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, coll);
   return -1;
 }
@@ -118,6 +118,7 @@ int64_t xb_enum_len(xb_ctx *ctx, const xb_item *coll) {
   if (coll->type == XB_T_ARRAY) return (int64_t)xb_array_length(coll->v.p);
   if (coll->type == XB_T_STRING) return (int64_t)coll->v.s->len;
   if (coll->type == XB_T_HASH) return (int64_t)xb_hash_length(coll->v.p);
+  if (xb_is_generator(coll)) return xb_gen_move_next(ctx, coll) ? INT64_MAX : 0;
   return enum_len_other(ctx, coll);
 }
 

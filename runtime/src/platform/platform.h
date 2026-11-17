@@ -118,6 +118,10 @@ size_t xb_platform_page_size(void);
 /* The memory of the process that is resident now (its working set), in bytes: 0 when the system does not tell. */
 size_t xb_platform_resident_bytes(void);
 
+/* The address space the system lets the process map, in bytes (a limit set on it, RLIMIT_AS; Windows' virtual space
+ * of the process): SIZE_MAX when it tells none. */
+size_t xb_platform_address_space(void);
+
 /* One-time process setup, first thing in main. */
 void xb_platform_init(void);
 

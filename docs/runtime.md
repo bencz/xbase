@@ -97,12 +97,15 @@ xBase, such as `AEval`, shows its own frame, also with line 0: [Functions writte
 xBase](#functions-written-in-xbase)), and a function or message whose error raises the error block (`xb_error_in` names
 it: `SUBSTR`, `ERROR:FOO` for a message to an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block).
 Compiled code links a frame without slots too, over the function's own, while the body of a function or codeblock it
-runs in place (inlined, [xir.md](xir.md#passes)) runs: the call stack shows the callee as its call would.
-Operators and statements show nothing of their own. `ProcName( [nLevel] )`, `ProcLine( [nLevel] )` and
-`ProcFile( [nLevel] )` read it: level 0 is the function calling them, a non-numeric level is 0, a negative one gives
-`PROCNAME`, line 0 and `""`, a level past the end `""`, 0 and `""`. `ProcFile` gives the name of the function's source
-file (`xb_proc.file`; a codeblock's is its function's), without the directories: the reference keeps the path given to
-the compiler, which would put build directories into programs; a runtime function, in C or in xBase, has none (`""`).
+runs in place (inlined, [xir.md](xir.md#passes)) runs: the call stack shows the callee as its call would. Operators and
+statements show nothing of their own. `ProcName( [nLevel] )`, `ProcLine( [nLevel] )` and `ProcFile( [nLevel] )` read it:
+level 0 is the function calling them, a non-numeric level is 0, a negative one gives `PROCNAME`, line 0 and `""`, a
+level past the end `""`, 0 and `""`. In a task the stack ends with the task's own calls (`task_base`, the frames when
+its step began): the same whether the step runs on a worker or inline, on the thread of its caller (an asynchronous
+function's first step) or of a waiter, so an error a task fails with keeps its own calls only. `ProcFile` gives the name
+of the function's source file (`xb_proc.file`; a codeblock's is its function's), without the directories: the reference
+keeps the path given to the compiler, which would put build directories into programs; a runtime function, in C or in
+xBase, has none (`""`).
 
 `argc` and `argv` in the frame are the arguments as the function received them, stored only by a function or codeblock
 that calls `PCount()` or `PValue()` itself, or runs a macro, whose text may call them (`XB_PROC_ARGS` in its
@@ -251,9 +254,12 @@ rest of the runtime and compiled code use.
   `HAllocate`, `HCopy`, `MemoLine`, `Str` with a width) that no memory holds, even after a full collection, is the error
   `BASE/9032 Memory low` (`EG_MEM`), which the program may handle (`xb_gc_try_alloc`, `xb_str_try_alloc`,
   `xb_array_try_alloc`, `xb_array_resize_try`, `xb_hash_reserve_try`: for a large object); the reference ends the
-  program (`xb_error_memory` raises it). Other allocations that find no memory (the runtime's own, and objects up to
-  the largest size class), a lock that cannot be created and an ABI mismatch end the program through `xb_gc_fatal`,
-  the runtime's single fatal exit, with a message on standard error and exit code 1.
+  program (`xb_error_memory` raises it). A string asked longer than any the runtime makes (past `XB_STR_MAX_LEN`, or a
+  `Str`/`StrZero` width past `INT32_MAX`, the widest field the formatter takes) is `BASE/1234 String overflow`
+  (`EG_STROVERFLOW`, `xb_error_overflow`) instead, whatever memory there is; the reference falls back to the default
+  width for such a `Str` width. Other allocations that find no memory (the runtime's own, and objects up to the largest
+  size class), a lock that cannot be created and an ABI mismatch end the program through `xb_gc_fatal`, the runtime's
+  single fatal exit, with a message on standard error and exit code 1.
 - Rules for C code: a collection can run inside any allocation, so every object still needed must be reachable from a
   frame or a C root before the next allocation, and a store into a heap object that may have aged since it was allocated
   (any allocation in between) is followed by `xb_gc_write` or `xb_gc_write_item`. An object address in a C variable
@@ -457,37 +463,40 @@ the text it read (`xb_object_replace`), so tasks that fail with one error at onc
 ### Enumerators
 
 `FOR EACH x IN o`, for an object of a compiled class, goes through an enumerator (`core/control.c`): once before the
-loop, `xb_each_source` takes `o:GetEnumerator()`, or `o` itself when it answers `MoveNext` (calling its `Reset()`
-first when it has one); the enumerator answers `MoveNext()` (`.T.` while there is an element) and `Current` (a method,
-an `ACCESS` or a variable). Each iteration's length test (`xb_enum_len`) sends `MoveNext()` (a length as large as can
-be while it gives `.T.`, else 0), and `xb_each_move` puts `Current` in the loop reference's own item: the variable
-reads it, and assigning the variable changes nothing in the collection. `k` in `FOR EACH k => x` is the position.
-With `DESCEND` the enumerator's elements are gathered into an array first. An object without an enumerator is the
-error of any other value that is no collection (`BASE/1068`). The paths of arrays, strings and hashes come first and
-do not change.
+loop, `xb_each_source` takes `o:GetEnumerator()`, or `o` itself when it answers `MoveNext` (calling its `Reset()` first
+when it has one); the enumerator answers `MoveNext()` (`.T.` while there is an element) and `Current` (a method, an
+`ACCESS` or a variable). Each iteration's length test (`xb_enum_len`) sends `MoveNext()` (a length as large as can be
+while it gives `.T.`, else 0), and `xb_each_move` puts `Current` in the loop reference's own item: the variable reads
+it, and assigning the variable changes nothing in the collection. A generator's enumerator is stepped directly
+(`xb_gen_move_next`, its `Current` copied); compiled code does both in place for a local one (docs/compiler.md). `k` in
+`FOR EACH k => x` is the position. With `DESCEND` the enumerator's elements are gathered into an array first. An object
+without an enumerator is the error of any other value that is no collection (`BASE/1068`). The paths of arrays, strings
+and hashes come first and do not change.
 
 ### Generators
 
 `types/generator.c`. A generator's enumerator is an object of the runtime class `GENERATOR`: `Current` (a variable no
 message assigns, `XB_VAR_READ`) is the last element, `MoveNext()` (a method of the class) runs one step
-(`xb_gen_move_next`), its other messages are the `Enumerable` class's (`xb_gen_message`), and its own
-variables, whose names no message reaches (in parentheses: `xb_var_answers`, whatever text a message comes from,
-`ObjSend` or a macro), hold the state, the resume function (its address as an integer) and the frame between steps (an
-array). `xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the enumerator, the resume
-function's argument); at each step `xb_gen_restore` copies the saved slots into the resume function's frame and returns
-the state, marking the enumerator ended until the step yields (a step that fails, or a `MoveNext` inside the step, ends
-it); a shared enumerator's step is claimed first, under its lock (its state `s` becomes `-(s + 2)` until the step
-yields), so a `MoveNext` from another thread meanwhile answers `.F.` and touches nothing, and one thread at a time
-touches the frame (a `MoveNext` and the `Current` after it are two operations: another thread may step between them);
-`xb_gen_yield` saves the frame (the barrier for its run of items, `xb_gc_write_items`), the state and the element;
-`xb_gen_done` ends it and drops the frame, at the end of the body and after a step that fails (`Current` is then NIL).
-`FOR EACH` calls the step and reads `Current` (`xb_gen_current`, whole); its other messages are those of the runtime's
-`Enumerable` (`g:Where( ... )`), the class its own class function makes (`xbf_ENUMERABLE`, `xb_class_send_as`): a
-program's class named `Enumerable` is another one. A message neither answers is the usual `GENERATOR:message` error. The
-`generator` benchmark (3,000,000 steps of one generator feeding another) takes about 80 ms. The frame between steps is
-saved and loaded by `xb_frame_store` and `xb_frame_load` (`types/types.h`), which asynchronous functions use too: in
-place for a holder only its thread reaches, else each value shared first and the slots stored under the array's stripe
-in one hold.
+(`xb_gen_move_next`), its other messages are the `Enumerable` class's (`xb_gen_message`), and its own variables, whose
+names no message reaches (in parentheses: `xb_var_answers`, whatever text a message comes from, `ObjSend` or a macro),
+hold the state, the resume function (its address as an integer) and the frame between steps (an array). Their indexes
+(`XB_GEN_CURRENT`, `XB_GEN_STATE`, `XB_GEN_FRAME`, `XB_GEN_RESUME`), the ended state (`XB_GEN_ENDED`) and the class
+(`xb_generator_class`) are in `xbrt.h`: compiled code steps a local enumerator and saves and restores its frame in
+place, with the same rules. `xb_gen_new` makes it with the function's arguments in frame slots 1 .. n (slot 0 is the
+enumerator, the resume function's argument); at each step `xb_gen_restore` copies the saved slots into the resume
+function's frame and returns the state, marking the enumerator ended until the step yields (a step that fails, or a
+`MoveNext` inside the step, ends it); a shared enumerator's step is claimed first, under its lock (its state `s` becomes
+`-(s + 2)` until the step yields), so a `MoveNext` from another thread meanwhile answers `.F.` and touches nothing, and
+one thread at a time touches the frame (a `MoveNext` and the `Current` after it are two operations: another thread may
+step between them); `xb_gen_yield` saves the frame (the barrier for its run of items, `xb_gc_write_items`), the state
+and the element; `xb_gen_done` ends it and drops the frame, at the end of the body and after a step that fails
+(`Current` is then NIL). `FOR EACH` calls the step and reads `Current` (`xb_gen_current`, whole); its other messages are
+those of the runtime's `Enumerable` (`g:Where( ... )`), the class its own class function makes (`xbf_ENUMERABLE`,
+`xb_class_send_as`): a program's class named `Enumerable` is another one. A message neither answers is the usual
+`GENERATOR:message` error. The `generator` benchmark (3,000,000 steps of one generator feeding another) takes about 60
+ms. The frame between steps is saved and loaded by `xb_frame_store` and `xb_frame_load` (`types/types.h`), which
+asynchronous functions use too: in place for a holder only its thread reaches, else each value shared first and the
+slots stored under the array's stripe in one hold.
 
 ### Asynchronous functions
 
@@ -1069,13 +1078,15 @@ Conventions:
   the same.
 - The memo-line functions (`rtl/memoline.c`) cut a text into lines of a width (79 by default; tab size 4, word wrap on):
   `MemoLine`, `MLCount`, `MLPos`, `MLCToPos`, `MPosToLC` share one scanner, Clipper's rules and their corner cases (a
-  line ends at a hard return, CR LF, or before the character that would pass the width: with word wrap after the
-  line's last blank; a soft return, the byte 141 and LF, is skipped with word wrap and ends the line without it; a
-  tab takes the columns to the next multiple of the tab size). The reference reads its line end from a setting and
-  takes more arguments; xbase takes Clipper's arguments and CR LF. Compared with the reference over random texts
-  (letters, blanks, tabs, hard and soft returns, lone CR and LF) and arguments, the results are the same. `HardCR`
-  makes soft returns hard; `MemoTran( c, [cHard], [cSoft] )` replaces hard and soft returns by the first character of
-  its arguments (`;` and a blank by default, also for an empty one, where the reference writes a zero byte).
+  line ends at a hard return, CR LF, or before the character that would pass the width: with word wrap after the line's
+  last blank; a soft return, the byte 141 and LF, is skipped with word wrap and ends the line without it; a tab takes
+  the columns to the next multiple of the tab size). A width or column past what `size_t` holds (32-bit hosts) is as
+  wide as no line (`xb_size_sat`), never the value narrowed; `MemoLine`, whose line is padded to the width, gives the
+  string overflow for a width past the largest string. The reference reads its line end from a setting and takes more
+  arguments; xbase takes Clipper's arguments and CR LF. Compared with the reference over random texts (letters, blanks,
+  tabs, hard and soft returns, lone CR and LF) and arguments, the results are the same. `HardCR` makes soft returns
+  hard; `MemoTran( c, [cHard], [cSoft] )` replaces hard and soft returns by the first character of its arguments (`;`
+  and a blank by default, also for an empty one, where the reference writes a zero byte).
 - `MemVarBlock( cName )` returns a block that reads the memory variable and, called with a value that is not NIL,
   assigns it; NIL when no variable of that name is visible.
 - `StrTran( c, cSearch, cReplace, nStart, nCount )`: `nStart` or `nCount` of 0 gives `""`; a negative `nStart`
@@ -1375,37 +1386,37 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   the program's end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): an
   asynchronous call allocates no environment; one that creates PRIVATEs copies the bindings it shares (once) and grows
   its own stack of PRIVATEs. The program's exit code is the process's.
-- Program threads (`rtl/threads.c`): `xb_program_thread_start` starts a thread with a 16 MB stack, detached
-  (`xb_thread_detach`), counted until it ends, that attaches (the second attached thread publishes the program's
-  storage), makes its context (with a `QUIT` pending while the program ends) and runs its body; `ThreadStart`'s and the
-  scheduler's workers are such threads. `ThreadStart` makes the `Thread` object (its block and arguments in an array,
-  the snapshot of the creator's environment), shares it and starts the thread, which stores its `xb_thread_self` and
-  tells the creator, which waits for that in a blocking operation (the thread object stays on its stack, pinned). The
-  thread restores the environment, evaluates the block (`xb_eval_work`), stores the result, sets its done word and wakes
-  the joiners, frees its context and detaches from the collector. A `Mutex` is three words in its object's own variables
-  (the state, 0 free, 1 held, 2 held with waiters; the holder's `xb_flow_self`; the depth), a `Thread`'s done flag one:
-  changed with atomic operations, waited on in the parking lot a while at a time (50 ms) in a blocking operation, so
-  collections go on and a `QUIT` is seen; the object a waiter waits on is pinned by its stack. An `AtomicInt`'s integer
-  is changed under its stripe's lock once it is shared, in place while it is local. `QUIT` in a thread raises it on
-  every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before the `EXIT` procedures and after
-  them) does too when threads still run, and waits until none does; a thread made meanwhile quits at once. A `Mutex`'s
-  `Hold()` returns a `MutexHolder` (the mutex in its own variable) whose `Dispose()` releases it once. A `Mutex`'s and a
-  `Semaphore`'s asynchronous waiters (`LockAsync`, `HoldAsync`, `WaitAsync`) are a ring (`xb_ring`) of `{task, flow,
-  value}` in the object's variables under a short lock of their own, with their count in a word kept equal to the ring's
-  under that lock: the task is a waiter's (`xb_task_waiter`: its token cancels it, its timer completes it with the value
-  it was made with); a release that frees what they wait for, after a sequentially consistent fence, reads the count
-  and, when there are waiters, takes the lock and grants them in turn (the lock taken for the waiter's flow, or a place;
-  the waiter claimed, then completed once the lock is released; one that ended meanwhile passed over, one that ends as
-  it is granted given back), and a new waiter, counted before a fence and its try once it is in the ring, tries again:
-  one of the two sees the other. A new waiter goes in line whenever one waits (strict order), unless its flow holds the
-  lock already. A `Mutex` also keeps how many waiters each flow has in line (a hash): once a flow holds the lock,
-  granted or taken with `Lock()` or `TryLock()`, its waiters further in line take it too at once (they would wait behind
-  others for what their flow has). A `Condition` keeps its waiters and the signals given to them in one word (16 bits
-  each: a waiter takes a signal and leaves in one compare-and-swap, so a signal never outlives the waiters it was for)
-  and a generation each signal changes, which waiters park on; a `Semaphore` its count and maximum (a `Release()` wakes
-  waiters when the count leaves 0, and a waiter that takes a place and leaves others wakes the next). Their waits take a
-  limit in milliseconds on the monotonic clock. The words, the waits with a limit, the checks of arguments and the error
-  codes that threads and tasks share are in `rtl/flows.h`.
+- Program threads (`rtl/threads.c`): `xb_program_thread_start` starts a thread with a 16 MB stack
+  (`XB_PROGRAM_THREAD_STACK`), detached (`xb_thread_detach`), counted until it ends, that attaches (the second attached
+  thread publishes the program's storage), makes its context (with a `QUIT` pending while the program ends) and runs its
+  body; `ThreadStart`'s and the scheduler's workers are such threads. `ThreadStart` makes the `Thread` object (its block
+  and arguments in an array, the snapshot of the creator's environment), shares it and starts the thread, which stores
+  its `xb_thread_self` and tells the creator, which waits for that in a blocking operation (the thread object stays on
+  its stack, pinned). The thread restores the environment, evaluates the block (`xb_eval_work`), stores the result, sets
+  its done word and wakes the joiners, frees its context and detaches from the collector. A `Mutex` is three words in
+  its object's own variables (the state, 0 free, 1 held, 2 held with waiters; the holder's `xb_flow_self`; the depth), a
+  `Thread`'s done flag one: changed with atomic operations, waited on in the parking lot a while at a time (50 ms) in a
+  blocking operation, so collections go on and a `QUIT` is seen; the object a waiter waits on is pinned by its stack. An
+  `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local. `QUIT` in a
+  thread raises it on every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before the `EXIT`
+  procedures and after them) does too when threads still run, and waits until none does; a thread made meanwhile quits
+  at once. A `Mutex`'s `Hold()` returns a `MutexHolder` (the mutex in its own variable) whose `Dispose()` releases it
+  once. A `Mutex`'s and a `Semaphore`'s asynchronous waiters (`LockAsync`, `HoldAsync`, `WaitAsync`) are a ring
+  (`xb_ring`) of `{task, flow, value}` in the object's variables under a short lock of their own, with their count in a
+  word kept equal to the ring's under that lock: the task is a waiter's (`xb_task_waiter`: its token cancels it, its
+  timer completes it with the value it was made with); a release that frees what they wait for, after a sequentially
+  consistent fence, reads the count and, when there are waiters, takes the lock and grants them in turn (the lock taken
+  for the waiter's flow, or a place; the waiter claimed, then completed once the lock is released; one that ended
+  meanwhile passed over, one that ends as it is granted given back), and a new waiter, counted before a fence and its
+  try once it is in the ring, tries again: one of the two sees the other. A new waiter goes in line whenever one waits
+  (strict order), unless its flow holds the lock already. A `Mutex` also keeps how many waiters each flow has in line (a
+  hash): once a flow holds the lock, granted or taken with `Lock()` or `TryLock()`, its waiters further in line take it
+  too at once (they would wait behind others for what their flow has). A `Condition` keeps its waiters and the signals
+  given to them in one word (16 bits each: a waiter takes a signal and leaves in one compare-and-swap, so a signal never
+  outlives the waiters it was for) and a generation each signal changes, which waiters park on; a `Semaphore` its count
+  and maximum (a `Release()` wakes waiters when the count leaves 0, and a waiter that takes a place and leaves others
+  wakes the next). Their waits take a limit in milliseconds on the monotonic clock. The words, the waits with a limit,
+  the checks of arguments and the error codes that threads and tasks share are in `rtl/flows.h`.
 - The scheduler (`core/sched.c`, [concurrency.md](concurrency.md#scheduler)) and tasks (`rtl/tasks.c`,
   [concurrency.md](concurrency.md#tasks)). Workers are program threads started when tasks first need them, `target` of
   them active at once (one per processor, or `//WORKERS:n`), up to 1024 with those that took the place of blocked ones.
@@ -1418,18 +1429,17 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   another worker runs (one searcher at a time, `searching`; it looks at the count of queued tasks, and searches the
   queues every 16 looks while it is not 0), and a submission wakes no worker while one searches (a searcher that finds
   work wakes another while work waits; a worker woken from its park does not: measured, those wakes cost more than they
-  found); a
-  thief takes another's next task only once that worker's task has run 5 µs (or it is away). `xb_blocking_run` tells the
-  scheduler when a worker running a task enters and leaves an operation that may block (`xb_sched_blocking`): meanwhile
-  it is not active, and when work waits another worker is woken or started; one beyond the target that stays idle 2
-  seconds ends. `xb_waiting_run` is the same for the collector but not for the scheduler: a wait for a lock of the
-  runtime's held a moment (a stripe, `xb_object_lock_short` for a channel's) keeps the worker's place. The queues hold
-  object addresses, which the collector marks (`xb_sched_mark`). A task is a `Task` object, shared: a state word
+  found); a thief takes another's next task only once that worker's task has run 5 µs (or it is away). `xb_blocking_run`
+  tells the scheduler when a worker running a task enters and leaves an operation that may block (`xb_sched_blocking`):
+  meanwhile it is not active, and when work waits another worker is woken or started; one beyond the target that stays
+  idle 2 seconds ends. `xb_waiting_run` is the same for the collector but not for the scheduler: a wait for a lock of
+  the runtime's held a moment (a stripe, `xb_object_lock_short` for a channel's) keeps the worker's place. The queues
+  hold object addresses, which the collector marks (`xb_sched_mark`). A task is a `Task` object, shared: a state word
   (created, scheduled, running, then completed, failed or canceled), the result or the failure's value, the block and
-  its arguments and the snapshot of its creator's environment until it runs, and the continuations, nodes
-  `{target, next}` pushed under the task's stripe lock (compared with the head read before, again when another came
-  first; finished combinators at the head are left out of the new node), which completing takes under the same lock with
-  the final state; then each fires, from a stack of frames `{list, antecedent, below}` (local arrays) rather than by
+  its arguments and the snapshot of its creator's environment until it runs, and the continuations, nodes `{target,
+  next}` pushed under the task's stripe lock (compared with the head read before, again when another came first;
+  finished combinators at the head are left out of the new node), which completing takes under the same lock with the
+  final state; then each fires, from a stack of frames `{list, antecedent, below}` (local arrays) rather than by
   recursion, so a chain of combinators runs in constant stack: a continuation is scheduled (to run next on the
   completing worker; on the pool's queue when another thread completes it), a combinator counts (`TaskWhenAll`) or
   completes once (`TaskWhenAny`) and pushes its own continuations. A combinator waits for the tasks of a snapshot of its
@@ -1444,55 +1454,56 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   `BREAK`'s value; a `QUIT` ends the program and leaves it canceled. The task's tables are closed as its environment
   goes (`xb_env_close_areas`, which sets the requests and the `BREAK` value aside meanwhile and keeps a `QUIT` that
   comes); a `ThreadStart` thread's when it ends, the program's at its end. A failure that carries an Error object is
-  raised again for whoever takes the result, through its error block (`xb_error_raise`); another value as
-  `Break( value )`. At the program's end the workers stop with the other threads, and the tasks that never started are
-  canceled (`xb_sched_end`). A worker's `run` word (idle, running, blocked, long; changed with compare-and-swap so that
-  each absence counts and is repaid once) tells whether it counts as active: not while it blocks or, seen by the
-  monitor, runs one task longer than 20 ms while work waits. The monitor hands over at most one place per look, only
-  when no task ended since its last look, and keeps no more workers long than the target; while work waits it fills
-  again the places that a thread which did not start left empty (`fill_place`), and when no other worker can start
-  (the 1024 workers, or the last thread did not start: `unstarted`) and no task ended for 2 seconds it tells the
-  standard error once (`starved`, until tasks end again). Timers are a binary heap of
-  `{deadline, target}` under the timers' lock, which one program thread serves (started with the pool; with nothing
-  queued it sleeps until its next timer, or with no limit when there is none, and a submission that finds every worker
-  busy wakes it, whatever timers wait): it fires
-  each due target without the lock (`xb_task_timer`: a delay completes, a cancellation source's signal is set, a timeout
-  fails with `Task timed out`, an Error object made with `xb_error_object`), and is the monitor. The heap drops the
-  timers whose targets need them no more (`xb_task_timer_dead`: settled, or replaced by a later `CancelAfter`, whose
-  deadline the signal keeps) once it doubled; at the program's end the timers left fire as ending (a delay and a timeout
-  canceled, a source canceled). Cancellation: a source and its token share a signal, a task that completes when the
-  source is canceled, whose continuations are what waits for it (a delay with that token, a linked source's signal,
-  `Register`'s tasks). A list of continuations drops, at its head, the targets that need it no more (ended, or the
-  signal of a disposed source), and is pruned whole once as many were pushed as it kept at its last pruning. Channels
-  (`rtl/channels.c`, their rings and the claims of their waiters in `rtl/waiters.c`, shared with `Mutex` and
-  `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a runtime
-  class's object (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext` takes the
-  next value (waiting for it) into `Current`. Their error codes are xbase's own: 9016 to 9031.
+  raised again for whoever takes the result, through its error block (`xb_error_raise`); another value as `Break( value
+  )`. At the program's end the workers stop with the other threads, and the tasks that never started are canceled
+  (`xb_sched_end`). A worker's `run` word (idle, running, blocked, long; changed with compare-and-swap so that each
+  absence counts and is repaid once) tells whether it counts as active: not while it blocks or, seen by the monitor,
+  runs one task longer than 20 ms while work waits. The monitor hands over at most one place per look, only when no task
+  ended since its last look, and keeps no more workers long than the target; while work waits it fills again the places
+  that a thread which did not start left empty (`fill_place`), and when no other worker can start (the most workers,
+  `workersMax`: 1024, fewer when their stacks would take more than a quarter of the address space the process may map,
+  `xb_platform_address_space`; or the last thread did not start: `unstarted`) and no task ended for 2 seconds it tells
+  the standard error once (`starved`, until tasks end again). Timers are a binary heap of `{deadline, target}` under the
+  timers' lock, which one program thread serves (started with the pool; with nothing queued it sleeps until its next
+  timer, or with no limit when there is none, and a submission that finds every worker busy wakes it, whatever timers
+  wait): it fires each due target without the lock (`xb_task_timer`: a delay completes, a cancellation source's signal
+  is set, a timeout fails with `Task timed out`, an Error object made with `xb_error_object`), and is the monitor. The
+  heap drops the timers whose targets need them no more (`xb_task_timer_dead`: settled, or replaced by a later
+  `CancelAfter`, whose deadline the signal keeps) once it doubled; at the program's end the timers left fire as ending
+  (a delay and a timeout canceled, a source canceled). Cancellation: a source and its token share a signal, a task that
+  completes when the source is canceled, whose continuations are what waits for it (a delay with that token, a linked
+  source's signal, `Register`'s tasks). A list of continuations drops, at its head, the targets that need it no more
+  (ended, or the signal of a disposed source), and is pruned whole once as many were pushed as it kept at its last
+  pruning. Channels (`rtl/channels.c`, their rings and the claims of their waiters in `rtl/waiters.c`, shared with
+  `Mutex` and `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a
+  runtime class's object (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext`
+  takes the next value (waiting for it) into `Current`. Their error codes are xbase's own: 9016 to 9031.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
-  reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread
-  and its starter each letting go of its record, the last one freeing it; `xb_thread_yield`, a waiter's back-off),
-  mutexes (`xb_mutex`, with
-  `trylock`), condition variables (`xb_cond`, with waits timed on the monotonic clock: POSIX binds the condition to it,
-  macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks (`xb_rwlock`; on glibc
-  of the kind where a waiting writer goes before readers that come after it, elsewhere with the system's policy), the
-  number of processors the program may run on (its affinity on Linux, else every processor online), the bounds of the
-  calling thread's stack (`xb_platform_stack_bounds`), a monotonic clock in nanoseconds
+  reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread and
+  its starter each letting go of its record, the last one freeing it; `xb_thread_yield`, a waiter's back-off), mutexes
+  (`xb_mutex`, with `trylock`), condition variables (`xb_cond`, with waits timed on the monotonic clock: POSIX binds the
+  condition to it, macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks
+  (`xb_rwlock`; on glibc of the kind where a waiting writer goes before readers that come after it, elsewhere with the
+  system's policy), the number of processors the program may run on (its affinity on Linux, else every processor
+  online), the bounds of the calling thread's stack (`xb_platform_stack_bounds`), a monotonic clock in nanoseconds
   (`xb_platform_monotonic_ns`), which `ElapsedMs` counts from the program's first context (`xb_program_elapsed_ms`),
-  pages for the collector's heap (`xb_platform_pages_map` aligned by mapping the size and the alignment and giving
-  back the parts around, `VirtualAlloc` at an aligned address found by a reservation on Windows; `_unmap`;
-  `_decommit`: `MADV_DONTNEED` on Linux, `MADV_FREE_REUSABLE` on macOS, `posix_madvise` elsewhere, `MEM_DECOMMIT` on
-  Windows; `_recommit`, which only Windows and macOS need; `xb_platform_page_size`), and the process's resident
-  memory (`xb_platform_resident_bytes`: `/proc/self/statm` on Linux, the task's basic information on macOS, the
-  working set on Windows, 0 elsewhere), which `__GcMemory()` reports with the live objects and the heap's memory.
-  With glibc, `xb_platform_init` keeps the C allocator to 4 arenas: each would reserve 64 MB of address space for a
-  thread that allocates, and the runtime's objects live in the collector's heap. The
-  functions that may block (files, directories) are the operating system's side (`xb_os_*`, `platform/os.h`) wrapped
-  once for every platform through `xb_blocking_run` (`platform/blocking.c`, the arguments in a structure), which the
-  collector provides ([Garbage collector](#garbage-collector)); so is the flush of a C stream (`xb_platform_flush`).
-  Each object is made by its `init` function, which fails only for lack of memory or system objects, and freed by its
-  `destroy` function. None of these locks is recursive: the thread holding one never asks for it again, not even for a
-  second read lock, which would wait behind a waiting writer.
+  pages for the collector's heap (`xb_platform_pages_map` aligned by mapping the size and the alignment and giving back
+  the parts around, `VirtualAlloc` at an aligned address found by a reservation on Windows; `_unmap`; `_decommit`:
+  `MADV_DONTNEED` on Linux, `MADV_FREE_REUSABLE` on macOS, `posix_madvise` elsewhere, `MEM_DECOMMIT` on Windows;
+  `_recommit`, which only Windows and macOS need; `xb_platform_page_size`), and the process's resident memory
+  (`xb_platform_resident_bytes`: `/proc/self/statm` on Linux, the task's basic information on macOS, the working set on
+  Windows, 0 elsewhere), which `__GcMemory()` reports with the live objects and the heap's memory, and the address space
+  the system lets the process map (`xb_platform_address_space`: the soft `RLIMIT_AS` on POSIX systems, the process's
+  virtual space on Windows, `SIZE_MAX` when none is told), which bounds the scheduler's workers. With glibc,
+  `xb_platform_init` keeps the C allocator to 4 arenas: each would reserve 64 MB of address space for a thread that
+  allocates, and the runtime's objects live in the collector's heap. The functions that may block (files, directories)
+  are the operating system's side (`xb_os_*`, `platform/os.h`) wrapped once for every platform through `xb_blocking_run`
+  (`platform/blocking.c`, the arguments in a structure), which the collector provides ([Garbage
+  collector](#garbage-collector)); so is the flush of a C stream (`xb_platform_flush`). Each object is made by its
+  `init` function, which fails only for lack of memory or system objects, and freed by its `destroy` function. None of
+  these locks is recursive: the thread holding one never asks for it again, not even for a second read lock, which would
+  wait behind a waiting writer.
 - Atomic operations (`platform/atomic.h`) on ordinary 8-bit, 32-bit, 64-bit, `size_t` and pointer fields, so that
   memory read plainly where no other thread sees it (an object header, a field compiled code reads) is also changed
   atomically where one may: loads, stores, add, or, and, exchange and compare-and-swap with an explicit order (not

@@ -28,6 +28,7 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <time.h>
@@ -156,6 +157,13 @@ size_t xb_platform_resident_bytes(void) {
 #else
   return 0;
 #endif
+}
+
+size_t xb_platform_address_space(void) {
+  struct rlimit limit;
+  if (getrlimit(RLIMIT_AS, &limit) != 0 || limit.rlim_cur == RLIM_INFINITY || (uint64_t)limit.rlim_cur > SIZE_MAX)
+    return SIZE_MAX;
+  return (size_t)limit.rlim_cur;
 }
 
 struct xb_thread_impl {

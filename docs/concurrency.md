@@ -77,14 +77,15 @@ NEXT
   assigned to (an assignment that fails disposes the value too). Classes of the runtime that hold resources (files,
   sockets, connections, locks) answer both.
 - Errors: an error in a task goes to the task's error block, as in any code (it may substitute a value, retry, or
-  `BREAK`). One that leaves the task's body (a `BREAK`, or the default handler that would end the program) completes
-  the task as failed with the error object; `AWAIT` of a failed task raises it in the awaiter as `Result` does
-  ([Tasks](#tasks)): the Error object through the awaiter's error block (so `CATCH oErr` takes it, and so does
-  `RECOVER USING oErr` under an error block that breaks), another value as `Break( value )` (done). The default handler
-  reports an error that crossed tasks with where it happened, then each place it was waited for (`Called from
-  INNER(26)`, then `Waited for in MIDDLE(21)`, `Waited for in MAIN(7)`: done). *(Planned)*: a failed task nobody awaits
-  is reported (on standard error, and to a handler the program may set) when the collector finds it unreachable.
-  `QUIT` in any task ends the program.
+  `BREAK`). One that leaves the task's body (a `BREAK`, or the default handler that would end the program) completes the
+  task as failed with the error object; `AWAIT` of a failed task raises it in the awaiter as `Result` does
+  ([Tasks](#tasks)): the Error object through the awaiter's error block (so `CATCH oErr` takes it, and so does `RECOVER
+  USING oErr` under an error block that breaks), another value as `Break( value )` (done). The default handler reports
+  an error that crossed tasks with where it happened, then each place it was waited for (`Called from INNER(29)`, then
+  `Waited for in MIDDLE(24)`, `Waited for in MAIN(11)`, tests/run/async_errors; the task's own calls only, also for a
+  step that ran inline: tests/run/async_errors_early: done). *(Planned)*: a failed task nobody awaits is reported (on
+  standard error, and to a handler the program may set) when the collector finds it unreachable. `QUIT` in any task ends
+  the program.
 - Restrictions: no `AWAIT` in a codeblock, no `...`, `PCount()`, `PValue()` or `PARAMETERS` in an `ASYNC` function
   (done). Its `PRIVATE` variables (a `PRIVATE` statement, or an assignment to a name no variable has) belong to its
   own environment: visible to what it calls, they last across `AWAIT` until it ends (done). *(Planned)*: asynchronous
@@ -237,19 +238,20 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   5 µs: a task that ends soon runs the task it made ready itself, without a thread switch), searches 50 µs more while
   another worker runs (one searcher at a time), then parks; a submission wakes a parked worker, or starts one, while
   fewer are active than the target and none searches.
-- **Blocking handoff**: every operation that may block the thread (file and lock I/O, `Mutex` waits, `Wait()`,
-  console input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run`. While a worker running
-  a task blocks with work waiting, another takes its place (woken or started, up to 1024 workers); the blocked one is
-  active again when it returns, and a worker beyond the target that stays idle 2 seconds ends. A thread that waits
-  with no limit for a task still to start runs it itself (inline). Synchronous code inside tasks therefore costs
-  threads, up to the most workers or the threads the system lets start; past that the tasks left wait in the queues
-  until a worker comes back, which may be never when what the blocked tasks wait for is one of those left (a task
-  that would release their lock, close their channel). The asynchronous waits (`LockAsync`, `WaitAsync`,
-  `ReceiveAsync`, `AWAIT` of a task) hold no worker. When tasks wait in the queues, no worker can start and none ended
-  for 2 seconds, the program's standard error is told so once (`xbrt: ... tasks have waited ...`), until tasks end
-  again. A short wait for a lock of the runtime's (a stripe, a channel's lock: held a moment) runs through
-  `xb_waiting_run` instead: the worker keeps its place, so many tasks meeting on one channel never multiply the
-  threads. A monitor sees a task that runs long (20 ms) without blocking while others wait in the queues, and puts
+- **Blocking handoff**: every operation that may block the thread (file and lock I/O, `Mutex` waits, `Wait()`, console
+  input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run`. While a worker running a task
+  blocks with work waiting, another takes its place (woken or started, up to the most workers: 1024, or as many as have
+  their 16 MB stacks in a quarter of the address space the process may map, for a 32-bit process or one with a limit on
+  it, so that the heap keeps the rest); the blocked one is active again when it returns, and a worker beyond the target
+  that stays idle 2 seconds ends. A thread that waits with no limit for a task still to start runs it itself (inline).
+  Synchronous code inside tasks therefore costs threads, up to the most workers or the threads the system lets start;
+  past that the tasks left wait in the queues until a worker comes back, which may be never when what the blocked tasks
+  wait for is one of those left (a task that would release their lock, close their channel). The asynchronous waits
+  (`LockAsync`, `WaitAsync`, `ReceiveAsync`, `AWAIT` of a task) hold no worker. When tasks wait in the queues, no worker
+  can start and none ended for 2 seconds, the program's standard error is told so once (`xbrt: ... tasks have waited
+  ...`), until tasks end again. A short wait for a lock of the runtime's (a stripe, a channel's lock: held a moment)
+  runs through `xb_waiting_run` instead: the worker keeps its place, so many tasks meeting on one channel never multiply
+  the threads. A monitor sees a task that runs long (20 ms) without blocking while others wait in the queues, and puts
   another worker beside it the same way; it also starts again the workers whose threads did not start.
 - Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): a binary heap of deadlines that one thread serves, started with
   the pool: it sleeps until the earliest deadline and fires what is due; it is also the monitor, looking every 10 ms

@@ -204,11 +204,19 @@ private:
   void storeObjectVariable(llvm::Value *obj, llvm::Value *var, llvm::Value *state, const Words &value);
   void copyObjectVariable(llvm::Value *d, llvm::Value *var);
   void emitObjectAccess(const xir::Instruction &i);
+  llvm::Value *genFrame(llvm::Value *gen, llvm::BasicBlock *slow, llvm::Value *&state);
+  void emitGenRestore(const xir::Instruction &i);
+  void emitGenYield(const xir::Instruction &i);
+  llvm::Value *localGenerator(llvm::Value *coll, llvm::BasicBlock *other);
+  void emitEnumLen(const xir::Instruction &i);
   llvm::Value *setDecimals();
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);
   // InlineCalls.cpp: Len, Asc, Chr, SubStr( c, n, 1 ), Int, PCount and PValue( n ) in place.
   void findFusedCalls(const xir::BasicBlock &b);
+  bool fusedDivision(const xir::Instruction &i) const;
+  void emitIntOfQuotient(const xir::Instruction &div, llvm::Value *d, llvm::BasicBlock *join);
+  llvm::Value *defaultWidth(llvm::Value *wide);
   void findFusedSends(const xir::BasicBlock &b);
   bool emitInlineCall(const xir::Instruction &i);
   llvm::Value *strLength(llvm::Value *str);
@@ -280,6 +288,7 @@ private:
   llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, decimals, frames, stack limit }
   llvm::GlobalVariable *nilItem_ = nullptr; // a NIL item: missing arguments
   llvm::GlobalVariable *strBytes_ = nullptr; // xb_str_bytes, declared when first used
+  llvm::GlobalVariable *generatorClass_ = nullptr; // xb_generator_class, declared when first used
   uint64_t itemSize_ = 0;
   llvm::Align itemAlign_;
   uint64_t unionSize_ = 0;
@@ -291,8 +300,8 @@ private:
   llvm::FunctionCallee rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_;
   llvm::FunctionCallee rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArgsRest_;
-  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtCellOf_, rtBlockNew_, rtRootPush_,
-      rtRootPop_;
+  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtWriteItems_, rtCellOf_, rtBlockNew_,
+      rtRootPush_, rtRootPop_;
   llvm::FunctionCallee rtEnumLen_, rtEachSource_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefLoad_;
   llvm::FunctionCallee rtRefStore_;
   llvm::FunctionCallee rtSwitchCheck_;
@@ -380,7 +389,8 @@ private:
   std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<const xir::Var *>>
       shareOnEdge_; // and the edges (from, to) that do it instead of the loads after them
   std::unordered_set<const xir::Instruction *> fusedSends_;               // sends an AWAIT fused (await.fuse before)
-  std::unordered_set<const xir::Instruction *> fusedCalls_;                // Asc() calls lowered with their SubStr()
+  // Asc() calls lowered with their SubStr(), Int() calls with their division (findFusedCalls)
+  std::unordered_set<const xir::Instruction *> fusedCalls_;
   std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
   // The words of the values held in frame slots, read once right after their definition (cacheWords): a slot holds
   // its value unchanged while the value lives, so its header (which the collector never changes) and its integer
