@@ -39,8 +39,8 @@ MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, **SET ORD
 PROCEDURE*, **SET RELATION**, *SET SAFETY*, **SET SCOPE**, **SET SCOPEBOTTOM**, **SET SCOPETOP**, *SET SCOREBOARD*,
 **SET SOFTSEEK**, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, **SET UNIQUE**,
 *SET VIDEOMODE*, *SET WRAP*, **SKIP**, **SORT**, **STORE**, **SUM**, **TEXT** (but `TO FILE`, `TO PRINTER`),
-*TEXTBLOCK*, **TOTAL**, *TYPE*, **UNLOCK**, **UPDATE**, **USE**, *WAIT*, **ZAP**; xbase's own: **SYNCHRONIZED**
-([concurrency.md](concurrency.md#threads))
+*TEXTBLOCK*, **TOTAL**, *TYPE*, **UNLOCK**, **UPDATE**, **USE**, *WAIT*, **ZAP**; xbase's own: **SYNCHRONIZED**,
+**AWAIT SYNCHRONIZED** ([concurrency.md](concurrency.md#threads))
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch` (provided: the logical
 constants, the `IS...()` type tests through `ValType()`, `DEFAULT ... TO`, `UPDATE ... IF ... TO`), `inkey.ch`, `set.ch`
@@ -166,8 +166,9 @@ Hashes ([runtime.md](runtime.md#hashes)): **Hash**, **HAllocate**, **HCaseMatch*
 **HDel**, **HDelAt**, **HEval**, **HFill**, **HGet**, **HGetDef**, **HHasKey**, **HKeyAt**, **HKeys**, **HMerge**,
 **HPairAt**, **HPos**, **HScan**, **HSet**, **HSort**, **HValueAt**, **HValues**.
 
-Threads ([concurrency.md](concurrency.md#threads)): **AtomicInt**, **Condition**, **Mutex** (and its holder's
-`Dispose`), **Semaphore**, **ThreadStart** (the `Thread` object's `Join` and `IsAlive`).
+Threads ([concurrency.md](concurrency.md#threads)): **AtomicInt**, **Condition**, **Mutex** (with `LockAsync`,
+`HoldAsync`, and its holder's `Dispose`), **Semaphore** (with `WaitAsync`), **ThreadStart** (the `Thread` object's
+`Join` and `IsAlive`).
 
 Tasks ([concurrency.md](concurrency.md#tasks)): **CancellationTokenSource** (and its token), **Channel**,
 **TaskCompletionSource**, **TaskDelay**, **TaskFromResult**, **TaskRun**, **TaskTimeout**, **TaskWhenAll**,

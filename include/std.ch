@@ -32,6 +32,10 @@
  * whole word only: Sync(), Synchronize() stay calls. */
 #xcommand SYNCHRONIZED <m>             => using <m>:Hold()
 
+/* AWAIT SYNCHRONIZED oMutex ... END: the same in an ASYNC function, which awaits the mutex (HoldAsync) instead of
+ * waiting for it on its worker, and holds it across the AWAITs of the body. */
+#xcommand AWAIT SYNCHRONIZED <m>       => using AWAIT <m>:HoldAsync()
+
 /* Memory variables: a name or a skeleton (* any characters, ? one) is matched when the code runs. */
 #command RELEASE <vars,...>            => __MemRelease( <"vars"> )
 #command RELEASE ALL                   => __MemReleaseAll( "*", .T. )

@@ -1381,21 +1381,31 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   scheduler's workers are such threads. `ThreadStart` makes the `Thread` object (its block and arguments in an array,
   the snapshot of the creator's environment), shares it and starts the thread, which stores its `xb_thread_self` and
   tells the creator, which waits for that in a blocking operation (the thread object stays on its stack, pinned). The
-  thread restores the environment, evaluates the block (`xb_eval_work`), stores the result, sets its done word and
-  wakes the joiners, frees its context and detaches from the collector. A `Mutex` is three words in its
-  object's own variables (the state, 0 free, 1 held, 2 held with waiters; the holder's `xb_flow_self`; the depth), a
-  `Thread`'s done flag one: changed with atomic operations, waited on in the parking lot a while at a time (50 ms)
-  in a blocking operation, so collections go on and a `QUIT` is seen; the object a waiter waits on is pinned by its
-  stack. An `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local.
-  `QUIT` in a thread raises it on every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before
-  the `EXIT` procedures and after them) does too when threads still run, and waits until none does; a thread made
-  meanwhile quits at once. A `Mutex`'s `Hold()` returns a `MutexHolder` (the mutex in its own variable) whose
-  `Dispose()` releases it once. A `Condition` keeps its waiters and the signals given to them in one word (16 bits
+  thread restores the environment, evaluates the block (`xb_eval_work`), stores the result, sets its done word and wakes
+  the joiners, frees its context and detaches from the collector. A `Mutex` is three words in its object's own variables
+  (the state, 0 free, 1 held, 2 held with waiters; the holder's `xb_flow_self`; the depth), a `Thread`'s done flag one:
+  changed with atomic operations, waited on in the parking lot a while at a time (50 ms) in a blocking operation, so
+  collections go on and a `QUIT` is seen; the object a waiter waits on is pinned by its stack. An `AtomicInt`'s integer
+  is changed under its stripe's lock once it is shared, in place while it is local. `QUIT` in a thread raises it on
+  every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before the `EXIT` procedures and after
+  them) does too when threads still run, and waits until none does; a thread made meanwhile quits at once. A `Mutex`'s
+  `Hold()` returns a `MutexHolder` (the mutex in its own variable) whose `Dispose()` releases it once. A `Mutex`'s and a
+  `Semaphore`'s asynchronous waiters (`LockAsync`, `HoldAsync`, `WaitAsync`) are a ring (`xb_ring`) of `{task, flow,
+  value}` in the object's variables under a short lock of their own, with their count in a word kept equal to the ring's
+  under that lock: the task is a waiter's (`xb_task_waiter`: its token cancels it, its timer completes it with the value
+  it was made with); a release that frees what they wait for, after a sequentially consistent fence, reads the count
+  and, when there are waiters, takes the lock and grants them in turn (the lock taken for the waiter's flow, or a place;
+  the waiter claimed, then completed once the lock is released; one that ended meanwhile passed over, one that ends as
+  it is granted given back), and a new waiter, counted before a fence and its try once it is in the ring, tries again:
+  one of the two sees the other. A new waiter goes in line whenever one waits (strict order), unless its flow holds the
+  lock already. A `Mutex` also keeps how many waiters each flow has in line (a hash): once a flow holds the lock,
+  granted or taken with `Lock()` or `TryLock()`, its waiters further in line take it too at once (they would wait behind
+  others for what their flow has). A `Condition` keeps its waiters and the signals given to them in one word (16 bits
   each: a waiter takes a signal and leaves in one compare-and-swap, so a signal never outlives the waiters it was for)
   and a generation each signal changes, which waiters park on; a `Semaphore` its count and maximum (a `Release()` wakes
   waiters when the count leaves 0, and a waiter that takes a place and leaves others wakes the next). Their waits take a
-  limit in milliseconds on the monotonic clock. The words, the waits with a limit, the checks of arguments and the
-  error codes that threads and tasks share are in `rtl/flows.h`.
+  limit in milliseconds on the monotonic clock. The words, the waits with a limit, the checks of arguments and the error
+  codes that threads and tasks share are in `rtl/flows.h`.
 - The scheduler (`core/sched.c`, [concurrency.md](concurrency.md#scheduler)) and tasks (`rtl/tasks.c`,
   [concurrency.md](concurrency.md#tasks)). Workers are program threads started when tasks first need them, `target` of
   them active at once (one per processor, or `//WORKERS:n`), up to 1024 with those that took the place of blocked ones.
@@ -1439,7 +1449,10 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   canceled (`xb_sched_end`). A worker's `run` word (idle, running, blocked, long; changed with compare-and-swap so that
   each absence counts and is repaid once) tells whether it counts as active: not while it blocks or, seen by the
   monitor, runs one task longer than 20 ms while work waits. The monitor hands over at most one place per look, only
-  when no task ended since its last look, and keeps no more workers long than the target. Timers are a binary heap of
+  when no task ended since its last look, and keeps no more workers long than the target; while work waits it fills
+  again the places that a thread which did not start left empty (`fill_place`), and when no other worker can start
+  (the 1024 workers, or the last thread did not start: `unstarted`) and no task ended for 2 seconds it tells the
+  standard error once (`starved`, until tasks end again). Timers are a binary heap of
   `{deadline, target}` under the timers' lock, which one program thread serves (started with the pool; with nothing
   queued it sleeps until its next timer, or with no limit when there is none, and a submission that finds every worker
   busy wakes it, whatever timers wait): it fires
@@ -1451,7 +1464,8 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   source is canceled, whose continuations are what waits for it (a delay with that token, a linked source's signal,
   `Register`'s tasks). A list of continuations drops, at its head, the targets that need it no more (ended, or the
   signal of a disposed source), and is pruned whole once as many were pushed as it kept at its last pruning. Channels
-  (`rtl/channels.c`): see [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a runtime
+  (`rtl/channels.c`, their rings and the claims of their waiters in `rtl/waiters.c`, shared with `Mutex` and
+  `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a runtime
   class's object (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext` takes the
   next value (waiting for it) into `Current`. Their error codes are xbase's own: 9016 to 9031.
 

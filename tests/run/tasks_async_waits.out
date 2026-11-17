@@ -1,0 +1,20 @@
+
+in order: .T.        400 .T. .T.
+synchronized: .T.        300
+held across steps: .F. .T. .T. released .T.
+own lock: .T. MUTEXHOLDER
+still held: .F.
+released three times: .T.
+time limit: .F. NIL
+canceled: .T. next waiter: .T. taken
+mixed: .T.
+two of one flow: .T. ended both,other
+granted in time: .T. .T.
+condition releases: .T.
+semaphore: .T.          3          3        300
+semaphore order: canceled 2,3 2
+places: .T. .T. .T. .F. .F.          0
+error: 9024 MUTEX:LOCKASYNC
+error: 9024 MUTEX:HOLDASYNC
+error: 9024 SEMAPHORE:WAITASYNC
+error: 9024 SEMAPHORE:WAITASYNC

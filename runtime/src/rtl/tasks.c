@@ -28,9 +28,11 @@ enum { S_CREATED, S_SCHEDULED, S_RUNNING, S_CLAIMED, S_CLAIMED_CANCELED, S_COMPL
 /* What completes it: its block (TaskRun, ContinueWith), code (a promise), the tasks it waits for (the combinators), a
  * timer (TaskDelay: canceled by its token; a cancellation source's signal: also by the sources it is linked to), or
  * the task it waits for or its timer, the first (TaskTimeout), an asynchronous function's steps (K_ASYNC: it waits
- * created while it is suspended, and is scheduled again when the task it awaits ends, as a continuation is), or the
- * first wait for it (TaskYield: a continuation added, a thread that waits). */
-enum { K_RUN, K_PROMISE, K_WHEN_ALL, K_WHEN_ANY, K_DELAY, K_SIGNAL, K_TIMEOUT, K_ASYNC, K_YIELD };
+ * created while it is suspended, and is scheduled again when the task it awaits ends, as a continuation is), the
+ * first wait for it (TaskYield: a continuation added, a thread that waits), or what it waits for (K_WAIT: a waiter
+ * of a Mutex or a Semaphore, granted by code; canceled by its token, or at its timer completed with the value it was
+ * made with, V_RESULT, unless code claimed it first). */
+enum { K_RUN, K_PROMISE, K_WHEN_ALL, K_WHEN_ANY, K_DELAY, K_SIGNAL, K_TIMEOUT, K_ASYNC, K_YIELD, K_WAIT };
 
 /* The variables: the state and the kind (words), the result (or the failure's value), the block and its arguments
  * and the environment's snapshot (until it runs), the continuations, a word (a combinator's count, when all: the tasks
@@ -195,9 +197,9 @@ static void when_all_done(xb_ctx *ctx, const xb_item *combinator, xb_item *stack
 
 static int dead_target(const xb_item *target);
 
-/* A timer-kind task completes because `antecedent` (rooted, or NULL for its timer) did: a delay canceled (its token),
- * a signal set, a timeout as the task it waits for ended (its timer: failed with the error "Task timed out"); what
- * that fires goes on `stack`. */
+/* A timer-kind task completes because `antecedent` (rooted, or NULL for its timer) did: a delay or a waiter canceled
+ * (its token), a waiter's time up (completed with the value it was made with), a signal set, a timeout as the task it
+ * waits for ended (its timer: failed with the error "Task timed out"); what that fires goes on `stack`. */
 static void settle(xb_ctx *ctx, const xb_item *target, const xb_item *antecedent, xb_item *stack) {
   if (FINAL(state_of(target))) return;
   uint32_t kind = xb_atomic_load32(xb_object_word(target, V_KIND), XB_RELAXED), state = S_COMPLETED;
@@ -206,8 +208,10 @@ static void settle(xb_ctx *ctx, const xb_item *target, const xb_item *antecedent
   xb_set_nil(&next);
   xb_gc_root_push(ctx, &value);
   xb_gc_root_push(ctx, &next);
-  if (kind == K_DELAY && antecedent) {
+  if ((kind == K_DELAY || kind == K_WAIT) && antecedent) {
     state = S_CANCELED;
+  } else if (kind == K_WAIT) {
+    xb_object_get(target->v.p, V_RESULT, &value); /* its time is up: what it was made to give then */
   } else if (kind == K_TIMEOUT && antecedent) {
     state = state_of(antecedent);
     xb_object_get(antecedent->v.p, V_RESULT, &value);
@@ -248,6 +252,7 @@ static void fire(xb_ctx *ctx, const xb_item *target, const xb_item *antecedent, 
     break;
   }
   case K_DELAY:   /* its token was canceled */
+  case K_WAIT:    /* the same */
   case K_SIGNAL:  /* a source it is linked to was canceled: unless it was disposed */
   case K_TIMEOUT: /* the task it waits for ended in time: as that one did */
     if (!dead_target(target)) settle(ctx, target, antecedent, stack);
@@ -1015,6 +1020,26 @@ int xb_task_promise(xb_ctx *ctx, xb_item *r, const xb_item *token, const char *w
     add_continuation(ctx, &signal, r);
     xb_gc_root_pop(ctx, 1);
   }
+  return 1;
+}
+
+int xb_task_waiter(xb_ctx *ctx, xb_item *r, const xb_item *token, int64_t deadline, const xb_item *timed_out,
+                   const char *what, uint32_t argc, xb_item *argv) {
+  xb_item signal;
+  xb_set_nil(&signal);
+  if (token->type != XB_T_NIL && !token_signal(token, &signal)) {
+    xb_flow_arg_error(ctx, XB_CODE_TASK, what, argc, argv);
+    return 0;
+  }
+  xb_object *t = task_new(r, K_WAIT, S_CREATED);
+  t->vars[V_RESULT] = *timed_out; /* local, new: no barrier */
+  xb_share(r);
+  if (signal.type != XB_T_NIL) {
+    xb_gc_root_push(ctx, &signal);
+    add_continuation(ctx, &signal, r);
+    xb_gc_root_pop(ctx, 1);
+  }
+  if (deadline >= 0 && !FINAL(state_of(r))) xb_timer_add(r->v.p, deadline);
   return 1;
 }
 

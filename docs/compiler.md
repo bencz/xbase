@@ -153,7 +153,8 @@ Statements:
   `Dispose()` unless it is NIL, and a `BREAK` or an error goes on after it. Not `YIELD` inside. `USING`, like `YIELD`,
   starts the statement unless the name is followed by what makes it a variable or a function (an assignment, `(`, `[`,
   `:`, `->`, the end of the statement).
-  `std.ch` builds `SYNCHRONIZED` on it ([concurrency.md](concurrency.md#threads)).
+  `std.ch` builds `SYNCHRONIZED` and `AWAIT SYNCHRONIZED` (`USING AWAIT oMutex:HoldAsync()`, the operand of `USING`
+  an awaited value) on it ([concurrency.md](concurrency.md#threads)).
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
 - Classes ([runtime.md](runtime.md#classes)), at file level: `[STATIC | CREATE | SCALAR] CLASS name [INHERIT | FROM
   parent, ...]`, then members, then `ENDCLASS` (or `END [CLASS]`): `EXPORTED:` (`EXPORT:`, `VISIBLE:`), `PROTECTED:` and

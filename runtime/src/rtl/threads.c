@@ -241,11 +241,182 @@ void xbf_THREADSTART(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_park_wait_blocking(&s.ready, 0, -1);
 }
 
-/* Mutexes: the words of a recursive lock (xb_rwords, core/sync.h) in the object's variables. */
+/* Mutexes: the words of a recursive lock (xb_rwords, core/sync.h) in the object's variables; the flows that wait for it
+ * asynchronously (LockAsync, HoldAsync: `waits` below), and how many waiters each flow has in line. */
 
-enum { M_STATE, M_OWNER, M_DEPTH, M_COUNT_ };
-static const xb_class_var mutex_vars[] = {{"(STATE)", XB_VAR_ANY}, {"(OWNER)", XB_VAR_ANY}, {"(DEPTH)", XB_VAR_ANY}};
+enum {
+  M_STATE, M_OWNER, M_DEPTH, M_QUEUE, M_WAITING, M_WAITERS, M_WAITERS_HEAD, M_WAITERS_COUNT, M_FLOWS, M_COUNT_
+};
+static const xb_class_var mutex_vars[] = {
+  {"(STATE)", XB_VAR_ANY},   {"(OWNER)", XB_VAR_ANY},        {"(DEPTH)", XB_VAR_ANY},
+  {"(QUEUE)", XB_VAR_ANY},   {"(WAITING)", XB_VAR_ANY},      {"(WAITERS)", XB_VAR_ANY},
+  {"(WAITERSHEAD)", XB_VAR_ANY}, {"(WAITERSCOUNT)", XB_VAR_ANY}, {"(FLOWS)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(mutex_vars) == M_COUNT_, "one M_ index per Mutex variable");
+
+/* Asynchronous waits for what a Mutex or a Semaphore gives (a lock, a place): the object's variables of its waiters
+ * (the short lock of their ring; how many are in line, a word kept equal to the ring's count under that lock and read
+ * without it, so that a release that finds none takes no lock; the ring), how the thing is taken for a flow without
+ * waiting and given back, and, for a lock (which belongs to a flow), the flow that holds it (0: none) and the hash of
+ * how many waiters each flow has in line (NULL and NO_FLOWS for a place, which belongs to none). A waiter is {task,
+ * flow, value}: the flow it is for, the task's value once granted; NIL in the ring once it was granted out of its turn.
+ */
+#define NO_FLOWS UINT32_MAX
+typedef struct waits {
+  uint32_t queue, waiting;
+  xb_ring ring;
+  uint32_t flows;
+  int (*take)(const xb_item *o, uint64_t flow);
+  void (*give_back)(const xb_item *o, uint64_t flow);
+  uint64_t (*owner)(const xb_item *o);
+} waits;
+
+enum { W_TASK, W_FLOW, W_VALUE, W_COUNT_ };
+_Static_assert(W_TASK == 0, "a waiter's task first: xb_ring_pair_gone");
+
+/* A flow's count of waiters in line changed by one (under the ring's lock): the count now. */
+static int64_t flow_waiters(xb_ctx *ctx, const xb_item *o, const waits *k, uint64_t flow, int more) {
+  xb_hash *h = ((xb_object *)o->v.p)->vars[k->flows].v.p;
+  xb_item key, n;
+  xb_set_int(&key, (int64_t)flow);
+  int64_t now = (xb_hash_get(h, &key, &n) ? n.v.i : 0) + (more ? 1 : -1);
+  xb_set_int(&n, now);
+  if (more) xb_hash_put(ctx, h, &key, &n);
+  else if (now > 0) xb_hash_replace(h, &key, &n);
+  else xb_hash_remove(h, &key);
+  return now;
+}
+
+/* The waits of an object, for the ring's `gone` test: a waiter granted out of its turn (NIL) or ended (canceled, timed
+ * out) needs its place no more, and leaves its flow's count. */
+typedef struct waits_of {
+  const xb_item *o;
+  const waits *k;
+} waits_of;
+
+static int waiter_gone(void *arg, const xb_item *w) {
+  if (w->type != XB_T_ARRAY) return 1;
+  if (!xb_ring_pair_gone(NULL, w)) return 0;
+  const waits_of *of = arg;
+  if (of->k->flows != NO_FLOWS) flow_waiters(NULL, of->o, of->k, (uint64_t)((xb_array *)w->v.p)->items[W_FLOW].v.i, 0);
+  return 1;
+}
+
+/* The waiters of the flow `owner`, which holds the lock, granted out of their turn (they would wait behind others for
+ * what their flow has): each takes it again and leaves NIL in its place. */
+static void grant_owner(const xb_item *o, const waits *k, uint64_t owner, xb_claims *c) {
+  xb_item nil;
+  xb_set_nil(&nil);
+  for (uint32_t i = 0; i < xb_ring_count(o, k->ring); ++i) {
+    const xb_item *e = xb_ring_at(o, k->ring, i);
+    if (e->type != XB_T_ARRAY) continue;
+    const xb_array *w = e->v.p;
+    if ((uint64_t)w->items[W_FLOW].v.i != owner || xb_task_is_final(&w->items[W_TASK]) || !k->take(o, owner)) continue;
+    if (xb_task_claim(&w->items[W_TASK])) {
+      c->held = *e;
+      xb_ring_set(o, k->ring, i, &nil);
+      flow_waiters(NULL, o, k, owner, 0);
+      w = c->held.v.p;
+      xb_claims_add(c, &w->items[W_TASK], &w->items[W_VALUE]);
+    } else {
+      k->give_back(o, owner); /* it ended as it was granted */
+    }
+  }
+}
+
+/* The waiters of `o` given what is free in turn (under their ring's lock), each completed once that lock is
+ * released: the first waiter takes it for its flow, and the others wait for more. A waiter that ended meanwhile
+ * (canceled, timed out) is passed over; one that ends as it is granted gives back what it took. Then the waiters of
+ * the flow that holds the lock (granted now, or taken without the line) take it too. */
+static void grant(xb_ctx *ctx, const xb_item *o, const waits *k) {
+  xb_claims c;
+  xb_claims_root(ctx, &c);
+  xb_object_lock_short(o, k->queue);
+  while (xb_ring_count(o, k->ring)) {
+    const xb_item *e = xb_ring_at(o, k->ring, 0);
+    if (e->type != XB_T_ARRAY) { /* the place of a waiter granted out of its turn */
+      xb_ring_pop(o, k->ring, &c.held);
+      continue;
+    }
+    const xb_array *w = e->v.p;
+    uint64_t flow = (uint64_t)w->items[W_FLOW].v.i;
+    int gone = xb_task_is_final(&w->items[W_TASK]);
+    if (!gone && !k->take(o, flow)) break; /* none free: the next release grants again */
+    xb_ring_pop(o, k->ring, &c.held);
+    if (k->flows != NO_FLOWS) flow_waiters(NULL, o, k, flow, 0);
+    w = c.held.v.p;
+    if (gone) continue;
+    if (xb_task_claim(&w->items[W_TASK])) xb_claims_add(&c, &w->items[W_TASK], &w->items[W_VALUE]);
+    else k->give_back(o, flow); /* it ended as it was granted */
+  }
+  if (k->flows != NO_FLOWS && xb_ring_count(o, k->ring)) {
+    uint64_t owner = k->owner(o);
+    xb_item key, n;
+    xb_set_int(&key, (int64_t)owner);
+    if (owner && xb_hash_get(((xb_object *)o->v.p)->vars[k->flows].v.p, &key, &n)) grant_owner(o, k, owner, &c);
+  }
+  xb_atomic_store32(xb_object_word(o, k->waiting), xb_ring_count(o, k->ring), XB_SEQ_CST);
+  xb_object_unlock_short(o, k->queue);
+  xb_claims_settle(ctx, &c);
+  xb_gc_root_pop(ctx, 2);
+}
+
+/* After a release of what `o` gives, or a lock taken without the line: its waiters granted when there are any. The
+ * change before and the count of waiters are ordered against a waiter's count and its take (a sequentially
+ * consistent fence on both sides): one of the two sees the other. */
+static void released(xb_ctx *ctx, const xb_item *o, const waits *k) {
+  xb_atomic_fence(XB_SEQ_CST);
+  if (xb_atomic_load32(xb_object_word(o, k->waiting), XB_RELAXED)) grant(ctx, o, k);
+}
+
+/* A waiter of `o` for this flow until `deadline` (< 0: none) unless `*token` cancels it first: its task in `*r`,
+ * completed with `*granted` once taken, else with `*timed_out` at the deadline; at once when it can be taken now and
+ * no other waiter is in line before it (or the flow holds it already). 0, with the argument error of `what`, for a
+ * token that is no token. */
+static int wait_async(xb_ctx *ctx, xb_item *r, const xb_item *o, const waits *k, const xb_item *token,
+                      int64_t deadline, const xb_item *granted, const xb_item *timed_out, const char *what,
+                      uint32_t argc, xb_item *argv) {
+  uint64_t self = xb_flow_self();
+  int first = !xb_atomic_load32(xb_object_word(o, k->waiting), XB_SEQ_CST) || (k->owner && k->owner(o) == self);
+  if (first && k->take(o, self)) {
+    xb_task_completed(ctx, r, granted);
+    return 1;
+  }
+  xb_item waiter;
+  xb_set_nil(&waiter);
+  xb_gc_root_push(ctx, &waiter);
+  int ok = xb_task_waiter(ctx, r, token, deadline, timed_out, what, argc, argv);
+  if (ok) {
+    xb_array *w = xb_array_alloc(W_COUNT_); /* `w`, on the stack, stays where it is */
+    xb_set_array(&waiter, w);
+    w->items[W_TASK] = *r;
+    xb_set_int(&w->items[W_FLOW], (int64_t)self);
+    w->items[W_VALUE] = *granted;
+    xb_gc_write(w);
+    xb_share(&waiter);
+    waits_of of = {o, k};
+    xb_object_lock_short(o, k->queue);
+    xb_ring_push(o, k->ring, &waiter, waiter_gone, &of);
+    if (k->flows != NO_FLOWS) flow_waiters(ctx, o, k, self, 1);
+    xb_atomic_store32(xb_object_word(o, k->waiting), xb_ring_count(o, k->ring), XB_SEQ_CST);
+    xb_object_unlock_short(o, k->queue);
+    xb_atomic_fence(XB_SEQ_CST); /* the count before the take (released's other side) */
+    grant(ctx, o, k); /* freed meanwhile: the first waiter takes it */
+  }
+  xb_gc_root_pop(ctx, 1);
+  return ok;
+}
+
+/* The waits of an asynchronous call ( [nMs], [oToken] ) after the object, checked whether it waits or not: 0 after
+ * an argument error. */
+static int async_args(xb_ctx *ctx, const char *what, uint32_t argc, xb_item *argv, int64_t *deadline,
+                      xb_item *token) {
+  if (!xb_deadline_arg(ctx, what, XB_CODE_TASK, 1, argc, argv, deadline)) return 0;
+  if (argc > 2) *token = argv[2];
+  else xb_set_nil(token);
+  if (xb_task_token_ok(token)) return 1;
+  xb_flow_arg_error(ctx, XB_CODE_TASK, what, argc, argv);
+  return 0;
+}
 
 xb_rwords xb_object_rwords(const xb_item *object, uint32_t k) {
   return (xb_rwords){xb_object_word(object, k), xb_object_word64(object, k + 1), xb_object_word(object, k + 2)};
@@ -287,7 +458,27 @@ void xb_object_unlock_short(const xb_item *object, uint32_t k) {
 
 static xb_rwords mutex_words(const xb_item *m) { return xb_object_rwords(m, M_STATE); }
 
-static int mutex_take(xb_ctx *ctx, const xb_item *m) { return xb_object_lock(ctx, m, M_STATE); }
+static int mutex_take_for(const xb_item *m, uint64_t flow) { return xb_rwords_try(mutex_words(m), flow); }
+static void mutex_give_back(const xb_item *m, uint64_t flow) { xb_rwords_release(mutex_words(m), flow); }
+static uint64_t mutex_owner(const xb_item *m) { return xb_atomic_load64(xb_object_word64(m, M_OWNER), XB_RELAXED); }
+static const waits mutex_waits = {M_QUEUE,        M_WAITING,       {M_WAITERS, M_WAITERS_HEAD, M_WAITERS_COUNT},
+                                  M_FLOWS,        mutex_take_for,  mutex_give_back,
+                                  mutex_owner};
+
+/* The mutex released once by `self`: 0 when `self` does not hold it. Released whole, it goes to an asynchronous
+ * waiter. */
+static int mutex_release(xb_ctx *ctx, const xb_item *m, uint64_t self) {
+  if (!xb_rwords_release(mutex_words(m), self)) return 0;
+  if (mutex_owner(m) != self) released(ctx, m, &mutex_waits);
+  return 1;
+}
+
+/* The mutex taken by this flow, as Lock() does: its waiters of this flow already in line take it too (released). */
+static int mutex_take(xb_ctx *ctx, const xb_item *m) {
+  if (!xb_object_lock(ctx, m, M_STATE)) return 0;
+  released(ctx, m, &mutex_waits);
+  return 1;
+}
 
 static int is_mutex(const xb_item *it);
 
@@ -300,15 +491,16 @@ static void mutex_lock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
 
 /* oMutex:TryLock(): takes the lock when no other flow holds it: whether it did. */
 static void mutex_try_lock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
   XB_UNUSED(argc);
-  xb_set_logical(r, xb_rwords_try(mutex_words(&argv[0]), xb_flow_self()));
+  int taken = xb_rwords_try(mutex_words(&argv[0]), xb_flow_self());
+  if (taken) released(ctx, &argv[0], &mutex_waits);
+  xb_set_logical(r, taken);
 }
 
 /* oMutex:Unlock(): releases the lock once; an error when this flow does not hold it. */
 static void mutex_unlock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   xb_set_nil(r);
-  if (!xb_rwords_release(mutex_words(&argv[0]), xb_flow_self()))
+  if (!mutex_release(ctx, &argv[0], xb_flow_self()))
     xb_error_described(ctx, NULL, EG_ARG, XB_CODE_MUTEX_UNLOCK, "Mutex not held", "MUTEX:UNLOCK", 0, argc, argv);
 }
 
@@ -320,12 +512,14 @@ _Static_assert(XB_TABLE_SIZE(holder_vars) == H_COUNT_, "one H_ index per holder 
 
 /* oHolder:Dispose(): the mutex released once, by the flow holding it; nothing after, nor from another flow. */
 static void holder_dispose(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
   XB_UNUSED(argc);
   xb_set_nil(r);
   xb_item m, nil;
   xb_object_get(argv[0].v.p, H_MUTEX, &m);
-  if (!is_mutex(&m) || !xb_rwords_release(mutex_words(&m), xb_flow_self())) return; /* released, or another's */
+  xb_gc_root_push(ctx, &m);
+  int released = is_mutex(&m) && mutex_release(ctx, &m, xb_flow_self());
+  xb_gc_root_pop(ctx, 1);
+  if (!released) return; /* released, or another's */
   xb_set_nil(&nil);
   xb_object_put(argv[0].v.p, H_MUTEX, &nil);
 }
@@ -346,13 +540,49 @@ static void mutex_hold(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   if (!mutex_take(ctx, &argv[0])) {
     xb_set_nil(r);
   } else if (xb_pending_get(ctx) & XB_PENDING_UNWIND) { /* a QUIT came meanwhile: no USING will store the holder */
-    xb_rwords_release(mutex_words(&argv[0]), xb_flow_self());
+    mutex_release(ctx, &argv[0], xb_flow_self());
     xb_set_nil(r);
   }
 }
 
+/* oMutex:LockAsync( [nMs], [oToken] ): a task that completes with .T. once this flow holds the lock (at once when it
+ * is free or the flow's), with .F. when nMs milliseconds passed first; the token cancels the wait. An asynchronous
+ * function that awaits it holds the lock across its steps, as Lock() would, without a worker waiting. */
+static void mutex_lock_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  int64_t deadline;
+  xb_item token, granted, timed_out;
+  xb_set_nil(r);
+  if (!async_args(ctx, "MUTEX:LOCKASYNC", argc, argv, &deadline, &token)) return;
+  xb_set_logical(&granted, 1);
+  xb_set_logical(&timed_out, 0);
+  xb_gc_root_push(ctx, &token);
+  wait_async(ctx, r, &argv[0], &mutex_waits, &token, deadline, &granted, &timed_out, "MUTEX:LOCKASYNC", argc, argv);
+  xb_gc_root_pop(ctx, 1);
+}
+
+/* oMutex:HoldAsync( [nMs], [oToken] ): LockAsync's wait, completed with a holder (Hold()'s: its Dispose() releases the
+ * lock), or with NIL when nMs milliseconds passed first. */
+static void mutex_hold_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  int64_t deadline;
+  xb_item token, holder, nil;
+  xb_set_nil(r);
+  xb_set_nil(&holder);
+  xb_set_nil(&nil);
+  if (!async_args(ctx, "MUTEX:HOLDASYNC", argc, argv, &deadline, &token)) return;
+  xb_gc_root_push(ctx, &token);
+  xb_gc_root_push(ctx, &holder);
+  xb_object *h = xb_object_new(&holder_class);
+  xb_set_object(&holder, h);
+  h->vars[H_MUTEX] = argv[0];
+  xb_gc_write(h);
+  xb_share(&holder);
+  wait_async(ctx, r, &argv[0], &mutex_waits, &token, deadline, &holder, &nil, "MUTEX:HOLDASYNC", argc, argv);
+  xb_gc_root_pop(ctx, 2);
+}
+
 static const xb_class_method mutex_methods[] = {
-  {"LOCK", mutex_lock}, {"TRYLOCK", mutex_try_lock}, {"UNLOCK", mutex_unlock}, {"HOLD", mutex_hold}};
+  {"LOCK", mutex_lock},           {"TRYLOCK", mutex_try_lock}, {"UNLOCK", mutex_unlock}, {"HOLD", mutex_hold},
+  {"LOCKASYNC", mutex_lock_async}, {"HOLDASYNC", mutex_hold_async}};
 static const xb_class mutex_class = {"MUTEX", M_COUNT_, mutex_vars, NULL, XB_TABLE_SIZE(mutex_methods), mutex_methods};
 
 static int is_mutex(const xb_item *it) {
@@ -365,7 +595,9 @@ void xbf_MUTEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   xb_object *m = xb_object_new(&mutex_class);
-  for (uint32_t k = 0; k < M_COUNT_; ++k) xb_set_logical(&m->vars[k], 0);
+  for (uint32_t k = 0; k < M_WAITERS; ++k) xb_set_logical(&m->vars[k], 0);
+  xb_ring_init(m, mutex_waits.ring);
+  xb_set_hash(&m->vars[M_FLOWS], xb_hash_alloc()); /* `m` is new: no barrier */
   xb_set_object(ret, m);
 }
 
@@ -424,7 +656,7 @@ static void condition_wait(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv
   int joined = condition_join(&argv[0]); /* before the mutex goes: a Notify() after it finds this waiter */
   uint32_t depth = *xb_object_word(&argv[1], M_DEPTH);
   *xb_object_word(&argv[1], M_DEPTH) = 1;
-  xb_rwords_release(mutex_words(&argv[1]), xb_flow_self());
+  mutex_release(ctx, &argv[1], xb_flow_self());
   int notified = 0, ended = XB_WAIT_CHANGED;
   if (!joined) {
     while (ended == XB_WAIT_CHANGED) {
@@ -494,11 +726,34 @@ void xbf_CONDITION(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_object(ret, c);
 }
 
-/* Semaphores: the count of free places and the most it may reach. */
+/* Semaphores: the count of free places and the most it may reach; the tasks that wait for a place asynchronously
+ * (WaitAsync, waits as a Mutex's are). */
 
-enum { S_COUNT, S_MAXIMUM, S_COUNT_ };
-static const xb_class_var semaphore_vars[] = {{"(COUNT)", XB_VAR_ANY}, {"(MAXIMUM)", XB_VAR_ANY}};
+enum { S_COUNT, S_MAXIMUM, S_QUEUE, S_WAITING, S_WAITERS, S_WAITERS_HEAD, S_WAITERS_COUNT, S_COUNT_ };
+static const xb_class_var semaphore_vars[] = {
+  {"(COUNT)", XB_VAR_ANY},   {"(MAXIMUM)", XB_VAR_ANY}, {"(QUEUE)", XB_VAR_ANY},
+  {"(WAITING)", XB_VAR_ANY}, {"(WAITERS)", XB_VAR_ANY}, {"(WAITERSHEAD)", XB_VAR_ANY}, {"(WAITERSCOUNT)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(semaphore_vars) == S_COUNT_, "one S_ index per Semaphore variable");
+
+/* A place taken, when one is free (for any flow: places belong to none). */
+static int semaphore_take(const xb_item *s, uint64_t flow) {
+  XB_UNUSED(flow);
+  uint32_t *word = xb_object_word(s, S_COUNT), n = xb_atomic_load32(word, XB_ACQUIRE);
+  while (n)
+    if (xb_atomic_cas32(word, &n, n - 1, XB_ACQ_REL)) return 1;
+  return 0;
+}
+
+/* A place given back by a waiter that ended as it was granted: a thread waiting for one is woken. */
+static void semaphore_give_back(const xb_item *s, uint64_t flow) {
+  XB_UNUSED(flow);
+  uint32_t *word = xb_object_word(s, S_COUNT);
+  if (!xb_atomic_add32(word, 1, XB_ACQ_REL)) xb_park_wake(word, 0);
+}
+
+static const waits semaphore_waits = {S_QUEUE,        S_WAITING,           {S_WAITERS, S_WAITERS_HEAD, S_WAITERS_COUNT},
+                                      NO_FLOWS,       semaphore_take,      semaphore_give_back,
+                                      NULL};
 
 #define SEMAPHORE_MAX INT32_MAX
 
@@ -547,7 +802,24 @@ static void semaphore_release(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *a
     }
   } while (!xb_atomic_cas32(word, &before, before + (uint32_t)n, XB_ACQ_REL));
   if (!before) xb_park_wake(word, n > 1);
+  released(ctx, &argv[0], &semaphore_waits);
   xb_set_int(r, before);
+}
+
+/* oSemaphore:WaitAsync( [nMs], [oToken] ): a task that completes with .T. once it took a place (at once when one is
+ * free), with .F. when nMs milliseconds passed first; the token cancels the wait. Places a Release() gives go to these
+ * waiters in their order. */
+static void semaphore_wait_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  int64_t deadline;
+  xb_item token, granted, timed_out;
+  xb_set_nil(r);
+  if (!async_args(ctx, "SEMAPHORE:WAITASYNC", argc, argv, &deadline, &token)) return;
+  xb_set_logical(&granted, 1);
+  xb_set_logical(&timed_out, 0);
+  xb_gc_root_push(ctx, &token);
+  wait_async(ctx, r, &argv[0], &semaphore_waits, &token, deadline, &granted, &timed_out, "SEMAPHORE:WAITASYNC", argc,
+             argv);
+  xb_gc_root_pop(ctx, 1);
 }
 
 /* oSemaphore:Count(): the places free now. */
@@ -557,8 +829,10 @@ static void semaphore_count(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *arg
   xb_set_int(r, xb_atomic_load32(xb_object_word(&argv[0], S_COUNT), XB_ACQUIRE));
 }
 
-static const xb_class_method semaphore_methods[] = {
-  {"WAIT", semaphore_wait}, {"RELEASE", semaphore_release}, {"COUNT", semaphore_count}};
+static const xb_class_method semaphore_methods[] = {{"WAIT", semaphore_wait},
+                                                    {"RELEASE", semaphore_release},
+                                                    {"COUNT", semaphore_count},
+                                                    {"WAITASYNC", semaphore_wait_async}};
 static const xb_class semaphore_class = {
   "SEMAPHORE", S_COUNT_, semaphore_vars, NULL, XB_TABLE_SIZE(semaphore_methods), semaphore_methods};
 
@@ -575,8 +849,8 @@ void xbf_SEMAPHORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   xb_object *s = xb_object_new(&semaphore_class);
-  xb_set_logical(&s->vars[S_COUNT], 0);
-  xb_set_logical(&s->vars[S_MAXIMUM], 0);
+  for (uint32_t k = 0; k < S_WAITERS; ++k) xb_set_logical(&s->vars[k], 0);
+  xb_ring_init(s, semaphore_waits.ring);
   s->vars[S_COUNT].v.l = (int32_t)initial;
   s->vars[S_MAXIMUM].v.l = (int32_t)maximum;
   xb_set_object(ret, s);

@@ -51,6 +51,51 @@ int xb_object_lock(xb_ctx *ctx, const xb_item *object, uint32_t k);
 void xb_object_lock_short(const xb_item *object, uint32_t k);
 void xb_object_unlock_short(const xb_item *object, uint32_t k);
 
+/* An object's variable `k` that holds a 32-bit count (written with xb_set_int), read without its lock only where the
+ * caller allows a stale value. */
+static inline uint32_t xb_object_u32(const xb_item *o, uint32_t k) {
+  return (uint32_t)((const xb_object *)o->v.p)->vars[k].v.i;
+}
+
+/* Rings (rtl/waiters.c): a queue in three variables of a runtime object (its array, its head, its count), read and
+ * written only under the object's short lock. The arrays are the collector's and shared with the object: only the
+ * lock's holder reads or writes them, in place. A ring grows when full (twice as large; first the elements its `gone`
+ * test finds needless are dropped, the test told so through `arg` and called once for each, and when that freed less
+ * than half of it, it grows all the same, so that waiters canceled again and again cost what they are), and shrinks to
+ * half once a quarter of it is used. xb_ring_at is the element k places from the head (k below the count),
+ * xb_ring_set replaces it; xb_ring_task_gone is the test of a ring of waiting tasks (an ended one, canceled or timed
+ * out, needs its place no more), xb_ring_pair_gone of a ring of arrays whose first item is such a task. */
+typedef struct xb_ring {
+  uint32_t items, head, count;
+} xb_ring;
+typedef int (*xb_ring_gone)(void *arg, const xb_item *element);
+void xb_ring_init(xb_object *o, xb_ring g);
+static inline uint32_t xb_ring_count(const xb_item *o, xb_ring g) { return xb_object_u32(o, g.count); }
+static inline const xb_item *xb_ring_at(const xb_item *o, xb_ring g, uint32_t k) {
+  const xb_array *a = ((const xb_object *)o->v.p)->vars[g.items].v.p;
+  return &a->items[(xb_object_u32(o, g.head) + k) % a->len];
+}
+void xb_ring_set(const xb_item *o, xb_ring g, uint32_t k, const xb_item *v);
+void xb_ring_push(const xb_item *o, xb_ring g, const xb_item *v, xb_ring_gone gone, void *arg);
+void xb_ring_pop(const xb_item *o, xb_ring g, xb_item *out);
+int xb_ring_task_gone(void *arg, const xb_item *task);
+int xb_ring_pair_gone(void *arg, const xb_item *pair);
+
+/* Waiting tasks claimed under an object's lock (xb_task_claim: a token cancels them no more) and completed once it is
+ * released (xb_claims_settle: wakes and continuations run there, never under the lock): pairs {task, value} in an
+ * array (`list`, NIL until a claim), completed with their values (failed with them, `fail`). `held` keeps what a
+ * ring gave up until it is in the list: popped, a waiter is reachable from nowhere else, and the allocations that
+ * follow may collect. xb_claims_root roots both (two roots, the caller pops them with its own). */
+typedef struct xb_claims {
+  xb_item list;
+  xb_item held;
+  uint32_t n;
+  int fail;
+} xb_claims;
+void xb_claims_root(xb_ctx *ctx, xb_claims *c);
+void xb_claims_add(xb_claims *c, const xb_item *task, const xb_item *value);
+void xb_claims_settle(xb_ctx *ctx, xb_claims *c);
+
 /* How a wait ended. */
 enum { XB_WAIT_QUIT = -1, XB_WAIT_TIMED_OUT, XB_WAIT_CHANGED };
 
@@ -87,6 +132,12 @@ int xb_integer_arg(xb_ctx *ctx, const char *what, int32_t code, uint32_t k, uint
  * the token is no token. xb_task_settle: completes it with `value` (`ok`), or fails it with that value: 0 when it had
  * ended already (canceled). xb_task_completed: a task completed with `value` (with .T., one task shared by all). */
 int xb_task_promise(xb_ctx *ctx, xb_item *r, const xb_item *token, const char *what, uint32_t argc, xb_item *argv);
+/* xb_task_waiter: a waiter's task in `*r`, shared (a Mutex's LockAsync, a Semaphore's WaitAsync): code grants it
+ * (xb_task_claim, then xb_task_settle_claimed); `*token` cancels it first (NIL: none), and at `deadline` (< 0: none)
+ * it completes with `*timed_out` unless it was claimed by then. 0, with the argument error of `what`, when the token
+ * is no token. */
+int xb_task_waiter(xb_ctx *ctx, xb_item *r, const xb_item *token, int64_t deadline, const xb_item *timed_out,
+                   const char *what, uint32_t argc, xb_item *argv);
 /* Whether a task ended (completed, failed or canceled). */
 int xb_task_is_final(const xb_item *task);
 /* Whether the item is a CancellationToken, or NIL (none). */
@@ -96,7 +147,8 @@ int xb_task_settle(xb_ctx *ctx, const xb_item *task, int ok, const xb_item *valu
  * 0 when it had ended (canceled). xb_task_settle_claimed then completes it (`ok`) or fails it with `value`. */
 int xb_task_claim(const xb_item *task);
 /* A claim given back (the claimer settles nothing after all): 1, the promise waits again, its token may cancel it; 0
- * when its token asked to cancel it meanwhile: it stays claimed, and the claimer cancels it (xb_task_cancel_claimed). */
+ * when its token asked to cancel it meanwhile: it stays claimed, and the claimer cancels it (xb_task_cancel_claimed).
+ */
 int xb_task_unclaim(const xb_item *task);
 void xb_task_cancel_claimed(xb_ctx *ctx, const xb_item *task);
 void xb_task_settle_claimed(xb_ctx *ctx, const xb_item *task, int ok, const xb_item *value);

@@ -51,6 +51,7 @@
 #define MONITOR_NS ((int64_t)10 * XB_NS_PER_MS)
 #define SEARCH_NS ((int64_t)50 * XB_NS_PER_US)
 #define STEAL_NEXT_NS ((int64_t)5 * XB_NS_PER_US)
+#define STARVED_NS ((int64_t)2000 * XB_NS_PER_MS)
 #define SEARCH_LOOK 64u /* looks for work between looks at the clock (and yields of the processor) */
 #define SEARCH_RETRY 16u /* looks between two searches of the queues, which found nothing that waits there */
 
@@ -78,6 +79,7 @@ static uint32_t queued;  /* tasks in the queues */
 static uint32_t ended;   /* tasks ended (the monitor tells progress) */
 static uint32_t longCount; /* workers LONG */
 static uint32_t searching; /* workers searching for work before they park */
+static uint32_t unstarted; /* the last thread a worker was to run did not start (none started since) */
 static uint32_t target;  /* workers that run at once; 0 until the pool first starts */
 static uint32_t stopping;
 static unsigned requested;
@@ -274,7 +276,11 @@ static worker *spawn_locked(void) {
   xb_atomic_store32(&w->alive, 1, XB_RELEASE);
   xb_atomic_add32(&total, 1, XB_ACQ_REL);
   xb_atomic_add32(&active, 1, XB_ACQ_REL);
-  if (xb_program_thread_start(worker_body, w)) return w;
+  if (xb_program_thread_start(worker_body, w)) {
+    xb_atomic_store32(&unstarted, 0, XB_RELAXED);
+    return w;
+  }
+  xb_atomic_store32(&unstarted, 1, XB_RELAXED);
   xb_atomic_store32(&w->alive, 0, XB_RELEASE);
   xb_atomic_add32(&total, (uint32_t)-1, XB_ACQ_REL);
   xb_atomic_add32(&active, (uint32_t)-1, XB_ACQ_REL);
@@ -453,14 +459,57 @@ void xb_sched_blocking(int entering) {
   }
 }
 
-/* The monitor: while tasks wait in the queues and none ended since its last look, the first worker found running one
- * task longer than LONG_TASK_NS has its place given to another, as long as fewer than `target` are LONG. */
+/* What the program's standard error is told once tasks starve (starved). */
+typedef struct starving {
+  uint32_t tasks, workers;
+} starving;
+
+static void tell_starving(void *p) {
+  const starving *s = p;
+  xb_output_lock();
+  fflush(stdout);
+  fprintf(stderr,
+          "\nxbrt: %u tasks have waited %d seconds while all %u workers wait or run long and no other can start: a "
+          "task that waits for a lock, a semaphore, a condition, a task or a channel holds its worker, which awaiting "
+          "it (LockAsync, WaitAsync, ReceiveAsync, AWAIT of the task) does not\n",
+          s->tasks, (int)(STARVED_NS / XB_NS_PER_MS / 1000), s->workers);
+  fflush(stderr);
+  xb_output_unlock();
+}
+
+/* Tasks starve when they wait in the queues, none ended for STARVED_NS, and no other worker can start: the most
+ * workers, or fewer active than the target and the last thread the system was asked for did not start. The program's
+ * standard error is told so once, until tasks end again. */
+static void starved(int progress, int waiting) {
+  static int64_t since;
+  static int told;
+  int full = xb_atomic_load32(&total, XB_ACQUIRE) >= WORKERS_MAX ||
+             (xb_atomic_load32(&unstarted, XB_RELAXED) &&
+              xb_atomic_load32(&active, XB_ACQUIRE) < xb_atomic_load32(&target, XB_ACQUIRE));
+  if (progress || !waiting || !full) {
+    since = 0;
+    told = 0;
+    return;
+  }
+  int64_t now = xb_platform_monotonic_ns();
+  if (!since) since = now;
+  if (told || now - since < STARVED_NS) return;
+  told = 1;
+  starving s = {xb_atomic_load32(&queued, XB_ACQUIRE), xb_atomic_load32(&total, XB_ACQUIRE)};
+  xb_blocking_run(tell_starving, &s); /* a full pipe holds the write */
+}
+
+/* The monitor: while tasks wait in the queues, the places that a thread which did not start left empty are filled
+ * again (fill_place), and when none ended since its last look, the first worker found running one task longer than
+ * LONG_TASK_NS has its place given to another, as long as fewer than `target` are LONG; tasks that starve are told. */
 static void monitor(void) {
   static uint32_t lastEnded;
   uint32_t now_ended = xb_atomic_load32(&ended, XB_RELAXED), progress = now_ended != lastEnded;
   lastEnded = now_ended;
-  if (progress || !xb_atomic_load32(&queued, XB_ACQUIRE) ||
-      xb_atomic_load32(&longCount, XB_ACQUIRE) >= xb_atomic_load32(&target, XB_ACQUIRE))
+  int waiting = xb_atomic_load32(&queued, XB_ACQUIRE) != 0;
+  if (waiting) fill_place();
+  starved((int)progress, waiting);
+  if (progress || !waiting || xb_atomic_load32(&longCount, XB_ACQUIRE) >= xb_atomic_load32(&target, XB_ACQUIRE))
     return;
   uint64_t now = (uint64_t)xb_platform_monotonic_ns();
   uint32_t n = xb_atomic_load32(&slots, XB_ACQUIRE);

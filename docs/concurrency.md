@@ -69,12 +69,13 @@ NEXT
 - Asynchronous generators: `YIELD` in an `ASYNC` function. Calling it returns an asynchronous enumerator
   (`MoveNextAsync()` gives a task of a logical, `Current`); `AWAIT FOR EACH x IN expr ... NEXT` awaits each step.
   `AWAIT FOR EACH` over an ordinary enumerator awaits each element that is a task (a collection of tasks in order).
-- `USING [AWAIT] [v :=] expr ... END [USING]`: the body runs, then the value's `Dispose()` (with `AWAIT`, `AWAIT
-  DisposeAsync()`) when it ends in any way (`RETURN`, `EXIT`, `LOOP`, an error, `BREAK`, `QUIT`), as `ALWAYS` would.
-  Without `AWAIT` it is done ([compiler.md](compiler.md#grammar)): the value is kept in a variable of the statement's
-  own, so the one disposed is the one evaluated, a NIL value is not disposed, and `v`, when written, is an ordinary
-  variable that the value is assigned to (an assignment that fails disposes the value too). Classes of the runtime
-  that hold resources (files, sockets, connections, locks) answer both.
+- `[AWAIT] USING [v :=] expr ... END [USING]`: the body runs, then the value's `Dispose()` (with `AWAIT`, `AWAIT
+  DisposeAsync()`; `USING AWAIT expr` is `USING` of the awaited value) when it ends in any way (`RETURN`, `EXIT`,
+  `LOOP`, an error, `BREAK`, `QUIT`), as `ALWAYS` would. Without `AWAIT` it is done
+  ([compiler.md](compiler.md#grammar)): the value is kept in a variable of the statement's own, so the one disposed is
+  the one evaluated, a NIL value is not disposed, and `v`, when written, is an ordinary variable that the value is
+  assigned to (an assignment that fails disposes the value too). Classes of the runtime that hold resources (files,
+  sockets, connections, locks) answer both.
 - Errors: an error in a task goes to the task's error block, as in any code (it may substitute a value, retry, or
   `BREAK`). One that leaves the task's body (a `BREAK`, or the default handler that would end the program) completes
   the task as failed with the error object; `AWAIT` of a failed task raises it in the awaiter as `Result` does
@@ -92,8 +93,9 @@ NEXT
   (`xb_flow_self`: a 64-bit number never given twice, so no flow ever takes another's lock for its own, however many
   flows a long-running process starts). So `SYNCHRONIZED oMutex` around an `AWAIT` keeps the mutex while the function is
   suspended and releases it from whatever worker runs its end, and another task that the same worker runs meanwhile
-  waits for it as any other flow (done; C# forbids `await` inside `lock`). A wait for a held lock blocks its worker
-  (another takes its place); `Semaphore:WaitAsync` and an asynchronous lock that suspends instead are planned.
+  waits for it as any other flow (done; C# forbids `await` inside `lock`). A wait for a held lock with `Lock()` blocks
+  its worker (another takes its place); `AWAIT oMutex:LockAsync()`, `AWAIT SYNCHRONIZED oMutex` and `AWAIT
+  oSemaphore:WaitAsync()` suspend the function instead (done, [Threads](#threads)).
 - Commands: awaitable forms are `#command` rules in `std.ch` (`AWAIT SEEK x`, `AWAIT SKIP n`, `AWAIT COMMIT`), never
   special cases in the compiler.
 
@@ -113,9 +115,9 @@ Classes and functions, listed in [coverage.md](coverage.md) as each one comes:
   data between tasks.
 - Threads: `ThreadStart( bWork, ... )` (a flow on a thread of its own, for work that blocks or computes for long),
   `Join()`, `IsAlive()`; `Mutex()` (`Lock`, `Unlock`, `TryLock`, `Hold`); `Condition()` (`Wait`, `Notify`,
-  `NotifyAll`); `Semaphore()` (`Wait`, `Release`, `Count`); `AtomicInt()` (`Add`, `CompareExchange`, `Value`): done,
-  see [Threads](#threads). Planned: `Semaphore`'s `WaitAsync`, `AsyncLock` (held across `AWAIT`), `Lazy( bInit )`; a
-  thread becomes a task once tasks exist.
+  `NotifyAll`); `Semaphore()` (`Wait`, `Release`, `Count`); `AtomicInt()` (`Add`, `CompareExchange`, `Value`); the
+  asynchronous waits `Mutex`'s `LockAsync` and `HoldAsync` (held across `AWAIT`) and `Semaphore`'s `WaitAsync`: done,
+  see [Threads](#threads). Planned: `Lazy( bInit )`; a thread becomes a task once tasks exist.
 - Statements of xbase's own over them, rules in `std.ch`: `SYNCHRONIZED oMutex ... END` (held for the body, released
   in any way it ends; done).
 
@@ -174,17 +176,26 @@ Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); th
   thread inside a system call that does not return (a read of the standard input, a file lock another program never
   releases) holds the program's end until it returns. A thread that ends holding a `Mutex` leaves it held.
 - `Mutex()` makes a lock that the flow holding it (a thread, a task, an `ASYNC` function: [Asynchronous
-  functions](#asynchronous-functions)) may take again: `Lock()` waits while another flow holds it (a blocking
-  operation: collections go on without the waiter), `TryLock()` takes it only when no other flow holds it and tells
-  whether it did, `Unlock()` releases it once (it is free when released as many times as taken); `Unlock()` by a flow
-  that does not hold it is `BASE/9019` `Mutex not held`. A wait for a mutex that a flow the waiter runs inside holds
-  (an `ASYNC` function's first step, a task run inline, wanting what its caller holds) is `BASE/9031` `Mutex held by a
-  flow this one runs in`: it could never end. `Hold()` takes it as `Lock()` does and returns a
-  holder (`MutexHolder`) whose `Dispose()` releases it once, from the flow holding it (from another, it does
-  nothing), for `USING`; NIL when a `QUIT` ended the wait or came as it took the lock (then released).
+  functions](#asynchronous-functions)) may take again: `Lock()` waits while another flow holds it (a blocking operation:
+  collections go on without the waiter), `TryLock()` takes it only when no other flow holds it and tells whether it did,
+  `Unlock()` releases it once (it is free when released as many times as taken); `Unlock()` by a flow that does not hold
+  it is `BASE/9019` `Mutex not held`. A wait for a mutex that a flow the waiter runs inside holds (an `ASYNC` function's
+  first step, a task run inline, wanting what its caller holds) is `BASE/9031` `Mutex held by a flow this one runs in`:
+  it could never end. `Hold()` takes it as `Lock()` does and returns a holder (`MutexHolder`) whose `Dispose()` releases
+  it once, from the flow holding it (from another, it does nothing), for `USING`; NIL when a `QUIT` ended the wait or
+  came as it took the lock (then released). `LockAsync( [nMs], [oToken] )` waits without holding a thread: a task that
+  completes with `.T.` once the calling flow holds the lock (at once when it is free and no such waiter is in line, or
+  the flow holds it already), with `.F.` when nMs milliseconds passed first (without nMs, NIL or a negative one: no
+  limit), canceled by the token; an `ASYNC` function that awaits it holds the lock across its next steps and releases it
+  with `Unlock()` from any of them. `HoldAsync( [nMs], [oToken] )` is the same wait completed with a holder, or NIL when
+  the time passed. A release that frees the lock gives it to the first of these waiters that is still waiting (canceled
+  and timed-out ones are passed over), in the order they came; a thread waiting with `Lock()` may take it before them. A
+  limit that is no number, or a token that is no token, is `BASE/9024` `Argument error`.
 - `SYNCHRONIZED oMutex ... END` (`END SYNCHRONIZED` too) runs the body holding the mutex and releases it however the
   body ends: a `std.ch` rule, `USING oMutex:Hold()` (`oMutex` is a variable, an element, a call or a message: an
-  operator around it would bind before `:Hold()`). `RETURN`, `EXIT` and `LOOP` may leave it.
+  operator around it would bind before `:Hold()`). `RETURN`, `EXIT` and `LOOP` may leave it. `AWAIT SYNCHRONIZED
+  oMutex ... END`, in an `ASYNC` function, awaits the mutex instead (`USING AWAIT oMutex:HoldAsync()`) and holds it
+  across the `AWAIT`s of the body.
 - `Condition()` makes a condition variable. `oCondition:Wait( oMutex, [nMs] )` releases `oMutex`, which the flow
   must hold (else `BASE/9021` `Mutex not held`; a limit that is no number, `BASE/9021` `Argument error`), however
   many times it took it, waits for a `Notify()` or `NotifyAll()` or nMs milliseconds (without nMs, NIL or a negative
@@ -193,12 +204,15 @@ Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); th
   a loop, holding the mutex. A `QUIT` ends the wait without the mutex. Up to 65535 threads wait on a condition at
   once; one more waits for a place with the mutex released, then takes it back and returns `.F.`, as if it had timed
   out.
-- `Semaphore( nInitial, [nMaximum] )` counts free places (0 .. nMaximum, at most 2^31 - 1, its default; a value out
-  of range, or nMaximum below nInitial, is `BASE/9022` `Argument error`). `Wait( [nMs] )` takes a place, waiting while
-  none is free (nMs as `Wait()`'s above; one that is no number is `BASE/9022`; a `QUIT` ends the wait), and tells
-  whether it took one; `Release( [nCount] )` gives back nCount
-  places (1 without it; below 1, `BASE/9022`) and returns the count before, or, past the maximum, raises
-  `BASE/9023` `Semaphore full` (`EG_LIMIT`) and changes nothing; `Count()` gives the places free.
+- `Semaphore( nInitial, [nMaximum] )` counts free places (0 .. nMaximum, at most 2^31 - 1, its default; a value out of
+  range, or nMaximum below nInitial, is `BASE/9022` `Argument error`). `Wait( [nMs] )` takes a place, waiting while none
+  is free (nMs as `Wait()`'s above; one that is no number is `BASE/9022`; a `QUIT` ends the wait), and tells whether it
+  took one; `Release( [nCount] )` gives back nCount places (1 without it; below 1, `BASE/9022`) and returns the count
+  before, or, past the maximum, raises `BASE/9023` `Semaphore full` (`EG_LIMIT`) and changes nothing; `Count()` gives
+  the places free. `WaitAsync( [nMs], [oToken] )` takes a place without holding a thread: a task that completes with
+  `.T.` once it took one (at once when one is free and no such waiter is in line), with `.F.` when nMs milliseconds
+  passed first, canceled by the token (its arguments as `LockAsync`'s); the places a `Release()` gives go to these
+  waiters in their order (a thread waiting with `Wait()` may take one before them).
 - `AtomicInt( [nValue] )` holds a 64-bit integer (0 without a value; a number is truncated toward zero, saturated):
   `Value` reads it, `Value := n` stores n, `Add( n )` adds n and returns the new value (wrapping as two's complement
   does), `CompareExchange( nExpected, nNew )` stores nNew when the value is nExpected and tells whether it did; each in
@@ -227,11 +241,16 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   console input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run`. While a worker running
   a task blocks with work waiting, another takes its place (woken or started, up to 1024 workers); the blocked one is
   active again when it returns, and a worker beyond the target that stays idle 2 seconds ends. A thread that waits
-  with no limit for a task still to start runs it itself (inline). Legacy synchronous code inside tasks therefore
-  costs threads, never liveness. A short wait for a lock of the runtime's (a stripe, a channel's lock: held a moment)
-  runs through `xb_waiting_run` instead: the worker keeps its place, so many tasks meeting on one channel never
-  multiply the threads. A monitor sees a task that runs long (20 ms) without blocking while others wait in
-  the queues, and puts another worker beside it the same way.
+  with no limit for a task still to start runs it itself (inline). Synchronous code inside tasks therefore costs
+  threads, up to the most workers or the threads the system lets start; past that the tasks left wait in the queues
+  until a worker comes back, which may be never when what the blocked tasks wait for is one of those left (a task
+  that would release their lock, close their channel). The asynchronous waits (`LockAsync`, `WaitAsync`,
+  `ReceiveAsync`, `AWAIT` of a task) hold no worker. When tasks wait in the queues, no worker can start and none ended
+  for 2 seconds, the program's standard error is told so once (`xbrt: ... tasks have waited ...`), until tasks end
+  again. A short wait for a lock of the runtime's (a stripe, a channel's lock: held a moment) runs through
+  `xb_waiting_run` instead: the worker keeps its place, so many tasks meeting on one channel never multiply the
+  threads. A monitor sees a task that runs long (20 ms) without blocking while others wait in the queues, and puts
+  another worker beside it the same way; it also starts again the workers whose threads did not start.
 - Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): a binary heap of deadlines that one thread serves, started with
   the pool: it sleeps until the earliest deadline and fires what is due; it is also the monitor, looking every 10 ms
   while tasks wait in the queues (with nothing queued it sleeps until its next timer, and a submission that finds every

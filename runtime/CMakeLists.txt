@@ -48,6 +48,7 @@ add_library(xbrt STATIC
   src/rdd/field.c
   src/rtl/arrays.c
   src/rtl/channels.c
+  src/rtl/waiters.c
   src/rtl/collections.c
   src/rtl/console.c
   src/rtl/dates.c

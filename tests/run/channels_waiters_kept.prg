@@ -17,7 +17,7 @@ PROCEDURE Main()
    ch:TryReceive( a )
    ? "senders served in order:", nOrder == nRounds, a[ 1 ][ 1 ]
    FOR i := 1 TO nRounds
-      ch:ReceiveAsync():ContinueWith( {| t | oCount:Add( 1 ), oSum:Add( t:Result[ 1 ] ) } )
+      ch:ReceiveAsync():ContinueWith( {| t | oSum:Add( t:Result[ 1 ] ), oCount:Add( 1 ) } ) /* counted once summed */
       ch:TrySend( { i, Str( i ) } )
       nSum += i
    NEXT

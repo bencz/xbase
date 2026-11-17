@@ -14,7 +14,7 @@ count          8       2000      16000      16000
 ends: end free return free exit free loop free break free error free
 nested: .T. .T.
 after: .F.
-holder: MUTEXHOLDER .T. DISPOSE LOCK,TRYLOCK,UNLOCK,HOLD
+holder: MUTEXHOLDER .T. DISPOSE LOCK,TRYLOCK,UNLOCK,HOLD,LOCKASYNC,HOLDASYNC
 other thread: .T.
 disposed: .F.
 twice: .F.
