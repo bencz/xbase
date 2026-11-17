@@ -34,6 +34,11 @@ static inline uint32_t *xb_object_word(const xb_item *object, uint32_t k) {
   return (uint32_t *)&((xb_object *)object->v.p)->vars[k].v.l;
 }
 
+/* The same for a 64-bit value (v.i, 8-aligned in every item): a lock's holder (xb_rwords), a thread's number. */
+static inline uint64_t *xb_object_word64(const xb_item *object, uint32_t k) {
+  return (uint64_t *)&((xb_object *)object->v.p)->vars[k].v.i;
+}
+
 /* A recursive lock (xb_rwords, core/sync.h) over the words of an object's variables k, k + 1 and k + 2 (a Mutex's, a
  * Channel's). xb_object_lock takes it for the flow (xb_flow_self), waiting as Lock() does: 0 when a QUIT or the
  * program's end ended the wait, or when a flow the running one runs inside holds it (a wait that could never end:

@@ -13,6 +13,9 @@ int64_t xb_file_read_up_to(xb_file f, void *buf, size_t n, int32_t *err);
 /* Reads `n` bytes at `pos`: whether all of them were there (a file that ends early is XB_FERR_FAILURE). */
 int xb_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err);
 
+/* Reads up to `n` bytes at `pos`, fewer only where the file ends: how many, or -1 on an error. */
+int64_t xb_file_read_up_to_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err);
+
 /* Copies `len` bytes at `from` to `to` in the same file, front first: right when `to` is not after `from` or the two
  * ranges do not overlap. */
 int xb_file_copy_within(xb_file f, int64_t from, int64_t to, int64_t len, int32_t *err);

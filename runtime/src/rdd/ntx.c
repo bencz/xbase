@@ -6,7 +6,9 @@
  *     offset, 8-11 the first free page's (0: none), 12-13 an entry's size (the key's length and 8), 14-15 the key's
  *     length, 16-17 its decimals, 18-19 the entries a page holds at most, 20-21 half of that, 22-277 the key
  *     expression's text, 278 1 for a unique order, 280 1 for a descending one, 282-537 the FOR condition's text;
- *     zeros elsewhere;
+ *     1016-1023 xbase's own 64-bit counter of changes, which goes up with the 2-byte one (that one wraps after 65,536
+ *     changes, which another program can make between two operations; other programs leave it, or zero it, which
+ *     reads as a change); zeros elsewhere;
  *   every other page: 0-1 its entry count n, then max + 1 offsets (2 bytes) in the page of its entries in order, then
  *     of its free slots. An entry is the offset of the page of the keys before it (0 in a leaf), the record number and
  *     the key; the one after the last (at offset n) holds only the page of the keys after all the others;
@@ -43,6 +45,7 @@
 #define NTX_UNIQUE 278
 #define NTX_DESCEND 280
 #define NTX_COND_TEXT 282
+#define NTX_GENERATION 1016
 #define NTX_ENTRY_HEAD 8 /* the page offset and the record number before the key */
 #define NTX_CACHE 4096   /* pages an exclusive file keeps in memory (rdd/pages.h), made as pages come */
 #define NTX_CACHE_SHARED 512 /* a shared one's: other programs' changes drop them, and each change writes them back */
@@ -65,6 +68,7 @@ struct xb_tag {
   uint32_t entrySize, max, half, base; /* base: where the entries start in a page */
   uint32_t root, freeList, end;       /* end: the offset of a page added at the end of the file */
   uint16_t version;
+  uint64_t generation;                /* the header's 64-bit counter */
   int headerDirty;
   int changed;                        /* since the last flush: the counter goes up once per flush */
   xb_pages pages;
@@ -256,10 +260,11 @@ static void free_page(xb_tag *x, page *p) {
 }
 
 static void put_header(const xb_index_info *info, uint32_t entrySize, uint32_t max, uint32_t root, uint32_t freeList,
-                       uint16_t version, unsigned char *h) {
+                       uint16_t version, uint64_t generation, unsigned char *h) {
   memset(h, 0, NTX_PAGE);
   xb_put_le16(h, info->cond[0] ? NTX_SIG_COND : NTX_SIG);
   xb_put_le16(h + NTX_VERSION, version);
+  xb_put_le64(h + NTX_GENERATION, generation);
   xb_put_le32(h + NTX_ROOT, root);
   xb_put_le32(h + NTX_FREE, freeList);
   xb_put_le16(h + NTX_ENTRY_SIZE, (uint16_t)entrySize);
@@ -444,7 +449,7 @@ static int create_file(const char *path, const xb_index_info *info, const unsign
            write_entries(&bd, root, v->cur, v->order, v->ncur);
     }
     unsigned char h[NTX_PAGE];
-    put_header(info, x.entrySize, x.max, root, 0, 1, h);
+    put_header(info, x.entrySize, x.max, root, 0, 1, 0, h); /* the 64-bit counter at 0: the reference's bytes */
     ok = ok && xb_platform_file_write_at(bd.f, 0, h, NTX_PAGE, err);
     int32_t closeErr = 0;
     if (!xb_shared_close(sf, &closeErr) && ok) {
@@ -492,6 +497,7 @@ static int open_tag(const char *path, int readonly, int exclusive, xb_tag **out,
   x->half = max / 2;
   x->base = 2 + 2 * (max + 1);
   x->version = xb_get_le16(h + NTX_VERSION);
+  x->generation = xb_get_le64(h + NTX_GENERATION);
   x->root = xb_get_le32(h + NTX_ROOT);
   x->freeList = xb_get_le32(h + NTX_FREE);
   x->end = (uint32_t)(end / NTX_PAGE * NTX_PAGE);
@@ -509,10 +515,15 @@ static int flush_tag(xb_tag *x, int32_t *err) {
   for (uint32_t i = 0; i < x->pages.count; ++i)
     if (offset_of(x, x->cache[i]) && x->cache[i]->dirty && !write_page(x, x->cache[i], err)) return 0;
   if (!x->changed && !x->headerDirty) return 1;
-  if (x->changed) ++x->version;
+  if (x->changed) {
+    ++x->version;
+    ++x->generation;
+  }
   unsigned char h[NTX_PAGE];
-  put_header(&x->info, x->entrySize, x->max, x->root, x->freeList, x->version, h);
-  if (!xb_platform_file_write_at(x->f, 0, h, NTX_COUNTS, err)) return 0;
+  put_header(&x->info, x->entrySize, x->max, x->root, x->freeList, x->version, x->generation, h);
+  if (!xb_platform_file_write_at(x->f, NTX_GENERATION, h + NTX_GENERATION, 8, err) ||
+      !xb_platform_file_write_at(x->f, 0, h, NTX_COUNTS, err))
+    return 0;
   x->changed = x->headerDirty = 0;
   return 1;
 }
@@ -1098,9 +1109,10 @@ static int delete_entry(xb_tag *x, const unsigned char *key, uint32_t recno, int
 }
 
 /* Shared indexes. Every operation holds the index lock (a read lock to read, a write lock to change it) and first
- * reads the header's change counter: another program's (or area's) change since the last operation makes the pages
- * kept stale, and the cursor is placed again on its entry (gone: on the one after it, `displaced`). A change is
- * written, with the counter one higher, before the lock goes. An exclusive index skips all of it. */
+ * reads the header (one read of its page): a change of its counters, root or free list since the last operation (by
+ * another program or area) makes the pages kept stale, and the cursor is placed again on its entry (gone: on the one
+ * after it, `displaced`). A change is written, with the counter one higher, before the lock goes. An exclusive index
+ * skips all of it. */
 
 /* Drops the pages kept (none is changed between operations of a shared index). */
 static void forget_pages(xb_tag *x) {
@@ -1123,15 +1135,19 @@ static int begin(xb_tag *x, int kind, int32_t *err) {
   if (!x->shared || x->held) return 1;
   if (!xb_shared_lock(x->s, XB_DB_LOCK, 1, kind, 1, err)) return 0;
   x->displaced = 0;
-  unsigned char h[NTX_COUNTS];
+  unsigned char h[NTX_PAGE];
   if (!xb_file_read_at(x->f, 0, h, sizeof h, err)) return unlock_index(x, 0, err);
   uint16_t version = xb_get_le16(h + NTX_VERSION);
-  if (version == x->version && !x->stale) return 1;
+  uint64_t generation = xb_get_le64(h + NTX_GENERATION);
+  if (version == x->version && generation == x->generation && xb_get_le32(h + NTX_ROOT) == x->root &&
+      xb_get_le32(h + NTX_FREE) == x->freeList && !x->stale)
+    return 1;
   x->stale = 0;
   int64_t end = xb_platform_file_seek(x->f, 0, FS_END, err);
   if (end < 0) return unlock_index(x, 0, err);
   forget_pages(x);
   x->version = version;
+  x->generation = generation;
   x->root = xb_get_le32(h + NTX_ROOT);
   x->freeList = xb_get_le32(h + NTX_FREE);
   x->end = end > UINT32_MAX ? UINT32_MAX / NTX_PAGE * NTX_PAGE : (uint32_t)(end / NTX_PAGE * NTX_PAGE);

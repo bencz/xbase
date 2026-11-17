@@ -1,0 +1,21 @@
+
+old          1 room        512  1= 1= 510= 511+ 1112+
+old        509 room        512  1= 508= 509= 510= 511+ 1112+
+old        510 room        512  1= 509= 510= 510= 511+ 1112+
+old        511 room        512  1= 510= 511= 510= 511= 1112+
+old        512 room       1024  1= 511= 512= 1022= 1023+ 1624+
+old       1021 room       1024  1= 1020= 1021= 1022= 1023+ 1624+
+old       1022 room       1024  1= 1021= 1022= 1022= 1023+ 1624+
+old       1023 room       1024  1= 1022= 1023= 1022= 1023= 1624+
+old       3000 room       3072  1= 2999= 3000= 3070= 3071+ 3672+
+neighbors intact: .T.
+exclusive: .T. .T.
+reopened: .T.
+packed: .T. .T.
+shared: .T. .T.
+reopened: .T.
+packed: .T. .T.
+long, exclusive: .T. .T.
+packed: .T.
+long, shared: .T. .T.
+packed: .T.

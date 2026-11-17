@@ -9,10 +9,13 @@
  * Operations are a byte, then their operands as 32-bit words in the host's
  * order (the code never leaves the process):
  *   MO_CONST k              push constant k (an item of the array)
- *   MO_MV_GET id            push the memory variable numbered id (MO_MV_REF:
- *                           a reference to it); MO_MV_SET id pops a value
- *                           into it
- *   MO_MV_FIELD id          an undeclared name read: the current work area's
+ *   MO_MV_GET v             push the memory variable v (MO_MV_REF: a
+ *                           reference to it); MO_MV_SET v pops a value into
+ *                           it. v is a permanent name's number, or
+ *                           XB_MACRO_NAMED | k for constant k, the name's
+ *                           text: the code keeps no number another name may
+ *                           take (core/memvar.c)
+ *   MO_MV_FIELD v           an undeclared name read: the current work area's
  *                           field of the variable's name, else as MO_MV_GET
  *   MO_LOCAL_* s            the same for the codeblock's parameter s
  *   MO_CAPTURE_* k          the same for the codeblock's captured variable k:
@@ -735,6 +738,12 @@ static uint32_t add_string(fn *f, const char *s, size_t len) {
   return (uint32_t)k;
 }
 
+/* The MO_MV_* operand of the memory variable `name` (upper case): see the top of the file. */
+static uint32_t memvar_operand(fn *f, const char *name, size_t len) {
+  uint32_t id;
+  return xb_memvar_permanent(name, len, &id) ? id : XB_MACRO_NAMED | add_string(f, name, len);
+}
+
 /* Whether a name is a parameter of the codeblock `f`, and which one; any
  * other name is a memory variable. */
 static int param_of(const fn *f, const char *name, uint32_t *index) {
@@ -789,13 +798,14 @@ static void gen_load(gen *g, fn *f, const node *v) {
     emit1(f, MO_CAPTURE_GET, index, 0, 1);
     return;
   }
-  uint32_t id = xb_memvar_number(v->name, v->nameLen);
+  uint32_t id = memvar_operand(f, v->name, v->nameLen);
+  int exists = xb_memvar_exists_named(g->ctx, v->name, v->nameLen);
   if (v->flag) { /* M->name */
-    if (!xb_memvar_exists(g->ctx, id)) g->flags |= XB_MACRO_NO_VAR;
+    if (!exists) g->flags |= XB_MACRO_NO_VAR;
     emit1(f, MO_MV_GET, id, 0, 1);
     return;
   }
-  if (g->area != AREA_UNKNOWN && !xb_memvar_exists(g->ctx, id)) {
+  if (g->area != AREA_UNKNOWN && !exists) {
     const xb_area *a = xb_area_at(g->ctx, g->area);
     if (!a || xb_area_field_index(a, v->name, v->nameLen) < 0) g->flags |= XB_MACRO_NO_VAR;
   }
@@ -864,7 +874,7 @@ static void gen_store(fn *f, const node *v) {
     emit1(f, MO_CAPTURE_SET, index, 1, 0);
     return;
   }
-  emit1(f, MO_MV_SET, xb_memvar_number(v->name, v->nameLen), 1, 0);
+  emit1(f, MO_MV_SET, memvar_operand(f, v->name, v->nameLen), 1, 0);
 }
 
 static void gen_list(gen *g, fn *f, node *const *list, uint32_t n) {
@@ -1553,9 +1563,8 @@ static void gen_expr(gen *g, fn *f, const node *n) {
       emit1(f, MO_CAPTURE_REF, index, 0, 1);
       return;
     }
-    uint32_t id = xb_memvar_number(t->name, t->nameLen);
-    if (!xb_memvar_exists(g->ctx, id)) g->flags |= XB_MACRO_NO_VAR;
-    emit1(f, MO_MV_REF, id, 0, 1);
+    if (!xb_memvar_exists_named(g->ctx, t->name, t->nameLen)) g->flags |= XB_MACRO_NO_VAR;
+    emit1(f, MO_MV_REF, memvar_operand(f, t->name, t->nameLen), 0, 1);
     return;
   }
   case N_LIST:

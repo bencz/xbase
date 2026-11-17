@@ -1206,7 +1206,7 @@ static void settle_young(void) {
   heap.retainedLen = 0;
 }
 
-static void mark_public(xb_item *it, void *data) {
+static void mark_root(xb_item *it, void *data) {
   XB_UNUSED(data);
   mark_item(it);
 }
@@ -1215,7 +1215,7 @@ static void mark_env(xb_env *env) {
   mark_item(&env->error_block);
   mark_item(&env->language);
   xb_areas_mark(env, mark_item);
-  for (uint32_t i = 0; i < env->memvarCap; ++i) mark_item(&env->memvars[i]);
+  xb_memvar_bindings_each(env, mark_root, NULL);
   for (uint32_t i = 0; i < env->privateLen; ++i) mark_item(&env->privates[i].hidden);
 }
 
@@ -1230,7 +1230,7 @@ static void mark_roots(void) {
   }
   for (const xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
-  xb_memvar_publics_each(mark_public, NULL);
+  xb_memvar_publics_each(mark_root, NULL);
   xb_env_parked_each(mark_env);
   xb_sched_mark(mark_item);
   for (size_t i = heap.finalizedHead; i < heap.finalizedLen; ++i) mark_item(&heap.finalized[i]);

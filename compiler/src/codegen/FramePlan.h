@@ -4,6 +4,7 @@
 #include "xir/IR.h"
 #include "xir/Types.h"
 
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -68,7 +69,10 @@ public:
   // The slots set to NIL where a block starts: those of the values of a loop it leaves that are dead there. A dead
   // value's slot otherwise keeps what it held until another value takes the slot, and what only it holds would not be
   // collected (nor its destructor run).
+  // A loop exit that other blocks reach too (the header of the loop after it, say) clears them on the loop's edges to
+  // it instead, which run once per exit: clearsOnEdge.
   const std::vector<uint32_t> &clearsAtStart(const xir::BasicBlock *b) const;
+  const std::vector<uint32_t> &clearsOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to) const;
 
 private:
   struct Unit {                  // what one allocation serves
@@ -113,6 +117,7 @@ private:
   std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> bodyUnits_; // inline.leave -> units
   std::unordered_map<const xir::Instruction *, std::vector<uint32_t>> clears_;           // inline.leave -> slots
   std::unordered_map<const xir::BasicBlock *, std::vector<uint32_t>> blockClears_;       // loop exit -> slots
+  std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<uint32_t>> edgeClears_;
 };
 
 } // namespace xb

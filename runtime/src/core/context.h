@@ -6,18 +6,21 @@
 #include "platform/atomic.h"
 
 #define XB_MACRO_CACHE 64
+#define XB_NAME_CACHE 32 /* names a context keeps held (core/memvar.c, xb_memvar_use) */
 
 /* The environment of a flow of execution: what a program sets and sees as its state (the SET values, ErrorBlock(),
  * memory variables, work areas), apart from the thread that runs it. A thread context points at the environment of
  * the flow it runs (docs/concurrency.md). */
+typedef struct xb_bindings xb_bindings;
+
 typedef struct xb_env {
   /* ErrorBlock(): a codeblock, NIL until ErrorSys() runs (a root of the collector) */
   xb_item  error_block;
-  /* Memory variables (core/memvar.c): by number, the binding visible (an
-   * XB_T_CELL item, NIL for none); the PRIVATEs alive, each with the binding
-   * it hid, in creation order. Roots of the collector. */
-  xb_item  *memvars;
-  uint32_t  memvarCap;
+  /* Memory variables (core/memvar.c): by number, the bindings visible (XB_T_CELL items; NULL: none), shared with the
+   * environments that inherit them until one changes them; the PRIVATEs alive, each with the binding it hid, in
+   * creation order. Roots of the collector. */
+  xb_bindings *bindings;
+  uint32_t  bindHint;       /* the entry of the bindings found last: tried first */
   struct xb_private *privates;
   uint32_t  privateLen, privateCap;
   int      set_exact;
@@ -90,6 +93,10 @@ struct xb_ctx {
    * the text alone, so the cache is the thread's. */
   xb_item  macro_cache[2 * XB_MACRO_CACHE];
   uint8_t  macro_cache_goal[XB_MACRO_CACHE];
+  /* Names of memory variables the thread used lately by their text (core/memvar.c, xb_memvar_use): per entry, chosen
+   * by a hash of the name, its number (UINT32_MAX: none), which the context holds, and the operations using it now. */
+  uint32_t nameIds[XB_NAME_CACHE];
+  uint32_t namePins[XB_NAME_CACHE];
 };
 
 /* A send that an AWAIT fused (xb_await_fuse) reaches the method `fn` (NULL: a runtime class's): a compiled method run
@@ -185,9 +192,14 @@ int xb_language_select(xb_ctx *ctx, const char *id, size_t len);
 const xb_array *xb_language(xb_ctx *ctx);
 xb_str *xb_language_error(xb_ctx *ctx, int32_t gencode, int32_t subcode);
 
+/* xb_private.id of a PRIVATE that CLEAR MEMORY released: it no longer names a variable (nor holds a name), and
+ * restores nothing when its activation ends. */
+#define XB_PRIVATE_CLEARED UINT32_MAX
+
 typedef struct xb_private {
-  uint32_t id;              /* the variable's number (none once CLEAR MEMORY released it, core/memvar.c) */
-  uint32_t borrowed;        /* its binding is an argument passed by reference (PARAMETERS) */
+  uint32_t id;              /* the variable's number, which it holds (XB_PRIVATE_CLEARED: none; core/memvar.c) */
+  uint16_t borrowed;        /* its binding is an argument passed by reference (PARAMETERS) */
+  uint16_t permanent;       /* its name is a module's (it holds none, and its entry stays when it ends) */
   const xb_frame *owner;    /* the frame of the activation that created it */
   xb_item  hidden;          /* the binding it hid (NIL: none) */
 } xb_private;

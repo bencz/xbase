@@ -1,5 +1,7 @@
 /* Recursive locks: a thread takes its lock again as often as it likes and keeps it until it has released it as many
- * times; other threads wait meanwhile, and increments made under the lock by many threads at once all add up. */
+ * times; other threads wait meanwhile, and increments made under the lock by many threads at once all add up. Holders'
+ * numbers are compared whole: a holder whose number differs from the caller's only above its low 32 bits (the number
+ * the caller's would come back as after 2^32 others, were they 32 bits) keeps the caller out. */
 #include "check.h"
 #include "core/sync.h"
 
@@ -54,6 +56,20 @@ int main(void) {
   xb_thread_join(t);
   CHECK(probed);
   CHECK(lock.owner == 0 && lock.depth == 0);
+
+  uint64_t self = xb_thread_self();
+  uint32_t state = 1, depth = 1;
+  uint64_t other = self + ((uint64_t)1 << 32);
+  xb_rwords w = {&state, &other, &depth};
+  CHECK(!xb_rwords_try(w, self) && depth == 1);
+  CHECK(!xb_rwords_release(w, self) && state == 1 && other == self + ((uint64_t)1 << 32));
+  CHECK(xb_rwords_release(w, other) && state == 0 && other == 0);
+  CHECK(xb_flow_self() == self); /* no flow entered: the thread's own */
+  xb_flow f = {0, NULL};
+  xb_flow_enter(&f);
+  uint64_t n = xb_flow_self();
+  CHECK(n != self && n != 0 && f.number == n && xb_flow_outer(self) && !xb_flow_outer(n));
+  xb_flow_leave(&f);
   puts("rlock ok");
   return 0;
 }

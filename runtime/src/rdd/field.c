@@ -139,15 +139,20 @@ void xb_field_set(xb_ctx *ctx, const xb_item *area, const char *alias, const cha
   if (find(ctx, area, alias, name, cache, &a, &field) && !a->eof) xb_area_field_put(ctx, a, field, v);
 }
 
-void xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache *cache) {
+int xb_field_try(xb_ctx *ctx, xb_item *r, const char *name, xb_field_cache *cache) {
   xb_area *a = xb_area_current(ctx);
-  int64_t k = a ? field_of(a, m->name, cache) : -1;
+  int64_t k = a ? field_of(a, name, cache) : -1;
   if (k >= 0) { /* a field: the record's pending relational move first, which may close the area */
     a = xb_area_record(ctx);
-    k = a ? field_of(a, m->name, cache) : -1;
+    k = a ? field_of(a, name, cache) : -1;
   }
-  if (k >= 0) xb_area_field_get(ctx, a, (uint32_t)k, r);
-  else xb_mv_get(ctx, r, m);
+  if (k < 0) return 0;
+  xb_area_field_get(ctx, a, (uint32_t)k, r);
+  return 1;
+}
+
+void xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache *cache) {
+  if (!xb_field_try(ctx, r, m->name, cache)) xb_mv_get(ctx, r, m);
 }
 
 int xb_area_lookup(xb_ctx *ctx, const xb_item *area, uint32_t *n) {

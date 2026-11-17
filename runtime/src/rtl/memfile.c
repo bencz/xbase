@@ -110,17 +110,23 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *skel = argc > 1 && argv[1].type == XB_T_STRING ? argv[1].v.s : all;
   int like = argc > 2 && argv[2].type == XB_T_LOGICAL ? argv[2].v.l != 0 : 1;
   bytes out = {0};
-  for (uint32_t id = 0; id < xb_memvar_count(); ++id) {
+  uint32_t n;
+  uint32_t *ids = xb_memvar_visible(ctx, &n); /* held: an error block run meanwhile cannot free their names */
+  int unwound = 0;
+  for (uint32_t k = 0; k < n && !unwound; ++k) {
     size_t len;
-    const char *name = xb_memvar_name(id, &len);
+    const char *name = xb_memvar_name(ids[k], &len);
     if (xb_memvar_like(skel, name, len) != like) continue;
     xb_item value; /* put in the record before anything allocates */
-    int has = xb_memvar_value(ctx, id, &value);
-    if (xb_pending_get(ctx) & XB_PENDING_UNWIND) {
-      free(out.p);
-      return;
-    }
-    if (has) put_record(&out, name, len, &value);
+    int has = xb_memvar_value(ctx, ids[k], &value);
+    unwound = (xb_pending_get(ctx) & XB_PENDING_UNWIND) != 0;
+    if (has && !unwound) put_record(&out, name, len, &value);
+  }
+  for (uint32_t k = 0; k < n; ++k) xb_memvar_unhold(ids[k]);
+  free(ids);
+  if (unwound) {
+    free(out.p);
+    return;
   }
   *grow(&out, 1) = MEM_END;
   char *path = xb_file_path_with_ext(argv[0].v.s->data, strlen(argv[0].v.s->data), ".mem");

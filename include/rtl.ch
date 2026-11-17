@@ -363,6 +363,7 @@ EXTERN FUNCTION __IsCollection( xValue ) NATIVE
 EXTERN FUNCTION __LanguageCurrent() NATIVE
 EXTERN FUNCTION __LanguageTexts( cId ) NATIVE
 EXTERN FUNCTION __MemClear() NATIVE
+EXTERN FUNCTION __MemNamesInUse( [lLetGo] ) NATIVE
 EXTERN FUNCTION __MemRelease( ... ) NATIVE
 EXTERN FUNCTION __MemReleaseAll( cSkeleton, lLike ) NATIVE
 EXTERN FUNCTION __MemRestore( cFile, [lAdditive] ) NATIVE PRIVATES

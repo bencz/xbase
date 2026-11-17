@@ -38,10 +38,12 @@ static xb_env *env_new(xb_ctx *ctx) {
 }
 
 static void env_free(xb_ctx *ctx, xb_env *env) {
-  if (env->memvars) free(env->memvars); /* most environments never had these */
-  if (env->privates) free(env->privates);
+  xb_memvar_bindings_free(env);
+  for (uint32_t i = 0; i < env->privateLen; ++i) /* an environment that ends with PRIVATEs alive: a task abandoned */
+    if (env->privates[i].id != XB_PRIVATE_CLEARED) xb_memvar_unhold(env->privates[i].id);
+  env->privateLen = 0;
+  if (env->privates) free(env->privates); /* most environments never had these */
   if (env->areas) free(env->areas);
-  env->memvars = NULL;
   env->privates = NULL;
   env->areas = NULL;
   if (ctx && !ctx->spareEnv) {
@@ -125,8 +127,7 @@ xb_env *xb_env_inherit(xb_ctx *ctx) {
   *env = *from; /* the SET values, ErrorBlock(), the language, the code page, the default driver; the rest below */
   env->dateOwn = fmt;
   env->dateCap = cap;
-  env->memvars = NULL;
-  env->memvarCap = 0;
+  env->bindings = NULL;
   env->privates = NULL;
   env->privateLen = env->privateCap = 0;
   env->file_error = 0;
@@ -284,6 +285,7 @@ xb_ctx *xb_ctx_new(void) {
   xb_ctx_set_date_format(ctx, "mm/dd/yy", 8);
   xb_set_nil(&ctx->break_value);
   for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) xb_set_nil(&ctx->macro_cache[i]);
+  for (uint32_t i = 0; i < XB_NAME_CACHE; ++i) ctx->nameIds[i] = UINT32_MAX;
   xb_gc_register(ctx);
   return ctx;
 }
@@ -291,6 +293,8 @@ xb_ctx *xb_ctx_new(void) {
 void xb_ctx_free(xb_ctx *ctx) {
   if (!ctx) return;
   xb_gc_unregister(ctx);
+  for (uint32_t i = 0; i < XB_NAME_CACHE; ++i)
+    if (ctx->nameIds[i] != UINT32_MAX) xb_memvar_unhold(ctx->nameIds[i]);
   free(ctx->roots);
   env_free(NULL, ctx->env);
   if (ctx->spareEnv) env_free(NULL, ctx->spareEnv);

@@ -611,20 +611,41 @@ place.
 
 `PRIVATE` and `PUBLIC` variables (`core/memvar.c`, the `xb_mv_*` entry points in `xbrt.h`) are found by name when the
 code runs, so a function sees and changes the memory variables of the functions that called it, whatever module they
-are in. Each module gives the runtime the names it uses (`xb_memvar`, numbered when it registers; `RESTORE` numbers
-the names of its file that no module uses, while the program runs, so `xb_env.memvars` may grow, and move, whenever
-xBase code runs: C code keeps no pointer into it across an error block). The table of names is the process's: a name
-is found under a reader-writer lock and added under its write lock, so a macro or `RESTORE` may number a new name on
-any thread; a number's spelling is read without a lock, from chunks of entries that never move. Each environment keeps,
-by number, the PRIVATE binding visible now (`xb_env.memvars`), and the PRIVATEs alive, in creation order, each with the
-frame of the activation that created it and the binding it hid (`xb_env.privates`). The PUBLICs are the program's, in
-one table every thread reads by number without a lock: chunks of items that never move, made when a PUBLIC first needs
-one, an item NIL or the variable's cell, set under the names' write lock (the cell made, and shared once the program's
-storage is, before the lock is taken; the cell stored before the type, which a reader loads first) and released by its
-type made NIL. A name with no binding in the environment is the PUBLIC's, if there is one. All three are roots of the
-collector. A new flow's environment (a thread's, a task's) starts with the bindings its creator saw when it was made
-(`xb_memvar_capture` into the snapshot of the environment, `xb_memvar_restore` from it), and no PRIVATE record: the
-same variables, which neither releases when its activations end.
+are in.
+
+- Names. A name has a number. The names a module uses (`xb_memvar`) get theirs when it registers and keep them for the
+  program's life (permanent). A name met only while the program runs (a macro, `RESTORE`, `MemVarBlock()`, `PRIVATE
+  &cName`) has one while something holds it: a binding of an environment, a PRIVATE alive, the PUBLIC of that name, a
+  function of the runtime using it a moment (`xb_memvar_hold`). When the last holder lets it go, the name and its number
+  are freed, and the number goes to another name later: a long-running program that makes names without end (a server
+  evaluating `Type()` of user input, `PRIVATE &cName` with names made from data) keeps only the names in use, and runs
+  as fast after a million of them as after ten (`__MemNamesInUse( [lLetGo] )` counts those numbered and not freed, after
+  the calling thread lets go of its cache of names with `.T.`). Compiled code, and the macro compiler's code, keep only
+  permanent names' numbers; a macro keeps the text of any other name, and so do a `MemVarBlock()` block and an
+  environment's snapshot. An operation by a name's text (a macro's `MO_MV_*` with `XB_MACRO_NAMED`, `PRIVATE &c`, a
+  `MemVarBlock()` block, `RESTORE`) takes the name's number from its thread's cache of names (`xb_memvar_use`:
+  `XB_NAME_CACHE` entries chosen by a hash of the name, each holding the name it last served), so a name used again and
+  again costs no lock and no atomic operation, and at most `XB_NAME_CACHE` names per thread stay held for it; a read of
+  a name no variable has looks it up without numbering it (error 1003), and a macro's undeclared name tries the work
+  area's field of that name first. The table of names is the process's: a name is found under a reader-writer lock,
+  numbered or freed under its write lock; a held number's spelling is read without a lock, from chunks of entries that
+  never move.
+- Bindings. Each environment keeps, by number, the PRIVATE bindings visible now (`xb_env.bindings`): a small hash of
+  the numbers bound (open addressing, linear probing, at most half full, backward-shift deletion), which an
+  environment that inherits it shares until one of them changes it (copy on write), so an asynchronous call copies
+  nothing, and what an environment costs follows what it binds, never how many names the program has. The PRIVATEs
+  alive, in creation order, each with the frame of the activation that created it and the binding it hid, are a stack
+  of the environment (`xb_env.privates`).
+- PUBLICs. They are the program's, in one table every thread reads by number without a lock: chunks of items that
+  never move, made when a PUBLIC first needs one, an item NIL or the variable's cell, set under the names' write lock
+  (the cell made, and shared once the program's storage is, before the lock is taken; the cell stored before the
+  type, which a reader loads first) and released by its type made NIL. A name with no binding in the environment is
+  the PUBLIC's, if there is one.
+
+All three are roots of the collector. A new flow's environment (a thread's, a task's) starts with the bindings its
+creator saw when it was made (`xb_memvar_capture` into the snapshot of the environment, the names that are not
+permanent by their text; `xb_memvar_restore` from it), and no PRIVATE record: the same variables, which neither
+releases when its activations end.
 
 - A binding is a cell (an `XB_T_CELL` item): `@name` passes it, and a codeblock reaches the variable through the name
   when it runs, not through a capture.
@@ -658,12 +679,12 @@ same variables, which neither releases when its activations end.
   PRIVATEs' records stay until their activations end, restoring nothing.
 - `SAVE TO file [ALL [LIKE | EXCEPT skeleton]]` (also `SAVE ALL LIKE | EXCEPT skeleton TO file`; `__MemSave()`,
   `rtl/memfile.c`) writes the variables visible, PRIVATE or PUBLIC, whose names match, to a `.mem` file (the extension
-  is added when the name has none): Clipper's format, which `memfile.c` describes, holds strings (65534 bytes of each
-  at most), numbers (with their width and decimals), dates and logicals, and the first 10 characters of each name;
-  other values are left out. The records follow the names' numbers (the reference orders them otherwise; each record
-  is the same). No file name (`SAVE` alone) is error 2008 (`EG_ARG`). A file that cannot be created or written is
-  error 2006 (`EG_CREATE`, or `EG_WRITE`), which the block may retry; the default gives up, leaving a file already
-  created or partly written as it is.
+  is added when the name has none): Clipper's format, which `memfile.c` describes, holds strings (65534 bytes of each at
+  most), numbers (with their width and decimals), dates and logicals, and the first 10 characters of each name; other
+  values are left out. The records follow the names' numbers (the reference orders them otherwise; each record is the
+  same): the environment's bindings and the PUBLICs it does not hide, held while they are written. No file name (`SAVE`
+  alone) is error 2008 (`EG_ARG`). A file that cannot be created or written is error 2006 (`EG_CREATE`, or `EG_WRITE`),
+  which the block may retry; the default gives up, leaving a file already created or partly written as it is.
 - `RESTORE FROM file [ADDITIVE]` (`__MemRestore()`) gives each variable of the file its value: the one visible by
   that name, else a new PRIVATE of the function (or codeblock) running `RESTORE`, which ends it when it returns (its
   declaration's `PRIVATES` attribute gives that function a mark, see [compiler.md](compiler.md#calls); `Do()` takes
@@ -1017,7 +1038,8 @@ Conventions:
   otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it in front when the picture
   has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name ([Languages](#languages)),
   `_SET_CODEPAGE` a codepage's ([Codepages](#codepages)). Other values change nothing.
-- `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector).
+- `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector). `__MemNamesInUse( [lLetGo] )`: see
+  [Memory variables](#memory-variables).
 - `AScan( a, xSearch, [nStart], [nCount] )` returns the position of the first element of the range equal to `xSearch`
   (values of one comparable kind, compared like the operators, strings with SET EXACT; two `NIL`s; arrays and blocks
   never), or for which a block `xSearch( element, position )` returns `.T.`, else 0 (also for anything but an array, and
@@ -1262,25 +1284,26 @@ each time):
 The program's threads (`ThreadStart`, `Mutex`, `AtomicInt`: [concurrency.md](concurrency.md#threads)) and the
 services below, which tasks will be built on too ([concurrency.md](concurrency.md)).
 
-- Contexts (`core/context.h`): a thread context (`xb_ctx`) holds what the code running on its thread uses (the
-  `[ABI]` head compiled code reads: pending requests, `SET DECIMALS`, the chain of frames, the stack
-  limit; the C roots, a `BREAK` on its way, the error blocks running, `Type()`'s trap) and caches of its own (the macro
-  cache), and points at the environment of the flow it runs (`xb_env`): `ErrorBlock()`, the memory variables, the `SET`
-  values, `FError()`, the language and the codepage, the work areas and their settings. Each thread context has one
-  environment, made with it. A new flow's starts as a copy of its creator's: `xb_env_capture` makes a snapshot of it,
-  an array that the thread or task object keeps (the scalar `SET` values, `SET DECIMALS` too, as the bytes of a
-  string; the date format; `ErrorBlock()`; the language's texts; the PRIVATE bindings, pairs of a name's number and its
-  cell), and `xb_env_restore` gives a new environment its values; work areas, none. A task runs in an environment of
-  its own, made from its snapshot, that `xb_env_enter` puts in front of the thread's (the one set aside is
-  `xb_env.outer`, marked by the collector too) and `xb_env_leave` closes and takes away. An asynchronous function's
+- Contexts (`core/context.h`): a thread context (`xb_ctx`) holds what the code running on its thread uses (the `[ABI]`
+  head compiled code reads: pending requests, `SET DECIMALS`, the chain of frames, the stack limit; the C roots, a
+  `BREAK` on its way, the error blocks running, `Type()`'s trap) and caches of its own (the macro cache), and points at
+  the environment of the flow it runs (`xb_env`): `ErrorBlock()`, the memory variables, the `SET` values, `FError()`,
+  the language and the codepage, the work areas and their settings. Each thread context has one environment, made with
+  it. A new flow's starts as a copy of its creator's: `xb_env_capture` makes a snapshot of it, an array that the thread
+  or task object keeps (the scalar `SET` values, `SET DECIMALS` too, as the bytes of a string; the date format;
+  `ErrorBlock()`; the language's texts; the PRIVATE bindings, pairs of a name, its number when it is permanent or else
+  its text, and its cell), and `xb_env_restore` gives a new environment its values; work areas, none. A task runs in an
+  environment of its own, made from its snapshot, that `xb_env_enter` puts in front of the thread's (the one set aside
+  is `xb_env.outer`, marked by the collector too) and `xb_env_leave` closes and takes away. An asynchronous function's
   environment is its own from its call to its end: `xb_env_inherit` makes it from its caller's directly (no snapshot:
-  the structure copied, the PRIVATE bindings copied, the date format borrowed until it changes or the environment is
-  parked, no work area), and between steps `xb_env_park` sets it aside (`SET DECIMALS` kept) in a list the collector
-  marks, until `xb_env_unpark` puts it back in front of the thread's; `xb_env_parked_settle`, after each collection's
-  marking, moves the environments whose tasks it found unreachable to a list that `xb_env_reap` closes (their work
-  areas, then the rest) at the next step any thread runs, and `xb_env_reap_all` closes every one left at the program's
-  end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): no allocation for an
-  asynchronous call. The program's exit code is the process's.
+  the structure copied, the PRIVATE bindings shared until either changes them, the date format borrowed until it changes
+  or the environment is parked, no work area), and between steps `xb_env_park` sets it aside (`SET DECIMALS` kept) in a
+  list the collector marks, until `xb_env_unpark` puts it back in front of the thread's; `xb_env_parked_settle`, after
+  each collection's marking, moves the environments whose tasks it found unreachable to a list that `xb_env_reap` closes
+  (their work areas, then the rest) at the next step any thread runs, and `xb_env_reap_all` closes every one left at the
+  program's end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): an
+  asynchronous call allocates no environment; one that creates PRIVATEs copies the bindings it shares (once) and grows
+  its own stack of PRIVATEs. The program's exit code is the process's.
 - Program threads (`rtl/threads.c`): `xb_program_thread_start` starts a thread with a 16 MB stack, detached
   (`xb_thread_detach`), counted until it ends, that attaches (the second attached thread publishes the program's
   storage), makes its context (with a `QUIT` pending while the program ends) and runs its body; `ThreadStart`'s and the
@@ -1386,27 +1409,27 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   Clang use their `__atomic` builtins (with libatomic on a target that lacks native atomics of some size, found when
   the build is configured); MSVC builds the runtime with `/volatile:ms` (volatile loads acquire, stores release, on
   every architecture; a build with `/volatile:iso` stops) and its `Interlocked` intrinsics.
-- On top of them, the same everywhere (`core/sync.c`): the owners of locks, numbers from one counter that skips 0:
-  `xb_thread_self` (the thread's, for the runtime's own locks, which no program code runs under) and `xb_flow_self`
-  (the program's locks: the innermost flow entered on the thread, a task's or an asynchronous function's step, records
-  on the C stack chained by `xb_flow_enter`/`xb_flow_leave` and numbered when one first takes a lock, a function's
-  number kept in its task across its steps so a lock held across `AWAIT` stays its function's; else the thread's);
-  `xb_flow_outer` tells whether a lock's holder is a flow the running one runs inside on the thread (a `Mutex` wait
-  for it raises `BASE/9031` instead of never ending),
-  `xb_once` (a function run once whatever threads ask at the same time, the others waiting until it returns), a
-  recursive lock over three words (`xb_rwords`: the state, 0 free, 1 held, 2 held and maybe waited for; the holder's
-  number; the depth: the holder takes it again, and holds it until it has released it as often; a release
-  wakes a waiter only when the state was 2), which `xb_rlock` keeps together (made statically, for rare nesting work
-  such as preparing classes) and a `Mutex` object in its variables, and a parking lot: `xb_park_wait` sleeps while a
-  32-bit value at an address is the one expected (with an optional limit in nanoseconds, which its own deadline
-  decides), `xb_park_wake` wakes the waiter of the address that came first, or every one. Waiters queue in arrival order
-  in one of 256 buckets chosen by the address (each made when first used) and sleep on a condition of their own, so a
-  wake reaches only the waiters it marks. A waiter counts itself in its bucket before it tests the value under the
-  bucket's lock; the waker, after changing the value and a full fence, reads the count: none waits, it takes no lock
-  (completing a task nobody waits for costs a load); else it takes the lock, so no wake is lost. The lock of a `Mutex`
-  or a `Channel` looks at the state a few times before its waiter sleeps, and so does a wait for a task (short work on
-  the other side ends sooner than a sleep). `xb_park_wait_blocking` waits so in a blocking operation. The output lock
-  (`xb_output_lock`) serializes the program's writes to the standard streams.
+- On top of them, the same everywhere (`core/sync.c`): the owners of locks, 64-bit numbers from one counter that starts
+  at 1 and never comes back to a number it gave (the owner word 8-aligned, read and written atomically):
+  `xb_thread_self` (the thread's, for the runtime's own locks, which no program code runs under) and `xb_flow_self` (the
+  program's locks: the innermost flow entered on the thread, a task's or an asynchronous function's step, records on the
+  C stack chained by `xb_flow_enter`/`xb_flow_leave` and numbered when one first takes a lock, a function's number kept
+  in its task across its steps so a lock held across `AWAIT` stays its function's; else the thread's); `xb_flow_outer`
+  tells whether a lock's holder is a flow the running one runs inside on the thread (a `Mutex` wait for it raises
+  `BASE/9031` instead of never ending), `xb_once` (a function run once whatever threads ask at the same time, the others
+  waiting until it returns), a recursive lock over three words (`xb_rwords`: the state, 0 free, 1 held, 2 held and maybe
+  waited for; the holder's number; the depth: the holder takes it again, and holds it until it has released it as often;
+  a release wakes a waiter only when the state was 2), which `xb_rlock` keeps together (made statically, for rare
+  nesting work such as preparing classes) and a `Mutex` object in its variables, and a parking lot: `xb_park_wait`
+  sleeps while a 32-bit value at an address is the one expected (with an optional limit in nanoseconds, which its own
+  deadline decides), `xb_park_wake` wakes the waiter of the address that came first, or every one. Waiters queue in
+  arrival order in one of 256 buckets chosen by the address (each made when first used) and sleep on a condition of
+  their own, so a wake reaches only the waiters it marks. A waiter counts itself in its bucket before it tests the value
+  under the bucket's lock; the waker, after changing the value and a full fence, reads the count: none waits, it takes
+  no lock (completing a task nobody waits for costs a load); else it takes the lock, so no wake is lost. The lock of a
+  `Mutex` or a `Channel` looks at the state a few times before its waiter sleeps, and so does a wait for a task (short
+  work on the other side ends sooner than a sleep). `xb_park_wait_blocking` waits so in a blocking operation. The output
+  lock (`xb_output_lock`) serializes the program's writes to the standard streams.
 - Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's operations on arrays,
   hashes, objects, cells and references use them, and compiled code tests the bit): `XB_GC_SHARED` in an object's header
   (`XB_GC_STATE_SHARED`, kept by every collection) marks one that more than one flow can reach. `xb_share` marks what an

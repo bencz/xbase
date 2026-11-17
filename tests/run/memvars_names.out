@@ -1,0 +1,13 @@
+
+start .T.
+privates made and released:      20001          0
+type of unknown names: UU          0
+macro assignments:      10001          0
+publics:       3000 U          0
+tasks, threads, async:     180600 .T.
+block outlives its variable: B          0
+number given to another name: U N Variable does not exist 77          0
+block dropped:          0
+macro block of a name before: Variable does not exist Variable does not exist          0
+restore:       1275 .T.
+cleared:          0 U U

@@ -441,10 +441,26 @@ void FramePlan::placeLoopClears() {
       }
     }
     for (const BasicBlock *b : loop->blocks)
-      for (size_t k = 0; k < b->numSuccessors(); ++k)
-        if (const BasicBlock *exit = b->successor(k); !loop->contains(exit))
+      for (size_t k = 0; k < b->numSuccessors(); ++k) {
+        const BasicBlock *exit = b->successor(k);
+        if (loop->contains(exit)) continue;
+        const std::vector<BasicBlock *> &preds = cfg_.preds(exit);
+        bool onlyLoop = std::all_of(preds.begin(), preds.end(), [&](const BasicBlock *p) { return loop->contains(p); });
+        const xir::Instruction *leave = b->terminator();
+        bool branch = leave && (leave->op == xir::Op::Br || leave->op == xir::Op::CondBr) &&
+                      k < leave->targets.size(); // not the unwind edge, which no branch takes
+        if (!onlyLoop && branch) // a branch's edge may get a block of its own
+          addClears(edgeClears_[{b, exit}], units, start_.at(exit));
+        else
           addClears(blockClears_[exit], units, start_.at(exit));
+      }
   }
+}
+
+const std::vector<uint32_t> &FramePlan::clearsOnEdge(const BasicBlock *from, const BasicBlock *to) const {
+  static const std::vector<uint32_t> none;
+  auto c = edgeClears_.find({from, to});
+  return c == edgeClears_.end() ? none : c->second;
 }
 
 const std::vector<uint32_t> &FramePlan::clearsAtStart(const BasicBlock *b) const {

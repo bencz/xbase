@@ -462,7 +462,9 @@ emits the object file.
   from its uses back to its definition, slots are assigned by linear scan and reused once free. A dead value's slot
   keeps what it held until another value takes it, so where a loop exits, the block it goes to first sets to `NIL` the
   slots of the loop's values that are dead there and that no live value holds (`clearsAtStart`; see `inline.leave`
-  below for an inlined body): what only they held can be collected, and its destructor run. The parameters take
+  below for an inlined body): what only they held can be collected, and its destructor run. When other blocks reach
+  that block too (the header of a loop that follows, say), the loop's branches to it clear them on their edge instead
+  (`clearsOnEdge`), so the clears run once per exit, not on every pass of the next loop. The parameters take
   slots 0 to n-1 (the prologue copies them there), then the frame variables still in memory (those mem2reg did not make
   values), then temporaries. The arguments of a call and the elements of an array literal take consecutive slots, and a
   value used only there (a block parameter too) is computed straight into its slot; a branch argument used only there

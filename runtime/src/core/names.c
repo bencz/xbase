@@ -44,6 +44,28 @@ uint32_t xb_names_add(xb_names *t, const char *name, size_t len) {
   return s->id;
 }
 
+void xb_names_insert(xb_names *t, const char *name, size_t len, uint32_t id) {
+  if (2 * ((size_t)t->count + 1) > t->capacity) grow(t);
+  xb_name_slot *s = probe(t, name, len);
+  if (!s->name) ++t->count;
+  *s = (xb_name_slot){name, len, id};
+}
+
+void xb_names_remove(xb_names *t, const char *name, size_t len) {
+  if (!t->capacity) return;
+  size_t mask = t->capacity - 1, i = (size_t)(probe(t, name, len) - t->slots);
+  if (!t->slots[i].name) return;
+  --t->count;
+  for (size_t j = (i + 1) & mask; t->slots[j].name; j = (j + 1) & mask) {
+    size_t home = hash(t->slots[j].name, t->slots[j].len) & mask;
+    if (((j - home) & mask) >= ((j - i) & mask)) { /* its home is not between the hole and it: it fills the hole */
+      t->slots[i] = t->slots[j];
+      i = j;
+    }
+  }
+  t->slots[i].name = NULL;
+}
+
 int xb_names_find(const xb_names *t, const char *name, size_t len, uint32_t *id) {
   if (!t->capacity) return 0;
   const xb_name_slot *s = probe(t, name, len);

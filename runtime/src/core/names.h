@@ -9,12 +9,17 @@ typedef struct xb_name_slot xb_name_slot;
 typedef struct xb_names {
   xb_name_slot *slots;      /* an open-addressing hash: linear probing, at most half full */
   size_t capacity;          /* a power of two */
-  uint32_t count;           /* the names added: numbered 0 .. count - 1 */
+  uint32_t count;           /* the names there; numbered 0 .. count - 1 when only xb_names_add adds them */
 } xb_names;
 
 /* The number of `name` (`len` bytes, kept by reference: it must outlive the
  * table), a new one when it was not there. */
 uint32_t xb_names_add(xb_names *t, const char *name, size_t len);
+
+/* A table whose numbers its owner gives: `name` (not there yet, kept by reference) with number `id`; xb_names_remove
+ * takes it out (backward shift: no tombstone, so lookups stay as short as the names there make them). */
+void xb_names_insert(xb_names *t, const char *name, size_t len, uint32_t id);
+void xb_names_remove(xb_names *t, const char *name, size_t len);
 
 /* Whether `name` is there, and its number in `*id`. */
 int xb_names_find(const xb_names *t, const char *name, size_t len, uint32_t *id);

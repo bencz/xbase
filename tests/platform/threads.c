@@ -8,7 +8,7 @@
 
 static xb_mutex lock;
 static uint32_t locked, atomic;
-static uint32_t numbers[THREADS];
+static uint64_t numbers[THREADS];
 
 static void count(void *arg) {
   size_t k = (size_t)arg;
@@ -49,7 +49,7 @@ int main(void) {
   for (size_t k = 0; k < THREADS; ++k) xb_thread_join(threads[k]);
   CHECK(locked == THREADS * ROUNDS);
   CHECK(atomic == THREADS * ROUNDS);
-  uint32_t self = xb_flow_self();
+  uint64_t self = xb_flow_self();
   CHECK(self != 0 && self == xb_flow_self());
   for (size_t k = 0; k < THREADS; ++k) {
     CHECK(numbers[k] != 0 && numbers[k] != self);

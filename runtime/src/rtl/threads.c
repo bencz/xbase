@@ -95,7 +95,7 @@ _Static_assert(XB_TABLE_SIZE(thread_vars) == T_COUNT_, "one T_ index per Thread 
 
 /* oThread:Join(): waits for the thread to end, and returns what its block returned. */
 static void thread_join(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
-  if (xb_atomic_load32(xb_object_word(&argv[0], T_ID), XB_RELAXED) == xb_thread_self()) {
+  if (xb_atomic_load64(xb_object_word64(&argv[0], T_ID), XB_RELAXED) == xb_thread_self()) {
     xb_error_described(ctx, r, EG_ARG, XB_CODE_THREAD_JOIN, "Thread joins itself", "THREAD:JOIN", XB_ERR_SUBSTITUTE,
                        argc, argv);
     return;
@@ -195,7 +195,7 @@ static void thread_body(xb_ctx *ctx, void *p) {
   xb_set_nil(&result);
   xb_gc_root_push(ctx, &thread);
   xb_gc_root_push(ctx, &result);
-  xb_atomic_store32(xb_object_word(&thread, T_ID), xb_thread_self(), XB_RELAXED);
+  xb_atomic_store64(xb_object_word64(&thread, T_ID), xb_thread_self(), XB_RELAXED);
   xb_atomic_store32(&s->ready, 1, XB_RELEASE);
   xb_park_wake(&s->ready, 1); /* by address alone: the creator may be gone, with `s` */
   xb_object_get(thread.v.p, T_ENV, &env);
@@ -248,17 +248,17 @@ static const xb_class_var mutex_vars[] = {{"(STATE)", XB_VAR_ANY}, {"(OWNER)", X
 _Static_assert(XB_TABLE_SIZE(mutex_vars) == M_COUNT_, "one M_ index per Mutex variable");
 
 xb_rwords xb_object_rwords(const xb_item *object, uint32_t k) {
-  return (xb_rwords){xb_object_word(object, k), xb_object_word(object, k + 1), xb_object_word(object, k + 2)};
+  return (xb_rwords){xb_object_word(object, k), xb_object_word64(object, k + 1), xb_object_word(object, k + 2)};
 }
 
 int xb_object_lock(xb_ctx *ctx, const xb_item *object, uint32_t k) {
-  uint32_t self = xb_flow_self();
+  uint64_t self = xb_flow_self();
   for (uint32_t spin = 0; spin < LOCK_SPINS; ++spin) /* a holder's work is short: worth a look before sleeping */
     if ((spin == 0 || !xb_atomic_load32(xb_object_word(object, k), XB_RELAXED)) &&
         xb_rwords_try(xb_object_rwords(object, k), self))
       return 1;
   while (!xb_rwords_claim(xb_object_rwords(object, k), self)) {
-    if (xb_flow_outer(xb_atomic_load32(xb_object_word(object, k + 1), XB_RELAXED))) { /* waits for itself */
+    if (xb_flow_outer(xb_atomic_load64(xb_object_word64(object, k + 1), XB_RELAXED))) { /* waits for itself */
       xb_error_described(ctx, NULL, EG_ARG, XB_CODE_MUTEX_OUTER, "Mutex held by a flow this one runs in",
                          "MUTEX:LOCK", 0, 0, NULL);
       return 0;
@@ -269,7 +269,7 @@ int xb_object_lock(xb_ctx *ctx, const xb_item *object, uint32_t k) {
 }
 
 void xb_object_lock_short(const xb_item *object, uint32_t k) {
-  uint32_t self = xb_thread_self();
+  uint64_t self = xb_thread_self();
   for (uint32_t spin = 0; spin < LOCK_SPINS; ++spin)
     if ((spin == 0 || !xb_atomic_load32(xb_object_word(object, k), XB_RELAXED)) &&
         xb_rwords_try(xb_object_rwords(object, k), self))
@@ -408,7 +408,7 @@ static void condition_wait(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv
   int64_t deadline;
   xb_set_nil(r);
   if (argc < 2 || !is_mutex(&argv[1]) ||
-      xb_atomic_load32(xb_object_word(&argv[1], M_OWNER), XB_RELAXED) != xb_flow_self()) {
+      xb_atomic_load64(xb_object_word64(&argv[1], M_OWNER), XB_RELAXED) != xb_flow_self()) {
     xb_error_described(ctx, NULL, EG_ARG, XB_CODE_CONDITION, "Mutex not held", "CONDITION:WAIT", 0, argc, argv);
     return;
   }

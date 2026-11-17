@@ -89,10 +89,11 @@ NEXT
   own environment: visible to what it calls, they last across `AWAIT` until it ends (done). *(Planned)*: asynchronous
   codeblocks; `...` and the arguments as received in `ASYNC` functions and generators.
 - Locks belong to the flow that takes them: a thread, or an `ASYNC` function while one of its steps runs
-  (`xb_flow_self`). So `SYNCHRONIZED oMutex` around an `AWAIT` keeps the mutex while the function is suspended and
-  releases it from whatever worker runs its end, and another task that the same worker runs meanwhile waits for it as
-  any other flow (done; C# forbids `await` inside `lock`). A wait for a held lock blocks its worker (another takes its
-  place); `Semaphore:WaitAsync` and an asynchronous lock that suspends instead are planned.
+  (`xb_flow_self`: a 64-bit number never given twice, so no flow ever takes another's lock for its own, however many
+  flows a long-running process starts). So `SYNCHRONIZED oMutex` around an `AWAIT` keeps the mutex while the function is
+  suspended and releases it from whatever worker runs its end, and another task that the same worker runs meanwhile
+  waits for it as any other flow (done; C# forbids `await` inside `lock`). A wait for a held lock blocks its worker
+  (another takes its place); `Semaphore:WaitAsync` and an asynchronous lock that suspends instead are planned.
 - Commands: awaitable forms are `#command` rules in `std.ch` (`AWAIT SEEK x`, `AWAIT SKIP n`, `AWAIT COMMIT`), never
   special cases in the compiler.
 

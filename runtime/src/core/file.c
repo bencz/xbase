@@ -17,16 +17,23 @@ int64_t xb_file_read_up_to(xb_file f, void *buf, size_t n, int32_t *err) {
   return (int64_t)got;
 }
 
-int xb_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err) {
+int64_t xb_file_read_up_to_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err) {
   size_t got = 0;
   while (got < n) {
     int64_t r = xb_platform_file_read_at(f, pos + (int64_t)got, (char *)buf + got, n - got, err);
-    if (r < 0) return 0;
-    if (r == 0) {
-      *err = XB_FERR_FAILURE;
-      return 0;
-    }
+    if (r < 0) return -1;
+    if (r == 0) break;
     got += (size_t)r;
+  }
+  return (int64_t)got;
+}
+
+int xb_file_read_at(xb_file f, int64_t pos, void *buf, size_t n, int32_t *err) {
+  int64_t got = xb_file_read_up_to_at(f, pos, buf, n, err);
+  if (got < 0) return 0;
+  if ((size_t)got < n) {
+    *err = XB_FERR_FAILURE;
+    return 0;
   }
   return 1;
 }

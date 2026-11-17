@@ -14,11 +14,41 @@ static uint32_t word(const unsigned char **pc) {
   return w;
 }
 
-/* The memory variable numbered `id`, as compiled code names one. */
+/* The memory variable numbered `id` (held, or permanent), as compiled code names one. */
 static xb_memvar memvar_of(uint32_t id) {
   size_t len;
   xb_memvar m = {xb_memvar_name(id, &len), id};
   return m;
+}
+
+/* The memory variable of an MO_MV_* operand: a permanent name's number, or (XB_MACRO_NAMED) constant k, the text of a
+ * name, whose number the context holds while the operation runs (xb_memvar_use; memvar_done ends it): new for an
+ * assignment, which creates a variable; else, when the name has none, no variable has it: error 1003, which the error
+ * block may retry (0 when it does not, `*m` unset). */
+static int memvar_at(xb_ctx *ctx, const xb_array *fa, uint32_t w, int assign, xb_memvar *m, uint32_t *slot) {
+  *slot = UINT32_MAX;
+  if (!(w & XB_MACRO_NAMED)) {
+    *m = memvar_of(w);
+    return 1;
+  }
+  const xb_str *name = fa->items[w & ~XB_MACRO_NAMED].v.s; /* NUL-terminated, upper case */
+  for (uint16_t tries = 1;; ++tries) {
+    uint32_t id = xb_memvar_use(ctx, name->data, name->len, assign, slot);
+    if (id != UINT32_MAX) {
+      *m = memvar_of(id);
+      return 1;
+    }
+    char upper[64]; /* the error's operation: the name (no collection may move the constant while it is copied) */
+    size_t n = name->len < sizeof upper - 1 ? name->len : sizeof upper - 1;
+    memcpy(upper, name->data, n);
+    upper[n] = 0;
+    if (!xb_error_retry(ctx, EG_NOVAR, 1003, upper, tries)) return 0;
+    name = fa->items[w & ~XB_MACRO_NAMED].v.s; /* the block ran: the constant may have moved */
+  }
+}
+
+static void memvar_done(xb_ctx *ctx, uint32_t w, const xb_memvar *m, uint32_t slot) {
+  if (w & XB_MACRO_NAMED) xb_memvar_done(ctx, m->id, slot);
 }
 
 static int is_ref(const xb_item *v) { return v->type == XB_T_CELL || v->type == XB_T_REF; }
@@ -102,26 +132,40 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     case MO_CONST: s[++sp] = fa->items[word(&pc)]; break;
     case MO_MV_GET:
     case MO_MV_REF: {
-      xb_memvar m = memvar_of(word(&pc));
+      uint32_t w = word(&pc), slot;
+      xb_memvar m;
       xb_set_nil(r);
-      if (op == MO_MV_GET) xb_mv_get(ctx, r, &m);
-      else xb_mv_ref(ctx, r, &m);
+      if (memvar_at(ctx, fa, w, 0, &m, &slot)) {
+        if (op == MO_MV_GET) xb_mv_get(ctx, r, &m);
+        else xb_mv_ref(ctx, r, &m);
+        memvar_done(ctx, w, &m, slot);
+      }
       ++sp;
       if (FAILED()) goto out;
       break;
     }
     case MO_MV_SET: {
-      xb_memvar m = memvar_of(word(&pc));
+      uint32_t w = word(&pc), slot;
+      xb_memvar m;
+      memvar_at(ctx, fa, w, 1, &m, &slot); /* an assignment numbers the name */
       xb_mv_set(ctx, &m, &s[sp]);
+      memvar_done(ctx, w, &m, slot);
       --sp;
       if (FAILED()) goto out;
       break;
     }
-    case MO_MV_FIELD: {
-      xb_memvar m = memvar_of(word(&pc));
+    case MO_MV_FIELD: { /* a field of the name first: a name only fields have is never held */
+      uint32_t w = word(&pc), slot;
       xb_field_cache cache = {0};
       xb_set_nil(r);
-      xb_mv_field(ctx, r, &m, &cache);
+      const char *field = w & XB_MACRO_NAMED ? fa->items[w & ~XB_MACRO_NAMED].v.s->data : memvar_of(w).name;
+      if (!xb_field_try(ctx, r, field, &cache)) {
+        xb_memvar m;
+        if (memvar_at(ctx, fa, w, 0, &m, &slot)) {
+          xb_mv_get(ctx, r, &m);
+          memvar_done(ctx, w, &m, slot);
+        }
+      }
       ++sp;
       if (FAILED()) goto out;
       break;
@@ -563,16 +607,20 @@ void xb_macro_private(xb_ctx *ctx, const xb_item *text, uint32_t mark) {
   const char *name;
   size_t len;
   if (!name_of(ctx, NULL, text, &name, &len)) return;
-  xb_memvar m = memvar_of(xb_memvar_number(name, len));
+  uint32_t slot;
+  xb_memvar m = memvar_of(xb_memvar_use(ctx, name, len, 1, &slot));
   xb_mv_private(ctx, &m, mark);
+  xb_memvar_done(ctx, m.id, slot);
 }
 
 void xb_macro_public(xb_ctx *ctx, const xb_item *text) {
   const char *name;
   size_t len;
   if (!name_of(ctx, NULL, text, &name, &len)) return;
-  xb_memvar m = memvar_of(xb_memvar_number(name, len));
+  uint32_t slot;
+  xb_memvar m = memvar_of(xb_memvar_use(ctx, name, len, 1, &slot));
   xb_mv_public(ctx, &m);
+  xb_memvar_done(ctx, m.id, slot);
 }
 
 /* Type( cExpr ): the type of the expression's value, as ValType() gives it,

@@ -82,6 +82,8 @@ Where xbase does not follow the reference (each checked by `tests/run/rdd_checks
   when it is stored in a variable, an element or a hash, returned, or taken by `FOR EACH`, and keeps it elsewhere.
 - PACK ends each memo it moves with two `0x1A`, as every memo is written (the reference writes one there), and a value
   of the wrong type for a memo field names the field, as for the other types (the reference names the `.dbt`).
+- A memo of a `.dbt` open exclusively is written over the one it replaces when it fits its blocks (the reference
+  appends every value, so the file grows with every change until PACK).
 - A `.dbt` shorter than its header's 4 bytes is an `Open error` (the reference opens it); one whose header gives a
   first free block below the end of the file gets new memos after the last one (the reference writes over those
   there); `DATA.DBT` serves `DATA.DBF` when there is no `DATA.dbt`.
@@ -429,19 +431,30 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
   The record is written when another becomes current or the table closes, the header (record count, date) on `COMMIT`
   and at closing when the table changed. *(Planned)*: the common extended types (`I`, `B`, `Y`, `T`, `@`, `+`, `V`, `Q`)
   as the reference reads them.
-- **DBT** (`dbt.c`, dBASE III memos): 512-byte blocks; block 0 is the header, the number of the first free block in
-  its first 4 bytes and zeros after; each memo starts a block, its text followed by two `0x1A` (reading stops at the
-  first `0x1A`, so a memo cannot hold one), and the file ends after the last memo (the next one starts at the next
-  block, zeros between). A value is never rewritten in place: writing a memo field writes a new memo after the last
-  (an empty value is none), as the reference does; the first free block is never taken below the end of the file,
-  whatever the header says (the reference then writes over the memos there). PACK gives the records it keeps their
-  memos at the start, in record order, dropping the others, in steps that each leave every record on a whole memo, so
-  that a failure (a full disk) loses nothing: copies of the memos after every older one, the records moved to the
-  front with their copies' blocks, the copies moved to block 1 when they fit before themselves (else they stay), the
-  records renumbered, the older memos cut. ZAP leaves the header only, its first free block 1. The memo file is the
-  table's name with `.dbt` (also beside `DATA.DBF`, as the reference names it); opening finds `DATA.DBT` too when
-  there is no `DATA.dbt`, as tables copied from systems that write names in upper case have it. A table with memo
-  fields and a version byte of another memo format (dBASE IV, ...) is `DBFNTX/1012` `Corruption detected`.
+- **DBT** (`dbt.c`, dBASE III memos): 512-byte blocks; block 0 is the header, the number of the first free block in its
+  first 4 bytes and zeros after; each memo starts a block, its text followed by two `0x1A` (reading stops at the first
+  `0x1A`, so a memo cannot hold one), and the file ends after the last memo (the next one starts at the next block,
+  zeros between). In a file open shared, a value is never rewritten in place (another program may be reading it):
+  writing a memo field writes a new memo after the last (an empty value is none), as the reference always does. In a
+  file open exclusively, a value whose text and two end marks fit the blocks of the memo it replaces (its room: the
+  blocks up to its first `0x1A`, and the next one when the second starts it) is written over it, and the blocks it no
+  longer needs go to a list of free runs kept while the file is open (sorted, neighbors joined); a value that does not
+  fit takes the first free run that holds it, else goes after the last memo, and gives the old memo's room back once it
+  is written (a write that fails keeps the record's old memo whole; a run given back twice, as two records of a damaged
+  file on one memo would, is ignored). So memos changed again and again keep the file near the size of what they hold,
+  as PACK would leave it, instead of growing it without end (the reference appends there too). The cost is the crash
+  safety of an append-only file: a value written over its old text, or into blocks freed while the table's record
+  pointing at them is not written yet, is lost or crosses with another record's when the program dies before the table
+  is written (the reference's FPT files reuse freed blocks the same way). A memo is read in chunks that double from 4 KB
+  (one read for a short memo, a few for a long one). The first free block is never taken below the end of the file,
+  whatever the header says (the reference then writes over the memos there). PACK gives the records it keeps their memos
+  at the start, in record order, dropping the others, in steps that each leave every record on a whole memo, so that a
+  failure (a full disk) loses nothing: copies of the memos after every older one, the records moved to the front with
+  their copies' blocks, the copies moved to block 1 when they fit before themselves (else they stay), the records
+  renumbered, the older memos cut. ZAP leaves the header only, its first free block 1. The memo file is the table's name
+  with `.dbt` (also beside `DATA.DBF`, as the reference names it); opening finds `DATA.DBT` too when there is no
+  `DATA.dbt`, as tables copied from systems that write names in upper case have it. A table with memo fields and a
+  version byte of another memo format (dBASE IV, ...) is `DBFNTX/1012` `Corruption detected`.
 - **FPT** (`fpt.c`, FoxPro memos as the reference writes them, with the free list of Clipper's FlexFile): a 1024-byte
   header (the first free block and the block size, 64 for new files, big-endian; the FlexFile mark at `0x200`, then,
   little-endian, the byte offsets of the free list's two pages and a counter of changes). A memo starts a block: its
@@ -466,7 +479,9 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
 - **NTX** (`ntx.c`): 1024-byte pages. Page 0 is the header: a signature (6, 7 with a condition), a counter of
   changes, the root's and the first free page's offsets, an entry's size (the key's and 8), the key's length and
   decimals, the entries a page holds (`floor(1022 / (entry + 2)) - 1`, made even) and half of that, the key's text,
-  the `UNIQUE` and `DESCENDING` flags, the condition's text. A page: its entry count, then an offset per slot (the
+  the `UNIQUE` and `DESCENDING` flags, the condition's text, and at bytes 1016-1023 xbase's own 64-bit counter of
+  changes, which goes up with the 2-byte one (other programs leave it, or zero it, which reads as a change). A page:
+  its entry count, then an offset per slot (the
   entries in order, then the free slots), the slots (each a page offset, a record number, a key); the entry after the
   last holds only the page of the keys after all others. A B-tree: the entries of a branch page are entries too, the
   pages under it before them. A free page has count 0 and the next free page in its only entry; new pages come from
@@ -602,10 +617,12 @@ Offsets are bytes of the file; POSIX takes them with `fcntl` locks, Windows with
   file is found again. A change is written before the write lock goes, with the head and the counter plus one. The
   tags themselves are read at opening: a tag another program adds, removes or makes anew meanwhile is not seen until
   the file is opened again (as with the reference).
-- Index read (NTX): a read lock on byte 1,000,000,000 of the index (waiting); the header is read, and a counter
-  (bytes 2-3) other than the last one seen means pages kept from before are stale.
-- Index change (NTX): a write lock on the same byte (waiting); the pages are written, then the header with the counter
-  plus one. A changed key's old entry goes and the new one comes under one lock.
+- Index read (NTX): a read lock on byte 1,000,000,000 of the index (waiting); the header page is read (one read), and
+  a counter (bytes 2-3, or the 64-bit one at 1016), root or free list other than the last ones seen means pages kept
+  from before are stale. The 2-byte counter alone would wrap: after exactly 65,536 changes by others it shows the
+  value seen before, and stale pages would be used and written back over the index.
+- Index change (NTX): a write lock on the same byte (waiting); the pages are written, then the header with both
+  counters plus one. A changed key's old entry goes and the new one comes under one lock.
 - An order's cursor is placed from the current record's key as it is now (the record read again, unless it has
   changes not yet written), so `SKIP` and `ordKeyNo()` follow a key another program changed.
 

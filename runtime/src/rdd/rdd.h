@@ -271,6 +271,10 @@ int xb_area_load(xb_ctx *ctx, xb_area *a);
 /* Reading a field (a memo that cannot be read: DBFNTX/1010, NIL); writing one, with the errors raised (READONLY, a
  * wrong type, a number too wide, a memo that cannot be written). */
 int xb_area_field_get(xb_ctx *ctx, xb_area *a, uint32_t field, xb_item *r);
+
+/* The field `name` (upper case) of the current work area into `r`, as xb_mv_field reads an undeclared name: 0 when the
+ * area has none of that name (or no area is open). */
+int xb_field_try(xb_ctx *ctx, xb_item *r, const char *name, xb_field_cache *cache);
 int xb_area_field_put(xb_ctx *ctx, xb_area *a, uint32_t field, const xb_item *v);
 /* A field's value from its bytes as a table stores them, and into them (XB_PUT_OK, XB_PUT_TYPE: nothing written,
  * XB_PUT_WIDTH: stars written): C, N, D (YYYYMMDD), L; not memos (rdd/field.c). */

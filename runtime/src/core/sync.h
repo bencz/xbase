@@ -7,7 +7,8 @@
 
 #include <stdint.h>
 
-/* Owners of locks (xb_rwords): a number never 0, from one counter that skips 0 (2^32 numbers before one comes again).
+/* Owners of locks (xb_rwords): a 64-bit number never 0 and never given twice (one counter, which a process could not
+ * run long enough to wrap).
  * xb_thread_self is the calling thread's own, for the runtime's locks, which no code of the program's runs under.
  * xb_flow_self is the flow's that runs on the thread, for the program's locks (a Mutex): the thread's own, or the
  * innermost flow entered on it, a task's or an asynchronous function's step (xb_flow_enter, xb_flow_leave: a record on
@@ -15,14 +16,14 @@
  * goes with it across AWAIT, from worker to worker). xb_flow_outer tells whether `owner` is a flow the running one runs
  * inside on this thread (the thread's, or one entered further out): a wait for a lock it holds would never end. */
 typedef struct xb_flow {
-  uint32_t number;
+  uint64_t number;
   struct xb_flow *outer;
 } xb_flow;
-uint32_t xb_thread_self(void);
-uint32_t xb_flow_self(void);
+uint64_t xb_thread_self(void);
+uint64_t xb_flow_self(void);
 void xb_flow_enter(xb_flow *flow);
 void xb_flow_leave(xb_flow *flow);
-int  xb_flow_outer(uint32_t owner);
+int  xb_flow_outer(uint64_t owner);
 
 /* Runs fn() once for the flag, whichever threads call it at once: the others wait until it has returned. fn never
  * calls xb_once with its own flag. A flag starts as XB_ONCE_INIT, statically. */
@@ -39,18 +40,22 @@ void xb_once(xb_once_flag *flag, void (*fn)(void));
  * when `self` holds it already or finds it free: 1; 0 when another holds it. xb_rwords_claim, after a failed try,
  * marks the lock waited for and takes it if it was free meanwhile: 1; 0 when the caller must wait while the state is 2
  * (on its address) and claim again. xb_rwords_release releases it once (the next waiter woken when it is free): 0 when
- * `self` does not hold it. */
+ * `self` does not hold it. The holder's word is 64 bits, 8-aligned, read and written atomically: a torn read could
+ * show another flow its own number. */
 typedef struct xb_rwords {
-  uint32_t *state, *owner, *depth;
+  uint32_t *state;
+  uint64_t *owner;
+  uint32_t *depth;
 } xb_rwords;
-int xb_rwords_try(xb_rwords w, uint32_t self);
-int xb_rwords_claim(xb_rwords w, uint32_t self);
-int xb_rwords_release(xb_rwords w, uint32_t self);
+int xb_rwords_try(xb_rwords w, uint64_t self);
+int xb_rwords_claim(xb_rwords w, uint64_t self);
+int xb_rwords_release(xb_rwords w, uint64_t self);
 
 /* The lock made statically as XB_RLOCK_INIT, which needs no setup, owned by the thread (a release by another thread
  * ends the process: a defect of the runtime). For rare, nesting work (preparing classes), not hot paths. */
 typedef struct xb_rlock {
-  uint32_t state, owner, depth;
+  _Alignas(8) uint64_t owner;
+  uint32_t state, depth;
 } xb_rlock;
 #define XB_RLOCK_INIT {0, 0, 0}
 void xb_rlock_lock(xb_rlock *l);

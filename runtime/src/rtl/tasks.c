@@ -443,7 +443,7 @@ static void run_step(xb_ctx *ctx, const xb_item *task) {
     xb_object_get(task->v.p, V_RESUME, &it);
     st.resume = (xb_func)(uintptr_t)it.v.i;
     xb_object_get(task->v.p, V_FLOW, &it);
-    st.flow.number = (uint32_t)it.v.i;
+    st.flow.number = (uint64_t)it.v.i;
     xb_env_unpark(ctx, st.env);
     async_step_run(ctx, &st, &result);
   } else {
@@ -1088,7 +1088,7 @@ void xb_async_suspend(xb_ctx *ctx, const xb_item *slots, uint32_t nslots, uint32
   xb_frame_store(ctx, &st->task, V_WORK, slots, nslots);
   xb_object *t = st->task.v.p;
   xb_set_int(&t->vars[V_POINT], point); /* no heap references: no barrier; read by the next step only */
-  xb_set_int(&t->vars[V_FLOW], st->flow.number); /* given when a step first took a lock */
+  xb_set_int(&t->vars[V_FLOW], (int64_t)st->flow.number); /* given when a step first took a lock */
   st->awaited = *awaited;
 }
 

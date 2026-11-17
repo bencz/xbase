@@ -688,16 +688,18 @@ void CodeGen::emit(const xir::Instruction &i) {
     pollOnBackEdge(i.parent, i.targets[0].block);
     shareOnEdge(i.parent, i.targets[0].block);
     emitBranch(i.targets[0]);
+    for (uint32_t s : plan_->clearsOnEdge(i.parent, i.targets[0].block)) setNil(slot(s)); // after the arguments
     b_.CreateBr(blocks_.at(i.targets[0].block));
     break;
   case Op::CondBr: {
     pollOnBackEdge(i.parent, i.targets[0].block);
     if (blockOrder_.at(i.targets[0].block) > blockOrder_.at(i.parent)) pollOnBackEdge(i.parent, i.targets[1].block);
-    // A target with arguments, or whose edge ends a string's growth, gets an edge block of its own.
+    // A target with arguments, or whose edge ends a string's growth or clears a loop's slots, gets an edge block.
     BasicBlock *dests[2];
     bool own[2];
     for (size_t k = 0; k < 2; ++k) {
-      own[k] = !i.targets[k].args.empty() || shareOnEdge_.count({i.parent, i.targets[k].block});
+      own[k] = !i.targets[k].args.empty() || shareOnEdge_.count({i.parent, i.targets[k].block}) ||
+               !plan_->clearsOnEdge(i.parent, i.targets[k].block).empty();
       dests[k] = own[k] ? newBlock("edge") : blocks_.at(i.targets[k].block);
     }
     const auto *cond = ops[0]->kind() == xir::Value::Kind::Instruction ? static_cast<const xir::Instruction *>(ops[0])
@@ -711,6 +713,7 @@ void CodeGen::emit(const xir::Instruction &i) {
       b_.SetInsertPoint(dests[k]);
       shareOnEdge(i.parent, i.targets[k].block);
       emitBranch(i.targets[k]);
+      for (uint32_t s : plan_->clearsOnEdge(i.parent, i.targets[k].block)) setNil(slot(s));
       b_.CreateBr(blocks_.at(i.targets[k].block));
     }
     break;

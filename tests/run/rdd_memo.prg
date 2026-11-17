@@ -1,10 +1,12 @@
 // Memo fields (M, DBT files): dbCreate makes the .dbt beside the table; a memo is read whole (up to its first 0x1A),
-// written as a new memo after the last (the file grows; an empty memo is none), its value "M" for ValType() and
+// written as a new memo after the last (the file grows; an empty memo is none) unless it fits the memo it replaces
+// in a table open exclusively (written over it: the file keeps its size), its value "M" for ValType() and
 // Type() while it is the field's own string (a copy keeps it, a string made from it is "C"); PACK keeps the memos of
 // the records it keeps and drops the others (the file shrinks), ZAP empties it; a table reopened goes on after its last
 // memo. A missing .dbt is DBFNTX/1002 Open error with its name; a value that is not a string is a Data type error;
 // READONLY is Write not allowed. Where the reference differs (docs/rdd.md): a copy in a variable stays "M" here, PACK
-// ends each memo with two 0x1A (one byte more), and the type error names the field. The files start with "rdd_memo",
+// ends each memo with two 0x1A (one byte more), the type error names the field, and a memo that fits is rewritten in
+// place. The files start with "rdd_memo",
 // deleted at the end.
 FIELD NAME, NOTE
 

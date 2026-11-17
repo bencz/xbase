@@ -66,6 +66,8 @@ uint32_t xb_macro_compile(xb_ctx *ctx, xb_item *code, const char *text, size_t l
 /* The stack machine's operations (see compile.c for their operands). */
 /* An MO_BLOCK capture's source: a parameter of the creator, or (with this bit) one of the creator's captures. */
 #define XB_MACRO_FROM_CAPTURE 0x80000000u
+/* An MO_MV_* operand: a permanent name's number, or (with this bit) the constant holding the text of another name. */
+#define XB_MACRO_NAMED 0x80000000u
 typedef enum mop {
   MO_NIL, MO_TRUE, MO_FALSE, MO_CONST,
   MO_MV_GET, MO_MV_SET, MO_MV_REF, MO_MV_FIELD, MO_FIELD, MO_FIELD_SET,
