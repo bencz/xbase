@@ -533,6 +533,7 @@ static void run_step(xb_ctx *ctx, const xb_item *task) {
   ctx->error_trapped = trapped;
   if (step_ended(ctx, &st.task, &st.awaited, &result)) complete(ctx, &st.task, S_COMPLETED, &result);
   xb_gc_root_pop(ctx, 4);
+  xb_stack_give_back(); /* a step that went deep */
 }
 
 /* The task claimed (scheduled to running) by this thread: 1, and it runs it. */

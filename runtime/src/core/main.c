@@ -43,7 +43,7 @@ XB_NOINLINE static void run(program *p) {
   xb_ctx *ctx = xb_ctx_new();
   const char *low, *high;
   xb_platform_stack_bounds(&low, &high);
-  xb_ctx_set_stack(ctx, low);
+  xb_ctx_set_stack(ctx, low, high);
   uint32_t n = p->argc > 1 ? (uint32_t)(p->argc - 1) : 0;
   xb_frame *args = calloc(1, sizeof(xb_frame) + n * sizeof(xb_item)); /* NIL slots */
   if (!args) xb_gc_fatal("out of memory");

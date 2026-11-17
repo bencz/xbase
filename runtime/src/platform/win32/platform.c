@@ -69,6 +69,20 @@ void xb_platform_pages_unmap(void *p, size_t size) {
 
 void xb_platform_pages_decommit(void *p, size_t size) { VirtualFree(p, size, MEM_DECOMMIT); }
 
+/* A thread's stack grows through its guard page: touched, the system commits the page below it as the next guard and
+ * moves the thread's stack limit (NT_TIB.StackLimit) down. The pages given back leave the stack as one that never grew
+ * below `to`: the page just below it (committed: the stack went deeper) becomes the guard page, the pages under it are
+ * decommitted, and the limit is `to`. A guard page that cannot be made leaves the stack as it was. */
+void xb_platform_stack_give_back(const char *from, const char *to) {
+  size_t page = xb_platform_page_size();
+  if ((size_t)(to - from) <= page) return;
+  char *guard = (char *)(uintptr_t)to - page;
+  DWORD before;
+  if (!VirtualProtect(guard, page, PAGE_READWRITE | PAGE_GUARD, &before)) return;
+  VirtualFree((void *)(uintptr_t)from, (size_t)(guard - from), MEM_DECOMMIT);
+  ((NT_TIB *)NtCurrentTeb())->StackLimit = (void *)(uintptr_t)to;
+}
+
 /* Whole pages: the range rounded out to the pages it touches. */
 int xb_platform_pages_recommit(void *p, size_t size) {
   uintptr_t page = xb_platform_page_size(), from = (uintptr_t)p & ~(page - 1);

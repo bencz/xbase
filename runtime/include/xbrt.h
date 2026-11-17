@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 49u
+#define XB_ABI_VERSION 50u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -208,9 +208,9 @@ struct xb_frame {
  * (requests tested after every operation that can fail), `int32_t
  * set_decimals` (SET DECIMALS, the decimals of `/` and `%`, as 16 bits),
  * `xb_frame *frames` (the innermost frame of the chain), `const char
- * *stack_limit` (a function whose frame lies below it calls
- * xb_stack_overflow before its body runs, then returns unwinding; NULL: no
- * limit). */
+ * *stack_limit` (a function whose frame lies below it calls xb_stack_deep
+ * and, unless that lets it go on, xb_stack_overflow before its body runs,
+ * then returns unwinding; NULL: no limit). */
 typedef struct xb_ctx xb_ctx;
 
 /* [ABI] dynamic calling convention used by every xBase-callable function:
@@ -292,8 +292,14 @@ void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_siz
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
                       uint32_t ctx_stack_limit_offset, uint32_t array_items_offset, uint32_t ref_value_offset,
                       uint32_t hash_entries_offset, uint32_t object_vars_offset);
-/* The stack error (EG_LIMIT, "Stack overflow"): raised by compiled code whose
- * frame lies below the context's stack_limit (core/ctx.c). */
+/* A frame (its address) below the context's stack_limit: xb_stack_deep gives
+ * 1 when that limit was only the mark of a deep stack (core/ctx.c), whose
+ * pages go back to the system once it is shallow again, and the frame lies
+ * above the stack error's limit, which the context now has: the function goes
+ * on; 0: the stack error is due, which xb_stack_overflow raises (EG_LIMIT,
+ * "Stack overflow"). xb_stack_deep reads and writes the context alone (the
+ * compiler declares it so). */
+int32_t  xb_stack_deep(xb_ctx *ctx, uintptr_t frame);
 void     xb_stack_overflow(xb_ctx *ctx);
 
 void     xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);

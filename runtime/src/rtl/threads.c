@@ -139,7 +139,7 @@ static void program_thread_main(void *p) {
   free(p);
   xb_ctx *ctx = xb_ctx_new();
   const char *low, *high;
-  if (xb_platform_stack_bounds(&low, &high)) xb_ctx_set_stack(ctx, low);
+  if (xb_platform_stack_bounds(&low, &high)) xb_ctx_set_stack(ctx, low, high);
   if (xb_atomic_load32(&ending, XB_SEQ_CST)) xb_pending_set(ctx, XB_PENDING_QUIT); /* registered before the look */
   t.body(ctx, t.arg);
   xb_sched_thread_end();

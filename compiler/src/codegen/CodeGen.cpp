@@ -80,6 +80,13 @@ void CodeGen::initTypes() {
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
   rtStackOverflow_ = rt("xb_stack_overflow", voidTy, {ptrTy_});
+  rtStackDeep_ = rt("xb_stack_deep", i32_, {ptrTy_, intPtrTy_});
+  if (auto *f = dyn_cast<Function>(rtStackDeep_.getCallee())) { // it reads and writes the context alone (core/ctx.c)
+    f->setMemoryEffects(MemoryEffects::argMemOnly());
+    f->setWillReturn();
+    f->setNoSync();
+    f->setDoesNotFreeMemory();
+  }
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtBitNot_ = rt("xb_op_bitnot", voidTy, {ptrTy_, ptrTy_, ptrTy_});
@@ -622,13 +629,20 @@ void CodeGen::linkFrame(Value *frame, Value *nslots, Value *proc, Value *prev) {
   tag(b_.CreateStore(frame, frames), Mem::Ctx);
 }
 
-// A frame below the context's stack limit raises the stack error (xb_stack_overflow) before anything is written into
-// it, and the code goes on at `exit`, unwinding as after any error (with the stack restored to `stackSave`, when
-// given, first).
+// A frame below the context's stack limit goes on when the limit was only the mark of a deep stack (xb_stack_deep);
+// else it raises the stack error (xb_stack_overflow) before anything is written into it, and the code goes on at
+// `exit`, unwinding as after any error (with the stack restored to `stackSave`, when given, first). The call on the
+// way back into the body is declared to touch the context alone, and passes the frame's address as a number: what the
+// function knows of the rest of memory, and its frame, stay known (the function inlines as without the mark).
 void CodeGen::checkStack(Value *frame, BasicBlock *exit, Value *stackSave) {
   Value *limit = loadFrom(ptrTy_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxStackLimit), Mem::Ctx, "stack.limit");
-  Value *below = b_.CreateICmpULT(b_.CreatePtrToInt(frame, intPtrTy_), b_.CreatePtrToInt(limit, intPtrTy_));
-  BasicBlock *join = beginUnlikely(below, "stack.overflow");
+  Value *at = b_.CreatePtrToInt(frame, intPtrTy_);
+  Value *below = b_.CreateICmpULT(at, b_.CreatePtrToInt(limit, intPtrTy_));
+  BasicBlock *join = beginUnlikely(below, "stack.below");
+  Value *deep = b_.CreateCall(rtStackDeep_, {fnCtx_, at});
+  BasicBlock *raise = newBlock("stack.overflow");
+  b_.CreateCondBr(b_.CreateICmpNE(deep, ConstantInt::get(i32_, 0)), join, raise);
+  b_.SetInsertPoint(raise);
   if (stackSave) b_.CreateStackRestore(stackSave);
   b_.CreateCall(rtStackOverflow_, {fnCtx_});
   b_.CreateBr(exit);

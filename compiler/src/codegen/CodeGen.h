@@ -294,7 +294,7 @@ private:
   uint64_t unionSize_ = 0;
 
   // runtime entry points
-  llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_, rtStackOverflow_;
+  llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_, rtStackOverflow_, rtStackDeep_;
   llvm::FunctionCallee rtInc_, rtDec_, rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_,
       rtPendingGc_;
   llvm::FunctionCallee rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_;

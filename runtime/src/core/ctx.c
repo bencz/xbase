@@ -355,8 +355,12 @@ xb_ctx *xb_ctx_new(void) {
   return ctx;
 }
 
+/* The context whose stack the thread runs on (xb_stack_give_back). */
+static XB_THREAD_LOCAL xb_ctx *stackOwner;
+
 void xb_ctx_free(xb_ctx *ctx) {
   if (!ctx) return;
+  if (stackOwner == ctx) stackOwner = NULL; /* freed by its own thread */
   xb_gc_unregister(ctx);
   for (uint32_t i = 0; i < XB_NAME_CACHE; ++i)
     if (ctx->nameIds[i] != UINT32_MAX) xb_memvar_unhold(ctx->nameIds[i]);
@@ -371,16 +375,57 @@ void xb_ctx_free(xb_ctx *ctx) {
 #define XB_STACK_FLOOR ((size_t)64 << 10)
 /* The room above the stack error's limit a waiter needs to run a task inline, on top of its own calls. */
 #define XB_STACK_INLINE ((size_t)1 << 20)
+/* The part of a stack below its end that stays the thread's: past it the stack is deep (its mark), and its pages go
+ * back to the system once the thread is XB_STACK_GIVE_ROOM above the mark again (room for the calls that give them). */
+#define XB_STACK_KEEP ((size_t)1 << 20)
+#define XB_STACK_GIVE_ROOM ((size_t)64 << 10)
+/* A thread gives its stack's pages back at most once in this time: one that goes past the mark again and again (a loop
+ * that recurses a little deeper) pays the system's call and the pages' faults that often at most, staying deep between. */
+#define XB_STACK_GIVE_EVERY_NS ((int64_t)100 * 1000 * 1000)
 
-void xb_ctx_set_stack(xb_ctx *ctx, const char *low) {
+/* The stack error's limit: where the stack ends for the program's calls. */
+static const char *error_limit(const xb_ctx *ctx) { return ctx->stack_low + XB_STACK_RESERVE; }
+
+void xb_ctx_set_stack(xb_ctx *ctx, const char *low, const char *high) {
   ctx->stack_low = low;
-  ctx->stack_limit = low ? low + XB_STACK_RESERVE : NULL;
+  ctx->stack_mark = NULL;
+  ctx->stack_limit = NULL;
+  if (!low) return;
+  ctx->stack_limit = error_limit(ctx);
+  stackOwner = ctx;
+  /* a mark only on a stack with room below it (the program's, ThreadStart()'s, the workers' of 4 MB); a stack too small
+   * for both keeps its pages, and one smaller than the reserve has the error at once */
+  if (high && (uintptr_t)high > (uintptr_t)ctx->stack_limit &&
+      (uintptr_t)high - (uintptr_t)ctx->stack_limit > 2 * XB_STACK_KEEP) {
+    ctx->stack_mark = high - XB_STACK_KEEP;
+    ctx->stack_limit = ctx->stack_mark;
+  }
 }
 
 int xb_stack_room(const xb_ctx *ctx) {
   /* where the thread's stack is now (it grows down, as the limit's check takes it to); in the reserve, no room */
   char here;
-  return !ctx->stack_limit || (uintptr_t)&here >= (uintptr_t)ctx->stack_limit + XB_STACK_INLINE;
+  return !ctx->stack_low || (uintptr_t)&here >= (uintptr_t)error_limit(ctx) + XB_STACK_INLINE;
+}
+
+int32_t xb_stack_deep(xb_ctx *ctx, uintptr_t frame) {
+  if (!ctx->stack_mark || ctx->stack_limit != ctx->stack_mark) return 0;
+  ctx->stack_limit = error_limit(ctx);
+  return frame >= (uintptr_t)ctx->stack_limit;
+}
+
+void xb_stack_give_back(void) {
+  xb_ctx *ctx = stackOwner;
+  if (!ctx || !ctx->stack_mark || ctx->stack_limit != error_limit(ctx)) return; /* not deep, or in the stack error */
+  char here;
+  if ((uintptr_t)&here < (uintptr_t)ctx->stack_mark + XB_STACK_GIVE_ROOM) return; /* still deep */
+  int64_t now = xb_platform_monotonic_ns();
+  if (ctx->stack_given && now - ctx->stack_given < XB_STACK_GIVE_EVERY_NS) return;
+  ctx->stack_given = now;
+  uintptr_t page = xb_platform_page_size();
+  uintptr_t from = ((uintptr_t)ctx->stack_low + page - 1) & ~(page - 1), to = (uintptr_t)ctx->stack_mark & ~(page - 1);
+  if (to > from) xb_platform_stack_give_back((const char *)from, (const char *)to);
+  ctx->stack_limit = ctx->stack_mark;
 }
 
 /* Raised before the body of a function whose frame lies below the limit: the error's handler (ErrorSys, a BEGIN

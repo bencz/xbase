@@ -175,6 +175,10 @@ xb_add_codegen_test(loop_back_edge_poll x86_64-linux-gnu
   "@xbp_SUM\\(.*load atomic i32, ptr %[0-9a-z]+ monotonic[^\n]*!xb\\.poll" loop_poll)
 # Every function tests its frame against the stack limit before its body.
 xb_add_codegen_test(stack_limit_check x86_64-linux-gnu "@xbp_SUM\\(.*call void @xb_stack_overflow" loop_poll)
+# Below it, xb_stack_deep first (a deep stack's mark), declared to touch the context alone (the body after it stays
+# optimized as without it).
+xb_add_codegen_test(stack_deep_mark x86_64-linux-gnu
+  "memory\\(argmem: readwrite\\)\ndeclare i32 @xb_stack_deep\\(ptr, i64\\).*@xbp_SUM\\(.*call i32 @xb_stack_deep" loop_poll)
 # A counted loop polls when it reaches a stop, in its exit test's branch; a loop whose end depends on its data counts
 # its passes down between polls (LoopPolls).
 xb_add_codegen_test(loop_strip_mined x86_64-linux-gnu "\npoll\\.reached[0-9]*:" loop_stops)

@@ -657,9 +657,11 @@ emits the object file.
   activation's mark), `xb_macro_public` and `xb_macro_text` with the text's item; `macro.call` puts the text and the
   arguments in consecutive slots (a list, as a send does) and calls `xb_macro_call`.
 - Stack limit ([runtime.md](runtime.md#frames)): once the frame is linked, the prologue compares its address with the
-  context's `stack_limit` and, below it (an unlikely branch), calls `xb_stack_overflow` and branches to the exit, before
-  the body (`checkStack`); a list built for `...` is tested the same way before it is written, restoring the stack and
-  unwinding when it is below the limit.
+  context's `stack_limit` and, below it (an unlikely branch), calls `xb_stack_deep` with the frame's address as a number
+  (a deep stack's mark: it goes on; declared to read and write the context alone, `memory(argmem: readwrite)`, so that
+  on the way back into the body only what the function read from the context is read again, and it inlines as without
+  the mark) and otherwise `xb_stack_overflow`, and branches to the exit, before the body (`checkStack`); a list built
+  for `...` is tested the same way before it is written, restoring the stack and unwinding when it is below the limit.
 - Call stack ([runtime.md](runtime.md#frames)): the prologue stores the function's `xb_proc` (its
   `xir::Function::stackName`, its number of parameters, `XB_PROC_ARGS` when it keeps its arguments, `XB_PROC_HIDDEN`
   when it is hidden, `XB_PROC_METHOD` for a method (`xir::Function::method`, `method` in the xIR listing), and its

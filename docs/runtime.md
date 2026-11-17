@@ -70,18 +70,31 @@ function: nothing keeps a pointer to a slot (a variable that outlives it moves i
 on a thread whose stack is reserved at 1 GB on 64-bit targets and 256 MB on 32-bit ones (`XB_PROGRAM_STACK_SIZE` in
 `core/main.c`; pages are committed as used), so deep recursion has room.
 
-Running out of it is an error, not the end of the process: the context knows the lowest address of its thread's
-stack the program may use (`xb_ctx_set_stack`, from `xb_platform_stack_bounds`: the system's bounds of the thread's
-stack, above its guard pages; none on a system that does not tell, where the error is never raised), and its
-`stack_limit` lies 1 MB above it. Every place where xBase code goes deeper tests it: a compiled function (a
-codeblock's too) compares its frame's address with the limit after linking the frame, and below it, before its body
-runs, calls `xb_stack_overflow` and returns through its exit, unwinding; the macro evaluator does the same for each
-evaluation (a codeblock made from text), and a list of arguments forwarded with `...` is tested before it is written.
-That raises `EG_LIMIT` (`Stack overflow`, the function's name as the operation; it cannot be substituted), whose
-handler runs in the reserve, the limit lowered to 64 KB above the lowest address meanwhile: a `BEGIN SEQUENCE` or
-`TRY` recovers from it and the program goes on, the default handler reports it and ends the program; a handler that
-runs out of the reserve too ends the process with `xbrt: stack overflow` (the reference's program crashes). Pages of
-the stack used once stay committed. The test costs a load, a comparison and a branch per call: on the `fib`
+Running out of it is an error, not the end of the process: the context knows the lowest address of its thread's stack
+the program may use (`xb_ctx_set_stack`, from `xb_platform_stack_bounds`: the system's bounds of the thread's stack,
+above its guard pages; none on a system that does not tell, where the error is never raised), and its stack's error
+limit lies 1 MB above it. Every place where xBase code goes deeper tests `stack_limit`: a compiled function (a
+codeblock's too) compares its frame's address with it after linking the frame, and below it, before its body runs, calls
+`xb_stack_deep`, then unless that lets it go on `xb_stack_overflow`, and returns through its exit, unwinding; the macro
+evaluator does the same for each evaluation (a codeblock made from text), and a list of arguments forwarded with `...`
+is tested before it is written. That raises `EG_LIMIT` (`Stack overflow`, the function's name as the operation; it
+cannot be substituted), whose handler runs in the reserve, the limit lowered to 64 KB above the lowest address
+meanwhile: a `BEGIN SEQUENCE` or `TRY` recovers from it and the program goes on, the default handler reports it and ends
+the program; a handler that runs out of the reserve too ends the process with `xbrt: stack overflow` (the reference's
+program crashes).
+
+A stack that goes deep gives its pages back: on a stack with room for it (the context knows its end too), `stack_limit`
+is first a mark 1 MB below the end (`XB_STACK_KEEP`); the frame that passes it calls `xb_stack_deep`, which notes the
+stack as deep, puts the error's limit in `stack_limit` and lets the function go on (no error, one call per descent).
+Once the thread is 64 KB above the mark again (`XB_STACK_GIVE_ROOM`), at the places where it often is (a sequence that
+recovers, `xb_seq_catch`; a task's step that ended; a blocking operation, a wait, once the thread counts as blocked;
+after a collection's safepoint: neither delays a collection), `xb_stack_give_back` gives the pages below the mark back
+to the system and watches the mark again, at most once every 100 ms per thread (`XB_STACK_GIVE_EVERY_NS`: a loop that
+crosses the mark again and again stays deep in between instead of paying the system's call and the pages' faults each
+time). `xb_platform_stack_give_back` frees them with `madvise(MADV_DONTNEED)` on Linux, maps a new anonymous range over
+them elsewhere on POSIX systems (where the advice may only mark them), and on Windows decommits them under a new guard
+page, the thread's stack limit (`NT_TIB.StackLimit`) moved up. A recursion of 120000 levels, or one the stack error
+ended, leaves the resident memory where it was. The test costs a load, a comparison and a branch per call: on the `fib`
 benchmark, which does little but call, 2.9% more instructions and 1.3% more cycles (perf stat, x86-64).
 
 The frames also make the call stack. A frame's `proc` (an `xb_proc` constant the compiler emits per function: its name,

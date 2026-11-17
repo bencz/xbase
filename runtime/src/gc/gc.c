@@ -495,6 +495,7 @@ void xb_gc_safepoint(void) {
   xb_mutex_lock(&heap.lock);
   if (heap.stopping) xb_platform_with_registers(park_locked, t);
   xb_mutex_unlock(&heap.lock);
+  xb_stack_give_back(); /* after the collection, which does not wait for it */
 }
 
 typedef struct blocked_call {
@@ -518,6 +519,7 @@ static void run_blocked(void *p) {
     xb_cond_broadcast(&heap.stopped);
     xb_mutex_unlock(&heap.lock);
   }
+  xb_stack_give_back(); /* the thread waits: a stack that went deep gives its pages back, below what collections scan */
   c->fn(c->arg);
   xb_atomic_store32(&t->state, T_RUNNING, XB_SEQ_CST);
   if (xb_atomic_load32(&heap.stopping, XB_SEQ_CST)) { /* a collection runs: wait for it, still as blocked */
@@ -538,6 +540,7 @@ static void run_blocked(void *p) {
 static void run_stopped(void (*fn)(void *), void *arg, int away) {
   xb_tlh *t = tlh;
   if (!t || t->blocking) { /* not attached, or inside a blocking operation already */
+    if (!t) xb_stack_give_back();
     fn(arg);
     return;
   }

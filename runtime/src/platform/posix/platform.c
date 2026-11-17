@@ -129,6 +129,17 @@ void xb_platform_pages_decommit(void *p, size_t size) {
 #endif
 }
 
+/* The pages of a stack below its frames come back as it touches them: no recommit. Linux frees them at once
+ * (MADV_DONTNEED); elsewhere the advice may only mark them (macOS counts them resident until it reclaims them, the BSDs
+ * deactivate them), so a new anonymous mapping takes the range's place, which POSIX says removes the pages there. */
+void xb_platform_stack_give_back(const char *from, const char *to) {
+#if defined(__linux__)
+  madvise((void *)(uintptr_t)from, (size_t)(to - from), MADV_DONTNEED);
+#else
+  mmap((void *)(uintptr_t)from, (size_t)(to - from), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+#endif
+}
+
 int xb_platform_pages_recommit(void *p, size_t size) {
 #if defined(__APPLE__)
   uintptr_t page = xb_platform_page_size(), from = (uintptr_t)p & ~(page - 1); /* whole pages: rounded out */

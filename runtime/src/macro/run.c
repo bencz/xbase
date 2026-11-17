@@ -114,7 +114,8 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
   uint32_t mark = self ? xb_mv_mark(ctx) : 0; /* a codeblock ends the PRIVATEs it creates */
   size_t sp = nparams; /* the top item; the stack starts above the parameters */
   uint32_t areas = 0, areaBefore = 0; /* alias->( expr ) entered, and the work area current before the first */
-  if ((const char *)&local < ctx->stack_limit) { /* as compiled code tests its frame: a macro block recursing */
+  /* as compiled code tests its frame: a macro block recursing */
+  if ((const char *)&local < ctx->stack_limit && !xb_stack_deep(ctx, (uintptr_t)&local)) {
     xb_stack_overflow(ctx);
     goto out;
   }

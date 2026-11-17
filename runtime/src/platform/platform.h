@@ -97,6 +97,12 @@ void xb_thread_yield(void);
  * the collector scans (gc.c). 0, both NULL, when the system does not tell. */
 int xb_platform_stack_bounds(const char **low, const char **high);
 
+/* The calling thread's stack between `from` (its lowest address the program may use) and `to`, below every frame of
+ * the thread (both whole pages), is used no more: its pages go back to the system and come back, zeroed or not, as the
+ * stack grows into them again (on Windows, through a guard page set just below `to`, the thread's stack limit moved
+ * up there, as a stack that never grew so deep has them). */
+void xb_platform_stack_give_back(const char *from, const char *to);
+
 /* The processors the program may run on (at least 1): those of its affinity where the system tells it (Linux), else
  * every processor online. */
 unsigned xb_platform_cpu_count(void);

@@ -397,6 +397,7 @@ void xbf___BREAK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 int32_t xb_seq_catch(xb_ctx *ctx) {
   xb_await_fused(ctx); /* an AWAIT's call that unwound to here asks nothing any more (xb_await_fuse) */
+  xb_stack_give_back(); /* a recursion the stack error ended unwound to here */
   if ((xb_pending_get(ctx) & XB_PENDING_UNWIND) != XB_PENDING_BREAK) return 0;
   xb_pending_clear(ctx, XB_PENDING_BREAK);
   return 1;

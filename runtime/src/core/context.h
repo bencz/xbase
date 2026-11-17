@@ -64,9 +64,11 @@ struct xb_ctx {
   uint32_t  pending;        /* [ABI] the first four fields, in this order (see xbrt.h) */
   int32_t   set_decimals;   /* SET DECIMALS: compiled code reads it for / and % (the thread's until tasks switch) */
   xb_frame *frames;         /* innermost frame of compiled code; frames are GC roots */
-  const char *stack_limit;  /* compiled code raises the stack error below it (core/ctx.c) */
+  const char *stack_limit;  /* below it compiled code calls xb_stack_deep, then raises the stack error (core/ctx.c) */
   xb_env   *env;
   const char *stack_low;    /* the lowest address of the thread's stack the program may use (NULL: unknown) */
+  const char *stack_mark;   /* where a deep stack starts (xb_stack_deep), NULL: no mark on this stack */
+  int64_t stack_given;      /* when its pages were last given back (monotonic ns), 0: never */
   xb_ctx  *gcNext, *gcPrev; /* registered root sets */
   struct xb_tlh *gcThread;  /* the attached thread that registered it (gc.c), NULL: none */
   xb_item **roots;          /* temporary C roots (xb_gc_root_push) */
@@ -140,9 +142,15 @@ static inline void xb_root_pop(xb_ctx *ctx, unsigned n) { ctx->rootLen -= n; }
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 
-/* The lowest address of the stack of the context's thread that the program may use: compiled code raises the stack
- * error a reserve above it (core/ctx.c); NULL: unknown, no limit. */
-void xb_ctx_set_stack(xb_ctx *ctx, const char *low);
+/* The stack of the context's thread, from the lowest address the program may use to its end (it grows down from
+ * there): compiled code raises the stack error a reserve above `low` (core/ctx.c); NULL: unknown, no limit. The
+ * context becomes the thread's for xb_stack_give_back. */
+void xb_ctx_set_stack(xb_ctx *ctx, const char *low, const char *high);
+/* The pages of a deep stack (one that went past its mark, XB_STACK_KEEP below its end), given back to the system once
+ * the calling thread is XB_STACK_GIVE_ROOM above the mark again (at most once in XB_STACK_GIVE_EVERY_NS), and the mark
+ * watched again: called where a stack often is (a sequence that recovers, a task's step that ended, a blocking
+ * operation, after a collection's safepoint); nothing on a stack that did not go deep. */
+void xb_stack_give_back(void);
 /* Whether the thread's stack has room left for a task to run inline (XB_STACK_INLINE above the stack error's limit,
  * or bounds unknown): a waiter short of it waits instead, and a worker runs the task on a stack of its own. */
 int xb_stack_room(const xb_ctx *ctx);
