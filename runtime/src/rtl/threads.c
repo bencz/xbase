@@ -128,6 +128,7 @@ static void program_thread_main(void *p) {
   if (xb_platform_stack_bounds(&low, &high)) xb_ctx_set_stack(ctx, low);
   if (xb_atomic_load32(&ending, XB_SEQ_CST)) xb_pending_set(ctx, XB_PENDING_QUIT); /* registered before the look */
   t.body(ctx, t.arg);
+  xb_sched_thread_end();
   xb_ctx_free(ctx);
   xb_gc_thread_detach();
   if (xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL) == 1) xb_park_wake(&running, 1);

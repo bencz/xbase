@@ -26,6 +26,9 @@ void xb_sched_end(xb_ctx *ctx);
  * xb_task_timer). */
 void xb_timer_add(xb_object *target, int64_t deadline);
 
+/* A thread that is no worker ends: its feeder (the queue its submissions went to) serves another thread. */
+void xb_sched_thread_end(void);
+
 /* The number of workers that run tasks at once (//WORKERS:n; 0: one per processor the program may run on). */
 void xb_sched_set_workers(unsigned n);
 /* The workers alive now, the number that run tasks at once (the target) and the most there may be (TaskWorkers()). */

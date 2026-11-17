@@ -4,8 +4,8 @@
  * at once (one per processor, or //WORKERS:n). Each has a queue of its own, a ring of RUNQ tasks that it fills at the
  * tail and takes from at the head, which other workers steal half of at once (one compare-and-swap of the head), and a
  * slot for the task to run next (a task it just made: locality), which a thief takes only when the ring is empty. Tasks
- * from other threads, and those a full ring sheds (half of it), go to the pool's queue, under the pool's lock, which a
- * worker looks at first once every GLOBAL_FIRST tasks.
+ * from other threads go to their feeders (below); those a full ring sheds (half of it) go to the pool's queue, under
+ * the pool's lock, which a worker looks at first once every GLOBAL_FIRST tasks.
  *
  * A worker with nothing to run searches for SEARCH_NS (it spins: one at a time, and only while another runs a task),
  * then parks on a word of its own, listed as idle under the pool's lock, after it looked once more for work (the count
@@ -96,6 +96,17 @@ static void **global; /* the pool's queue: a ring of gCap entries from gHead, gL
 static size_t gHead, gLen, gCap;
 
 static XB_THREAD_LOCAL worker *me;
+
+/* Feeders: the ring of a thread that submits tasks without being a worker (the program's thread, ThreadStart()'s),
+ * which it fills without the pool's lock and the workers steal from as from one another; when its thread ends
+ * (xb_sched_thread_end) the feeder, with the tasks left in it, which thieves take as before, serves the next thread
+ * that submits. A worker's struct, of which only the ring is used. Past FEEDERS_MAX threads at once, the others submit
+ * to the pool's queue. */
+#define FEEDERS_MAX 1024u
+static worker *feeders[FEEDERS_MAX];
+static uint32_t feederSlots; /* feeders[0 .. feederSlots) made so far (the pool's lock; read atomically) */
+static worker *feederFree;   /* feeders whose threads ended (the pool's lock), linked by idleNext */
+static XB_THREAD_LOCAL worker *fed;
 
 typedef struct timer {
   int64_t deadline;
@@ -256,17 +267,37 @@ static void *steal_from(worker *w, worker *v) {
   }
 }
 
+/* Half of another worker's ring, or of a feeder's, from a victim chosen at random. */
 static void *steal(worker *w) {
-  uint32_t n = xb_atomic_load32(&slots, XB_ACQUIRE);
+  uint32_t n = xb_atomic_load32(&slots, XB_ACQUIRE), f = xb_atomic_load32(&feederSlots, XB_ACQUIRE);
   w->seed = w->seed * 1103515245u + 12345u;
-  uint32_t start = n ? (w->seed >> 16) % n : 0;
-  for (uint32_t k = 0; k < n; ++k) {
-    worker *v = xb_atomic_loadptr((void *const *)&workers[(start + k) % n], XB_ACQUIRE);
+  uint32_t all = n + f, start = all ? (w->seed >> 16) % all : 0;
+  for (uint32_t k = 0; k < all; ++k) {
+    uint32_t i = (start + k) % all;
+    worker *v = xb_atomic_loadptr(i < n ? (void *const *)&workers[i] : (void *const *)&feeders[i - n], XB_ACQUIRE);
     if (!v || v == w) continue;
     void *t = steal_from(w, v);
     if (t) return t;
   }
   return NULL;
+}
+
+/* The calling thread's feeder, made or reused at its first submission; NULL past FEEDERS_MAX. */
+static worker *feeder(void) {
+  if (fed) return fed;
+  xb_mutex_lock(&poolLock);
+  worker *w = feederFree;
+  if (w) {
+    feederFree = w->idleNext;
+  } else if (feederSlots < FEEDERS_MAX) {
+    w = calloc(1, sizeof *w);
+    if (!w) xb_gc_fatal("out of memory");
+    xb_atomic_storeptr((void **)&feeders[feederSlots], w, XB_RELEASE);
+    xb_atomic_store32(&feederSlots, feederSlots + 1, XB_RELEASE);
+  }
+  xb_mutex_unlock(&poolLock);
+  fed = w;
+  return w;
 }
 
 static void *find_work(worker *w) {
@@ -393,6 +424,16 @@ static void run_task(xb_ctx *ctx, worker *w, void *t) {
   xb_gc_root_pop(ctx, 1);
 }
 
+void xb_sched_thread_end(void) {
+  worker *w = fed;
+  if (!w) return;
+  fed = NULL;
+  xb_mutex_lock(&poolLock); /* the tasks left in its ring stay there, for thieves and the feeder's next thread */
+  w->idleNext = feederFree;
+  feederFree = w;
+  xb_mutex_unlock(&poolLock);
+}
+
 /* A worker's tasks go to the pool's queue as it ends. */
 static void hand_back(worker *w) {
   void *t = xb_atomic_xchgptr(&w->next, NULL, XB_ACQ_REL);
@@ -456,6 +497,8 @@ void xb_sched_submit(xb_object *task, int next) {
     void *before = xb_atomic_xchgptr(&w->next, task, XB_ACQ_REL);
     if (before) runq_put(w, before);
   } else if (w) {
+    runq_put(w, task);
+  } else if ((w = feeder()) != NULL) {
     runq_put(w, task);
   } else {
     void *t = task;
@@ -728,6 +771,7 @@ void xb_sched_end(xb_ctx *ctx) {
   for (;;) {
     xb_mutex_lock(&poolLock);
     void *t = gLen ? global_take() : NULL;
+    for (uint32_t k = 0; !t && k < feederSlots; ++k) t = runq_get(feeders[k]); /* no thief: every worker ended */
     xb_mutex_unlock(&poolLock);
     if (!t) break;
     xb_atomic_add32(&queued, (uint32_t)-1, XB_RELAXED);
@@ -752,6 +796,10 @@ void xb_sched_mark(int (*mark)(xb_item *)) {
   for (uint32_t k = 0; k < slots; ++k) {
     worker *w = workers[k];
     mark_slot(&w->next, mark);
+    for (uint32_t i = w->head; i != w->tail; ++i) mark_slot(&w->ring[i % RUNQ], mark);
+  }
+  for (uint32_t k = 0; k < feederSlots; ++k) {
+    worker *w = feeders[k];
     for (uint32_t i = w->head; i != w->tail; ++i) mark_slot(&w->ring[i % RUNQ], mark);
   }
   for (size_t k = 0; k < gLen; ++k) mark_slot(&global[(gHead + k) % gCap], mark);
