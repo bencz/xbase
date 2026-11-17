@@ -682,12 +682,12 @@ int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a,
 }
 
 void xb_classes_finalize(xb_ctx *ctx) {
-  static XB_THREAD_LOCAL int running; /* a destructor's own pending tests, or a collection it makes */
-  if (running) return;
-  running = 1;
+  /* One context at a time: also when a destructor's own pending tests, or a collection it makes, come back here. */
+  if (!xb_gc_finalizing(1)) return;
   xb_item obj, self, ret, breakValue;
   xb_set_nil(&obj);
   xb_set_nil(&ret);
+  xb_set_nil(&breakValue);
   xb_gc_root_push(ctx, &obj);
   xb_gc_root_push(ctx, &ret);
   xb_gc_root_push(ctx, &breakValue);
@@ -714,5 +714,5 @@ void xb_classes_finalize(xb_ctx *ctx) {
     }
   }
   xb_gc_root_pop(ctx, 3);
-  running = 0;
+  if (xb_gc_finalizing(0) && !quit) xb_pending_set(ctx, XB_PENDING_FINALIZE); /* at this context's next test */
 }

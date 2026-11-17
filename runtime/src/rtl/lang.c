@@ -64,6 +64,20 @@ void xbf___GCCOLLECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (xb_pending_get(ctx)) xb_pending_gc(ctx); /* runs the destructors of what it found; the caller tests the rest */
 }
 
+/* __GcMemory(): { the live objects found by the last full collection, the bytes of memory the heap holds (blocks in
+ * use, large objects' units and mappings: what a collection gave back is not counted), the process's resident bytes
+ * (0 where the system does not tell) }. */
+void xbf___GCMEMORY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_array *a = xb_array_alloc(3);
+  xb_set_int(&a->items[0], (int64_t)xb_gc_live_objects());
+  xb_set_int(&a->items[1], (int64_t)xb_gc_heap_bytes());
+  xb_set_int(&a->items[2], (int64_t)xb_platform_resident_bytes());
+  xb_set_array(ret, a);
+}
+
 /* The call stack level `n` (0: the function calling, 1: its caller, ...)
  * from argument 0; a level below 0 is the asking function itself. */
 static const xb_frame *stack_level(const xb_ctx *ctx, uint32_t argc, const xb_item *argv, int64_t *n) {

@@ -132,8 +132,25 @@ rest of the runtime and compiled code use.
   one size class each: the classes are computed at start-up, each the largest slot that fits its number of slots in a
   block, and each at least an eighth larger than the one before. A class's block takes its objects' slots from a free
   list, and a dead object's slot serves the next object of its class, where holes of many lines would fragment the
-  heap; a class's block left empty becomes a free block of lines. Blocks come from chunks of 32 blocks obtained with
-  `malloc` and aligned by hand. Larger objects are allocated individually (`XB_GC_HDR_LARGE` in their header).
+  heap; a class's block left empty becomes a free block of lines. Blocks come from chunks of 32 blocks, each a mapping
+  of its own from the system (`xb_platform_pages_map`, aligned to a block); a chunk's blocks are in use, never handed
+  out yet (their pages untouched, so not resident), or given back (below), as two bit masks of the chunk say
+  (`xb_chunk`), never the block's own metadata. A new block is a free one, else the first spare block of the lowest
+  chunk that has one (made usable again, `xb_platform_pages_recommit`, when it was given back), else one of a new
+  chunk: the heap's chunks stay few and low.
+- Large objects (`XB_GC_HDR_LARGE`), above the largest size class, take whole units of 4 KB: a run of them in chunks of
+  large objects (1 MB mappings, first fit from the lowest address, `xb_lchunk` with its bit maps of units taken and
+  given back), or, from 512 KB, a mapping of their own (`xb_large`: the bytes it takes, its list's link, its header).
+  They never move. A large object is in the young list until it is old, then in the old list, so a young collection
+  sweeps the young list only. A dead one's units are free at once (its mapping unmapped).
+- Memory given back: after a collection, the free blocks beyond those the next allocations need (the young budget and
+  an eighth of the blocks in use, at least 1 MB, and half as much again before any goes, so a heap near the line does
+  not give blocks back and take them again at each collection) go back to the system
+  (`xb_platform_pages_decommit`): the highest chunks' first, a whole page of the system at a time (blocks of a page all
+  free or spare: one block on 4 KB and 16 KB pages, two on 64 KB ones). They leave the blocks in use, and a chunk left
+  with none in use is unmapped. The free units of large objects beyond 1 MB and the young budget go back likewise
+  (runs of whole pages), and a chunk of large objects with none in use is unmapped. So the process's memory comes down
+  after a peak: the program keeps about the live data and the next young budget, whatever it held before.
 - Allocation: every thread fills a hole, a run of free lines, by bumping a cursor, without locking (and takes the slots
   of a size class from a block of its own); when the object
   does not fit, it takes the block's next hole, then a recyclable block (free lines among live ones), then a free
@@ -144,10 +161,14 @@ rest of the runtime and compiled code use.
 - Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest;
   also compiled code's, while it makes a codeblock's cells) of every registered context, and global item arrays
   registered with `xb_gc_add_root` (the modules' `STATIC`s).
-- Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young.
-  A young collection marks from the roots and the remembered set, stops at old objects instead of traversing them,
-  and frees only the young objects it did not reach. A full collection clears every mark and traces the whole heap;
-  it runs when the old generation reaches twice its size after the previous full one (at least 8 MB).
+- Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young. A
+  young collection marks from the roots and the remembered set, stops at old objects instead of traversing them, and
+  frees only the young objects it did not reach. A full collection clears every mark and traces the whole heap; it runs
+  when the old generation has grown by half the live data the previous full one found (at least 8 MB), and also when
+  eight times that live data (at least 8 MB) was allocated since, when 30 seconds passed with a young budget allocated,
+  or when 1024 objects with destructors became old (or half as many as were old already, when more): old objects that
+  died, and the resources their destructors free (files, connections), are never kept long by a program whose old
+  generation stopped growing.
 - Aging: a young object reached by a young collection ages, and is promoted by the next one that reaches it, so
   objects that die soon after a collection (a table whose entries are replaced) die young. An object that is old
   after a young collection and still refers to a young one stays in the remembered set (an array keeps the card
@@ -156,8 +177,9 @@ rest of the runtime and compiled code use.
   once), and back on when a full collection finds that more than half of the old bytes had died.
 - Young budget: a young collection runs when the allocation since the last collection reaches the budget, at least
   4 MB. The budget doubles after a collection where more than half of the allocation survived (collecting such
-  objects early only promotes them) and halves when less than an eighth did; it never exceeds the size of the old
-  generation.
+  objects early only promotes them) and halves when less than an eighth did; it never exceeds a quarter of the live
+  data the last full collection found, so the heap stays near the live data (the old generation grows to half again
+  the live data, the young one to a quarter of it).
 - Write barrier: storing a pointer into an old object must record that object in the remembered set, because a young
   collection does not scan old objects. The state byte sits `XB_GC_STATE_BACK` bytes before the object; its bits
   `XB_GC_STATE_OLD` and `XB_GC_STATE_RECORDED` tell whether a store must record it (`xb_gc_write` in `xbrt.h`). C code
@@ -174,26 +196,34 @@ rest of the runtime and compiled code use.
   into such an old array marks the element's card and records the array for its cards only; the young collection
   scans the marked cards (eight card bytes per step) instead of the whole array. Storage that is replaced (the array
   grew) records the whole array.
-- Collection: marking uses an explicit stack. Marking an object gives the lines it covers the collection's epoch, and
-  making it old (a full collection, a promotion) makes them old lines. A line is then free when it is not old and no
-  object reached by this collection covers it: sweeping reads a block's line marks, never its objects, and makes the
-  lists of free and recyclable blocks. A young collection sweeps only the blocks that received objects or hold aged
-  ones since their last sweep; old lines stay until a full collection, which clears every line and walks the objects
-  through the start bits to clear their marks. When the epoch (8 bits) wraps, every line mark is cleared. The blocks
-  of size classes are swept slot by slot (their dead objects' slots return to the free list). Large objects are freed
-  at once. Memory is not returned to the operating system.
-- Evacuation: dead objects spread over many blocks leave holes that objects of several lines may not fit, and the
-  heap would grow instead. A full collection defragments when it can: it picks the emptiest blocks of lines (at most
-  half their lines live), as many as the free blocks and a reserve of new ones (a sixteenth of the heap's blocks) can
-  take, and moves every object it reaches in them into free blocks. The old place keeps the address of the copy
+- Collection: marking uses an explicit stack; an array of more than 4096 items is traced a slice of 4096 at a time
+  (`xb_slice`), so the stack holds a slice's children, not a long array's all. The collector's vectors (the stack, the
+  remembered set, the lists of survivors, aged, pinned and retained objects, the threads' lists) give back what they
+  grew past 64 K entries when a collection uses a quarter of it at most. Marking an object gives the lines it covers the
+  collection's epoch, and making it old (a full collection, a promotion) makes them old lines. A line is then free when
+  it is not old and no object reached by this collection covers it: sweeping reads a block's line marks, never its
+  objects, and makes the lists of free and recyclable blocks. A young collection sweeps only the blocks that received
+  objects or hold aged ones since their last sweep; old lines stay until a full collection, which clears every line and
+  walks the objects through the start bits to clear their marks (a free block holds none alive and is skipped). When the
+  epoch (8 bits) wraps, every line mark is cleared. The blocks of size classes are swept slot by slot (their dead
+  objects' slots return to the free list). The system's lack of memory for a block or a large object makes a full
+  collection first (once for that allocation), and ends the program only when it still has none.
+- Evacuation: dead objects spread over many blocks leave holes that objects of several lines may not fit, and the heap
+  would grow instead. A full collection defragments when it can: it picks the emptiest blocks of lines (at most half
+  their lines live), as many as the free blocks and a reserve of new ones (a sixteenth of the heap's blocks) can take,
+  and moves every object it reaches in them into free blocks. The old place keeps the address of the copy
   (`XB_GC_HDR_MOVED`; the address is stored past a string's flags, which stay readable, since a string is tested for
   `XB_STR_STATIC` before its header: a literal has none), every reference the collection sees is set to the copy (roots,
-  fields, an array's own items, a hash's tables inside its entry store, a codeblock's cells, the collector's own
-  lists), and the emptied blocks become free. When the heap is about to grow (no free or recyclable block left, the
-  last chunk used up), at least a young budget was allocated since the last full collection, and a quarter of the
-  heap is free lines of blocks such a collection may empty, it runs first instead, on a thread that may move objects.
-  Objects of size classes, large objects and objects too small to hold the copy's address (on 32-bit targets, a
-  codeblock without cells or an object without variables) never move.
+  fields, an array's own items, a hash's tables inside its entry store, a codeblock's cells, the collector's own lists),
+  and the emptied blocks become free. When the heap is about to grow (no free or recyclable block left, no block a chunk
+  never handed out: taking a given-back block from the system again is growing too), at least a young budget was
+  allocated since the last full collection, and a quarter of the heap is free lines of blocks such a collection may
+  empty, it runs first instead, on a thread that may move objects. A size class's blocks are compacted too: for each
+  class, its blocks by how full they are, the sparsest ones (at most half their slots taken) whose objects all fit the
+  free slots of the fuller ones are emptied into them (no new memory, and only when at least 16 blocks are emptied:
+  fewer would not pay for the move's stack scan), so a class whose objects died but one in many gives its blocks back.
+  Large objects and objects too small to hold the copy's address (on 32-bit targets, a codeblock without cells or an
+  object without variables) never move.
 - Pinning: compiled code and C code keep object addresses in registers and on the machine stack, where the collector
   cannot update them. Before moving anything, the collector saves its registers on its stack
   (`xb_platform_with_registers`) and scans every thread's stack up to its end (the system's bounds of the stack,
@@ -254,17 +284,25 @@ rest of the runtime and compiled code use.
   operation ends); the thread publishes where its stack is in use and its state (sequentially consistent, as the
   collector's `stopping` is, so neither misses the other), and on its way back it parks if a collection runs. A second
   thread that wants to collect parks until the first one's collection ends, then sees whether its own is still needed.
+  A collection starts only once the threads the last one parked have gone on (each tells the collector as it leaves
+  its park): a thread that collects again and again (`__GcCollect()` in a loop) never keeps the others parked from one
+  collection to the next.
   What holds a collection up is code that reaches no safepoint: a runtime loop of C alone (a sort without a block) for
   as long as it runs.
 
 `__GcCollect( [lYoung] )` runs a full collection (a young one with `.T.`), then the destructors of the objects it
 found unreachable ([Classes](#classes)), and returns the number of live objects the last full collection found (tests
-use it).
+use it). `__GcMemory()` returns `{ live objects, the heap's memory in bytes (blocks in use, large objects' units and
+mappings: what was given back is not counted), the process's resident bytes (0 where the system does not tell) }`.
 
 Finalization: an object registered with `xb_gc_finalizable` (an object whose class has a destructor) that a
 collection does not reach moves, after marking, to a queue of finalized objects, and is marked with what it refers to
 (the queue is a root until `xb_gc_next_finalized` hands it out); the collection then raises `XB_PENDING_FINALIZE` in
-the context that runs the destructors (the first one registered, then another when it goes).
+the context that runs the destructors: the program's (the first one registered, then another when it goes), or,
+while its thread is in a blocking operation (a `Join()`, a wait, where it would test nothing for as long), the
+collecting thread's, the one whose allocation found them. One context runs destructors at a time
+(`xb_gc_finalizing`); objects queued while it ends its turn make it run again at its next test. The objects with
+destructors are listed young and old: a young collection looks at the young ones only.
 
 ## Hashes
 
@@ -1038,8 +1076,8 @@ Conventions:
   otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it in front when the picture
   has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name ([Languages](#languages)),
   `_SET_CODEPAGE` a codepage's ([Codepages](#codepages)). Other values change nothing.
-- `__GcCollect( [lYoung] )`: see [Garbage collector](#garbage-collector). `__MemNamesInUse( [lLetGo] )`: see
-  [Memory variables](#memory-variables).
+- `__GcCollect( [lYoung] )`, `__GcMemory()`: see [Garbage collector](#garbage-collector). `__MemNamesInUse( [lLetGo] )`:
+  see [Memory variables](#memory-variables).
 - `AScan( a, xSearch, [nStart], [nCount] )` returns the position of the first element of the range equal to `xSearch`
   (values of one comparable kind, compared like the operators, strings with SET EXACT; two `NIL`s; arrays and blocks
   never), or for which a block `xSearch( element, position )` returns `.T.`, else 0 (also for anything but an array, and
@@ -1391,8 +1429,14 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks (`xb_rwlock`; on glibc
   of the kind where a waiting writer goes before readers that come after it, elsewhere with the system's policy), the
   number of processors the program may run on (its affinity on Linux, else every processor online), the bounds of the
-  calling thread's stack (`xb_platform_stack_bounds`), and a monotonic clock in nanoseconds
-  (`xb_platform_monotonic_ns`), which `ElapsedMs` counts from the program's first context (`xb_program_elapsed_ms`).
+  calling thread's stack (`xb_platform_stack_bounds`), a monotonic clock in nanoseconds
+  (`xb_platform_monotonic_ns`), which `ElapsedMs` counts from the program's first context (`xb_program_elapsed_ms`),
+  pages for the collector's heap (`xb_platform_pages_map` aligned by mapping the size and the alignment and giving
+  back the parts around, `VirtualAlloc` at an aligned address found by a reservation on Windows; `_unmap`;
+  `_decommit`: `MADV_DONTNEED` on Linux, `MADV_FREE_REUSABLE` on macOS, `posix_madvise` elsewhere, `MEM_DECOMMIT` on
+  Windows; `_recommit`, which only Windows and macOS need; `xb_platform_page_size`), and the process's resident
+  memory (`xb_platform_resident_bytes`: `/proc/self/statm` on Linux, the task's basic information on macOS, the
+  working set on Windows, 0 elsewhere), which `__GcMemory()` reports with the live objects and the heap's memory.
   With glibc, `xb_platform_init` keeps the C allocator to 4 arenas: each would reserve 64 MB of address space for a
   thread that allocates, and the runtime's objects live in the collector's heap. The
   functions that may block (files, directories) are the operating system's side (`xb_os_*`, `platform/os.h`) wrapped

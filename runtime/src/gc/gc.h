@@ -79,6 +79,10 @@ void  xb_gc_unregister(xb_ctx *ctx);
 /* Raises the requests `bits` on every registered context but `except` (the program's QUIT from any thread). */
 void  xb_gc_raise_all(const xb_ctx *except, uint32_t bits);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */
+size_t xb_gc_heap_bytes(void);
+/* Whether the heap's books agree (tests, after a collection): every free block in use listed as free, no block given
+ * back or never handed out among those in use, the counts of spare blocks right. */
+int    xb_gc_consistent(void);             /* the heap's memory the system has given it now (blocks in use, large) */
 /* The barrier after storing items `from` .. `to` - 1 of an array (xb_gc_write_item for each card they cover). */
 void   xb_gc_write_items(xb_array *a, size_t from, size_t to);
 /* Finalization: an object registered with xb_gc_finalizable that a
@@ -87,6 +91,9 @@ void   xb_gc_write_items(xb_array *a, size_t from, size_t to);
  * the order they were found (1, or 0 when none is left; the caller roots the
  * item, which the queue no longer does). */
 void   xb_gc_finalizable(void *obj);
+/* Destructors run on one context at a time: xb_gc_finalizing(1) takes the turn (1, or 0 when another context has it),
+ * xb_gc_finalizing(0) gives it back: 1 when objects wait to be finalized still (queued meanwhile). */
+int    xb_gc_finalizing(int start);
 int    xb_gc_next_finalized(xb_item *out);
 size_t xb_gc_finalizable_count(void);    /* registered and not yet handed out */
 _Noreturn void xb_gc_fatal(const char *why); /* unrecoverable: reports and ends the process */

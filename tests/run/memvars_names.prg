@@ -46,6 +46,7 @@ PROCEDURE Main()
       x += Shared( "sh" + LTrim( Str( i ) ), i )
    NEXT
    ? "tasks, threads, async:", x, Held( nBase ) <= 32 * 16 // the task workers keep theirs
+   nBase := __MemNamesInUse( .T. ) // from here: the workers' caches as they are now
 
    bOld := Block( "blk1", 5 )
    __MemNamesInUse( .T. ) // blk1's number freed now, for the next new name

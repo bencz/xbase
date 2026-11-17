@@ -1,0 +1,4 @@
+
+destructor of old garbage ran before 100M allocations: .T. .T.
+destructors ran while the program's thread joined: .T.
+each once: .T.

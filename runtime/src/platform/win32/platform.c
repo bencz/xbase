@@ -8,6 +8,7 @@
 #include <time.h>
 #include <windows.h>
 
+#include <psapi.h>
 #include <shellapi.h>
 
 /* Program output is byte-exact on every platform: no CRLF translation. */
@@ -38,6 +39,47 @@ int xb_platform_stack_bounds(const char **low, const char **high) {
 unsigned xb_platform_cpu_count(void) {
   DWORD n = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
   return n ? (unsigned)n : 1u;
+}
+
+size_t xb_platform_page_size(void) {
+  SYSTEM_INFO info;
+  GetSystemInfo(&info);
+  return info.dwPageSize;
+}
+
+/* A reservation of `size` + `align` bytes finds an aligned address; it is given back and the aligned range reserved
+ * and committed there (another thread may take that range meanwhile: then the search starts again). */
+void *xb_platform_pages_map(size_t size, size_t align) {
+  if (size > SIZE_MAX - align) return NULL;
+  for (int tries = 0; tries < 64; ++tries) {
+    char *raw = VirtualAlloc(NULL, size + align, MEM_RESERVE, PAGE_NOACCESS);
+    if (!raw) return NULL;
+    char *p = (char *)(((uintptr_t)raw + align - 1) & ~(uintptr_t)(align - 1));
+    VirtualFree(raw, 0, MEM_RELEASE);
+    void *got = VirtualAlloc(p, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (got) return got;
+  }
+  return NULL;
+}
+
+void xb_platform_pages_unmap(void *p, size_t size) {
+  (void)size;
+  VirtualFree(p, 0, MEM_RELEASE);
+}
+
+void xb_platform_pages_decommit(void *p, size_t size) { VirtualFree(p, size, MEM_DECOMMIT); }
+
+/* Whole pages: the range rounded out to the pages it touches. */
+int xb_platform_pages_recommit(void *p, size_t size) {
+  uintptr_t page = xb_platform_page_size(), from = (uintptr_t)p & ~(page - 1);
+  uintptr_t to = ((uintptr_t)p + size + page - 1) & ~(page - 1);
+  return VirtualAlloc((void *)from, to - from, MEM_COMMIT, PAGE_READWRITE) != NULL;
+}
+
+size_t xb_platform_resident_bytes(void) {
+  PROCESS_MEMORY_COUNTERS counters;
+  if (!K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof counters)) return 0;
+  return counters.WorkingSetSize;
 }
 
 struct xb_thread_impl {

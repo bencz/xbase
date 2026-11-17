@@ -424,7 +424,8 @@ The collector ([runtime.md](runtime.md#garbage-collector)) gets, in this order:
    Suspended tasks have no stack: their frames are heap objects, traced precisely.
 3. **Thread-safe mutators** (done). Header state bits a mutator sets change with atomic byte operations; the remembered
    set is filled through per-thread lists merged at collection, not under the heap lock; destructors run on one
-   context, the program's, never on two threads at once (*planned*: on a finalizer task of their own).
+   context at a time, the program's, or the allocating thread's while the program's thread waits in a blocking
+   operation (*planned*: on a finalizer task of their own).
 4. **Parallel collection.** Marking with per-thread mark stacks and work stealing, sweeping lazily per block as
    allocation reaches it.
 5. **Concurrent marking** (a snapshot-at-the-beginning barrier) once pauses under the server load of the benchmarks
@@ -486,7 +487,7 @@ Each phase ends with its tests, its benchmarks measured before and after, the do
    parking lot), monotonic nanoseconds.
 2. **A thread-safe runtime**: the runtime caches and global state made thread-safe (done), the context split and
    environments with the stack error (done); stop-the-world collections with back-edge polls (ABI), every stack scanned,
-   atomic headers, per-thread remembered sets, the finalizer task; shared objects (header bit, publication, sequence
+   atomic headers, per-thread remembered sets; shared objects (header bit, publication, sequence
    counters and locks, compiled fast paths); line-atomic console output, `ThreadStart`, `Mutex`, `AtomicInt`,
    `Condition`, `Semaphore`, `SYNCHRONIZED` (done). The first visible feature: threads sharing memory safely.
 3. **Scheduler and tasks**: workers, run queues, stealing, parking, blocking handoff, `//WORKERS:n`, `Task`,

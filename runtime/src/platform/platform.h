@@ -101,6 +101,23 @@ int xb_platform_stack_bounds(const char **low, const char **high);
  * every processor online. */
 unsigned xb_platform_cpu_count(void);
 
+/* Memory for the collector's heap, in whole pages of the system, which it can give back. xb_platform_pages_map maps
+ * `size` bytes (a multiple of the page size) readable, writable and zeroed, at an address aligned to `align` (a power
+ * of two, a multiple of the page size): NULL when the system has no memory; xb_platform_pages_unmap gives a mapping
+ * back whole (its address and size). xb_platform_pages_decommit lets the system take back the pages of [p, p + size),
+ * which stay the caller's address range but lose their contents (the process's resident memory drops); before they are
+ * used again, xb_platform_pages_recommit makes them readable and writable, zeroed or not (0: the system has no memory).
+ * Decommit takes whole pages; recommit rounds its range out to the pages it touches. xb_platform_page_size: the
+ * system's page size, a power of two. */
+void *xb_platform_pages_map(size_t size, size_t align);
+void xb_platform_pages_unmap(void *p, size_t size);
+void xb_platform_pages_decommit(void *p, size_t size);
+int xb_platform_pages_recommit(void *p, size_t size);
+size_t xb_platform_page_size(void);
+
+/* The memory of the process that is resident now (its working set), in bytes: 0 when the system does not tell. */
+size_t xb_platform_resident_bytes(void);
+
 /* One-time process setup, first thing in main. */
 void xb_platform_init(void);
 

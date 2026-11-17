@@ -1,0 +1,7 @@
+
+small: .T. .T.
+size classes: .T. .T.
+large units, one in a hundred kept:        200 .T. .T. .T.
+large mappings: .T. .T.
+size class, one in 64 kept:       3125 .T. .T. .T.
+long array: .T. .T.

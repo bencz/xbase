@@ -27,10 +27,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
 #if defined(__GLIBC__) /* defined by the headers above */
 #include <malloc.h>
 #endif
@@ -91,6 +95,67 @@ unsigned xb_platform_cpu_count(void) {
 #endif
   long n = sysconf(_SC_NPROCESSORS_ONLN);
   return n > 0 ? (unsigned)n : 1u;
+}
+
+size_t xb_platform_page_size(void) {
+  long n = sysconf(_SC_PAGESIZE);
+  return n > 0 ? (size_t)n : 4096;
+}
+
+/* A mapping of `size` + `align` bytes, the parts before and after the aligned range given back. */
+void *xb_platform_pages_map(size_t size, size_t align) {
+  if (size > SIZE_MAX - align) return NULL;
+  char *raw = mmap(NULL, size + align, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (raw == MAP_FAILED) return NULL;
+  char *p = (char *)(((uintptr_t)raw + align - 1) & ~(uintptr_t)(align - 1));
+  if (p > raw) munmap(raw, (size_t)(p - raw));
+  size_t tail = (size_t)(raw + size + align - (p + size));
+  if (tail) munmap(p + size, tail);
+  return p;
+}
+
+void xb_platform_pages_unmap(void *p, size_t size) { munmap(p, size); }
+
+/* Linux frees the pages at once (they read as zeros after); macOS counts them as reusable, out of the resident
+ * memory, until they are reused (MADV_FREE_REUSE says so); elsewhere the portable advice. */
+void xb_platform_pages_decommit(void *p, size_t size) {
+#if defined(__linux__)
+  madvise(p, size, MADV_DONTNEED);
+#elif defined(__APPLE__)
+  madvise(p, size, MADV_FREE_REUSABLE);
+#else
+  posix_madvise(p, size, POSIX_MADV_DONTNEED);
+#endif
+}
+
+int xb_platform_pages_recommit(void *p, size_t size) {
+#if defined(__APPLE__)
+  uintptr_t page = xb_platform_page_size(), from = (uintptr_t)p & ~(page - 1); /* whole pages: rounded out */
+  uintptr_t to = ((uintptr_t)p + size + page - 1) & ~(page - 1);
+  madvise((void *)from, to - from, MADV_FREE_REUSE);
+#else
+  (void)p;
+  (void)size;
+#endif
+  return 1;
+}
+
+size_t xb_platform_resident_bytes(void) {
+#if defined(__linux__)
+  FILE *f = fopen("/proc/self/statm", "r");
+  if (!f) return 0;
+  unsigned long pages = 0, resident = 0;
+  int got = fscanf(f, "%lu %lu", &pages, &resident);
+  fclose(f);
+  return got == 2 ? (size_t)resident * xb_platform_page_size() : 0;
+#elif defined(__APPLE__)
+  mach_task_basic_info_data_t info;
+  mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+  if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return 0;
+  return (size_t)info.resident_size;
+#else
+  return 0;
+#endif
 }
 
 struct xb_thread_impl {

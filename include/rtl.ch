@@ -359,6 +359,7 @@ EXTERN FUNCTION __ConsoleWrite( lNewLine, ... ) NATIVE
 EXTERN FUNCTION __DirScan( [cSpec] ) NATIVE
 EXTERN FUNCTION __Dispose( xValue ) NATIVE
 EXTERN FUNCTION __GcCollect( [lYoung] ) NATIVE
+EXTERN FUNCTION __GcMemory() NATIVE
 EXTERN FUNCTION __IsCollection( xValue ) NATIVE
 EXTERN FUNCTION __LanguageCurrent() NATIVE
 EXTERN FUNCTION __LanguageTexts( cId ) NATIVE
