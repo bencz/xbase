@@ -196,7 +196,8 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   leave the frame.
 - `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `from_bool` and `truth` of
   constants (`truth` of a logical just made is its boolean), `+`, `-`, `*`, the bit operators, unary `-` and `~`, and
-  the comparisons of two number constants, as the run-time operators compute them from two values (`foldNumbers`,
+  the comparisons of two number constants (and of two logicals, and `=`, `==`, `!=` with a `NIL` constant:
+  `compareLogicals`, `compareNil`), as the run-time operators compute them from two values (`foldNumbers`,
   `foldNumber` and `compareNumbers` of `opt/Fold`, with `runtime`: an integer result is a computed one, of width 0; a
   double's decimals are the operator's; `/`, `%`, `^` and an integer product that overflows, whose decimals are SET
   DECIMALS at run time, stay), `+` and `-` of two string constants (`stringJoin`), `=`, `==` and `!=` of two

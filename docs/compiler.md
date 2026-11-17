@@ -722,7 +722,7 @@ constants, which are values the program computes at run time, with the run-time 
 | integer `%` integer | integer |
 | unary `-` | the negated number, same decimals |
 | bit operators `&` `\|` `^^` `<<` `>>` `~` on numbers | an integer without a display width of its own (`xb_bit_apply`, the operands taken as integers by `xb_dbl_to_i64`) |
-| comparisons of numbers or logicals | `.T.`/`.F.` |
+| comparisons of numbers or logicals; `=`, `==`, `!=` of `NIL` and a literal (`xb_fold_nil`: equal when both are `NIL`) | `.T.`/`.F.` |
 | strings `+`, `-`, `==`, `$`; `=`/`!=` of two strings of one length | the result (`=` of strings of different lengths depends on SET EXACT and is not folded; `stringJoin`, `stringTest`) |
 | `.NOT.`, `.AND.`/`.OR.` with a logical literal on the left, `IIF` with a logical literal condition | the result or the remaining operand |
 | a call the language evaluates when compiling, of a `FOLD` function with literal arguments | its result, a literal that folds further (`Len( Chr( 65 ) ) / 1` is the integer 1, while `Len( SubStr( "ab", 2 ) ) / 1` is `1.00`): `Len` of a string literal (its length) or of an array literal of constants (its element count); `Chr`; `Asc` and `At` (integers with a program constant's width, as `Len`'s); `Upper` of a text of ASCII letters, digits and spaces only (`xb_upper_folds`); `Empty` of a constant, of a codeblock literal, of an array or hash literal of such literals (one that evaluates anything else, such as a call, is left to run time, which keeps its effects); the bit functions on number constants (an integer without a display width of its own, as the runtime makes it; arithmetic on such an integer gives one too) |

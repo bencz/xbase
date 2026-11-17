@@ -6,7 +6,7 @@
 // same value, type and width (a number too large for an integer counts as the largest one: a start past the end).
 // The expressions of the second part show what the language folds: compiled and as a macro, under two SET DECIMALS
 // (Asc() and At() give literals, with a program constant's width; Empty() of a codeblock or of literals that
-// evaluate nothing else). Calls on arguments of the wrong type keep their run-time error.
+// evaluate nothing else; =, == and != with NIL). Calls on arguments of the wrong type keep their run-time error.
 #xtranslate T( <f>, <a,...> ) => { <"f">, { <a> }, {|| <f>( <a> ) }, { <"a"> } }
 #xtranslate E( <x> ) => { <"x">, {|| <x> } }
 
@@ -59,7 +59,10 @@ PROCEDURE Main()
       E( Str( Asc( Chr( 255 ) ) * 100000000 ) ), E( Str( Len( "ab" ) * 1000000000 ) ), ;
       E( iif( Empty( {|| 1 } ), 1, 2 ) / 1 ), E( iif( Empty( { {=>} } ), 1, 2 ) / 1 ), ;
       E( iif( Empty( { {} } ), 1, 2 ) / 1 ), E( iif( Empty( { 1 => {|| 2 } } ), 1, 2 ) / 1 ), ;
-      E( Len( Upper( "ab" + Chr( 0 ) ) ) / 3 ), E( Len( Upper( "a" + "b" ) ) / 2 ) }
+      E( Len( Upper( "ab" + Chr( 0 ) ) ) / 3 ), E( Len( Upper( "a" + "b" ) ) / 2 ), ;
+      E( iif( NIL == NIL, 1, 2 ) / 1 ), E( iif( NIL = 1, 1, 2 ) / 1 ), E( iif( NIL != "a", 1, 2 ) / 1 ), ;
+      E( iif( "a" == NIL, 1, 2 ) / 1 ), E( iif( .T. = NIL, 1, 2 ) / 1 ), E( iif( NIL <> NIL, 1, 2 ) / 1 ), ;
+      E( iif( .T. == .T., 1, 2 ) / 1 ), E( iif( .T. != .F., 1, 2 ) / 1 ), E( iif( Chr( 65 ) == NIL, 1, 2 ) / 1 ) }
    ? "calls"
    FOR EACH x IN aCall
       cArgs := ""

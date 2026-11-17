@@ -673,7 +673,8 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
   of a numeric literal is `xb_num_literal_width`, shared), and operators on number literals fold as the compiler folds
   them, with the rules of `xbrt.h` (`xb_fold_*`): numbers through the operators, the bit operators and functions,
   `Len()`, `Asc()` and `At()` (the runtime's: not a function of the program of that name), strings through `+`, `-`,
-  `Chr()` and `Upper()` (`xb_upper_folds`), logicals through `.NOT.`, `.AND.`, `.OR.`, comparisons and `Empty()`, an
+  `Chr()` and `Upper()` (`xb_upper_folds`), logicals through `.NOT.`, `.AND.`, `.OR.`, comparisons (`=`, `==`, `!=` with
+  `NIL` too) and `Empty()`, an
   `IIF()` on a folded condition and a list whose leading values are constants: the calls the language evaluates when
   compiling ([compiler.md](compiler.md#constant-folding); only folded numbers are emitted, folded strings and logicals
   matter to what is folded from them: `&( 'Len( Chr( 65 ) + "b" ) / 2' )` is the integer 1; `&( "999999999

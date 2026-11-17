@@ -59,6 +59,11 @@ const StringExpr *str(const ExprPtr &e) {
 const LogicalExpr *logical(const ExprPtr &e) {
   return e->kind == ExprKind::Logical ? static_cast<const LogicalExpr *>(e.get()) : nullptr;
 }
+// A literal of a type no class defines operators for: NIL, a logical, a number, a string.
+bool scalar(const Expr &e) {
+  return e.kind == ExprKind::Nil || e.kind == ExprKind::Logical || e.kind == ExprKind::Number ||
+         e.kind == ExprKind::String;
+}
 
 } // namespace
 
@@ -90,19 +95,24 @@ ExprPtr foldNumbers(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberEx
 
 namespace {
 
+// The comparison of the folding rules an operator is, or nothing.
+std::optional<xb_fold_cmp> foldComparison(BinOp op) {
+  switch (op) {
+  case BinOp::Eq: case BinOp::ExactEq: return XB_FOLD_EQ;
+  case BinOp::NotEq: return XB_FOLD_NE;
+  case BinOp::Lt: return XB_FOLD_LT;
+  case BinOp::Le: return XB_FOLD_LE;
+  case BinOp::Gt: return XB_FOLD_GT;
+  case BinOp::Ge: return XB_FOLD_GE;
+  default: return std::nullopt;
+  }
+}
+
 // Result of a comparison operator given the operands' order c (xb_fold_compare).
 bool comparisonResult(BinOp op, int c, bool &result) {
-  xb_fold_cmp f;
-  switch (op) {
-  case BinOp::Eq: case BinOp::ExactEq: f = XB_FOLD_EQ; break;
-  case BinOp::NotEq: f = XB_FOLD_NE; break;
-  case BinOp::Lt: f = XB_FOLD_LT; break;
-  case BinOp::Le: f = XB_FOLD_LE; break;
-  case BinOp::Gt: f = XB_FOLD_GT; break;
-  case BinOp::Ge: f = XB_FOLD_GE; break;
-  default: return false;
-  }
-  result = xb_fold_compare(f, c) != 0;
+  std::optional<xb_fold_cmp> f = foldComparison(op);
+  if (!f) return false;
+  result = xb_fold_compare(*f, c) != 0;
   return true;
 }
 
@@ -113,6 +123,19 @@ ExprPtr foldNumber(SourceLoc loc, UnOp op, const NumberExpr &n, bool runtime) {
   if (op != UnOp::Neg) return nullptr;
   xb_folded x = folded(n);
   return numberOf(loc, xb_fold_negate(&x, runtime ? 1 : 0));
+}
+
+std::optional<bool> compareLogicals(BinOp op, bool a, bool b) {
+  bool result;
+  if (comparisonResult(op, (int)a - (int)b, result)) return result; // .F. < .T.
+  return std::nullopt;
+}
+
+std::optional<bool> compareNil(BinOp op, bool aNil, bool bNil) {
+  std::optional<xb_fold_cmp> f = foldComparison(op);
+  int r;
+  if (f && xb_fold_nil(*f, aNil, bNil, &r)) return r != 0;
+  return std::nullopt;
 }
 
 std::optional<bool> compareNumbers(BinOp op, const NumberExpr &a, const NumberExpr &b) {
@@ -337,8 +360,12 @@ ExprPtr Folder::foldBinary(BinaryExpr &b) {
   }
   const LogicalExpr *la = logical(b.lhs), *lb = logical(b.rhs);
   if (la && lb) {
-    bool result;
-    if (comparisonResult(b.op, (int)la->value - (int)lb->value, result)) return makeLogical(loc, result); // .F. < .T.
+    if (std::optional<bool> r = compareLogicals(b.op, la->value, lb->value)) return makeLogical(loc, *r);
+    return nullptr;
+  }
+  bool nilA = b.lhs->kind == ExprKind::Nil, nilB = b.rhs->kind == ExprKind::Nil;
+  if ((nilA || nilB) && scalar(*b.lhs) && scalar(*b.rhs)) {
+    if (std::optional<bool> r = compareNil(b.op, nilA, nilB)) return makeLogical(loc, *r);
     return nullptr;
   }
   const StringExpr *sa = str(b.lhs), *sb = str(b.rhs);

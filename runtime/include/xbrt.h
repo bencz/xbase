@@ -1121,6 +1121,14 @@ static inline int xb_fold_compare(xb_fold_cmp op, int order) {
   }
   return 0;
 }
+/* `a op b` when either is NIL (and neither an object, whose class may define the operator), into *r (0: an operator
+ * other than = == != fails): = and == are true when both are NIL, != when one is not (the runtime's xb_op_eq,
+ * xb_op_exacteq, xb_op_ne, and the folding of constants). */
+static inline int xb_fold_nil(xb_fold_cmp op, int aNil, int bNil, int *r) {
+  if (op != XB_FOLD_EQ && op != XB_FOLD_NE) return 0;
+  *r = (aNil == bNil) == (op == XB_FOLD_EQ);
+  return 1;
+}
 /* The order of two numbers: integers exactly, else as doubles (xb_order_double). */
 static inline int xb_folded_order(const xb_folded *a, const xb_folded *b) {
   if (a->is_int && b->is_int) return (a->i > b->i) - (a->i < b->i);

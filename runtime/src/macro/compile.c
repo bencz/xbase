@@ -1339,6 +1339,18 @@ static int fold_cmp_of(int op, xb_fold_cmp *out) {
   }
 }
 
+/* A constant of a type no class defines operators for (the compiler's `scalar`): NIL, a logical, a number, a
+ * string. */
+static int scalar_node(const node *n) {
+  xb_folded v;
+  int l;
+  fstr s;
+  if (n->kind == N_NIL || folded_number(n, &v) || folded_logical(n, &l)) return 1;
+  if (!folded_string(n, &s)) return 0;
+  fstr_free(&s);
+  return 1;
+}
+
 /* Empty() of the runtime on a constant, a codeblock (never empty), an array or hash literal that evaluates nothing
  * else (empty with no element). */
 static int folded_empty(const node *n, int *out) {
@@ -1392,6 +1404,9 @@ static int folded_logical(const node *n, int *out) {
     return folded_empty(n, out);
   case N_BINARY: {
     fstr s, t;
+    if ((n->a->kind == N_NIL || n->b->kind == N_NIL) && scalar_node(n->a) && scalar_node(n->b)) {
+      return fold_cmp_of(n->op, &cmp) && xb_fold_nil(cmp, n->a->kind == N_NIL, n->b->kind == N_NIL, out);
+    }
     if (folded_string(n->a, &s)) {
       int ok = folded_string(n->b, &t);
       if (ok) {

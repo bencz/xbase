@@ -30,6 +30,11 @@ ExprPtr foldNumbers(SourceLoc loc, BinOp op, const NumberExpr &a, const NumberEx
 // `op n` for a number and `-` or `~`, as a number literal (with `runtime`, as the run-time operator makes it: an
 // integer is a computed one), or null for another operator.
 ExprPtr foldNumber(SourceLoc loc, UnOp op, const NumberExpr &n, bool runtime);
+// `a op b` for two logicals and a comparison operator (.F. before .T.), or nothing for another operator.
+std::optional<bool> compareLogicals(BinOp op, bool a, bool b);
+// `a op b` for constants of which one at least is NIL (aNil, bNil) and the other no object: = and == of two NILs,
+// != of NIL and another value (xb_fold_nil), or nothing for another operator (an error at run time).
+std::optional<bool> compareNil(BinOp op, bool aNil, bool bNil);
 // `a op b` for two numbers and a comparison operator (as xb_compare orders them), or nothing for another operator.
 std::optional<bool> compareNumbers(BinOp op, const NumberExpr &a, const NumberExpr &b);
 

@@ -106,6 +106,15 @@ Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
       std::optional<bool> r = compareNumbers(i.binop, *x, *y);
       return r ? b.logical(*r) : nullptr;
     }
+    const Constant *cx = asConstant(ops[0]), *cy = asConstant(ops[1]);
+    if (cx && cy && cx->lit == Constant::Lit::Logical && cy->lit == Constant::Lit::Logical) {
+      std::optional<bool> r = compareLogicals(i.binop, cx->logical, cy->logical);
+      return r ? b.logical(*r) : nullptr;
+    }
+    if (cx && cy && (cx->lit == Constant::Lit::Nil || cy->lit == Constant::Lit::Nil)) {
+      std::optional<bool> r = compareNil(i.binop, cx->lit == Constant::Lit::Nil, cy->lit == Constant::Lit::Nil);
+      return r ? b.logical(*r) : nullptr;
+    }
     const Constant *x = asString(ops[0]), *y = asString(ops[1]);
     if (!x || !y) return nullptr;
     if (std::optional<std::string> r = stringJoin(i.binop, x->str, y->str)) return b.string(*r);

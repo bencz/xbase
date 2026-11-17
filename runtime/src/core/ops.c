@@ -230,9 +230,16 @@ int xb_compare(const xb_ctx *ctx, const xb_item *a, const xb_item *b) {
   return 2;
 }
 
+/* =, == or != with a NIL operand (xb_fold_nil). */
+static void nil_test(xb_item *r, xb_fold_cmp op, const xb_item *a, const xb_item *b) {
+  int result = 0;
+  xb_fold_nil(op, a->type == XB_T_NIL, b->type == XB_T_NIL, &result);
+  xb_set_logical(r, result);
+}
+
 void xb_op_eq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_EQ, a, b, NULL)) return;
-  if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
+  if (a->type == XB_T_NIL || b->type == XB_T_NIL) { nil_test(r, XB_FOLD_EQ, a, b); return; }
   int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error2(ctx, r, 1071, "=", a, b);
   else xb_set_logical(r, xb_order_is(c, 0, 1, 0));
@@ -240,7 +247,7 @@ void xb_op_eq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 
 void xb_op_ne(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_NE, a, b, NULL)) return;
-  if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type != b->type); return; }
+  if (a->type == XB_T_NIL || b->type == XB_T_NIL) { nil_test(r, XB_FOLD_NE, a, b); return; }
   int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error2(ctx, r, 1072, "<>", a, b);
   else xb_set_logical(r, !xb_order_is(c, 0, 1, 0));
@@ -270,7 +277,7 @@ void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) 
     xb_set_logical(r, x->len == y->len && memcmp(x->data, y->data, x->len) == 0);
     return;
   }
-  if (a->type == XB_T_NIL || b->type == XB_T_NIL) { xb_set_logical(r, a->type == b->type); return; }
+  if (a->type == XB_T_NIL || b->type == XB_T_NIL) { nil_test(r, XB_FOLD_EQ, a, b); return; }
   int c = xb_compare(ctx, a, b);
   if (c == 2) arg_error2(ctx, r, 1070, "==", a, b);
   else xb_set_logical(r, xb_order_is(c, 0, 1, 0));
