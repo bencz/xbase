@@ -45,9 +45,11 @@ static inline uint64_t *xb_object_word64(const xb_item *object, uint32_t k) {
  * BASE/9031 raised). */
 xb_rwords xb_object_rwords(const xb_item *object, uint32_t k);
 int xb_object_lock(xb_ctx *ctx, const xb_item *object, uint32_t k);
-/* xb_object_lock for a lock held a moment (a Channel's), owned by the thread: no QUIT ends the wait, which keeps the
- * worker's place. */
+/* A lock held a moment (a Channel's) in the word of variable k: never taken again by its holder, so the word alone
+ * (0 free, 1 held, 2 maybe waited for): one compare-and-swap to take it, one exchange to release it, loads before its
+ * waiter sleeps on the word (as a short wait, which keeps the worker's place); no QUIT ends the wait. */
 void xb_object_lock_short(const xb_item *object, uint32_t k);
+void xb_object_unlock_short(const xb_item *object, uint32_t k);
 
 /* How a wait ended. */
 enum { XB_WAIT_QUIT = -1, XB_WAIT_TIMED_OUT, XB_WAIT_CHANGED };
@@ -90,6 +92,14 @@ int xb_task_is_final(const xb_item *task);
 /* Whether the item is a CancellationToken, or NIL (none). */
 int xb_task_token_ok(const xb_item *token);
 int xb_task_settle(xb_ctx *ctx, const xb_item *task, int ok, const xb_item *value);
+/* A promise taken to settle later (outside a lock, say): 1 when it was waiting, and no token cancels it from now on;
+ * 0 when it had ended (canceled). xb_task_settle_claimed then completes it (`ok`) or fails it with `value`. */
+int xb_task_claim(const xb_item *task);
+/* A claim given back (the claimer settles nothing after all): 1, the promise waits again, its token may cancel it; 0
+ * when its token asked to cancel it meanwhile: it stays claimed, and the claimer cancels it (xb_task_cancel_claimed). */
+int xb_task_unclaim(const xb_item *task);
+void xb_task_cancel_claimed(xb_ctx *ctx, const xb_item *task);
+void xb_task_settle_claimed(xb_ctx *ctx, const xb_item *task, int ok, const xb_item *value);
 void xb_task_completed(xb_ctx *ctx, xb_item *r, const xb_item *value);
 /* Waits for a task to end (no limit): 1 with its result in `*out` when it completed; 0 when it failed, was canceled,
  * or a QUIT ended the wait. */

@@ -52,6 +52,9 @@ typedef struct xb_env {
   int32_t  parkedDecimals;
   void    *parkedTask;
   struct xb_env *parkedPrev, *parkedNext;
+  uint8_t  parkedShard;     /* its list's shard (ctx.c) */
+  uint8_t  parkedOld;       /* in the shard's old list: what it reaches is old, young collections skip it */
+  uint8_t  parkedScans;     /* young collections that scanned it since it was parked */
 } xb_env;
 
 /* A thread's context: what compiled code reaches (the [ABI] head), the state of the code running on the thread now
@@ -158,10 +161,11 @@ void xb_env_park(xb_ctx *ctx, xb_env *env, void *task);
 void xb_env_unpark(xb_ctx *ctx, xb_env *env);
 void xb_env_reap(xb_ctx *ctx);
 void xb_env_reap_all(xb_ctx *ctx);
-/* The collector's side: `fn` on each parked environment (marking, every other thread stopped); then `live` gives
- * where each one's task is now, NULL when it is unreachable: those are the environments to reap. */
-void xb_env_parked_each(void (*fn)(xb_env *env));
-void xb_env_parked_settle(void *(*live)(void *obj));
+/* The collector's side, every other thread stopped: `fn` on each parked environment a collection must scan (`full`:
+ * all of them; else those parked lately); then `live` gives where each one's task is now, NULL when it is unreachable:
+ * those are the environments to reap (1 when some are). */
+void xb_env_parked_each(void (*fn)(xb_env *env), int full);
+int  xb_env_parked_settle(void *(*live)(void *obj), int full);
 
 /* Closes the work areas of `ctx`'s environment whatever ended its flow: the requests pending (and a BREAK's value) set
  * aside meanwhile and back after; what closing raised dropped, but a QUIT (also one another thread raised). */

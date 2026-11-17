@@ -300,6 +300,7 @@ static struct {
   size_t liveBytes;                /* found by the last full collection */
   int64_t lastFullNs;              /* when it ran */
   uint32_t finalizing;             /* a context runs destructors (xb_gc_finalizing) */
+  int reap;                        /* the collection found tasks' environments to close (xb_env_reap) */
   xb_item *finalized;              /* found unreachable, kept alive (roots) until they are finalized, in order */
   size_t finalizedHead, finalizedLen, finalizedCap;
   int evacuating;                  /* the collection in progress moves objects out of the blocks marked defrag */
@@ -1055,13 +1056,16 @@ void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
   return h + 1;
 }
 
-/* After a collection that queued objects to finalize: their destructors run on the program's context (the first
+/* After a collection that queued objects to finalize, or found tasks' environments to close (their tables, their
+ * locks: XB_PENDING_FINALIZE closes them too, xb_env_reap): their destructors run on the program's context (the first
  * registered), at its next pending test; while its thread is in a blocking operation (a Join, a wait: it would not
  * test anything for as long), on the collecting thread's (`self`, the one that allocated), so that they never wait for
  * it and the allocating thread pays for the garbage it makes. One context runs destructors at a time
  * (xb_gc_finalizing). Under the lock, every other thread stopped. */
 static void request_finalize(const xb_tlh *self) {
-  if (heap.finalizedLen == heap.finalizedHead || !heap.finalizer) return;
+  int reap = heap.reap;
+  heap.reap = 0;
+  if ((heap.finalizedLen == heap.finalizedHead && !reap) || !heap.finalizer) return;
   xb_ctx *to = heap.finalizer;
   const xb_tlh *t = to->gcThread;
   if (t && t != self && xb_atomic_load32(&t->state, XB_SEQ_CST) == T_BLOCKED)
@@ -1666,7 +1670,7 @@ static void mark_roots(void) {
   for (const xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
   xb_memvar_publics_each(mark_root, NULL);
-  xb_env_parked_each(mark_env);
+  xb_env_parked_each(mark_env, heap.full);
   xb_sched_mark(mark_item);
   for (size_t i = heap.finalizedHead; i < heap.finalizedLen; ++i) mark_item(&heap.finalized[i]);
 }
@@ -2073,7 +2077,7 @@ static void collect(int full, int due) {
     find_finalized(full);
     drain();
   }
-  xb_env_parked_settle(live_object);
+  if (xb_env_parked_settle(live_object, full)) heap.reap = 1; /* closed soon: their tables, their locks */
   if (!full) settle_young();
   for (size_t i = 0; i < heap.pinnedLen; ++i) heap.pinned[i]->flags &= (uint16_t)~XB_GC_HDR_PINNED;
   heap.pinnedLen = 0;

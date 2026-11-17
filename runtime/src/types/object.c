@@ -124,9 +124,40 @@ void xb_args_values(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
     }
 }
 
-void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
+int xb_runtime_member(const xb_class *cls, const char *message, size_t *member) {
   int assign = message[0] == '_';
   const char *name = message + assign;
+  for (uint32_t k = 0; k < cls->nvars; ++k)
+    if (xb_var_answers(&cls->vars[k], name) && !(assign && cls->vars[k].rule == XB_VAR_READ)) {
+      *member = (size_t)k << 2 | (assign ? XB_RT_SET : XB_RT_GET);
+      return 1;
+    }
+  const xb_class_method *m = xb_class_method_of(cls, message); /* an assignment's is named _NAME */
+  if (!m) return 0;
+  *member = (size_t)(m - cls->methods) << 2 | XB_RT_METHOD;
+  return 1;
+}
+
+void xb_runtime_perform(xb_ctx *ctx, xb_item *r, size_t member, uint32_t argc, xb_item *argv) {
+  const xb_class *cls = ((const xb_object *)argv[0].v.p)->cls;
+  uint32_t k = (uint32_t)(member >> 2);
+  xb_args_values(ctx, argc, argv); /* the values: a runtime class's own members take no reference */
+  switch (member & 3) {
+    case XB_RT_GET: xb_object_get(argv[0].v.p, k, r); return; /* arguments are ignored */
+    case XB_RT_SET: {
+      xb_item nil;
+      xb_set_nil(&nil);
+      assign_var(ctx, r, &argv[0], k, argc > 1 ? &argv[1] : &nil);
+      return;
+    }
+    default:
+      xb_fuse_target(ctx, NULL);
+      cls->methods[k].fn(ctx, r, argc, argv);
+      return;
+  }
+}
+
+void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
   if (argv[0].type == XB_T_OBJECT) {
     xb_object *o = argv[0].v.p;
     const xb_class *cls = o->cls;
@@ -134,24 +165,12 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
       xb_class_send(ctx, r, message, NULL, 0, argc, argv);
       return;
     }
-    xb_args_values(ctx, argc, argv); /* a class of the runtime's own */
-    for (uint32_t k = 0; k < cls->nvars; ++k)
-      if (xb_var_answers(&cls->vars[k], name) && !(assign && cls->vars[k].rule == XB_VAR_READ)) {
-        if (!assign) {
-          xb_object_get(o, k, r); /* arguments are ignored */
-        } else {
-          xb_item nil;
-          xb_set_nil(&nil);
-          assign_var(ctx, r, &argv[0], k, argc > 1 ? &argv[1] : &nil);
-        }
-        return;
-      }
-    const xb_class_method *m = xb_class_method_of(cls, message); /* an assignment's is named _NAME */
-    if (m) {
-      xb_fuse_target(ctx, NULL);
-      m->fn(ctx, r, argc, argv);
+    size_t member; /* a class of the runtime's own */
+    if (xb_runtime_member(cls, message, &member)) {
+      xb_runtime_perform(ctx, r, member, argc, argv);
       return;
     }
+    xb_args_values(ctx, argc, argv);
     if (xb_is_generator(&argv[0]) && xb_gen_message(ctx, r, message, argc, argv)) return; /* after its variables */
   }
   if (!xb_class_scalar_send(ctx, r, message, NULL, 0, argc, argv)) xb_object_message(ctx, r, message, argc, argv);

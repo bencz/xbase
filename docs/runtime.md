@@ -611,8 +611,11 @@ first time it is used (its class function, or a subclass):
   that reaches a member of an object (not through a cast) stores the object's class, the member and its slot there (a
   variable's index, a class variable's address) as the newest way (the oldest of a full cache goes); the next message
   from that send to an object of one of those classes runs the member at once, without the lookup, the scope checks
-  (which give the same answer for the same class at the same send) or a call to `dispatch` (`perform`). Messages to
-  casts, to values of scalar classes and to the runtime's own classes always look up. Each way also tells compiled code
+  (which give the same answer for the same class at the same send) or a call to `dispatch` (`perform`). A runtime
+  class's member (`xb_runtime_member`: a variable or a method, found as `xb_op_send` finds it) is kept too, its index
+  and how it is reached in the slot and no member (`XB_SEND_OTHER` for compiled code), and run by
+  `xb_runtime_perform`: a `Channel`'s or a `Task`'s send repeated finds its method with no search by name. Messages to
+  casts and to values of scalar classes always look up. Each way also tells compiled code
   what the member is (`kind`: `XB_SEND_GET`, `XB_SEND_SET`, `XB_SEND_METHOD` with the method's function in `fn`, or
   `XB_SEND_OTHER`), so that it performs the newest way in place ([compiler.md](compiler.md#xir-to-llvm)). Threads share
   the caches: each one is a sequence lock (`version`, odd while a thread changes it). A reader that finds the version
@@ -1336,10 +1339,15 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   environment is its own from its call to its end: `xb_env_inherit` makes it from its caller's directly (no snapshot:
   the structure copied, the PRIVATE bindings shared until either changes them, the date format borrowed until it changes
   or the environment is parked, no work area), and between steps `xb_env_park` sets it aside (`SET DECIMALS` kept) in a
-  list the collector marks, until `xb_env_unpark` puts it back in front of the thread's; `xb_env_parked_settle`, after
-  each collection's marking, moves the environments whose tasks it found unreachable to a list that `xb_env_reap` closes
-  (their work areas, then the rest) at the next step any thread runs, and `xb_env_reap_all` closes every one left at the
-  program's end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): an
+  list the collector marks, until `xb_env_unpark` puts it back in front of the thread's. The lists are 64 shards by
+  the environment's address, each with its lock (independent suspensions do not wait for one another) and two lists:
+  the environments parked lately, which every collection scans, and those two young collections scanned already, which
+  only full collections scan (a parked environment does not change, and all it reaches is old by then): a young
+  collection costs what was parked lately, however many functions wait. `xb_env_parked_settle`, after each collection's
+  marking, moves the environments whose tasks it found unreachable to a list that `xb_env_reap` closes (their work
+  areas, then the rest): the collection raises `XB_PENDING_FINALIZE` on the context that runs destructors, whose next
+  pending test closes them (and so does the next step any thread runs), and `xb_env_reap_all` closes every one left at
+  the program's end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): an
   asynchronous call allocates no environment; one that creates PRIVATEs copies the bindings it shares (once) and grows
   its own stack of PRIVATEs. The program's exit code is the process's.
 - Program threads (`rtl/threads.c`): `xb_program_thread_start` starts a thread with a 16 MB stack, detached

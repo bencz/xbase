@@ -1,0 +1,4 @@
+
+claims: each sent value received once, no canceled one
+long-lived waiters: cycles cost the same, every waiter served in order, none left
+burst: all received, held, room given back

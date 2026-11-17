@@ -150,22 +150,49 @@ static void own_date_format(xb_ctx *ctx) {
     xb_ctx_set_date_format(ctx, ctx->env->date_format, strlen(ctx->env->date_format));
 }
 
-/* The parked environments (a list under its lock), and those whose tasks died, to close (`dead`, the same lock;
- * `deaths` tells a thread there are some without the lock). */
-static xb_mutex parkedLock;
+/* The parked environments, in PARK_SHARDS shards by the environment's address, each a lock and two lists: so that
+ * the suspensions and resumptions of independent functions do not wait for one another. A shard's young list holds the
+ * environments parked lately, which every collection scans; one that young collections scanned twice moves to the old
+ * list (all it reaches is old by then, and a parked environment does not change), which only full collections scan:
+ * a young collection costs what was parked lately, whatever waits for long. Those whose tasks died wait in `dead`
+ * (under deadLock; `deaths` tells a thread there are some without the lock) until they are closed. */
+#define PARK_SHARDS 64u
+#define PARK_SCANS_YOUNG 2u
+typedef struct park_shard {
+  xb_mutex lock;
+  xb_env *young, *old;
+} park_shard;
+static park_shard shards[PARK_SHARDS];
+static xb_mutex deadLock;
 static xb_once_flag parkedMade = XB_ONCE_INIT;
-static xb_env *parked, *dead;
+static xb_env *dead;
 static uint32_t deaths;
+static uint32_t parkedReady; /* the locks made: a collection before any park has none to look at */
 
 static void make_parked(void) {
-  if (!xb_mutex_init(&parkedLock)) xb_gc_fatal("cannot create the environments' lock");
+  for (uint32_t k = 0; k < PARK_SHARDS; ++k)
+    if (!xb_mutex_init(&shards[k].lock)) xb_gc_fatal("cannot create the environments' lock");
+  if (!xb_mutex_init(&deadLock)) xb_gc_fatal("cannot create the environments' lock");
+  xb_atomic_store32(&parkedReady, 1, XB_RELEASE);
+}
+
+static xb_env **list_of(xb_env *env) {
+  park_shard *s = &shards[env->parkedShard];
+  return env->parkedOld ? &s->old : &s->young;
 }
 
 static void unlink_parked(xb_env *env) {
   if (env->parkedPrev) env->parkedPrev->parkedNext = env->parkedNext;
-  else parked = env->parkedNext;
+  else *list_of(env) = env->parkedNext;
   if (env->parkedNext) env->parkedNext->parkedPrev = env->parkedPrev;
   env->parkedPrev = env->parkedNext = NULL;
+}
+
+static void link_parked(xb_env **list, xb_env *env) {
+  env->parkedPrev = NULL;
+  env->parkedNext = *list;
+  if (*list) (*list)->parkedPrev = env;
+  *list = env;
 }
 
 void xb_env_park(xb_ctx *ctx, xb_env *env, void *task) {
@@ -176,18 +203,20 @@ void xb_env_park(xb_ctx *ctx, xb_env *env, void *task) {
   ctx->set_decimals = env->outerDecimals;
   env->outer = NULL;
   env->parkedTask = task;
-  xb_mutex_lock(&parkedLock); /* no safepoint until it is released: no collection meanwhile */
-  env->parkedPrev = NULL;
-  env->parkedNext = parked;
-  if (parked) parked->parkedPrev = env;
-  parked = env;
-  xb_mutex_unlock(&parkedLock);
+  env->parkedShard = (uint8_t)(((uintptr_t)env >> 6) % PARK_SHARDS);
+  env->parkedOld = 0;
+  env->parkedScans = 0;
+  park_shard *s = &shards[env->parkedShard];
+  xb_mutex_lock(&s->lock); /* no safepoint until it is released: no collection meanwhile */
+  link_parked(&s->young, env);
+  xb_mutex_unlock(&s->lock);
 }
 
 void xb_env_unpark(xb_ctx *ctx, xb_env *env) {
-  xb_mutex_lock(&parkedLock);
+  park_shard *s = &shards[env->parkedShard];
+  xb_mutex_lock(&s->lock);
   unlink_parked(env);
-  xb_mutex_unlock(&parkedLock);
+  xb_mutex_unlock(&s->lock);
   env->parkedTask = NULL;
   env->outer = ctx->env;
   env->outerDecimals = ctx->set_decimals;
@@ -195,40 +224,76 @@ void xb_env_unpark(xb_ctx *ctx, xb_env *env) {
   ctx->set_decimals = env->parkedDecimals;
 }
 
-void xb_env_parked_each(void (*fn)(xb_env *env)) {
-  for (xb_env *env = parked; env; env = env->parkedNext) fn(env);
+void xb_env_parked_each(void (*fn)(xb_env *env), int full) {
+  if (!xb_atomic_load32(&parkedReady, XB_ACQUIRE)) return; /* none parked yet */
+  for (uint32_t k = 0; k < PARK_SHARDS; ++k) {
+    for (xb_env *env = shards[k].young; env; env = env->parkedNext) fn(env);
+    if (full)
+      for (xb_env *env = shards[k].old; env; env = env->parkedNext) fn(env);
+  }
   for (xb_env *env = dead; env; env = env->parkedNext) fn(env);
 }
 
-void xb_env_parked_settle(void *(*live)(void *obj)) {
-  for (xb_env *env = parked, *next; env; env = next) {
-    next = env->parkedNext;
-    env->parkedTask = live(env->parkedTask);
-    if (env->parkedTask) continue;
+/* An environment of a shard's list (`old`) after a collection's marking: dead to `dead`; a young one scanned twice
+ * to the old list. */
+static int settle_one(xb_env *env, void *(*live)(void *obj), int old) {
+  env->parkedTask = live(env->parkedTask);
+  if (!env->parkedTask) {
     unlink_parked(env);
     env->parkedNext = dead;
     if (dead) dead->parkedPrev = env;
     dead = env;
-    xb_atomic_store32(&deaths, 1, XB_RELEASE);
+    return 1;
   }
+  if (!old && ++env->parkedScans >= PARK_SCANS_YOUNG) {
+    unlink_parked(env);
+    env->parkedOld = 1;
+    link_parked(&shards[env->parkedShard].old, env);
+  }
+  return 0;
+}
+
+int xb_env_parked_settle(void *(*live)(void *obj), int full) {
+  if (!xb_atomic_load32(&parkedReady, XB_ACQUIRE)) return 0;
+  int died = 0;
+  for (uint32_t k = 0; k < PARK_SHARDS; ++k) {
+    for (xb_env *env = shards[k].young, *next; env; env = next) {
+      next = env->parkedNext;
+      died |= settle_one(env, live, 0);
+    }
+    if (full)
+      for (xb_env *env = shards[k].old, *next; env; env = next) {
+        next = env->parkedNext;
+        died |= settle_one(env, live, 1);
+      }
+  }
+  if (died) xb_atomic_store32(&deaths, 1, XB_RELEASE);
+  return died;
 }
 
 /* Closes the environments of `list`, one at a time `ctx`'s (its work areas closed as a flow's at its end). */
 static void close_parked(xb_ctx *ctx, int all) {
   if (!all && !xb_atomic_load32(&deaths, XB_ACQUIRE)) return;
   xb_once(&parkedMade, make_parked);
-  for (;;) {
-    xb_mutex_lock(&parkedLock);
-    xb_env *env = dead ? dead : all ? parked : NULL;
-    if (env == dead && env) {
+  for (uint32_t k = 0;;) {
+    xb_mutex_lock(&deadLock);
+    xb_env *env = dead;
+    if (env) {
       dead = env->parkedNext;
       if (dead) dead->parkedPrev = NULL;
       env->parkedNext = NULL;
-    } else if (env) {
-      unlink_parked(env);
+    } else {
+      xb_atomic_store32(&deaths, 0, XB_RELAXED);
     }
-    if (!env) xb_atomic_store32(&deaths, 0, XB_RELAXED);
-    xb_mutex_unlock(&parkedLock);
+    xb_mutex_unlock(&deadLock);
+    while (!env && all && k < PARK_SHARDS) { /* the program's end: every parked one too */
+      park_shard *s = &shards[k];
+      xb_mutex_lock(&s->lock);
+      env = s->young ? s->young : s->old;
+      if (env) unlink_parked(env);
+      xb_mutex_unlock(&s->lock);
+      if (!env) ++k;
+    }
     if (!env) return;
     env->parkedTask = NULL;
     env->outer = ctx->env;
@@ -352,9 +417,10 @@ int32_t xb_pending_gc(xb_ctx *ctx) {
     xb_pending_clear(ctx, XB_PENDING_SAFEPOINT);
     xb_gc_safepoint();
   }
-  if (xb_pending_get(ctx) & XB_PENDING_FINALIZE) {
+  if (xb_pending_get(ctx) & XB_PENDING_FINALIZE) { /* destructors, and the environments of tasks that died */
     xb_pending_clear(ctx, XB_PENDING_FINALIZE);
     xb_classes_finalize(ctx);
+    xb_env_reap(ctx);
   }
   return xb_pending(ctx);
 }

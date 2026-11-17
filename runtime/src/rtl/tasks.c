@@ -18,7 +18,11 @@
 
 void xbf_BREAK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
-enum { S_CREATED, S_SCHEDULED, S_RUNNING, S_COMPLETED, S_FAILED, S_CANCELED };
+/* S_CLAIMED: a promise that code took to settle (xb_task_claim): no token cancels it any more, only its settling ends
+ * it; S_CLAIMED_CANCELED, one whose token asked to cancel it meanwhile: its claimer completes it, or cancels it when it
+ * gives the claim back (xb_task_unclaim). */
+enum { S_CREATED, S_SCHEDULED, S_RUNNING, S_CLAIMED, S_CLAIMED_CANCELED, S_COMPLETED, S_FAILED, S_CANCELED };
+#define CLAIMED(s) ((s) == S_CLAIMED || (s) == S_CLAIMED_CANCELED)
 #define FINAL(s) ((s) >= S_COMPLETED)
 
 /* What completes it: its block (TaskRun, ContinueWith), code (a promise), the tasks it waits for (the combinators), a
@@ -72,13 +76,15 @@ static xb_object *task_new(xb_item *r, uint32_t kind, uint32_t state) {
 }
 
 /* The task's final state and result, set once: 1, with the continuations it had in `*next` (rooted by the caller);
- * 0 when it was final already. */
-static int finish(const xb_item *task, uint32_t state, const xb_item *value, xb_item *next) {
-  if (FINAL(state_of(task))) return 0;
+ * 0 when it was final already, or claimed by another (`claimed`: the caller is the claimer, the task claimed). */
+static int finish_as(const xb_item *task, uint32_t state, const xb_item *value, xb_item *next, int claimed) {
+  uint32_t s = state_of(task);
+  if (FINAL(s) || (CLAIMED(s) != claimed && !(s == S_CLAIMED && state == S_CANCELED))) return 0;
   xb_object *o = task->v.p;
   xb_item nil;
   xb_set_nil(&nil);
   if (!xb_is_shared(o)) { /* an asynchronous function's that never suspended: this thread alone reaches it */
+    if (CLAIMED(s) != claimed) return 0;
     *next = o->vars[V_NEXT];
     o->vars[V_RESULT] = *value;
     o->vars[V_NEXT] = nil;
@@ -89,8 +95,14 @@ static int finish(const xb_item *task, uint32_t state, const xb_item *value, xb_
     return 1;
   }
   xb_share(value);
-  xb_seq_lock(o);
-  if (FINAL(xb_atomic_load32(xb_object_word(task, V_STATE), XB_RELAXED))) {
+  xb_seq_lock(o); /* a claim takes it too: a token's cancellation and a claim never both win */
+  s = xb_atomic_load32(xb_object_word(task, V_STATE), XB_RELAXED);
+  if (!claimed && s == S_CLAIMED && state == S_CANCELED) { /* kept for the claimer, which decides */
+    xb_atomic_store32(xb_object_word(task, V_STATE), S_CLAIMED_CANCELED, XB_RELAXED);
+    xb_seq_unlock(o);
+    return 0;
+  }
+  if (FINAL(s) || CLAIMED(s) != claimed) {
     xb_seq_unlock(o);
     return 0;
   }
@@ -104,6 +116,29 @@ static int finish(const xb_item *task, uint32_t state, const xb_item *value, xb_
   xb_seq_unlock(o);
   xb_park_wake(xb_object_word(task, V_STATE), 1);
   return 1;
+}
+
+static int finish(const xb_item *task, uint32_t state, const xb_item *value, xb_item *next) {
+  return finish_as(task, state, value, next, 0);
+}
+
+int xb_task_claim(const xb_item *task) {
+  xb_object *o = task->v.p;
+  xb_seq_lock(o);
+  uint32_t s = xb_atomic_load32(xb_object_word(task, V_STATE), XB_RELAXED);
+  int claimed = s == S_CREATED;
+  if (claimed) xb_atomic_store32(xb_object_word(task, V_STATE), S_CLAIMED, XB_RELAXED);
+  xb_seq_unlock(o);
+  return claimed;
+}
+
+int xb_task_unclaim(const xb_item *task) {
+  xb_object *o = task->v.p;
+  xb_seq_lock(o);
+  int canceled = xb_atomic_load32(xb_object_word(task, V_STATE), XB_RELAXED) == S_CLAIMED_CANCELED;
+  if (!canceled) xb_atomic_store32(xb_object_word(task, V_STATE), S_CREATED, XB_RELAXED);
+  xb_seq_unlock(o);
+  return !canceled;
 }
 
 /* What completions fire is run from a stack of frames {list, antecedent, below} (local arrays), not by recursion: a
@@ -243,19 +278,33 @@ static void drain(xb_ctx *ctx, xb_item *stack) {
 }
 
 /* The task's final state and result, once, and what that fires: 0 when it was final already. */
-static int complete(xb_ctx *ctx, const xb_item *task, uint32_t state, const xb_item *value) {
+static int complete_as(xb_ctx *ctx, const xb_item *task, uint32_t state, const xb_item *value, int claimed) {
   xb_item next, stack;
   xb_set_nil(&next);
   xb_set_nil(&stack);
   xb_gc_root_push(ctx, &next);
   xb_gc_root_push(ctx, &stack);
-  int done = finish(task, state, value, &next);
+  int done = finish_as(task, state, value, &next, claimed);
   if (done) {
     push_list(&stack, &next, task);
     drain(ctx, &stack);
   }
   xb_gc_root_pop(ctx, 2);
   return done;
+}
+
+static int complete(xb_ctx *ctx, const xb_item *task, uint32_t state, const xb_item *value) {
+  return complete_as(ctx, task, state, value, 0);
+}
+
+void xb_task_settle_claimed(xb_ctx *ctx, const xb_item *task, int ok, const xb_item *value) {
+  complete_as(ctx, task, ok ? S_COMPLETED : S_FAILED, value, 1);
+}
+
+void xb_task_cancel_claimed(xb_ctx *ctx, const xb_item *task) {
+  xb_item nil;
+  xb_set_nil(&nil);
+  complete_as(ctx, task, S_CANCELED, &nil, 1);
 }
 
 /* Whether a continuation's target needs it no more: it ended, or it is the signal of a source disposed. */

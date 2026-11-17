@@ -438,7 +438,8 @@ static size_t inline_kind(const member *m) {
   }
 }
 
-/* The member a message reached for class `c`, first in the cache; the oldest of a full cache goes. */
+/* The member a message reached for class `c`, first in the cache; the oldest of a full cache goes. A runtime class's
+ * (`m` NULL) keeps its member in `slot` (xb_runtime_member), and compiled code nothing in place (XB_SEND_OTHER). */
 static void cache_put(xb_send_cache *cache, const void *c, const member *m, size_t slot) {
   size_t version = xb_atomic_loadsz(&cache->version, XB_RELAXED);
   if ((version & 1) || !xb_atomic_cassz(&cache->version, &version, version + 1, XB_ACQUIRE)) return;
@@ -453,8 +454,8 @@ static void cache_put(xb_send_cache *cache, const void *c, const member *m, size
   xb_atomic_storeptr(&cache->cls[0], (void *)(uintptr_t)c, XB_RELAXED);
   xb_atomic_storeptr(&cache->member[0], (void *)(uintptr_t)m, XB_RELAXED);
   xb_atomic_storesz(&cache->slot[0], slot, XB_RELAXED);
-  xb_atomic_storesz(&cache->kind[0], inline_kind(m), XB_RELAXED);
-  xb_atomic_storesz(&cache->fn[0], m->kind == XB_MK_METHOD ? (size_t)(uintptr_t)m->fn : 0, XB_RELAXED);
+  xb_atomic_storesz(&cache->kind[0], m ? inline_kind(m) : XB_SEND_OTHER, XB_RELAXED);
+  xb_atomic_storesz(&cache->fn[0], m && m->kind == XB_MK_METHOD ? (size_t)(uintptr_t)m->fn : 0, XB_RELAXED);
   xb_atomic_storesz(&cache->version, version + 2, XB_RELEASE);
 }
 
@@ -622,11 +623,17 @@ void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def 
     member *m;
     size_t slot;
     if (cache && argv[0].width == 0 && cache_find(cache, o->cls, &m, &slot)) { /* a class the cache holds it for */
-      perform(ctx, r, m, slot, argc, argv);
+      if (m) perform(ctx, r, m, slot, argc, argv);
+      else xb_runtime_perform(ctx, r, slot, argc, argv);
       return;
     }
     if (o->cls->compiled) {
       dispatch(ctx, r, o->cls->compiled, message, from, super, cache, argc, argv);
+      return;
+    }
+    if (!super && xb_runtime_member(o->cls, message, &slot)) { /* a runtime class's: kept for the next time */
+      if (cache) cache_put(cache, o->cls, NULL, slot);
+      xb_runtime_perform(ctx, r, slot, argc, argv);
       return;
     }
   }

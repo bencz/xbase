@@ -1,0 +1,4 @@
+
+sends whose canceled token never ended them:          0
+sends canceled: .T.
+the value kept:          0 then: .F.

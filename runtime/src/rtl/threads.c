@@ -268,13 +268,21 @@ int xb_object_lock(xb_ctx *ctx, const xb_item *object, uint32_t k) {
   return 1;
 }
 
+/* The word: 0 free, 1 held, 2 held and maybe waited for. A holder never takes it again, so it needs no owner. */
 void xb_object_lock_short(const xb_item *object, uint32_t k) {
-  uint64_t self = xb_thread_self();
-  for (uint32_t spin = 0; spin < LOCK_SPINS; ++spin)
-    if ((spin == 0 || !xb_atomic_load32(xb_object_word(object, k), XB_RELAXED)) &&
-        xb_rwords_try(xb_object_rwords(object, k), self))
-      return;
-  while (!xb_rwords_claim(xb_object_rwords(object, k), self)) xb_park_wait_short(xb_object_word(object, k), 2, -1);
+  uint32_t free_state = 0;
+  if (xb_atomic_cas32(xb_object_word(object, k), &free_state, 1, XB_ACQUIRE)) return;
+  for (uint32_t spin = 0; spin < LOCK_SPINS; ++spin) { /* loads until it looks free: the holder's work is short */
+    if (xb_atomic_load32(xb_object_word(object, k), XB_RELAXED)) continue;
+    free_state = 0;
+    if (xb_atomic_cas32(xb_object_word(object, k), &free_state, 1, XB_ACQUIRE)) return;
+  }
+  while (xb_atomic_xchg32(xb_object_word(object, k), 2, XB_ACQUIRE) != 0) /* the address again after each wait */
+    xb_park_wait_short(xb_object_word(object, k), 2, -1);
+}
+
+void xb_object_unlock_short(const xb_item *object, uint32_t k) {
+  if (xb_atomic_xchg32(xb_object_word(object, k), 0, XB_RELEASE) == 2) xb_park_wake(xb_object_word(object, k), 0);
 }
 
 static xb_rwords mutex_words(const xb_item *m) { return xb_object_rwords(m, M_STATE); }

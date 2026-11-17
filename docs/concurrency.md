@@ -136,7 +136,9 @@ The context is split in two (done, [runtime.md](runtime.md#threads-and-synchroni
   same variables) with no work area open; what it changes there (`SET`, `SELECT`, `USE`, `ErrorBlock()`) is its own,
   never its caller's, also in its first step, and lasts across `AWAIT`; its tables stay open across `AWAIT` and close
   when it ends. Between steps the environment is parked; one whose function is abandoned (what it awaits is dropped, so
-  it never resumes) is closed once the collector finds the task unreachable, its tables with it. *(Planned)*:
+  it never resumes) is closed after the collection that finds the task unreachable (at the next pending test of the
+  context that runs destructors), its tables and locks with it: a young collection finds one parked a short while, one
+  that outlived two young collections is found by the next full collection. *(Planned)*:
   `SET DECIMALS` moves into the environment, copied into the context when it changes, so that switching between
   suspended tasks is a pointer store and that copy.
 
@@ -325,14 +327,21 @@ sent and not received yet (without it, or 0: any number; a capacity below 0, pas
 - One sender's values arrive in the order it sent them. `FOR EACH x IN oChannel` takes the values as they come, waiting
   for each, until the channel is closed and empty (an enumerator of its own for each `FOR EACH`, in C: the hot path of
   a consumer).
-- Cost (measured): a `TrySend` and `TryReceive` pair about 65 ns, a `SendAsync` and `ReceiveAsync` pair that waits for
-  nothing about 80 ns; a value handed between tasks that block waiting for each other costs a thread's wake (about a
+- Cost (measured): a `TrySend` and `TryReceive` pair about 40 ns, a `SendAsync` and `ReceiveAsync` pair that waits for
+  nothing about 90 ns; a value handed between tasks that block waiting for each other costs a thread's wake (about a
   microsecond), which `AWAIT` (phase 4) removes: a waiting task suspends instead of blocking its thread.
 - A receiver or a sender that a token canceled gives its place up: the channel drops such waiters when its ring of
-  them is full, before growing it, so waits canceled again and again on a quiet channel keep nothing.
-- The channel's state is its own object's, under its lock (the three words a `Mutex` has: a waiter blocks, and
-  collections go on): rings over arrays for the values, the receivers waiting and the senders waiting; a send that
-  waits for nothing returns one task completed with `.T.` that all such sends share, so it allocates nothing.
+  them is full, and grows the ring all the same when that freed less than half of it, so waits canceled again and
+  again cost what they are (however many waiters stay) and keep nothing on a quiet channel. A ring shrinks to half
+  once a quarter of it is used: a burst's room is given back.
+- The channel's state is its own object's, under its lock (a word: one compare-and-swap to take it, one exchange to
+  release it, loads before a waiter sleeps on it, a short wait during which collections go on): rings over arrays for
+  the values, the receivers waiting and the senders waiting, read and written in place by the lock's holder. The lock
+  is held for the rings alone: a waiter's task is made before it is taken; a waiter the other side serves is claimed
+  under it (`xb_task_claim`: its token cancels it no more; a cancellation asked meanwhile is kept, so that a sender that
+  gives its claim back to wait in line is canceled instead) and completed, with its wake and continuations, once it is
+  released, as are the waiters that `Close()` fails. A send that waits for nothing returns one task completed with `.T.` that all such sends share, so it
+  allocates nothing.
 
 ### I/O reactor
 

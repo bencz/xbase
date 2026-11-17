@@ -166,6 +166,14 @@ typedef struct xb_class {
 /* The method of runtime class `cls` named `name` (upper-cased), or NULL. */
 const xb_class_method *xb_class_method_of(const xb_class *cls, const char *name);
 
+/* What a message reaches in an object of runtime class `cls` (its variables first, as xb_op_send finds them): 1 and
+ * `*member`, the member's index shifted by 2 and how it is reached (XB_RT_*), or 0 for none (a generator's own
+ * messages, an error). xb_runtime_perform does it (the arguments' values taken first): what a send cache keeps for a
+ * runtime class (types/class.c), so that a send repeated finds its member with no search. */
+enum { XB_RT_GET, XB_RT_SET, XB_RT_METHOD };
+int xb_runtime_member(const xb_class *cls, const char *message, size_t *member);
+void xb_runtime_perform(xb_ctx *ctx, xb_item *r, size_t member, uint32_t argc, xb_item *argv);
+
 /* An instance of a class: one item per variable, each starting as its rule's
  * empty value (NIL, .F., "" or 0). */
 xb_object *xb_object_new(const xb_class *cls);
