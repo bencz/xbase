@@ -2,9 +2,10 @@
 # Builds each benchmark with xbase and with every other compiler or interpreter found (bench/<language>/: the same
 # work, sizes and checks), runs each -Runs times and prints a Markdown table of the best time of each, in milliseconds.
 # The same as bench/compare.sh: xbase uses a Release build (-Build, configured when missing); Harbour compiles the
-# .prg itself (bench/compat.ch), with its fastest C output and -O2. A cell is "WRONG" when the program's check failed,
-# "fail" when it did not build or run, "timeout" past -Limit seconds, "-" when that language has no version. The
-# programs run in <Build>/compare/run (the index benchmark writes its files there).
+# .prg itself (bench/compat.ch, its class syntax), or its own form in bench/harbour/, with its fastest C output and
+# -O2. A cell is "WRONG" when the program's check failed, "fail" when it did not build or run, "timeout" past -Limit
+# seconds, "-" when that language has no version. The programs run in <Build>/compare/run (the index benchmark writes
+# its files there).
 #
 #   bench/compare.ps1 [-Runs 3] [-Build build-release] [-Langs xbase,c,...] [-Limit 300] [bench ...]
 #
@@ -33,8 +34,10 @@ $Tool = @{ xbase = "cmake"; harbour = "hbmk2"; c = "gcc"; rust = "rustc"; csharp
            go = "go"; node = "node"; pypy = "pypy3"; python = "python3" }
 $Title = @{ xbase = "xbase"; harbour = "Harbour"; c = "C"; rust = "Rust"; csharp = "C#"; java = "Java"; go = "Go";
             node = "JavaScript"; pypy = "Python (PyPy)"; python = "Python (CPython)" }
-# The benchmarks that use xbase's own language: Harbour has none of it in the standard xBase they are written in.
-$HarbourSkip = "oop", "crc32", "bitlookup", "generator", "tasks", "channels", "async", "async_pi"
+# What Harbour has no counterpart of (YIELD, a pool of tasks, bounded channels, ASYNC); those of its own forms in
+# bench/harbour/ that run threads, built with its threaded runtime.
+$HarbourSkip = "generator", "tasks", "channels", "async"
+$HarbourMt = "async_pi"
 $Java = @{ fib = "Fib"; loops = "Loops"; sieve = "Sieve"; matmul = "MatMul"; qsort = "QSort"; asort = "ASort";
            strings = "Strings"; crc32 = "Crc32"; float = "FloatBench"; mixed = "Mixed"; oop = "Oop"; gc = "Gc";
            bitlookup = "BitLookup"; generator = "Generator"; pi = "Pi"; tasks = "Tasks"; channels = "Channels";
@@ -96,8 +99,12 @@ function CommandOf([string]$l, [string]$b) {
       New-Item -ItemType Directory -Force -Path $dir | Out-Null
       Remove-Item -ErrorAction SilentlyContinue (Join-Path $dir "$b$Exe")
       Push-Location $dir
+      $src = Join-Path $Root "bench/harbour/$b.prg"
+      if (-not (Test-Path $src)) { $src = Join-Path $Root "bench/$b.prg" }
+      $mt = @()
+      if ($HarbourMt -contains $b) { $mt = @("-mt") }
       try {
-        hbmk2 -static -gtcgi -q -w0 -gc3 -cflag=-O2 "-u+$Root/bench/compat.ch" "$Root/bench/$b.prg" "-o$b" 2>&1 |
+        hbmk2 @mt -static -gtcgi -q -w0 -gc3 -cflag=-O2 "-u+hbclass.ch" "-u+$Root/bench/compat.ch" $src "-o$b" 2>&1 |
           Out-Null
       } finally { Pop-Location }
       if ($LASTEXITCODE -eq 0) { return , @(Join-Path $dir "$b$Exe") }

@@ -50,21 +50,22 @@ pwsh bench/compare.ps1              # -Langs xbase,c,... and -Runs on any system
 ```
 
 Milliseconds, lower is better; `-` where a language has no version of that benchmark (Harbour compiles the `.prg`
-themselves, so it has none of the ones that use xbase's own language: classes, bit operators, `YIELD`, tasks,
-`ASYNC`). Measured on an Intel Core i9-11900K (8 cores, 16 threads), Linux 7.3, idle: xbase 0.1 Release (`xbc -O2`),
-Harbour 3.2.1dev (`hbmk2 -gc3`, its C output compiled with `gcc -O2`), C (`gcc` 16.2 `-O2`), Rust 1.97 (`-C
-opt-level=2`), C# (.NET SDK 11.0.100-rc.3, Release, the default concurrent collector), Java (OpenJDK 27), JavaScript
-(Node.js 24; `loops` sums in `BigInt`, since its sum passes a double's exact integers), Python (PyPy 8.0, CPython
-3.14). xbase is dynamically typed, as Harbour, JavaScript and Python are; C, Rust, C# and Java are statically typed.
+themselves, or its own forms in `bench/harbour/` where it has functions or threads for xbase's bit operators and tasks;
+it has no `YIELD`, pool of tasks, bounded channel or `ASYNC`). Measured on an Intel Core i9-11900K (8 cores, 16
+threads), Linux 7.3, idle: xbase 0.1 Release (`xbc -O2`), Harbour 3.2.1dev (`hbmk2 -gc3`, its C output compiled with
+`gcc -O2`), C (`gcc` 16.2 `-O2`), Rust 1.97 (`-C opt-level=2`), C# (.NET SDK 11.0.100-rc.3, Release, the default
+concurrent collector), Java (OpenJDK 27), JavaScript (Node.js 24; `loops` sums in `BigInt`, since its sum passes a
+double's exact integers), Python (PyPy 8.0, CPython 3.14). xbase is dynamically typed, as Harbour, JavaScript and Python
+are; C, Rust, C# and Java are statically typed.
 
 | benchmark | xbase | Harbour | C | Rust | C# | Java | JavaScript | Python (PyPy) | Python (CPython) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | asort | 165 | 627 | 158 | 39 | 225 | 253 | 567 | 990 | 850 |
-| async_pi | 183 | - | 174 | 181 | 181 | 238 | 221 | 282 | 10752 |
+| async_pi | 183 | 12495 | 174 | 181 | 181 | 238 | 221 | 282 | 10752 |
 | async | 152 | - | - | - | 156 | - | 123 | 774 | 822 |
-| bitlookup | 494 | - | 44 | 35 | 191 | 30 | 43 | 179 | 2611 |
+| bitlookup | 494 | 3669 | 44 | 35 | 191 | 30 | 43 | 179 | 2611 |
 | channels | 405 | - | - | 557 | 387 | 236 | - | 7000 | 1170 |
-| crc32 | 13 | - | 5 | 4 | 12 | 24 | 21 | 39 | 325 |
+| crc32 | 13 | 432 | 5 | 4 | 12 | 24 | 21 | 39 | 325 |
 | fib | 189 | 2039 | 27 | 43 | 90 | 75 | 173 | 221 | 1817 |
 | float | 31 | 1071 | 29 | 28 | 30 | 31 | 31 | 35 | 859 |
 | gc | 444 | 1209 | 345 | 438 | 3013 | 513 | 495 | 897 | 2837 |
@@ -73,7 +74,7 @@ opt-level=2`), C# (.NET SDK 11.0.100-rc.3, Release, the default concurrent colle
 | loops | 212 | 11210 | 163 | 69 | 162 | 195 | 9138 | 389 | 21820 |
 | matmul | 59 | 1354 | 9 | 14 | 13 | 17 | 31 | 46 | 522 |
 | mixed | 54 | 1617 | 38 | 49 | 47 | 53 | 68 | 65 | 2700 |
-| oop | 11 | - | 5 | 6 | 4 | 7 | 6 | 7 | 262 |
+| oop | 11 | 677 | 5 | 6 | 4 | 7 | 6 | 7 | 262 |
 | pi | 35 | 704 | 6 | 6 | 24 | 32 | 86 | 34 | 662 |
 | qsort | 118 | 1333 | 54 | 55 | 110 | 75 | 107 | 135 | 956 |
 | sieve | 198 | 2784 | 28 | 42 | 49 | 51 | 71 | 210 | 1214 |

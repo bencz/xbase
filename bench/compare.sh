@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds each benchmark with xbase and with every other compiler or interpreter found (bench/<language>/: the same
 # work, sizes and checks), runs each RUNS times and prints a Markdown table of the best time of each, in milliseconds.
-# xbase uses a Release build (BUILD, configured when missing); Harbour compiles the .prg itself (bench/compat.ch),
-# with its fastest C output and the same optimization as xbc's (-O2). A cell is "WRONG" when the program's check
+# xbase uses a Release build (BUILD, configured when missing); Harbour compiles the .prg itself (bench/compat.ch, its
+# class syntax), or its own form in bench/harbour/, with its fastest C output and the same optimization as xbc's
+# (-O2). A cell is "WRONG" when the program's check
 # failed, "fail" when it did not build or run, "timeout" past LIMIT seconds, "-" when that language has no version.
 # The programs run in BUILD/compare/run (the index benchmark writes its files there).
 #
@@ -46,9 +47,10 @@ declare -A TOOL=([xbase]=cmake [harbour]=hbmk2 [c]=gcc [rust]=rustc [csharp]=dot
                  [node]=node [pypy]=pypy3 [python]=python3)
 declare -A TITLE=([xbase]=xbase [harbour]=Harbour [c]=C [rust]=Rust [csharp]=C# [java]=Java [go]=Go
                   [node]=JavaScript [pypy]="Python (PyPy)" [python]="Python (CPython)")
-# The benchmarks that use xbase's own language (classes, bit operators, YIELD, tasks, ASYNC): Harbour has none of
-# them in the standard xBase they are written in.
-HARBOUR_SKIP=" oop crc32 bitlookup generator tasks channels async async_pi "
+# What Harbour has no counterpart of (YIELD, a pool of tasks, bounded channels, ASYNC); those of its own forms in
+# bench/harbour/ that run threads, built with its threaded runtime.
+HARBOUR_SKIP=" generator tasks channels async "
+HARBOUR_MT=" async_pi "
 declare -A JAVA=([fib]=Fib [loops]=Loops [sieve]=Sieve [matmul]=MatMul [qsort]=QSort [asort]=ASort [strings]=Strings
                  [crc32]=Crc32 [float]=FloatBench [mixed]=Mixed [oop]=Oop [gc]=Gc [bitlookup]=BitLookup
                  [generator]=Generator [pi]=Pi [tasks]=Tasks [channels]=Channels [async_pi]=AsyncPi)
@@ -93,9 +95,13 @@ command_of() {
     harbour)
       [[ $HARBOUR_SKIP == *" $b "* ]] && return
       exe=$OUT/harbour/$b
+      src=$ROOT/bench/$b.prg
+      [ -f "$ROOT/bench/harbour/$b.prg" ] && src=$ROOT/bench/harbour/$b.prg
+      mt=()
+      [[ $HARBOUR_MT == *" $b "* ]] && mt=(-mt)
       mkdir -p "$OUT/harbour" && (cd "$OUT/harbour" && rm -f "$b" &&
-        hbmk2 -static -gtcgi -q -w0 -gc3 -cflag=-O2 -u+"$ROOT/bench/compat.ch" "$ROOT/bench/$b.prg" -o"$b" \
-          >/dev/null 2>&1) && { echo "$exe"; return; } ;;
+        hbmk2 "${mt[@]}" -static -gtcgi -q -w0 -gc3 -cflag=-O2 -u+hbclass.ch -u+"$ROOT/bench/compat.ch" "$src" \
+          -o"$b" >/dev/null 2>&1) && { echo "$exe"; return; } ;;
     c)
       [ -f "bench/c/$b.c" ] || return
       gcc -O2 -o "$OUT/c-$b" "bench/c/$b.c" -lm -lpthread 2>/dev/null && { echo "$OUT/c-$b"; return; } ;;

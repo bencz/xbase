@@ -17,6 +17,6 @@ ENDCLASS
 
 CLASS TCounter INHERIT TBase
    VAR n INIT 0
-   METHOD Add( x ) INLINE Super:Add( x )
+   METHOD Add( x ) INLINE ::Super:Add( x )
    METHOD Result() INLINE ::total + ::n
 ENDCLASS

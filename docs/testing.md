@@ -106,25 +106,28 @@ after.
 
 The same programs in other languages, for a comparative base (the same algorithm, sizes and checks, the same output
 line), are in `bench/c/` (one file each, `bench.h` shared; 64-bit integers as `int64_t`), `bench/rust/` (standard
-library only), `bench/csharp/` (one project, `Bench <name>`), `bench/java/` (one class each), `bench/js/` (Node.js) and
-`bench/python/` (CPython and PyPy). Each uses its language's own tools where xBase uses the runtime's (its sort, its
-strings, its tasks, channels and `async`); `bench/c/pi.c` and the other `pi` ports are translated statement by
-statement from `bench/pi.prg`. Where a compiler would remove the work the benchmark measures, the port keeps it as
-xbase does it: `bitlookup` makes its 7 calls of `AND()` a pair (IOR and XOR written out as the `.prg`'s macros expand
-them; C `noinline, noipa`, Rust `inline(never)` with `black_box` arguments, C# `NoInlining`; the Java and JavaScript
-JITs may still inline them), C's `generator` steps through function pointers it cannot follow. The differences that
-remain: C's `strings` and `crc32` build their text in buffers without allocating; Rust's channel has one receiver,
-which its two consumers share under a mutex; JavaScript's `async` has no pool of threads that runs JavaScript, so
-`TaskRun()` there is a turn of the event loop, and its `loops` sums in `BigInt` (the sum passes 2^53, past a double's
-exact integers). A language without a counterpart of a feature has no version of that benchmark (Java has no `async`,
-C no tasks or channels). Go versions are not written yet.
+library only), `bench/csharp/` (one project, `Bench <name>`), `bench/java/` (one class each), `bench/js/` (Node.js),
+`bench/python/` (CPython and PyPy) and `bench/harbour/` (Harbour, for the programs whose `.prg` it cannot compile as
+they are: its bit functions for the bit operators of `crc32` and `bitlookup`, its threads for the tasks of `async_pi`;
+it compiles the others themselves). Each uses its language's own tools where xBase uses the runtime's (its sort, its
+strings, its tasks, channels and `async`); `bench/c/pi.c` and the other `pi` ports are translated statement by statement
+from `bench/pi.prg`. Where a compiler would remove the work the benchmark measures, the port keeps it as xbase does it:
+`bitlookup` makes its 7 calls of `AND()` a pair (IOR and XOR written out as the `.prg`'s macros expand them; C
+`noinline, noipa`, Rust `inline(never)` with `black_box` arguments, C# `NoInlining`; the Java and JavaScript JITs may
+still inline them), C's `generator` steps through function pointers it cannot follow. The differences that remain: C's
+`strings` and `crc32` build their text in buffers without allocating; Rust's channel has one receiver, which its two
+consumers share under a mutex; JavaScript's `async` has no pool of threads that runs JavaScript, so `TaskRun()` there is
+a turn of the event loop, and its `loops` sums in `BigInt` (the sum passes 2^53, past a double's exact integers). A
+language without a counterpart of a feature has no version of that benchmark (Java has no `async`, C no tasks or
+channels, Harbour no `YIELD`, pool of tasks, bounded channel or `async`). Go versions are not written yet.
 
 `bench/compare.sh` (bash 4 and GNU `timeout`) and `bench/compare.ps1` (PowerShell 7.2) build each with every compiler
 or interpreter found and print a Markdown table of the best time of each (`-n`/`-Runs` runs, CPython once; `-l`/`-Langs`
 picks languages by key: `xbase`, `harbour`, `c`, `rust`, `csharp`, `java`, `go`, `node`, `pypy`, `python`): xbase from
 a Release build (`build-release`, configured when missing; another build is refused), each benchmark target built
-again and a failed build shown as `fail`; Harbour from the `.prg` themselves when it is installed (`hbmk2 -gc3`, its C
-output compiled with `-O2` as `xbc -O2`; the programs that use xbase's own language left out; `bench/compat.ch` gives
-`ElapsedMs()` from `Date()` and `Seconds()` for it), C with `gcc -O2`, Rust with `rustc -C opt-level=2`, C# in Release,
+again and a failed build shown as `fail`; Harbour from the `.prg` themselves, or their forms in `bench/harbour/`,
+when it is installed (`hbmk2 -gc3`, its C output compiled with `-O2` as `xbc -O2`, its class syntax header given on
+the command line, its threaded runtime for `async_pi`; `bench/compat.ch` gives `ElapsedMs()` from `Date()` and
+`Seconds()` for it), C with `gcc -O2`, Rust with `rustc -C opt-level=2`, C# in Release,
 Python with `-B` (no compiled files beside the sources). The programs run in `<build>/compare/run`, under a memory limit
 and the time limit (`-t`/`-Limit`). The README shows its table.
