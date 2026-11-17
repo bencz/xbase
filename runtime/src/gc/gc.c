@@ -25,7 +25,14 @@
  * given back (or never used) is unmapped. A new block is taken from the free
  * blocks, then from the lowest chunk with one given back or never used, then
  * from a new chunk: memory goes back to the system after a peak, and the
- * heap's chunks stay few and low.
+ * heap's chunks stay few and low. Collections follow allocation, so a program
+ * that stops allocating after a peak (it waits for input, a connection, a
+ * timer) would keep it: the trimmer, a thread started when a collection first
+ * leaves a heap of XB_GC_TRIM_MIN or more, runs a full collection once the
+ * heap has seen none for its delay (XB_GC_TRIM_NS, doubled after a trim that
+ * gave back less than a quarter, up to XB_GC_TRIM_MAX_NS, and reset after one
+ * that gave back more: an idle program whose heap is live does not keep
+ * collecting it), and once more after the next collection the program makes.
  *
  * Large objects. One above the largest size class takes whole units of
  * XB_GC_LARGE_UNIT bytes: a run of them, first fit from the lowest address, in
@@ -144,6 +151,10 @@
  * many times the aged bytes that died. */
 #define XB_GC_AGING_WASTE 4u
 #define XB_GC_MIN_FULL ((size_t)8 << 20)         /* old bytes that trigger the first full collection */
+#define XB_GC_TRIM_MIN ((size_t)32 << 20)        /* a heap the trimmer looks after (Memory given back) */
+#define XB_GC_TRIM_NS (5 * XB_NS_PER_SEC)        /* the idle time before its first collection */
+#define XB_GC_TRIM_MAX_NS (320 * XB_NS_PER_SEC)  /* its longest */
+#define XB_GC_TRIM_STACK ((size_t)256 << 10)     /* the trimmer's stack: the collection's stacks are vectors */
 #define XB_GC_ALIGN 8u
 #define XB_GC_DEFRAG_RESERVE 16u                 /* new blocks a defragmentation may take: the heap's blocks / this */
 #define XB_GC_CLASS_DEFRAG_MIN 16u               /* size classes' blocks worth emptying (a move costs a stack scan) */
@@ -304,6 +315,11 @@ static struct {
   size_t finalizablePromoted;      /* objects with destructors made old since the last full collection */
   size_t liveBytes;                /* found by the last full collection */
   int64_t lastFullNs;              /* when it ran */
+  int64_t lastCollectNs;           /* when the last collection, of either kind, ended */
+  int64_t trimDelay;               /* the trimmer's idle time before it collects (Memory given back) */
+  int trimArmed, trimming, trimStop, trimStarted; /* a heap to look after; the trimmer's collection runs; it ends */
+  uint32_t trimWord;               /* changed to wake the trimmer */
+  xb_thread trimThread;
   uint32_t finalizing;             /* a context runs destructors (xb_gc_finalizing) */
   int reap;                        /* the collection found tasks' environments to close (xb_env_reap) */
   xb_item *finalized;              /* found unreachable, kept alive (roots) until they are finalized, in order */
@@ -367,7 +383,8 @@ static void init_heap(void) {
   heap.fullThreshold = XB_GC_MIN_FULL;
   heap.youngBudget = XB_GC_YOUNG_MIN;
   heap.aging = 1;
-  heap.lastFullNs = xb_platform_monotonic_ns();
+  heap.lastFullNs = heap.lastCollectNs = xb_platform_monotonic_ns();
+  heap.trimDelay = XB_GC_TRIM_NS;
 }
 
 void xb_gc_init(void) {
@@ -561,6 +578,7 @@ void xb_gc_thread_attach(const void *base) {
 static void merge_remembered(xb_tlh *t);
 static void report_allocation(xb_tlh *t);
 static void collect(int full, int due);
+static void arm_trimmer(int64_t now);
 
 void xb_gc_thread_detach(void) {
   xb_tlh *t = tlh;
@@ -2179,6 +2197,7 @@ static void collect(int full, int due) {
   give_back();
   give_back_large();
   shrink_vectors();
+  arm_trimmer(now);
   size_t allocLimit = heap.liveBytes > XB_GC_MIN_FULL ? heap.liveBytes : XB_GC_MIN_FULL;
   int fullNext = heap.oldBytes >= heap.fullThreshold || heap.allocatedSinceFull / XB_GC_FULL_ALLOC >= allocLimit ||
                  heap.finalizablePromoted >= (heap.finalizableOldLen / 2 > XB_GC_FULL_FINALIZABLE
@@ -2202,6 +2221,67 @@ void xb_gc_release(void) {
   if (!heap.holds) xb_gc_fatal("the collector released more often than held");
   --heap.holds;
   xb_mutex_unlock(&heap.lock);
+}
+
+/* The memory the heap holds from the system (xb_gc_heap_bytes), under the lock. */
+static size_t heap_bytes_locked(void) {
+  size_t bytes = heap.blockCount * XB_GC_BLOCK_SIZE + heap.largeMapped;
+  for (size_t k = 0; k < heap.lchunkCount; ++k)
+    for (uint32_t u = 0; u < XB_GC_LARGE_UNITS; ++u) bytes += !unit_used(heap.lchunks[k].idle, u) * XB_GC_LARGE_UNIT;
+  return bytes;
+}
+
+/* The trimmer (Memory given back): asleep until a collection arms it, then until its heap has seen no collection for
+ * its delay, when it collects whole; unattached, it collects as any thread outside the program would. */
+static void trimmer(void *arg) {
+  (void)arg;
+  xb_mutex_lock(&heap.lock);
+  while (!heap.trimStop) {
+    int64_t left = heap.lastCollectNs + heap.trimDelay - xb_platform_monotonic_ns();
+    if (!heap.trimArmed || left > 0) {
+      uint32_t seen = heap.trimWord;
+      xb_mutex_unlock(&heap.lock);
+      xb_park_wait(&heap.trimWord, seen, heap.trimArmed ? left : -1);
+      xb_mutex_lock(&heap.lock);
+      continue;
+    }
+    size_t before = heap_bytes_locked();
+    heap.trimArmed = 0;
+    heap.trimming = 1;
+    xb_mutex_unlock(&heap.lock);
+    collect(1, 0);
+    xb_mutex_lock(&heap.lock);
+    heap.trimming = 0;
+    size_t after = heap_bytes_locked();
+    if (before - (after < before ? after : before) >= before / 4) heap.trimDelay = XB_GC_TRIM_NS;
+    else if (heap.trimDelay < XB_GC_TRIM_MAX_NS) heap.trimDelay *= 2;
+  }
+  xb_mutex_unlock(&heap.lock);
+}
+
+/* After a collection (under the lock): the trimmer armed, and started, when the heap is one to look after; not by its
+ * own collection, which waits for the program's next. */
+static void arm_trimmer(int64_t now) {
+  heap.lastCollectNs = now;
+  if (heap.trimming || heap.trimArmed || heap.trimStop || heap_bytes_locked() < XB_GC_TRIM_MIN) return;
+  heap.trimArmed = 1;
+  if (!heap.trimStarted) {
+    heap.trimStarted = xb_thread_start(&heap.trimThread, XB_GC_TRIM_STACK, trimmer, NULL);
+    return;
+  }
+  xb_atomic_add32(&heap.trimWord, 1, XB_RELEASE);
+  xb_park_wake(&heap.trimWord, 1);
+}
+
+void xb_gc_trim_end(void) {
+  xb_mutex_lock(&heap.lock);
+  heap.trimStop = 1;
+  int started = heap.trimStarted;
+  xb_atomic_add32(&heap.trimWord, 1, XB_RELEASE);
+  xb_mutex_unlock(&heap.lock);
+  if (!started) return;
+  xb_park_wake(&heap.trimWord, 1);
+  xb_thread_join(heap.trimThread);
 }
 
 void xb_gc_collect(void) { collect(1, 0); }
@@ -2257,9 +2337,7 @@ int xb_gc_consistent(void) {
 
 size_t xb_gc_heap_bytes(void) {
   xb_mutex_lock(&heap.lock);
-  size_t bytes = heap.blockCount * XB_GC_BLOCK_SIZE + heap.largeMapped;
-  for (size_t k = 0; k < heap.lchunkCount; ++k)
-    for (uint32_t u = 0; u < XB_GC_LARGE_UNITS; ++u) bytes += !unit_used(heap.lchunks[k].idle, u) * XB_GC_LARGE_UNIT;
+  size_t bytes = heap_bytes_locked();
   xb_mutex_unlock(&heap.lock);
   return bytes;
 }

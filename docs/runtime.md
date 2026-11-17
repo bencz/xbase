@@ -152,14 +152,21 @@ rest of the runtime and compiled code use.
   One that uses only its first bytes now gives the rest back in place (`xb_gc_trim`: its last units free, or its
   mapping's last pages unmapped): a string that no longer grows in place (no `XB_STR_APPEND`: its room given up once
   it was read) at the sweep that finds it alive, an array that `ASize` cut down at once.
-- Memory given back: after a collection, the free blocks beyond those the next allocations need (the young budget and
-  an eighth of the blocks in use, at least 1 MB, and half as much again before any goes, so a heap near the line does
-  not give blocks back and take them again at each collection) go back to the system
-  (`xb_platform_pages_decommit`): the highest chunks' first, a whole page of the system at a time (blocks of a page all
-  free or spare: one block on 4 KB and 16 KB pages, two on 64 KB ones). They leave the blocks in use, and a chunk left
-  with none in use is unmapped. The free units of large objects beyond 1 MB and the young budget go back likewise
-  (runs of whole pages), and a chunk of large objects with none in use is unmapped. So the process's memory comes down
-  after a peak: the program keeps about the live data and the next young budget, whatever it held before.
+- Memory given back: after a collection, the free blocks beyond those the next allocations need (the young budget and an
+  eighth of the blocks in use, at least 1 MB, and half as much again before any goes, so a heap near the line does not
+  give blocks back and take them again at each collection) go back to the system (`xb_platform_pages_decommit`): the
+  highest chunks' first, a whole page of the system at a time (blocks of a page all free or spare: one block on 4 KB and
+  16 KB pages, two on 64 KB ones). They leave the blocks in use, and a chunk left with none in use is unmapped. The free
+  units of large objects beyond 1 MB and the young budget go back likewise (runs of whole pages), and a chunk of large
+  objects with none in use is unmapped. So the process's memory comes down after a peak: the program keeps about the
+  live data and the next young budget, whatever it held before. Since collections follow allocation, a program that
+  stops allocating after a peak (waiting for input, a connection, a timer) would keep it: the trimmer, a thread of the
+  collector's (256 KB of stack, unattached) started when a collection first leaves a heap of 32 MB or more, runs a full
+  collection once the heap has seen none for 5 seconds, and once more only after the program's next collection; its
+  delay doubles after a trim that gave back less than a quarter of the heap (up to 320 seconds) and comes back to 5
+  seconds after one that gave back more, so an idle program whose heap is live is not collected over and over
+  (`xb_gc_trim_end` stops it as the program ends). A 1.6 GB peak dropped by a program that then only waits goes back to
+  the system within about 5 seconds (resident memory 1645 MB to 8 MB), with no `__GcCollect()`.
 - Allocation: every thread fills a hole, a run of free lines, by bumping a cursor, without locking (and takes the slots
   of a size class from a block of its own); when the object
   does not fit, it takes the block's next hole, then a recyclable block (free lines among live ones), then a free

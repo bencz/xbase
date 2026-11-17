@@ -79,5 +79,6 @@ int main(int argc, char **argv) {
   xb_thread thread;
   if (xb_thread_start(&thread, XB_PROGRAM_STACK_SIZE, run_program, &p)) xb_thread_join(thread);
   else run_program(&p); /* on this thread, with the stack the system gave it */
+  xb_gc_trim_end();
   return xb_exit_code();
 }

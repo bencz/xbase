@@ -87,6 +87,8 @@ void  xb_gc_unregister(xb_ctx *ctx);
 void  xb_gc_raise_all(const xb_ctx *except, uint32_t bits);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */
 size_t xb_gc_heap_bytes(void);
+/* The program ends: the trimmer (gc.c, Memory given back) stops, waited for. */
+void xb_gc_trim_end(void);
 /* Whether the heap's books agree (tests, after a collection): every free block in use listed as free, no block given
  * back or never handed out among those in use, the counts of spare blocks right. */
 int    xb_gc_consistent(void);             /* the heap's memory the system has given it now (blocks in use, large) */
