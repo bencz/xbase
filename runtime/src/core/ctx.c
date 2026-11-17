@@ -10,9 +10,26 @@
 
 /* The environment a program starts with: Clipper's SET values (SET DECIMALS is the thread context's), no ErrorBlock()
  * until ErrorSys() sets one (xb_program_run), work area 1 current. */
-static xb_env *env_new(void) {
-  xb_env *env = calloc(1, sizeof *env);
+/* The thread's spare environment, or a new one (zeroed): its fields are the caller's to set, but its date format's
+ * buffer (dateOwn, dateCap). */
+static xb_env *env_take(xb_ctx *ctx) {
+  xb_env *env = ctx ? ctx->spareEnv : NULL;
+  if (env) {
+    ctx->spareEnv = NULL;
+    return env;
+  }
+  env = calloc(1, sizeof *env);
   if (!env) xb_gc_fatal("out of memory");
+  return env;
+}
+
+static xb_env *env_new(xb_ctx *ctx) {
+  xb_env *env = env_take(ctx);
+  char *fmt = env->dateOwn;
+  size_t cap = env->dateCap;
+  memset(env, 0, sizeof *env);
+  env->dateOwn = fmt;
+  env->dateCap = cap;
   xb_set_nil(&env->error_block);
   xb_set_nil(&env->language);
   env->epoch = 1900;
@@ -20,11 +37,18 @@ static xb_env *env_new(void) {
   return env;
 }
 
-static void env_free(xb_env *env) {
-  free(env->memvars);
-  free(env->privates);
-  free(env->date_format);
-  free(env->areas);
+static void env_free(xb_ctx *ctx, xb_env *env) {
+  if (env->memvars) free(env->memvars); /* most environments never had these */
+  if (env->privates) free(env->privates);
+  if (env->areas) free(env->areas);
+  env->memvars = NULL;
+  env->privates = NULL;
+  env->areas = NULL;
+  if (ctx && !ctx->spareEnv) {
+    ctx->spareEnv = env;
+    return;
+  }
+  free(env->dateOwn);
   free(env);
 }
 
@@ -87,14 +111,141 @@ void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
 }
 
 void xb_env_enter(xb_ctx *ctx, const xb_item *snapshot) {
-  xb_env *env = env_new();
+  xb_env *env = env_new(ctx);
   env->outer = ctx->env;
   env->outerDecimals = ctx->set_decimals;
   ctx->env = env;
   xb_env_restore(ctx, snapshot);
 }
 
+xb_env *xb_env_inherit(xb_ctx *ctx) {
+  xb_env *from = ctx->env, *env = env_take(ctx);
+  char *fmt = env->dateOwn;
+  size_t cap = env->dateCap;
+  *env = *from; /* the SET values, ErrorBlock(), the language, the code page, the default driver; the rest below */
+  env->dateOwn = fmt;
+  env->dateCap = cap;
+  env->memvars = NULL;
+  env->memvarCap = 0;
+  env->privates = NULL;
+  env->privateLen = env->privateCap = 0;
+  env->file_error = 0;
+  env->areas = NULL;
+  env->areaCap = 0;
+  env->areaCurrent = 1;
+  env->netErr = 0;
+  env->parkedTask = NULL;
+  env->parkedPrev = env->parkedNext = NULL;
+  xb_memvar_inherit(env, from);
+  env->outer = from;
+  env->outerDecimals = ctx->set_decimals;
+  ctx->env = env;
+  return env;
+}
+
+/* A borrowed date format becomes the environment's own: it outlives the one it was borrowed from. */
+static void own_date_format(xb_ctx *ctx) {
+  if (ctx->env->date_format != ctx->env->dateOwn)
+    xb_ctx_set_date_format(ctx, ctx->env->date_format, strlen(ctx->env->date_format));
+}
+
+/* The parked environments (a list under its lock), and those whose tasks died, to close (`dead`, the same lock;
+ * `deaths` tells a thread there are some without the lock). */
+static xb_mutex parkedLock;
+static xb_once_flag parkedMade = XB_ONCE_INIT;
+static xb_env *parked, *dead;
+static uint32_t deaths;
+
+static void make_parked(void) {
+  if (!xb_mutex_init(&parkedLock)) xb_gc_fatal("cannot create the environments' lock");
+}
+
+static void unlink_parked(xb_env *env) {
+  if (env->parkedPrev) env->parkedPrev->parkedNext = env->parkedNext;
+  else parked = env->parkedNext;
+  if (env->parkedNext) env->parkedNext->parkedPrev = env->parkedPrev;
+  env->parkedPrev = env->parkedNext = NULL;
+}
+
+void xb_env_park(xb_ctx *ctx, xb_env *env, void *task) {
+  xb_once(&parkedMade, make_parked);
+  own_date_format(ctx);
+  env->parkedDecimals = ctx->set_decimals;
+  ctx->env = env->outer;
+  ctx->set_decimals = env->outerDecimals;
+  env->outer = NULL;
+  env->parkedTask = task;
+  xb_mutex_lock(&parkedLock); /* no safepoint until it is released: no collection meanwhile */
+  env->parkedPrev = NULL;
+  env->parkedNext = parked;
+  if (parked) parked->parkedPrev = env;
+  parked = env;
+  xb_mutex_unlock(&parkedLock);
+}
+
+void xb_env_unpark(xb_ctx *ctx, xb_env *env) {
+  xb_mutex_lock(&parkedLock);
+  unlink_parked(env);
+  xb_mutex_unlock(&parkedLock);
+  env->parkedTask = NULL;
+  env->outer = ctx->env;
+  env->outerDecimals = ctx->set_decimals;
+  ctx->env = env;
+  ctx->set_decimals = env->parkedDecimals;
+}
+
+void xb_env_parked_each(void (*fn)(xb_env *env)) {
+  for (xb_env *env = parked; env; env = env->parkedNext) fn(env);
+  for (xb_env *env = dead; env; env = env->parkedNext) fn(env);
+}
+
+void xb_env_parked_settle(void *(*live)(void *obj)) {
+  for (xb_env *env = parked, *next; env; env = next) {
+    next = env->parkedNext;
+    env->parkedTask = live(env->parkedTask);
+    if (env->parkedTask) continue;
+    unlink_parked(env);
+    env->parkedNext = dead;
+    if (dead) dead->parkedPrev = env;
+    dead = env;
+    xb_atomic_store32(&deaths, 1, XB_RELEASE);
+  }
+}
+
+/* Closes the environments of `list`, one at a time `ctx`'s (its work areas closed as a flow's at its end). */
+static void close_parked(xb_ctx *ctx, int all) {
+  if (!all && !xb_atomic_load32(&deaths, XB_ACQUIRE)) return;
+  xb_once(&parkedMade, make_parked);
+  for (;;) {
+    xb_mutex_lock(&parkedLock);
+    xb_env *env = dead ? dead : all ? parked : NULL;
+    if (env == dead && env) {
+      dead = env->parkedNext;
+      if (dead) dead->parkedPrev = NULL;
+      env->parkedNext = NULL;
+    } else if (env) {
+      unlink_parked(env);
+    }
+    if (!env) xb_atomic_store32(&deaths, 0, XB_RELAXED);
+    xb_mutex_unlock(&parkedLock);
+    if (!env) return;
+    env->parkedTask = NULL;
+    env->outer = ctx->env;
+    env->outerDecimals = ctx->set_decimals;
+    ctx->env = env;
+    ctx->set_decimals = env->parkedDecimals;
+    xb_env_leave(ctx);
+  }
+}
+
+void xb_env_reap(xb_ctx *ctx) { close_parked(ctx, 0); }
+
+void xb_env_reap_all(xb_ctx *ctx) { close_parked(ctx, 1); }
+
 void xb_env_close_areas(xb_ctx *ctx) {
+  uint32_t open = 0;
+  for (uint32_t n = 0; n < ctx->env->areaCap && !open; ++n) open = ctx->env->areas[n] != NULL;
+  if (!open) return;
   uint32_t requests = xb_pending_get(ctx) & XB_PENDING_UNWIND;
   xb_item value = ctx->break_value;
   xb_gc_root_push(ctx, &value);
@@ -111,7 +262,7 @@ void xb_env_leave(xb_ctx *ctx) {
   xb_env_close_areas(ctx);
   ctx->env = env->outer;
   ctx->set_decimals = env->outerDecimals;
-  env_free(env);
+  env_free(ctx, env);
 }
 
 /* The monotonic clock when the first context was made, as the program started: ElapsedMs() counts from it. */
@@ -128,7 +279,7 @@ xb_ctx *xb_ctx_new(void) {
   xb_shared_init();
   xb_ctx *ctx = calloc(1, sizeof *ctx);
   if (!ctx) xb_gc_fatal("out of memory");
-  ctx->env = env_new();
+  ctx->env = env_new(NULL);
   ctx->set_decimals = 2;
   xb_ctx_set_date_format(ctx, "mm/dd/yy", 8);
   xb_set_nil(&ctx->break_value);
@@ -141,7 +292,8 @@ void xb_ctx_free(xb_ctx *ctx) {
   if (!ctx) return;
   xb_gc_unregister(ctx);
   free(ctx->roots);
-  env_free(ctx->env);
+  env_free(NULL, ctx->env);
+  if (ctx->spareEnv) env_free(NULL, ctx->spareEnv);
   free(ctx);
 }
 
@@ -171,12 +323,17 @@ int32_t xb_exit_code(void) { return (int32_t)xb_atomic_load32((uint32_t *)&exitC
 void xb_exit_code_set(int32_t code) { xb_atomic_store32((uint32_t *)&exitCode, (uint32_t)code, XB_RELAXED); }
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len) {
-  char *fmt = malloc(len + 1);
-  if (!fmt) xb_gc_fatal("out of memory");
-  memcpy(fmt, s, len);
-  fmt[len] = '\0';
-  free(ctx->env->date_format);
-  ctx->env->date_format = fmt;
+  xb_env *env = ctx->env;
+  if (len + 1 > env->dateCap) { /* `s` is not in the buffer then: the buffer holds no text that long */
+    char *fmt = malloc(len + 1);
+    if (!fmt) xb_gc_fatal("out of memory");
+    free(env->dateOwn);
+    env->dateOwn = fmt;
+    env->dateCap = len + 1;
+  }
+  memmove(env->dateOwn, s, len);
+  env->dateOwn[len] = '\0';
+  env->date_format = env->dateOwn;
 }
 
 /* Slow paths of the pending test (xbrt.h). xb_pending never collects and never parks the thread for another's

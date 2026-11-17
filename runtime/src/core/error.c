@@ -4,18 +4,19 @@
 #include <string.h>
 
 /* The Error class: what describes a runtime error, in the order of an Error
- * object's items (ERR_* below). */
+ * object's items (ERR_* below). Hidden: where the tasks it failed raised it (the default handler's lines, a string;
+ * NIL before any). */
 static const xb_class_var error_vars[] = {
   {"ARGS", XB_VAR_ARRAY},           {"CANDEFAULT", XB_VAR_LOGICAL}, {"CANRETRY", XB_VAR_LOGICAL},
   {"CANSUBSTITUTE", XB_VAR_LOGICAL}, {"CARGO", XB_VAR_ANY},         {"DESCRIPTION", XB_VAR_STRING},
   {"FILENAME", XB_VAR_STRING},      {"GENCODE", XB_VAR_INT32},      {"OPERATION", XB_VAR_STRING},
   {"OSCODE", XB_VAR_INT32},         {"SEVERITY", XB_VAR_UINT16},    {"SUBCODE", XB_VAR_INT32},
-  {"SUBSYSTEM", XB_VAR_STRING},     {"TRIES", XB_VAR_UINT16},
+  {"SUBSYSTEM", XB_VAR_STRING},     {"TRIES", XB_VAR_UINT16},       {"(CALLS)", XB_VAR_ANY},
 };
 
 enum {
   ERR_ARGS, ERR_CANDEFAULT, ERR_CANRETRY, ERR_CANSUBSTITUTE, ERR_CARGO, ERR_DESCRIPTION, ERR_FILENAME, ERR_GENCODE,
-  ERR_OPERATION, ERR_OSCODE, ERR_SEVERITY, ERR_SUBCODE, ERR_SUBSYSTEM, ERR_TRIES, ERR_COUNT_
+  ERR_OPERATION, ERR_OSCODE, ERR_SEVERITY, ERR_SUBCODE, ERR_SUBSYSTEM, ERR_TRIES, ERR_CALLS, ERR_COUNT_
 };
 _Static_assert(XB_TABLE_SIZE(error_vars) == ERR_COUNT_, "one ERR_ index per Error variable");
 
@@ -125,6 +126,8 @@ static void make_error(xb_ctx *ctx, const failure *f, xb_item *r) {
 /* Raises the error (see xb_error_in). 0: fail; 1: substituted, or the
  * default action; 2: retry. */
 static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
+  ctx->async_fuse = NULL; /* an AWAIT's call that failed before its function ran: no request stays (xb_await_fuse) */
+  ctx->async_fuse_send = 0;
   const char *frame = f->frame;
   uint32_t flags = f->flags, argc = f->argc;
   const xb_item *args = f->args;
@@ -227,6 +230,54 @@ int xb_error_is(const xb_item *it) {
   return it->type == XB_T_OBJECT && ((const xb_object *)it->v.p)->cls == &error_class;
 }
 
+/* The lines (each one starts with a line feed) of `s`, `n` bytes. */
+static size_t lines_of(const char *s, size_t n) {
+  size_t k = 0;
+  for (size_t i = 0; i < n; ++i) k += s[i] == '\n';
+  return k;
+}
+
+void xb_error_add_calls(xb_ctx *ctx, const xb_item *error, const xb_item *calls) {
+  if (!xb_error_is(error) || calls->type != XB_T_STRING) return;
+  static const char more[] = "\n" XB_CALLS_NOT_SHOWN;
+  xb_item before, now;
+  xb_set_nil(&before);
+  xb_set_nil(&now);
+  xb_gc_root_push(ctx, &before);
+  xb_gc_root_push(ctx, &now);
+  for (;;) { /* another task that fails with the same error may add its lines meanwhile: then again, after them */
+    xb_object_get(error->v.p, ERR_CALLS, &before);
+    size_t had = before.type == XB_T_STRING ? before.v.s->len : 0;
+    size_t kept = had ? lines_of(before.v.s->data, had) : 0;
+    if (kept >= XB_CALLS_SHOWN) break; /* that many lines at most, the last one the note that more were left out */
+    size_t take = 0, lines = 0; /* the first lines of `calls` that fit before the note */
+    while (take < calls->v.s->len && kept + lines + 1 < XB_CALLS_SHOWN) {
+      size_t end = take + 1;
+      while (end < calls->v.s->len && calls->v.s->data[end] != '\n') ++end;
+      take = end;
+      ++lines;
+    }
+    int cut = take < calls->v.s->len;
+    xb_str *s = xb_str_alloc(had + take + (cut ? sizeof more - 1 : 0)); /* a safepoint: the items rooted */
+    if (had) memcpy(s->data, before.v.s->data, had);
+    memcpy(s->data + had, calls->v.s->data, take);
+    if (cut) memcpy(s->data + had + take, more, sizeof more - 1);
+    xb_set_str(&now, s);
+    if (xb_object_replace(error->v.p, ERR_CALLS, &before, &now)) break;
+  }
+  xb_gc_root_pop(ctx, 2);
+}
+
+/* __ErrorCalls( oError ): the lines of the calls where the tasks it failed raised it, "" for none. */
+void xbf___ERRORCALLS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  xb_item calls;
+  xb_set_nil(&calls);
+  if (argc && xb_error_is(&argv[0])) xb_object_get(argv[0].v.p, ERR_CALLS, &calls);
+  if (calls.type == XB_T_STRING) *ret = calls;
+  else xb_set_str(ret, xb_str_new("", 0));
+}
+
 int xb_error_raise(xb_ctx *ctx, xb_item *result, const xb_item *error) {
   const failure f = {NULL, NULL, NULL, 0, 0, "", NULL, 0, XB_ERR_SUBSTITUTE, 0, NULL, 0, error};
   return raise(ctx, &f, result) == 1;
@@ -265,6 +316,7 @@ void xbf___BREAK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 }
 
 int32_t xb_seq_catch(xb_ctx *ctx) {
+  xb_await_fused(ctx); /* an AWAIT's call that unwound to here asks nothing any more (xb_await_fuse) */
   if ((xb_pending_get(ctx) & XB_PENDING_UNWIND) != XB_PENDING_BREAK) return 0;
   xb_pending_clear(ctx, XB_PENDING_BREAK);
   return 1;

@@ -1,0 +1,41 @@
+
+-- values
+sync: O .T.          5          5
+no task:          7 s NIL A
+ended task: done
+suspended: .F.
+later:        505 .T.
+chain:        200
+loop:      45150
+-- expressions
+123 and noor big 15 99 2 abcdab -4 10  7  4 7 5 two 3 LO 2
+block:         50
+each:  10@1 20@2 30@3 a=1 b=2 z y x
+-- errors
+failed: .T. Argument error       1081
+first step fails: .T.
+caught: error Argument error +
+seq: recovered in-broken
+always: 5 out 3 always ran, task failed with unrecovered
+break value: got bv
+handler: H:Argument error outside handler gone
+error block set inside: own *
+return through finally:          2 body finally
+canceled: canceled 9026
+-- objects
+method:          5         11         11
+with object:        111
+procedure: U
+static: xx
+-- environment
+caller 4/1, function 7/5 then 7/5, caller after 4
+private: caller -> function, caller sees function
+own privates: mine/2 2 after: UU
+dates: 16/11/2026 16/11/2026 16/11/26 caller: mm/dd/yy
+tables:         21 .F.          1
+call stack: NAMES<MAIN, then NAMES<
+-- tasks
+when all: 101 2 202
+when any:        303
+continue with:        808
+result:        606 wait: .T.

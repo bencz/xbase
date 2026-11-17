@@ -354,7 +354,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     checkPending(unwind_);
     break;
   }
-  case Op::MvPrivate: b_.CreateCall(rtMvPrivate_, {fnCtx_, memvars_.at(i.message), fnMark_}); break;
+  case Op::MvPrivate: b_.CreateCall(rtMvPrivate_, {fnCtx_, memvars_.at(i.message), privateMark()}); break;
   case Op::MvPublic: b_.CreateCall(rtMvPublic_, {fnCtx_, memvars_.at(i.message)}); break;
   case Op::MvParam: // argument `index` of those received, NIL past them
     b_.CreateCall(rtMvParam_, {fnCtx_, memvars_.at(i.message), argItem(fn_->getArg(2), fn_->getArg(3), i.index)});
@@ -389,7 +389,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::MacroText: callItemOp(rtMacroText_, dest(i), {addr(ops[0])}); break;
   case Op::MacroPrivate:
   case Op::MacroPublic:
-    if (i.op == Op::MacroPrivate) b_.CreateCall(rtMacroPrivate_, {fnCtx_, callArg(addr(ops[0]), 0), fnMark_});
+    if (i.op == Op::MacroPrivate) b_.CreateCall(rtMacroPrivate_, {fnCtx_, callArg(addr(ops[0]), 0), privateMark()});
     else b_.CreateCall(rtMacroPublic_, {fnCtx_, callArg(addr(ops[0]), 0)});
     checkPending(unwind_);
     break;
@@ -622,6 +622,36 @@ void CodeGen::emit(const xir::Instruction &i) {
                                 i64_);
     break;
   case Op::GenDone: b_.CreateCall(rtGenDone_, {fnCtx_, rawAddress(*i.var)}); break;
+  case Op::AsyncNew: { // the task, after its first step ran here: a QUIT there goes on unwinding
+    Value *argv = operandGroup(i);
+    Value *d = dest(i);
+    setNil(d);
+    b_.CreateCall(rtAsyncNew_, {fnCtx_, d, functions_.at(i.blockFn), functions_.at(i.callee.function),
+                                ConstantInt::get(i32_, ops.size()), argv});
+    checkPending(unwind_);
+    break;
+  }
+  case Op::AsyncRestore: // the frame's slots after the task's own (parameter 0)
+    values_[&i] = b_.CreateSExt(
+        b_.CreateCall(rtAsyncRestore_, {fnCtx_, fnBase_, ConstantInt::get(i32_, plan_->savedSize())}), i64_);
+    break;
+  case Op::AwaitFuse: { // no entry: a send's method
+    Value *entry = i.callee.function ? static_cast<Value *>(functions_.at(i.callee.function))
+                                     : ConstantPointerNull::get(ptrTy_);
+    b_.CreateCall(rtAwaitFuse_, {fnCtx_, entry});
+    break;
+  }
+  case Op::AwaitFused:
+    values_[&i] = b_.CreateICmpNE(b_.CreateCall(rtAwaitFused_, {fnCtx_}), ConstantInt::get(i32_, 0));
+    break;
+  case Op::AwaitReady:
+    values_[&i] = b_.CreateICmpNE(b_.CreateCall(rtAwaitReady_, {addr(ops[0])}), ConstantInt::get(i32_, 0));
+    break;
+  case Op::AwaitValue:
+  case Op::AwaitWait:
+    callItemOp(i.op == Op::AwaitValue ? rtAwaitResult_ : rtAwaitWait_, dest(i), {addr(ops[0])});
+    checkPending(unwind_);
+    break;
   case Op::InlineEnter: { // a frame without slots, showing the inlined function, over the innermost one
     if (inlineFrames_.size() == inlineOpen_.size()) {
       IRBuilder<> entry(&fn_->getEntryBlock(), fn_->getEntryBlock().begin());
@@ -696,6 +726,13 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtGenYield_, {fnCtx_, rawAddress(*i.var), fnBase_, ConstantInt::get(i32_, plan_->savedSize()),
                                 ConstantInt::get(i32_, i.index), addr(ops[0])});
     storeLogical(fnRet_, b_.getInt1(true));
+    b_.CreateBr(fnExit_);
+    break;
+  case Op::AsyncSuspend: // the frame and the task awaited into the task; the step returns
+    shareOnEdge(i.parent, i.targets[0].block);
+    b_.CreateCall(rtAsyncSuspend_, {fnCtx_, fnBase_, ConstantInt::get(i32_, plan_->savedSize()),
+                                    ConstantInt::get(i32_, i.index), addr(ops[0])});
+    if (fnRet_) setNil(fnRet_);
     b_.CreateBr(fnExit_);
     break;
   }

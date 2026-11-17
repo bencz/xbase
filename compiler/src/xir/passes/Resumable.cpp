@@ -82,7 +82,7 @@ void spill(Function &f, Value *v, BasicBlock *def, size_t at) {
 bool makeResumable(Function &f) {
   bool yields = false;
   for (auto &b : f.blocks)
-    if (Instruction *t = b->terminator(); t && t->op == Op::GenYield) yields = true;
+    if (Instruction *t = b->terminator(); t && isSuspension(t->op)) yields = true;
   if (!yields) return false;
   CFG cfg(f);
   struct Crossing {

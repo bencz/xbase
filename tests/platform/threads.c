@@ -12,7 +12,7 @@ static uint32_t numbers[THREADS];
 
 static void count(void *arg) {
   size_t k = (size_t)arg;
-  numbers[k] = xb_thread_self();
+  numbers[k] = xb_flow_self();
   for (uint32_t i = 0; i < ROUNDS; ++i) {
     xb_mutex_lock(&lock);
     ++locked;
@@ -49,8 +49,8 @@ int main(void) {
   for (size_t k = 0; k < THREADS; ++k) xb_thread_join(threads[k]);
   CHECK(locked == THREADS * ROUNDS);
   CHECK(atomic == THREADS * ROUNDS);
-  uint32_t self = xb_thread_self();
-  CHECK(self != 0 && self == xb_thread_self());
+  uint32_t self = xb_flow_self();
+  CHECK(self != 0 && self == xb_flow_self());
   for (size_t k = 0; k < THREADS; ++k) {
     CHECK(numbers[k] != 0 && numbers[k] != self);
     for (size_t j = 0; j < k; ++j) CHECK(numbers[j] != numbers[k]);

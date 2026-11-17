@@ -155,7 +155,7 @@ StmtPtr Parser::parseStmtKind() {
   }
   switch (e->kind) {
   case ExprKind::Call: case ExprKind::Assign: case ExprKind::IncDec: case ExprKind::IIf: case ExprKind::List:
-  case ExprKind::Macro: case ExprKind::MacroCall: // a macro runs code
+  case ExprKind::Macro: case ExprKind::MacroCall: case ExprKind::Await: // a macro runs code; AWAIT waits
     break;
   case ExprKind::Send:
     if (static_cast<const SendExpr &>(*e).withArgs || static_cast<const SendExpr &>(*e).messageText) break;

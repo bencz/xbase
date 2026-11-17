@@ -42,6 +42,7 @@ constexpr unsigned kMaxRounds = 4;
 // and the cleanup passes tidy what the copy joined.
 constexpr Pass kFinal[] = {
     {"typed-continuations", onFunction<typedContinuations>},
+    {"peel-for-types", onFunction<peelForTypes>}, // after the checks, which narrow what the loops carry
     {"simplify-cfg", onFunction<simplifyCFG>},
     {"remove-dead-code", onFunction<removeDeadCode>},
 };

@@ -23,6 +23,7 @@ Value *Generator::genExpr(const Expr &e) {
     Value *a = genExpr(*u.operand);
     return u.op == UnOp::Plus ? a : b.unary(u.op, a);
   }
+  case ExprKind::Await: return genAwait(static_cast<const AwaitExpr &>(e));
   case ExprKind::Binary: {
     auto &bin = static_cast<const BinaryExpr &>(e);
     Value *l = genExpr(*bin.lhs);
@@ -143,6 +144,68 @@ Value *Generator::genCond(const Expr &e) {
     break;
   }
   return b.truth(genExpr(e));
+}
+
+// AWAIT in an ASYNC function: a value that is no task, or a task that ended, goes on at once (no suspension, no
+// allocation); otherwise the step ends (async.suspend, point k + 1) and the next one goes on after it, once the task
+// ended. Elsewhere (the start procedure) it waits. AWAIT of a call to one of the module's ASYNC functions, or of a
+// message (whose method may be one), asks it for its result itself when its first step does not suspend (await.fuse,
+// await.fused): then no task is made at all.
+Value *Generator::genAwait(const AwaitExpr &e) {
+  Builder &b = *cur_.b;
+  Value *v;
+  if (Function *entry = fusedCallee(*e.operand)) {
+    auto &c = static_cast<const CallExpr &>(*e.operand);
+    std::vector<Value *> args = genArgs(c.args);
+    Callee callee = calleeOf(c);
+    b.setLoc(c.loc);
+    b.awaitFuse(entry); // after the arguments: a call among them is no AWAIT's
+    v = b.call(std::move(callee), args);
+  } else if (e.operand->kind == ExprKind::Send && !static_cast<const SendExpr &>(*e.operand).messageText) {
+    auto &m = static_cast<const SendExpr &>(*e.operand); // the method found when it runs: it may be an ASYNC one
+    Value *object = genExpr(*m.object);
+    std::vector<Value *> args = genArgs(m.args);
+    b.setLoc(m.loc);
+    b.awaitFuse(nullptr);
+    v = sendFrom(m, nullptr, false, object, args);
+  } else {
+    return awaitTask(genExpr(*e.operand));
+  }
+  BasicBlock *done = cur_.fn->addBlock("await.done"), *task = cur_.fn->addBlock("await.task");
+  Value *result = done->addParam(Type::Item);
+  b.condBr(b.awaitFused(), done, task, {v}, {});
+  b.setBlock(task);
+  b.br(done, {awaitTask(v)});
+  b.setBlock(done);
+  return result;
+}
+
+// The callee's entry when `e` is a call of one of the module's ASYNC functions, else null.
+Function *Generator::fusedCallee(const Expr &e) {
+  if (e.kind != ExprKind::Call) return nullptr;
+  auto &c = static_cast<const CallExpr &>(e);
+  if (c.reference || c.callee || c.external) return nullptr;
+  auto it = funcs_.find(c.name);
+  return it != funcs_.end() && asyncEntries_.count(it->second) ? it->second : nullptr;
+}
+
+// AWAIT of the value `v`.
+Value *Generator::awaitTask(Value *v) {
+  Builder &b = *cur_.b;
+  if (!cur_.async) return b.awaitWait(v);
+  BasicBlock *suspend = cur_.fn->addBlock("await.suspend"), *resume = cur_.fn->addBlock("await.resume");
+  BasicBlock *ready = cur_.fn->addBlock("await.ready");
+  Value *awaited = ready->addParam(Type::Item);
+  b.condBr(b.awaitReady(v), ready, suspend, {v}, {});
+  b.setBlock(suspend);
+  std::vector<std::pair<Var *, Value *>> setAside = setHandlersAside();
+  cur_.resumes.push_back(resume);
+  b.asyncSuspend(frameVar(0), v, resume, (uint32_t)cur_.resumes.size());
+  b.setBlock(resume);
+  takeHandlersBack(setAside);
+  b.br(ready, {v});
+  b.setBlock(ready);
+  return b.awaitValue(awaited);
 }
 
 // The values of a list of arguments or elements, in order. `...`, the last, is

@@ -97,6 +97,9 @@ void ClassResolver::run(Module &m) {
       diag_.error(f->loc, "'" + f->name + "' of class " + cls->name + " is implemented twice");
       continue;
     }
+    if (decl->async != f->async)
+      diag_.error(f->loc, "'" + f->name + "' of class " + cls->name + (decl->async ? " is" : " is not") +
+                              " declared ASYNC: its implementation must match");
     f->name = memberName(*cls, *decl);
     f->isStatic = true;
     f->ofClass = cls;

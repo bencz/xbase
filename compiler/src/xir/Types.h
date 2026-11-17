@@ -47,6 +47,10 @@ enum class Substitution : uint8_t {
 // generator's resume function, which returns between steps.
 TypeSet returnTypes(const Function &f);
 
+// Whether a guard (subst.check with a mask) checks the value: it is typed by the mask, but until its check it may hold
+// anything, a heap object too, across a safepoint (a call's pending test may collect): its home stays a root.
+bool guarded(const Instruction &i);
+
 class TypeInfo {
 public:
   explicit TypeInfo(const CFG &cfg, Substitution s = Substitution::Any); // the function the CFG was built for

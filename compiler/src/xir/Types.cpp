@@ -208,7 +208,16 @@ bool checked(const Instruction &i) {
   return false;
 }
 
+// The types a guard (subst.check with a mask) lets on: every other use is past it.
+TypeSet guardMask(const Instruction &i) {
+  for (const Instruction *u : i.users())
+    if (u->op == Op::SubstCheck && u->imm != 0) return (TypeSet)u->imm;
+  return kAnyType;
+}
+
 } // namespace
+
+bool guarded(const Instruction &i) { return guardMask(i) != kAnyType; }
 
 TypeSet returnTypes(const Function &f) {
   CFG cfg(f);
@@ -216,7 +225,7 @@ TypeSet returnTypes(const Function &f) {
   TypeSet r = 0;
   for (BasicBlock *b : cfg.order())
     for (auto &i : b->insts) {
-      if (i->op == Op::GenYield) return kAnyType;
+      if (isSuspension(i->op)) return kAnyType;
       if (i->op == Op::Ret) r |= i->operands().empty() ? typeBit(XB_T_NIL) : types.of(i->operand(0));
     }
   return r;
@@ -227,7 +236,7 @@ bool TypeInfo::maySubstitute(const Instruction &i) const { return ownResult(i, *
 TypeSet TypeInfo::compute(const Instruction &i) const {
   OwnResult r = ownResult(i, *this);
   bool any = r.substitutable && substitution_ == Substitution::Any && !checked(i);
-  return r.types | (any ? kAnyType : 0);
+  return (r.types | (any ? kAnyType : 0)) & guardMask(i);
 }
 
 } // namespace xb::xir

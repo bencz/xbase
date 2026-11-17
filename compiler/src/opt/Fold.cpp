@@ -229,6 +229,9 @@ void Folder::fold(ExprPtr &e) {
     r = foldUnary(u);
     break;
   }
+  case ExprKind::Await:
+    fold(static_cast<AwaitExpr &>(*e).operand);
+    break;
   case ExprKind::Binary: {
     auto &b = static_cast<BinaryExpr &>(*e);
     fold(b.lhs);

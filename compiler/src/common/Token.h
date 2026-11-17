@@ -74,4 +74,21 @@ struct Token {
   uint16_t width = 0;        // display width of the integer part (0 = runtime default)
 };
 
+// Whether `t` is the operator AWAIT, given the two tokens after it (null past the statement): an operand starts right
+// after it (a name, a literal, an array or codeblock, a message to Self `::`, a macro `&` stuck to its name).
+// Otherwise AWAIT is a name: `AWAIT( ... )` calls Await(), as `YIELD( ... )` calls Yield(). The parser and the
+// preprocessor (where an expression ends) both follow it.
+inline bool isAwaitOperator(const Token &t, const Token *next, const Token *after) {
+  if (t.kind != Tok::Ident || t.upper != "AWAIT" || !next) return false;
+  switch (next->kind) {
+  case Tok::Ident: case Tok::Number: case Tok::String: case Tok::True: case Tok::False: case Tok::LBrace:
+  case Tok::DoubleColon:
+    return true;
+  case Tok::Amp:
+    return after && !after->spaceBefore;
+  default:
+    return false;
+  }
+}
+
 } // namespace xb

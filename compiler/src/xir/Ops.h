@@ -75,7 +75,7 @@ enum class Op : uint8_t {
   SeqSuspend,     // -> I64: in an unwind block, the requests to unwind, set aside (ALWAYS runs without them)
   SeqResume,      // I64, Item: those requests and the BREAK value back, unless ALWAYS made a request of its own
   SubstCheck,     // operation -> Bool: right after it, its result is not of the types it gives itself (an error's
-                  // block substituted it)
+                  // block substituted it); with a mask (`imm`), a guard: the value is not of those types
   SubstValue,     // operation -> Item: that result, at the start of the block the check leads to
   IntAdd,         // I64, I64 -> I64
   IntSub,         // I64, I64 -> I64
@@ -90,6 +90,15 @@ enum class Op : uint8_t {
   GenRestore,     // var: the enumerator (parameter 0) -> I64: its frame back from the enumerator; the state to resume
                   // in (0 at the start)
   GenDone,        // var: the generator ended: the enumerator has no more elements
+  AsyncNew,       // callee: an ASYNC function's resume function; args -> Item: its task, once its first step ran here
+  AsyncRestore,   // var: the task (parameter 0) -> I64: its frame back from the task (the arguments at the first step);
+                  // the point to resume at (0 at the start)
+  AwaitReady,     // Item -> Bool: AWAIT goes on at once (no task, or one that ended)
+  AwaitValue,     // Item -> Item: what AWAIT gives once the task ended: its result (its failure raised)
+  AwaitWait,      // Item -> Item: AWAIT outside an ASYNC function (the start procedure): waits, then as await.value
+  AwaitFuse,      // [callee]: an ASYNC function's entry (none: a send's method): right before AWAIT's call of it, asks
+                  // its first step for its result itself when it ends without suspending (no task made)
+  AwaitFused,     // -> Bool: right after that call: its value is that result (else a task), the request ended
   // A function's body inlined in another (passes/Inline.cpp) shows on the call stack as its own call would:
   // inline.enter makes a frame without slots (that of `blockFn`, its line the inlined code's) the innermost of the
   // context, inline.leave makes its caller's again. Between them, the inlined code's values live in the caller's frame.
@@ -101,6 +110,8 @@ enum class Op : uint8_t {
   CondBr,         // Bool; then(args), else(args)
   GenYield,       // var, index: Item; resume: the element, the frame saved in the enumerator; the function returns .T.,
                   // and state `index` goes on at the target
+  AsyncSuspend,   // var, index: Item; resume: the task awaited, the frame saved in the task; the step returns, and
+                  // point `index` goes on at the target once the awaited task ended
   Ret,            // [Item]
 };
 
@@ -143,5 +154,7 @@ struct OpInfo {
 const OpInfo &opInfo(Op op);
 inline const char *opName(Op op) { return opInfo(op).name; }
 inline bool isTerminator(Op op) { return (opInfo(op).effects & Terminator) != 0; }
+// A resumable function's step ends there; the next one goes on at its target (Resumable.cpp).
+inline bool isSuspension(Op op) { return op == Op::GenYield || op == Op::AsyncSuspend; }
 
 } // namespace xb::xir

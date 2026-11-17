@@ -79,6 +79,8 @@ private:
   StmtPtr parseTry();
   StmtPtr parseWithObject();
   StmtPtr parseUsing();
+  bool atAsyncStart(size_t at) const;
+  bool atAwait() const;
   bool aheadOperand() const;
   void parseSequenceParts(SequenceStmt &st, const char *recoverWord, const char *alwaysWord, const char *what,
                           SourceLoc openLoc);

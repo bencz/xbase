@@ -332,6 +332,35 @@ Instruction *Builder::genYield(Var *gen, Value *value, BasicBlock *resume, uint3
   return i;
 }
 
+Instruction *Builder::asyncNew(Function *entry, Function *resume, const std::vector<Value *> &args) {
+  Instruction *i = make(Op::AsyncNew, Type::Item);
+  for (Value *a : args) i->addOperand(a);
+  i->callee.function = resume;
+  i->blockFn = entry;
+  return i;
+}
+Instruction *Builder::asyncRestore(Var *task) {
+  Instruction *i = make(Op::AsyncRestore, Type::I64);
+  i->var = task;
+  return i;
+}
+Instruction *Builder::awaitReady(Value *v) { return make(Op::AwaitReady, Type::Bool, {v}); }
+Instruction *Builder::awaitValue(Value *v) { return make(Op::AwaitValue, Type::Item, {v}); }
+Instruction *Builder::awaitWait(Value *v) { return make(Op::AwaitWait, Type::Item, {v}); }
+Instruction *Builder::awaitFuse(Function *entry) {
+  Instruction *i = make(Op::AwaitFuse, Type::Void);
+  i->callee.function = entry;
+  return i;
+}
+Instruction *Builder::awaitFused() { return make(Op::AwaitFused, Type::Bool); }
+Instruction *Builder::asyncSuspend(Var *task, Value *awaited, BasicBlock *resume, uint32_t point) {
+  Instruction *i = make(Op::AsyncSuspend, Type::Void, {awaited});
+  i->var = task;
+  i->index = point;
+  i->targets.push_back({resume, {}});
+  return i;
+}
+
 Instruction *Builder::ret(Value *v) {
   Instruction *i = make(Op::Ret, Type::Void);
   if (v) i->addOperand(v);

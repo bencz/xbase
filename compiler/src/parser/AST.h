@@ -34,6 +34,7 @@ enum class ExprKind : uint8_t {
   MacroCall,  // &name( args ): the function the text names
   MacroText,  // a string literal with `&name` in it: substituted when the code runs
   Field,      // alias->name, FIELD->name, (expr)->name: a field of a work area
+  Await,      // AWAIT expr: in an ASYNC function, the task's result once it ended (suspending meanwhile)
 };
 
 enum class BinOp : uint8_t {
@@ -124,6 +125,13 @@ struct UnaryExpr : Expr {
   UnOp op;
   ExprPtr operand;
   UnaryExpr(SourceLoc l, UnOp o, ExprPtr e) : Expr(ExprKind::Unary, l), op(o), operand(std::move(e)) {}
+};
+
+// AWAIT operand: in an ASYNC function, a task's result once it ended (the function suspends meanwhile); a value that
+// is no task is its own result. Elsewhere (the start procedure) it waits for the task.
+struct AwaitExpr : Expr {
+  ExprPtr operand;
+  AwaitExpr(SourceLoc l, ExprPtr e) : Expr(ExprKind::Await, l), operand(std::move(e)) {}
 };
 
 struct BinaryExpr : Expr {
@@ -437,6 +445,10 @@ struct FuncDecl {
   // A generator: its body has YIELD (set by the parser). Calling it returns an enumerator; the body runs step by step
   // as a resumable function whose first parameter, which Sema adds, is the enumerator.
   bool generator = false;
+  // ASYNC: calling it returns a Task; the body runs as a resumable function whose first parameter, which Sema adds, is
+  // the task, a step at a time: its first at once, the next ones when what an AWAIT waits for ended.
+  bool async = false;
+  bool resumable() const { return generator || async; }
   // Classes. A method's implementation (METHOD, ACCESS or ASSIGN name ... CLASS cls) names its class and kind; Sema
   // makes it a STATIC function "CLS:NAME" whose first parameter is SELF.
   enum class Member : uint8_t { None, Method, Access, Assign };
@@ -464,6 +476,7 @@ struct ClassMethodDecl {
   bool variadic = false;
   std::string op;                // OPERATOR: its message (XB_OPERATOR_*), else empty
   bool destructor = false;       // DESTRUCTOR: run when an object is unreachable, never a message
+  bool async = false;            // ASYNC METHOD: its implementation is ASYNC too
   ExprPtr inlineBody;            // INLINE expr, or null
   FuncDecl *impl = nullptr;      // set by Sema: the function that implements it
   std::string message() const {

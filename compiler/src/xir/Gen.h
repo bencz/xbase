@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace xb::xir {
@@ -26,7 +27,7 @@ private:
   Function *declare(const FuncDecl &f);
   void genFunction(const FuncDecl &f, Function *fn);
   void genBody(const FuncDecl &f, Function *fn, Function *byRef, const std::vector<uint32_t> &plain);
-  void genGenerator(const FuncDecl &f, Function *fn);
+  void genResumable(const FuncDecl &f, Function *fn);
   void genModuleInit(const xb::Module &ast);
   Function *genCodeblockFunction(const BlockExpr &b);
   Var *frameVar(uint32_t slot);
@@ -95,13 +96,19 @@ private:
   };
   struct Cleanup {                 // what a RETURN, EXIT or LOOP that leaves a sequence does first
     Value *oldBlock;               // the error block to put back (WITH), or null
-    Var *oldBlockVar;              // in a generator, where it is instead: a YIELD puts it back and takes it again
+    Var *oldBlockVar;              // in a resumable function, where it is instead: a step's end puts it back and the
+                                   // next step takes it again
     const Block *always;           // else the ALWAYS code to run
     BasicBlock *unwind;            // where that code unwinds: the sequence's own unwind block
     size_t loops;                  // the loops around the sequence (FnState::loops)
     size_t eachVars;               // the FOR EACH loops around it (FnState::eachVars)
   };
   Value *oldBlockOf(const Cleanup &c);
+  std::vector<std::pair<Var *, Value *>> setHandlersAside();
+  void takeHandlersBack(const std::vector<std::pair<Var *, Value *>> &setAside);
+  Value *genAwait(const AwaitExpr &e);
+  Value *awaitTask(Value *v);
+  Function *fusedCallee(const Expr &e);
   struct FnState {
     Function *fn = nullptr;
     std::unique_ptr<Builder> b;
@@ -113,7 +120,8 @@ private:
     std::unordered_map<uint32_t, Var *> paramLocals; // parameter slot -> the LOCAL standing for it
     int32_t classIndex = -1;       // a method's class (Module::classes), for its codeblocks too; -1 elsewhere
     bool generator = false;        // a generator's resume function: YIELD suspends, RETURN ends the enumeration
-    std::vector<BasicBlock *> resumes; // where each YIELD goes on (state k + 1)
+    bool async = false;            // an ASYNC function's resume function: AWAIT may suspend, RETURN gives the result
+    std::vector<BasicBlock *> resumes; // where each YIELD or suspending AWAIT goes on (state k + 1)
   };
   // The message of `m` (its getter, or with `assign` its setter) sent from the current function: from a method (or
   // its codeblocks), with its class. `text`: the value of a macro message's text, else null.
@@ -121,6 +129,7 @@ private:
   void declareClasses(const xb::Module &ast);
   std::unordered_map<const ClassDecl *, int32_t> classIndex_;
   FnState cur_;
+  std::unordered_set<const Function *> asyncEntries_; // the module's ASYNC functions (their entries)
 };
 
 } // namespace xb::xir

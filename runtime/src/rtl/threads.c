@@ -85,7 +85,7 @@ void xb_threads_end(xb_ctx *ctx) {
 }
 
 /* Threads: the result, whether it ended, the block and its arguments (an array, NIL once it ended), the thread's
- * xb_thread_self, and the snapshot of its creator's environment (xb_env_capture, NIL once it ended). */
+ * xb_flow_self, and the snapshot of its creator's environment (xb_env_capture, NIL once it ended). */
 
 enum { T_RESULT, T_DONE, T_WORK, T_ID, T_ENV, T_COUNT_ };
 static const xb_class_var thread_vars[] = {
@@ -252,13 +252,29 @@ xb_rwords xb_object_rwords(const xb_item *object, uint32_t k) {
 }
 
 int xb_object_lock(xb_ctx *ctx, const xb_item *object, uint32_t k) {
+  uint32_t self = xb_flow_self();
   for (uint32_t spin = 0; spin < LOCK_SPINS; ++spin) /* a holder's work is short: worth a look before sleeping */
     if ((spin == 0 || !xb_atomic_load32(xb_object_word(object, k), XB_RELAXED)) &&
-        xb_rwords_try(xb_object_rwords(object, k)))
+        xb_rwords_try(xb_object_rwords(object, k), self))
       return 1;
-  while (!xb_rwords_claim(xb_object_rwords(object, k)))
+  while (!xb_rwords_claim(xb_object_rwords(object, k), self)) {
+    if (xb_flow_outer(xb_atomic_load32(xb_object_word(object, k + 1), XB_RELAXED))) { /* waits for itself */
+      xb_error_described(ctx, NULL, EG_ARG, XB_CODE_MUTEX_OUTER, "Mutex held by a flow this one runs in",
+                         "MUTEX:LOCK", 0, 0, NULL);
+      return 0;
+    }
     if (!xb_wait_while(ctx, object, k, 2)) return 0;
+  }
   return 1;
+}
+
+void xb_object_lock_short(const xb_item *object, uint32_t k) {
+  uint32_t self = xb_thread_self();
+  for (uint32_t spin = 0; spin < LOCK_SPINS; ++spin)
+    if ((spin == 0 || !xb_atomic_load32(xb_object_word(object, k), XB_RELAXED)) &&
+        xb_rwords_try(xb_object_rwords(object, k), self))
+      return;
+  while (!xb_rwords_claim(xb_object_rwords(object, k), self)) xb_park_wait_short(xb_object_word(object, k), 2, -1);
 }
 
 static xb_rwords mutex_words(const xb_item *m) { return xb_object_rwords(m, M_STATE); }
@@ -267,24 +283,24 @@ static int mutex_take(xb_ctx *ctx, const xb_item *m) { return xb_object_lock(ctx
 
 static int is_mutex(const xb_item *it);
 
-/* oMutex:Lock(): takes the lock, waiting while another thread holds it (or until a QUIT ends the wait). */
+/* oMutex:Lock(): takes the lock, waiting while another flow holds it (or until a QUIT ends the wait). */
 static void mutex_lock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   xb_set_nil(r);
   mutex_take(ctx, &argv[0]);
 }
 
-/* oMutex:TryLock(): takes the lock when no other thread holds it: whether it did. */
+/* oMutex:TryLock(): takes the lock when no other flow holds it: whether it did. */
 static void mutex_try_lock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   XB_UNUSED(argc);
-  xb_set_logical(r, xb_rwords_try(mutex_words(&argv[0])));
+  xb_set_logical(r, xb_rwords_try(mutex_words(&argv[0]), xb_flow_self()));
 }
 
-/* oMutex:Unlock(): releases the lock once; an error when this thread does not hold it. */
+/* oMutex:Unlock(): releases the lock once; an error when this flow does not hold it. */
 static void mutex_unlock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   xb_set_nil(r);
-  if (!xb_rwords_release(mutex_words(&argv[0])))
+  if (!xb_rwords_release(mutex_words(&argv[0]), xb_flow_self()))
     xb_error_described(ctx, NULL, EG_ARG, XB_CODE_MUTEX_UNLOCK, "Mutex not held", "MUTEX:UNLOCK", 0, argc, argv);
 }
 
@@ -294,14 +310,14 @@ enum { H_MUTEX, H_COUNT_ };
 static const xb_class_var holder_vars[] = {{"(MUTEX)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(holder_vars) == H_COUNT_, "one H_ index per holder variable");
 
-/* oHolder:Dispose(): the mutex released once, by the thread holding it; nothing after, nor from another thread. */
+/* oHolder:Dispose(): the mutex released once, by the flow holding it; nothing after, nor from another flow. */
 static void holder_dispose(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   XB_UNUSED(argc);
   xb_set_nil(r);
   xb_item m, nil;
   xb_object_get(argv[0].v.p, H_MUTEX, &m);
-  if (!is_mutex(&m) || !xb_rwords_release(mutex_words(&m))) return; /* released already, or not this thread's */
+  if (!is_mutex(&m) || !xb_rwords_release(mutex_words(&m), xb_flow_self())) return; /* released, or another's */
   xb_set_nil(&nil);
   xb_object_put(argv[0].v.p, H_MUTEX, &nil);
 }
@@ -322,7 +338,7 @@ static void mutex_hold(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   if (!mutex_take(ctx, &argv[0])) {
     xb_set_nil(r);
   } else if (xb_pending_get(ctx) & XB_PENDING_UNWIND) { /* a QUIT came meanwhile: no USING will store the holder */
-    xb_rwords_release(mutex_words(&argv[0]));
+    xb_rwords_release(mutex_words(&argv[0]), xb_flow_self());
     xb_set_nil(r);
   }
 }
@@ -384,7 +400,7 @@ static int condition_join(const xb_item *c) {
   return 0;
 }
 
-/* oCondition:Wait( oMutex, [nMs] ): releases oMutex, which this thread holds (however many times it took it), waits
+/* oCondition:Wait( oMutex, [nMs] ): releases oMutex, which this flow holds (however many times it took it), waits
  * for a Notify() (or NotifyAll()) or nMs milliseconds, takes oMutex back as it was: whether it was notified. A QUIT
  * ends the wait without the mutex. A thread that finds no place among the waiters waits for one with the mutex
  * released, then returns .F. as if it had timed out: its caller tests its condition again. */
@@ -392,7 +408,7 @@ static void condition_wait(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv
   int64_t deadline;
   xb_set_nil(r);
   if (argc < 2 || !is_mutex(&argv[1]) ||
-      xb_atomic_load32(xb_object_word(&argv[1], M_OWNER), XB_RELAXED) != xb_thread_self()) {
+      xb_atomic_load32(xb_object_word(&argv[1], M_OWNER), XB_RELAXED) != xb_flow_self()) {
     xb_error_described(ctx, NULL, EG_ARG, XB_CODE_CONDITION, "Mutex not held", "CONDITION:WAIT", 0, argc, argv);
     return;
   }
@@ -400,7 +416,7 @@ static void condition_wait(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv
   int joined = condition_join(&argv[0]); /* before the mutex goes: a Notify() after it finds this waiter */
   uint32_t depth = *xb_object_word(&argv[1], M_DEPTH);
   *xb_object_word(&argv[1], M_DEPTH) = 1;
-  xb_rwords_release(mutex_words(&argv[1]));
+  xb_rwords_release(mutex_words(&argv[1]), xb_flow_self());
   int notified = 0, ended = XB_WAIT_CHANGED;
   if (!joined) {
     while (ended == XB_WAIT_CHANGED) {

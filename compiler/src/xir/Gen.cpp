@@ -83,6 +83,7 @@ Function *Generator::declare(const FuncDecl &f) {
   case FuncDecl::Startup::Exit: mod_->exitProcs.push_back(fn); break;
   }
   fn->startup = f.startup != FuncDecl::Startup::None;
+  if (f.async) asyncEntries_.insert(fn);
   return fn;
 }
 
@@ -95,8 +96,8 @@ Function *Generator::declare(const FuncDecl &f) {
 // as received, to the other body (NAME.byref), which reaches the parameters
 // through their references as written.
 void Generator::genFunction(const FuncDecl &f, Function *fn) {
-  if (f.generator) {
-    genGenerator(f, fn);
+  if (f.resumable()) {
+    genResumable(f, fn);
     return;
   }
   std::vector<uint32_t> plain;
@@ -122,10 +123,15 @@ void Generator::genFunction(const FuncDecl &f, Function *fn) {
 // after the YIELD the state names; YIELD saves the frame and returns .T., the
 // end and RETURN end the enumeration and return .F. (makeResumable keeps the
 // values a YIELD would lose in the frame).
-void Generator::genGenerator(const FuncDecl &f, Function *fn) {
+// An ASYNC function likewise: the function itself makes its task and runs the
+// first step at once (async.new), the resume function with the task as
+// parameter 0; it starts with async.restore, an AWAIT that suspends saves the
+// frame and returns (async.suspend), and RETURN gives the task's result.
+void Generator::genResumable(const FuncDecl &f, Function *fn) {
   mod_->functions.push_back(std::make_unique<Function>(Function::Kind::Program, f.name + ".resume"));
   Function *resume = mod_->functions.back().get();
   resume->internal = true;
+  resume->ownsPrivates = f.async;
   genBody(f, resume, nullptr, {});
   makeResumable(*resume);
 
@@ -133,7 +139,7 @@ void Generator::genGenerator(const FuncDecl &f, Function *fn) {
   cur_.fn = fn;
   cur_.b = std::make_unique<Builder>(fn);
   fn->stackName = f.name;
-  fn->hidden = runtimeLibrary_ && f.isStatic;
+  fn->hidden = (runtimeLibrary_ && f.isStatic) || f.async; // the call stack shows its resume function, running
   fn->numParams = (uint32_t)f.params.size() - 1;
   fn->method = f.ofClass != nullptr;
   Builder &b = *cur_.b;
@@ -145,7 +151,7 @@ void Generator::genGenerator(const FuncDecl &f, Function *fn) {
     p->param = true;
     args.push_back(b.load(p, Access::MaybeRef)); // the values: references are not kept
   }
-  b.ret(b.genNew(resume, args));
+  b.ret(f.async ? b.asyncNew(fn, resume, args) : b.genNew(resume, args));
 }
 
 // The frame holds the parameters, then the LOCALs; a shared one moves into a
@@ -159,12 +165,13 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   cur_.function = f.name;
   cur_.classIndex = f.ofClass ? classIndex_.at(f.ofClass) : -1;
   cur_.generator = f.generator;
+  cur_.async = f.async;
   fn->stackName = f.name;
   fn->hidden = runtimeLibrary_ && f.isStatic;
   fn->numParams = (uint32_t)f.params.size();
   fn->readsArgs = f.readsArgs;
   fn->readsParams = f.readsParams;
-  fn->method = f.ofClass != nullptr && !f.generator; // a resume function's arguments are its enumerator
+  fn->method = f.ofClass != nullptr && !f.resumable(); // a resume function's argument is its enumerator or task
   fn->callsPrivates = f.callsPrivates;
   for (uint32_t s = 0; s < f.numLocals; ++s) {
     Var *v = fn->addVar(Var::Kind::Frame, s, s < f.params.size() ? f.params[s].name : "");
@@ -193,7 +200,7 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
     b.ret(b.classNew(classIndex_.at(f.instantiates)));
     return;
   }
-  if (!f.generator) {
+  if (!f.resumable()) {
     genBlock(f.body);
     if (!b.terminated()) b.ret(nullptr);
     return;
@@ -202,13 +209,26 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   b.br(dispatch);
   b.setBlock(start);
   genBlock(f.body);
-  if (!b.terminated()) {
+  if (!b.terminated() && f.async) {
+    b.ret(nullptr);
+  } else if (!b.terminated()) {
     b.genDone(frameVar(0));
     b.ret(b.logical(false));
   }
   b.setBlock(dispatch);
-  Value *state = b.genRestore(frameVar(0));
+  Value *state = f.async ? b.asyncRestore(frameVar(0)) : b.genRestore(frameVar(0));
+  // Only the points a step can stop at: code nothing reaches (after RETURN: a copy of ALWAYS code, for one) loses its
+  // blocks, and its points with them.
+  std::unordered_set<const BasicBlock *> reached{start};
+  std::vector<const BasicBlock *> work{start};
+  while (!work.empty()) {
+    const BasicBlock *at = work.back();
+    work.pop_back();
+    for (size_t k = 0; k < at->numSuccessors(); ++k)
+      if (reached.insert(at->successor(k)).second) work.push_back(at->successor(k));
+  }
   for (size_t k = 0; k < cur_.resumes.size(); ++k) {
+    if (!reached.count(cur_.resumes[k])) continue;
     BasicBlock *next = fn->addBlock("gen.dispatch");
     b.condBr(b.intCmp(IntPred::Eq, state, b.i64((int64_t)k + 1)), cur_.resumes[k], next);
     b.setBlock(next);

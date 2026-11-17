@@ -39,12 +39,40 @@ void xb_gen_new(xb_ctx *ctx, xb_item *r, xb_func resume, uint32_t argc, const xb
   xb_gc_write_items(frame, 1, (size_t)argc + 1);
 }
 
+void xb_frame_store_slow(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots, uint32_t nslots) {
+  xb_object *o = holder->v.p;
+  if (o->vars[k].type != XB_T_ARRAY) { /* the first save: an allocation, rooted in the holder (a safepoint) */
+    xb_array *made = xb_array_alloc(nslots);
+    o = holder->v.p;
+    xb_item frame;
+    xb_set_array(&frame, made);
+    if (xb_is_shared(o)) xb_object_put(o, k, &frame);
+    else {
+      o->vars[k] = frame;
+      xb_gc_write(o);
+    }
+  }
+  xb_array *frame = o->vars[k].v.p;
+  /* Grown first: an allocation, a safepoint where the program's storage may become shared (publication,
+   * docs/concurrency.md), and the holder with it. */
+  if (frame->len < nslots) xb_array_resize_any(ctx, frame, nslots);
+  if (!xb_is_shared(o)) { /* its frame too (only it reaches the frame): in place, as items built in locals and then
+                            * copied would stall the copies' loads */
+    memcpy(frame->items + 1, slots + 1, (nslots - 1) * sizeof *slots);
+    xb_gc_write_items(frame, 1, nslots);
+    return;
+  }
+  for (uint32_t s = 1; s < nslots; ++s) xb_share(&slots[s]); /* before another thread can reach them */
+  xb_seq_lock(frame);
+  for (uint32_t s = 1; s < nslots; ++s) xb_seq_store(&frame->items[s], &slots[s]);
+  xb_gc_write_items(frame, 1, nslots);
+  xb_seq_unlock(frame);
+}
+
 int32_t xb_gen_restore(xb_ctx *ctx, const xb_item *gen, xb_item *slots, uint32_t nslots) {
   XB_UNUSED(ctx);
   xb_object *g = gen->v.p;
-  const xb_array *frame = g->vars[GEN_FRAME].v.p;
-  uint32_t n = nslots < frame->len ? nslots : (uint32_t)frame->len;
-  if (n > 1) memcpy(slots + 1, frame->items + 1, (n - 1) * sizeof *slots);
+  xb_frame_load(g->vars[GEN_FRAME].v.p, slots, nslots);
   if (!xb_is_shared(g)) { /* ended until the step yields; one that fails ends it (xb_gen_move_next) */
     int32_t state = (int32_t)g->vars[GEN_STATE].v.i; /* never claimed: only shared ones are, and they stay shared */
     xb_set_int(&g->vars[GEN_STATE], GEN_ENDED);
@@ -72,21 +100,14 @@ static int claim(xb_object *g) {
 
 void xb_gen_yield(xb_ctx *ctx, const xb_item *gen, const xb_item *slots, uint32_t nslots, uint32_t state,
                   const xb_item *value) {
+  xb_frame_store(ctx, gen, GEN_FRAME, slots, nslots);
   xb_object *g = gen->v.p;
-  xb_array *frame = g->vars[GEN_FRAME].v.p;
-  /* Its frame grown first: an allocation, a safepoint where the program's storage may become shared (publication,
-   * docs/concurrency.md), and the enumerator with it. */
-  if (frame->len < nslots) xb_array_resize_any(ctx, frame, nslots);
-  if (!xb_is_shared(g)) { /* its frame too (only it reaches the frame): in place, as items built in locals and then
-                            * copied would stall the copies' loads */
-    memcpy(frame->items + 1, slots + 1, (nslots - 1) * sizeof *slots);
-    xb_gc_write_items(frame, 1, nslots);
+  if (!xb_is_shared(g)) {
     g->vars[GEN_CURRENT] = *value;
     xb_set_int(&g->vars[GEN_STATE], state);
     xb_gc_write(g);
     return;
   }
-  for (uint32_t k = 1; k < nslots; ++k) xb_array_put(frame, k, &slots[k]); /* the slots' values shared first */
   xb_object_put(g, GEN_CURRENT, value);
   xb_item s;
   xb_set_int(&s, state);

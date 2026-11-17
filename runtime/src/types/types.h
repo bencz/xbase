@@ -188,6 +188,9 @@ static inline void xb_object_put(xb_object *o, uint32_t k, const xb_item *v) {
   o->vars[k] = *v;
   if (xb_gc_needs_record(state)) xb_gc_remember(o); /* xb_gc_write's */
 }
+/* Variable `k` takes `v` only while it still holds `expected` (the same item, both words): 1 when it did. Under the
+ * object's lock when it is shared (`v` shared first). */
+int        xb_object_replace(xb_object *o, uint32_t k, const xb_item *expected, const xb_item *v);
 void       xb_set_object(xb_item *it, xb_object *o);
 /* A message to an object of a compiled class (types/class.c); one it does not
  * answer is the class's error ("Message not found"). Returns 1. */
@@ -223,6 +226,31 @@ int        xb_gen_move_next(xb_ctx *ctx, const xb_item *gen);
 #define XB_GEN_CURRENT 0u
 static inline void xb_gen_current(const xb_item *gen, xb_item *dst) { xb_object_get(gen->v.p, XB_GEN_CURRENT, dst); }
 int        xb_gen_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);
+
+/* The frame of a resumable function (a generator's, an asynchronous function's) between its steps: an array whose
+ * items 1 .. are its slots (slot 0 is its holder, the step's argument). xb_frame_load copies them back into `slots`
+ * (as many as both have); xb_frame_store saves `slots` into the array of the holder's variable `k` (made at the first
+ * save, grown as needed: allocations), in place for a local holder, shared first for a shared one. One thread at a
+ * time runs a step. */
+static inline void xb_frame_load(const xb_array *frame, xb_item *slots, uint32_t nslots) {
+  uint32_t n = nslots < frame->len ? nslots : (uint32_t)frame->len;
+  if (n > 1) memcpy(slots + 1, frame->items + 1, (n - 1) * sizeof *slots); /* one thread at a time runs a step */
+}
+void       xb_frame_store_slow(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots, uint32_t nslots);
+static inline void xb_frame_store(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots,
+                                  uint32_t nslots) {
+  xb_object *o = holder->v.p;
+  if (o->vars[k].type == XB_T_ARRAY && !xb_is_shared(o)) { /* its frame too (only it reaches the frame): in place, as
+                                                            * items built in locals and then copied would stall */
+    xb_array *frame = o->vars[k].v.p;
+    if (frame->len >= nslots) {
+      memcpy(frame->items + 1, slots + 1, (nslots - 1) * sizeof *slots);
+      xb_gc_write_items(frame, 1, nslots);
+      return;
+    }
+  }
+  xb_frame_store_slow(ctx, holder, k, slots, nslots); /* the first save, a growth, or a shared holder */
+}
 /* What every value answers (ClassName), else the error of a message no
  * class has: BASE/1004, or BASE/1005 for an assignment. */
 void       xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv);

@@ -1,0 +1,10 @@
+
+count:         50
+free after: yes, yes
+taken by another while suspended: no, no
+free at the end: yes, yes
+failed: .T. free: yes, yes
+nested: held twice, held once free: yes, yes
+held outside: 9031 free: yes, yes
+class INIT: O
+joins itself: 9018

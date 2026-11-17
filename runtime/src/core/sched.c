@@ -7,12 +7,18 @@
  * from other threads, and those a full ring sheds (half of it), go to the pool's queue, under the pool's lock, which a
  * worker looks at first once every GLOBAL_FIRST tasks.
  *
- * A worker with nothing to run parks on a word of its own, listed as idle under the pool's lock, after it looked once
- * more for work (the count of queued tasks, read after its listing, against a submission that counts its task before it
- * looks for an idle worker: one of the two sees the other). A submission wakes an idle worker, or starts one, while
- * fewer than `target` are active (searching or running, neither parked nor away: BLOCKED or LONG). A worker running a
- * task that enters an operation that may block counts as inactive meanwhile: when work waits, another worker takes its
- * place (blocking handoff), up to WORKERS_MAX; a worker beyond the target that stays idle SURPLUS_IDLE_NS ends.
+ * A worker with nothing to run searches for SEARCH_NS (it spins: one at a time, and only while another runs a task),
+ * then parks on a word of its own, listed as idle under the pool's lock, after it looked once more for work (the count
+ * of queued tasks, read after its listing, against a submission that counts its task before it looks for an idle
+ * worker: one of the two sees the other). A submission wakes an idle worker, or starts one, while fewer than `target`
+ * are active (searching or running, neither parked nor away: BLOCKED or LONG) and none searches (the searcher finds
+ * the task; one that finds work wakes another for what is left, one that gives up looks at the count before it
+ * parks; a worker woken from its park wakes none: more wakes cost more than the work they find, and the monitor puts
+ * a worker beside one that runs long). A thief takes another worker's next task only once that worker's task has run
+ * STEAL_NEXT_NS: a task that ends soon runs the task it made ready itself (a continuation, a value handed over),
+ * without a thread switch. A worker running a task that enters an operation that
+ * may block counts as inactive meanwhile: when work waits, another worker takes its place (blocking handoff), up to
+ * WORKERS_MAX; a worker beyond the target that stays idle SURPLUS_IDLE_NS ends.
  *
  * A worker's `run` word says what it does: IDLE (no task), RUNNING one, BLOCKED in an operation that may block, or
  * LONG: running one longer than LONG_TASK_NS while work waits, seen by the monitor. The last two count as away (not
@@ -43,6 +49,10 @@
 #define SURPLUS_IDLE_NS ((int64_t)2000 * XB_NS_PER_MS)
 #define LONG_TASK_NS ((int64_t)20 * XB_NS_PER_MS)
 #define MONITOR_NS ((int64_t)10 * XB_NS_PER_MS)
+#define SEARCH_NS ((int64_t)50 * XB_NS_PER_US)
+#define STEAL_NEXT_NS ((int64_t)5 * XB_NS_PER_US)
+#define SEARCH_LOOK 64u /* looks for work between looks at the clock (and yields of the processor) */
+#define SEARCH_RETRY 16u /* looks between two searches of the queues, which found nothing that waits there */
 
 enum { RUN_IDLE, RUN_RUNNING, RUN_BLOCKED, RUN_LONG };
 
@@ -67,6 +77,7 @@ static uint32_t active;  /* workers searching or running, neither parked nor awa
 static uint32_t queued;  /* tasks in the queues */
 static uint32_t ended;   /* tasks ended (the monitor tells progress) */
 static uint32_t longCount; /* workers LONG */
+static uint32_t searching; /* workers searching for work before they park */
 static uint32_t target;  /* workers that run at once; 0 until the pool first starts */
 static uint32_t stopping;
 static unsigned requested;
@@ -186,8 +197,17 @@ static void *runq_get(worker *w) {
   }
 }
 
+/* Whether a thief may take `v`'s next task: `v` is away (BLOCKED, LONG), or its task has run STEAL_NEXT_NS. An idle
+ * `v` takes it in a moment. */
+static int next_stealable(worker *v) {
+  uint32_t run = xb_atomic_load32(&v->run, XB_ACQUIRE);
+  if (run == RUN_BLOCKED || run == RUN_LONG) return 1;
+  return run == RUN_RUNNING &&
+         xb_platform_monotonic_ns() - (int64_t)xb_atomic_load64(&v->runStart, XB_RELAXED) >= STEAL_NEXT_NS;
+}
+
 /* Half of victim `v`'s ring moved into thief `w`'s (empty), the last of them returned; or `v`'s next task, when its
- * ring is empty. */
+ * ring is empty and it may be taken. */
 static void *steal_from(worker *w, worker *v) {
   for (;;) {
     uint32_t h = xb_atomic_load32(&v->head, XB_ACQUIRE), tl = xb_atomic_load32(&v->tail, XB_ACQUIRE);
@@ -195,7 +215,8 @@ static void *steal_from(worker *w, worker *v) {
     n -= n / 2;
     if (!n) {
       void *t = xb_atomic_loadptr(&v->next, XB_ACQUIRE);
-      return t && xb_atomic_casptr(&v->next, &t, NULL, XB_ACQ_REL) ? t : NULL;
+      if (!t || !next_stealable(v)) return NULL;
+      return xb_atomic_casptr(&v->next, &t, NULL, XB_ACQ_REL) ? t : NULL;
     }
     if (n > RUNQ / 2) continue; /* the head and the tail read at different moments */
     uint32_t wt = w->tail;
@@ -337,6 +358,28 @@ static void hand_back(worker *w) {
   xb_mutex_unlock(&poolLock);
 }
 
+static void fill_place(void);
+
+/* The search of a worker that found nothing: SEARCH_NS more of looking, while it is the only searcher and another
+ * worker runs a task (work may come from it). The task found, or NULL. */
+static void *search(xb_ctx *ctx, worker *w) {
+  uint32_t none = 0;
+  if (xb_atomic_load32(&active, XB_ACQUIRE) < 2 || !xb_atomic_cas32(&searching, &none, 1, XB_SEQ_CST)) return NULL;
+  int64_t until = xb_platform_monotonic_ns() + SEARCH_NS;
+  void *t = NULL;
+  for (uint32_t k = 1; !t; ++k) {
+    if (xb_atomic_load32(&stopping, XB_ACQUIRE) || xb_pending_get(ctx)) break; /* a collection waits: park */
+    if (k % SEARCH_RETRY == 1 && xb_atomic_load32(&queued, XB_ACQUIRE) && (t = find_work(w)) != NULL) break;
+    if (k % SEARCH_LOOK == 0) {
+      if (xb_platform_monotonic_ns() >= until) break;
+      xb_thread_yield();
+    }
+  }
+  xb_atomic_store32(&searching, 0, XB_SEQ_CST);
+  if (t) fill_place(); /* what is left waits for another */
+  return t;
+}
+
 static void worker_body(xb_ctx *ctx, void *arg) {
   worker *w = arg;
   me = w;
@@ -346,6 +389,7 @@ static void worker_body(xb_ctx *ctx, void *arg) {
       break;
     }
     void *t = find_work(w);
+    if (!t) t = search(ctx, w);
     if (t) run_task(ctx, w, t);
     else if (!park(w)) break;
   }
@@ -376,6 +420,7 @@ void xb_sched_submit(xb_object *task, int next) {
     xb_mutex_unlock(&poolLock);
   }
   xb_atomic_fence(XB_SEQ_CST);
+  if (xb_atomic_load32(&searching, XB_SEQ_CST)) return; /* the searcher finds it, or sees it counted before it parks */
   if (xb_atomic_load32(&active, XB_SEQ_CST) < xb_atomic_load32(&target, XB_ACQUIRE)) wake_or_spawn();
   else if (xb_atomic_load32(&timerIdle, XB_SEQ_CST)) timers_wake(); /* every worker busy: the monitor looks */
 }

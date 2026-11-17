@@ -36,6 +36,7 @@
 
 #define XB_NS_PER_SEC INT64_C(1000000000)
 #define XB_NS_PER_MS INT64_C(1000000)
+#define XB_NS_PER_US INT64_C(1000)
 
 /* A mutex. */
 typedef struct xb_mutex_impl *xb_mutex;
@@ -69,8 +70,11 @@ void xb_rwlock_write_unlock(xb_rwlock *l);
 
 /* Runs fn(arg), which may block the calling thread (a file's I/O, a wait), so that a collection does not wait for it:
  * the runtime provides it (gc.c). fn allocates nothing and changes no reference; it may read and write objects the
- * thread keeps rooted (a buffer a read fills), which do not move meanwhile. Nested, it simply calls fn. */
+ * thread keeps rooted (a buffer a read fills), which do not move meanwhile. Nested, it simply calls fn. A worker of the
+ * scheduler that runs it counts as away meanwhile (another takes its place); xb_waiting_run is the same for a short
+ * wait (for a lock of the runtime's, held a moment), which keeps the worker's place. */
 void xb_blocking_run(void (*fn)(void *), void *arg);
+void xb_waiting_run(void (*fn)(void *), void *arg);
 
 /* fflush(stream) as a blocking operation (a full pipe holds it): the standard output before the standard error is
  * written, the program's output at its end. */

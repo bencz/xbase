@@ -53,6 +53,10 @@ bool removeDeadCode(Function &f);
 // (TypedContinuations.cpp).
 bool typedContinuations(Function &f);
 
+// Peels the first pass of a small innermost loop that carries a value whose type the first pass changes (a sum that
+// starts at the integer 0 and adds doubles): the loop proper then carries it with one type (PeelTypes.cpp).
+bool peelForTypes(Function &f);
+
 // A generator's values that live across a YIELD move into frame variables, which the enumerator saves between steps
 // (Resumable.cpp). Not an optimization: Gen runs it on every generator, and the other passes leave such functions'
 // variables in memory.

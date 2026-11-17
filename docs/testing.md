@@ -93,7 +93,10 @@ another), the collector (`gc`: strings and small arrays of many sizes replaced a
 heap's fragmentation; its memory is read with `/usr/bin/time`), and an order over a table (`index`: built, searched with
 SEEK, walked, kept up to date as records are appended; its files are deleted at the end), tasks (`tasks`: 200,000
 short tasks joined, a 50,000-link continuation chain, tasks waiting for tasks they start) and channels (`channels`:
-producer and consumer tasks over a bounded channel, then `TrySend`/`TryReceive` pairs). Each one times its own work
+producer and consumer tasks over a bounded channel, then `TrySend`/`TryReceive` pairs), asynchronous functions
+(`async`: a million calls awaited that complete at once, round trips between two of them over channels, ten thousand
+suspended at once; `async_pi`: the Basel sum over 32 of them awaiting CPU-bound tasks, every processor busy). Each one
+times its own work
 with `ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name>
 <milliseconds> ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`
 (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every program

@@ -71,6 +71,14 @@ public:
   Instruction *genRestore(Var *gen);
   Instruction *genDone(Var *gen);
   Instruction *genYield(Var *gen, Value *value, BasicBlock *resume, uint32_t state);
+  Instruction *asyncNew(Function *entry, Function *resume, const std::vector<Value *> &args);
+  Instruction *asyncRestore(Var *task);
+  Instruction *awaitReady(Value *v);
+  Instruction *awaitValue(Value *v);
+  Instruction *awaitWait(Value *v);
+  Instruction *awaitFuse(Function *entry);
+  Instruction *awaitFused();
+  Instruction *asyncSuspend(Var *task, Value *awaited, BasicBlock *resume, uint32_t point);
   Instruction *inlineEnter(Function *shown, const std::vector<Value *> &args = {});
   Instruction *inlineLeave();
   Instruction *seqWith(Value *handler);

@@ -149,9 +149,19 @@ bool Parser::atInlineIf() const {
 
 // FUNCTION or PROCEDURE, after STATIC, INIT or EXIT.
 bool Parser::atFuncStart() const {
-  if (atStmtKw("FUNCTION") || atStmtKw("PROCEDURE") || atClassStart() || atMemberStart()) return true;
+  if (atStmtKw("FUNCTION") || atStmtKw("PROCEDURE") || atClassStart() || atMemberStart() || atAsyncStart(0))
+    return true;
   bool qualified = atStmtKw("STATIC") || (at(Tok::Ident) && (isKw(cur(), "INIT") || isKw(cur(), "EXIT")));
-  return qualified && (isKw(ahead(), "FUNCTION") || isKw(ahead(), "PROCEDURE"));
+  return qualified &&
+         (isKw(ahead(), "FUNCTION") || isKw(ahead(), "PROCEDURE") || (atStmtKw("STATIC") && atAsyncStart(1)));
+}
+
+// ASYNC FUNCTION, ASYNC PROCEDURE or ASYNC METHOD, `at` tokens ahead.
+bool Parser::atAsyncStart(size_t at) const {
+  const Token &t = at ? ahead(at) : cur();
+  if (t.kind != Tok::Ident || !isKw(t, "ASYNC")) return false;
+  const Token &n = ahead(at + 1);
+  return isKw(n, "FUNCTION") || isKw(n, "PROCEDURE") || isKw(n, "METHOD");
 }
 
 // CLASS name, CREATE CLASS name, STATIC CLASS name or SCALAR CLASS name.
@@ -285,7 +295,12 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
     fn->startup = atKw("INIT") ? FuncDecl::Startup::Init : FuncDecl::Startup::Exit;
     fn->isStatic = true; // the runtime runs it; nothing calls it by name
     advance();
-  } else if (atMemberStart()) {
+  }
+  if (atAsyncStart(0)) {
+    fn->async = true;
+    advance(); // ASYNC
+  }
+  if (fn->startup == FuncDecl::Startup::None && !fn->isStatic && atMemberStart()) {
     fn->member = atKw("ACCESS") ? FuncDecl::Member::Access
                  : atKw("ASSIGN") ? FuncDecl::Member::Assign
                                   : FuncDecl::Member::Method; // METHOD, DESTRUCTOR
@@ -468,10 +483,13 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
       endOfStmt();
       continue;
     }
+    bool async = atAsyncStart(0) && isKw(ahead(), "METHOD") && ahead(2).kind == Tok::Ident;
+    if (async) advance(); // ASYNC METHOD
     bool method = atStmtKw("METHOD"), access = atStmtKw("ACCESS"), assign = atStmtKw("ASSIGN");
     if ((method || access || assign) && ahead().kind == Tok::Ident) {
       advance();
       ClassMethodDecl m;
+      m.async = async;
       m.loc = cur().loc;
       m.name = cur().upper;
       m.kind = method ? FuncDecl::Member::Method : access ? FuncDecl::Member::Access : FuncDecl::Member::Assign;
@@ -499,7 +517,10 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
         m.op = operatorMessage();
       }
       if (at(Tok::Ident) && cur().upper == "CONSTRUCTOR") advance();
-      if (at(Tok::Ident) && cur().upper == "INLINE") parseInline(m);
+      if (at(Tok::Ident) && cur().upper == "INLINE") {
+        if (m.async) diag_.error(cur().loc, "an INLINE method cannot be ASYNC: its expression cannot AWAIT");
+        parseInline(m);
+      }
       memberScope(m.flags, false, false);
       cls->methods.push_back(std::move(m));
       endOfStmt();

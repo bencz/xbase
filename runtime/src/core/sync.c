@@ -2,11 +2,40 @@
 
 #include <stdlib.h>
 
+static uint32_t lastNumber;
+static XB_THREAD_LOCAL uint32_t threadNumber;
+static XB_THREAD_LOCAL xb_flow *innermost;
+
+static uint32_t number_new(void) {
+  uint32_t n;
+  while ((n = xb_atomic_add32(&lastNumber, 1, XB_RELAXED) + 1) == 0) {} /* 0 is no owner */
+  return n;
+}
+
 uint32_t xb_thread_self(void) {
-  static uint32_t last;
-  static XB_THREAD_LOCAL uint32_t self;
-  if (!self) self = xb_atomic_add32(&last, 1, XB_RELAXED) + 1;
-  return self;
+  if (!threadNumber) threadNumber = number_new();
+  return threadNumber;
+}
+
+uint32_t xb_flow_self(void) {
+  if (!innermost) return xb_thread_self();
+  if (!innermost->number) innermost->number = number_new(); /* most flows take no lock: numbered when one does */
+  return innermost->number;
+}
+
+void xb_flow_enter(xb_flow *flow) {
+  flow->outer = innermost;
+  innermost = flow;
+}
+
+void xb_flow_leave(xb_flow *flow) { innermost = flow->outer; }
+
+int xb_flow_outer(uint32_t owner) {
+  if (!owner || !innermost) return 0; /* the thread's own flow runs inside none */
+  if (owner == threadNumber) return 1;
+  for (const xb_flow *f = innermost->outer; f; f = f->outer)
+    if (f->number == owner) return 1;
+  return 0;
 }
 
 /* The parking lot: a waiter queues in the bucket of its address, in arrival order, and sleeps on a condition of its
@@ -117,31 +146,36 @@ void xb_park_wait_blocking(const uint32_t *addr, uint32_t expected, int64_t ns) 
   xb_blocking_run(park, &a);
 }
 
-/* The holder's number is written only by that thread, so a thread that reads its own there holds the lock. */
-static void hold(xb_rwords w) {
-  xb_atomic_store32(w.owner, xb_thread_self(), XB_RELAXED);
+void xb_park_wait_short(const uint32_t *addr, uint32_t expected, int64_t ns) {
+  park_args a = {addr, expected, ns};
+  xb_waiting_run(park, &a);
+}
+
+/* The holder's number is written only by the holder, so a caller that reads its own there holds the lock. */
+static void hold(xb_rwords w, uint32_t self) {
+  xb_atomic_store32(w.owner, self, XB_RELAXED);
   *w.depth = 1;
 }
 
-int xb_rwords_try(xb_rwords w) {
-  if (xb_atomic_load32(w.owner, XB_RELAXED) == xb_thread_self()) {
+int xb_rwords_try(xb_rwords w, uint32_t self) {
+  if (xb_atomic_load32(w.owner, XB_RELAXED) == self) {
     ++*w.depth;
     return 1;
   }
   uint32_t free_state = 0;
   if (!xb_atomic_cas32(w.state, &free_state, 1, XB_ACQUIRE)) return 0;
-  hold(w);
+  hold(w, self);
   return 1;
 }
 
-int xb_rwords_claim(xb_rwords w) {
+int xb_rwords_claim(xb_rwords w, uint32_t self) {
   if (xb_atomic_xchg32(w.state, 2, XB_ACQUIRE) != 0) return 0;
-  hold(w);
+  hold(w, self);
   return 1;
 }
 
-int xb_rwords_release(xb_rwords w) {
-  if (xb_atomic_load32(w.owner, XB_RELAXED) != xb_thread_self()) return 0;
+int xb_rwords_release(xb_rwords w, uint32_t self) {
+  if (xb_atomic_load32(w.owner, XB_RELAXED) != self) return 0;
   if (--*w.depth) return 1;
   xb_atomic_store32(w.owner, 0, XB_RELAXED);
   if (xb_atomic_xchg32(w.state, 0, XB_RELEASE) == 2) xb_park_wake(w.state, 0);
@@ -152,12 +186,13 @@ static xb_rwords rlock_words(xb_rlock *l) { return (xb_rwords){&l->state, &l->ow
 
 void xb_rlock_lock(xb_rlock *l) {
   xb_rwords w = rlock_words(l);
-  if (xb_rwords_try(w)) return;
-  while (!xb_rwords_claim(w)) xb_park_wait_blocking(&l->state, 2, -1); /* its holder may wait for a collection */
+  uint32_t self = xb_thread_self();
+  if (xb_rwords_try(w, self)) return;
+  while (!xb_rwords_claim(w, self)) xb_park_wait_blocking(&l->state, 2, -1); /* its holder may wait for a collection */
 }
 
 void xb_rlock_unlock(xb_rlock *l) {
-  if (!xb_rwords_release(rlock_words(l))) abort(); /* only its holder releases it */
+  if (!xb_rwords_release(rlock_words(l), xb_thread_self())) abort(); /* only its holder releases it */
 }
 
 void xb_once(xb_once_flag *flag, void (*fn)(void)) {

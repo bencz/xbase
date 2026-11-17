@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 45u
+#define XB_ABI_VERSION 46u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -695,6 +695,29 @@ int32_t  xb_gen_restore(xb_ctx *ctx, const xb_item *gen, xb_item *slots, uint32_
 void     xb_gen_yield(xb_ctx *ctx, const xb_item *gen, const xb_item *slots, uint32_t nslots, uint32_t state,
                       const xb_item *value);
 void     xb_gen_done(xb_ctx *ctx, const xb_item *gen);
+
+/* [ABI] Asynchronous functions (rtl/tasks.c, docs/concurrency.md#asynchronous-functions). Calling one runs its
+ * first step at once, on the caller's thread (xb_async_new, from its entry `entry`: `resume`, the function's resume
+ * function, and its arguments, slots 1 .. argc of the resume function's frame); `*r` is its task: made when the step
+ * suspends, or made ended. The resume function, whose argument (frame slot 0) is the task, NIL in the first step,
+ * starts with xb_async_restore (its frame's other `nslots` - 1 slots: the arguments, or the frame saved; the point to
+ * resume at: 0 at the start). At an AWAIT of `*v`, xb_await_ready tells whether it goes on at once (no task, or one
+ * that ended); if not, the function saves its slots with xb_async_suspend (`point` goes on after that AWAIT, `awaited`
+ * the task) and returns: the task resumes once `awaited` ends, on a worker. xb_await_result gives the value (a task's
+ * result; a failure or a cancellation raised as Result raises them). RETURN returns the task's result. xb_await_wait
+ * is AWAIT outside an asynchronous function (the start procedure): it waits, then as xb_await_result.
+ * AWAIT of a call to an asynchronous function: xb_await_fuse(entry) right before the call (NULL `entry`: a send, whose
+ * compiled method is the entry) asks that function's first step, when it ends without suspending, for its result itself
+ * instead of a task (no task made); xb_await_fused right after the call tells whether `*r` is that result (1) or a task
+ * (0), and ends the request (an error ends it too). */
+void     xb_async_new(xb_ctx *ctx, xb_item *r, xb_func entry, xb_func resume, uint32_t argc, xb_item *argv);
+int32_t  xb_async_restore(xb_ctx *ctx, xb_item *slots, uint32_t nslots);
+void     xb_async_suspend(xb_ctx *ctx, const xb_item *slots, uint32_t nslots, uint32_t point, const xb_item *awaited);
+int32_t  xb_await_ready(const xb_item *v);
+void     xb_await_result(xb_ctx *ctx, xb_item *r, const xb_item *v);
+void     xb_await_wait(xb_ctx *ctx, xb_item *r, const xb_item *v);
+void     xb_await_fuse(xb_ctx *ctx, xb_func entry);
+int32_t  xb_await_fused(xb_ctx *ctx);
 
 /* The macro operator (macro/run.c): `text` holds an expression, compiled when
  * the code runs; it sees memory variables and functions by name, never the

@@ -286,6 +286,8 @@ private:
   llvm::FunctionCallee rtMvField_, rtFieldGet_, rtFieldSet_;
   llvm::FunctionCallee rtSendFrom_, rtClassInstance_, rtClassesRegister_;
   llvm::FunctionCallee rtGenNew_, rtGenRestore_, rtGenYield_, rtGenDone_;
+  llvm::FunctionCallee rtAsyncNew_, rtAsyncRestore_, rtAsyncSuspend_, rtAwaitReady_, rtAwaitResult_, rtAwaitWait_;
+  llvm::FunctionCallee rtAwaitFuse_, rtAwaitFused_;
   llvm::GlobalVariable *classTable_ = nullptr; // the module's xb_class_def array, or null
   void genClasses(const xir::Module &m);
   llvm::Constant *classDef(int32_t index);
@@ -330,6 +332,9 @@ private:
   std::unordered_map<llvm::Instruction *, llvm::Value *> callFrame_;
   std::unordered_map<const xir::Function *, llvm::Constant *> procs_; // procOf's, made once each
   llvm::Value *fnMark_ = nullptr; // the PRIVATE mark of an activation that may create PRIVATEs (xb_mv_mark), or null
+  // The mark a PRIVATE statement checks against: fnMark_, or 0 for a function whose environment's PRIVATEs are its own
+  // (xir::Function::ownsPrivates).
+  llvm::Value *privateMark() { return fnMark_ ? fnMark_ : llvm::ConstantInt::get(i32_, 0); }
   uint32_t fnParams_ = 0; // the function's parameters: the arguments past them are what `...` passes on
   const xir::Instruction *emitting_ = nullptr; // the instruction being lowered (checkPending)
   uint32_t fnSkip_ = 0;   // 1 in a method: its first argument (Self) is not one PCount() and PValue() count

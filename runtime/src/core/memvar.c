@@ -507,6 +507,19 @@ void xb_memvar_capture(xb_ctx *ctx, xb_item *r) {
   xb_gc_write(a);
 }
 
+void xb_memvar_inherit(xb_env *to, const xb_env *from) {
+  uint32_t cap = from->memvarCap;
+  while (cap && from->memvars[cap - 1].type != XB_T_CELL) --cap;
+  if (!cap) return;
+  to->memvars = malloc(cap * sizeof *to->memvars);
+  if (!to->memvars) xb_gc_fatal("out of memory");
+  for (uint32_t i = 0; i < cap; ++i) {
+    if (from->memvars[i].type == XB_T_CELL) to->memvars[i] = from->memvars[i];
+    else xb_set_nil(&to->memvars[i]);
+  }
+  to->memvarCap = cap;
+}
+
 void xb_memvar_restore(xb_ctx *ctx, const xb_item *pairs) {
   if (pairs->type != XB_T_ARRAY) return;
   size_t n = xb_array_length(pairs->v.p);

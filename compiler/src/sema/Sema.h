@@ -42,6 +42,7 @@ private:
   void createdMemvar(const LocalDecl &d);
   bool memvarCreated(const std::string &name) const;
   bool constantInit(const Expr &e, unsigned blockDepth) const;
+  bool mayStart(const FuncDecl &f) const;
 
   struct Binding {
     VarWhere where;              // Frame or Static

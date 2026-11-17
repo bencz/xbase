@@ -192,7 +192,7 @@ public:
   // Binary add or sub of 1 from ++, -- or the step of a FOR without STEP: an error is theirs (xb_op_inc, xb_op_dec).
   bool byOne = false;
   IntPred pred = IntPred::Eq;
-  double imm = 0.0;                   // NumDefaultDec
+  double imm = 0.0;                   // NumDefaultDec; SubstCheck: the types a guard expects (0: none)
   Var *var = nullptr;                 // Load, Store, Barrier, Each*, RefVar
   Access access = Access::Direct;     // Load, Store, Barrier
   Callee callee;                      // Call
@@ -204,7 +204,7 @@ public:
   // whether it is Super:message; ClassNew: the class.
   int32_t classIndex = -1;
   bool superSend = false;
-  Function *blockFn = nullptr;        // MakeBlock
+  Function *blockFn = nullptr;        // MakeBlock; AsyncNew: the entry it runs in (its own, inlined or not)
   std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
   std::vector<Target> targets;        // Br: one; CondBr: then, else (operand 0 is the condition)
 
@@ -288,6 +288,9 @@ public:
   bool method = false;            // a method: its first parameter is Self, which PCount() and PValue() skip
   bool byRefBody = false;         // the body versioned for references (NAME.byref), reached by call.forward
   bool usesRest = false;          // has an args.rest (`...`)
+  // An ASYNC function's resume function: the PRIVATEs it creates are its environment's (its own, from its call to its
+  // end: concurrency.md), which none of its steps ends.
+  bool ownsPrivates = false;
   // The types its result may hold (a TypeSet, Types.h): every type until the pass manager, having optimized it,
   // narrows them to what its RETURNs give (returnTypes).
   uint32_t returnTypes = ~0u;

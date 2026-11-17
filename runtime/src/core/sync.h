@@ -7,8 +7,22 @@
 
 #include <stdint.h>
 
-/* A number for the calling thread: never 0, and no other thread's while fewer than 2^32 threads have asked. */
+/* Owners of locks (xb_rwords): a number never 0, from one counter that skips 0 (2^32 numbers before one comes again).
+ * xb_thread_self is the calling thread's own, for the runtime's locks, which no code of the program's runs under.
+ * xb_flow_self is the flow's that runs on the thread, for the program's locks (a Mutex): the thread's own, or the
+ * innermost flow entered on it, a task's or an asynchronous function's step (xb_flow_enter, xb_flow_leave: a record on
+ * the C stack, `number` 0 until the flow first asks for it; a function's steps keep one number, so that a lock it holds
+ * goes with it across AWAIT, from worker to worker). xb_flow_outer tells whether `owner` is a flow the running one runs
+ * inside on this thread (the thread's, or one entered further out): a wait for a lock it holds would never end. */
+typedef struct xb_flow {
+  uint32_t number;
+  struct xb_flow *outer;
+} xb_flow;
 uint32_t xb_thread_self(void);
+uint32_t xb_flow_self(void);
+void xb_flow_enter(xb_flow *flow);
+void xb_flow_leave(xb_flow *flow);
+int  xb_flow_outer(uint32_t owner);
 
 /* Runs fn() once for the flag, whichever threads call it at once: the others wait until it has returned. fn never
  * calls xb_once with its own flag. A flag starts as XB_ONCE_INIT, statically. */
@@ -18,23 +32,23 @@ typedef struct xb_once_flag {
 #define XB_ONCE_INIT {0}
 void xb_once(xb_once_flag *flag, void (*fn)(void));
 
-/* A lock the thread holding it may take again, released when it has been released as many times as taken, over three
- * words: the state (0 free, 1 held, 2 held and maybe waited for), the holder's xb_thread_self (0: none), how many times
- * it took the lock (the holder's alone). xb_rlock keeps them together; a Mutex object keeps them in its variables
- * (rtl/threads.c), which waits of its own read again between waits. xb_rwords_try takes the lock when the caller holds
- * it already or finds it free: 1; 0 when another thread holds it. xb_rwords_claim, after a failed try, marks the lock
- * waited for and takes it if it was free meanwhile: 1; 0 when the caller must wait while the state is 2 (on its
- * address) and claim again. xb_rwords_release releases it once (the next waiter woken when it is free): 0 when the
- * caller does not hold it. */
+/* A lock its holder may take again, released when it has been released as many times as taken, over three words: the
+ * state (0 free, 1 held, 2 held and maybe waited for), the holder's number (`self`: xb_thread_self or xb_flow_self;
+ * 0: none), how many times it took the lock (the holder's alone). xb_rlock keeps them together; a Mutex object keeps
+ * them in its variables (rtl/threads.c), which waits of its own read again between waits. xb_rwords_try takes the lock
+ * when `self` holds it already or finds it free: 1; 0 when another holds it. xb_rwords_claim, after a failed try,
+ * marks the lock waited for and takes it if it was free meanwhile: 1; 0 when the caller must wait while the state is 2
+ * (on its address) and claim again. xb_rwords_release releases it once (the next waiter woken when it is free): 0 when
+ * `self` does not hold it. */
 typedef struct xb_rwords {
   uint32_t *state, *owner, *depth;
 } xb_rwords;
-int xb_rwords_try(xb_rwords w);
-int xb_rwords_claim(xb_rwords w);
-int xb_rwords_release(xb_rwords w);
+int xb_rwords_try(xb_rwords w, uint32_t self);
+int xb_rwords_claim(xb_rwords w, uint32_t self);
+int xb_rwords_release(xb_rwords w, uint32_t self);
 
-/* The lock made statically as XB_RLOCK_INIT, which needs no setup (a release by another thread ends the process: a
- * defect of the runtime). For rare, nesting work (preparing classes), not hot paths. */
+/* The lock made statically as XB_RLOCK_INIT, which needs no setup, owned by the thread (a release by another thread
+ * ends the process: a defect of the runtime). For rare, nesting work (preparing classes), not hot paths. */
 typedef struct xb_rlock {
   uint32_t state, owner, depth;
 } xb_rlock;
@@ -55,6 +69,8 @@ uint32_t xb_park_wake(const uint32_t *addr, int all);
 /* xb_park_wait as a blocking operation (xb_blocking_run): collections go on without the waiter, which may wait for a
  * thread that waits for a collection. */
 void xb_park_wait_blocking(const uint32_t *addr, uint32_t expected, int64_t ns);
+/* The same for a short wait (xb_waiting_run): a lock of the runtime's, which its holder keeps a moment. */
+void xb_park_wait_short(const uint32_t *addr, uint32_t expected, int64_t ns);
 
 /* The lock of the standard streams: each write of the program (what one QOut() or OutStd() call shows, an error
  * report) holds it, so the outputs of threads never split one another. Taken inside a blocking operation. */

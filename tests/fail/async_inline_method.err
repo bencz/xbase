@@ -1,0 +1,1 @@
+an INLINE method cannot be ASYNC: its expression cannot AWAIT

@@ -60,7 +60,7 @@ bool inlinable(const Function &callee, const std::vector<BasicBlock *> &body, si
   for (const BasicBlock *blk : body) {
     if (blk->unwind) return false;
     for (auto &i : blk->insts)
-      if (createsPrivates(i->op) || i->op == Op::ArgsRest || i->op == Op::CallForward || i->op == Op::GenYield)
+      if (createsPrivates(i->op) || i->op == Op::ArgsRest || i->op == Op::CallForward || isSuspension(i->op))
         return false;
   }
   return true;
@@ -268,9 +268,9 @@ bool recursive(const Function &f) {
   return false;
 }
 
-bool isGenerator(const Function &f) {
+bool isResumable(const Function &f) {
   for (auto &b : f.blocks)
-    if (Instruction *t = b->terminator(); t && t->op == Op::GenYield) return true;
+    if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return true;
   return false;
 }
 
@@ -313,7 +313,7 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
   const Module *from = nullptr;
   if (!callee && call.callee.native) std::tie(callee, from) = libraryFunction(m, call.callee.name);
   if (!inlinableCall(call) || !callee || callee == &f || callee->kind != Function::Kind::Program || callee->method ||
-      callee->startup || isGenerator(*callee) || recursive(*callee))
+      callee->startup || isResumable(*callee) || recursive(*callee))
     return std::nullopt;
   std::vector<BasicBlock *> body;
   BasicBlock *start = callee->entry();
@@ -359,7 +359,7 @@ bool inlineFound(Function &f, std::vector<std::pair<Instruction *, Inlined>> &fo
 } // namespace
 
 bool inlineBlocks(Function &f) {
-  if (isGenerator(f)) return false; // its values live in the frame
+  if (isResumable(f)) return false; // its values live in the frame
   std::vector<std::pair<Instruction *, Inlined>> found;
   std::unordered_set<const Var *> rebound = reboundVars(f);
   for (auto &b : f.blocks)
@@ -395,7 +395,7 @@ bool unshareVariables(Function &f) {
 }
 
 bool inlineFunctions(Module &m, Function &f) {
-  if (isGenerator(f)) return false;
+  if (isResumable(f)) return false;
   bool trimmed = trimInlinedBodies(f);
   std::vector<std::pair<Instruction *, Inlined>> found;
   for (auto &b : f.blocks)

@@ -4,8 +4,9 @@
  * receivers waiting; senders waiting, each {task, value}), each an array with its head and count. Elements are read and
  * written through the array functions (the arrays are shared, as the channel is). A receiver or a sender that must
  * wait gets a task its token may cancel (xb_task_promise), which the other side completes; one canceled meanwhile is
- * passed over. A send that needs no wait returns the one task completed with .T. that all share. FOR EACH goes through
- * a channel with an enumerator of its own (each FOR EACH one), whose MoveNext() takes the next value, waiting for it. */
+ * passed over. A send that needs no wait returns the one task completed with .T. that all share. FOR EACH goes
+ * through a channel with an enumerator of its own (each FOR EACH one), whose MoveNext() takes the next value, waiting
+ * for it. */
 #include "rtl/flows.h"
 
 #include "core/shared.h"
@@ -120,8 +121,9 @@ static void ring_pop(const xb_item *ch, ring g, xb_item *out) {
   set_var(ch, g.count, n - 1);
 }
 
-static int lock(xb_ctx *ctx, const xb_item *ch) { return xb_object_lock(ctx, ch, H_STATE); }
-static void unlock(const xb_item *ch) { xb_rwords_release(xb_object_rwords(ch, H_STATE)); }
+/* The channel's lock: held a moment (no wait under it), its waiters keep their workers' places. */
+static void lock(const xb_item *ch) { xb_object_lock_short(ch, H_STATE); }
+static void unlock(const xb_item *ch) { xb_rwords_release(xb_object_rwords(ch, H_STATE), xb_thread_self()); }
 
 static int is_closed(const xb_item *ch) {
   return xb_atomic_load32(xb_object_word(ch, H_CLOSED), XB_ACQUIRE) != 0;
@@ -201,7 +203,7 @@ static void channel_send_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *
     closed_task(ctx, r, "CHANNEL:SENDASYNC");
     return;
   }
-  if (!lock(ctx, &argv[0])) return;
+  lock(&argv[0]);
   if (is_closed(&argv[0])) {
     unlock(&argv[0]);
     closed_task(ctx, r, "CHANNEL:SENDASYNC");
@@ -239,7 +241,7 @@ static void channel_receive_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_ite
     xb_flow_arg_error(ctx, XB_CODE_TASK, "CHANNEL:RECEIVEASYNC", argc, argv);
     return;
   }
-  if (!lock(ctx, &argv[0])) return;
+  lock(&argv[0]);
   if (ring_count(&argv[0], values)) {
     xb_gc_root_push(ctx, &value);
     ring_pop(&argv[0], values, &value);
@@ -264,7 +266,8 @@ static void channel_try_send(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *ar
   if (argc > 1) value = argv[1];
   else xb_set_nil(&value);
   xb_set_logical(r, 0);
-  if (is_closed(&argv[0]) || !lock(ctx, &argv[0])) return;
+  if (is_closed(&argv[0])) return;
+  lock(&argv[0]);
   int taken = !is_closed(&argv[0]) &&
               (deliver(ctx, &argv[0], &value) || (has_room(&argv[0]) && (ring_push(&argv[0], values, &value), 1)));
   unlock(&argv[0]);
@@ -277,7 +280,7 @@ static void channel_try_receive(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item 
   xb_item value;
   xb_set_nil(&value);
   xb_set_logical(r, 0);
-  if (!lock(ctx, &argv[0])) return;
+  lock(&argv[0]);
   int got = ring_count(&argv[0], values) != 0;
   xb_gc_root_push(ctx, &value);
   if (got) {
@@ -295,7 +298,7 @@ static void channel_try_receive(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item 
 static void channel_close(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   xb_set_nil(r);
-  if (!lock(ctx, &argv[0])) return;
+  lock(&argv[0]);
   if (is_closed(&argv[0])) {
     unlock(&argv[0]);
     return;
@@ -322,9 +325,10 @@ static void channel_close(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv)
 
 /* oChannel:Count(): the values kept, not received yet. */
 static void channel_count(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
   XB_UNUSED(argc);
   xb_set_nil(r);
-  if (!lock(ctx, &argv[0])) return;
+  lock(&argv[0]);
   uint32_t n = ring_count(&argv[0], values);
   unlock(&argv[0]);
   xb_set_int(r, n);
@@ -347,7 +351,7 @@ static int receive(xb_ctx *ctx, const xb_item *ch, xb_item *out) {
   xb_item token, task;
   xb_set_nil(&token);
   xb_set_nil(&task);
-  if (!lock(ctx, ch)) return 0;
+  lock(ch);
   if (ring_count(ch, values)) {
     ring_pop(ch, values, out);
     xb_gc_root_push(ctx, out);
@@ -374,7 +378,8 @@ static int receive(xb_ctx *ctx, const xb_item *ch, xb_item *out) {
   return got;
 }
 
-/* oEnumerator:MoveNext(): the next value taken into CURRENT, waiting for it: .F. once the channel is closed and empty. */
+/* oEnumerator:MoveNext(): the next value taken into CURRENT, waiting for it: .F. once the channel is closed and
+ * empty. */
 static void enumerator_move_next(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   xb_item ch, value;

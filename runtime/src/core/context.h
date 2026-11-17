@@ -22,7 +22,11 @@ typedef struct xb_env {
   uint32_t  privateLen, privateCap;
   int      set_exact;
   int      set_fixed;       /* SET FIXED: numbers shown with SET DECIMALS decimals (core/numeric.h) */
-  char    *date_format;     /* SET DATE FORMAT picture (malloc'ed, NUL-terminated) */
+  /* SET DATE FORMAT picture (NUL-terminated): in `dateOwn` (malloc'ed, dateCap bytes), or borrowed from the
+   * environment that is set aside while this one runs (xb_env_inherit), until it changes or this one is parked. */
+  const char *date_format;
+  char    *dateOwn;
+  size_t   dateCap;
   int32_t  epoch;           /* SET EPOCH */
   int      century;         /* SET CENTURY */
   int32_t  file_error;      /* FError(): the code of the last file function (rtl/files.c) */
@@ -40,6 +44,11 @@ typedef struct xb_env {
   int      netErr;
   struct xb_env *outer;    /* the environment set aside while this one runs (xb_env_enter), NULL: none; a root too */
   int32_t  outerDecimals;  /* SET DECIMALS of the code that set it aside, back when this one ends */
+  /* While an asynchronous function that owns it is suspended (xb_env_park): its SET DECIMALS, the task (its address,
+   * which the collector updates; the environment goes when the task does), and its neighbors in the parked list. */
+  int32_t  parkedDecimals;
+  void    *parkedTask;
+  struct xb_env *parkedPrev, *parkedNext;
 } xb_env;
 
 /* A thread's context: what compiled code reaches (the [ABI] head), the state of the code running on the thread now
@@ -58,7 +67,18 @@ struct xb_ctx {
   unsigned rootLen, rootCap;
   xb_item  break_value;     /* the value of a pending BREAK (a root of the collector) */
   uint32_t error_depth;     /* error blocks running */
-  uint32_t task_depth;      /* tasks running on the thread (one inside another that waits for it): __InTask() */
+  uint32_t task_depth;      /* tasks running on the thread (one inside another that waits for it): __TaskFail() */
+  /* The step of an asynchronous function that runs on the thread (rtl/tasks.c, on the C stack): its resume function
+   * finds its arguments, its frame and its task there. */
+  struct xb_async_step *async_step;
+  /* AWAIT of a call to an asynchronous function (xb_await_fuse): the function's entry (or, `async_fuse_send`, the
+   * method the send reaches: xb_fuse_target), and the frame that calls it; `async_done` once its first step gave the
+   * result itself (it did not suspend: no task made). */
+  xb_func async_fuse;
+  const xb_frame *async_fuse_frame;
+  int32_t async_fuse_send;
+  int32_t async_done;
+  xb_env  *spareEnv;        /* an environment ended, kept for the next one the thread makes (no allocation) */
   /* Type() evaluating (error_trap > 0): an error runs no block, it ends the
    * evaluation (XB_PENDING_TRAP, which no BEGIN SEQUENCE catches) and sets
    * error_trapped to its generic code (never 0). */
@@ -72,6 +92,14 @@ struct xb_ctx {
   uint8_t  macro_cache_goal[XB_MACRO_CACHE];
 };
 
+/* A send that an AWAIT fused (xb_await_fuse) reaches the method `fn` (NULL: a runtime class's): a compiled method run
+ * right from the frame of that AWAIT becomes the entry it asks for; any other ends the request. */
+static inline void xb_fuse_target(xb_ctx *ctx, xb_func fn) {
+  if (!ctx->async_fuse_send) return;
+  ctx->async_fuse_send = 0;
+  if (fn && ctx->async_fuse_frame == ctx->frames) ctx->async_fuse = fn;
+}
+
 /* ctx->pending: other threads set requests there (a collection's safepoint, objects to finalize, the program's QUIT),
  * so every change is an atomic read-modify-write, and code that sets aside or ends requests touches only the flow's
  * own (BREAK, QUIT, TRAP: XB_PENDING_UNWIND), never another thread's; code that sets requests aside clears those it
@@ -80,6 +108,19 @@ struct xb_ctx {
 static inline uint32_t xb_pending_get(const xb_ctx *ctx) { return xb_atomic_load32(&ctx->pending, XB_ACQUIRE); }
 static inline void xb_pending_set(xb_ctx *ctx, uint32_t bits) { xb_atomic_or32(&ctx->pending, bits, XB_RELEASE); }
 static inline void xb_pending_clear(xb_ctx *ctx, uint32_t bits) { xb_atomic_and32(&ctx->pending, ~bits, XB_RELAXED); }
+
+/* The C roots (xb_gc_root_push and xb_gc_root_pop, xbrt.h) inline for the runtime's own code, which reaches them
+ * under those names; the vector grows in xb_gc_roots_grow. The exported functions stay for compiled code. */
+void xb_gc_roots_grow(xb_ctx *ctx);
+static inline void xb_root_push(xb_ctx *ctx, xb_item *it) {
+  if (ctx->rootLen == ctx->rootCap) xb_gc_roots_grow(ctx);
+  ctx->roots[ctx->rootLen++] = it;
+}
+static inline void xb_root_pop(xb_ctx *ctx, unsigned n) { ctx->rootLen -= n; }
+#ifndef XB_GC_ROOTS_DEFINED
+#define xb_gc_root_push xb_root_push
+#define xb_gc_root_pop xb_root_pop
+#endif
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 
@@ -97,6 +138,23 @@ void xb_env_capture(xb_ctx *ctx, xb_item *r);
 void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot);
 void xb_env_enter(xb_ctx *ctx, const xb_item *snapshot);
 void xb_env_leave(xb_ctx *ctx);
+
+/* The environment of an asynchronous function (rtl/tasks.c), its own from its call to its end, across its steps
+ * (docs/concurrency.md#asynchronous-functions). xb_env_inherit sets `ctx`'s aside for a new one with its values (the
+ * SET values, ErrorBlock(), the language, the memory variables visible: the same variables) and no work area open, and
+ * returns it; xb_env_leave ends it. Between two steps it is parked: xb_env_park sets it aside (SET DECIMALS kept), a
+ * root of the collector until xb_env_unpark puts it back as `ctx`'s for the next step. A parked environment whose task
+ * the collector finds unreachable (xb_env_parked_settle) is closed later by xb_env_reap (its work areas, then the
+ * rest), which any thread may call between flows; xb_env_reap_all closes every parked one (the program's end). */
+xb_env *xb_env_inherit(xb_ctx *ctx);
+void xb_env_park(xb_ctx *ctx, xb_env *env, void *task);
+void xb_env_unpark(xb_ctx *ctx, xb_env *env);
+void xb_env_reap(xb_ctx *ctx);
+void xb_env_reap_all(xb_ctx *ctx);
+/* The collector's side: `fn` on each parked environment (marking, every other thread stopped); then `live` gives
+ * where each one's task is now, NULL when it is unreachable: those are the environments to reap. */
+void xb_env_parked_each(void (*fn)(xb_env *env));
+void xb_env_parked_settle(void *(*live)(void *obj));
 
 /* Closes the work areas of `ctx`'s environment whatever ended its flow: the requests pending (and a BREAK's value) set
  * aside meanwhile and back after; what closing raised dropped, but a QUIT (also one another thread raised). */

@@ -23,7 +23,8 @@ enum {
   XB_CODE_TASK_TIMEOUT,
   XB_CODE_OPERATION_CANCELED,
   XB_CODE_CHANNEL,
-  XB_CODE_CHANNEL_CLOSED
+  XB_CODE_CHANNEL_CLOSED,
+  XB_CODE_MUTEX_OUTER
 };
 
 /* The word of an object's own variable `k`: its 32-bit value (v.l), changed atomically. An object moves only while
@@ -34,9 +35,14 @@ static inline uint32_t *xb_object_word(const xb_item *object, uint32_t k) {
 }
 
 /* A recursive lock (xb_rwords, core/sync.h) over the words of an object's variables k, k + 1 and k + 2 (a Mutex's, a
- * Channel's). xb_object_lock takes it, waiting as Lock() does: 0 when a QUIT or the program's end ended the wait. */
+ * Channel's). xb_object_lock takes it for the flow (xb_flow_self), waiting as Lock() does: 0 when a QUIT or the
+ * program's end ended the wait, or when a flow the running one runs inside holds it (a wait that could never end:
+ * BASE/9031 raised). */
 xb_rwords xb_object_rwords(const xb_item *object, uint32_t k);
 int xb_object_lock(xb_ctx *ctx, const xb_item *object, uint32_t k);
+/* xb_object_lock for a lock held a moment (a Channel's), owned by the thread: no QUIT ends the wait, which keeps the
+ * worker's place. */
+void xb_object_lock_short(const xb_item *object, uint32_t k);
 
 /* How a wait ended. */
 enum { XB_WAIT_QUIT = -1, XB_WAIT_TIMED_OUT, XB_WAIT_CHANGED };

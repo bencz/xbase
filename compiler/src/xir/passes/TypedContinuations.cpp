@@ -8,6 +8,14 @@
 // it to a generic copy of the rest of the function, whose operations keep
 // giving any type. Type inference gives a checked operation its own types.
 //
+// A guard is such a check of a value (a parameter, a variable, a call's result,
+// an operation whose error may substitute it) whose type the code would not
+// know where it enters a loop that computes
+// with numbers (a FOR's start or limit, an operand of arithmetic): checked
+// once where it is made, against the numbers (`subst.check` with a mask), the
+// loop keeps its values typed and out of the frame; another type goes on in
+// the copy, as before.
+//
 // The copy is made once per function and entered after each checked
 // operation; the values of the function that reach it are joined to the
 // copy's own by block parameters (SSA reconstruction on demand, as in Braun et
@@ -33,6 +41,48 @@ namespace {
 constexpr size_t kMaxInstructions = 500;
 constexpr size_t kMaxChecks = 16;
 
+// An operation of a loop that takes its operand as a number (an operand of another type is an error, or another
+// operation altogether).
+bool numericUse(const Instruction &u) {
+  if (u.op == Op::ForTest) return true;
+  if (u.op == Op::Unary) return u.unop == UnOp::Neg;
+  if (u.op != Op::Binary) return false;
+  switch (u.binop) {
+  case BinOp::Sub: case BinOp::Mul: case BinOp::Div: case BinOp::Mod: case BinOp::Pow:
+  case BinOp::Lt: case BinOp::Le: case BinOp::Gt: case BinOp::Ge:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Whether `v`, made outside loop `l`, reaches a numeric use in it: directly, or as what a header's parameter starts
+// with (a FOR's variable).
+bool entersAsNumber(const Value *v, const Loop &l) {
+  for (const Instruction *u : v->users()) {
+    if (!l.contains(u->parent)) continue;
+    if (numericUse(*u)) return true;
+  }
+  for (const Instruction *u : v->users()) {
+    if (l.contains(u->parent)) continue;
+    for (const auto &t : u->targets) {
+      if (t.block != l.header) continue;
+      for (size_t k = 0; k < t.args.size(); ++k)
+        if (t.args[k] == v)
+          for (const Instruction *pu : t.block->params[k]->users())
+            if (l.contains(pu->parent) && numericUse(*pu)) return true;
+    }
+  }
+  return false;
+}
+
+// Whether `i` is made outside an innermost loop that takes it as a number.
+bool entersLoopAsNumber(const Instruction &i, const Loops &loops) {
+  for (auto &l : loops.all())
+    if (loops.innermost(l->header) == l.get() && !l->contains(i.parent) && entersAsNumber(&i, *l)) return true;
+  return false;
+}
+
 // An operation worth checking: in a loop, its error may substitute the
 // result, the types it gives itself hold no heap reference (the value can
 // stay out of the frame) or are a single type (its tag is a constant: a
@@ -55,25 +105,39 @@ bool worthChecking(const Instruction &i, const TypeInfo &types, const Loops &loo
   return false;
 }
 
+// A value worth a guard: made outside an innermost loop that takes it as a number, of a type the code would not know
+// there (`types` as code generation sees them: what an error may substitute counts), which may be a number.
+bool worthGuarding(const Instruction &i, const TypeInfo &types, const Loops &loops) {
+  TypeSet t = types.of(&i);
+  if (i.type() != Type::Item || (t & ~kNumberTypes) == 0 || (t & kNumberTypes) == 0) return false;
+  return entersLoopAsNumber(i, loops);
+}
+
 } // namespace
 
 bool typedContinuations(Function &f) {
   size_t count = 0;
   for (auto &b : f.blocks) {
     if (b->unwind) return false; // unwind blocks take no parameters: the copy could not be joined there
-    if (Instruction *t = b->terminator(); t && t->op == Op::GenYield) return false; // a generator: values in the frame
+    if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return false; // resumable: values in the frame
     count += b->insts.size();
   }
   if (count > kMaxInstructions) return false;
 
   std::vector<Instruction *> checked;
+  std::unordered_set<const Instruction *> guards;
   {
     CFG cfg(f);
-    TypeInfo types(cfg, Substitution::None);
+    TypeInfo types(cfg, Substitution::None), seen(cfg);
     Loops loops(cfg);
     for (BasicBlock *b : cfg.order())
       for (auto &i : b->insts)
-        if (worthChecking(*i, types, loops)) checked.push_back(i.get());
+        if (worthChecking(*i, types, loops)) {
+          checked.push_back(i.get());
+        } else if (worthGuarding(*i, seen, loops)) {
+          checked.push_back(i.get());
+          guards.insert(i.get());
+        }
     std::stable_sort(checked.begin(), checked.end(), [&](const Instruction *a, const Instruction *b) {
       return loops.depth(a->parent) > loops.depth(b->parent);
     });
@@ -104,7 +168,9 @@ bool typedContinuations(Function &f) {
     BasicBlock *enter = f.addBlock(b->name + ".subst");
     b->takeTerminator();
     builder.setBlock(b);
-    builder.condBr(builder.substCheck(i), enter, after[n]);
+    Instruction *check = builder.substCheck(i);
+    if (guards.count(i)) check->imm = kNumberTypes;
+    builder.condBr(check, enter, after[n]);
     builder.setBlock(enter);
     Value *substituted = builder.substValue(i);
     builder.br(copy.blocks.at(after[n]));

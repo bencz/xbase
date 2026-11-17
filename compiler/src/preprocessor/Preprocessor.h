@@ -133,10 +133,13 @@ private:
   // RuleMatch.cpp
   bool matchSeq(const Rule &r, const std::vector<PNode> &nodes, const Toks &in, size_t &pos, size_t end,
                 const PNode *outerStop, Caps &caps) const;
-  bool matchMarker(const Marker &m, const Toks &in, size_t &pos, size_t end, const PNode *stop, Cmp mode) const;
+  bool matchMarker(const Rule &r, const Marker &m, const Toks &in, size_t &pos, size_t end, const PNode *stop,
+                   Cmp mode) const;
   static bool tokEqual(const Token &a, const Token &pattern, Cmp mode);
   static bool canStartExp(const Toks &in, size_t pos, size_t end);
-  static bool skipExp(const Toks &in, size_t &pos, size_t end, const PNode *stop, Cmp mode, bool *fStop);
+  static bool ruleWord(const std::vector<PNode> &nodes, const Token &t, Cmp mode);
+  static bool skipExp(const Rule &r, const Toks &in, size_t &pos, size_t end, const PNode *stop, Cmp mode,
+                      bool *fStop);
   static bool skipMacro(const Toks &in, size_t &pos, size_t end);
 
   // RuleResult.cpp

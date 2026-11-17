@@ -51,6 +51,8 @@ void xb_memvar_publics_each(void (*fn)(xb_item *it, void *data), void *data);
  * (a snapshot's: xb_env_capture): the same variables. */
 void xb_memvar_capture(xb_ctx *ctx, xb_item *r);
 void xb_memvar_restore(xb_ctx *ctx, const xb_item *pairs);
+/* Makes `to` (new) see the bindings `from` sees: the same variables. */
+void xb_memvar_inherit(xb_env *to, const xb_env *from);
 
 /* CLEAR MEMORY: no PRIVATE of the environment, and no PUBLIC of the program, exists any more. */
 void xb_memvar_clear(xb_ctx *ctx);

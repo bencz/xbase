@@ -1,0 +1,7 @@
+
+at once  2, later  3, nested  4, argument task  5, task given O 14, failed at once: -, failed later: *
+method  12, suspending method  14, plain method  24, variable 100, self  36, runtime class  12 10
+generator moved 1, plain function N, eval of a reference  12, block  13, array of tasks A, recursion  610
+plain call gives a task: O O
+after an unwound AWAIT: OOOO
+done

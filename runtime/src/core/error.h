@@ -41,6 +41,10 @@ void xb_error_object(xb_ctx *ctx, xb_item *r, int32_t gencode, int32_t subcode, 
 /* Whether the item is an Error object. */
 int xb_error_is(const xb_item *it);
 
+/* Appends `calls` (a string: the default handler's lines of the calls) to where the tasks an Error object failed
+ * raised it, which __ErrorCalls() gives; anything else is left alone. */
+void xb_error_add_calls(xb_ctx *ctx, const xb_item *error, const xb_item *calls);
+
 /* xb_error with a description of its own instead of the generic code's. */
 int xb_error_described(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *description,
                        const char *operation, uint32_t flags, uint32_t argc, const xb_item *args);

@@ -164,6 +164,9 @@ private:
       out_ += buf;
       break;
     }
+    case Op::SubstCheck:
+      if (i.imm != 0) out_ += " guard " + std::to_string((uint32_t)i.imm); // the types it lets on (TypeSet)
+      break;
     case Op::Call: case Op::FuncRef:
       out_ += " " + (i.callee.function ? i.callee.function->name : i.callee.name) +
               (i.callee.function ? "" : i.callee.native ? " native" : " extern");
@@ -187,7 +190,8 @@ private:
     case Op::ParamsRef:
       for (Var *c : i.captures) out_ += " " + varName(*c);
       break;
-    case Op::CallForward: case Op::GenNew: out_ += " " + i.callee.function->name; break;
+    case Op::CallForward: case Op::GenNew: case Op::AsyncNew: out_ += " " + i.callee.function->name; break;
+    case Op::AwaitFuse: out_ += i.callee.function ? " " + i.callee.function->name : std::string(" send"); break;
     default:
       break;
     }
@@ -195,7 +199,7 @@ private:
     const auto &ops = i.operands();
     for (size_t k = 0; k < ops.size(); ++k) out_ += (k || i.var ? ", " : " ") + value(ops[k]);
     if (i.op == Op::Br) out_ += " " + target(i.targets[0]);
-    if (i.op == Op::GenYield) out_ += ", " + std::to_string(i.index) + ", " + target(i.targets[0]);
+    if (isSuspension(i.op)) out_ += ", " + std::to_string(i.index) + ", " + target(i.targets[0]);
     if (i.op == Op::CondBr) out_ += ", " + target(i.targets[0]) + ", " + target(i.targets[1]);
     out_ += "\n";
   }

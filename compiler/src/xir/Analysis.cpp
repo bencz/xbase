@@ -218,7 +218,7 @@ bool openInlineBodies(const CFG &cfg, InlineBodies &at) {
       if (i->op == Op::InlineEnter) open.push_back(i->blockFn);
       else if (i->op == Op::InlineLeave && open.empty()) nested = false;
       else if (i->op == Op::InlineLeave) open.pop_back();
-      else if ((i->op == Op::Ret || i->op == Op::GenYield) && !open.empty()) nested = false;
+      else if ((i->op == Op::Ret || isSuspension(i->op)) && !open.empty()) nested = false;
     }
     for (size_t k = 0; k < b->numSuccessors(); ++k)
       if (auto [it, first] = at.try_emplace(b->successor(k), open); !first && it->second != open) nested = false;

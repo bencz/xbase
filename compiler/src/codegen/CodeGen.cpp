@@ -145,6 +145,14 @@ void CodeGen::initTypes() {
   rtGenRestore_ = rt("xb_gen_restore", i32_, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtGenYield_ = rt("xb_gen_yield", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
   rtGenDone_ = rt("xb_gen_done", voidTy, {ptrTy_, ptrTy_});
+  rtAsyncNew_ = rt("xb_async_new", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtAsyncRestore_ = rt("xb_async_restore", i32_, {ptrTy_, ptrTy_, i32_});
+  rtAsyncSuspend_ = rt("xb_async_suspend", voidTy, {ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
+  rtAwaitFuse_ = rt("xb_await_fuse", voidTy, {ptrTy_, ptrTy_});
+  rtAwaitFused_ = rt("xb_await_fused", i32_, {ptrTy_});
+  rtAwaitReady_ = rt("xb_await_ready", i32_, {ptrTy_});
+  rtAwaitResult_ = rt("xb_await_result", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtAwaitWait_ = rt("xb_await_wait", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtSendFrom_ = rt("xb_op_send_from", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_});
   rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
@@ -155,7 +163,8 @@ void CodeGen::initTypes() {
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
                            rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_,
                            rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_, rtMvPrivate_, rtMvPublic_,
-                           rtMvParam_, rtGenRestore_, rtGenYield_, rtGenDone_})
+                           rtMvParam_, rtGenRestore_, rtGenYield_, rtGenDone_, rtAsyncRestore_, rtAsyncSuspend_,
+                           rtAwaitReady_, rtAwaitFuse_, rtAwaitFused_})
     quietCalls_.insert(c.getCallee());
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},
@@ -453,6 +462,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   bool privates = f.callsPrivates;
   for (auto &b : f.blocks)
     for (auto &i : b->insts) privates = privates || xir::createsPrivates(i->op);
+  if (f.ownsPrivates) privates = false; // its environment's, from its start: mark 0 (below), never released here
   fnMark_ = privates ? b_.CreateCall(rtMvMark_, {fnCtx_}, "mark") : nullptr;
   fnExit_ = BasicBlock::Create(ctx_, "exit", fn_);
 

@@ -71,12 +71,13 @@ one.
 
 ## Resumable functions
 
-`yield` (and later `await`) is a suspension point. A generator's body becomes a resume function that runs one step
+`yield` and `await` are suspension points. A generator's body becomes a resume function that runs one step
 per call (see [compiler.md](compiler.md#syntax-tree-to-xir)): its frame is saved into the enumerator, a GC object, at
 `gen.yield` and comes back at `gen.restore`, which dispatches on the state to the block after that `YIELD`. Values the
 registers would lose across a `YIELD` move into frame variables (`makeResumable`). xIR does this itself instead of
 using LLVM's coroutine intrinsics, so that suspended frames stay visible to the collector and compatible with
-statepoints. Planned: `ASYNC` functions on the same machinery.
+statepoints. `ASYNC` functions use the same machinery: their frame goes into their task at `async.suspend` and comes
+back at `async.restore` (`isSuspension` names both terminators for the passes).
 
 ## Classes
 
@@ -113,7 +114,8 @@ The error block may substitute a value of any type for the result of an operatio
 errors and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that may fail may produce any type:
 `binaryMayFail` tells when operands can make a `binary` fail (an operand type pair it does not take, a divisor that may
 be zero: not a non-zero constant), `unary` and `switch.check` fail for types they do not take. An operation that
-`subst.check` follows gives only its own types (see `typed-continuations` in [Passes](#passes)).
+`subst.check` follows gives only its own types, and a value a guard checks (`subst.check` with a mask) only the types
+of the mask (see `typed-continuations` in [Passes](#passes)).
 `Substitution::None` types every operation as if no error block substituted anything.
 
 ## Passes
@@ -223,13 +225,27 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   weights its branch unlikely; between the operation and `subst.value` the result may sit in a home the collector does
   not see, which holds because the pending test after such an operation calls `xb_pending`, which never collects nor
   parks the thread for another thread's collection (the request waits for the next poll), and not `xb_pending_gc`.
+  The same pass guards the values that enter a loop with a type the code would not know there (with substitutions
+  counted: a parameter, a variable, a call's result, an operation whose error may substitute it) when the loop takes
+  them as numbers (a `FOR`'s start or limit, an operand of `-`, `*`, `/`, `%`, `^`, a comparison, a negation):
+  `subst.check` with a mask (`imm`, the number types) right after the value, into the same copy otherwise, so the loop
+  keeps its values typed and out of the frame. The guarded value itself keeps a home the collector sees
+  (`xir::guarded`): until its check it may hold anything, and the pending test after a call may collect.
+- `peel-for-types`, after `typed-continuations`: a small innermost loop (at most 80 instructions, in a function of at
+  most 600; up to 4 loops) without a suspension point or an inlined body's frame, one of whose header's parameters gets
+  one number type from the loop's passes and another number type from outside (a sum that starts at the integer 0 and
+  adds doubles), has its first pass copied in front of it (with the blocks its checks lead to): the copy's edges back
+  to its header enter the loop, the loop's entries enter the copy, and the values of the loop used after it are joined
+  with the copy's (`SSAUpdater`). The loop then carries that value with one type, which the lowering keeps in a
+  register of its kind (a double in a floating-point register): the Basel sum's loop runs in about 8 cycles a term
+  (`bench/async_pi.prg`), as .NET's does.
 
 Shared changes of shape are in `Transform.*`: `splitAfter` (the rest of a block into a new one it jumps to),
 `copyBlocks` (blocks copied into their function or another, with the map from each original block and value to its
 copy; a value from outside the copied blocks stays, or is what a given function makes of it), `SSAUpdater` (SSA form
 rebuilt for a value that gets more definitions, given at the end of blocks: the value reaching a block, through block
 parameters made on demand where definitions meet, as in Braun et al.) and `removeTrivialParams` (a parameter made so
-whose arguments are one value is that value). `typed-continuations` and the inlining passes use them.
+whose arguments are one value is that value). `typed-continuations`, `peel-for-types` and the inlining passes use them.
 
 They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
 with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor
@@ -310,7 +326,9 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   (`each.source`, `each.in_cell`, `each.enter`, `each.move`, `each.leave`, and `each.key`, the key at a position), the
   `SWITCH` check (whose result is the value the `CASE`s match: a substituted one after an error) and match, `seq.catch`
   and `seq.value` for `BEGIN SEQUENCE`, the generator operations (`gen.new`, `gen.restore`, `gen.done`, the terminator
-  `gen.yield`, and `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), `append`
+  `gen.yield`, and `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), the
+  asynchronous operations (`async.new`, `async.restore`, `await.ready`, `await.value`, `await.wait`, `await.fuse`,
+  `await.fused`, the terminator `async.suspend`), `append`
   (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps
   the check right after its operation and the value first in the block only the check leads to), and for parameter
   versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the
@@ -318,7 +336,7 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   around an inlined body: the call stack shows that function in between.
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
-- Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `ret`.
+- Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `async.suspend`, `ret`.
 - Lowering to LLVM gives every live `item` value that may refer to a heap object a frame slot (a GC root; others are
   `Local`, see [compiler.md](compiler.md#xir-to-llvm)): liveness is computed per value by walking from its uses back to
   its definition, and slots are assigned by linear scan, so slots are reused once their values die. The operands of a

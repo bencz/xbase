@@ -111,7 +111,7 @@ void xb_seq_lock(const void *obj) {
       /* Marked as waited for, then asleep until the holder wakes it; meanwhile collections go on without it. */
       if (xb_atomic_xchg32(&s->lock, 2, XB_ACQUIRE) == 0) break;
       wait_args a = {&s->lock};
-      xb_blocking_run(wait_lock, &a);
+      xb_waiting_run(wait_lock, &a); /* a writer's work is short */
     }
   }
   xb_atomic_add32(&s->seq, 1, XB_RELAXED); /* odd: readers wait or read again (before the writes: release stores) */

@@ -127,6 +127,18 @@ Statements:
   generator left before its end would never run that code); in another sequence an error of a later step reaches its
   `RECOVER` or `CATCH`, and between the steps the caller runs with its own error block. A generator takes no `...`,
   reads no arguments as received (`PCount()`, `PValue()`, `PARAMETERS`) and creates no `PRIVATE` or `PUBLIC`.
+- `ASYNC FUNCTION`, `ASYNC PROCEDURE`, `ASYNC METHOD` (also after `STATIC`, `INIT` or `EXIT`; a class declares
+  `ASYNC METHOD name` and its implementation must be `ASYNC` too, and not `INLINE`) make an asynchronous function
+  ([concurrency.md](concurrency.md#asynchronous-functions)); `AWAIT expr` is a unary operator, at the level of `-`
+  and `++`, when an operand starts right after it (a name, a number, a string, a logical, `{`, `::`, `&` stuck to a
+  name: the rule `isAwaitOperator` in `common/Token.h`, which the preprocessor follows too, so a command's expression
+  marker takes `AWAIT f( x )` whole); otherwise, `AWAIT(` among them, it is a name. In an `ASYNC` function, `AWAIT` may
+  be anywhere but a codeblock; elsewhere only in a function that may start the program (a public `MAIN`, or the first
+  function of its module, `Sema::mayStart`), where it waits. An `ASYNC` function cannot `YIELD`, takes no `...` and
+  reads no arguments as received (each reported once); its resume function creates its `PRIVATE`s in the function's
+  own environment, with no mark of its own (`xir::Function::ownsPrivates`: none of its steps ends them). In a
+  command, `AWAIT` followed by one of the words of the rule being matched is a name (`INDEX ON await TO x`,
+  `Preprocessor::ruleWord`).
 - `WITH OBJECT expr ... END` (`END WITH` too): inside, `:name` (also `:name( args )`, assigned, `++`) is a message to
   the object, evaluated once into a `LOCAL` of its own (`WithObjectStmt::hidden`, a name no program can write). A
   codeblock made there captures that variable, as it would any `LOCAL`: it sends to the object the statement holds,
@@ -417,7 +429,19 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   stores the caller's block of the moment as the one to put back in the end. Then `makeResumable`
   (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that lives across a
   `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a `Bool` or `I64`
-  boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone.
+  boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone. The dispatch
+  goes only to the points a step can stop at: those of code nothing reaches (a copy of `ALWAYS` code after a `RETURN`)
+  are left out with it.
+- An `ASYNC` function is generated the same way (`Generator::genResumable`, `FuncDecl::async`, the task as parameter
+  0): its entry returns `async.new` of its resume function with its arguments, its entry named (`Instruction::blockFn`,
+  kept when the entry is inlined); the resume function starts with `async.restore` and the same dispatch, `RETURN`
+  and the end return the task's result. `AWAIT expr` (`Generator::genAwait`) is `await.ready` of the value: when it
+  holds, `await.value` at once; otherwise the handlers set aside as at `YIELD` (`setHandlersAside`), the terminator
+  `async.suspend` (the task awaited, the next point), and in the block it resumes at the handlers taken back and the
+  same `await.value`. Outside an `ASYNC` function it is `await.wait`. `AWAIT` of a call of one of the module's `ASYNC`
+  functions (`fusedCallee`) or of a message evaluates the arguments, then `await.fuse` (the entry, none for a message),
+  the call, and `await.fused`: when it holds, the call's value is the result itself; otherwise the `AWAIT` of that
+  task. The entry is hidden from the call stack (the resume function shows, with its caller below in the first step).
 - A codeblock becomes an xIR function of its own (`<function>.blockN`) whose frame holds its parameters; `block`
   creates it with the cells of the variables it captures (moving them into cells if they are not yet).
 - `STATIC` initializers form the module initialization function.

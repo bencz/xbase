@@ -1,0 +1,8 @@
+
+handlers: 10000 done, sum exact, 0 lost their state
+pipeline: 8000 received, 0 wrong
+races: exact
+deep:       2000
+memory, completed: bounded (exact)
+memory, abandoned: bounded (20000 suspended)
+abandoned table closed: open while held no, after yes

@@ -15,7 +15,8 @@ bool isItemResult(const Value *v) { return v->kind() == Value::Kind::Instruction
 // Operations whose operands go in consecutive slots (a call to a direct entry passes words in registers).
 bool isGroupUser(const Instruction &i) {
   return (i.op == Op::Call && !isDirectCall(i)) || i.op == Op::Send || i.op == Op::SendMacro || i.op == Op::ArrayLit ||
-         i.op == Op::HashLit || i.op == Op::MacroCall || i.op == Op::GenNew || i.op == Op::InlineEnter;
+         i.op == Op::HashLit || i.op == Op::MacroCall || i.op == Op::GenNew || i.op == Op::AsyncNew ||
+         i.op == Op::InlineEnter;
 }
 
 } // namespace
@@ -223,7 +224,8 @@ void FramePlan::chooseHomes() {
   }
   for (BasicBlock *b : cfg_.order())
     for (auto &i : b->insts)
-      if (isItemResult(i.get()) && !homes_.count(i.get()) && !unit_.count(i.get()) && types_.noHeap(i.get()))
+      if (isItemResult(i.get()) && !homes_.count(i.get()) && !unit_.count(i.get()) && types_.noHeap(i.get()) &&
+          !xir::guarded(*i))
         homes_[i.get()] = {Home::Kind::Local, 0, nullptr};
   // Every other item value gets a slot of its own.
   for (BasicBlock *b : cfg_.order()) {

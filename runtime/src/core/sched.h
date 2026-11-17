@@ -37,9 +37,9 @@ void xb_sched_mark(int (*mark)(xb_item *));
 void xb_task_run(xb_ctx *ctx, xb_item *task);
 void xb_task_cancel(xb_ctx *ctx, xb_item *task);
 
-/* rtl/tasks.c: the timer of `*target` (rooted) set for `deadline` is due; with `ending`, the program ends first: a delay
- * or a timeout is canceled, a cancellation source canceled. xb_task_timer_dead: whether a timer for `target` (under
- * the timers' lock, no safepoint) is needed no more: its target settled, or a later CancelAfter replaced it. */
+/* rtl/tasks.c: the timer of `*target` (rooted) set for `deadline` is due; with `ending`, the program ends first: a
+ * delay or a timeout is canceled, a cancellation source canceled. xb_task_timer_dead: whether a timer for `target`
+ * (under the timers' lock, no safepoint) is needed no more: its target settled, or a later CancelAfter replaced it. */
 void xb_task_timer(xb_ctx *ctx, xb_item *target, int64_t deadline, int ending);
 int xb_task_timer_dead(void *target, int64_t deadline);
 

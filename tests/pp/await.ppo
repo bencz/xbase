@@ -1,0 +1,6 @@
+QOut( AWAIT F( 1 ), AWAIT t, AWAIT ::Get(), AWAIT &cTask, x )
+QOut( Await( 2 ) + await (3), AWAIT {| | 1 } )
+y := AWAIT oTask
+ordCondSet(,, .F.,,,, RecNo(),,, .F., .F., , .F., .F. )
+ordCreate( "foo",, "await", {|| await }, iif( .F., .T., NIL ) )
+_FIELD->await := 1

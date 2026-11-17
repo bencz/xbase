@@ -119,6 +119,9 @@ void CallResolver::expr(Expr &e) {
   case ExprKind::Unary:
     expr(*static_cast<UnaryExpr &>(e).operand);
     break;
+  case ExprKind::Await:
+    expr(*static_cast<AwaitExpr &>(e).operand);
+    break;
   case ExprKind::Binary: {
     auto &b = static_cast<BinaryExpr &>(e);
     expr(*b.lhs);

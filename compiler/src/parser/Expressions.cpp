@@ -121,6 +121,8 @@ bool Parser::enterExpr() {
   return true;
 }
 
+bool Parser::atAwait() const { return isAwaitOperator(cur(), &ahead(), &ahead(2)); }
+
 ExprPtr Parser::parseUnary() {
   SourceLoc loc = cur().loc;
   if (!enterExpr()) return std::make_unique<NilExpr>(loc);
@@ -131,6 +133,9 @@ ExprPtr Parser::parseUnary() {
     e = std::make_unique<UnaryExpr>(loc, UnOp::Plus, parseUnary());
   } else if (accept(Tok::Tilde)) {
     e = std::make_unique<UnaryExpr>(loc, UnOp::BitNot, parseUnary());
+  } else if (atAwait()) { // AWAIT operand (AWAIT( ... ) stays a call of a function Await(), as YIELD( ... ))
+    advance();
+    e = std::make_unique<AwaitExpr>(loc, parseUnary());
   } else if (at(Tok::Inc) || at(Tok::Dec)) {
     bool inc = at(Tok::Inc);
     advance();

@@ -31,6 +31,7 @@ add_executable(xbc
   src/xir/passes/RemoveDeadCode.cpp
   src/xir/passes/SimplifyCFG.cpp
   src/xir/passes/TypedContinuations.cpp
+  src/xir/passes/PeelTypes.cpp
   src/xir/passes/Resumable.cpp
   src/xir/passes/Versioning.cpp
   src/xir/Printer.cpp

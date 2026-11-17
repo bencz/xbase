@@ -33,22 +33,12 @@ void Generator::genStmt(const Stmt &s) {
   case StmtKind::Sequence: genSequence(static_cast<const SequenceStmt &>(s)); break;
   case StmtKind::Yield: { // the element; the next step goes on in a block of its own (state k + 1)
     Value *value = genExpr(*static_cast<const YieldStmt &>(s).value);
-    // The caller runs with its own error block until the next step: each WITH handler around (innermost first) is
-    // set aside and the block it replaced put back; the next step puts them back (outermost first), each taking the
-    // error block the caller has then as the one to put back in the end.
-    std::vector<std::pair<Var *, Value *>> setAside;
-    for (size_t k = cur_.cleanups.size(); k-- > 0;)
-      if (const Cleanup &c = cur_.cleanups[k]; c.oldBlock) {
-        Value *handler = b.seqWith(b.nil()); // NIL leaves the error block as it is
-        b.seqRestore(oldBlockOf(c));
-        setAside.emplace_back(c.oldBlockVar, handler);
-      }
+    std::vector<std::pair<Var *, Value *>> setAside = setHandlersAside();
     BasicBlock *resume = cur_.fn->addBlock("gen.resume");
     cur_.resumes.push_back(resume);
     b.genYield(frameVar(0), value, resume, (uint32_t)cur_.resumes.size());
     b.setBlock(resume);
-    for (auto it = setAside.rbegin(); it != setAside.rend(); ++it)
-      b.store(it->first, Access::Direct, b.seqWith(it->second));
+    takeHandlersBack(setAside);
     break;
   }
   case StmtKind::WithObject: {
@@ -74,6 +64,27 @@ void Generator::genStmt(const Stmt &s) {
     break;
   }
   }
+}
+
+// Between two steps of a resumable function the caller (or the worker) runs with its own error block: each WITH
+// handler around (innermost first) is set aside and the block it replaced put back; the next step puts them back
+// (outermost first), each taking the error block it then finds as the one to put back in the end.
+std::vector<std::pair<Var *, Value *>> Generator::setHandlersAside() {
+  Builder &b = *cur_.b;
+  std::vector<std::pair<Var *, Value *>> setAside;
+  for (size_t k = cur_.cleanups.size(); k-- > 0;)
+    if (const Cleanup &c = cur_.cleanups[k]; c.oldBlock) {
+      Value *handler = b.seqWith(b.nil()); // NIL leaves the error block as it is
+      b.seqRestore(oldBlockOf(c));
+      setAside.emplace_back(c.oldBlockVar, handler);
+    }
+  return setAside;
+}
+
+void Generator::takeHandlersBack(const std::vector<std::pair<Var *, Value *>> &setAside) {
+  Builder &b = *cur_.b;
+  for (auto it = setAside.rbegin(); it != setAside.rend(); ++it)
+    b.store(it->first, Access::Direct, b.seqWith(it->second));
 }
 
 // A LOCAL's initializer is an ordinary store (with the write barrier when the
@@ -349,7 +360,7 @@ void Generator::genSequence(const SequenceStmt &st) {
   BasicBlock *outer = b.unwindBlock();
   Cleanup with{st.handler ? b.seqWith(genExpr(*st.handler)) : nullptr, nullptr, nullptr, outer, cur_.loops.size(),
                cur_.eachVars.size()};
-  if (with.oldBlock && cur_.generator) {
+  if (with.oldBlock && (cur_.generator || cur_.async)) {
     with.oldBlockVar = hiddenVar();
     b.store(with.oldBlockVar, Access::Direct, with.oldBlock);
   }

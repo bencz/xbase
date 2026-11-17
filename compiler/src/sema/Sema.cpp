@@ -158,10 +158,20 @@ bool Sema::memvarCreated(const std::string &name) const {
   return false;
 }
 
+// A function that may start the program (the driver's choice): a public MAIN, or the first function of its module.
+bool Sema::mayStart(const FuncDecl &f) const {
+  if (f.startup != FuncDecl::Startup::None || f.member != FuncDecl::Member::None) return false;
+  if (f.name == "MAIN" && !f.isStatic) return true;
+  for (const auto &g : module_->funcs)
+    if (g->startup == FuncDecl::Startup::None && g->member == FuncDecl::Member::None) return g.get() == &f;
+  return false;
+}
+
 void Sema::func(FuncDecl &f) {
   curFunc_ = &f;
   Scope s;
   if (f.generator) f.params.insert(f.params.begin(), Param{f.loc, "(GENERATOR)"}); // the enumerator it runs for
+  else if (f.async) f.params.insert(f.params.begin(), Param{f.loc, "(TASK)"});       // the task it runs for
   frames_.push_back({{}, {}, {}, {}, &f.boxed, nullptr});
   for (const Param &p : f.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, s.next}).second)
@@ -169,9 +179,11 @@ void Sema::func(FuncDecl &f) {
     else ++s.next;
   }
   block(f.body, s);
-  if (f.generator && f.variadic) diag_.error(f.loc, "a generator cannot take '...'");
-  if (f.generator && f.readsArgs) // its frame is the resume function's, whose argument is the enumerator
-    diag_.error(f.loc, "a generator cannot read its arguments as received (PCount(), PValue(), PARAMETERS)");
+  const char *what = f.async ? "an ASYNC function" : "a generator";
+  if (f.async && f.generator) diag_.error(f.loc, "an ASYNC function cannot YIELD");
+  if (f.resumable() && f.variadic) diag_.error(f.loc, std::string(what) + " cannot take '...'");
+  if (f.resumable() && f.readsArgs) // its frame is the resume function's, whose argument is the enumerator or task
+    diag_.error(f.loc, std::string(what) + " cannot read its arguments as received (PCount(), PValue(), PARAMETERS)");
   f.numLocals = s.next;
   f.boxed.resize(f.numLocals);
   frames_.pop_back();
@@ -342,8 +354,10 @@ void Sema::stmt(Stmt &st, Scope &s) {
     break;
   case StmtKind::Parameters: // PRIVATEs holding the arguments received
     if (s.inBlock) diag_.error(st.loc, "PARAMETERS is not allowed in a codeblock");
-    if (curFunc_->generator) diag_.error(st.loc, "PARAMETERS is not allowed in a generator");
-    curFunc_->readsArgs = true;
+    if (curFunc_->resumable()) // reported here alone: not as reading the arguments as received too
+      diag_.error(st.loc, std::string("PARAMETERS is not allowed in ") +
+                              (curFunc_->async ? "an ASYNC function" : "a generator"));
+    else curFunc_->readsArgs = true;
     for (const LocalDecl &d : static_cast<LocalStmt &>(st).decls) createdMemvar(d);
     break;
   case StmtKind::ForEach: {
@@ -566,6 +580,13 @@ void Sema::expr(Expr &e, Scope &s) {
   }
   case ExprKind::Unary:
     expr(*static_cast<UnaryExpr &>(e).operand, s);
+    break;
+  case ExprKind::Await:
+    expr(*static_cast<AwaitExpr &>(e).operand, s);
+    if (!curFunc_) break; // a file-wide STATIC's initializer, which must be constant: reported as such
+    if (frames_.back().block || s.inBlock) diag_.error(e.loc, "AWAIT cannot be inside a codeblock");
+    else if (!curFunc_->async && !mayStart(*curFunc_))
+      diag_.error(e.loc, "AWAIT is valid only in an ASYNC function or in the procedure that starts the program");
     break;
   case ExprKind::Binary: {
     auto &b = static_cast<BinaryExpr &>(e);

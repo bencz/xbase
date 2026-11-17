@@ -374,4 +374,5 @@ EXTERN FUNCTION __ValueLess( x, y ) NATIVE
 EXTERN FUNCTION __ValueMatches( xValue, xSearch ) NATIVE
 EXTERN FUNCTION __SetCentury( [lOn] ) NATIVE
 EXTERN FUNCTION __StdWrite( nHandle, ... ) NATIVE
-EXTERN FUNCTION __TaskFail( [xValue] ) NATIVE
+EXTERN FUNCTION __TaskFail( [xValue], [cCalls] ) NATIVE
+EXTERN FUNCTION __ErrorCalls( oError ) NATIVE

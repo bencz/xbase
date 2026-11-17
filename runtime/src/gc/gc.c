@@ -75,6 +75,7 @@
  * (xb_blocking_run, whose operation touches only rooted objects). The write
  * barrier lists objects in a list of the thread's own, merged when a
  * collection starts. */
+#define XB_GC_ROOTS_DEFINED /* the exported functions are defined here */
 #include "xbrt_int.h"
 
 #include "core/memvar.h"
@@ -402,14 +403,14 @@ static void run_blocked(void *p) {
 
 /* The registers are saved only while other threads are attached: with this one alone, nothing collects beside it, and
  * one that attaches meanwhile moves nothing until the operation ends (stacks_known). */
-void xb_blocking_run(void (*fn)(void *), void *arg) {
+static void run_stopped(void (*fn)(void *), void *arg, int away) {
   xb_tlh *t = tlh;
   if (!t || t->blocking) { /* not attached, or inside a blocking operation already */
     fn(arg);
     return;
   }
   blocked_call c = {fn, arg, t};
-  xb_sched_blocking(1); /* a worker running a task: another may take its place meanwhile */
+  if (away) xb_sched_blocking(1); /* a worker running a task: another may take its place meanwhile */
   t->blocking = 1;
   if (xb_atomic_load32(&heap.threadCount, XB_RELAXED) > 1) {
     xb_platform_with_registers(run_blocked, &c);
@@ -419,8 +420,12 @@ void xb_blocking_run(void (*fn)(void *), void *arg) {
     xb_atomic_store32(&t->unsaved, 0, XB_RELAXED);
   }
   t->blocking = 0;
-  xb_sched_blocking(0);
+  if (away) xb_sched_blocking(0);
 }
+
+void xb_blocking_run(void (*fn)(void *), void *arg) { run_stopped(fn, arg, 1); }
+
+void xb_waiting_run(void (*fn)(void *), void *arg) { run_stopped(fn, arg, 0); }
 
 void xb_gc_thread_attach(const void *base) {
   xb_gc_init();
@@ -790,20 +795,19 @@ void xb_gc_add_root(xb_item *items, size_t count) {
   xb_mutex_unlock(&heap.lock);
 }
 
-void xb_gc_root_push(xb_ctx *ctx, xb_item *it) {
-  if (ctx->rootLen == ctx->rootCap) {
-    /* Each root belongs to a C call in progress: the program's stack ends
-     * the nesting long before the vector's size could overflow. */
-    unsigned cap = ctx->rootCap ? ctx->rootCap * 2 : 64;
-    xb_item **roots = cap > ctx->rootCap ? realloc(ctx->roots, (size_t)cap * sizeof *roots) : NULL;
-    if (!roots) xb_gc_fatal("out of memory");
-    ctx->roots = roots;
-    ctx->rootCap = cap;
-  }
-  ctx->roots[ctx->rootLen++] = it;
+void xb_gc_roots_grow(xb_ctx *ctx) {
+  /* Each root belongs to a C call in progress: the program's stack ends
+   * the nesting long before the vector's size could overflow. */
+  unsigned cap = ctx->rootCap ? ctx->rootCap * 2 : 64;
+  xb_item **roots = cap > ctx->rootCap ? realloc(ctx->roots, (size_t)cap * sizeof *roots) : NULL;
+  if (!roots) xb_gc_fatal("out of memory");
+  ctx->roots = roots;
+  ctx->rootCap = cap;
 }
 
-void xb_gc_root_pop(xb_ctx *ctx, unsigned n) { ctx->rootLen -= n; }
+void xb_gc_root_push(xb_ctx *ctx, xb_item *it) { xb_root_push(ctx, it); }
+
+void xb_gc_root_pop(xb_ctx *ctx, unsigned n) { xb_root_pop(ctx, n); }
 
 /* A collection's state for an object (while the world is stopped), its sharing kept. */
 static void set_state(xb_gc_hdr *h, uint8_t state) { h->state = (uint8_t)((h->state & XB_GC_SHARED) | state); }
@@ -1227,6 +1231,7 @@ static void mark_roots(void) {
   for (const xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
   xb_memvar_publics_each(mark_public, NULL);
+  xb_env_parked_each(mark_env);
   xb_sched_mark(mark_item);
   for (size_t i = heap.finalizedHead; i < heap.finalizedLen; ++i) mark_item(&heap.finalized[i]);
 }
@@ -1262,6 +1267,12 @@ static void find_finalized(void) {
     mark_item(it);
   }
   heap.finalizableLen = kept;
+}
+
+/* Where a traced object is now, or NULL when this collection found it unreachable (a weak reference's target). */
+static void *live_object(void *obj) {
+  xb_gc_hdr *h = forwarded((xb_gc_hdr *)obj - 1);
+  return h->state & (XB_GC_SEEN | XB_GC_MARKED) ? h + 1 : NULL;
 }
 
 /* Clears the marks of every object and every line, before a full collection.
@@ -1446,6 +1457,7 @@ static void collect(int full, int due) {
     find_finalized();
     while (heap.stackLen) trace_queued(heap.stack[--heap.stackLen]);
   }
+  xb_env_parked_settle(live_object);
   if (!full) settle_young();
   for (size_t i = 0; i < heap.pinnedLen; ++i) heap.pinned[i]->flags &= (uint16_t)~XB_GC_HDR_PINNED;
   heap.pinnedLen = 0;

@@ -105,5 +105,6 @@ void xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv) {
       stopped = unwinding(ctx);
     }
   xb_threads_end(ctx); /* those the EXIT procedures started */
+  xb_env_reap_all(ctx); /* the asynchronous functions still suspended: their tables too */
   xb_env_close_areas(ctx); /* the tables are closed whatever ended the program */
 }

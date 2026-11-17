@@ -471,7 +471,10 @@ static void cache_put(xb_send_cache *cache, const void *c, const member *m, size
 static void perform(xb_ctx *ctx, xb_item *r, const member *m, uintptr_t slot, uint32_t argc, xb_item *argv) {
   xb_item nil;
   switch (m->kind) {
-    case M_METHOD: m->fn(ctx, r, argc, argv); return;
+    case M_METHOD:
+      xb_fuse_target(ctx, m->fn);
+      m->fn(ctx, r, argc, argv);
+      return;
     case M_CLASS_GET: /* the program's storage: whole under the stripe of its address once it is shared */
       if (xb_storage_is_shared()) xb_seq_get((void *)slot, r, (xb_item *)slot);
       else *r = *(xb_item *)slot;

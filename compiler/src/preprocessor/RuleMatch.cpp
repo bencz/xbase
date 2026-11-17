@@ -37,6 +37,14 @@ bool needLeft(const Token &t, const Token *next) {
 
 } // namespace
 
+// Whether `t` is one of the words of a rule's pattern (TO, WITH, FOR...).
+bool Preprocessor::ruleWord(const std::vector<PNode> &nodes, const Token &t, Cmp mode) {
+  for (const PNode &n : nodes)
+    if ((n.k == PNode::Lit && tokEqual(t, n.tok, mode)) || (n.k == PNode::Opt && ruleWord(n.kids, t, mode)))
+      return true;
+  return false;
+}
+
 bool Preprocessor::tokEqual(const Token &a, const Token &p, Cmp mode) {
   if (a.kind != p.kind) return false;
   switch (a.kind) {
@@ -67,7 +75,8 @@ bool Preprocessor::canStartExp(const Toks &in, size_t pos, size_t end) {
   return true;
 }
 
-bool Preprocessor::skipExp(const Toks &in, size_t &pos, size_t end, const PNode *stop, Cmp mode, bool *fStop) {
+bool Preprocessor::skipExp(const Rule &r, const Toks &in, size_t &pos, size_t end, const PNode *stop, Cmp mode,
+                           bool *fStop) {
   size_t start = pos;
   Tok prev = Tok::Eof; // "nothing yet": can be joined
   Tok lbr = Tok::Eof, rbr = Tok::Eof;
@@ -94,7 +103,12 @@ bool Preprocessor::skipExp(const Toks &in, size_t &pos, size_t end, const PNode 
       rbr = closerOf(t.kind);
       depth = 1;
     }
-    if (t.kind != Tok::Inc && t.kind != Tok::Dec) prev = t.kind;
+    const Token *next = pos + 1 < end ? &in[pos + 1] : nullptr;
+    bool word = next && next->kind == Tok::Ident && ruleWord(r.pattern, *next, mode); // INDEX ON await TO: a name
+    if (!word && isAwaitOperator(t, next, pos + 2 < end ? &in[pos + 2] : nullptr))
+      prev = Tok::Eof; // a prefix operator: its operand joins it
+    else if (t.kind != Tok::Inc && t.kind != Tok::Dec)
+      prev = t.kind;
     ++pos;
   }
   return pos != start;
@@ -121,16 +135,16 @@ bool Preprocessor::skipMacro(const Toks &in, size_t &pos, size_t end) {
   return false;
 }
 
-bool Preprocessor::matchMarker(const Marker &m, const Toks &in, size_t &pos, size_t end, const PNode *stop,
-                               Cmp mode) const {
+bool Preprocessor::matchMarker(const Rule &r, const Marker &m, const Toks &in, size_t &pos, size_t end,
+                               const PNode *stop, Cmp mode) const {
   switch (m.kind) {
   case MK::Regular:
-    return canStartExp(in, pos, end) && skipExp(in, pos, end, stop, mode, nullptr);
+    return canStartExp(in, pos, end) && skipExp(r, in, pos, end, stop, mode, nullptr);
   case MK::List: {
     if (!canStartExp(in, pos, end)) return false;
     bool matched = false, fStop = false;
     do {
-      if (!skipExp(in, pos, end, stop, mode, &fStop)) break;
+      if (!skipExp(r, in, pos, end, stop, mode, &fStop)) break;
       matched = true;
     } while (!fStop);
     return matched;
@@ -161,7 +175,7 @@ bool Preprocessor::matchMarker(const Marker &m, const Toks &in, size_t &pos, siz
     if (pos >= end || in[pos].kind == Tok::RParen || in[pos].kind == Tok::RBracket || in[pos].kind == Tok::Comma ||
         !canStartExp(in, pos, end))
       return false;
-    if (in[pos].kind == Tok::LParen) return skipExp(in, pos, end, stop, mode, nullptr);
+    if (in[pos].kind == Tok::LParen) return skipExp(r, in, pos, end, stop, mode, nullptr);
     do {
       ++pos;
     } while (pos < end && !in[pos].spaceBefore && in[pos].kind != Tok::Comma);
@@ -214,7 +228,7 @@ bool Preprocessor::matchSeq(const Rule &r, const std::vector<PNode> &nodes, cons
       const PNode *stop = outerStop ? outerStop : (k + 1 < n ? &nodes[k + 1] : nullptr);
       size_t before = pos;
       const Marker &m = r.markers[(size_t)node.marker];
-      if (!matchMarker(m, in, pos, end, stop, mode)) return false;
+      if (!matchMarker(r, m, in, pos, end, stop, mode)) return false;
       if (pos != before) {
         auto &occ = caps[(size_t)node.marker];
         if (!occ.empty() && !m.repeatable) { // a second value with no room: the whole rule fails
