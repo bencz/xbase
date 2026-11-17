@@ -103,6 +103,10 @@ static inline void xb_cell_put(xb_cell *c, const xb_item *v) {
  * the shared paths of cells, arrays and hashes: an element gone is the bound error, and then the reference's own
  * item is read, or written when no request to unwind is pending (a substituted value lands there). */
 void     xb_ref_get(xb_ctx *ctx, const xb_item *r, xb_item *dst);
+/* The arguments of a message (argv[1] on) that are references (an argument written @x), each replaced by the value it
+ * designates: for what does not take references, an instance variable assigned or a method of the runtime's own
+ * (a method compiled from xBase takes them, as a function does). */
+void     xb_args_values(xb_ctx *ctx, uint32_t argc, xb_item *argv);
 /* A reference's index and own item (a string's character, an enumerator's Current) when another thread may reach the
  * reference: a loop's, in a cell shared with a codeblock. */
 int64_t  xb_ref_index(const xb_ref *ref);

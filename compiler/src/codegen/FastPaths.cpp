@@ -459,31 +459,17 @@ void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, Glob
   b_.SetInsertPoint(hit);
   // Weighted: a hit is performed in place, the default (a member the runtime performs) is the cold call.
   SwitchInst *sw = b_.CreateSwitch(kind, slow, 3);
-  // The variable `slot` of a local object (its state byte read once: sharing and the barrier's test, as
-  // xb_object_put does), or the runtime.
-  auto variable = [&](const char *name, Value *&state) {
-    BasicBlock *bb = newBlock(name), *local = newBlock(name);
-    b_.SetInsertPoint(bb);
-    state = stateByte(obj, AtomicOrdering::Monotonic);
-    branchLikely(isLocalState(state), local, slow);
-    b_.SetInsertPoint(local);
-    Value *vars = b_.CreateStructGEP(objectTy_, obj, ObjectVars);
-    return std::make_pair(bb, b_.CreateInBoundsGEP(itemTy_, vars, b_.CreateZExtOrTrunc(slot, i64_), "var"));
-  };
   Value *state = nullptr;
-  auto [get, readVar] = variable("send.get", state);
-  copyItem(d, readVar); // arguments are ignored, as the runtime does
+  BasicBlock *get = newBlock("send.get");
+  b_.SetInsertPoint(get);
+  copyObjectVariable(d, objectVariable(obj, slot, slow, state)); // arguments are ignored, as the runtime does
   b_.CreateBr(join);
   sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_GET), get);
-  if (argc == 2) {
-    auto [set, writeVar] = variable("send.set", state);
-    // One 16-byte store of both words: a read of the variable that code generation makes one 16-byte load (a copy)
-    // is then forwarded from it, which it could not be from two 8-byte stores.
-    auto *pair = FixedVectorType::get(i64_, 2);
-    Value *item = b_.CreateInsertElement(PoisonValue::get(pair), value.header, uint64_t(0));
-    item = b_.CreateInsertElement(item, b_.CreateBitCast(value.payload, i64_), uint64_t(1));
-    tag(b_.CreateAlignedStore(item, writeVar, itemAlign_), Mem::HeapItem);
-    recordIfOld(obj, state);
+  if (argc == 2 && !xir::isReference(i.operand(1))) { // a reference's value: the runtime's (xb_args_values)
+    BasicBlock *set = newBlock("send.set");
+    b_.SetInsertPoint(set);
+    Value *var = objectVariable(obj, slot, slow, state);
+    storeObjectVariable(obj, var, state, value);
     storeWords(d, value.header, value.payload);
     b_.CreateBr(join);
     sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_SET), set);
@@ -502,6 +488,59 @@ void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, Glob
 
   b_.SetInsertPoint(slow);
   slowSend();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// Variable `slot` (an integer of any width) of object `obj` when the object is local, in a block that follows; a shared
+// one goes to `shared`. `state` is its state byte, read once for both sharing and the write barrier's test (as
+// xb_object_put reads it).
+Value *CodeGen::objectVariable(Value *obj, Value *slot, BasicBlock *shared, Value *&state) {
+  BasicBlock *local = newBlock("object.local");
+  state = stateByte(obj, AtomicOrdering::Monotonic);
+  branchLikely(isLocalState(state), local, shared);
+  b_.SetInsertPoint(local);
+  Value *vars = b_.CreateStructGEP(objectTy_, obj, ObjectVars);
+  return b_.CreateInBoundsGEP(itemTy_, vars, b_.CreateZExtOrTrunc(slot, i64_), "var");
+}
+
+// Stores the words of a value into a local object's variable, then the write barrier on its state byte.
+void CodeGen::storeObjectVariable(Value *obj, Value *var, Value *state, const Words &value) {
+  storeWords(var, value.header, value.payload);
+  recordIfOld(obj, state);
+}
+
+// Copies a local object's variable into `d` as copyItem copies an item, word by word (the value word as two 32-bit
+// integers, which code generation does not merge with the header): an assignment's two 8-byte stores are then
+// forwarded to the loads, which a 16-byte copy would wait for.
+void CodeGen::copyObjectVariable(Value *d, Value *var) { copyItem(d, var); }
+
+// object.get and object.set (a send resolved for the object's known class): a local object's variable in place, a
+// shared one through the runtime, which takes its lock.
+void CodeGen::emitObjectAccess(const xir::Instruction &i) {
+  Value *objItem = addr(i.operand(0));
+  Value *d = dest(i);
+  Value *slot = ConstantInt::get(i32_, i.index);
+  Words value{nullptr, nullptr};
+  Value *valueItem = nullptr;
+  if (i.op == xir::Op::ObjectSet) {
+    valueItem = addr(i.operand(1));
+    value = itemWords(valueItem);
+  }
+  BasicBlock *shared = newBlock("object.shared"), *join = newBlock("object.done");
+  Value *obj = itemPointer(objItem, "obj");
+  Value *state = nullptr;
+  Value *var = objectVariable(obj, slot, shared, state);
+  if (i.op == xir::Op::ObjectGet) {
+    copyObjectVariable(d, var);
+  } else {
+    storeObjectVariable(obj, var, state, value);
+    storeWords(d, value.header, value.payload);
+  }
+  b_.CreateBr(join);
+  b_.SetInsertPoint(shared);
+  if (i.op == xir::Op::ObjectGet) b_.CreateCall(rtObjectGet_, {d, objItem, slot});
+  else b_.CreateCall(rtObjectSet_, {d, objItem, slot, valueItem});
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
 }

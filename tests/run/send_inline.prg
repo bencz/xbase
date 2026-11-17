@@ -1,11 +1,12 @@
-// Sends that compiled code performs in place from the send's inline cache (an instance variable read or written, a
-// method called): an object that survives collections (old) taking new strings and arrays through assignments in a
-// loop while collections run, whose values must stay (the write barrier); objects shared with other threads, which
-// the runtime reads and writes under their locks; an assignment message with no argument; an error inside a method
-// called in place (its call stack); a method that returns its object (chained sends); many sends whose classes
-// alternate at one site; a site that gets the object and a cast of it in turn (the cast goes to the runtime); reads
-// of a variable another thread keeps writing strings and numbers into (never a torn item); AWAIT of a method at a
-// site whose cache holds it; a read with arguments (ignored) and assignments with none or two (the runtime's).
+// Sends that compiled code performs in place, from the send's inline cache (an object whose class the compiler does
+// not know) or resolved when compiling (one it knows: object.get, object.set, a call): an object that survives
+// collections (old) taking new strings and arrays through assignments while collections run, whose values must stay
+// (the write barrier; each path alone, with nothing but the object referring to the new values); objects shared with
+// other threads, which the runtime reads and writes under their locks; an assignment message with no argument; an
+// error inside a method called in place (its call stack); a method that returns its object (chained sends); many
+// sends whose classes alternate at one site; a site that gets the object and a cast of it in turn (the cast goes to
+// the runtime); reads of a variable another thread keeps writing strings and numbers into (never a torn item); AWAIT
+// of a method at a site whose cache holds it; a read with arguments (ignored) and assignments with none or two.
 PROCEDURE Main()
    LOCAL o := THolder():New(), i, k, c, t, a, s := 0, nBad := 0
    FOR k := 1 TO 3 // the holder survives collections: it is old
@@ -35,6 +36,8 @@ PROCEDURE Main()
    NEXT
    __GcCollect()
    ? "barrier", nBad, o:text, o:list[ 1 ], o:list[ 2 ], o:list[ 3 ][ 1 ], Len( o:kept ), o:kept[ 1 ], o:kept[ 20000 ]
+   ? "barrier known class", Known()
+   ? "barrier unknown class", Unknown( { THolder():New() } )
    c := 0
    FOR EACH t IN o:kept
       c += Len( t )
@@ -125,7 +128,7 @@ RETURN o:Who()
 STATIC FUNCTION Torn()
    LOCAL o := THolder():New(), t, i, v, nBad := 0
    o:text := "abc"
-   t := ThreadStart( {|| Flip( o, 200000 ) } )
+   t := ThreadStart( {| x | Flip( x, 200000 ) }, o ) // not captured: the reads below are resolved for its class
    FOR i := 1 TO 200000
       v := o:text
       IF ! ( ( ValType( v ) == "C" .AND. v == "abc" ) .OR. ( ValType( v ) == "N" .AND. v == 12345 ) )
@@ -165,3 +168,67 @@ ENDCLASS
 
 ASYNC METHOD Twice( k ) CLASS TAsync
 RETURN k * 2
+
+// The barrier test with an object whose class the compiler does not know (an array's element): its sends go through
+// their inline caches, not resolved when compiling.
+STATIC FUNCTION Unknown( aBox )
+   LOCAL i, k, t, nBad := 0
+   FOR k := 1 TO 3
+      __GcCollect()
+   NEXT
+   FOR i := 1 TO 5000
+      IF i % 100 == 0
+         __GcCollect( .T. )
+         __GcCollect( .T. )
+      ENDIF
+      FillBox( aBox, i )
+      IF i % 100 == 0
+         __GcCollect( .T. )
+         FOR k := 1 TO 200
+            t := { Replicate( "z", 40 ), k }
+         NEXT
+         IF aBox[ 1 ]:list[ 1 ] != i .OR. aBox[ 1 ]:list[ 3 ][ 1 ] != i * 5 .OR. ;
+               ! aBox[ 1 ]:list[ 2 ] == Str( i ) .OR. ;
+               ! Right( aBox[ 1 ]:text, Len( LTrim( Str( i ) ) ) ) == LTrim( Str( i ) )
+            nBad++
+         ENDIF
+      ENDIF
+   NEXT
+RETURN nBad
+
+// The barrier test with an object whose class the compiler knows (made here, in a function without BEGIN SEQUENCE,
+// whose variables are values): its sends are resolved when compiling (object.get, object.set), in Fill() too (a copy
+// typed for the class).
+STATIC FUNCTION Known()
+   LOCAL o := THolder():New(), i, k, t, nBad := 0
+   FOR k := 1 TO 3
+      __GcCollect()
+   NEXT
+   FOR i := 1 TO 5000
+      IF i % 100 == 0
+         __GcCollect( .T. )
+         __GcCollect( .T. )
+      ENDIF
+      Fill( o, i ) // its frame gone, nothing but the holder refers to the new values
+      IF i % 100 == 0
+         __GcCollect( .T. )
+         FOR k := 1 TO 200
+            t := { Replicate( "z", 40 ), k }
+         NEXT
+         IF o:list[ 1 ] != i .OR. o:list[ 3 ][ 1 ] != i * 5 .OR. ! o:list[ 2 ] == Str( i ) .OR. ;
+               ! Right( o:text, Len( LTrim( Str( i ) ) ) ) == LTrim( Str( i ) )
+            nBad++
+         ENDIF
+      ENDIF
+   NEXT
+RETURN nBad
+
+STATIC FUNCTION Fill( o, i )
+   o:text := Replicate( "k", 1 + i % 30 ) + LTrim( Str( i ) )
+   o:list := { i, Str( i ), { i * 5 } }
+RETURN NIL
+
+STATIC FUNCTION FillBox( aBox, i )
+   aBox[ 1 ]:text := Replicate( "q", 1 + i % 30 ) + LTrim( Str( i ) )
+   aBox[ 1 ]:list := { i, Str( i ), { i * 5 } }
+RETURN NIL

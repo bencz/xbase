@@ -155,6 +155,8 @@ void CodeGen::initTypes() {
   rtAwaitResult_ = rt("xb_await_result", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtAwaitWait_ = rt("xb_await_wait", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtSendFrom_ = rt("xb_op_send_from", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_});
+  rtObjectGet_ = rt("xb_op_object_get", voidTy, {ptrTy_, ptrTy_, i32_});
+  rtObjectSet_ = rt("xb_op_object_set", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
   for (FunctionCallee c : {rtWriteItem_, rtGcRemember_})
@@ -793,6 +795,13 @@ CodeGen::Words CodeGen::loadWords(Value *item) {
   Value *header = tag(b_.CreateAlignedLoad(i64_, item, itemAlign_, "header"), m);
   Value *payload = tag(b_.CreateAlignedLoad(i64_, b_.CreateStructGEP(itemTy_, item, FValue), itemAlign_, "int"), m);
   return {header, payload};
+}
+
+// The words of an item: those its value's definition left in registers when addr() gave this address for it
+// (wordsAt_), else read from memory.
+CodeGen::Words CodeGen::itemWords(Value *item) {
+  if (auto w = wordsAt_.find(item); w != wordsAt_.end()) return w->second;
+  return loadWords(item);
 }
 
 // Argument `k` as received: argv[k], or a NIL item past argc.

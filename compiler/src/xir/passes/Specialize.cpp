@@ -1,15 +1,18 @@
-// A call of a function of the module whose arguments hold numbers (or logicals, or dates) goes to a copy of the
-// function that knows it: its parameters read with those types, so that what it computes from them stays in registers,
-// and its own calls with such arguments go to the copy too (a recursive function then knows its result).
+// A call of a function of the module whose arguments hold numbers (or logicals, or dates), or objects of one class of
+// the module, goes to a copy of the function that knows it: its parameters read with those types, so that what it
+// computes from them stays in registers, or of that class, so that its sends to them resolve (a method's to Self), and
+// its own calls with such arguments go to the copy too (a recursive function then knows its result).
 #include "xir/passes/Passes.h"
 
 #include "xir/Builder.h"
+#include "xir/ClassModel.h"
 #include "xir/Transform.h"
 #include "xir/Types.h"
 
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -33,11 +36,11 @@ TypeSet classOf(TypeSet t) {
   return kAnyType;
 }
 
-// A function whose copy behaves as it does: a FUNCTION or PROCEDURE of the program, not a method, nor one that reads
+// A function whose copy behaves as it does: a FUNCTION, PROCEDURE or method of the program, not one that reads
 // its arguments as received (PCount(), PValue(), `...`), nor a generator or an ASYNC function (made by a resume
 // function), nor one that makes codeblocks (which would share their function with the copy) or recovers from errors.
 bool copyable(const Function &g) {
-  if (g.kind != Function::Kind::Program || g.method || g.startup || g.byRefBody || g.readsArgs || g.readsParams ||
+  if (g.kind != Function::Kind::Program || g.startup || g.byRefBody || g.readsArgs || g.readsParams ||
       g.usesRest || g.ownsPrivates || g.numParams == 0 || instructionCount(g) > kMaxInstructions)
     return false;
   for (auto &b : g.blocks) {
@@ -50,8 +53,10 @@ bool copyable(const Function &g) {
   return true;
 }
 
-// The copy of `g` whose parameters hold `types`: shown on the call stack as `g`, reached only from the module.
-Function *makeCopy(Module &m, const Function &g, const std::vector<TypeSet> &types, size_t number) {
+// The copy of `g` whose parameters hold `types` and objects of `classes`: shown on the call stack as `g`, reached only
+// from the module.
+Function *makeCopy(Module &m, const Function &g, const std::vector<TypeSet> &types,
+                   const std::vector<int32_t> &classes, size_t number) {
   std::string name = g.name + ".typed" + std::to_string(number);
   m.functions.push_back(std::make_unique<Function>(Function::Kind::Program, name));
   Function &c = *m.functions.back();
@@ -61,12 +66,16 @@ Function *makeCopy(Module &m, const Function &g, const std::vector<TypeSet> &typ
   c.runtime = g.runtime;
   c.callsPrivates = g.callsPrivates;
   c.hidden = g.hidden;
-  // A parameter some instruction writes (or passes on by reference) keeps any type.
+  c.method = g.method;
+  // A parameter some instruction writes (or passes on by reference) keeps any type and class.
   c.paramTypes = types;
+  c.paramClasses = classes;
   for (auto &b : g.blocks)
     for (auto &i : b->insts)
-      if (isParameter(i->var) && i->var->index < types.size() && i->op != Op::Load)
+      if (isParameter(i->var) && i->var->index < types.size() && i->op != Op::Load) {
         c.paramTypes[i->var->index] = kAnyType;
+        c.paramClasses[i->var->index] = kNoClass;
+      }
   std::map<const Var *, Var *> vars;
   for (auto &v : g.vars) {
     Var *nv = c.addVar(v->kind, v->index, v->name);
@@ -100,18 +109,28 @@ bool specializeCalls(Module &m, Function &f, TypedCopies &copies, const std::fun
   bool changed = false;
   CFG cfg(f);
   TypeInfo types(cfg);
-  std::vector<std::pair<Instruction *, std::vector<TypeSet>>> work;
+  std::optional<ClassModel> model;
+  std::optional<ClassInfo> classes;
+  if (!m.classes.empty()) {
+    model.emplace(m);
+    classes.emplace(f, cfg, *model);
+  }
+  // Each call to copy for, with what its copy's key holds: the parameters' types, then their classes.
+  std::vector<std::pair<Instruction *, std::vector<uint32_t>>> work;
   for (BasicBlock *b : cfg.order())
     for (auto &ip : b->insts) {
       Instruction &i = *ip;
       Function *g = i.callee.function;
       if (i.op != Op::Call || !g || i.hasRest() || !g->paramTypes.empty() || !copyable(*g)) continue;
       if (std::any_of(i.operands().begin(), i.operands().end(), isReference)) continue;
-      std::vector<TypeSet> wanted(g->numParams, kAnyType);
+      std::vector<uint32_t> wanted(2 * g->numParams, kAnyType);
+      for (uint32_t k = 0; k < g->numParams; ++k) wanted[g->numParams + k] = (uint32_t)kNoClass;
       bool any = false;
-      for (size_t k = 0; k < g->numParams && k < i.operands().size(); ++k) {
+      for (uint32_t k = 0; k < g->numParams && k < i.operands().size(); ++k) {
         wanted[k] = classOf(types.of(i.operand(k)));
-        any |= wanted[k] != kAnyType;
+        int32_t c = classes ? classes->of(i.operand(k)) : kNoClass;
+        wanted[g->numParams + k] = (uint32_t)c;
+        any |= wanted[k] != kAnyType || c != kNoClass;
       }
       if (any) work.push_back({&i, wanted});
     }
@@ -126,7 +145,10 @@ bool specializeCalls(Module &m, Function &f, TypedCopies &copies, const std::fun
       auto made = static_cast<size_t>(
           std::count_if(copies.begin(), copies.end(), [&](const auto &e) { return e.first.first == g; }));
       if (made >= kMaxCopies) continue;
-      copy = makeCopy(m, *g, wanted, made + 1);
+      std::vector<TypeSet> typesOf(wanted.begin(), wanted.begin() + g->numParams);
+      std::vector<int32_t> classesOf;
+      for (size_t k = g->numParams; k < wanted.size(); ++k) classesOf.push_back((int32_t)wanted[k]);
+      copy = makeCopy(m, *g, typesOf, classesOf, made + 1);
       copies[key] = copy;
       optimizeCopy(*copy);
     }

@@ -84,8 +84,17 @@ back at `async.restore` (`isSuspension` names both terminators for the passes).
 Now: a `send` from a method (or a codeblock it makes) names the method's class (`classIndex`, printed `from n`; `super
 n` for `Super:message`), which decides what the message reaches at run time; `class.new` makes an object of a class of
 the module (`Module::classes`). Each `send` is lowered with a polymorphic inline cache of its own, which the runtime
-fills ([runtime.md](runtime.md#classes)). Planned: `send`, `get_field` and `set_field` carry the receiver's class when
-it is known: calls are devirtualized through class hierarchy analysis, and variables are read from known offsets.
+fills ([runtime.md](runtime.md#classes)). `object.get` and `object.set` (an instance variable's slot in `index`) read
+and assign a variable of an object whose class is known, which `resolve-sends` makes of sends (Passes).
+
+`ClassModel` (`ClassModel.*`) sees the module's classes as the runtime does once they are prepared: it describes each
+as an `xb_class_def` and applies the runtime's own rules (`xbclass.h`, `runtime/src/types/members.c`, compiled into
+`xbc` too): a class's line, what a message reaches (also from a method of a class, and `Super:`), the scope a sender
+needs, an instance variable's slot. A class whose line reaches a class found by name when the program runs (another
+module's, or one not declared) has no known line. `ClassInfo` gives the class of the values of a function that hold
+objects of one such class: what `class.new` makes, what a `New` without a method of the class's own returns (Init
+runs, the object comes back), a parameter of a copy typed for it (`Function::paramClasses`), a block parameter all of
+whose arguments hold objects of one class.
 
 ## Types
 
@@ -160,7 +169,8 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   nor into a function that has grown past 3000 instructions. The body is copied with `copyBlocks`, its constants made
   anew in the function.
   - `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
-    (`Module::library`, below), not a method, an `INIT` or `EXIT` procedure, a generator, nor one that calls itself, of
+    (`Module::library`, below; a method too, which `resolve-sends` made a call of), not an `INIT` or `EXIT` procedure,
+    a generator, nor one that calls itself, of
     at most 30 instructions, or 200 when the call passes a codeblock literal (which the body may then run in place
     too). A function versioned for references runs, for arguments without a reference, the body after its
     `params.ref` test (which they pass); otherwise its other body (`NAME.byref`).
@@ -237,21 +247,30 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   `subst.check` with a mask (`imm`, the number types) right after the value, into the same copy otherwise, so the loop
   keeps its values typed and out of the frame. The guarded value itself keeps a home the collector sees
   (`xir::guarded`): until its check it may hold anything, and the pending test after a call may collect.
+- `resolve-sends`, after `fold-constants`: a `send` (without `...`, not one an AWAIT fuses) to an object whose class
+  `ClassInfo` knows reaches what `ClassModel` finds for it from the send's class (`classIndex`) and `Super`: a method
+  becomes a `call` of its function (which `inline-functions` may then inline: a method is inlined like a function,
+  with its frame shown), an instance variable read an `object.get` (the arguments ignored, as the runtime does) and one
+  assigned with one argument that is no reference an `object.set` of its slot. Anything else stays a send: a class
+  variable, a cast, `New` or `Init` without a method, a message no member answers, a member whose scope the sender
+  reaches only as a friend (the runtime checks friends), a line not known. The classes' methods are optimized before
+  the other functions (`calleesFirst`), so that a call a send became inlines an optimized body.
 - `specialize-calls`, on each function after its pipeline (then the pipeline again when it changed it): a call of a
-  function of the module (a `FUNCTION` or `PROCEDURE` with parameters, not a method, an `INIT` or `EXIT` procedure, a
-  body versioned for references, one that reads its arguments as received (`PCount()`, `PValue()`, `...`), a
-  generator, an `ASYNC` function, nor one that makes codeblocks or has unwind blocks; at most 2000 instructions) that
-  passes no reference nor `...` and whose arguments the type inference finds all numbers, all logicals or all dates for
-  some parameter goes to a copy of the function typed for them (`NAME.typedN`, at most 4 a function, shown on the call
-  stack as the function: `stackName`): the copy's parameters have those types (`Function::paramTypes`; a parameter the
-  body writes keeps any type), its versioning test is false (no call of it passes a reference) and its body versioned
-  for references goes. The copy is made once per function and parameter types, optimized at once (its own calls with
-  such arguments go to it, so a recursive function calls its copy), and its return types are the least fixed point of
-  what its `RETURN`s give with its calls of itself giving the types found so far, from none (`settleReturnTypes`).
-  Once every function is done, a `STATIC FUNCTION` its copies replaced, which no root reaches any more, leaves the
-  module with its body versioned for references (`dropCopiedFunctions`; the module's first function, which may be the
-  program's start, `firstProgramFunction`, stays). `Fib( n - 1 ) + Fib( n - 2 )` then computes with numbers in
-  registers.
+  function of the module (a `FUNCTION`, `PROCEDURE` or method with parameters, not an `INIT` or `EXIT` procedure, a body
+  versioned for references, one that reads its arguments as received (`PCount()`, `PValue()`, `...`), a generator, an
+  `ASYNC` function, nor one that makes codeblocks or has unwind blocks; at most 2000 instructions) that passes no
+  reference nor `...` and whose arguments the type inference finds all numbers, all logicals or all dates for some
+  parameter, or objects of one class `ClassInfo` knows, goes to a copy of the function typed for them (`NAME.typedN`, at
+  most 4 a function, shown on the call stack as the function: `stackName`): the copy's parameters have those types and
+  classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes keeps any type and class; a
+  method's copy, its Self of a known class, resolves the sends to Self), its versioning test is false (no call of it
+  passes a reference) and its body versioned for references goes. The copy is made once per function and parameter
+  types, optimized at once (its own calls with such arguments go to it, so a recursive function calls its copy), and its
+  return types are the least fixed point of what its `RETURN`s give with its calls of itself giving the types found so
+  far, from none (`settleReturnTypes`). Once every function is done, a `STATIC FUNCTION` its copies replaced, which no
+  root reaches any more, leaves the module with its body versioned for references (`dropCopiedFunctions`; the module's
+  first function, which may be the program's start, `firstProgramFunction`, stays). `Fib( n - 1 ) + Fib( n - 2 )` then
+  computes with numbers in registers.
 - `peel-for-types`, after `typed-continuations`: a small innermost loop (at most 80 instructions, in a function of at
   most 600; up to 4 loops) without a suspension point or an inlined body's frame, one of whose header's parameters gets
   one number type from the loop's passes and another number type from outside (a sum that starts at the integer 0 and

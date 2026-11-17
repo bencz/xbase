@@ -194,21 +194,23 @@ line, then statements, then a line that starts with `}` (the expression goes on 
 ends without one; the procedure rule does not apply), any other statement but `STATIC`, `MEMVAR`, `PRIVATE`, `PUBLIC`
 and `PARAMETERS`. A codeblock inside captures its `LOCAL`s like a function's, and they can be passed by reference
 (`BlockExpr::boxed`). It is generated like any codeblock, with a frame of its own. A call argument `@name` or
-`@name[i]...` (or `@&name`, see the macro operator below) passes a variable or an element by reference (`RefExpr`); `@`
-anywhere else is an error (also in an array literal, by design: an element never holds a reference, which keeps every
-array operation free of the test; the reference's live elements read through it but are replaced by `:=`), and so are
-fields (`@alias->name`, and a name `FIELD` declares, also as the argument `DO ... WITH` passes by reference or as the
-variable of `FOR EACH`). `@name()` where an operand starts is a function reference, a value anywhere (`RefExpr` of a
-`CallExpr` with `reference` set and no arguments; what follows, such as `:Name`, applies to the function reference,
-among call arguments too, where the reference implementation calls the function and sends the message to its result;
-`@IIF()` is an error): it is lowered to `func.ref` with the function's callee, and the generator emits its `xb_funcref`
-([runtime.md](runtime.md#function-references)). `...` as the last argument of a call or a send or the last element of an
-array literal (`SpreadExpr`; once, with nothing after it, not even an empty argument) stands for the arguments the
-function received past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ... )`, `{ ... }`. Sema accepts it
-only in a function declared with `...`, outside its codeblocks (which have arguments of their own); a `CHECKED`
-function's count includes the other arguments only, so only too many of them is an error. Variables, elements
-(`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`, a message without arguments) and macros can be
-assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
+`@name[i]...` (or `@&name`, see the macro operator below) passes a variable or an element by reference (`RefExpr`), and
+so does a message's argument (a method compiled from xBase receives the reference, as a function does; what takes no
+reference, an instance or class variable assigned or a method of the runtime's own classes, takes its value:
+`xb_args_values`); `@` anywhere else is an error (also in an array literal, by design: an element never holds a
+reference, which keeps every array operation free of the test; the reference's live elements read through it but are
+replaced by `:=`), and so are fields (`@alias->name`, and a name `FIELD` declares, also as the argument `DO ... WITH`
+passes by reference or as the variable of `FOR EACH`). `@name()` where an operand starts is a function reference, a
+value anywhere (`RefExpr` of a `CallExpr` with `reference` set and no arguments; what follows, such as `:Name`, applies
+to the function reference, among call arguments too, where the reference implementation calls the function and sends the
+message to its result; `@IIF()` is an error): it is lowered to `func.ref` with the function's callee, and the generator
+emits its `xb_funcref` ([runtime.md](runtime.md#function-references)). `...` as the last argument of a call or a send or
+the last element of an array literal (`SpreadExpr`; once, with nothing after it, not even an empty argument) stands for
+the arguments the function received past its parameters, as many as there are: `f( a, b, ... )`, `o:m( ... )`, `{ ...
+}`. Sema accepts it only in a function declared with `...`, outside its codeblocks (which have arguments of their own);
+a `CHECKED` function's count includes the other arguments only, so only too many of them is an error. Variables,
+elements (`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`, a message without arguments) and macros
+can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
 
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
 C has them, so a comparison binds tighter than `&`, `^^` and `|`: `x & 1 == 0` is `x & ( 1 == 0 )`, an argument error at
@@ -607,7 +609,13 @@ emits the object file.
   (the runtime then hands the method to the AWAIT). The written value's words are read before the cache's acquiring
   loads, which would keep them from being forwarded from the stores that made them. Anything else, a shared object and
   every miss call `xb_op_send_from`, which fills the cache. `xb_object` is part of the ABI for this (`cls` and
-  `vars`, checked by `xb_abi_check`). `send.macro` calls `xb_macro_send` the same way, without a
+  `vars`, checked by `xb_abi_check`). A send with an argument by reference is not
+  written in place (the runtime assigns the value it designates). `object.get` and `object.set` (a send resolved for the
+  object's known class) read and write a local object's variable in place (`emitObjectAccess`: the state byte read once
+  for sharing and the barrier, the write followed by the barrier), and call `xb_op_object_get` and `xb_op_object_set`
+  for a shared one. Object variables are read as `copyItem` copies an item (the value word as two 32-bit integers, which
+  code generation does not merge with the header into one 16-byte load) and written with two 8-byte stores, so that a
+  read after an assignment is forwarded from its stores. `send.macro` calls `xb_macro_send` the same way, without a
   cache. `class.new` calls `xb_class_instance`.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations

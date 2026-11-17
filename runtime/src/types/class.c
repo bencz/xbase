@@ -32,20 +32,13 @@
 #include "xbrt_int.h"
 
 #include "rtl/collections.h"
+#include "xbclass.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum member_kind { M_GET, M_SET, M_CLASS_GET, M_CLASS_SET, M_METHOD } member_kind;
-
-typedef struct member {
-  const char *message;
-  member_kind kind;
-  uint32_t flags;           /* scope, XB_MEMBER_READONLY */
-  xb_class_def *owner;
-  uint32_t index;           /* the variable (or class variable) among its owner's */
-  xb_func fn;               /* M_METHOD */
-} member;
+/* What a message reaches (xbclass.h: the rules shared with the compiler). */
+typedef xb_member member;
 
 /* A class's preparation: none yet (or its line failed: tried again), its line
  * while its parents are prepared (meeting it again then means it inherits
@@ -64,6 +57,7 @@ typedef struct cls {
   xb_class_var *slots;      /* every slot's name, for the object */
   xb_names messages;        /* message to its member */
   member *members;
+  const char **messageOf;   /* each member's message */
   uint32_t nmembers, capMembers;
   xb_item *initial;         /* its own variables' initial values, then its class variables' (a root) */
   uint32_t *classArea;      /* the first class variable of each class of the line */
@@ -120,24 +114,26 @@ static uint32_t position(const cls *c, const xb_class_def *x) {
 /* Whether class `c` is `x` or inherits from it. */
 static int kind_of(const cls *c, const xb_class_def *x) { return position(c, x) != UINT32_MAX; }
 
-static void table(cls *c, const char *message, member m) {
+static void table(cls *c, const char *message, const member *m) {
   uint32_t before = c->messages.count;
   uint32_t id = xb_names_add(&c->messages, message, strlen(message));
   if (c->messages.count == before) return; /* an earlier class of the line has it */
   if (id == c->capMembers) {
     c->capMembers = c->capMembers ? c->capMembers * 2 : 16;
     member *grown = realloc(c->members, c->capMembers * sizeof *grown);
-    if (!grown) xb_gc_fatal("out of memory");
+    const char **messages = realloc((void *)c->messageOf, c->capMembers * sizeof *messages);
+    if (!grown || !messages) xb_gc_fatal("out of memory");
     c->members = grown;
+    c->messageOf = messages;
   }
-  m.message = message;
-  c->members[id] = m;
+  c->members[id] = *m;
+  c->messageOf[id] = message;
   c->nmembers = id + 1;
 }
 
 /* A variable's assigning message ("_NAME"), kept for the life of the program
  * (the table refers to it). */
-static const char *setter(const char *name) {
+static const char *setter_of(const char *name) {
   size_t n = strlen(name);
   char *s = malloc(n + 2);
   if (!s) xb_gc_fatal("out of memory");
@@ -146,37 +142,33 @@ static const char *setter(const char *name) {
   return s;
 }
 
+/* Tables a member (xb_line_members' order: the first one of a message stays). */
+static int table_member(void *data, const char *name, int setter, const member *m) {
+  cls *c = data;
+  if (!setter) {
+    table(c, name, m);
+    return 0;
+  }
+  uint32_t id;
+  const char *set = setter_of(name);
+  if (xb_names_find(&c->messages, set, strlen(set), &id)) free((char *)set);
+  else table(c, set, m);
+  return 0;
+}
+
 /* The tables of a class whose line is known (see the top of the file). */
 static void build_tables(cls *c) {
   c->area = malloc(c->nline * sizeof *c->area);
   if (!c->area) xb_gc_fatal("out of memory");
-  uint32_t slots = 0;
-  for (uint32_t k = 0; k < c->nline; ++k) {
-    c->area[k] = slots;
-    slots += c->line[k]->nvars;
-  }
+  for (uint32_t k = 0; k < c->nline; ++k) c->area[k] = xb_line_area((const xb_class_def *const *)c->line, k);
+  uint32_t slots = c->area[c->nline - 1] + c->line[c->nline - 1]->nvars;
   c->slots = malloc((slots ? slots : 1) * sizeof *c->slots);
   if (!c->slots) xb_gc_fatal("out of memory");
   for (uint32_t k = 0; k < c->nline; ++k) {
     xb_class_def *x = c->line[k];
     for (uint32_t i = 0; i < x->nvars; ++i) c->slots[c->area[k] + i] = (xb_class_var){x->vars[i].name, XB_VAR_ANY};
-    for (uint32_t i = 0; i < x->nmethods; ++i)
-      table(c, x->methods[i].message, (member){NULL, M_METHOD, x->methods[i].flags, x, 0, x->methods[i].fn});
-    for (uint32_t i = 0; i < x->nvars; ++i) {
-      table(c, x->vars[i].name, (member){NULL, M_GET, x->vars[i].flags, x, i, NULL});
-      uint32_t id;
-      const char *set = setter(x->vars[i].name);
-      if (xb_names_find(&c->messages, set, strlen(set), &id)) free((char *)set);
-      else table(c, set, (member){NULL, M_SET, x->vars[i].flags, x, i, NULL});
-    }
-    for (uint32_t i = 0; i < x->nclassVars; ++i) {
-      table(c, x->classVars[i].name, (member){NULL, M_CLASS_GET, x->classVars[i].flags, x, i, NULL});
-      uint32_t id;
-      const char *set = setter(x->classVars[i].name);
-      if (xb_names_find(&c->messages, set, strlen(set), &id)) free((char *)set);
-      else table(c, set, (member){NULL, M_CLASS_SET, x->classVars[i].flags, x, i, NULL});
-    }
   }
+  xb_line_members((const xb_class_def *const *)c->line, c->nline, table_member, c);
   c->classArea = malloc(c->nline * sizeof *c->classArea);
   if (!c->classArea) xb_gc_fatal("out of memory");
   uint32_t nclass = 0;
@@ -260,15 +252,10 @@ static xb_class_def **linearize(xb_ctx *ctx, xb_class_def *def, uint32_t *count)
       free(line);
       return NULL;
     }
-    for (uint32_t k = 0; k < pc->nline; ++k) {
-      int seen = 0;
-      for (uint32_t j = 0; j < nline && !seen; ++j) seen = line[j] == pc->line[k];
-      if (seen) continue;
-      xb_class_def **grown = realloc(line, (nline + 1) * sizeof *grown);
-      if (!grown) xb_gc_fatal("out of memory");
-      line = grown;
-      line[nline++] = pc->line[k];
-    }
+    xb_class_def **grown = realloc(line, (nline + pc->nline) * sizeof *grown);
+    if (!grown) xb_gc_fatal("out of memory");
+    line = grown;
+    xb_line_merge((const xb_class_def **)line, &nline, (const xb_class_def *const *)pc->line, pc->nline);
   }
   *count = nline;
   return line;
@@ -356,15 +343,12 @@ static member *lookup(cls *c, const char *message) {
   return xb_names_find(&c->messages, message, strlen(message), &id) ? &c->members[id] : NULL;
 }
 
-/* The member a message reaches among the classes after `from` in its line
- * (Super:message). */
-static member *lookup_super(cls *from, const char *message) {
-  for (uint32_t k = 1; k < from->nline; ++k) {
-    member *m = lookup(runtime_of(from->line[k]), message);
-    if (m && m->owner == from->line[k]) return m;
-  }
-  return NULL;
+/* What a class answers, for the shared rules (xb_member_reach). */
+static const member *lookup_of(void *data, const xb_class_def *c, const char *message) {
+  (void)data;
+  return lookup(runtime_of(c), message);
 }
+
 
 /* A scope violation: BASE/41 (HIDDEN) or BASE/42 (PROTECTED). */
 static void violation(xb_ctx *ctx, xb_item *r, const cls *c, const char *message, int hidden) {
@@ -397,17 +381,6 @@ static int friend_of(const xb_ctx *ctx, const xb_class_def *owner, const xb_clas
   return 0;
 }
 
-static int is_hidden(const member *m) { return (m->flags & XB_SCOPE_MASK) == XB_SCOPE_HIDDEN; }
-
-/* The member a message from a method of `f` reaches in an object of `c`, a
- * class of `f`'s kind (see the top of the file). */
-static member *lookup_from(cls *c, cls *f, const char *message) {
-  member *mf = lookup(f, message), *mc = lookup(c, message);
-  if (mf && is_hidden(mf) && mf->owner == f->def) return mf;
-  if (mc && mc->kind == M_METHOD) return mc;
-  if (mf && mf->kind != M_METHOD && !is_hidden(mf)) return mf;
-  return mc ? mc : mf;
-}
 
 /* The object seen as the class of its line named `message` (also SUPER: the
  * first parent of the class it is seen as, `view`), a cast (see the top of the
@@ -419,7 +392,7 @@ static int cast(xb_item *r, const cls *c, uint32_t view, const xb_item *self, co
     if (seen->nline < 2) return 0;
     k = position(c, seen->line[1]); /* the first parent's line comes first after the class */
   } else {
-    while (k < c->nline && strcmp(c->line[k]->name, message) != 0) ++k;
+    k = xb_line_named((const xb_class_def *const *)c->line, c->nline, message);
   }
   if ((k == 0 && strcmp(message, c->def->name) != 0) || k >= c->nline || k > UINT16_MAX) return 0;
   *r = *self;
@@ -458,9 +431,9 @@ static int cache_find(xb_send_cache *cache, const void *c, member **m, size_t *s
 /* What compiled code may do in place for member `m` (XB_SEND_* in xbrt.h). */
 static size_t inline_kind(const member *m) {
   switch (m->kind) {
-    case M_GET: return XB_SEND_GET;
-    case M_SET: return XB_SEND_SET;
-    case M_METHOD: return XB_SEND_METHOD;
+    case XB_MK_GET: return XB_SEND_GET;
+    case XB_MK_SET: return XB_SEND_SET;
+    case XB_MK_METHOD: return XB_SEND_METHOD;
     default: return XB_SEND_OTHER;
   }
 }
@@ -481,7 +454,7 @@ static void cache_put(xb_send_cache *cache, const void *c, const member *m, size
   xb_atomic_storeptr(&cache->member[0], (void *)(uintptr_t)m, XB_RELAXED);
   xb_atomic_storesz(&cache->slot[0], slot, XB_RELAXED);
   xb_atomic_storesz(&cache->kind[0], inline_kind(m), XB_RELAXED);
-  xb_atomic_storesz(&cache->fn[0], m->kind == M_METHOD ? (size_t)(uintptr_t)m->fn : 0, XB_RELAXED);
+  xb_atomic_storesz(&cache->fn[0], m->kind == XB_MK_METHOD ? (size_t)(uintptr_t)m->fn : 0, XB_RELAXED);
   xb_atomic_storesz(&cache->version, version + 2, XB_RELEASE);
 }
 
@@ -490,15 +463,16 @@ static void cache_put(xb_send_cache *cache, const void *c, const member *m, size
 static void perform(xb_ctx *ctx, xb_item *r, const member *m, uintptr_t slot, uint32_t argc, xb_item *argv) {
   xb_item nil;
   switch (m->kind) {
-    case M_METHOD:
+    case XB_MK_METHOD:
       xb_fuse_target(ctx, m->fn);
       m->fn(ctx, r, argc, argv);
       return;
-    case M_CLASS_GET: /* the program's storage: whole under the stripe of its address once it is shared */
+    case XB_MK_CLASS_GET: /* the program's storage: whole under the stripe of its address once it is shared */
       if (xb_storage_is_shared()) xb_seq_get((void *)slot, r, (xb_item *)slot);
       else *r = *(xb_item *)slot;
       return;
-    case M_CLASS_SET: { /* a root: no barrier */
+    case XB_MK_CLASS_SET: { /* a root: no barrier */
+      xb_args_values(ctx, argc, argv); /* the value, not a reference to it */
       xb_set_nil(&nil);
       xb_item v = argc > 1 ? argv[1] : nil;
       if (xb_storage_is_shared()) {
@@ -510,8 +484,9 @@ static void perform(xb_ctx *ctx, xb_item *r, const member *m, uintptr_t slot, ui
       *r = v;
       return;
     }
-    case M_GET: xb_object_get(argv[0].v.p, (uint32_t)slot, r); return; /* arguments are ignored */
-    case M_SET: {
+    case XB_MK_GET: xb_object_get(argv[0].v.p, (uint32_t)slot, r); return; /* arguments are ignored */
+    case XB_MK_SET: {
+      xb_args_values(ctx, argc, argv); /* the value, not a reference to it */
       if (argc < 2) xb_set_nil(&nil);
       const xb_item *v = argc > 1 ? &argv[1] : &nil;
       xb_object_put(argv[0].v.p, (uint32_t)slot, v);
@@ -536,10 +511,10 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
     not_found(ctx, r, c, message, &argv[0]);
     return;
   }
-  member *m = view       ? lookup(runtime_of(c->line[view]), message)
-              : super    ? lookup_super(f, message)
-              : related  ? lookup_from(c, f, message)
-                         : lookup(c, message);
+  const xb_class_def *const *fline = f ? (const xb_class_def *const *)f->line : NULL;
+  const member *m = view ? lookup(runtime_of(c->line[view]), message)
+                         : xb_member_reach(c->def, from, fline, f ? f->nline : 0, (int)super, related, message,
+                                           lookup_of, NULL);
   if (!m) {
     if (object && cast(r, c, view, &argv[0], message)) return;
     if (strcmp(message, "CLASSNAME") == 0) { /* a cast's is the class it sees; Super:ClassName() the parent's */
@@ -563,20 +538,16 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
     not_found(ctx, r, c, message, &argv[0]);
     return;
   }
-  uint32_t scope = m->flags & XB_SCOPE_MASK;
   int inside = f && kind_of(f, m->owner); /* a method of the member's class or of a subclass */
-  if ((m->kind == M_SET || m->kind == M_CLASS_SET) && (m->flags & XB_MEMBER_READONLY))
-    scope = scope == XB_SCOPE_EXPORTED ? XB_SCOPE_PROTECTED : XB_SCOPE_HIDDEN;
-  if (((scope == XB_SCOPE_HIDDEN && from != m->owner) || (scope == XB_SCOPE_PROTECTED && !inside)) &&
-      !friend_of(ctx, m->owner, from)) {
-    violation(ctx, r, c, message, scope == XB_SCOPE_HIDDEN);
+  if (!xb_member_scope_ok(m, from, inside) && !friend_of(ctx, m->owner, from)) {
+    violation(ctx, r, c, message, xb_member_scope(m) == XB_SCOPE_HIDDEN);
     return;
   }
   uintptr_t slot = 0;
-  if (m->kind == M_CLASS_GET || m->kind == M_CLASS_SET) {
+  if (m->kind == XB_MK_CLASS_GET || m->kind == XB_MK_CLASS_SET) {
     const cls *holder = view ? runtime_of(c->line[view]) : c; /* a cast reads the class it sees */
     slot = (uintptr_t)holder->classSlots[holder->classArea[position(holder, m->owner)] + m->index];
-  } else if (m->kind != M_METHOD) {
+  } else if (m->kind != XB_MK_METHOD) {
     slot = c->area[position(c, m->owner)] + m->index;
   }
   if (cache && object && !view) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, m, slot);
@@ -673,8 +644,8 @@ int xb_class_has(const xb_object *o, const char *message, int method) {
   const cls *c = o->cls->compiled;
   uint32_t id;
   if (!xb_names_find(&c->messages, message, strlen(message), &id)) return 0;
-  member_kind kind = c->members[id].kind;
-  return method ? kind == M_METHOD : kind == M_GET || kind == M_CLASS_GET;
+  xb_member_kind kind = c->members[id].kind;
+  return method ? kind == XB_MK_METHOD : kind == XB_MK_GET || kind == XB_MK_CLASS_GET;
 }
 
 uint32_t xb_class_names(const xb_object *o, int methods, const char **out) {
@@ -682,10 +653,11 @@ uint32_t xb_class_names(const xb_object *o, int methods, const char **out) {
   uint32_t n = 0;
   for (uint32_t id = 0; id < c->nmembers; ++id) {
     const member *m = &c->members[id];
-    int named = m->message[0] >= 'A' && m->message[0] <= 'Z'; /* not "_NAME", nor an operator's */
+    const char *message = c->messageOf[id];
+    int named = message[0] >= 'A' && message[0] <= 'Z'; /* not "_NAME", nor an operator's */
     if ((m->flags & XB_SCOPE_MASK) != XB_SCOPE_EXPORTED || !named) continue;
-    if (methods ? m->kind != M_METHOD : m->kind != M_GET && m->kind != M_CLASS_GET) continue;
-    if (out) out[n] = m->message;
+    if (methods ? m->kind != XB_MK_METHOD : m->kind != XB_MK_GET && m->kind != XB_MK_CLASS_GET) continue;
+    if (out) out[n] = message;
     ++n;
   }
   return n;
@@ -698,7 +670,7 @@ int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a,
   if (!k) return 0;
   if (a->width && a->width < k->nline) k = runtime_of(k->line[a->width]); /* a cast: the class it is seen as */
   const member *m = lookup(k, op);
-  if (!m || m->kind != M_METHOD) return 0;
+  if (!m || m->kind != XB_MK_METHOD) return 0;
   xb_item argv[3] = {*a};
   uint32_t argc = 1;
   if (b) argv[argc++] = *b;

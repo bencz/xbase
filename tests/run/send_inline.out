@@ -1,5 +1,7 @@
 
 barrier          0 G20000      20000      20000      40000      20000 BB1 G20000
+barrier known class          0
+barrier unknown class          0
 kept     598894
 no argument U NIL
 threads      20000      20000

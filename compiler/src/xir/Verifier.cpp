@@ -205,6 +205,8 @@ private:
       break;
     case Op::ArrayLit: allItems(i); break;
     case Op::ClassNew: expect(i, 0, {}); break;
+    case Op::ObjectGet: expect(i, 1, {Type::Item}); break;
+    case Op::ObjectSet: expect(i, 2, {Type::Item, Type::Item}); break;
     case Op::FuncRef:
       expect(i, 0, {});
       if (!i.callee.function && i.callee.name.empty()) fail("func.ref of no function");

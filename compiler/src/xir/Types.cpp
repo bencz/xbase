@@ -189,6 +189,8 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
     return {a & kSwitchTypes, (a & ~kSwitchTypes) != 0};
   }
   case Op::FromBool: return {kLogical, false};
+  case Op::ObjectSet: return {t.of(i.operand(1)), false}; // the value assigned
+  case Op::ClassNew: return {typeBit(XB_T_OBJECT), false};
   case Op::ArrayLit: return {typeBit(XB_T_ARRAY), false};
   case Op::HashLit: return {typeBit(XB_T_HASH), false};
   case Op::MakeBlock: return {typeBit(XB_T_BLOCK), false};

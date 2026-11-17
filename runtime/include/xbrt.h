@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 47u
+#define XB_ABI_VERSION 48u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -691,6 +691,12 @@ typedef struct xb_send_cache {
   size_t kind[XB_SEND_CACHE_WAYS];
   size_t fn[XB_SEND_CACHE_WAYS]; /* an xb_func as an integer (uintptr_t) */
 } xb_send_cache;
+
+/* [ABI] Instance variable `slot` of object `obj` (an XB_T_OBJECT item), read into `r`, or assigned `v` (the value
+ * also into `r`), when it may be shared: under its lock (core/shared.h). Compiled code calls them for a send resolved
+ * when compiling (the object's class known) on a shared object; it reads and writes a local one in place. */
+void     xb_op_object_get(xb_item *r, const xb_item *obj, uint32_t slot);
+void     xb_op_object_set(xb_item *r, const xb_item *obj, uint32_t slot, const xb_item *v);
 
 /* [ABI] An object, an instance of a class: its class (a runtime structure, types/types.h) and its instance
  * variables, `nvars` items in the class's order. Compiled code reads `cls`, and reads and writes the items in place. */

@@ -124,6 +124,7 @@ private:
     llvm::Value *header, *payload; // the two words of an item
   };
   Words loadWords(llvm::Value *item);
+  Words itemWords(llvm::Value *item);
   void copyItem(llvm::Value *dst, llvm::Value *src);
   void setNil(llvm::Value *dst);
   void storeTagged(llvm::Value *dst, uint32_t tag, llvm::Value *v);
@@ -199,6 +200,10 @@ private:
   llvm::Value *truncDouble(llvm::Value *v);
   void sendInPlace(const xir::Instruction &i, llvm::Value *argv, llvm::Value *d, llvm::GlobalVariable *cache,
                    const std::function<void()> &slowSend);
+  llvm::Value *objectVariable(llvm::Value *obj, llvm::Value *slot, llvm::BasicBlock *shared, llvm::Value *&state);
+  void storeObjectVariable(llvm::Value *obj, llvm::Value *var, llvm::Value *state, const Words &value);
+  void copyObjectVariable(llvm::Value *d, llvm::Value *var);
+  void emitObjectAccess(const xir::Instruction &i);
   llvm::Value *setDecimals();
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);
@@ -295,7 +300,7 @@ private:
   llvm::FunctionCallee rtModuleRegister_, rtProgramRun_, rtGcRemember_, rtRefOf_, rtRefElem_;
   llvm::FunctionCallee rtMvMark_, rtMvRelease_, rtMvGet_, rtMvSet_, rtMvRef_, rtMvPrivate_, rtMvPublic_, rtMvParam_;
   llvm::FunctionCallee rtMvField_, rtFieldGet_, rtFieldSet_;
-  llvm::FunctionCallee rtSendFrom_, rtClassInstance_, rtClassesRegister_;
+  llvm::FunctionCallee rtSendFrom_, rtClassInstance_, rtClassesRegister_, rtObjectGet_, rtObjectSet_;
   llvm::FunctionCallee rtGenNew_, rtGenRestore_, rtGenYield_, rtGenDone_;
   llvm::FunctionCallee rtAsyncNew_, rtAsyncRestore_, rtAsyncSuspend_, rtAwaitReady_, rtAwaitResult_, rtAwaitWait_;
   llvm::FunctionCallee rtAwaitFuse_, rtAwaitFused_;

@@ -182,6 +182,7 @@ private:
       out_ += " " + (i.alias.empty() ? std::string() : i.alias + "->") + i.message;
       break;
     case Op::ClassNew: out_ += " " + std::to_string(i.classIndex); break;
+    case Op::ObjectGet: case Op::ObjectSet: out_ += " " + std::to_string(i.index); break;
     case Op::MvParam: out_ += " " + i.message + " " + std::to_string(i.index); break;
     case Op::MakeBlock: case Op::InlineEnter:
       out_ += " " + i.blockFn->name;

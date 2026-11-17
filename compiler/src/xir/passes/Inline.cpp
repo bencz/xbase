@@ -295,7 +295,7 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
   Function *callee = call.callee.function;
   const Module *from = nullptr;
   if (!callee && call.callee.native) std::tie(callee, from) = libraryFunction(m, call.callee.name);
-  if (!inlinableCall(call) || !callee || callee == &f || callee->kind != Function::Kind::Program || callee->method ||
+  if (!inlinableCall(call) || !callee || callee == &f || callee->kind != Function::Kind::Program ||
       callee->startup || isResumable(*callee) || recursive(*callee))
     return std::nullopt;
   std::vector<BasicBlock *> body;

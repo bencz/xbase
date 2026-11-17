@@ -35,6 +35,10 @@ bool inlineBlocks(Function &f);
 // written directly (no barrier: it is never in the heap), which lets promote-variables take it (Inline.cpp).
 bool unshareVariables(Function &f);
 
+// A send to an object whose class is known exactly (one of the module's, its whole line the module's) is what the
+// runtime would do: a call of the method it reaches, or an object.get or object.set of the variable (ResolveSends.cpp).
+bool resolveSends(Module &m, Function &f);
+
 // `x := x + y` on a LOCAL only the function sees and that holds strings
 // becomes one `append`, whose string grows in place (AppendInPlace.cpp).
 bool appendInPlace(Function &f);
@@ -64,7 +68,8 @@ bool removeDeadCode(Function &f);
 // (TypedContinuations.cpp).
 bool typedContinuations(Function &f);
 
-// The typed copies of the module's functions made so far, by function and parameter types (Specialize.cpp).
+// The typed copies of the module's functions made so far, by function and their parameters' types then classes
+// (Specialize.cpp).
 using TypedCopies = std::map<std::pair<const Function *, std::vector<uint32_t>>, Function *>;
 
 // A call of a function of the module whose arguments hold numbers, logicals or dates goes to a copy of the function

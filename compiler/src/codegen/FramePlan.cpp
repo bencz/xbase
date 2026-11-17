@@ -126,7 +126,7 @@ bool FramePlan::canForward(const Instruction &value, const Instruction &store) c
   if (value.mayFail() && store.parent->unwind) return false;
   switch (value.op) {
   case Op::Unary: case Op::Binary: case Op::Index: case Op::ArrayLit: case Op::MakeBlock: case Op::NumDefaultDec:
-  case Op::FromBool:
+  case Op::FromBool: case Op::ObjectGet: case Op::ObjectSet:
     return true;
   case Op::Call: case Op::Send: case Op::SendMacro:
     return isPlain(*store.var, store.access);

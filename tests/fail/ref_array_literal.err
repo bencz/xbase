@@ -1,1 +1,1 @@
-'@' (by reference) is supported only in function call arguments
+'@' (by reference) is supported only in the arguments of a call or a message

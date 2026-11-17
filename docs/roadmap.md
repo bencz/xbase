@@ -106,7 +106,8 @@ Done: `CLASS ... ENDCLASS` with `INHERIT` (multiple, an area of variables per an
 ([runtime.md](runtime.md#classes)).
 Operator overloading and scalar classes (`ASSOCIATE CLASS`) are done too.
 Destructors and polymorphic inline caches for sends are done.
-Missing, from the plan below: devirtualization and variables at known offsets.
+Sends to objects whose class the compiler knows are resolved when compiling (calls, inlined methods, variables at
+known slots), by the runtime's own rules.
 
 - Syntax: `CLASS Name [INHERIT Parent1, Parent2, ...]`, `VAR`/`DATA name [INIT value]`, `METHOD name( params )
   [CONSTRUCTOR | INLINE expr]`, `ACCESS`/`ASSIGN`, `ENDCLASS`; a method's body is `METHOD name( params ) CLASS Name`,

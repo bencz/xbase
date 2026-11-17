@@ -136,8 +136,10 @@ A library is written in xBase and distributed compiled, so that programs include
 ### Classes
 
 `CLASS`, `INHERIT`, `DATA`/`VAR`, `METHOD`, `ACCESS`/`ASSIGN`, `Super` and constructors are compiled natively. Since the
-language is untyped, `o:Msg()` dispatches by interned selector with an inline cache at the call site; object layouts
-come from the target `DataLayout`.
+language is untyped, `o:Msg()` dispatches by interned selector with an inline cache at the call site, which compiled
+code performs in place on a hit; where the compiler knows the object's class (made in the function, or a parameter of
+a copy typed for it), it resolves the message by the runtime's own rules (`xbclass.h`): a method call it may inline, a
+variable read or written at its slot. Object layouts come from the target `DataLayout`.
 
 ### async/await
 

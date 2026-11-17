@@ -245,7 +245,7 @@ ExprPtr Parser::parseBraced() {
 }
 
 // Empty arguments - f( a, , b ) - are passed as NIL. `refs`: the arguments of
-// a function call, where `@` passes a variable or element by reference.
+// a function call or a message, where `@` passes a variable or element by reference.
 // `spread`: `...` may stand for the arguments of the function past its
 // parameters (a call, a send, an array literal), as the last of the list.
 std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
@@ -257,7 +257,7 @@ std::vector<ExprPtr> Parser::parseArgs(Tok close, bool refs, bool spread) {
     } else if (atFunctionRef()) { // a value, which an operator or a message may follow
       args.push_back(parseExpr());
     } else if (at(Tok::At)) {
-      if (!refs) diag_.error(cur().loc, "'@' (by reference) is supported only in function call arguments");
+      if (!refs) diag_.error(cur().loc, "'@' (by reference) is supported only in the arguments of a call or a message");
       args.push_back(parseRef());
     } else if (at(Tok::Ellipsis)) {
       if (!spread) diag_.error(cur().loc, "'...' is supported only in the arguments of a call or in an array");
@@ -381,7 +381,7 @@ ExprPtr Parser::parseSend(SourceLoc loc, ExprPtr object) {
   else advance();
   if (accept(Tok::LParen)) {
     send->withArgs = true;
-    send->args = parseArgs(Tok::RParen, false, true);
+    send->args = parseArgs(Tok::RParen, true, true);
     expect(Tok::RParen, "')'");
   }
   return send;

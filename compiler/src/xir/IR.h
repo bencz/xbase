@@ -212,7 +212,8 @@ public:
   std::string message;                // Send: upper-cased, "_NAME" to assign NAME; Mv*: the variable's name;
                                       // Field*: the field's name
   std::string alias;                  // Field* without an area operand: the work area's alias ("" the current one)
-  uint32_t index = 0; // MvParam: the argument, from 0; GenYield: the state it resumes in; SendMacro: 1 to assign
+  uint32_t index = 0; // MvParam: the argument, from 0; GenYield: the state it resumes in; SendMacro: 1 to assign;
+                      // ObjectGet, ObjectSet: the instance variable's slot
   // Send from a method: the index of its class in Module::classes (what the send may reach), -1 elsewhere, and
   // whether it is Super:message; ClassNew: the class.
   int32_t classIndex = -1;
@@ -310,6 +311,9 @@ public:
   // A typed copy (passes/Specialize.cpp): the types each parameter holds (a TypeSet each), which every call of it
   // passes; empty for any function else.
   std::vector<uint32_t> paramTypes;
+  // A copy typed for the classes of its parameters: the class (an index in Module::classes) of the object each one
+  // holds, which every call of it passes, or -2 (any value); empty for any function else.
+  std::vector<int32_t> paramClasses;
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   std::vector<std::unique_ptr<Constant>> constants;

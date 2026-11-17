@@ -4,8 +4,9 @@ Code: `runtime/include/xbrt.h` (the contract with the compiler), `runtime/src/`.
 
 `xbrt.h` is the ABI shared with `xbc`. The compiler includes it for constants only (type tags, ABI version, flags,
 shared formulas) and mirrors the structures as LLVM types laid out by the target `DataLayout`; it never relies on the
-host's layout. Any change to a structure or an entry point used by generated code updates `CodeGen` and bumps
-`XB_ABI_VERSION`.
+host's layout. It also compiles `types/members.c` (`xbclass.h`: the rules of classes) and applies it to `xb_class_def`
+descriptions it makes in memory, so that it resolves sends exactly as the runtime dispatches them. Any change to a
+structure or an entry point used by generated code updates `CodeGen` and bumps `XB_ABI_VERSION`.
 
 ## Values
 
@@ -357,13 +358,17 @@ missing name, which fails only when it is called; xbase reports the missing func
 
 ## Objects and messages
 
-An object (`xb_object` in `xbrt.h`, part of the ABI; `types/object.c`) is an instance of a class: its class and one
-item per instance variable. The runtime defines classes of its own in C (`xb_class`: name, variables and methods), and
+An object (`xb_object` in `xbrt.h`, part of the ABI; `types/object.c`) is an instance of a class: its class and one item
+per instance variable. The runtime defines classes of its own in C (`xb_class`: name, variables and methods), and
 programs define theirs in xBase ([Classes](#classes)). `xb_op_send(ctx, ret, message, argc, argv)` sends a message to
-`argv[0]` with the arguments `argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment
-`o:x := v` sends `_X` with `v`. Compiled code sends through `xb_op_send_from`, with the send's inline cache and the
-class of the method it is in ([Classes](#classes)), after performing in place what the cache's newest way holds for
-the object's class (an instance variable read or written, a method called: [compiler.md](compiler.md#xir-to-llvm)).
+`argv[0]` with the arguments `argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment `o:x :=
+v` sends `_X` with `v`. An argument written `@x` reaches a method compiled from xBase as the reference; an instance or
+class variable assigned, and a method of a class of the runtime's own, take the value it designates (`xb_args_values`).
+A send the compiler resolved for the object's known class reads and writes the variable itself, or calls the method
+(`xb_op_object_get` and `xb_op_object_set` for a shared object). Compiled code sends through `xb_op_send_from`, with the
+send's inline cache and the class of the method it is in ([Classes](#classes)), after performing in place what the
+cache's newest way holds for the object's class (an instance variable read or written, a method called:
+[compiler.md](compiler.md#xir-to-llvm)).
 
 - An object's variables: `X` returns the variable (arguments are ignored), `_X` assigns it (without an argument, `NIL`).
   A variable's rule (`xb_var_rule`) says what it accepts: any value; only an array, a logical or a string (a value of
@@ -470,7 +475,10 @@ first time it is used (its class function, or a subclass):
   evaluated meanwhile, inherits from itself (`BASE/0` `Class inherits from itself`, the class's name as the operation;
   the compiler reports it within a module).
 - The messages it answers are tabled: for each class of the line in order, its methods, then its variables (`NAME`
-  reads, `_NAME` assigns); the first class that has a message takes it. The INIT values are evaluated then, once per
+  reads, `_NAME` assigns), then its class variables; the first class that has a message takes it. These rules (the
+  line, the table's order, what a message from a method or `Super:` reaches, the scope a sender needs) are one
+  implementation, `xbclass.h` (`types/members.c`), which the compiler applies too when it resolves a send to an object
+  whose class it knows ([xir.md](xir.md#classes)). The INIT values are evaluated then, once per
   class (`CLS:(INIT)`); each new object gets them, an array or a hash copied for each object (`xb_clone_deep`). When
   evaluating them fails, the class is not usable yet and they are evaluated again the next time it is used; INIT
   values that need an object of their own class, or of a subclass being prepared, are `BASE/0` `Class used by its own
@@ -572,8 +580,8 @@ first time it is used (its class function, or a subclass):
   the caches: each one is a sequence lock (`version`, odd while a thread changes it). A reader that finds the version
   odd, or changed once it has read a way, does the full lookup instead (nothing torn is used, nothing is tried again),
   and a writer that finds another one at work leaves the cache as it is; 20,000,000 messages to objects of two classes
-  through one send take the same time as without it. Not yet: devirtualized calls and variables at known offsets in
-  the generated code ([xir.md](xir.md#classes)).
+  through one send take the same time as without it. Where the compiler knows the object's class, it resolves the send
+  by these rules instead: a call of the method, or the variable at its slot ([xir.md](xir.md#classes)).
 
 ## References
 

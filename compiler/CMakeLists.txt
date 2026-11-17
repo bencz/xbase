@@ -33,6 +33,9 @@ add_executable(xbc
   src/xir/passes/TypedContinuations.cpp
   src/xir/passes/PeelTypes.cpp
   src/xir/passes/Specialize.cpp
+  src/xir/passes/ResolveSends.cpp
+  src/xir/ClassModel.cpp
+  ${PROJECT_SOURCE_DIR}/runtime/src/types/members.c
   src/xir/passes/Resumable.cpp
   src/xir/passes/Versioning.cpp
   src/xir/Printer.cpp

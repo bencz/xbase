@@ -29,6 +29,7 @@ constexpr Pass kPipeline[] = {
     {"append-in-place", onFunction<appendInPlace>},    // before promote-variables, which takes the other LOCALs
     {"promote-variables", onFunction<promoteVariables>},
     {"fold-constants", onFunction<foldConstants>},
+    {"resolve-sends", resolveSends},                   // after promote-variables: the objects' classes flow
     {"simplify-cfg", onFunction<simplifyCFG>},
     {"remove-dead-code", onFunction<removeDeadCode>},
     {"unshare-variables", onFunction<unshareVariables>}, // after remove-dead-code: captures gone with dead code
@@ -65,9 +66,14 @@ std::vector<Function *> calleesFirst(const Module &m) {
       }
     return out;
   };
-  for (auto &root : m.functions) {
-    if (!seen.insert(root.get()).second) continue;
-    stack.push_back({root.get(), targets(*root)});
+  // The classes' methods first: a send resolved to one of them then calls (or inlines) it optimized.
+  std::vector<Function *> roots;
+  for (const Module::Class &c : m.classes)
+    for (const Module::Class::Method &mt : c.methods) roots.push_back(mt.fn);
+  for (auto &f : m.functions) roots.push_back(f.get());
+  for (Function *root : roots) {
+    if (!seen.insert(root).second) continue;
+    stack.push_back({root, targets(*root)});
     while (!stack.empty()) {
       auto &[f, next] = stack.back();
       if (next.empty()) {

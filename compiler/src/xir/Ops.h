@@ -42,6 +42,8 @@ enum class Op : uint8_t {
   ParamsRef,      // parameters (captures) -> Bool: one of them holds a reference its caller passed
   CallForward,    // callee -> Item: calls it with this function's own arguments, as received [may fail]
   ClassNew,       // -> Item: a new object of class `classIndex` (its INIT values run once)  [may fail]
+  ObjectGet,      // object -> Item: its instance variable `index` (a send resolved for the object's known class)
+  ObjectSet,      // object, value -> Item: assigns its instance variable `index`, giving the value
   FuncRef,        // callee -> Item: the function itself (@name(), a symbol: XB_T_SYMBOL)
   // Fields of work areas, by name (`message`): of the work area of `alias` ("" the current one), or of the one an
   // operand names (an alias or a number); a missing alias or field is an error the error block may retry.

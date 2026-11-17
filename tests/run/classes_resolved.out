@@ -1,0 +1,24 @@
+
+overrides leaf B Mleaf LB lmb
+mid mid mb
+multiple A a b A:a onlyB:b
+multiple set         10 b         10
+diamond          1 d          1 left
+from own/from own/from
+from sub own/sub own/sub sub
+access        100        212.00        100
+scope pub E41:TSCOPE:HID:Scope violation (hidden)<(b)MAIN(41) E42:TSCOPE:PRO:Scope violation (protected)<(b)MAIN(41) ro E42:TSCOPE:_RO:Scope violation (protected)<(b)MAIN(41) E41:TSCOPE:_HID:Scope violation (hidden)<(b)MAIN(41) hidproRO RO
+scope sub proE41:TSCOPESUB:HID:Scope violation (hidden)<(b)TSCOPESUB:FROMSUB(196) E41:TSCOPESUB:HID:Scope violation (hidden)<(b)MAIN(44) E42:TSCOPESUB:PRO:Scope violation (protected)<(b)MAIN(44)
+friend hidpro
+class vars          1          1          2          2          2
+init          3          4          7
+own new C made by New
+arguments          0 NIL NIL          7          7
+counts NU NN UU
+by reference        100         21          3 2101/101/2101       2101 N42
+cast by New base NEW base who
+not found E1004:TNAMED:NOTHING:Message not found<(b)MAIN(72) E1005:TNAMED:_NOTHING:Message not found<(b)MAIN(72)
+error E1004:TNAMED:FAIL:Message not found<(b)MAIN(73)
+recursive    3628800       6765
+self other/first first
+unknown leaf/lmb mid/mb base/b 

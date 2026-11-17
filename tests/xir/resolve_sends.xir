@@ -1,0 +1,201 @@
+module RESOLVE_SENDS
+
+function MAIN params 1 {
+  $f0 = frame 0 "X"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward MAIN.byref
+  ret %2
+body:
+  %4 = load $f0
+  inline.enter TPAIR
+  %6 = class.new 1
+  inline.leave
+  %8 = send NEW %6
+  %9 = array %8
+  %10 = object.set 0 %8, 1:w10
+  %11 = object.get 0 %8
+  inline.enter TBASIS:DOUBLED
+  %13 = object.get 3 %8
+  %14 = binary mul %13, 2:w10
+  inline.leave
+  %16 = binary add %11, %14
+  %17 = object.set 1 %8, %16
+  inline.enter TPAIR:TOTAL
+  %19 = object.get 0 %8
+  %20 = object.get 1 %8
+  %21 = binary add %19, %20
+  %22 = object.get 3 %8
+  %23 = binary add %21, %22
+  %24 = binary gt %23, 100:w10
+  %25 = truth %24
+  cond_br %25, endif.inline(100:w10), endif.inline(%23)
+endif.inline(%27: item):
+  inline.enter TBASIS:DOUBLED
+  %29 = object.get 3 %8
+  %30 = binary mul %29, 2:w10
+  inline.leave
+  %32 = binary add %27, %30
+  %33 = object.get 3 %8
+  %34 = binary sub %32, %33
+  inline.leave
+  %36 = send TBASIS %8
+  %37 = send BASE %36
+  %38 = send COUNT %8
+  %39 = send _FIRST %8
+  %40 = send NOTHING %8
+  %41 = send SECRET %8
+  %42 = index %9, 1:w10
+  %43 = send FIRST %42
+  %44 = send FIRST %4
+  %45 = call QOUT native %34, %37, %38, %39, %40, %41, %43, %44
+  ret
+}
+
+function TPAIR:TOTAL internal params 1 method {
+  $f0 = frame 0 "SELF"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward TPAIR:TOTAL.byref
+  ret %2
+body:
+  %4 = load $f0
+  %5 = send FIRST from 1 %4
+  %6 = send LAST from 1 %4
+  %7 = binary add %5, %6
+  %8 = send BASE from 1 %4
+  %9 = binary add %7, %8
+  %10 = binary gt %9, 100:w10
+  %11 = truth %10
+  cond_br %11, endif(100:w10), endif(%9)
+endif(%13: item):
+  %14 = send DOUBLED from 1 %4
+  %15 = binary add %13, %14
+  %16 = send BASE from 1 %4
+  %17 = binary sub %15, %16
+  ret %17
+}
+
+function TBASIS:DOUBLED internal params 1 method {
+  $f0 = frame 0 "SELF"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward TBASIS:DOUBLED.byref
+  ret %2
+body:
+  %4 = load $f0
+  %5 = send BASE from 0 %4
+  %6 = binary mul %5, 2:w10
+  ret %6
+}
+
+function TBASIS params 0 {
+entry:
+  %0 = class.new 0
+  ret %0
+}
+
+function TBASIS:(INIT) internal params 0 {
+entry:
+  %0 = array 10:w10, 0:w10
+  ret %0
+}
+
+function TPAIR params 0 {
+entry:
+  %0 = class.new 1
+  ret %0
+}
+
+function TPAIR:(INIT) internal params 0 {
+entry:
+  %0 = array 0:w10, 0:w10, "s"
+  ret %0
+}
+
+function MAIN.byref internal params 1 {
+  $f0 = frame 0 "X"
+entry:
+  inline.enter TPAIR
+  %1 = class.new 1
+  inline.leave
+  %3 = send NEW %1
+  %4 = array %3
+  %5 = object.set 0 %3, 1:w10
+  %6 = object.get 0 %3
+  inline.enter TBASIS:DOUBLED
+  %8 = object.get 3 %3
+  %9 = binary mul %8, 2:w10
+  inline.leave
+  %11 = binary add %6, %9
+  %12 = object.set 1 %3, %11
+  inline.enter TPAIR:TOTAL
+  %14 = object.get 0 %3
+  %15 = object.get 1 %3
+  %16 = binary add %14, %15
+  %17 = object.get 3 %3
+  %18 = binary add %16, %17
+  %19 = binary gt %18, 100:w10
+  %20 = truth %19
+  cond_br %20, endif.inline(100:w10), endif.inline(%18)
+endif.inline(%22: item):
+  inline.enter TBASIS:DOUBLED
+  %24 = object.get 3 %3
+  %25 = binary mul %24, 2:w10
+  inline.leave
+  %27 = binary add %22, %25
+  %28 = object.get 3 %3
+  %29 = binary sub %27, %28
+  inline.leave
+  %31 = send TBASIS %3
+  %32 = send BASE %31
+  %33 = send COUNT %3
+  %34 = send _FIRST %3
+  %35 = send NOTHING %3
+  %36 = send SECRET %3
+  %37 = index %4, 1:w10
+  %38 = send FIRST %37
+  %39 = load $f0 maybe_ref
+  %40 = send FIRST %39
+  %41 = call QOUT native %29, %32, %33, %34, %35, %36, %38, %40
+  ret
+}
+
+function TPAIR:TOTAL.byref internal params 1 method {
+  $f0 = frame 0 "SELF"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = send FIRST from 1 %0
+  %2 = load $f0 maybe_ref
+  %3 = send LAST from 1 %2
+  %4 = binary add %1, %3
+  %5 = load $f0 maybe_ref
+  %6 = send BASE from 1 %5
+  %7 = binary add %4, %6
+  %8 = binary gt %7, 100:w10
+  %9 = truth %8
+  cond_br %9, endif(100:w10), endif(%7)
+endif(%11: item):
+  %12 = load $f0 maybe_ref
+  %13 = send DOUBLED from 1 %12
+  %14 = binary add %11, %13
+  %15 = load $f0 maybe_ref
+  %16 = send BASE from 1 %15
+  %17 = binary sub %14, %16
+  ret %17
+}
+
+function TBASIS:DOUBLED.byref internal params 1 method {
+  $f0 = frame 0 "SELF"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = send BASE from 0 %0
+  %2 = binary mul %1, 2:w10
+  ret %2
+}

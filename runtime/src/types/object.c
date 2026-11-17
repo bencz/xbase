@@ -115,6 +115,15 @@ const xb_class_method *xb_class_method_of(const xb_class *cls, const char *name)
   return NULL;
 }
 
+void xb_args_values(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
+  for (uint32_t k = 1; k < argc; ++k)
+    if (argv[k].type == XB_T_CELL || argv[k].type == XB_T_REF) {
+      xb_item value;
+      xb_ref_get(ctx, &argv[k], &value);
+      argv[k] = value; /* the reference's own slot: a temporary of the send */
+    }
+}
+
 void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_item *argv) {
   int assign = message[0] == '_';
   const char *name = message + assign;
@@ -125,6 +134,7 @@ void xb_op_send(xb_ctx *ctx, xb_item *r, const char *message, uint32_t argc, xb_
       xb_class_send(ctx, r, message, NULL, 0, argc, argv);
       return;
     }
+    xb_args_values(ctx, argc, argv); /* a class of the runtime's own */
     for (uint32_t k = 0; k < cls->nvars; ++k)
       if (xb_var_answers(&cls->vars[k], name) && !(assign && cls->vars[k].rule == XB_VAR_READ)) {
         if (!assign) {
@@ -162,6 +172,7 @@ void xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t ar
       return;
     }
   }
+  xb_args_values(ctx, argc, argv); /* past :Exec, which passes them on: nothing else takes a reference */
   if (!assign && strcmp(message, "CLASSNAME") == 0) {
     const char *cn = argv[0].type == XB_T_OBJECT ? ((const xb_object *)argv[0].v.p)->cls->name
                                                  : xb_type_class_name(argv[0].type);
@@ -173,4 +184,12 @@ void xb_object_message(xb_ctx *ctx, xb_item *r, const char *message, uint32_t ar
   const char *shown = message_frame(frame, &argv[0], message);
   if (assign) xb_error_in(ctx, shown, r, EG_NOVARMETHOD, 1005, name, XB_ERR_SUBSTITUTE, argc, argv);
   else xb_error_in(ctx, shown, r, EG_NOMETHOD, 1004, name, XB_ERR_SUBSTITUTE, argc, argv);
+}
+
+void xb_op_object_get(xb_item *r, const xb_item *obj, uint32_t slot) { xb_object_get(obj->v.p, slot, r); }
+
+void xb_op_object_set(xb_item *r, const xb_item *obj, uint32_t slot, const xb_item *v) {
+  xb_item value = *v; /* `r` may be the value's own item */
+  xb_object_put(obj->v.p, slot, &value);
+  *r = value;
 }
