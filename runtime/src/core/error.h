@@ -30,6 +30,10 @@ int xb_error(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, con
 int xb_error_in(xb_ctx *ctx, const char *frame, xb_item *result, int32_t gencode, int32_t subcode,
                 const char *operation, uint32_t flags, uint32_t argc, const xb_item *args);
 
+/* BASE/9032 Memory low (XB_CODE_MEMORY) raised inside `function` for a size the program chose that no memory holds; the
+ * error block's value, if it returns, is the function's result. */
+void xb_error_memory(xb_ctx *ctx, xb_item *ret, const char *function, uint32_t argc, const xb_item *argv);
+
 /* Raises an Error object again (a task's failure, for the code that waits for it): the error block evaluated with it,
  * whose result `result` takes (1); 0 with a request to unwind pending. */
 int xb_error_raise(xb_ctx *ctx, xb_item *result, const xb_item *error);

@@ -88,12 +88,15 @@ int xb_array_put(xb_array *a, size_t i, const xb_item *v) {
   return in;
 }
 
-/* Storage for `cap` items, its cards clean. */
-static xb_item *storage(size_t cap) {
-  xb_item *items = xb_gc_alloc(XB_GC_ITEMS, cap * sizeof(xb_item) + xb_array_card_count(cap));
-  memset(items + cap, 0, xb_array_card_count(cap));
+/* Storage for `cap` items, its cards clean; `fallible`: NULL when there is no memory for it (xb_gc_try_alloc). */
+static xb_item *storage_of(size_t cap, int fallible) {
+  size_t bytes = cap * sizeof(xb_item) + xb_array_card_count(cap);
+  xb_item *items = fallible ? xb_gc_try_alloc(XB_GC_ITEMS, bytes) : xb_gc_alloc(XB_GC_ITEMS, bytes);
+  if (items) memset(items + cap, 0, xb_array_card_count(cap));
   return items;
 }
+
+static xb_item *storage(size_t cap) { return storage_of(cap, 0); }
 
 static size_t grown_cap(size_t cap, size_t len) {
   cap = cap ? cap * 2 : 4;
@@ -104,16 +107,18 @@ static size_t grown_cap(size_t cap, size_t len) {
 /* A shared array's length set to `len`. Storage large enough is allocated first, outside the lock (its capacity only
  * grows, so it is still large enough under the lock), and rooted meanwhile: the root's tag only keeps it, storage is
  * traced through its array. Under the lock the items move there and the new ones become NIL. */
-static void resize_shared(xb_ctx *ctx, xb_array *a, size_t len) {
+static int resize_shared(xb_ctx *ctx, xb_array *a, size_t len, int fallible) {
   xb_item spare, nil;
   xb_set_nil(&spare);
   xb_set_nil(&nil);
-  xb_gc_root_push(ctx, &spare);
   size_t room = xb_atomic_loadsz(&a->cap, XB_ACQUIRE);
   if (len > room) {
     room = grown_cap(room, len);
-    xb_set_ptr(&spare, XB_T_ARRAY, storage(room));
+    xb_item *items = storage_of(room, fallible);
+    if (!items) return 0;
+    xb_set_ptr(&spare, XB_T_ARRAY, items);
   }
+  xb_gc_root_push(ctx, &spare);
   xb_seq_lock(a);
   if (len > a->cap) {
     xb_item *items = spare.v.p; /* where a collection while the lock was waited for left it */
@@ -126,15 +131,17 @@ static void resize_shared(xb_ctx *ctx, xb_array *a, size_t len) {
   xb_atomic_storesz(&a->len, len, XB_RELEASE);
   xb_seq_unlock(a);
   xb_gc_root_pop(ctx, 1);
+  return 1;
 }
 
 /* Room for `len` items in a local array, made in place: the allocation is a safepoint, where the program's storage
  * may become shared (publication, docs/concurrency.md) and this array with it, so it is tested again after it: 0
  * then, nothing changed, for the shared path to take over. */
-static int local_room(xb_array *a, size_t len) {
+static int local_room(xb_array *a, size_t len, int fallible) {
   if (len <= a->cap) return !xb_is_shared(a);
   size_t cap = grown_cap(a->cap, len);
-  xb_item *items = storage(cap); /* `a` is reachable */
+  xb_item *items = storage_of(cap, fallible); /* `a` is reachable */
+  if (!items) return -1; /* no memory: only when fallible */
   if (xb_is_shared(a)) return 0;
   if (a->len) memcpy(items, a->items, a->len * sizeof(xb_item));
   a->items = items;
@@ -143,17 +150,52 @@ static int local_room(xb_array *a, size_t len) {
   return 1;
 }
 
-void xb_array_resize_any(xb_ctx *ctx, xb_array *a, uint64_t newLen) {
-  if (newLen > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
-  if (!xb_is_shared(a) && local_room(a, (size_t)newLen)) {
-    xb_array_resize(a, newLen); /* within its room: nothing allocates */
-    return;
+/* A local array shrunk to `len` items, a quarter of its room or less (of XB_ARRAY_SHRINK_MIN items at least): a peak's
+ * room is given back. Items in storage of their own move into storage twice as large as they need (0 when the array
+ * became shared meanwhile: the allocation is a safepoint, nothing changed); items in the array's own allocation stay,
+ * its cards after them, and the collector trims the rest (a large object). */
+#define XB_ARRAY_SHRINK_MIN 1024u
+static int local_shrink(xb_array *a, size_t len) {
+  if (a->items == a->inline_items) {
+    a->len = a->cap = len;
+    memset(a->items + len, 0, xb_array_card_count(len)); /* clean cards; the whole array traced next */
+    xb_gc_trim(a, sizeof(xb_array) + len * sizeof(xb_item) + xb_array_card_count(len));
+    xb_gc_write(a);
+    return 1;
   }
-  resize_shared(ctx, a, (size_t)newLen);
+  size_t cap = len * 2 > 16 ? len * 2 : 16;
+  xb_item *items = storage(cap); /* `a` is reachable */
+  if (xb_is_shared(a)) return 0;
+  memcpy(items, a->items, len * sizeof(xb_item));
+  a->items = items;
+  a->cap = cap;
+  a->len = len;
+  xb_gc_write(a); /* new storage: the whole array is traced */
+  return 1;
 }
 
+static int resize_any(xb_ctx *ctx, xb_array *a, uint64_t newLen, int fallible) {
+  if (newLen > XB_ARRAY_MAX_LEN) {
+    if (fallible) return 0;
+    xb_gc_fatal("array too large");
+  }
+  if (!xb_is_shared(a) && a->cap >= XB_ARRAY_SHRINK_MIN && newLen <= a->cap / 4 && local_shrink(a, (size_t)newLen))
+    return 1;
+  int room = xb_is_shared(a) ? 0 : local_room(a, (size_t)newLen, fallible);
+  if (room < 0) return 0;
+  if (room) {
+    xb_array_resize(a, newLen); /* within its room: nothing allocates */
+    return 1;
+  }
+  return resize_shared(ctx, a, (size_t)newLen, fallible);
+}
+
+void xb_array_resize_any(xb_ctx *ctx, xb_array *a, uint64_t newLen) { resize_any(ctx, a, newLen, 0); }
+
+int xb_array_resize_try(xb_ctx *ctx, xb_array *a, uint64_t newLen) { return resize_any(ctx, a, newLen, 1); }
+
 void xb_array_append(xb_ctx *ctx, xb_array *a, const xb_item *v) {
-  if (!xb_is_shared(a) && local_room(a, a->len + 1)) {
+  if (!xb_is_shared(a) && local_room(a, a->len + 1, 0)) {
     a->items[a->len++] = *v;
     xb_gc_write_item(a, a->len - 1);
     return;
@@ -234,17 +276,26 @@ void xb_array_resize(xb_array *a, uint64_t newLen) {
 }
 
 /* A new array of `len` NIL items, with room for `len` items in its own allocation. */
-xb_array *xb_array_alloc(uint64_t newLen) {
-  if (newLen > XB_ARRAY_MAX_LEN) xb_gc_fatal("array too large");
+static xb_array *array_alloc(uint64_t newLen, int fallible) {
+  if (newLen > XB_ARRAY_MAX_LEN) {
+    if (fallible) return NULL;
+    xb_gc_fatal("array too large");
+  }
   size_t len = (size_t)newLen;
   size_t cards = xb_array_card_count(len);
-  xb_array *a = xb_gc_alloc(XB_GC_ARRAY, sizeof(xb_array) + len * sizeof(xb_item) + cards);
+  size_t bytes = sizeof(xb_array) + len * sizeof(xb_item) + cards;
+  xb_array *a = fallible ? xb_gc_try_alloc(XB_GC_ARRAY, bytes) : xb_gc_alloc(XB_GC_ARRAY, bytes);
+  if (!a) return NULL;
   a->len = len;
   a->cap = len;
   a->items = a->inline_items;
   memset(a->items, 0, len * sizeof(xb_item) + cards); /* NIL items, clean cards */
   return a;
 }
+
+xb_array *xb_array_alloc(uint64_t len) { return array_alloc(len, 0); }
+
+xb_array *xb_array_try_alloc(uint64_t len) { return array_alloc(len, 1); }
 
 void xb_set_array(xb_item *it, xb_array *a) { xb_set_ptr(it, XB_T_ARRAY, a); }
 

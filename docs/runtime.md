@@ -50,7 +50,10 @@ typedef struct xb_item {
   `width` 0.
 - Arrays (`xb_array` in `xbrt.h`: `len`, `cap`, `items`; `types/array.c`, functions in `rtl/arrays.c`) are 1-based.
   Their items start in the array's own allocation and move to a separate heap object when the array grows past it.
-  Compiled code reads `len` and `items` to access elements in place.
+  A local array that `ASize` leaves with a quarter of its room or less (of 1024 items or more) gives a peak's room
+  back: items in storage of their own move into storage twice as large as they need; items in the array's own
+  allocation stay, and the collector trims the rest of it (`xb_gc_trim`). Compiled code reads `len` and `items` to
+  access elements in place.
 - Hashes (`xb_hash` in `types/types.h`) map keys to values in insertion order; see [Hashes](#hashes).
 - Codeblocks (`xb_block`: function, captured cells) and cells (`xb_cell`: one item at offset 0) are described in
   [Codeblocks](#codeblocks), objects in [Objects and messages](#objects-and-messages).
@@ -140,9 +143,12 @@ rest of the runtime and compiled code use.
   chunk: the heap's chunks stay few and low.
 - Large objects (`XB_GC_HDR_LARGE`), above the largest size class, take whole units of 4 KB: a run of them in chunks of
   large objects (1 MB mappings, first fit from the lowest address, `xb_lchunk` with its bit maps of units taken and
-  given back), or, from 512 KB, a mapping of their own (`xb_large`: the bytes it takes, its list's link, its header).
-  They never move. A large object is in the young list until it is old, then in the old list, so a young collection
-  sweeps the young list only. A dead one's units are free at once (its mapping unmapped).
+  given back), or, from 512 KB, a mapping of their own (`xb_large`: the bytes it takes, whether it is its own mapping,
+  its list's link, its header). They never move. A large object is in the young list until it is old, then in the old
+  list, so a young collection sweeps the young list only. A dead one's units are free at once (its mapping unmapped).
+  One that uses only its first bytes now gives the rest back in place (`xb_gc_trim`: its last units free, or its
+  mapping's last pages unmapped): a string that no longer grows in place (no `XB_STR_APPEND`: its room given up once
+  it was read) at the sweep that finds it alive, an array that `ASize` cut down at once.
 - Memory given back: after a collection, the free blocks beyond those the next allocations need (the young budget and
   an eighth of the blocks in use, at least 1 MB, and half as much again before any goes, so a heap near the line does
   not give blocks back and take them again at each collection) go back to the system
@@ -207,7 +213,8 @@ rest of the runtime and compiled code use.
   walks the objects through the start bits to clear their marks (a free block holds none alive and is skipped). When the
   epoch (8 bits) wraps, every line mark is cleared. The blocks of size classes are swept slot by slot (their dead
   objects' slots return to the free list). The system's lack of memory for a block or a large object makes a full
-  collection first (once for that allocation), and ends the program only when it still has none.
+  collection first (once for that allocation), and ends the program only when it still has none, or, for a size the
+  program chose, raises `BASE/9032 Memory low` (see the rules below).
 - Evacuation: dead objects spread over many blocks leave holes that objects of several lines may not fit, and the heap
   would grow instead. A full collection defragments when it can: it picks the emptiest blocks of lines (at most half
   their lines live), as many as the free blocks and a reserve of new ones (a sixteenth of the heap's blocks) can take,
@@ -238,10 +245,13 @@ rest of the runtime and compiled code use.
   that may allocate.
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
-- Sizes that cannot be allocated (an array longer than `XB_ARRAY_MAX_LEN`, an object above half the address space,
-  memory exhausted), a lock that cannot be created and an ABI mismatch
-  end the program through `xb_gc_fatal`, the runtime's single fatal exit, with a message on standard error and exit
-  code 1.
+- A size the program chose (`Space`, `Replicate`, `PadL`/`PadR`/`PadC`, `StrTran`'s result, `Array`, `ASize`,
+  `HAllocate`, `HCopy`, `MemoLine`, `Str` with a width) that no memory holds, even after a full collection, is the error
+  `BASE/9032 Memory low` (`EG_MEM`), which the program may handle (`xb_gc_try_alloc`, `xb_str_try_alloc`,
+  `xb_array_try_alloc`, `xb_array_resize_try`, `xb_hash_reserve_try`: for a large object); the reference ends the
+  program (`xb_error_memory` raises it). Other allocations that find no memory (the runtime's own, and objects up to
+  the largest size class), a lock that cannot be created and an ABI mismatch end the program through `xb_gc_fatal`,
+  the runtime's single fatal exit, with a message on standard error and exit code 1.
 - Rules for C code: a collection can run inside any allocation, so every object still needed must be reachable from a
   frame or a C root before the next allocation, and a store into a heap object that may have aged since it was allocated
   (any allocation in between) is followed by `xb_gc_write` or `xb_gc_write_item`. An object address in a C variable
@@ -321,7 +331,10 @@ the functions that take its lock when it is shared ([Threads and synchronization
   entry frees its index slot by moving back the slots after it that probing would no longer reach (no tombstones) and
   leaves a hole (a `NIL` key) in the store. A full store whose holes are a quarter of it is compacted (the live
   entries move down in order); otherwise it doubles. A new hash has no store; the first holds 8 entries, the largest
-  `XB_HASH_MAX_LEN` (2^30), and a larger one is the fatal error of a size that cannot be allocated.
+  `XB_HASH_MAX_LEN` (2^30). `HAllocate` past it, or past what memory holds, is `BASE/9032 Memory low`. A cleared
+  hash (`HClear`) of more than 64 entries' room drops its store (O(1), the room given back; the next key makes a small
+  one); a local hash that a deletion leaves with an eighth of its room or less (above 64) moves into a store twice as
+  large as it needs, so a cache whose keys came and went gives its peak's room back.
 - Positions (`xb_hash_at`, `xb_hash_pos`: `HKeyAt`, `HPos`, `FOR EACH`, ...) count live entries in order. Without
   holes position k is entry k. With holes the Fenwick tree, built over the entries when a position is first needed
   and updated by every insertion and deletion until the next compaction, finds the entry of a position, or the
@@ -1064,7 +1077,13 @@ Conventions:
 - `MemVarBlock( cName )` returns a block that reads the memory variable and, called with a value that is not NIL,
   assigns it; NIL when no variable of that name is visible.
 - `StrTran( c, cSearch, cReplace, nStart, nCount )`: `nStart` or `nCount` of 0 gives `""`; a negative `nStart`
-  replaces nothing, a negative `nCount` replaces every occurrence from `nStart`.
+  replaces nothing, a negative `nCount` replaces every occurrence from `nStart`. The text between matches is copied
+  whole.
+- Searching bytes in bytes (`At`, `RAt`, `$`, `StrTran`, `Split`: `xb_bytes_find`, `xbrt.h`) is linear whatever the
+  texts: a needle of up to 16 bytes is looked for with `memchr` and `memcmp` (its length bounds the work at each
+  place), a longer one with the two-way search (Crochemore and Perrin's critical factorization: no needle and haystack
+  make it quadratic), the last occurrence as the first one of the reversed strings.
+- `CHARACTER:Split` is one pass in C (`__Split`), `StartsWith` and `EndsWith` compare in place (`__Affix`).
 - `Stuff( c, nStart, nDelete, cInsert )`: `nStart` 0 is 1; a negative `nStart` or `nDelete` counts as past the end.
 - Trimming from the left, `Val` and `Empty` skip blanks, tabs, carriage returns and line feeds (`xb_is_blank`); trimming
   from the right removes spaces only. Case changes and the character classes (`IsAlpha`, `IsUpper`, `IsLower`) read
@@ -1122,7 +1141,8 @@ Conventions:
   arithmetic shift (a count past 63 gives 0, or -1 for a negative number), 9008. The function names, operator symbols,
   operand counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too. The `Char*()`
   functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)), the thread and task functions 9016 to 9031
-  ([concurrency.md](concurrency.md#threads)).
+  ([concurrency.md](concurrency.md#threads)), a size no memory holds 9032 (`Memory low`), and the `CHARACTER` methods
+  given an argument that is no string `Split` 9033, `StartsWith` and `EndsWith` 9034.
 - `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
   program started from a monotonic clock (`xb_program_elapsed_ms`), for timing: the difference of two calls.

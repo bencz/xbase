@@ -425,8 +425,8 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
   `0x1A`. A table whose descriptors cannot be read (an unknown type, a field of no bytes, a date that is not 8 bytes,
   fields past the record's length) is an `Open error` with code 31 (general failure). Field types: Clipper's `C` (up to
   64 KB, a length past 255 with its high byte in the decimals), `N` (read and written as `Val()` and `Str()` do,
-  `xb_num_parse` and `xb_num_to_field`; stars when the number is too wide), `D` (`YYYYMMDD`, blanks for the empty date),
-  `L` (`T` or `F`; `T`, `t`, `Y`, `y` read as true) and `M` (10 bytes: the number of the memo's first block in the
+  `xb_num_parse` and `xb_num_to_field_buf`; stars when the number is too wide), `D` (`YYYYMMDD`, blanks for the empty
+  date), `L` (`T` or `F`; `T`, `t`, `Y`, `y` read as true) and `M` (10 bytes: the number of the memo's first block in the
   `.dbt`, right-aligned; blanks for none). A table with memo fields has version `0x83` and a `.dbt` of the same name.
   The record is written when another becomes current or the table closes, the header (record count, date) on `COMMIT`
   and at closing when the table changed. *(Planned)*: the common extended types (`I`, `B`, `Y`, `T`, `@`, `+`, `V`, `Q`)

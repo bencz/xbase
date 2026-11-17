@@ -183,9 +183,14 @@ _Static_assert(XB_GC_CHUNK_BLOCKS <= 32, "a bit per block of a chunk");
 typedef struct xb_large {
   struct xb_large *next;
   size_t bytes;
-  xb_gc_hdr hdr;
+  size_t mapped; /* the size of its own mapping (0: units of a chunk of large objects), unmapped whole when it dies */
+  /* At a multiple of 16: the object 8 bytes past one, so the 16-byte items after a 24-byte array header (64-bit
+   * targets) start on a 64-byte line and never straddle two (an array's stores run at half speed otherwise). */
+  _Alignas(16) xb_gc_hdr hdr;
 } xb_large;
-_Static_assert(offsetof(xb_large, hdr) % 8 == 0, "a large object stays 8-aligned");
+_Static_assert(offsetof(xb_large, hdr) % 16 == 0 && sizeof(xb_gc_hdr) == 8, "a large object 8 past 16-byte lines");
+/* The bytes of a large object's allocation before the object itself. */
+#define LARGE_HEAD (offsetof(xb_large, hdr) + sizeof(xb_gc_hdr))
 
 #define XB_GC_LARGE_UNIT ((size_t)4 << 10)
 #define XB_GC_LARGE_CHUNK ((size_t)1 << 20)
@@ -929,9 +934,9 @@ static xb_large *large_units(size_t bytes) {
 
 /* A large object's memory back: its units free, or its mapping unmapped. Under the lock, after its sweep. */
 static void large_free(xb_large *l) {
-  if (l->bytes >= XB_GC_LARGE_MAP) {
+  if (l->mapped) {
     heap.largeMapped -= l->bytes;
-    xb_platform_pages_unmap(l, l->bytes);
+    xb_platform_pages_unmap(l, l->mapped);
     return;
   }
   xb_lchunk *c = lchunk_of(l);
@@ -939,6 +944,38 @@ static void large_free(xb_large *l) {
   units_mark(c->used, (uint32_t)((size_t)((char *)l - c->start) / XB_GC_LARGE_UNIT), n, 0);
   c->usedUnits -= n;
   c->longest = (uint32_t)XB_GC_LARGE_UNITS; /* not known any more */
+}
+
+/* A large object's memory past `size` bytes of object given back (its tail units free, or its mapping's tail pages
+ * decommitted: the mapping is unmapped whole when the object dies): what it no longer uses goes, the object stays
+ * where it is. Under the lock. */
+static void large_trim(xb_large *l, size_t size) {
+  size_t total = LARGE_HEAD + size;
+  size_t unit = l->mapped ? xb_platform_page_size() : XB_GC_LARGE_UNIT;
+  size_t keep = (total + unit - 1) & ~(unit - 1);
+  if (keep >= l->bytes) return;
+  if (l->mapped) {
+    xb_platform_pages_decommit((char *)l + keep, l->bytes - keep);
+    heap.largeMapped -= l->bytes - keep;
+  } else {
+    xb_lchunk *c = lchunk_of(l);
+    uint32_t first = (uint32_t)((size_t)((char *)l - c->start) / XB_GC_LARGE_UNIT);
+    uint32_t was = (uint32_t)(l->bytes / XB_GC_LARGE_UNIT), now = (uint32_t)(keep / XB_GC_LARGE_UNIT);
+    units_mark(c->used, first + now, was - now, 0);
+    c->usedUnits -= was - now;
+    c->longest = (uint32_t)XB_GC_LARGE_UNITS;
+  }
+  l->bytes = keep;
+  l->hdr.size = (uint32_t)(size > UINT32_MAX ? UINT32_MAX : size);
+}
+
+int xb_gc_trim(void *obj, size_t size) {
+  xb_gc_hdr *h = xb_gc_header(obj);
+  if (!(h->flags & XB_GC_HDR_LARGE)) return 0;
+  xb_mutex_lock(&heap.lock);
+  large_trim((xb_large *)((char *)h - offsetof(xb_large, hdr)), size);
+  xb_mutex_unlock(&heap.lock);
+  return 1;
 }
 
 /* After a collection's sweep: the free units of large objects beyond XB_GC_LARGE_RETAIN and the young budget go back
@@ -995,26 +1032,30 @@ static void give_back_large(void) {
 /* A large object of `size` bytes (Large objects above), in the young list; a young collection runs first when the
  * allocation since the last one reached the budget, a full one when the system has no memory, before the program ends.
  */
-static void *alloc_large(size_t size) {
+static void *alloc_large(size_t size, int fallible) {
+  if (size > SIZE_MAX - XB_GC_LARGE_MAP - LARGE_HEAD) { /* no address space holds it (rounded up to pages) */
+    if (fallible) return NULL;
+    out_of_memory();
+  }
+  size_t total = LARGE_HEAD + size;
   xb_gc_safepoint();
   xb_mutex_lock(&heap.lock);
   heap.allocated += size;
   int due = heap.allocated >= heap.youngBudget;
   xb_mutex_unlock(&heap.lock);
   if (due) collect(0, 1);
-  size_t total = offsetof(xb_large, hdr) + sizeof(xb_gc_hdr) + size;
-  if (total > SIZE_MAX - XB_GC_LARGE_MAP) out_of_memory();
   size_t bytes = (total + XB_GC_LARGE_UNIT - 1) & ~(XB_GC_LARGE_UNIT - 1);
   if (bytes >= XB_GC_LARGE_MAP) {
     size_t page = xb_platform_page_size();
     bytes = (total + page - 1) & ~(page - 1);
   }
-  for (int collected = 0;; out_of_blocks(&collected)) {
+  for (int collected = 0;; out_of_blocks(&collected)) { /* no memory: a full collection, then the end (or NULL) */
     xb_mutex_lock(&heap.lock);
     xb_large *l = bytes >= XB_GC_LARGE_MAP ? xb_platform_pages_map(bytes, xb_platform_page_size()) : large_units(bytes);
     if (l) {
       if (bytes >= XB_GC_LARGE_MAP) heap.largeMapped += bytes;
       l->bytes = bytes;
+      l->mapped = bytes >= XB_GC_LARGE_MAP ? bytes : 0;
       l->next = heap.largeYoung;
       heap.largeYoung = l;
     }
@@ -1023,7 +1064,21 @@ static void *alloc_large(size_t size) {
       l->hdr.flags = XB_GC_HDR_LARGE;
       return &l->hdr;
     }
+    if (collected && fallible) {
+      xb_mutex_lock(&heap.lock);
+      heap.allocated = heap.allocated > size ? heap.allocated - size : 0; /* what was not allocated */
+      xb_mutex_unlock(&heap.lock);
+      return NULL;
+    }
   }
+}
+
+/* The object's header filled in: its kind and size (saturated), not marked. */
+static inline void *labeled(xb_gc_hdr *h, xb_gc_kind kind, size_t size) {
+  h->kind = (uint8_t)kind;
+  h->state = 0;
+  h->size = (uint32_t)(size > UINT32_MAX ? UINT32_MAX : size);
+  return h + 1;
 }
 
 void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
@@ -1048,12 +1103,16 @@ void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
     t->allocated += heap.classSize[c];
     h->flags = 0;
   } else {
-    h = alloc_large(size);
+    h = alloc_large(size, 0);
   }
-  h->kind = (uint8_t)kind;
-  h->state = 0;
-  h->size = (uint32_t)(size > UINT32_MAX ? UINT32_MAX : size);
-  return h + 1;
+  return labeled(h, kind, size);
+}
+
+void *xb_gc_try_alloc(xb_gc_kind kind, size_t size) {
+  if (size > SIZE_MAX / 2) return NULL;
+  if (object_total(size) <= heap.classMax) return xb_gc_alloc(kind, size); /* small: as any allocation */
+  xb_gc_hdr *h = alloc_large(size, 1);
+  return h ? labeled(h, kind, size) : NULL;
 }
 
 /* After a collection that queued objects to finalize, or found tasks' environments to close (their tables, their
@@ -1807,6 +1866,10 @@ static void sweep_large(int full) {
     xb_large *l = list ? heap.largeOld : heap.largeYoung;
     while (l) {
       xb_large *next = l->next;
+      if ((l->hdr.state & (XB_GC_MARKED | XB_GC_AGED)) && l->hdr.kind == XB_GC_STRING) {
+        const xb_str *str = (const xb_str *)(&l->hdr + 1); /* one no longer grown in place keeps its text alone */
+        if (!(str->flags & XB_STR_APPEND)) large_trim(l, offsetof(xb_str, data) + str->len + 1);
+      }
       if (l->hdr.state & XB_GC_MARKED) {
         l->next = old;
         old = l;

@@ -7,6 +7,7 @@
 #include <string.h>
 
 #define MIN_CAPACITY 8u
+#define SHRINK_CAP 64u /* a store above this many entries goes when cleared, shrinks when mostly empty */
 
 void xb_set_hash(xb_item *it, xb_hash *h) { xb_set_ptr(it, XB_T_HASH, h); }
 
@@ -173,17 +174,23 @@ void xb_hash_compact(xb_hash *h) {
   index_entries(h);
 }
 
-/* A store for `cap` entries: NIL items, free slots. */
-static xb_hentry *new_store(uint32_t cap) {
-  uint32_t slots = 2 * cap;
+/* A store for `cap` entries: NIL items, free slots; `fallible`: NULL when it is past the largest hash or no memory
+ * holds it (a size the program chose). */
+static xb_hentry *new_store_of(uint64_t cap, int fallible) {
+  uint64_t slots = 2 * cap;
   /* computed in 64 bits and checked before it is narrowed to size_t (32-bit hosts) */
-  uint64_t size = (uint64_t)cap * (sizeof(xb_hentry) + 2 * sizeof(uint32_t)) + (uint64_t)slots * sizeof(uint32_t);
-  if (cap > XB_HASH_MAX_LEN || size > XB_STR_MAX_LEN) xb_gc_fatal("out of memory");
+  uint64_t size = cap * (sizeof(xb_hentry) + 2 * sizeof(uint32_t)) + slots * sizeof(uint32_t);
+  if (cap > XB_HASH_MAX_LEN || size > XB_STR_MAX_LEN) {
+    if (fallible) return NULL;
+    xb_gc_fatal("out of memory");
+  }
   size_t bytes = (size_t)size;
-  xb_hentry *entries = xb_gc_alloc(XB_GC_HSTORE, bytes);
-  memset(entries, 0, bytes);
+  xb_hentry *entries = fallible ? xb_gc_try_alloc(XB_GC_HSTORE, bytes) : xb_gc_alloc(XB_GC_HSTORE, bytes);
+  if (entries) memset(entries, 0, bytes);
   return entries;
 }
+
+static xb_hentry *new_store(uint32_t cap) { return new_store_of(cap, 0); }
 
 /* The live entries moved into `entries`, a new store for `cap` of them; nothing allocates. */
 static void move_into(xb_hash *h, xb_hentry *entries, uint32_t cap) {
@@ -345,13 +352,23 @@ void xb_hash_del_at(xb_hash *h, int64_t pos) {
   remove_entry(h, slot_of(h, &e->key, hv));
 }
 
+/* Emptied: a store larger than SHRINK_CAP entries is dropped (the next key makes a small one), so clearing costs what
+ * the hash holds now and a peak's room goes back; a small one is kept, emptied. */
 void xb_hash_clear(xb_hash *h) {
+  h->tree = NULL;
+  if (h->cap > SHRINK_CAP) {
+    h->entries = NULL;
+    h->hashes = h->index = NULL;
+    h->cap = h->imask = 0;
+    h->len = h->used = 0;
+    xb_gc_write(h);
+    return;
+  }
   for (uint32_t e = 0; e < h->used; ++e) {
     xb_set_nil(&h->entries[e].key);
     xb_set_nil(&h->entries[e].value);
   }
   h->len = h->used = 0;
-  h->tree = NULL;
   if (h->cap) memset(h->index, 0, ((size_t)h->imask + 1) * sizeof *h->index);
 }
 
@@ -456,10 +473,23 @@ int xb_hash_replace(xb_hash *h, const xb_item *key, const xb_item *v) {
   return e >= 0;
 }
 
+static uint32_t grown(uint32_t cap, uint32_t need);
+
+/* A local hash left with an eighth of its store or less (above SHRINK_CAP entries) moves into a store twice as large
+ * as it needs: a cache whose keys came and went gives its peak's room back. The allocation is a safepoint, after which
+ * a hash that became shared meanwhile is left as it is. */
+static void local_shrink(xb_hash *h) {
+  if (h->cap <= SHRINK_CAP || h->len > h->cap / 8) return;
+  uint32_t want = grown(0, 2 * h->len);
+  xb_hentry *store = new_store(want); /* `h` is reachable; the store, until it is in place, by the stack's pin */
+  if (!xb_is_shared(h)) move_into(h, store, want);
+}
+
 int xb_hash_remove(xb_hash *h, const xb_item *key) {
   int shared = lock_if_shared(h);
   int found = xb_hash_del(h, key);
   unlock_if(h, shared);
+  if (found && !shared) local_shrink(h);
   return found;
 }
 
@@ -468,6 +498,7 @@ int xb_hash_remove_at(xb_hash *h, int64_t pos) {
   int found = xb_hash_at(h, pos) != NULL;
   if (found) xb_hash_del_at(h, pos);
   unlock_if(h, shared);
+  if (found && !shared) local_shrink(h);
   return found;
 }
 
@@ -552,14 +583,19 @@ void xb_hash_put(xb_ctx *ctx, xb_hash *h, const xb_item *key, const xb_item *val
   xb_gc_root_pop(ctx, 1);
 }
 
-void xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint32_t n) {
+static int reserve_any(xb_ctx *ctx, xb_hash *h, uint64_t n, int fallible) {
+  if (n > XB_HASH_MAX_LEN) {
+    if (fallible) return 0;
+    xb_gc_fatal("out of memory");
+  }
   if (!xb_is_shared(h)) {
-    if (n <= h->cap) return;
-    uint32_t want = grown(h->cap, n);
-    xb_hentry *store = new_store(want); /* a safepoint: tested again after it, as in local_entry_room */
+    if (n <= h->cap) return 1;
+    uint32_t want = grown(h->cap, (uint32_t)n);
+    xb_hentry *store = new_store_of(want, fallible); /* a safepoint: tested again after it, as in local_entry_room */
+    if (!store) return 0;
     if (!xb_is_shared(h)) {
       move_into(h, store, want);
-      return;
+      return 1;
     }
   }
   xb_item spare;
@@ -569,11 +605,16 @@ void xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint32_t n) {
   for (;;) {
     xb_seq_lock(h);
     if (n > h->cap) {
-      uint32_t want = grown(h->cap, n);
+      uint32_t want = grown(h->cap, (uint32_t)n);
       if (room < want) {
         xb_seq_unlock(h);
         room = want;
-        xb_set_ptr(&spare, XB_T_HASH, new_store(room));
+        xb_hentry *store = new_store_of(room, fallible);
+        if (!store) {
+          xb_gc_root_pop(ctx, 1);
+          return 0;
+        }
+        xb_set_ptr(&spare, XB_T_HASH, store);
         continue;
       }
       move_into(h, spare.v.p, room);
@@ -582,7 +623,12 @@ void xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint32_t n) {
     break;
   }
   xb_gc_root_pop(ctx, 1);
+  return 1;
 }
+
+void xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint64_t n) { reserve_any(ctx, h, n, 0); }
+
+int xb_hash_reserve_try(xb_ctx *ctx, xb_hash *h, uint64_t n) { return reserve_any(ctx, h, n, 1); }
 
 void xb_hash_copy_any(xb_hash *dst, xb_hash *src) {
   if (!xb_is_shared(src)) {

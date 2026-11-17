@@ -1,0 +1,5 @@
+
+cases:       3600 found in many: .T. mismatches:          0
+empty:          0          0 .F.          0 .F. abc .T.
+longer:          0          0 .F.
+hard needle linear: yes

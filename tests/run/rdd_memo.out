@@ -9,7 +9,7 @@ written:       2053
          4 d             0 
 rewritten: hi       2053
 emptied: []       2053
-types: M M C C U
+types: M M C C C U
 packed:          3       1027
          1 a             5 first
          2 c             1 a

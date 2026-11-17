@@ -18,16 +18,24 @@ const xb_str1 xb_str_bytes[256] = {XB_BYTE64(0), XB_BYTE64(64), XB_BYTE64(128), 
 
 static xb_str *xb_str_byte(unsigned char c) { return (xb_str *)&xb_str_bytes[c]; }
 
-xb_str *xb_str_alloc(uint64_t newLen) {
-  if (newLen > XB_STR_MAX_LEN) xb_gc_fatal("out of memory");
+static xb_str *str_alloc(uint64_t newLen, int fallible) {
+  if (newLen > XB_STR_MAX_LEN) {
+    if (fallible) return NULL;
+    xb_gc_fatal("out of memory");
+  }
   size_t len = (size_t)newLen;
-  xb_str *s = xb_gc_alloc(XB_GC_STRING, offsetof(xb_str, data) + len + 1);
+  xb_str *s = (fallible ? xb_gc_try_alloc : xb_gc_alloc)(XB_GC_STRING, offsetof(xb_str, data) + len + 1);
+  if (!s) return NULL;
   s->flags = 0;
   s->hash = 0;
   s->len = len;
   s->data[len] = '\0';
   return s;
 }
+
+xb_str *xb_str_alloc(uint64_t len) { return str_alloc(len, 0); }
+
+xb_str *xb_str_try_alloc(uint64_t len) { return str_alloc(len, 1); }
 
 xb_str *xb_str_growing(uint64_t len, uint64_t room) {
   if (room > UINT32_MAX) room = UINT32_MAX; /* the room must fit `hash` */

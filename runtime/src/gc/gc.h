@@ -72,6 +72,13 @@ void  xb_gc_safepoint(void);
 void  xb_gc_hold(void);
 void  xb_gc_release(void);
 void *xb_gc_alloc(xb_gc_kind kind, size_t size);
+/* xb_gc_alloc for a size the program chose (Space( n ), Array( n )): NULL, rather than the program's end, when a large
+ * object (above the largest size class) finds no memory even after a full collection, so that the caller raises an
+ * error the program handles; a smaller one that finds none ends the program as xb_gc_alloc does. */
+void *xb_gc_try_alloc(xb_gc_kind kind, size_t size);
+/* An object that now uses only its first `size` bytes gives the rest back to the system when it is a large one (1);
+ * 0 for another (its memory stays). Its address does not change. */
+int   xb_gc_trim(void *obj, size_t size);
 void  xb_gc_collect(void);                 /* a full collection */
 void  xb_gc_collect_young(void);           /* a young collection */
 void  xb_gc_register(xb_ctx *ctx);

@@ -1,0 +1,10 @@
+
+{"a","b","","c"} {"","a",""} {"","",""} {"abc"}
+{"a","b","","c"} {"ab"} {"a","b","","c"} {"a","b","c"}
+{""} {"x","y","","z"}
+{"a","b"}
+long:     200001 word word .T. .T.
+.T. .T. .F. .T. .F. .T. .T.
+.T. .T. .F. .T. .F. .T. .T.
+case: .T. .T. .T.
+BASE/9033 CHARACTER:SPLIT BASE/9034 CHARACTER:STARTSWITH BASE/9034 CHARACTER:ENDSWITH

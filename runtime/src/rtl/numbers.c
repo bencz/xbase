@@ -15,7 +15,7 @@ static int str_args_ok(uint32_t argc, const xb_item *argv) {
 }
 
 /* The text of Str( n [, nWidth [, nDec]] ). A field too narrow for its
- * decimals is all stars. */
+ * decimals is all stars. NULL when no memory holds the width asked (a size the program chose). */
 static xb_str *str_of(uint32_t argc, const xb_item *argv) {
   int width, dec;
   xb_num_field(&argv[0], &width, &dec);
@@ -29,9 +29,18 @@ static xb_str *str_of(uint32_t argc, const xb_item *argv) {
   if (width > 1 && argc > 2) {
     int64_t d = xb_num_to_i64(&argv[2]);
     dec = d <= 0 ? 0 : (d > INT32_MAX ? INT32_MAX : (int)d);
-    if (hasWidth) return xb_num_to_field(&argv[0], width, dec);
   }
-  return xb_num_to_str(&argv[0], width, dec);
+  if (!hasWidth) return xb_num_to_str(&argv[0], width, dec);
+  xb_str *s = xb_str_try_alloc((size_t)width);
+  if (s) xb_num_to_field_buf(&argv[0], width, dec, s->data);
+  return s;
+}
+
+/* BASE/9032 Memory low: Str()'s width asked more than memory holds. */
+static int str_made(xb_ctx *ctx, xb_item *ret, const char *function, xb_str *s, uint32_t argc, xb_item *argv) {
+  if (s) return 1;
+  xb_error_memory(ctx, ret, function, argc, argv);
+  return 0;
 }
 
 /* Str( n [, nWidth [, nDec]] ): nWidth is the whole field (with the dot and
@@ -41,7 +50,8 @@ void xbf_STR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1099, "STR", argc, argv);
     return;
   }
-  xb_set_str(ret, str_of(argc, argv));
+  xb_str *s = str_of(argc, argv);
+  if (str_made(ctx, ret, "STR", s, argc, argv)) xb_set_str(ret, s);
 }
 
 /* StrZero(): Str() with the leading blanks (after a sign) turned into zeros. */
@@ -51,6 +61,7 @@ void xbf_STRZERO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   xb_str *s = str_of(argc, argv);
+  if (!str_made(ctx, ret, "STRZERO", s, argc, argv)) return;
   xb_set_str(ret, s);
   size_t i = 0;
   int neg = 0;

@@ -6,18 +6,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Array( n1 [, n2 ...] ): nested arrays of NIL. */
+/* Array( n1 [, n2 ...] ): nested arrays of NIL; NULL when no memory holds one (sizes the program chose). */
 static xb_array *make_dims(xb_ctx *ctx, uint32_t ndims, const xb_item *dims, xb_item *holder) {
   int64_t n = xb_num_to_i64(&dims[0]);
   if (n < 0) n = 0;
-  xb_array *a = xb_array_alloc((uint64_t)n);
+  xb_array *a = xb_array_try_alloc((uint64_t)n);
+  if (!a) return NULL;
   xb_set_array(holder, a); /* keeps `a` reachable while sub-arrays are allocated */
   if (ndims > 1) {
     xb_item sub;
     xb_set_nil(&sub);
     xb_gc_root_push(ctx, &sub);
     for (int64_t i = 0; i < n; ++i) {
-      make_dims(ctx, ndims - 1, dims + 1, &sub);
+      if (!make_dims(ctx, ndims - 1, dims + 1, &sub)) {
+        xb_gc_root_pop(ctx, 1);
+        return NULL;
+      }
+      a = holder->v.p;
       a->items[i] = sub;
       xb_gc_write_item(a, (size_t)i); /* `a` may have aged while the sub-array was allocated */
     }
@@ -35,7 +40,10 @@ void xbf_ARRAY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       return;
     }
   }
-  make_dims(ctx, argc, argv, ret);
+  if (!make_dims(ctx, argc, argv, ret)) {
+    xb_set_nil(ret);
+    xb_error_memory(ctx, ret, "ARRAY", argc, argv);
+  }
 }
 
 void xbf_AADD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -55,7 +63,10 @@ void xbf_ASIZE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
-  xb_array_resize_any(ctx, argv[0].v.p, n < 0 ? 0 : (uint64_t)n);
+  if (!xb_array_resize_try(ctx, argv[0].v.p, n < 0 ? 0 : (uint64_t)n)) {
+    xb_error_memory(ctx, ret, "ASIZE", argc, argv);
+    return;
+  }
   *ret = argv[0];
 }
 

@@ -170,12 +170,6 @@ void xbf_HVALUES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   hash_column(ctx, ret, argc, argv, "HVALUES", 1);
 }
 
-/* Room for `n` entries; past the largest hash, the fatal error of a size
- * that cannot be allocated (as for arrays). */
-static void reserve(xb_ctx *ctx, xb_hash *h, uint64_t n) {
-  xb_hash_reserve_any(ctx, h, n > XB_HASH_MAX_LEN ? XB_HASH_MAX_LEN + 1 : (uint32_t)n);
-}
-
 /* HClone( hHash ): a copy, the arrays and hashes inside it copied too
  * (xb_clone_deep), with the same letter case rule. */
 void xbf_HCLONE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -202,7 +196,11 @@ void xbf_HCOPY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   uint64_t start = xb_range_start(argc, argv, 2, len);
   if (start) {
     uint64_t count = xb_range_count(argc, argv, 3, len - start + 1);
-    reserve(ctx, argv[1].v.p, (uint64_t)xb_hash_length(argv[1].v.p) + count);
+    if (!xb_hash_reserve_try(ctx, argv[1].v.p, (uint64_t)xb_hash_length(argv[1].v.p) + count)) {
+      xb_gc_root_pop(ctx, 1);
+      xb_error_memory(ctx, ret, "HCOPY", argc, argv);
+      return;
+    }
     for (uint64_t k = start - 1; k < start - 1 + count; ++k) {
       xb_hash *s = from->v.p; /* read again after each put: a collection may move it */
       if (k >= s->len) break; /* a local source that is the destination grows only: never */
@@ -329,7 +327,10 @@ void xbf_HALLOCATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_hash *h = hash_arg(ctx, "HALLOCATE", argc, argv, 0);
   if (!h) return;
   int64_t n = argc > 1 && xb_is_number(&argv[1]) ? xb_num_to_i64(&argv[1]) : 0;
-  if (n > 0) reserve(ctx, h, (uint64_t)n);
+  if (n > 0 && !xb_hash_reserve_try(ctx, h, (uint64_t)n)) { /* BASE/9032 Memory low: past what memory holds */
+    xb_error_memory(ctx, ret, "HALLOCATE", argc, argv);
+    return;
+  }
   *ret = argv[0];
 }
 

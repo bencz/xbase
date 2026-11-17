@@ -146,15 +146,20 @@ RETURN
 // The elements whose value (bKey( element ), with bKey) was not met before: equal by ==, a number, a string or a date
 // found through a hash.
 METHOD Distinct( bKey ) CLASS Enumerable
-   LOCAL x, xKey, hSeen := { => }, aSeen := {}
+   LOCAL x, xKey, hSeen := { => }, aSeen := {}, aFlags := { .F., .F., .F. } // .T., .F., NIL seen
    FOR EACH x IN Self
       xKey := IIF( bKey == NIL, x, Eval( bKey, x ) )
-      IF ValType( xKey ) $ "CND"
+      IF ValType( xKey ) $ "CNDM" // a memo and a character string of the same text are one key
          IF xKey $ hSeen
             LOOP
          ENDIF
          hSeen[ xKey ] := .T.
-      ELSE
+      ELSEIF ValType( xKey ) $ "LU" // a flag each: constant time
+         IF aFlags[ IIF( xKey == NIL, 3, IIF( xKey, 1, 2 ) ) ]
+            LOOP
+         ENDIF
+         aFlags[ IIF( xKey == NIL, 3, IIF( xKey, 1, 2 ) ) ] := .T.
+      ELSE // arrays, objects, blocks: by identity, against those seen
          IF AScan( aSeen, {| y | ValType( y ) == ValType( xKey ) .AND. y == xKey } ) > 0
             LOOP
          ENDIF
@@ -380,27 +385,21 @@ SCALAR CLASS CHARACTER INHERIT Enumerable
    METHOD SubStr( nStart, nLen ) INLINE IIF( nLen == NIL, SubStr( Self, nStart ), SubStr( Self, nStart, nLen ) )
    METHOD At( cSearch ) INLINE At( cSearch, Self )
    METHOD Contains( cSearch ) INLINE cSearch $ Self
-   METHOD StartsWith( cStart ) INLINE Left( Self, Len( cStart ) ) == cStart
-   METHOD EndsWith( cEnd ) INLINE Right( Self, Len( cEnd ) ) == cEnd
+   METHOD StartsWith( cStart ) INLINE __Affix( Self, cStart, .F. )
+   METHOD EndsWith( cEnd ) INLINE __Affix( Self, cEnd, .T. )
    METHOD Replicate( nCount ) INLINE Replicate( Self, nCount )
    METHOD Split( cSeparator )
 ENDCLASS
 
 // The pieces between the separators (a space without one); with an empty separator, the characters.
 METHOD Split( cSeparator ) CLASS CHARACTER
-   LOCAL a := {}, cRest := Self, n
    IF cSeparator == NIL
       cSeparator := " "
    ENDIF
-   IF Len( cSeparator ) == 0
+   IF ValType( cSeparator ) == "C" .AND. Len( cSeparator ) == 0
       RETURN ::ToArray()
    ENDIF
-   DO WHILE ( n := At( cSeparator, cRest ) ) > 0
-      AAdd( a, Left( cRest, n - 1 ) )
-      cRest := SubStr( cRest, n + Len( cSeparator ) )
-   ENDDO
-   AAdd( a, cRest )
-RETURN a
+RETURN __Split( Self, cSeparator ) // one pass, in C: a long text costs what it is; another type is its error
 
 // Hashes: their values are the elements.
 SCALAR CLASS HASH INHERIT Enumerable

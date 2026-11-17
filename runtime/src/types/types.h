@@ -7,6 +7,8 @@
 
 /* Uninitialized string of `len` bytes (plus the terminating NUL). */
 xb_str *xb_str_alloc(uint64_t len); /* 64-bit: checked before it is narrowed to size_t (32-bit hosts) */
+/* The same for a length the program chose: NULL when there is no memory for it (xb_gc_try_alloc). */
+xb_str *xb_str_try_alloc(uint64_t len);
 /* -1, 0 or 1 as the comparison operators order two values (strings follow SET
  * EXACT), XB_ORDER_UNORDERED for a NaN (xb_order_is in xbrt.h), or 2 when they
  * cannot be compared (core/ops.c). */
@@ -33,6 +35,12 @@ static inline uint8_t *xb_array_cards(const xb_array *a) {
 #define XB_ARRAY_MAX_LEN (SIZE_MAX / sizeof(xb_item) / 4)
 /* Longest string: its size with the header must not wrap. */
 #define XB_STR_MAX_LEN (SIZE_MAX / 2)
+/* BASE/9032 Memory low (EG_MEM): a string or an array of a size the program chose finds no memory, even after a full
+ * collection; the program may handle it (the reference ends). */
+#define XB_CODE_MEMORY 9032
+/* CHARACTER:Split, and CHARACTER:StartsWith and EndsWith, given an argument that is no string. */
+#define XB_CODE_SPLIT 9033
+#define XB_CODE_AFFIX 9034
 
 /* The 0-based index of the 1-based position `n` in `a`, or -1 outside it. */
 static inline int64_t xb_array_index(const xb_array *a, int64_t n) {
@@ -42,11 +50,15 @@ static inline int64_t xb_array_index(const xb_array *a, int64_t n) {
 /* Lengths are 64-bit so that a length past XB_ARRAY_MAX_LEN is caught before
  * it is narrowed to size_t (on 32-bit hosts). */
 xb_array *xb_array_alloc(uint64_t len); /* `len` NIL items */
+/* The same for a length the program chose: NULL when it is past the largest array or no memory holds it. */
+xb_array *xb_array_try_alloc(uint64_t len);
 /* The visible length set to `len`, new items NIL; `a` must be reachable. xb_array_resize is for an array no other
  * thread reaches (one the runtime has just made); xb_array_resize_any for any, where a shared one (core/shared.h)
  * grows into storage allocated before its lock is taken (rooted in `ctx` meanwhile) and changes under the lock. */
 void      xb_array_resize(xb_array *a, uint64_t len);
 void      xb_array_resize_any(xb_ctx *ctx, xb_array *a, uint64_t len);
+/* xb_array_resize_any for a length the program chose (ASize): 0, the array as it was, when no memory holds it. */
+int       xb_array_resize_try(xb_ctx *ctx, xb_array *a, uint64_t len);
 /* An array that other threads may reach: its length, the element at 0-based `i` into *dst (0 past its end) and `v`
  * into element `i` (0 past its end; a shared array shares the value first), each whole under the array's sequence
  * counter or lock when it is shared, in place when it is local. */
@@ -350,7 +362,9 @@ void     xb_hash_empty(xb_hash *h);
 void     xb_hash_fill(xb_hash *h, const xb_item *v);
 int      xb_hash_case_match(xb_hash *h, int change, int match);
 void     xb_hash_put(xb_ctx *ctx, xb_hash *h, const xb_item *key, const xb_item *value);
-void     xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint32_t n);
+void     xb_hash_reserve_any(xb_ctx *ctx, xb_hash *h, uint64_t n);
+/* The same for a count the program chose (HAllocate): 0 when it is past the largest hash or no memory holds it. */
+int xb_hash_reserve_try(xb_ctx *ctx, xb_hash *h, uint64_t n);
 void     xb_hash_snapshot(xb_item *out, xb_hash *h);
 /* xb_hash_copy from a hash other threads may reach into an empty one only this one reaches (`dst` reachable). */
 void     xb_hash_copy_any(xb_hash *dst, xb_hash *src);

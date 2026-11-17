@@ -155,16 +155,6 @@ void xbf_ALLTRIM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   trim(ctx, ret, argc, argv, XB_TRIM_LEADING | XB_TRIM_TRAILING, 2022, "ALLTRIM");
 }
 
-void xbf_SPACE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  if (argc < 1 || !xb_is_number(&argv[0])) {
-    xb_fn_arg_error(ctx, ret, 1105, "SPACE", argc, argv);
-    return;
-  }
-  xb_str *r = xb_str_alloc(xb_count_arg(xb_num_to_i64(&argv[0])));
-  memset(r->data, ' ', r->len);
-  xb_set_str(ret, r);
-}
-
 /* Whether a string result of `len` bytes can be made; the length is computed
  * in 64 bits and tested before it is narrowed to size_t (32-bit hosts). */
 static int result_fits(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item *argv, uint64_t len,
@@ -174,6 +164,27 @@ static int result_fits(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item *
   return 0;
 }
 
+/* A string result of `len` bytes (a size the program chose): NULL, with the error BASE/9032 Memory low raised (which
+ * the program may handle), when there is no memory for it; the string overflow when it is past the largest string. */
+static xb_str *result_alloc(xb_ctx *ctx, xb_item *ret, uint32_t argc, const xb_item *argv, uint64_t len,
+                            const char *function) {
+  if (!result_fits(ctx, ret, argc, argv, len, function)) return NULL;
+  xb_str *r = xb_str_try_alloc(len);
+  if (!r) xb_error_memory(ctx, ret, function, argc, argv);
+  return r;
+}
+
+void xbf_SPACE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1 || !xb_is_number(&argv[0])) {
+    xb_fn_arg_error(ctx, ret, 1105, "SPACE", argc, argv);
+    return;
+  }
+  xb_str *r = result_alloc(ctx, ret, argc, argv, xb_count_arg(xb_num_to_i64(&argv[0])), "SPACE");
+  if (!r) return;
+  memset(r->data, ' ', r->len);
+  xb_set_str(ret, r);
+}
+
 void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *s = str_arg(argv, argc, 0);
   if (!s || argc < 2 || !xb_is_number(&argv[1])) {
@@ -181,9 +192,9 @@ void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   uint64_t count = s->len ? xb_count_arg(xb_num_to_i64(&argv[1])) : 0;
-  if (!result_fits(ctx, ret, argc, argv, xb_mul_sat_u64(count, s->len), "REPLICATE")) return;
-  size_t total = s->len * (size_t)count;
-  xb_str *r = xb_str_alloc(total);
+  xb_str *r = result_alloc(ctx, ret, argc, argv, xb_mul_sat_u64(count, s->len), "REPLICATE");
+  if (!r) return;
+  size_t total = r->len;
   if (s->len == 1) {
     memset(r->data, s->data[0], total);
   } else if (total) { /* the text once, then what is written so far copied after itself: log2(count) copies */
@@ -249,45 +260,73 @@ void xbf_STRTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     *ret = argv[0];
     return;
   }
-  /* First pass: count replacements, to size the result. */
-  size_t hits = 0;
+  /* First pass: count replacements, to size the result (each search from where the last match ended: xb_bytes_find,
+   * linear whatever the texts). */
+  size_t hits = 0, n = search->len;
   int64_t found = 0;
-  for (size_t i = 0; i + search->len <= s->len;) {
-    if (memcmp(s->data + i, search->data, search->len) == 0) {
-      ++found;
-      if (found >= start && (count < 0 || (int64_t)hits < count)) ++hits;
-      i += search->len;
-    } else {
-      ++i;
-    }
+  for (size_t i = 0, at; (at = xb_bytes_find(search->data, n, s->data + i, s->len - i, 0)) != 0; i += at - 1 + n) {
+    ++found;
+    if (found >= start && (count < 0 || (int64_t)hits < count)) ++hits;
   }
   if (!hits) {
     *ret = argv[0];
     return;
   }
   uint64_t added = xb_mul_sat_u64(hits, rlen); /* the removed search texts fit in s->len */
-  uint64_t len = added > UINT64_MAX - s->len ? UINT64_MAX : s->len - (uint64_t)hits * search->len + added;
-  if (!result_fits(ctx, ret, argc, argv, len, "STRTRAN")) return;
-  xb_str *r = xb_str_alloc(len);
-  size_t o = 0, done = 0;
+  uint64_t len = added > UINT64_MAX - s->len ? UINT64_MAX : s->len - (uint64_t)hits * n + added;
+  xb_str *r = result_alloc(ctx, ret, argc, argv, len, "STRTRAN");
+  if (!r) return;
+  size_t o = 0, done = 0, i = 0;
   found = 0;
-  for (size_t i = 0; i < s->len;) {
-    if (i + search->len <= s->len && memcmp(s->data + i, search->data, search->len) == 0) {
-      ++found;
-      if (found >= start && done < hits) {
-        memcpy(r->data + o, rp, rlen);
-        o += rlen;
-        ++done;
-      } else {
-        memcpy(r->data + o, s->data + i, search->len);
-        o += search->len;
-      }
-      i += search->len;
-    } else {
-      r->data[o++] = s->data[i++];
-    }
+  for (size_t at; done < hits && (at = xb_bytes_find(search->data, n, s->data + i, s->len - i, 0)) != 0;) {
+    size_t run = at - 1; /* the bytes before the match, copied whole */
+    memcpy(r->data + o, s->data + i, run);
+    o += run;
+    i += run;
+    int replaced = ++found >= start;
+    memcpy(r->data + o, replaced ? rp : s->data + i, replaced ? rlen : n);
+    o += replaced ? rlen : n;
+    done += (size_t)replaced;
+    i += n;
   }
+  memcpy(r->data + o, s->data + i, s->len - i); /* the rest */
   xb_set_str(ret, r);
+}
+
+/* __Affix( cText, cPart, lEnd ): whether cText starts (ends, with lEnd) with cPart, compared in place
+ * (CHARACTER:StartsWith and EndsWith: no substring made). */
+void xbf___AFFIX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_str *s = str_arg(argv, argc, 0), *part = str_arg(argv, argc, 1);
+  int end = argc > 2 && argv[2].type == XB_T_LOGICAL && argv[2].v.l;
+  if (!s || !part) {
+    xb_fn_arg_error(ctx, ret, XB_CODE_AFFIX, end ? "CHARACTER:ENDSWITH" : "CHARACTER:STARTSWITH", argc, argv);
+    return;
+  }
+  xb_set_logical(ret, part->len <= s->len &&
+                          memcmp(s->data + (end ? s->len - part->len : 0), part->data, part->len) == 0);
+}
+
+/* __Split( cText, cSeparator ): the pieces of cText between the separators (a separator of one byte or more), an
+ * array: one pass, each separator looked for from where the last one ended (CHARACTER:Split). */
+void xbf___SPLIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const xb_str *s = str_arg(argv, argc, 0), *sep = str_arg(argv, argc, 1);
+  if (!s || !sep || !sep->len) {
+    xb_fn_arg_error(ctx, ret, XB_CODE_SPLIT, "CHARACTER:SPLIT", argc, argv);
+    return;
+  }
+  size_t pieces = 1, n = sep->len;
+  for (size_t i = 0, at; (at = xb_bytes_find(sep->data, n, s->data + i, s->len - i, 0)) != 0; i += at - 1 + n) ++pieces;
+  xb_array *a = xb_array_alloc(pieces); /* rooted in `ret`; `s` and `sep`, pinned by the stack, stay where they are */
+  xb_set_array(ret, a);
+  size_t i = 0;
+  for (size_t k = 0; k < pieces; ++k) {
+    size_t at = k + 1 < pieces ? xb_bytes_find(sep->data, n, s->data + i, s->len - i, 0) : s->len - i + 1;
+    xb_str *piece = xb_str_new(s->data + i, at - 1);
+    a = ret->v.p; /* the array may have moved */
+    xb_set_str(&a->items[k], piece);
+    xb_gc_write_item(a, k);
+    i += at - 1 + n;
+  }
 }
 
 /* Stuff( c, nStart, nDelete, cInsert ): any other argument types give "".
@@ -403,7 +442,12 @@ static void pad(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, pad_sid
     }
   }
   size_t width = n > 0 ? (size_t)(n < (int64_t)XB_STR_MAX_LEN ? n : (int64_t)XB_STR_MAX_LEN) : 0;
-  xb_str *r = xb_str_alloc(width);
+  const char *function = side == PAD_LEFT ? "PADL" : side == PAD_CENTER ? "PADC" : "PADR";
+  xb_str *r = result_alloc(ctx, ret, argc, argv, width, function);
+  if (!r) {
+    xb_gc_root_pop(ctx, 1);
+    return;
+  }
   if (len >= width) {
     memcpy(r->data, p, width);
   } else {

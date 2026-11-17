@@ -1,0 +1,9 @@
+
+clears: .T.          1 k0     100000
+deleted all but one:          1     300000     300000 .T.
+grows again:          2 new
+array cut down:         10        385 .T.
+grows again:         11          1
+strings built by +=:     640000 789 .T.
+shared:         10          3         10       4991       5000
+distinct: 1 .T. NIL a .F. 2 

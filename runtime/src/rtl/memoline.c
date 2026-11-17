@@ -116,7 +116,6 @@ static int64_t skip_lines(scan *m, int64_t n) {
  * default) with its tabs as blanks, padded with blanks to nWidth; "" past the
  * text (as in Clipper, the line right after the last one is all blanks). */
 void xbf_MEMOLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
   scan m;
   int64_t line = num_or(argc, argv, 2, 1);
   if (line < 1 || !scan_init(&m, argc, argv, 3) || skip_lines(&m, line - 1) > 0) {
@@ -126,7 +125,10 @@ void xbf_MEMOLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   size_t from = m.off;
   scan_line(&m);
   char *out = malloc(m.width ? m.width : 1);
-  if (!out) xb_gc_fatal("out of memory");
+  if (!out) { /* BASE/9032 Memory low: a width the program chose that memory does not hold */
+    xb_error_memory(ctx, ret, "MEMOLINE", argc, argv);
+    return;
+  }
   size_t n = 0, col = 0;
   for (size_t i = from; i < m.len && col < m.col;) {
     if (at_soft(&m, i)) {
@@ -150,7 +152,13 @@ void xbf_MEMOLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     memset(out + n, ' ', pad);
     n += pad;
   }
-  xb_set_str(ret, xb_str_new(out, n));
+  xb_str *r = xb_str_try_alloc(n);
+  if (r) {
+    memcpy(r->data, out, n);
+    xb_set_str(ret, r);
+  } else {
+    xb_error_memory(ctx, ret, "MEMOLINE", argc, argv);
+  }
   free(out);
 }
 

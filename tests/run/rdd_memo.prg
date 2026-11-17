@@ -41,7 +41,8 @@ PROCEDURE Main()
    ? "emptied:", "[" + NOTE + "]", Size()
    REPLACE NOTE WITH "first"
    x := NOTE
-   ? "types:", ValType( x ), ValType( FieldGet( 2 ) ), ValType( x + "" ), ValType( Upper( x ) ), Type( "x" )
+   ? "types:", ValType( x ), ValType( FieldGet( 2 ) ), ValType( x + "" ), ValType( Upper( x ) ), ;
+      ValType( Lower( x ) ), Type( "x" ) // Lower() of a text in lower case already: "C" too
    GO 2
    DELETE
    PACK

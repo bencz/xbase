@@ -123,12 +123,6 @@ void xb_num_to_field_buf(const xb_item *it, int width, int dec, char *out) {
   format(out, it, dec > 0 ? width - dec - 1 : width, dec < 0 ? 0 : dec);
 }
 
-xb_str *xb_num_to_field(const xb_item *it, int width, int dec) {
-  xb_str *s = xb_str_alloc((size_t)width);
-  xb_num_to_field_buf(it, width, dec, s->data);
-  return s;
-}
-
 void xb_num_parse(const char *s, size_t len, xb_item *r) {
   size_t pos = 0;
   while (pos < len && xb_is_blank(s[pos])) ++pos;

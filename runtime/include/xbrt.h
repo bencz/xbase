@@ -1165,10 +1165,96 @@ static inline int xb_folded_order(const xb_folded *a, const xb_folded *b) {
   return xb_order_double(a->is_int ? (double)a->i : a->d, b->is_int ? (double)b->i : b->d);
 }
 
+/* Byte k of `s` (`n` bytes) read from its start, or from its end with `back` (the reversed string): the two-way search
+ * below finds the last occurrence as the first one of the reversed strings. */
+static inline unsigned char xb_find_at(const char *s, size_t n, size_t k, int back) {
+  return (unsigned char)s[back ? n - 1 - k : k];
+}
+
+/* The critical factorization of x (`lx` bytes, read as xb_find_at reads them): where x splits for the two-way search,
+ * and its period in `*period` (Crochemore and Perrin's maximal suffixes for both byte orders). */
+static inline size_t xb_find_factor(const char *x, size_t lx, int back, size_t *period) {
+  size_t suffix[2], per[2];
+  for (int order = 0; order < 2; ++order) {
+    size_t ms = (size_t)-1, j = 0, k = 1, p = 1; /* ms: the maximal suffix's start - 1 (-1: none yet) */
+    while (j + k < lx) {
+      unsigned char a = xb_find_at(x, lx, j + k, back), b = xb_find_at(x, lx, ms + k, back);
+      if (order ? b < a : a < b) {
+        j += k;
+        k = 1;
+        p = j - ms;
+      } else if (a == b) {
+        if (k != p) {
+          ++k;
+        } else {
+          j += p;
+          k = 1;
+        }
+      } else {
+        ms = j++;
+        k = p = 1;
+      }
+    }
+    suffix[order] = ms + 1;
+    per[order] = p;
+  }
+  int pick = suffix[1] > suffix[0];
+  *period = per[pick];
+  return suffix[pick];
+}
+
+/* The first occurrence of x in y (both read as xb_find_at reads them): its offset, or (size_t)-1. The two-way search
+ * (linear in |y| whatever the bytes: no needle and haystack make it quadratic), for needles longer than a few bytes. */
+static inline size_t xb_find_two_way(const char *x, size_t lx, const char *y, size_t ly, int back) {
+  size_t period, suffix = xb_find_factor(x, lx, back, &period);
+  int periodic = suffix + period <= lx;
+  for (size_t i = 0; periodic && i < suffix; ++i)
+    periodic = xb_find_at(x, lx, i, back) == xb_find_at(x, lx, i + period, back);
+  if (periodic) { /* the needle repeats with its period: what matched already is remembered (`memory`) */
+    size_t memory = 0, j = 0;
+    while (j <= ly - lx) {
+      size_t i = suffix > memory ? suffix : memory;
+      while (i < lx && xb_find_at(x, lx, i, back) == xb_find_at(y, ly, i + j, back)) ++i;
+      if (i < lx) {
+        j += i - suffix + 1;
+        memory = 0;
+        continue;
+      }
+      i = suffix;
+      while (i > memory && xb_find_at(x, lx, i - 1, back) == xb_find_at(y, ly, i - 1 + j, back)) --i;
+      if (i <= memory) return j;
+      j += period;
+      memory = lx - period;
+    }
+    return (size_t)-1;
+  }
+  period = (suffix > lx - suffix ? suffix : lx - suffix) + 1;
+  for (size_t j = 0; j <= ly - lx;) {
+    size_t i = suffix;
+    while (i < lx && xb_find_at(x, lx, i, back) == xb_find_at(y, ly, i + j, back)) ++i;
+    if (i < lx) {
+      j += i - suffix + 1;
+      continue;
+    }
+    i = suffix;
+    while (i > 0 && xb_find_at(x, lx, i - 1, back) == xb_find_at(y, ly, i - 1 + j, back)) --i;
+    if (i == 0) return j;
+    j += period;
+  }
+  return (size_t)-1;
+}
+
 /* Where the bytes x occur in y: the 1-based position of the first occurrence (`last`: of the last one), 0 when
- * nowhere or x is empty (At(), RAt(), `$`). */
+ * nowhere or x is empty (At(), RAt(), `$`, StrTran()). A short needle is looked for with memchr and memcmp (fastest
+ * for it, and a short needle bounds the work at each place); a longer one with the two-way search. */
+#define XB_FIND_SHORT 16u
 static inline size_t xb_bytes_find(const char *x, size_t lx, const char *y, size_t ly, int last) {
   if (lx == 0 || lx > ly) return 0;
+  if (lx > XB_FIND_SHORT) {
+    size_t at = xb_find_two_way(x, lx, y, ly, last);
+    if (at == (size_t)-1) return 0;
+    return last ? ly - lx - at + 1 : at + 1;
+  }
   const char *end = y + ly - lx + 1; /* candidates are before `end` */
   if (last) {
     for (const char *p = end; p-- > y;)
