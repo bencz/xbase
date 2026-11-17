@@ -164,12 +164,6 @@ const xb_class_method *xb_class_method_of(const xb_class *cls, const char *name)
 
 /* An instance of a class: one item per variable, each starting as its rule's
  * empty value (NIL, .F., "" or 0). */
-typedef struct xb_object {
-  const xb_class *cls;
-  uint32_t nvars;
-  xb_item vars[];
-} xb_object;
-
 xb_object *xb_object_new(const xb_class *cls);
 /* Variable `k` of an object that other threads may reach, read whole, or written (the value shared first) under the
  * object's lock when it is shared (core/shared.h); in place when it is local. */

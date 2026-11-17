@@ -360,24 +360,26 @@ void xb_ctx_raise(xb_ctx *ctx, uint32_t what) { xb_pending_set(ctx, what); }
 void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                   uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
                   uint32_t ctx_stack_limit_offset, uint32_t array_items_offset, uint32_t ref_value_offset,
-                  uint32_t hash_entries_offset) {
+                  uint32_t hash_entries_offset, uint32_t object_vars_offset) {
   if (version != XB_ABI_VERSION || item_size != sizeof(xb_item) || str_hdr_size != offsetof(xb_str, data) ||
       block_cells_offset != offsetof(xb_block, cells) || frame_slots_offset != offsetof(xb_frame, slots) ||
       ctx_frames_offset != offsetof(xb_ctx, frames) || ctx_decimals_offset != offsetof(xb_ctx, set_decimals) ||
       ctx_stack_limit_offset != offsetof(xb_ctx, stack_limit) ||
       array_items_offset != offsetof(xb_array, items) || ref_value_offset != offsetof(xb_ref, value) ||
-      hash_entries_offset != offsetof(xb_hash, entries)) {
-    char why[384];
+      hash_entries_offset != offsetof(xb_hash, entries) || object_vars_offset != offsetof(xb_object, vars)) {
+    char why[512];
     snprintf(why, sizeof why,
-             "ABI mismatch (module v%u item=%u str=%u block=%u frame=%u ctx=%u/%u/%u array=%u ref=%u hash=%u, "
-             "runtime v%u item=%u str=%u block=%u frame=%u ctx=%u/%u/%u array=%u ref=%u hash=%u)",
+             "ABI mismatch (module v%u item=%u str=%u block=%u frame=%u ctx=%u/%u/%u array=%u ref=%u hash=%u "
+             "object=%u, runtime v%u item=%u str=%u block=%u frame=%u ctx=%u/%u/%u array=%u ref=%u hash=%u object=%u)",
              version, item_size, str_hdr_size, block_cells_offset, frame_slots_offset, ctx_frames_offset,
              ctx_decimals_offset, ctx_stack_limit_offset, array_items_offset, ref_value_offset, hash_entries_offset,
+             object_vars_offset,
              XB_ABI_VERSION, (unsigned)sizeof(xb_item), (unsigned)offsetof(xb_str, data),
              (unsigned)offsetof(xb_block, cells), (unsigned)offsetof(xb_frame, slots),
              (unsigned)offsetof(xb_ctx, frames), (unsigned)offsetof(xb_ctx, set_decimals),
              (unsigned)offsetof(xb_ctx, stack_limit), (unsigned)offsetof(xb_array, items),
-             (unsigned)offsetof(xb_ref, value), (unsigned)offsetof(xb_hash, entries));
+             (unsigned)offsetof(xb_ref, value), (unsigned)offsetof(xb_hash, entries),
+             (unsigned)offsetof(xb_object, vars));
     xb_gc_fatal(why);
   }
 }

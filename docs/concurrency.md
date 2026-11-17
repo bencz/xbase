@@ -375,7 +375,8 @@ environments, and the variables made in them, come with `ThreadStart`) and the f
 - **Access.** A shared object's items are read under its sequence counter (read, check, retry: no lock, no write) and
   written, grown and shrunk under its lock: those of its stripe, one of a table chosen by its address, whose lock word a
   contended waiter sleeps on in the parking lot. Compiled code's in-place reads and writes (an array's elements and
-  length, a hash's keys in `FOR EACH`, a cell's value, a loop's reference) test the header bit first (one byte loaded
+  length, a hash's keys in `FOR EACH`, a cell's value, a loop's reference, an object's instance variable at a send)
+  test the header bit first (one byte loaded
   and a branch, predicted; a fast loop that makes no call tests it once, before it, for an array it does not change:
   [compiler.md](compiler.md#object-emission)) and call the runtime when it is set
   ([compiler.md](compiler.md#xir-to-llvm)). Strings are immutable; a shared string never grows in place (its append flag

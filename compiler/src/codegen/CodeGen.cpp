@@ -57,6 +57,7 @@ void CodeGen::initTypes() {
   blockTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(ptrTy_, 0)}, "xb_block");
   arrayTy_ = StructType::create(ctx_, {intPtrTy_, intPtrTy_, ptrTy_}, "xb_array"); // size_t is pointer-sized
   refTy_ = StructType::create(ctx_, {itemTy_, i64_, itemTy_, itemTy_, i32_}, "xb_ref");
+  objectTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(itemTy_, 0)}, "xb_object");
   hashTy_ = StructType::create(ctx_, {i32_, i32_, i32_, i32_, i32_, ptrTy_, ptrTy_, ptrTy_, ptrTy_}, "xb_hash");
   hentryTy_ = StructType::create(ctx_, {itemTy_, itemTy_}, "xb_hentry");
   MDBuilder md(ctx_);
@@ -64,7 +65,7 @@ void CodeGen::initTypes() {
   static const std::pair<Mem, const char *> kMemNames[] = {
       {Mem::Item, "item"},           {Mem::HeapItem, "heap item"}, {Mem::ArrayHeader, "array header"},
       {Mem::BlockCells, "block cells"}, {Mem::Ctx, "context"},     {Mem::FrameLink, "frame link"},
-      {Mem::GcState, "gc state"},       {Mem::String, "string"},
+      {Mem::GcState, "gc state"},       {Mem::String, "string"},    {Mem::ObjectHeader, "object header"},
   };
   static_assert(std::size(kMemNames) + 1 == (size_t)Mem::Count_, "one name per memory class but Unknown");
   for (auto [m, name] : kMemNames) {
@@ -77,7 +78,7 @@ void CodeGen::initTypes() {
   nilItem_->setAlignment(itemAlign_);
   rtCondError_ = rt("xb_cond_error", i32_, {ptrTy_, ptrTy_});
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
-  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
+  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
   rtStackOverflow_ = rt("xb_stack_overflow", voidTy, {ptrTy_});
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
@@ -487,6 +488,7 @@ void CodeGen::genFunction(const xir::Function &f) {
     for (uint32_t s : plan.clearsAtStart(xb)) setNil(slot(s));
     findFusedComparisons(*xb);
     findFusedCalls(*xb);
+    findFusedSends(*xb);
     for (auto &p : xb->params) cacheWords(p.get());
     for (auto &i : xb->insts) {
       line_ = i->loc.line;
@@ -700,12 +702,14 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t arrayItems = dl_.getStructLayout(arrayTy_)->getElementOffset(ArrayItems);
   uint64_t refValue = dl_.getStructLayout(refTy_)->getElementOffset(RefValue);
   uint64_t hashEntries = dl_.getStructLayout(hashTy_)->getElementOffset(HashEntries);
+  uint64_t objectVars = dl_.getStructLayout(objectTy_)->getElementOffset(ObjectVars);
   b_.CreateCall(rtAbiCheck_, {ConstantInt::get(i32_, XB_ABI_VERSION), ConstantInt::get(i32_, itemSize_),
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
                               ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
                               ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, ctxStackLimit),
                               ConstantInt::get(i32_, arrayItems),
-                              ConstantInt::get(i32_, refValue), ConstantInt::get(i32_, hashEntries)});
+                              ConstantInt::get(i32_, refValue), ConstantInt::get(i32_, hashEntries),
+                              ConstantInt::get(i32_, objectVars)});
   b_.CreateCall(rtProgramRun_, {ctx, functions_.at(&start), fn->getArg(1), fn->getArg(2)});
   b_.CreateRetVoid();
 }

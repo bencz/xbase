@@ -58,6 +58,7 @@ private:
   };
   enum CtxField : unsigned { CtxPending = 0, CtxDecimals = 1, CtxFrames = 2, CtxStackLimit = 3 };
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
+  enum ObjectField : unsigned { ObjectCls = 0, ObjectVars = 2 }; // xb_object
   enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
   enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 5 };           // xb_hash
   enum HEntryField : unsigned { HEntryKey = 0, HEntryValue = 1 };                     // xb_hentry
@@ -66,11 +67,12 @@ private:
   // items outside the heap (frames, Local and scratch items, STATIC storage,
   // literals), items in the heap (elements, cells, reference targets), array
   // headers, codeblocks' cell pointers, the context's head, frame links, the
-  // collector's state bytes, and strings (compiled code reads them, and
-  // writes the strings an `append` grows: bytes, length, flags, room).
+  // collector's state bytes, strings (compiled code reads them, and
+  // writes the strings an `append` grows: bytes, length, flags, room), and
+  // objects' class pointers.
   // Unknown memory is not tagged.
   enum class Mem : uint8_t {
-    Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, String, Count_
+    Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, String, ObjectHeader, Count_
   };
 
   // CodeGen.cpp: types, runtime declarations, the module, functions and
@@ -153,6 +155,8 @@ private:
   };
   llvm::LoadInst *stateByte(llvm::Value *obj, llvm::AtomicOrdering order);
   llvm::Value *storageLocal();
+  llvm::Value *isLocalState(llvm::Value *state);
+  void recordIfOld(llvm::Value *obj, llvm::Value *state);
   llvm::Value *isLocal(llvm::Value *obj, bool fromItem = true);
   VarTarget varTarget(const xir::Var &v, xir::Access a, bool load = false);
   llvm::Value *loadVar(const xir::Var &v, xir::Access a, llvm::Value *shadow, llvm::BasicBlock *unwind);
@@ -193,11 +197,14 @@ private:
   // trunc( v ) without a call: what llvm.trunc gives, which a target without the instruction (x86-64 before
   // SSE4.1) makes a call of the C library.
   llvm::Value *truncDouble(llvm::Value *v);
+  void sendInPlace(const xir::Instruction &i, llvm::Value *argv, llvm::Value *d, llvm::GlobalVariable *cache,
+                   const std::function<void()> &slowSend);
   llvm::Value *setDecimals();
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);
   // InlineCalls.cpp: Len, Asc, Chr, SubStr( c, n, 1 ), Int, PCount and PValue( n ) in place.
   void findFusedCalls(const xir::BasicBlock &b);
+  void findFusedSends(const xir::BasicBlock &b);
   bool emitInlineCall(const xir::Instruction &i);
   llvm::Value *strLength(llvm::Value *str);
   llvm::Value *strByte(llvm::Value *str, llvm::Value *pos);
@@ -261,6 +268,7 @@ private:
   llvm::FunctionType *initFnTy_ = nullptr;
   llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, ncells, cells[] }
   llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, items } (its items follow)
+  llvm::StructType *objectTy_ = nullptr;    // xb_object: { cls, nvars, vars }
   llvm::StructType *refTy_ = nullptr;       // xb_ref: { coll, index, value, key, loop }
   llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, entries, hashes, index, tree }
   llvm::StructType *hentryTy_ = nullptr;    // xb_hentry: { key, value }
@@ -366,6 +374,7 @@ private:
   std::unordered_set<const xir::Instruction *> sharingLoads_;              // loads that end an `append`'s growth
   std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<const xir::Var *>>
       shareOnEdge_; // and the edges (from, to) that do it instead of the loads after them
+  std::unordered_set<const xir::Instruction *> fusedSends_;               // sends an AWAIT fused (await.fuse before)
   std::unordered_set<const xir::Instruction *> fusedCalls_;                // Asc() calls lowered with their SubStr()
   std::unordered_set<const xir::Instruction *> fusedComparisons_;          // in the block being lowered
   // The words of the values held in frame slots, read once right after their definition (cacheWords): a slot holds

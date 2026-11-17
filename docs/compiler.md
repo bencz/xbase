@@ -493,7 +493,8 @@ emits the object file.
   classes that never overlap (`CodeGen::Mem`): items outside the heap (an `alloca` or a global of the module: frames,
   `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements, cells,
   reference targets), array headers, codeblocks' cell pointers, the context's head, frame links, the collector's state
-  bytes and strings (lengths and bytes, which compiled code reads, and the flags, where it clears `XB_STR_APPEND`). An
+  bytes, strings (lengths and bytes, which compiled code reads, and the flags, where it clears `XB_STR_APPEND`) and
+  objects' class pointers (`xb_object.cls`, which a send's in-place path reads). An
   address that may be either kind (a variable reached through a possible reference, an argument such as `argv` or the
   result pointer) is not tagged. LLVM then knows that a store into an element changes no frame slot and no array header;
   by itself this changes little in the code today, and it is the ground for moving array headers out of fast loops.
@@ -597,7 +598,16 @@ emits the object file.
   (`xb_classes_register`) with the module, with the class variables, the friends' names and the destructor. Every `send`
   calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed `xb_send_cache`:
   `XB_SEND_CACHE_WORDS` pointer-sized words) and, from a method or one of its codeblocks (`classIndex`,
-  `superSend`), its class's descriptor (else a null one). `send.macro` calls `xb_macro_send` the same way, without a
+  `superSend`), its class's descriptor (else a null one). Before that call, a send without `...` performs the cache's
+  newest way in place when it holds the class of the object sent to (`sendInPlace`, as `perform` does on a hit): the
+  object as itself (type `XB_T_OBJECT`, width 0) and the way read under the cache's sequence lock (an odd version, or
+  one changed meanwhile, misses); an instance variable of a local object is read (`XB_SEND_GET`) or, for a send with
+  one argument, written (`XB_SEND_SET`, followed by the write barrier on the object's state byte, read once as
+  `xb_object_put` does), and a method (`XB_SEND_METHOD`) is called through its function, unless an AWAIT fused the send
+  (the runtime then hands the method to the AWAIT). The written value's words are read before the cache's acquiring
+  loads, which would keep them from being forwarded from the stores that made them. Anything else, a shared object and
+  every miss call `xb_op_send_from`, which fills the cache. `xb_object` is part of the ABI for this (`cls` and
+  `vars`, checked by `xb_abi_check`). `send.macro` calls `xb_macro_send` the same way, without a
   cache. `class.new` calls `xb_class_instance`.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations

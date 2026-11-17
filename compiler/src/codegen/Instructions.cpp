@@ -421,7 +421,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     Constant *from = i.classIndex < 0 ? static_cast<Constant *>(ConstantPointerNull::get(ptrTy_))
                                       : classDef(i.classIndex);
     Value *super = ConstantInt::get(i32_, i.superSend ? 1 : 0);
-    Constant *cache = nullptr;
+    GlobalVariable *cache = nullptr;
     if (i.op == xir::Op::Send) { // the send's own inline cache (xb_send_cache: pointer-sized words the runtime fills)
       auto *cacheTy = ArrayType::get(intPtrTy_, XB_SEND_CACHE_WORDS);
       cache = new GlobalVariable(mod_, cacheTy, false, GlobalValue::PrivateLinkage, ConstantAggregateZero::get(cacheTy),
@@ -432,6 +432,7 @@ void CodeGen::emit(const xir::Instruction &i) {
       else b_.CreateCall(rtMacroSend_, {fnCtx_, d, from, super, ConstantInt::get(i32_, i.index), n, items});
     };
     if (i.hasRest()) withRest(i, argv, send);
+    else if (cache) sendInPlace(i, argv, d, cache, [&] { send(ConstantInt::get(i32_, ops.size()), argv); });
     else send(ConstantInt::get(i32_, ops.size()), argv);
     checkPending(unwind_);
     break;

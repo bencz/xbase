@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 46u
+#define XB_ABI_VERSION 47u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -286,12 +286,12 @@ int32_t  xb_pending_gc(xb_ctx *ctx);
 
 /* The layout the module was compiled for: offsets of xb_str.data,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
- * xb_ctx.stack_limit, xb_array.items (after len and cap), xb_ref.value (after coll and index) and
- * xb_hash.entries (after its five counts). */
+ * xb_ctx.stack_limit, xb_array.items (after len and cap), xb_ref.value (after coll and index),
+ * xb_hash.entries (after its five counts) and xb_object.vars (after cls and nvars). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
                       uint32_t ctx_stack_limit_offset, uint32_t array_items_offset, uint32_t ref_value_offset,
-                      uint32_t hash_entries_offset);
+                      uint32_t hash_entries_offset, uint32_t object_vars_offset);
 /* The stack error (EG_LIMIT, "Stack overflow"): raised by compiled code whose
  * frame lies below the context's stack_limit (core/ctx.c). */
 void     xb_stack_overflow(xb_ctx *ctx);
@@ -664,21 +664,45 @@ void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
  * scope decides what the method may reach, and a variable is first the one
  * `from` sees), or from elsewhere (NULL); with `super`, the method or variable
  * of `from`'s ancestors (Super:message). `cache` (NULL: none) is the send's
- * own, zeroed storage, which the runtime alone reads and writes: the members the message
- * reached for the classes of the last XB_SEND_CACHE_WAYS objects of different
+ * own, zeroed storage, which the runtime fills: the members the message
+ * reached for the classes (xb_object.cls) of the last XB_SEND_CACHE_WAYS objects of different
  * classes it went to, the most recent first (a polymorphic inline cache), so
  * that the next message to an object of one of those classes skips the lookup
  * and the checks. Threads share it: `version` is odd while one changes it (a
  * sequence lock, types/class.c). Every field is pointer-sized: the compiler
- * emits it as XB_SEND_CACHE_WORDS words. */
+ * emits it as XB_SEND_CACHE_WORDS words. For compiled code, which performs
+ * the most recent way in place for an object sent to as itself (an item width
+ * of 0: no cast), `kind` tells what the member is: XB_SEND_GET reads instance
+ * variable `slot` and XB_SEND_SET writes it (with the argument) when the object
+ * is local (not shared), XB_SEND_METHOD calls `fn`; XB_SEND_OTHER is left to
+ * the runtime. XB_SEND_CACHE_* are the word positions of each array's first way. */
 #define XB_SEND_CACHE_WAYS 4
-#define XB_SEND_CACHE_WORDS (1 + 3 * XB_SEND_CACHE_WAYS)
+#define XB_SEND_CACHE_WORDS (1 + 5 * XB_SEND_CACHE_WAYS)
+#define XB_SEND_CACHE_CLS 1
+#define XB_SEND_CACHE_SLOT (1 + 2 * XB_SEND_CACHE_WAYS)
+#define XB_SEND_CACHE_KIND (1 + 3 * XB_SEND_CACHE_WAYS)
+#define XB_SEND_CACHE_FN (1 + 4 * XB_SEND_CACHE_WAYS)
+enum { XB_SEND_OTHER = 0, XB_SEND_GET = 1, XB_SEND_SET = 2, XB_SEND_METHOD = 3 };
 typedef struct xb_send_cache {
   size_t version;
   void *cls[XB_SEND_CACHE_WAYS];
   void *member[XB_SEND_CACHE_WAYS];
   size_t slot[XB_SEND_CACHE_WAYS];
+  size_t kind[XB_SEND_CACHE_WAYS];
+  size_t fn[XB_SEND_CACHE_WAYS]; /* an xb_func as an integer (uintptr_t) */
 } xb_send_cache;
+
+/* [ABI] An object, an instance of a class: its class (a runtime structure, types/types.h) and its instance
+ * variables, `nvars` items in the class's order. Compiled code reads `cls`, and reads and writes the items in place. */
+typedef struct xb_class xb_class;
+typedef struct xb_object xb_object;
+#ifndef __cplusplus /* a flexible array member (the compiler mirrors the layout itself) */
+struct xb_object {
+  const xb_class *cls;
+  uint32_t nvars;
+  xb_item vars[];
+};
+#endif
 void     xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                          xb_send_cache *cache, uint32_t argc, xb_item *argv);
 

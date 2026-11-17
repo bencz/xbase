@@ -42,7 +42,7 @@ textual IR is written (except with the debugging options `--dump-xir` and `--dum
   target `DataLayout`, which gives the same layout the C compiler gives the runtime for that target.
 - Every program checks the ABI at startup (`xb_abi_check`): ABI version, item size, string header size, and the
   offsets of a codeblock's cells, a frame's slots, a context's frame chain and SET DECIMALS, an array's items, a
-  reference's value and a hash's entries.
+  reference's value, a hash's entries and an object's variables.
 - On-disk formats (DBF and NTX are little-endian; CDX keys are big-endian) are read and written only through explicit
   byte-order helpers, never by copying structures. *(planned)*
 - Objects have been produced and their layout inspected for x86-64, i686, AArch64, ARMv7, RISC-V 64, LoongArch64,

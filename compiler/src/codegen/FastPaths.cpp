@@ -411,6 +411,102 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
   return true;
 }
 
+// A send whose inline cache's most recent way holds the class of the object it goes to performs the member in place,
+// as the runtime does on that hit (xb_op_send_from; perform in types/class.c): an object sent to as itself (type
+// XB_T_OBJECT, width 0: no cast), the way read under the cache's sequence lock (an odd or changed version, another
+// class: the runtime). An instance variable read (XB_SEND_GET) or written (XB_SEND_SET, with one argument) of a
+// local object is copied in place, a write followed by the barrier; a method (XB_SEND_METHOD) is called, unless an
+// AWAIT fused the send (the runtime then tells the method to the AWAIT: xb_fuse_target). Anything else, and every
+// miss, makes the call (`slowSend`), which fills the cache.
+void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, GlobalVariable *cache,
+                          const std::function<void()> &slowSend) {
+  bool fused = fusedSends_.count(&i) != 0;
+  size_t argc = i.operands().size();
+  BasicBlock *object = newBlock("send.object"), *hit = newBlock("send.hit"), *slow = newBlock("send.slow");
+  BasicBlock *join = newBlock("send.done");
+  // A written value's words are read before the cache's acquiring loads, past which they could not be forwarded from
+  // the stores that just made them (the copy would then wait for those stores to reach memory).
+  Value *arg = argc == 2 ? b_.CreateConstInBoundsGEP1_32(itemTy_, argv, 1) : nullptr;
+  Words value = arg ? loadWords(arg) : Words{nullptr, nullptr};
+  uint64_t typeAndWidth = (0xFFFFFFFFull << headerShift(FType)) | (0xFFFFull << headerShift(FWidth));
+  Value *mask = ConstantInt::get(i64_, typeAndWidth);
+  Value *asSelf = b_.CreateICmpEQ(b_.CreateAnd(loadHeader(argv), mask),
+                                  b_.CreateAnd(headerWord(XB_T_OBJECT, 0, 0), mask));
+  branchLikely(asSelf, object, slow);
+
+  b_.SetInsertPoint(object);
+  Value *obj = itemPointer(argv, "obj");
+  Value *cls = b_.CreatePtrToInt(loadFrom(ptrTy_, b_.CreateStructGEP(objectTy_, obj, ObjectCls), Mem::ObjectHeader),
+                                 intPtrTy_, "cls");
+  auto word = [&](unsigned k, AtomicOrdering order, const char *name) {
+    auto *w = b_.CreateAlignedLoad(intPtrTy_, b_.CreateConstInBoundsGEP1_32(intPtrTy_, cache, k),
+                                   dl_.getABITypeAlign(intPtrTy_), name);
+    w->setAtomic(order);
+    return w;
+  };
+  Value *version = word(0, AtomicOrdering::Acquire, "version");
+  Value *wayCls = word(XB_SEND_CACHE_CLS, AtomicOrdering::Monotonic, "way.cls");
+  Value *kind = word(XB_SEND_CACHE_KIND, AtomicOrdering::Monotonic, "way.kind");
+  Value *slot = word(XB_SEND_CACHE_SLOT, AtomicOrdering::Monotonic, "way.slot");
+  Value *fn = word(XB_SEND_CACHE_FN, AtomicOrdering::Monotonic, "way.fn");
+  b_.CreateFence(AtomicOrdering::Acquire);
+  Value *again = word(0, AtomicOrdering::Monotonic, "version");
+  Value *even = b_.CreateICmpEQ(b_.CreateAnd(version, ConstantInt::get(intPtrTy_, 1)), ConstantInt::get(intPtrTy_, 0));
+  Value *same = b_.CreateAnd(b_.CreateICmpEQ(wayCls, cls), b_.CreateICmpEQ(again, version));
+  branchLikely(b_.CreateAnd(even, same), hit, slow);
+
+  b_.SetInsertPoint(hit);
+  // Weighted: a hit is performed in place, the default (a member the runtime performs) is the cold call.
+  SwitchInst *sw = b_.CreateSwitch(kind, slow, 3);
+  // The variable `slot` of a local object (its state byte read once: sharing and the barrier's test, as
+  // xb_object_put does), or the runtime.
+  auto variable = [&](const char *name, Value *&state) {
+    BasicBlock *bb = newBlock(name), *local = newBlock(name);
+    b_.SetInsertPoint(bb);
+    state = stateByte(obj, AtomicOrdering::Monotonic);
+    branchLikely(isLocalState(state), local, slow);
+    b_.SetInsertPoint(local);
+    Value *vars = b_.CreateStructGEP(objectTy_, obj, ObjectVars);
+    return std::make_pair(bb, b_.CreateInBoundsGEP(itemTy_, vars, b_.CreateZExtOrTrunc(slot, i64_), "var"));
+  };
+  Value *state = nullptr;
+  auto [get, readVar] = variable("send.get", state);
+  copyItem(d, readVar); // arguments are ignored, as the runtime does
+  b_.CreateBr(join);
+  sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_GET), get);
+  if (argc == 2) {
+    auto [set, writeVar] = variable("send.set", state);
+    storeWords(writeVar, value.header, value.payload);
+    recordIfOld(obj, state);
+    storeWords(d, value.header, value.payload);
+    b_.CreateBr(join);
+    sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_SET), set);
+  }
+  if (!fused) {
+    BasicBlock *method = newBlock("send.method");
+    b_.SetInsertPoint(method);
+    b_.CreateCall(xbFuncTy_, b_.CreateIntToPtr(fn, ptrTy_), {fnCtx_, d, ConstantInt::get(i32_, argc), argv});
+    b_.CreateBr(join);
+    sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_METHOD), method);
+  }
+
+  std::vector<uint32_t> weights(sw->getNumSuccessors(), 1000);
+  weights[0] = 1;
+  sw->setMetadata(LLVMContext::MD_prof, MDBuilder(ctx_).createBranchWeights(weights));
+
+  b_.SetInsertPoint(slow);
+  slowSend();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// The sends an AWAIT fused: right after `await.fuse` (the runtime hands the method the send reaches to the AWAIT).
+void CodeGen::findFusedSends(const xir::BasicBlock &b) {
+  fusedSends_.clear();
+  for (size_t k = 1; k < b.insts.size(); ++k)
+    if (b.insts[k - 1]->op == xir::Op::AwaitFuse) fusedSends_.insert(b.insts[k].get());
+}
+
 // trunc( v ) without a call (CodeGen.h).
 Value *CodeGen::truncDouble(Value *v) {
   // Below 2^52 in magnitude through an integer (the sign kept: trunc( -0.5 ) is -0.0); a larger magnitude, an

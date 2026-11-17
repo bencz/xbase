@@ -429,6 +429,11 @@ static int cast(xb_item *r, const cls *c, uint32_t view, const xb_item *self, co
 
 _Static_assert(sizeof(size_t) == sizeof(uintptr_t), "a send cache's words are all one size (xbrt.h)");
 _Static_assert(sizeof(xb_send_cache) == XB_SEND_CACHE_WORDS * sizeof(void *), "the size the compiler emits (xbrt.h)");
+_Static_assert(offsetof(xb_send_cache, cls) == XB_SEND_CACHE_CLS * sizeof(void *) &&
+                   offsetof(xb_send_cache, slot) == XB_SEND_CACHE_SLOT * sizeof(void *) &&
+                   offsetof(xb_send_cache, kind) == XB_SEND_CACHE_KIND * sizeof(void *) &&
+                   offsetof(xb_send_cache, fn) == XB_SEND_CACHE_FN * sizeof(void *),
+               "the word positions the compiler reads (xbrt.h)");
 
 /* The send caches are shared by every thread (xbrt.h): a sequence lock. A writer makes the version odd, changes the
  * ways, and makes it even again; a writer that finds another one at work leaves the cache. A reader that sees the
@@ -450,6 +455,16 @@ static int cache_find(xb_send_cache *cache, const void *c, member **m, size_t *s
   return 0;
 }
 
+/* What compiled code may do in place for member `m` (XB_SEND_* in xbrt.h). */
+static size_t inline_kind(const member *m) {
+  switch (m->kind) {
+    case M_GET: return XB_SEND_GET;
+    case M_SET: return XB_SEND_SET;
+    case M_METHOD: return XB_SEND_METHOD;
+    default: return XB_SEND_OTHER;
+  }
+}
+
 /* The member a message reached for class `c`, first in the cache; the oldest of a full cache goes. */
 static void cache_put(xb_send_cache *cache, const void *c, const member *m, size_t slot) {
   size_t version = xb_atomic_loadsz(&cache->version, XB_RELAXED);
@@ -459,10 +474,14 @@ static void cache_put(xb_send_cache *cache, const void *c, const member *m, size
     xb_atomic_storeptr(&cache->cls[k], xb_atomic_loadptr(&cache->cls[k - 1], XB_RELAXED), XB_RELAXED);
     xb_atomic_storeptr(&cache->member[k], xb_atomic_loadptr(&cache->member[k - 1], XB_RELAXED), XB_RELAXED);
     xb_atomic_storesz(&cache->slot[k], xb_atomic_loadsz(&cache->slot[k - 1], XB_RELAXED), XB_RELAXED);
+    xb_atomic_storesz(&cache->kind[k], xb_atomic_loadsz(&cache->kind[k - 1], XB_RELAXED), XB_RELAXED);
+    xb_atomic_storesz(&cache->fn[k], xb_atomic_loadsz(&cache->fn[k - 1], XB_RELAXED), XB_RELAXED);
   }
   xb_atomic_storeptr(&cache->cls[0], (void *)(uintptr_t)c, XB_RELAXED);
   xb_atomic_storeptr(&cache->member[0], (void *)(uintptr_t)m, XB_RELAXED);
   xb_atomic_storesz(&cache->slot[0], slot, XB_RELAXED);
+  xb_atomic_storesz(&cache->kind[0], inline_kind(m), XB_RELAXED);
+  xb_atomic_storesz(&cache->fn[0], m->kind == M_METHOD ? (size_t)(uintptr_t)m->fn : 0, XB_RELAXED);
   xb_atomic_storesz(&cache->version, version + 2, XB_RELEASE);
 }
 

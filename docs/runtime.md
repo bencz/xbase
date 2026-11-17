@@ -357,12 +357,13 @@ missing name, which fails only when it is called; xbase reports the missing func
 
 ## Objects and messages
 
-An object (`xb_object` in `types/types.h`, `types/object.c`) is an instance of a class: its class and one item per
-instance variable. The runtime defines classes of its own in C (`xb_class`: name, variables and methods), and
+An object (`xb_object` in `xbrt.h`, part of the ABI; `types/object.c`) is an instance of a class: its class and one
+item per instance variable. The runtime defines classes of its own in C (`xb_class`: name, variables and methods), and
 programs define theirs in xBase ([Classes](#classes)). `xb_op_send(ctx, ret, message, argc, argv)` sends a message to
 `argv[0]` with the arguments `argv[1 .. argc-1]`; the compiler passes the message upper-cased, and an assignment
 `o:x := v` sends `_X` with `v`. Compiled code sends through `xb_op_send_from`, with the send's inline cache and the
-class of the method it is in ([Classes](#classes)).
+class of the method it is in ([Classes](#classes)), after performing in place what the cache's newest way holds for
+the object's class (an instance variable read or written, a method called: [compiler.md](compiler.md#xir-to-llvm)).
 
 - An object's variables: `X` returns the variable (arguments are ignored), `_X` assigns it (without an argument, `NIL`).
   A variable's rule (`xb_var_rule`) says what it accepts: any value; only an array, a logical or a string (a value of
@@ -565,9 +566,9 @@ first time it is used (its class function, or a subclass):
   variable's index, a class variable's address) as the newest way (the oldest of a full cache goes); the next message
   from that send to an object of one of those classes runs the member at once, without the lookup, the scope checks
   (which give the same answer for the same class at the same send) or a call to `dispatch` (`perform`). Messages to
-  casts, to values of scalar classes and to the runtime's own classes always look up. The `oop` benchmark (method calls,
-  one through `Super`, variable reads and assignments) went from 292 ms to 69 ms; a send that goes to objects of three
-  classes in turn, from 46 ms to 23 ms for 3,000,000 messages once the cache held more than one class. Threads share
+  casts, to values of scalar classes and to the runtime's own classes always look up. Each way also tells compiled code
+  what the member is (`kind`: `XB_SEND_GET`, `XB_SEND_SET`, `XB_SEND_METHOD` with the method's function in `fn`, or
+  `XB_SEND_OTHER`), so that it performs the newest way in place ([compiler.md](compiler.md#xir-to-llvm)). Threads share
   the caches: each one is a sequence lock (`version`, odd while a thread changes it). A reader that finds the version
   odd, or changed once it has read a way, does the full lookup instead (nothing torn is used, nothing is tried again),
   and a writer that finds another one at work leaves the cache as it is; 20,000,000 messages to objects of two classes

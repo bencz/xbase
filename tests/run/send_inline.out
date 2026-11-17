@@ -1,0 +1,12 @@
+
+barrier          0 G20000      20000      20000      40000      20000 BB1 G20000
+kept     598894
+no argument U NIL
+threads      20000      20000
+chain          5
+alternating       4000
+casts 1/child 100/base 2/child 102/base 5/child 106/base          10        112
+torn          0
+await         30
+arguments t a a U NIL
+error Argument error + MAIN

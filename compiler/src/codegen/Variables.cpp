@@ -68,7 +68,20 @@ Value *CodeGen::isLocal(Value *obj, bool fromItem) {
                          ConstantAsMetadata::get(ConstantInt::get(i64_, headerShift(FType)))};
     state->setMetadata(kStateLoad, MDNode::get(ctx_, where));
   }
+  return isLocalState(state);
+}
+
+Value *CodeGen::isLocalState(Value *state) {
   return b_.CreateICmpEQ(b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_SHARED)), ConstantInt::get(i8_, 0));
+}
+
+// The barrier's test (xb_gc_write in xbrt.h) on the state byte `state` of `obj`, read before its store: an old object
+// not yet recorded is recorded.
+void CodeGen::recordIfOld(Value *obj, Value *state) {
+  Value *bits = b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
+  BasicBlock *join = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gc.old");
+  b_.CreateCall(rtGcRemember_, {obj});
+  endUnlikely(join);
 }
 
 // Where a load (`load`) or store of the variable reaches its value (see xir::Access). `local` is the item in place,
@@ -294,11 +307,7 @@ void CodeGen::cellStoreWritten(Value *cell, bool fromItem) {
 
 // After a store into a cell: the inline test of xb_gc_write (xbrt.h).
 void CodeGen::cellWritten(Value *cell) {
-  Value *state = stateByte(cell, AtomicOrdering::Monotonic); // other threads set its bits (xb_gc_write)
-  Value *bits = b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
-  BasicBlock *join = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gc.old");
-  b_.CreateCall(rtGcRemember_, {cell});
-  endUnlikely(join);
+  recordIfOld(cell, stateByte(cell, AtomicOrdering::Monotonic)); // other threads set its bits (xb_gc_write)
 }
 
 // Write barrier after a store into a variable (see xb_gc_write in xbrt.h). A
