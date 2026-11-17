@@ -428,6 +428,7 @@ void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, Glob
   // the stores that just made them (the copy would then wait for those stores to reach memory).
   Value *arg = argc == 2 ? b_.CreateConstInBoundsGEP1_32(itemTy_, argv, 1) : nullptr;
   Words value = arg ? loadWords(arg) : Words{nullptr, nullptr};
+
   uint64_t typeAndWidth = (0xFFFFFFFFull << headerShift(FType)) | (0xFFFFull << headerShift(FWidth));
   Value *mask = ConstantInt::get(i64_, typeAndWidth);
   Value *asSelf = b_.CreateICmpEQ(b_.CreateAnd(loadHeader(argv), mask),
@@ -476,7 +477,12 @@ void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, Glob
   sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_GET), get);
   if (argc == 2) {
     auto [set, writeVar] = variable("send.set", state);
-    storeWords(writeVar, value.header, value.payload);
+    // One 16-byte store of both words: a read of the variable that code generation makes one 16-byte load (a copy)
+    // is then forwarded from it, which it could not be from two 8-byte stores.
+    auto *pair = FixedVectorType::get(i64_, 2);
+    Value *item = b_.CreateInsertElement(PoisonValue::get(pair), value.header, uint64_t(0));
+    item = b_.CreateInsertElement(item, b_.CreateBitCast(value.payload, i64_), uint64_t(1));
+    tag(b_.CreateAlignedStore(item, writeVar, itemAlign_), Mem::HeapItem);
     recordIfOld(obj, state);
     storeWords(d, value.header, value.payload);
     b_.CreateBr(join);
@@ -484,10 +490,10 @@ void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, Glob
   }
   if (!fused) {
     BasicBlock *method = newBlock("send.method");
+    sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_METHOD), method);
     b_.SetInsertPoint(method);
     b_.CreateCall(xbFuncTy_, b_.CreateIntToPtr(fn, ptrTy_), {fnCtx_, d, ConstantInt::get(i32_, argc), argv});
     b_.CreateBr(join);
-    sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_METHOD), method);
   }
 
   std::vector<uint32_t> weights(sw->getNumSuccessors(), 1000);
