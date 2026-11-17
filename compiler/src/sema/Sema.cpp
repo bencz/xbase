@@ -21,6 +21,7 @@ struct Sema::Scope {
   bool inBlock = false;          // the statements of an extended codeblock
   bool inAlways = false;         // any part of a BEGIN SEQUENCE with ALWAYS or a TRY with FINALLY: YIELD cannot
                                  // suspend there, since a generator left before its end would never run that code
+  bool inAwaitEach = false;      // the body of an AWAIT FOR EACH, whose variables are restored that way
 };
 
 void Sema::run(Module &m) {
@@ -443,7 +444,9 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::Yield:
     expr(*static_cast<YieldStmt &>(st).value, s);
-    if (s.inAlways)
+    if (s.inAwaitEach)
+      diag_.error(st.loc, "YIELD cannot be inside AWAIT FOR EACH");
+    else if (s.inAlways)
       diag_.error(st.loc, "YIELD cannot be inside a BEGIN SEQUENCE with ALWAYS, a TRY with FINALLY or a USING");
     break;
   case StmtKind::WithObject: {
@@ -458,6 +461,29 @@ void Sema::stmt(Stmt &st, Scope &s) {
     expr(*u.value, s);
     declare(u.hidden, false, s);
     block(u.seq, s);
+    break;
+  }
+  case StmtKind::AwaitEach: { // its AWAITs are the statement's (AwaitExpr::generated): one error for it where an AWAIT
+    // is not valid; the body is checked anyway
+    auto &a = static_cast<AwaitEachStmt &>(st);
+    if (frames_.back().block || s.inBlock)
+      diag_.error(a.loc, "AWAIT FOR EACH cannot be inside a codeblock");
+    else if (curFunc_ && !curFunc_->async && !mayStart(*curFunc_))
+      diag_.error(a.loc,
+                  "AWAIT FOR EACH is valid only in an ASYNC function or in the procedure that starts the program");
+    for (size_t k = 0; k < a.hidden.size(); ++k) {
+      expr(*a.hidden[k].init, s);
+      // the loop variables (x, then k), whose values the hidden variables after the enumerator keep: no fields
+      if (k == 0) continue;
+      const Expr &v = *a.hidden[k].init;
+      if (v.kind == ExprKind::Var && static_cast<const VarExpr &>(v).where == VarWhere::Field)
+        diag_.error(v.loc, "a field cannot be the variable of AWAIT FOR EACH");
+    }
+    for (LocalDecl &h : a.hidden) declare(h, false, s);
+    bool wasInAwaitEach = s.inAwaitEach;
+    s.inAwaitEach = true;
+    block(a.seq, s);
+    s.inAwaitEach = wasInAwaitEach;
     break;
   }
   case StmtKind::Sequence: {
@@ -583,7 +609,8 @@ void Sema::expr(Expr &e, Scope &s) {
     break;
   case ExprKind::Await:
     expr(*static_cast<AwaitExpr &>(e).operand, s);
-    if (!curFunc_) break; // a file-wide STATIC's initializer, which must be constant: reported as such
+    if (!curFunc_ || static_cast<AwaitExpr &>(e).generated) break; // a file-wide STATIC's initializer, which must be
+                                                                   // constant: reported as such; a statement's own
     if (frames_.back().block || s.inBlock) diag_.error(e.loc, "AWAIT cannot be inside a codeblock");
     else if (!curFunc_->async && !mayStart(*curFunc_))
       diag_.error(e.loc, "AWAIT is valid only in an ASYNC function or in the procedure that starts the program");

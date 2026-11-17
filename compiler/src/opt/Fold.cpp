@@ -233,6 +233,12 @@ void Folder::stmt(Stmt &s) {
     block(u.seq);
     break;
   }
+  case StmtKind::AwaitEach: {
+    auto &a = static_cast<AwaitEachStmt &>(s);
+    for (LocalDecl &h : a.hidden) fold(h.init);
+    block(a.seq);
+    break;
+  }
   case StmtKind::Exit:
   case StmtKind::Loop:
   case StmtKind::Parameters:

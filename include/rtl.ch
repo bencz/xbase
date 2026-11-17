@@ -356,7 +356,11 @@ EXTERN FUNCTION QQOut( ... ) NATIVE
 
 // Internal functions used by std.ch commands, by tests and by the runtime's xBase code
 EXTERN FUNCTION __ArgError( nSubCode, [lSubstitute] ) NATIVE ARGS
+EXTERN FUNCTION __AwaitEach( xSource ) NATIVE
+EXTERN FUNCTION __AwaitEachAwaits( oEnumerator ) NATIVE
+EXTERN FUNCTION __AwaitEachKey( oEnumerator, nPosition ) NATIVE
 EXTERN FUNCTION __Break( [xValue] ) NATIVE
+EXTERN FUNCTION __CallLines( [oError] ) NATIVE
 EXTERN FUNCTION __ConsoleWrite( lNewLine, ... ) NATIVE
 EXTERN FUNCTION __DirScan( [cSpec] ) NATIVE
 EXTERN FUNCTION __Dispose( xValue ) NATIVE

@@ -7,27 +7,65 @@
 /* rtl/languages.prg */
 void xbf___LANGUAGETEXTS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
-/* Makes the texts of language `id`; stores them unless `onlyFirst` and a language was selected meanwhile (a
- * destructor that ran while they were made). */
-static int select_language(xb_ctx *ctx, const char *id, size_t len, int onlyFirst) {
-  xb_item arg, texts;
+/* Makes the texts of language `id` into `*texts` (rooted by the caller): 0 when it could not. */
+static int make_texts(xb_ctx *ctx, const char *id, size_t len, xb_item *texts) {
+  xb_item arg;
   xb_str *upper = xb_str_alloc(len);
   for (size_t i = 0; i < len; ++i) upper->data[i] = xb_ascii_upper(id[i]);
   xb_set_str(&arg, upper);
-  xb_set_nil(&texts);
+  xb_set_nil(texts);
   xb_gc_root_push(ctx, &arg);
-  xb_gc_root_push(ctx, &texts);
-  xbf___LANGUAGETEXTS(ctx, &texts, 1, &arg);
-  xb_gc_root_pop(ctx, 2);
-  if ((xb_pending_get(ctx) & XB_PENDING_UNWIND) || texts.type != XB_T_ARRAY) return 0;
-  if (!onlyFirst || ctx->env->language.type != XB_T_ARRAY) ctx->env->language = texts;
-  return 1;
+  xbf___LANGUAGETEXTS(ctx, texts, 1, &arg);
+  xb_gc_root_pop(ctx, 1);
+  return !(xb_pending_get(ctx) & XB_PENDING_UNWIND) && texts->type == XB_T_ARRAY;
 }
 
-int xb_language_select(xb_ctx *ctx, const char *id, size_t len) { return select_language(ctx, id, len, 0); }
+int xb_language_select(xb_ctx *ctx, const char *id, size_t len) {
+  xb_item texts;
+  xb_set_nil(&texts);
+  xb_gc_root_push(ctx, &texts);
+  int made = make_texts(ctx, id, len, &texts);
+  if (made) ctx->env->language = texts;
+  xb_gc_root_pop(ctx, 1);
+  return made;
+}
 
+/* The English texts, made once for the process (the texts are never changed): every environment that starts without
+ * texts takes them, shared, rather than making them again. `english` is a root of the collector once made, set under
+ * `englishLock` and read without it once `englishReady` says so. */
+static xb_item english;
+static uint32_t englishReady;
+static xb_mutex englishLock;
+static xb_once_flag englishMade = XB_ONCE_INIT;
+
+static void english_root(void) {
+  if (!xb_mutex_init(&englishLock)) xb_gc_fatal("cannot create the language's lock");
+  xb_set_nil(&english);
+  xb_gc_add_root(&english, 1);
+}
+
+/* The texts of the current language: an environment without any takes the English ones, made once (a language a
+ * destructor selected while they were made stays). */
 const xb_array *xb_language(xb_ctx *ctx) {
-  if (ctx->env->language.type != XB_T_ARRAY) select_language(ctx, "EN", 2, 1);
+  if (ctx->env->language.type != XB_T_ARRAY && xb_atomic_load32(&englishReady, XB_ACQUIRE)) {
+    ctx->env->language = english;
+  } else if (ctx->env->language.type != XB_T_ARRAY) {
+    xb_item texts;
+    xb_set_nil(&texts);
+    xb_gc_root_push(ctx, &texts);
+    if (make_texts(ctx, "EN", 2, &texts)) {
+      xb_once(&englishMade, english_root);
+      xb_share(&texts); /* before another thread may reach them */
+      xb_mutex_lock(&englishLock);
+      if (!xb_atomic_load32(&englishReady, XB_RELAXED)) {
+        english = texts;
+        xb_atomic_store32(&englishReady, 1, XB_RELEASE);
+      }
+      xb_mutex_unlock(&englishLock);
+      if (ctx->env->language.type != XB_T_ARRAY) ctx->env->language = texts;
+    }
+    xb_gc_root_pop(ctx, 1);
+  }
   return ctx->env->language.type == XB_T_ARRAY ? ctx->env->language.v.p : NULL;
 }
 

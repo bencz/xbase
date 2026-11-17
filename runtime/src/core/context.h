@@ -80,6 +80,9 @@ struct xb_ctx {
   /* The step of an asynchronous function that runs on the thread (rtl/tasks.c, on the C stack): its resume function
    * finds its arguments, its frame and its task there. */
   struct xb_async_step *async_step;
+  /* The word xb_wait_until sleeps on (rtl/threads.c), published before its QUIT test: xb_gc_raise_all wakes it after
+   * it raised a QUIT here, so a waiter ends without looking at the clock. NULL when it waits for nothing. */
+  const uint32_t *waitingOn;
   /* AWAIT of a call to an asynchronous function (xb_await_fuse): the function's entry (or, `async_fuse_send`, the
    * method the send reaches: xb_fuse_target), and the frame that calls it; `async_done` once its first step gave the
    * result itself (it did not suspend: no task made). */
@@ -140,6 +143,9 @@ void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
 /* The lowest address of the stack of the context's thread that the program may use: compiled code raises the stack
  * error a reserve above it (core/ctx.c); NULL: unknown, no limit. */
 void xb_ctx_set_stack(xb_ctx *ctx, const char *low);
+/* Whether the thread's stack has room left for a task to run inline (XB_STACK_INLINE above the stack error's limit,
+ * or bounds unknown): a waiter short of it waits instead, and a worker runs the task on a stack of its own. */
+int xb_stack_room(const xb_ctx *ctx);
 
 /* A new flow's environment (a thread's, a task's). xb_env_capture makes in `*r` (rooted) a snapshot of `ctx`'s, an
  * array the new flow keeps: the SET values (SET DECIMALS too), the date format, ErrorBlock(), the language's texts,
@@ -236,6 +242,9 @@ static inline void xb_frame_pop(xb_ctx *ctx, const xb_frame *f) { ctx->frames = 
 
 /* Whether the call stack (ProcName(), the "Called from" lines) shows a frame. */
 static inline int xb_frame_shown(const xb_frame *f) { return f->proc && !(f->proc->flags & XB_PROC_HIDDEN); }
+
+/* Where the call stack ends (the frame after its last, NULL for the bottom): in a task, below the task's own calls. */
+static inline const xb_frame *xb_stack_end(const xb_ctx *ctx) { return ctx->task_depth ? ctx->task_base : NULL; }
 
 /* SET DECIMALS as an item's decimal count (items keep 16 bits, as in Clipper). */
 static inline uint16_t xb_decimals(const xb_ctx *ctx) { return (uint16_t)ctx->set_decimals; }

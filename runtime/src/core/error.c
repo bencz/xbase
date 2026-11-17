@@ -1,5 +1,7 @@
 #include "xbrt_int.h"
 
+#include "core/text.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -29,7 +31,19 @@ void xbf_ERRORNEW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_object(ret, xb_object_new(&error_class));
 }
 
-static void set_text(xb_item *it, const char *s) { xb_set_str(it, xb_str_new(s, strlen(s))); }
+/* A text of the error object: the empty string shared (xb_str_empty), else a new one. */
+static void set_text(xb_item *it, const char *s) { xb_set_str(it, *s ? xb_str_new(s, strlen(s)) : xb_str_empty()); }
+
+/* "BASE", the subsystem of the runtime's errors: one string never collected (the layout of xb_str, as xb_str1 has it),
+ * not one per error. */
+typedef struct static_text {
+  uint32_t flags;
+  uint32_t hash;
+  size_t len;
+  char data[5];
+} static_text;
+_Static_assert(offsetof(static_text, data) == offsetof(xb_str, data), "a static text has the layout of xb_str");
+static const static_text base_subsystem = {XB_STR_STATIC, 0, 4, "BASE"};
 
 typedef struct report {
   const xb_ctx *ctx;
@@ -107,7 +121,8 @@ static void make_error(xb_ctx *ctx, const failure *f, xb_item *r) {
   xb_gc_write(e);
   set_text(&e->vars[ERR_OPERATION], f->operation);
   xb_gc_write(e);
-  set_text(&e->vars[ERR_SUBSYSTEM], f->subsystem ? f->subsystem : "BASE");
+  if (f->subsystem) set_text(&e->vars[ERR_SUBSYSTEM], f->subsystem);
+  else xb_set_str(&e->vars[ERR_SUBSYSTEM], (xb_str *)&base_subsystem);
   xb_gc_write(e);
   if (f->filename) {
     set_text(&e->vars[ERR_FILENAME], f->filename);
@@ -121,6 +136,26 @@ static void make_error(xb_ctx *ctx, const failure *f, xb_item *r) {
   xb_set_logical(&e->vars[ERR_CANRETRY], (flags & XB_ERR_RETRY) != 0);
   xb_set_logical(&e->vars[ERR_CANDEFAULT], (flags & XB_ERR_DEFAULT) != 0);
   xb_set_int(&e->vars[ERR_TRIES], f->tries);
+}
+
+/* In a task, fails it with the Error object `made` (else the one failure `f` raises): what the default handler does
+ * with an error nobody handled (xb_error_fail_task), for an error no handler can take (no error block, handlers
+ * recursing too deep, a handler that returned for an error that cannot go on): the task's waiter gets the error, where
+ * the program would end. 0 outside a task. */
+static int fail_task(xb_ctx *ctx, const failure *f, const xb_item *made) {
+  if (!ctx->task_depth) return 0;
+  xb_item error, calls;
+  xb_set_nil(&error);
+  xb_set_nil(&calls);
+  xb_gc_root_push(ctx, &error);
+  xb_gc_root_push(ctx, &calls);
+  if (made) error = *made;
+  else if (f->error) error = *f->error;
+  else make_error(ctx, f, &error);
+  xb_error_call_lines(ctx, &error, &calls);
+  xb_error_fail_task(ctx, &error, &calls);
+  xb_gc_root_pop(ctx, 2);
+  return 1;
 }
 
 /* Raises the error (see xb_error_in). 0: fail; 1: substituted, or the
@@ -146,8 +181,10 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
   xb_frame inside;
   if (frame) xb_frame_push(ctx, &inside, &proc);
   if (ctx->env->error_block.type != XB_T_BLOCK || ctx->error_depth >= XB_ERROR_MAX_DEPTH) {
-    if (ctx->env->error_block.type != XB_T_BLOCK) unrecoverable(ctx, 9002, "No ERRORBLOCK() for error");
-    else unrecoverable(ctx, 9003, "Too many recursive error handler calls");
+    if (!fail_task(ctx, f, NULL)) {
+      if (ctx->env->error_block.type != XB_T_BLOCK) unrecoverable(ctx, 9002, "No ERRORBLOCK() for error");
+      else unrecoverable(ctx, 9003, "Too many recursive error handler calls");
+    }
     if (frame) xb_frame_pop(ctx, &inside);
     return 0;
   }
@@ -180,7 +217,7 @@ static int raise(xb_ctx *ctx, const failure *f, xb_item *result) {
       outcome = 1;
     } else if (flags & XB_ERR_DEFAULT) {
       outcome = 1;
-    } else {
+    } else if (!fail_task(ctx, f, &call[0])) {
       unrecoverable(ctx, 9001, "Error recovery failure");
     }
   }
@@ -266,6 +303,49 @@ void xb_error_add_calls(xb_ctx *ctx, const xb_item *error, const xb_item *calls)
     if (xb_object_replace(error->v.p, ERR_CALLS, &before, &now)) break;
   }
   xb_gc_root_pop(ctx, 2);
+}
+
+void xb_error_call_lines(xb_ctx *ctx, const xb_item *error, xb_item *out) {
+  static const char further[] = "\n" XB_CALLS_NOT_SHOWN, called[] = "Called from ", waited[] = "Waited for in ";
+  xb_item before;
+  xb_set_nil(&before);
+  if (xb_error_is(error)) xb_object_get(error->v.p, ERR_CALLS, &before);
+  int fromTask = before.type == XB_T_STRING && before.v.s->len;
+  char local[2048];
+  xb_buffer b = {local, 0, sizeof local, 0};
+  const xb_frame *end = xb_stack_end(ctx);
+  uint32_t n = 0;
+  for (const xb_frame *f = ctx->frames; f && f != end; f = f->prev) {
+    if (!xb_frame_shown(f)) continue;
+    if (n++ == XB_CALLS_SHOWN) {
+      xb_buffer_put(&b, further, sizeof further - 1);
+      break;
+    }
+    char line[32];
+    int len = snprintf(line, sizeof line, "(%u)  ", (unsigned)f->line);
+    xb_buffer_put(&b, "\n", 1);
+    if (n == 1 && fromTask) xb_buffer_put(&b, waited, sizeof waited - 1);
+    else xb_buffer_put(&b, called, sizeof called - 1);
+    xb_buffer_put(&b, f->proc->name, strlen(f->proc->name));
+    xb_buffer_put(&b, line, (size_t)len);
+  }
+  xb_set_str(out, xb_str_new(b.p, b.len));
+  xb_buffer_free(&b);
+}
+
+/* __CallLines( [oError] ): xb_error_call_lines, for the default error handler (rtl/errorsys.prg). */
+void xbf___CALLLINES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_item nil;
+  xb_set_nil(&nil);
+  xb_error_call_lines(ctx, argc ? &argv[0] : &nil, ret);
+}
+
+int xb_error_fail_task(xb_ctx *ctx, const xb_item *value, const xb_item *calls) {
+  if (!ctx->task_depth) return 0;
+  if (calls) xb_error_add_calls(ctx, value, calls);
+  ctx->break_value = *value;
+  xb_pending_set(ctx, XB_PENDING_FAIL);
+  return 1;
 }
 
 /* __ErrorCalls( oError ): the lines of the calls where the tasks it failed raised it, "" for none. */

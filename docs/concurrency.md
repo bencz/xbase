@@ -66,9 +66,16 @@ NEXT
   start procedure may also be `ASYNC`: the runtime waits for the task it returns before the program ends, its failure
   raised as `Result` raises it, so an error nobody handled is reported and ends the program with exit code 1
   ([runtime.md](runtime.md#program-startup)). Done.
-- Asynchronous generators: `YIELD` in an `ASYNC` function. Calling it returns an asynchronous enumerator
-  (`MoveNextAsync()` gives a task of a logical, `Current`); `AWAIT FOR EACH x IN expr ... NEXT` awaits each step.
-  `AWAIT FOR EACH` over an ordinary enumerator awaits each element that is a task (a collection of tasks in order).
+- `AWAIT FOR EACH [k =>] x IN expr ... NEXT` awaits each step of an asynchronous enumerator (an object that answers
+  `MoveNextAsync()`, a task of a logical, and `Current`: a channel's enumerator, a class's; an object that answers
+  `GetAsyncEnumerator()` gives one), a channel's values as they come too; over an ordinary collection (an array, a hash,
+  a string, an enumerator, a generator) it awaits each element that is a task, in order (a collection of tasks); `k` is
+  the position, a hash's key; the variables are put back after the loop, as `FOR EACH` puts them; a field cannot be one,
+  the statement cannot stand in a codeblock, and `YIELD` cannot stand in its body. The loop calls `MoveNextAsync()`
+  without a token: one that should end it is given to the enumerator, as `AWAIT FOR EACH x IN oChannel:GetEnumerator(
+  oToken )` (canceled, the step's `AWAIT` fails as canceled, and no value goes to the loop that was left) (done,
+  [compiler.md](compiler.md#grammar)). Asynchronous generators: `YIELD` in an `ASYNC` function; calling it returns an
+  asynchronous enumerator (planned).
 - `[AWAIT] USING [v :=] expr ... END [USING]`: the body runs, then the value's `Dispose()` (with `AWAIT`, `AWAIT
   DisposeAsync()`; `USING AWAIT expr` is `USING` of the awaited value) when it ends in any way (`RETURN`, `EXIT`,
   `LOOP`, an error, `BREAK`, `QUIT`), as `ALWAYS` would. Without `AWAIT` it is done
@@ -170,12 +177,13 @@ Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); th
   changes in its own environment (a `SET`, a `PRIVATE` it creates) stays there.
 - An error goes to the thread's error block, the creator's: a block that `BREAK`s ends the thread with `NIL`; the
   default handler reports the error and quits. `QUIT` in any thread (an error nobody handles too) ends the program:
-  every other thread is asked to `QUIT` (a waiting `Join()` or `Lock()` looks for the request every 50 ms), the
-  program waits for them, then runs its `EXIT` procedures, with the exit code `ErrorLevel()` set. The program also ends
-  when its start procedure returns: the threads still running are asked to `QUIT` the same way and waited for. A thread
-  started meanwhile quits at once; the `EXIT` procedures may start threads, which end the same way when they return. A
-  thread inside a system call that does not return (a read of the standard input, a file lock another program never
-  releases) holds the program's end until it returns. A thread that ends holding a `Mutex` leaves it held.
+  every other thread is asked to `QUIT` (a thread waiting in `Join()`, `Lock()` or any other wait is woken by the
+  request itself), the program waits for them, then runs its `EXIT` procedures, with the exit code `ErrorLevel()` set.
+  The program also ends when its start procedure returns: the threads still running are asked to `QUIT` the same way and
+  waited for. A thread started meanwhile quits at once; the `EXIT` procedures may start threads, which end the same way
+  when they return. A thread inside a system call that does not return (a read of the standard input, a file lock
+  another program never releases) holds the program's end until it returns. A thread that ends holding a `Mutex` leaves
+  it held.
 - `Mutex()` makes a lock that the flow holding it (a thread, a task, an `ASYNC` function: [Asynchronous
   functions](#asynchronous-functions)) may take again: `Lock()` waits while another flow holds it (a blocking operation:
   collections go on without the waiter), `TryLock()` takes it only when no other flow holds it and tells whether it did,
@@ -239,7 +247,8 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   half of another's ring (that worker's next task when its ring is empty and its task has run 5 µs: a task that ends
   soon runs the task it made ready itself, without a thread switch), searches 50 µs more while another worker runs (one
   searcher at a time), then parks; a submission wakes a parked worker, or starts one, while fewer are active than the
-  target and none searches.
+  target and none searches. The counters every worker changes (active, searching, queued and ended tasks) each sit on a
+  cache line of their own (`XB_CACHE_LINE`, `core/sync.h`), so that changing one does not slow the readers of another.
 - **Blocking handoff**: every operation that may block the thread (file and lock I/O, `Mutex` waits, `Wait()`, console
   input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run`. While a worker running a task
   blocks with work waiting, another takes its place: an idle one woken, or a new one started, at once while fewer than
@@ -248,18 +257,20 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   each; up to the most workers (1024, or as many as have their 4 MB stacks in a quarter of the address space the process
   may map, for a 32-bit process or one with a limit on it, so that the heap keeps the rest). `TaskWorkers()` gives `{
   alive, target, most }`. The blocked one is active again when it returns, and a worker beyond the target that stays
-  idle 2 seconds ends. A thread that waits with no limit for a task still to start runs it itself (inline). Synchronous
-  code inside tasks therefore costs threads, up to the most workers or the threads the system lets start; past that the
-  tasks left wait in the queues until a worker comes back, which may be never when what the blocked tasks wait for is
-  one of those left (a task that would release their lock, close their channel). The asynchronous waits (`LockAsync`,
-  `WaitAsync`, `ReceiveAsync`, `AWAIT` of a task) hold no worker. When tasks wait in the queues, none ended for 2
-  seconds and then no worker is active (each one waits or runs one task long, or none could start), the program's
-  standard error is told so once (`xbrt: ... tasks have waited ...`), until tasks end again: the program's throughput is
-  held by tasks that hold their workers (more start only slowly), which is not a deadlock. A short wait for a lock of
-  the runtime's (a stripe, a channel's lock: held a moment) runs through `xb_waiting_run` instead: the worker keeps its
-  place, so many tasks meeting on one channel never multiply the threads. A monitor sees a task that runs long (20 ms)
-  without blocking while others wait in the queues, and puts another worker beside it the same way; it also starts again
-  the workers whose threads did not start.
+  idle 2 seconds ends. A thread that waits with no limit for a task still to start runs it itself (inline), while its
+  stack has 1 MB left above the stack error's limit (`xb_stack_room`, `core/ctx.c`): past that it waits, and a worker
+  runs the task on a stack of its own, so a chain of tasks that each wait for the next does not overflow one stack.
+  Synchronous code inside tasks therefore costs threads, up to the most workers or the threads the system lets start;
+  past that the tasks left wait in the queues until a worker comes back, which may be never when what the blocked tasks
+  wait for is one of those left (a task that would release their lock, close their channel). The asynchronous waits
+  (`LockAsync`, `WaitAsync`, `ReceiveAsync`, `AWAIT` of a task) hold no worker. When tasks wait in the queues, none
+  ended for 2 seconds and then no worker is active (each one waits or runs one task long, or none could start), the
+  program's standard error is told so once (`xbrt: ... tasks have waited ...`), until tasks end again: the program's
+  throughput is held by tasks that hold their workers (more start only slowly), which is not a deadlock. A short wait
+  for a lock of the runtime's (a stripe, a channel's lock: held a moment) runs through `xb_waiting_run` instead: the
+  worker keeps its place, so many tasks meeting on one channel never multiply the threads. A monitor sees a task that
+  runs long (20 ms) without blocking while others wait in the queues, and puts another worker beside it the same way; it
+  also starts again the workers whose threads did not start.
 - Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): a binary heap of deadlines that one thread serves, started with
   the pool: it sleeps until the earliest deadline and fires what is due; it is also the monitor, looking every 10 ms
   while tasks wait in the queues (with nothing queued it sleeps until its next timer, and a submission that finds every
@@ -286,10 +297,12 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   task with no limit runs it itself when it has not started.
 - An error in a task goes to its error block, its creator's; the default handler (`ErrorSys`) fails the task with the
   error instead of ending the program: a request that no `BEGIN SEQUENCE` of the task takes (a `RECOVER` meant for the
-  code's own `BREAK`s does not swallow it), as outside a task it would end the program. A task run inline inside
-  `Type()` has errors of its own, not `Type()`'s. A `BREAK` that leaves the block fails it with the `BREAK`'s value.
-  `QUIT` ends the program, the task canceled; a wait for a task (or a `Mutex`, a `Condition`...) ends when the program
-  is ending, also in code an `ALWAYS` runs meanwhile. At the program's end the tasks that never started are canceled.
+  code's own `BREAK`s does not swallow it), as outside a task it would end the program. So does an error no handler can
+  take (no error block, a handler that returns for an error that cannot go on, handlers recursing too deep: the
+  unrecoverable errors 9001 to 9003 elsewhere). A task run inline inside `Type()` has errors of its own, not `Type()`'s.
+  A `BREAK` that leaves the block fails it with the `BREAK`'s value. `QUIT` ends the program, the task canceled; a wait
+  for a task (or a `Mutex`, a `Condition`...) ends when the program is ending, also in code an `ALWAYS` runs meanwhile.
+  At the program's end the tasks that never started are canceled.
 - `oTask:ContinueWith( bWork )`: a task that runs `Eval( bWork, oTask )` once oTask ended (completed, failed or
   canceled), scheduled to run next on the worker that completed it (on the pool when another thread did).
   `TaskWhenAll( aTasks )`: a task that completes once all did, with their results in an array in their order; failed
@@ -357,8 +370,14 @@ sent and not received yet (without it, or 0: any number; a capacity below 0, pas
 - `Close()`: nothing is sent any more: waiting senders and receivers fail with `BASE/9030` `Channel closed`, the values
   kept are still received, then `ReceiveAsync` fails so too; closing again does nothing.
 - One sender's values arrive in the order it sent them. `FOR EACH x IN oChannel` takes the values as they come, waiting
-  for each, until the channel is closed and empty (an enumerator of its own for each `FOR EACH`, in C: the hot path of
-  a consumer).
+  for each, until the channel is closed and empty (an enumerator of its own for each `FOR EACH`, in C: the hot path of a
+  consumer). The enumerator's `MoveNextAsync( [oToken] )` awaits instead of holding the thread: a task of whether a
+  value came (`.F.` once the channel is closed and empty, also when it closes while the task waits), the value in
+  `Current`; its waits are served with `ReceiveAsync`'s, in the order they came. `GetEnumerator( [oToken] )` gives the
+  token that cancels the waits of the `MoveNextAsync()` calls given none of their own (something that is no token is
+  `BASE/9024`, as for `MoveNextAsync`). One enumerator waits for one value at a time: a `MoveNextAsync()` asked while
+  another of the same enumerator waits raises `BASE/9035` `Enumerator waiting already` (both values would go into one
+  `Current`).
 - Cost (measured): a `TrySend` and `TryReceive` pair about 40 ns, a `SendAsync` and `ReceiveAsync` pair that waits for
   nothing about 90 ns; a value handed between tasks that block waiting for each other costs a thread's wake (about a
   microsecond), which `AWAIT` (phase 4) removes: a waiting task suspends instead of blocking its thread.
@@ -538,7 +557,7 @@ Each phase ends with its tests, its benchmarks measured before and after, the do
    asynchronous I/O that needs it (phase 5).
 4. **The compiler**: `ASYNC` functions, procedures and methods, `AWAIT` everywhere in them, the start procedure
    awaiting, errors and cancellation across `AWAIT`, the completed fast path and fused calls (done, step 4a);
-   asynchronous generators and `AWAIT FOR EACH`; asynchronous codeblocks; `AWAIT USING` (`USING` is done).
+   `AWAIT FOR EACH` (done); asynchronous generators; asynchronous codeblocks; `AWAIT USING` (`USING` is done).
 5. **Asynchronous I/O**: the reactors (io_uring and epoll, kqueue, IOCP), sockets, asynchronous files, name resolution
    on the blocking pool; the echo server benchmark.
 6. **The database**: awaitable operations on the blocking pool for every driver, lock waits with timeouts and tokens,

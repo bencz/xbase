@@ -555,11 +555,12 @@ void xb_task_cancel(xb_ctx *ctx, xb_item *task) {
 /* The looks at a running task's state before its waiter sleeps (loads only). */
 #define WAIT_SPINS 2048u
 
-/* Waits for the task to end: one still to start runs on this thread (inline) when there is no limit. The
- * outcome of the wait (XB_WAIT_*). */
+/* Waits for the task to end: one still to start runs on this thread (inline) when there is no limit and the stack
+ * has room for it (xb_stack_room: a chain of waits, each running the next, would otherwise overflow it). The outcome
+ * of the wait (XB_WAIT_*). */
 static int wait_task(xb_ctx *ctx, const xb_item *task, int64_t deadline) {
   yielded(ctx, task);
-  if (deadline < 0 && state_of(task) == S_SCHEDULED && claim(task)) run_step(ctx, task);
+  if (deadline < 0 && state_of(task) == S_SCHEDULED && xb_stack_room(ctx) && claim(task)) run_step(ctx, task);
   for (uint32_t spin = 0; spin < WAIT_SPINS && !FINAL(state_of(task)); ++spin) { /* another side may be about to */
   }
   for (uint32_t s; !FINAL(s = state_of(task));) {
@@ -1244,13 +1245,9 @@ void xb_await_wait(xb_ctx *ctx, xb_item *r, const xb_item *v) {
  * handled; an Error object keeps cCalls, the lines of where it was raised): a request that unwinds to the task's end,
  * which no sequence takes: .T.; elsewhere nothing, .F. */
 void xbf___TASKFAIL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  int in_task = ctx->task_depth > 0;
-  xb_set_logical(ret, in_task);
-  if (!in_task) return;
-  if (argc > 1) xb_error_add_calls(ctx, &argv[0], &argv[1]);
-  if (argc) ctx->break_value = argv[0];
-  else xb_set_nil(&ctx->break_value);
-  xb_pending_set(ctx, XB_PENDING_FAIL);
+  xb_item nil;
+  xb_set_nil(&nil);
+  xb_set_logical(ret, xb_error_fail_task(ctx, argc ? &argv[0] : &nil, argc > 1 ? &argv[1] : NULL));
 }
 
 void xb_task_await_start(xb_ctx *ctx, const xb_item *value) {

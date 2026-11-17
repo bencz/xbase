@@ -1,0 +1,8 @@
+[0 taken:          0         10 ]
+[65535 taken:      65535      65546 ]
+[65536 refused:       2020 SET      65535 ]
+[65538 refused:       2020 SET      65535 ]
+[70000 refused:       2020 SET      65535 ]
+[1099511627776.00 refused:       2020 SET      65535 ]
+[-1 refused:       2020 SET      65535 ]
+[2 taken:          2         13 ]

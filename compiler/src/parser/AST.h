@@ -131,6 +131,7 @@ struct UnaryExpr : Expr {
 // is no task is its own result. Elsewhere (the start procedure) it waits for the task.
 struct AwaitExpr : Expr {
   ExprPtr operand;
+  bool generated = false;        // one an AWAIT FOR EACH made: where it may stand is that statement's to report
   AwaitExpr(SourceLoc l, ExprPtr e) : Expr(ExprKind::Await, l), operand(std::move(e)) {}
 };
 
@@ -289,7 +290,7 @@ struct IIfExpr : Expr {
 
 enum class StmtKind : uint8_t {
   Expr, Local, Static, Private, Public, Parameters, Memvar, Field, Return, If, While, For, ForEach, Switch, Sequence,
-  Exit, Loop, WithObject, Yield, Using
+  Exit, Loop, WithObject, Yield, Using, AwaitEach
 };
 
 struct Stmt {
@@ -418,6 +419,17 @@ struct UsingStmt : Stmt {
   LocalDecl hidden;
   Block seq;
   explicit UsingStmt(SourceLoc l) : Stmt(StmtKind::Using, l) {}
+};
+
+// AWAIT FOR EACH [k =>] x IN expr ... NEXT, as the parser builds it: hidden LOCALs set first, in order, from their
+// initializers (the asynchronous enumerator, __AwaitEach( expr ); the values of x and k to put back; a position), then
+// `seq`: one sequence whose body is DO WHILE AWAIT enumerator:MoveNextAsync(), x taken from Current (awaited when the
+// enumerator walks an ordinary collection, __AwaitEachAwaits), k the position counted (a hash's key: __AwaitEachKey),
+// then the statement's body; its ALWAYS code puts x and k back, on every way out.
+struct AwaitEachStmt : Stmt {
+  std::vector<LocalDecl> hidden;
+  Block seq;
+  explicit AwaitEachStmt(SourceLoc l) : Stmt(StmtKind::AwaitEach, l) {}
 };
 
 struct JumpStmt : Stmt { // EXIT / LOOP

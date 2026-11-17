@@ -1,0 +1,11 @@
+
+nested: 1a 1b 2a 2b  x0 y0
+same variable: abN1 abN2  x0
+private: left at b p0
+grows: 1234 1234
+shrinks: 12 12
+hash loses keys: a1b2 a1b2
+element fails: 1 caught Argument error x0
+not async: BASE/1004 No exported method MOVENEXTASYNC
+no collection: BASE/1068 Argument error array access BASE/1068 Argument error array access
+empty: [] [] []

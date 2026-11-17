@@ -74,14 +74,16 @@ static bucket *bucket_of(const uint32_t *addr) {
   return b;
 }
 
-int xb_park_wait(const uint32_t *addr, uint32_t expected, int64_t ns) {
+/* xb_park_wait, also not sleeping when the word at `stop` (if any) has a bit of `mask`: tested under the bucket's lock,
+ * after the waiter counted itself, so a thread that sets the bit and then wakes `addr` never misses the waiter. */
+static int park_wait(const uint32_t *addr, uint32_t expected, const uint32_t *stop, uint32_t mask, int64_t ns) {
   bucket *b = bucket_of(addr);
   int64_t deadline = ns < 0 ? 0 : xb_platform_monotonic_ns() + (ns < XB_WAIT_NS_MAX ? ns : XB_WAIT_NS_MAX);
   parked me = {addr, NULL, 0, NULL};
   if (!xb_cond_init(&me.wake)) abort();
   xb_mutex_lock(&b->lock);
   xb_atomic_add32(&b->waiting, 1, XB_SEQ_CST); /* before the value is read: a waker that changed it sees this */
-  if (xb_atomic_load32(addr, XB_SEQ_CST) != expected) {
+  if (xb_atomic_load32(addr, XB_SEQ_CST) != expected || (stop && (xb_atomic_load32(stop, XB_SEQ_CST) & mask))) {
     xb_atomic_add32(&b->waiting, (uint32_t)-1, XB_RELAXED);
     xb_mutex_unlock(&b->lock);
     xb_cond_destroy(&me.wake);
@@ -110,6 +112,8 @@ int xb_park_wait(const uint32_t *addr, uint32_t expected, int64_t ns) {
   return me.woken || left > 0;
 }
 
+int xb_park_wait(const uint32_t *addr, uint32_t expected, int64_t ns) { return park_wait(addr, expected, NULL, 0, ns); }
+
 uint32_t xb_park_wake(const uint32_t *addr, int all) {
   bucket *b = bucket_of(addr);
   xb_atomic_fence(XB_SEQ_CST); /* the value the caller changed, before the count is read: see xb_park_wait */
@@ -127,23 +131,29 @@ uint32_t xb_park_wake(const uint32_t *addr, int all) {
 }
 
 typedef struct park_args {
-  const uint32_t *addr;
-  uint32_t expected;
+  const uint32_t *addr, *stop;
+  uint32_t expected, mask;
   int64_t ns;
 } park_args;
 
 static void park(void *p) {
   const park_args *a = p;
-  xb_park_wait(a->addr, a->expected, a->ns);
+  park_wait(a->addr, a->expected, a->stop, a->mask, a->ns);
 }
 
 void xb_park_wait_blocking(const uint32_t *addr, uint32_t expected, int64_t ns) {
-  park_args a = {addr, expected, ns};
+  park_args a = {addr, NULL, expected, 0, ns};
+  xb_blocking_run(park, &a);
+}
+
+void xb_park_wait_blocking_stop(const uint32_t *addr, uint32_t expected, const uint32_t *stop, uint32_t mask,
+                                int64_t ns) {
+  park_args a = {addr, stop, expected, mask, ns};
   xb_blocking_run(park, &a);
 }
 
 void xb_park_wait_short(const uint32_t *addr, uint32_t expected, int64_t ns) {
-  park_args a = {addr, expected, ns};
+  park_args a = {addr, NULL, expected, 0, ns};
   xb_waiting_run(park, &a);
 }
 

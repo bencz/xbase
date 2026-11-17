@@ -7,6 +7,10 @@
 
 #include <stdint.h>
 
+/* The span of memory that caches move between processors at once: words that different threads change often are
+ * kept this far apart (a larger line only shares more; a smaller one is padded past). */
+#define XB_CACHE_LINE 64
+
 /* Owners of locks (xb_rwords): a 64-bit number never 0 and never given twice (one counter, which a process could not
  * run long enough to wrap).
  * xb_thread_self is the calling thread's own, for the runtime's locks, which no code of the program's runs under.
@@ -74,6 +78,10 @@ uint32_t xb_park_wake(const uint32_t *addr, int all);
 /* xb_park_wait as a blocking operation (xb_blocking_run): collections go on without the waiter, which may wait for a
  * thread that waits for a collection. */
 void xb_park_wait_blocking(const uint32_t *addr, uint32_t expected, int64_t ns);
+/* The same, not sleeping either while the word at `stop` has a bit of `mask` (a context's pending QUIT): whoever sets
+ * it and then wakes `addr` never misses the waiter. */
+void xb_park_wait_blocking_stop(const uint32_t *addr, uint32_t expected, const uint32_t *stop, uint32_t mask,
+                                int64_t ns);
 /* The same for a short wait (xb_waiting_run): a lock of the runtime's, which its holder keeps a moment. */
 void xb_park_wait_short(const uint32_t *addr, uint32_t expected, int64_t ns);
 

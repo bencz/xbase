@@ -1,6 +1,9 @@
 /* Codepages: reading and writing characters, their classes and case (see codepage.h). */
 #include "core/codepage.h"
 
+#include "xbrt_int.h"
+
+#include <stdlib.h>
 #include <string.h>
 
 static const xb_codepage utf8 = {"UTF8", NULL, NULL, NULL, NULL};
@@ -71,18 +74,48 @@ uint32_t xb_cp_decode(const xb_codepage *cp, const char *s, size_t len, size_t a
   return utf8_decode(p, len - at, n);
 }
 
+/* The single-byte codepages' tables backwards: for each, its 256 (character, byte) pairs in the order of the
+ * character, then of the byte, made once; encoding searches them (the first pair of a character: its lowest byte). */
+typedef struct cp_pair {
+  uint32_t c;
+  uint32_t b;
+} cp_pair;
+static cp_pair *backwards;
+static xb_once_flag backwardsMade = XB_ONCE_INIT;
+
+static int pair_order(const void *x, const void *y) {
+  const cp_pair *a = x, *b = y;
+  if (a->c != b->c) return a->c < b->c ? -1 : 1;
+  return a->b < b->b ? -1 : a->b > b->b;
+}
+
+static void make_backwards(void) {
+  backwards = malloc(xb_cp_singles_count * 256 * sizeof *backwards);
+  if (!backwards) xb_gc_fatal("out of memory");
+  for (size_t k = 0; k < xb_cp_singles_count; ++k) {
+    cp_pair *t = backwards + k * 256;
+    for (uint32_t b = 0; b < 256; ++b) t[b] = (cp_pair){xb_cp_singles[k].chars[b], b};
+    qsort(t, 256, sizeof *t, pair_order);
+  }
+}
+
 size_t xb_cp_encode(const xb_codepage *cp, uint32_t c, char out[4]) {
   if (cp->chars) {
     if (c < 0x80 && cp->chars[c] == c) { /* ASCII, which every single-byte codepage here keeps */
       out[0] = (char)c;
       return 1;
     }
-    for (unsigned b = 0; b < 256; ++b)
-      if (cp->chars[b] == c) {
-        out[0] = (char)b;
-        return 1;
-      }
-    return 0;
+    xb_once(&backwardsMade, make_backwards);
+    const cp_pair *t = backwards + (size_t)(cp - xb_cp_singles) * 256;
+    size_t lo = 0, hi = 256; /* the first pair whose character is c or after it */
+    while (lo < hi) {
+      size_t mid = (lo + hi) / 2;
+      if (t[mid].c < c) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo == 256 || t[lo].c != c) return 0;
+    out[0] = (char)t[lo].b;
+    return 1;
   }
   if (c < 0x80) {
     out[0] = (char)c;

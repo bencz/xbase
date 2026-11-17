@@ -1,0 +1,6 @@
+
+returns: BASE/1001 Undefined function NOSUCHFUNCTION failed: yes
+recurses: BASE/1001 Undefined function DEPTH8 failed: yes
+after an await: BASE/1001 Undefined function NOSUCHFUNCTION failed: yes
+the program's handler: BASE/1081 Argument error + failed: yes
+goes on: BASE/1081 Argument error +

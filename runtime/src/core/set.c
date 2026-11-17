@@ -55,8 +55,10 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_set_int(ret, ctx->set_decimals);
       if (value && xb_is_number(value)) {
         int64_t n = xb_num_to_i64(value);
-        if (n < 0) xb_error_in(ctx, "SET", NULL, EG_ARG, 2020, "SET", 0, argc, argv);
-        else ctx->set_decimals = n > INT32_MAX ? INT32_MAX : (int32_t)n;
+        /* the numbers keep their decimals in 16 bits (xb_decimals): more is the error of a negative count, where the
+         * reference keeps the number and formats with it modulo 65536 */
+        if (n < 0 || n > UINT16_MAX) xb_error_in(ctx, "SET", NULL, EG_ARG, 2020, "SET", 0, argc, argv);
+        else ctx->set_decimals = (int32_t)n;
       }
       break;
     case _SET_DATEFORMAT:

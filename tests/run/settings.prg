@@ -12,5 +12,5 @@ PROCEDURE Main()
    ? n10 / 4
    SET EXACT OFF
    ? a = "ab", Set( _SET_EXACT, "on" ), Set( _SET_EXACT )
-   ? Set( _SET_DECIMALS, 70000 ), Set( _SET_DECIMALS ), Set( _SET_DECIMALS, "5" ), Set( _SET_DECIMALS, 2 )
+   ? Set( _SET_DECIMALS, 65535 ), Set( _SET_DECIMALS ), Set( _SET_DECIMALS, "5" ), Set( _SET_DECIMALS, 2 )
    RETURN

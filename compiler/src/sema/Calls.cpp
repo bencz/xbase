@@ -279,6 +279,12 @@ void CallResolver::block(Block &b) {
       block(u.seq);
       break;
     }
+    case StmtKind::AwaitEach: {
+      auto &a = static_cast<AwaitEachStmt &>(*st);
+      for (LocalDecl &h : a.hidden) expr(*h.init);
+      block(a.seq);
+      break;
+    }
     case StmtKind::Exit: case StmtKind::Loop:
       break;
     }

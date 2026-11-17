@@ -53,6 +53,12 @@ void Generator::genStmt(const Stmt &s) {
     genBlock(u.seq);
     break;
   }
+  case StmtKind::AwaitEach: {
+    auto &a = static_cast<const AwaitEachStmt &>(s);
+    for (const LocalDecl &h : a.hidden) initLocal(h, genExpr(*h.init));
+    genBlock(a.seq);
+    break;
+  }
   case StmtKind::Exit:
   case StmtKind::Loop: {
     size_t target = cur_.loops.size(); // EXIT: the innermost loop or SWITCH; LOOP: the innermost loop

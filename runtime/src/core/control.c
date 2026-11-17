@@ -1,5 +1,7 @@
-/* Runtime support of FOR EACH, SWITCH, USING and `...`. */
+/* Runtime support of FOR EACH, AWAIT FOR EACH, SWITCH, USING and `...`. */
 #include "xbrt_int.h"
+
+#include "rtl/flows.h" /* xb_task_completed: AWAIT FOR EACH */
 
 #include <string.h>
 
@@ -246,6 +248,113 @@ int32_t xb_args_rest(xb_ctx *ctx, xb_item *dst, xb_item *rest, uint32_t n, uint3
     if (xb_pending_get(ctx) && xb_pending(ctx)) return 0;
   }
   return 1;
+}
+
+/* AWAIT FOR EACH (AwaitEachStmt, compiler/src/parser/AST.h): __AwaitEach( xSource ) gives what the loop awaits each
+ * step of. An asynchronous enumerator is itself (an object of any class that answers MoveNextAsync); an object that
+ * answers GetAsyncEnumerator gives that one; else what FOR EACH would go through (xb_each_source: an array, a hash, a
+ * string, an enumerator, an object's GetEnumerator(), such as a channel's), itself when it answers MoveNextAsync (a
+ * channel's enumerator), else walked by an AwaitEach object, whose MoveNextAsync takes the next element at once (a task
+ * completed with .T., .F. at the end) into its Current, which the loop awaits (__AwaitEachAwaits: an element that is a
+ * task gives its result). */
+enum { AE_CURRENT, AE_SOURCE, AE_POSITION, AE_KEY, AE_COUNT_ };
+static const xb_class_var await_each_vars[] = {
+  {"CURRENT", XB_VAR_READ}, {"(SOURCE)", XB_VAR_ANY}, {"(POSITION)", XB_VAR_ANY}, {"(KEY)", XB_VAR_ANY}};
+_Static_assert(XB_TABLE_SIZE(await_each_vars) == AE_COUNT_, "one AE_ index per AwaitEach variable");
+
+/* oAwaitEach:MoveNextAsync(): the source's next element into Current, now: a task completed with whether there was
+ * one (an element gone from an array that shrank meanwhile ends the walk). */
+static void await_each_move_next_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  xb_object *o = argv[0].v.p;
+  xb_item src, element, key, flag;
+  xb_object_get(o, AE_SOURCE, &src);
+  xb_object_get(o, AE_POSITION, &element);
+  int64_t pos = element.v.i + 1;
+  xb_set_nil(&element);
+  xb_set_int(&key, pos); /* the position, but a hash's key */
+  xb_gc_root_push(ctx, &src);
+  xb_gc_root_push(ctx, &element);
+  xb_gc_root_push(ctx, &key);
+  int got;
+  if (src.type == XB_T_ARRAY) {
+    got = (uint64_t)pos <= xb_array_length(src.v.p) && xb_array_get(src.v.p, (size_t)pos - 1, &element);
+  } else if (src.type == XB_T_HASH) {
+    got = xb_hash_entry(src.v.p, pos, &key, &element);
+  } else if (src.type == XB_T_STRING) {
+    got = (uint64_t)pos <= src.v.s->len;
+    if (got) xb_set_str(&element, xb_str_new(src.v.s->data + pos - 1, 1)); /* one byte: static */
+  } else {
+    got = move_next(ctx, &src) && current(ctx, &element, &src);
+  }
+  if (!(xb_pending_get(ctx) && xb_pending(ctx))) {
+    xb_item at;
+    xb_set_int(&at, pos);
+    xb_object_put(argv[0].v.p, AE_POSITION, &at);
+    if (got) xb_object_put(argv[0].v.p, AE_CURRENT, &element);
+    if (got) xb_object_put(argv[0].v.p, AE_KEY, &key);
+    xb_set_logical(&flag, got);
+    xb_task_completed(ctx, r, &flag);
+  }
+  xb_gc_root_pop(ctx, 3);
+}
+
+static const xb_class_method await_each_methods[] = {{"MOVENEXTASYNC", await_each_move_next_async}};
+static const xb_class await_each_class = {"AWAITEACH", AE_COUNT_, await_each_vars, NULL,
+                                          XB_TABLE_SIZE(await_each_methods), await_each_methods};
+
+void xbf___AWAITEACH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_item src;
+  xb_set_nil(&src);
+  if (!argc) {
+    xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 0, NULL);
+    return;
+  }
+  if (answers(&argv[0], "MOVENEXTASYNC", 0)) {
+    *ret = argv[0];
+    return;
+  }
+  xb_gc_root_push(ctx, &src);
+  if (answers(&argv[0], "GETASYNCENUMERATOR", 0)) {
+    if (send0(ctx, &src, &argv[0], "GETASYNCENUMERATOR")) *ret = src;
+    xb_gc_root_pop(ctx, 1);
+    return;
+  }
+  if (argv[0].type != XB_T_ARRAY && argv[0].type != XB_T_HASH && argv[0].type != XB_T_STRING &&
+      !is_collection_object(&argv[0])) {
+    xb_gc_root_pop(ctx, 1);
+    xb_error(ctx, NULL, EG_ARG, 1068, "array access", 0, 1, &argv[0]); /* no collection, as for FOR EACH */
+    return;
+  }
+  xb_each_source(ctx, &src, &argv[0], 0);
+  if (!(xb_pending_get(ctx) && xb_pending(ctx))) {
+    if (answers(&src, "MOVENEXTASYNC", 0)) {
+      *ret = src;
+    } else {
+      xb_object *o = xb_object_new(&await_each_class); /* `src` is rooted */
+      o->vars[AE_SOURCE] = src;
+      xb_set_int(&o->vars[AE_POSITION], 0);
+      xb_gc_write(o);
+      xb_set_object(ret, o);
+    }
+  }
+  xb_gc_root_pop(ctx, 1);
+}
+
+/* __AwaitEachKey( oEnumerator, nPosition ): the k of AWAIT FOR EACH k => v: the key of a hash's entry (an AwaitEach
+ * object's over a hash), else the position, as FOR EACH's k (xb_each_key). */
+void xbf___AWAITEACHKEY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  if (argc > 1) *ret = argv[1];
+  if (argc && argv[0].type == XB_T_OBJECT && ((const xb_object *)argv[0].v.p)->cls == &await_each_class)
+    xb_object_get(argv[0].v.p, AE_KEY, ret);
+}
+
+/* __AwaitEachAwaits( oEnumerator ): whether AWAIT FOR EACH awaits its Current (an AwaitEach object's). */
+void xbf___AWAITEACHAWAITS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  xb_set_logical(ret, argc && argv[0].type == XB_T_OBJECT &&
+                          ((const xb_object *)argv[0].v.p)->cls == &await_each_class);
 }
 
 /* __Dispose( xValue ): the end of a USING statement: xValue:Dispose(), unless xValue is NIL. */

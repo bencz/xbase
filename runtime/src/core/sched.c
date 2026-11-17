@@ -79,11 +79,19 @@ typedef struct worker {
 static worker *workers[WORKERS_MAX];
 static uint32_t slots;   /* workers[0 .. slots) made so far (the pool's lock; read atomically) */
 static uint32_t total;   /* workers alive */
-static uint32_t active;  /* workers searching or running, neither parked nor away (BLOCKED, LONG) */
-static uint32_t queued;  /* tasks in the queues */
-static uint32_t ended;   /* tasks ended (the monitor tells progress) */
+/* The counters every worker changes, each on a cache line of its own: padded to the line, and the whole aligned to
+ * one, so that nothing else shares their lines. */
+typedef struct own_line {
+  uint32_t n;
+  char pad[XB_CACHE_LINE - sizeof(uint32_t)];
+} own_line;
+static _Alignas(XB_CACHE_LINE) struct {
+  own_line active;    /* workers searching or running, neither parked nor away (BLOCKED, LONG) */
+  own_line queued;    /* tasks in the queues */
+  own_line ended;     /* tasks ended (the monitor tells progress) */
+  own_line searching; /* workers searching for work before they park */
+} counts;
 static uint32_t longCount; /* workers LONG */
-static uint32_t searching; /* workers searching for work before they park */
 static int64_t lastSpawn;  /* when the last worker was started (the pool's lock) */
 static uint32_t target;  /* workers that run at once; 0 until the pool is made (make_pool) */
 static uint32_t stopping;
@@ -307,7 +315,7 @@ static void *find_work(worker *w) {
   if (!t) t = runq_get(w);
   if (!t) t = global_get(w);
   if (!t) t = steal(w);
-  if (t) xb_atomic_add32(&queued, (uint32_t)-1, XB_RELAXED);
+  if (t) xb_atomic_add32(&counts.queued.n, (uint32_t)-1, XB_RELAXED);
   return t;
 }
 
@@ -329,11 +337,11 @@ static worker *spawn_locked(void) {
   xb_atomic_store32(&w->wake, 0, XB_RELAXED);
   xb_atomic_store32(&w->alive, 1, XB_RELEASE);
   xb_atomic_add32(&total, 1, XB_ACQ_REL);
-  xb_atomic_add32(&active, 1, XB_ACQ_REL);
+  xb_atomic_add32(&counts.active.n, 1, XB_ACQ_REL);
   if (xb_program_thread_start(worker_body, w, XB_WORKER_STACK)) return w;
   xb_atomic_store32(&w->alive, 0, XB_RELEASE);
   xb_atomic_add32(&total, (uint32_t)-1, XB_ACQ_REL);
-  xb_atomic_add32(&active, (uint32_t)-1, XB_ACQ_REL);
+  xb_atomic_add32(&counts.active.n, (uint32_t)-1, XB_ACQ_REL);
   return NULL;
 }
 
@@ -356,7 +364,7 @@ static void wake_or_spawn(void) {
   worker *w = idle;
   if (w) {
     idle = w->idleNext;
-    xb_atomic_add32(&active, 1, XB_ACQ_REL); /* for it: a second submission sees it active */
+    xb_atomic_add32(&counts.active.n, 1, XB_ACQ_REL); /* for it: a second submission sees it active */
   } else {
     int64_t now = xb_platform_monotonic_ns();
     /* deferred to the monitor, which runs on the timers' thread: at once when that thread could not start */
@@ -388,12 +396,12 @@ static int park(worker *w) {
   xb_mutex_lock(&poolLock);
   w->idleNext = idle;
   idle = w;
-  xb_atomic_add32(&active, (uint32_t)-1, XB_SEQ_CST);
+  xb_atomic_add32(&counts.active.n, (uint32_t)-1, XB_SEQ_CST);
   xb_mutex_unlock(&poolLock);
   xb_atomic_fence(XB_SEQ_CST);
-  if ((xb_atomic_load32(&queued, XB_SEQ_CST) || xb_atomic_load32(&stopping, XB_SEQ_CST)) && idle_remove(w)) {
+  if ((xb_atomic_load32(&counts.queued.n, XB_SEQ_CST) || xb_atomic_load32(&stopping, XB_SEQ_CST)) && idle_remove(w)) {
     if (xb_atomic_load32(&stopping, XB_ACQUIRE)) return 0;
-    xb_atomic_add32(&active, 1, XB_ACQ_REL);
+    xb_atomic_add32(&counts.active.n, 1, XB_ACQ_REL);
     return 1;
   }
   int64_t since = xb_platform_monotonic_ns();
@@ -417,10 +425,10 @@ static void run_task(xb_ctx *ctx, worker *w, void *t) {
   xb_atomic_store32(&w->run, RUN_RUNNING, XB_SEQ_CST);
   xb_task_run(ctx, &task);
   if (xb_atomic_xchg32(&w->run, RUN_IDLE, XB_ACQ_REL) == RUN_LONG) { /* the monitor gave its place away */
-    xb_atomic_add32(&active, 1, XB_ACQ_REL);
+    xb_atomic_add32(&counts.active.n, 1, XB_ACQ_REL);
     xb_atomic_add32(&longCount, (uint32_t)-1, XB_ACQ_REL);
   }
-  xb_atomic_add32(&ended, 1, XB_RELAXED);
+  xb_atomic_add32(&counts.ended.n, 1, XB_RELAXED);
   xb_gc_root_pop(ctx, 1);
 }
 
@@ -449,18 +457,20 @@ static void fill_place(void);
  * worker runs a task (work may come from it). The task found, or NULL. */
 static void *search(xb_ctx *ctx, worker *w) {
   uint32_t none = 0;
-  if (xb_atomic_load32(&active, XB_ACQUIRE) < 2 || !xb_atomic_cas32(&searching, &none, 1, XB_SEQ_CST)) return NULL;
+  if (xb_atomic_load32(&counts.active.n, XB_ACQUIRE) < 2 ||
+      !xb_atomic_cas32(&counts.searching.n, &none, 1, XB_SEQ_CST))
+    return NULL;
   int64_t until = xb_platform_monotonic_ns() + SEARCH_NS;
   void *t = NULL;
   for (uint32_t k = 1; !t; ++k) {
     if (xb_atomic_load32(&stopping, XB_ACQUIRE) || xb_pending_get(ctx)) break; /* a collection waits: park */
-    if (k % SEARCH_RETRY == 1 && xb_atomic_load32(&queued, XB_ACQUIRE) && (t = find_work(w)) != NULL) break;
+    if (k % SEARCH_RETRY == 1 && xb_atomic_load32(&counts.queued.n, XB_ACQUIRE) && (t = find_work(w)) != NULL) break;
     if (k % SEARCH_LOOK == 0) {
       if (xb_platform_monotonic_ns() >= until) break;
       xb_thread_yield();
     }
   }
-  xb_atomic_store32(&searching, 0, XB_SEQ_CST);
+  xb_atomic_store32(&counts.searching.n, 0, XB_SEQ_CST);
   if (t) fill_place(); /* what is left waits for another */
   return t;
 }
@@ -470,7 +480,7 @@ static void worker_body(xb_ctx *ctx, void *arg) {
   me = w;
   for (;;) {
     if (xb_atomic_load32(&stopping, XB_ACQUIRE) || (xb_pending_get(ctx) & XB_PENDING_QUIT)) {
-      xb_atomic_add32(&active, (uint32_t)-1, XB_ACQ_REL);
+      xb_atomic_add32(&counts.active.n, (uint32_t)-1, XB_ACQ_REL);
       break;
     }
     void *t = find_work(w);
@@ -491,7 +501,7 @@ static void timers_start(void);
 void xb_sched_submit(xb_object *task, int next) {
   xb_once(&poolMade, make_pool);
   timers_start(); /* the monitor too */
-  xb_atomic_add32(&queued, 1, XB_SEQ_CST);
+  xb_atomic_add32(&counts.queued.n, 1, XB_SEQ_CST);
   worker *w = me;
   if (w && next) {
     void *before = xb_atomic_xchgptr(&w->next, task, XB_ACQ_REL);
@@ -507,8 +517,9 @@ void xb_sched_submit(xb_object *task, int next) {
     xb_mutex_unlock(&poolLock);
   }
   xb_atomic_fence(XB_SEQ_CST);
-  if (xb_atomic_load32(&searching, XB_SEQ_CST)) return; /* the searcher finds it, or sees it counted before it parks */
-  if (xb_atomic_load32(&active, XB_SEQ_CST) < xb_atomic_load32(&target, XB_ACQUIRE)) wake_or_spawn();
+  /* the searcher finds it, or sees it counted before it parks */
+  if (xb_atomic_load32(&counts.searching.n, XB_SEQ_CST)) return;
+  if (xb_atomic_load32(&counts.active.n, XB_SEQ_CST) < xb_atomic_load32(&target, XB_ACQUIRE)) wake_or_spawn();
   else if (xb_atomic_load32(&timerIdle, XB_SEQ_CST)) timers_wake(); /* every worker busy: the monitor looks */
 }
 
@@ -516,14 +527,14 @@ int xb_sched_in_worker(void) { return me && xb_atomic_load32(&me->run, XB_RELAXE
 
 /* Another worker woken or started when work waits and fewer than `target` are active. */
 static void fill_place(void) {
-  if (xb_atomic_load32(&queued, XB_SEQ_CST) &&
-      xb_atomic_load32(&active, XB_SEQ_CST) < xb_atomic_load32(&target, XB_ACQUIRE))
+  if (xb_atomic_load32(&counts.queued.n, XB_SEQ_CST) &&
+      xb_atomic_load32(&counts.active.n, XB_SEQ_CST) < xb_atomic_load32(&target, XB_ACQUIRE))
     wake_or_spawn();
 }
 
 /* A place given to another worker while its worker is away: counted inactive, then filled when work waits. */
 static void hand_over(void) {
-  xb_atomic_add32(&active, (uint32_t)-1, XB_SEQ_CST);
+  xb_atomic_add32(&counts.active.n, (uint32_t)-1, XB_SEQ_CST);
   fill_place();
 }
 
@@ -535,7 +546,7 @@ void xb_sched_blocking(int entering) {
     if (xb_atomic_cas32(&w->run, &running, RUN_BLOCKED, XB_ACQ_REL)) hand_over(); /* LONG: away already; IDLE: none */
   } else if (xb_atomic_cas32(&w->run, &blocked, RUN_RUNNING, XB_ACQ_REL)) {
     xb_atomic_store64(&w->runStart, (uint64_t)xb_platform_monotonic_ns(), XB_RELAXED);
-    xb_atomic_add32(&active, 1, XB_ACQ_REL);
+    xb_atomic_add32(&counts.active.n, 1, XB_ACQ_REL);
   }
 }
 
@@ -578,9 +589,9 @@ static void starved(int progress, int waiting) {
   int64_t now = xb_platform_monotonic_ns();
   if (!since) since = now;
   if (told || now - since < STARVED_NS) return;
-  if (xb_atomic_load32(&active, XB_ACQUIRE)) return;
+  if (xb_atomic_load32(&counts.active.n, XB_ACQUIRE)) return;
   told = 1;
-  starving s = {xb_atomic_load32(&queued, XB_ACQUIRE), xb_atomic_load32(&total, XB_ACQUIRE)};
+  starving s = {xb_atomic_load32(&counts.queued.n, XB_ACQUIRE), xb_atomic_load32(&total, XB_ACQUIRE)};
   xb_blocking_run(tell_starving, &s); /* a full pipe holds the write */
 }
 
@@ -589,9 +600,9 @@ static void starved(int progress, int waiting) {
  * LONG_TASK_NS has its place given to another, as long as fewer than `target` are LONG; tasks that starve are told. */
 static void monitor(void) {
   static uint32_t lastEnded;
-  uint32_t now_ended = xb_atomic_load32(&ended, XB_RELAXED), progress = now_ended != lastEnded;
+  uint32_t now_ended = xb_atomic_load32(&counts.ended.n, XB_RELAXED), progress = now_ended != lastEnded;
   lastEnded = now_ended;
-  int waiting = xb_atomic_load32(&queued, XB_ACQUIRE) != 0;
+  int waiting = xb_atomic_load32(&counts.queued.n, XB_ACQUIRE) != 0;
   if (waiting) fill_place();
   starved((int)progress, waiting);
   if (progress || !waiting || xb_atomic_load32(&longCount, XB_ACQUIRE) >= xb_atomic_load32(&target, XB_ACQUIRE))
@@ -607,12 +618,12 @@ static void monitor(void) {
     /* Marked: counted away now (its task's end repays it). When the task is another than the one seen long, the
      * mark is undone, if the worker did not repay it first. */
     xb_atomic_add32(&longCount, 1, XB_ACQ_REL);
-    xb_atomic_add32(&active, (uint32_t)-1, XB_SEQ_CST);
+    xb_atomic_add32(&counts.active.n, (uint32_t)-1, XB_SEQ_CST);
     uint32_t marked = RUN_LONG;
     if (xb_atomic_load32(&w->runs, XB_SEQ_CST) != seen &&
         xb_atomic_cas32(&w->run, &marked, RUN_RUNNING, XB_ACQ_REL)) {
       xb_atomic_add32(&longCount, (uint32_t)-1, XB_ACQ_REL);
-      xb_atomic_add32(&active, 1, XB_ACQ_REL);
+      xb_atomic_add32(&counts.active.n, 1, XB_ACQ_REL);
       continue;
     }
     fill_place();
@@ -732,13 +743,14 @@ static void timer_body(xb_ctx *ctx, void *arg) {
       xb_pending_clear(ctx, XB_PENDING_UNWIND & ~(uint32_t)XB_PENDING_QUIT); /* what the firing left */
     }
     monitor();
-    int watching = xb_atomic_load32(&queued, XB_ACQUIRE) != 0; /* tasks wait: the monitor looks every MONITOR_NS */
+    /* tasks wait: the monitor looks every MONITOR_NS */
+    int watching = xb_atomic_load32(&counts.queued.n, XB_ACQUIRE) != 0;
     int64_t now = xb_platform_monotonic_ns(), slice = watching ? MONITOR_NS : -1;
     if (next >= 0 && (slice < 0 || next - now < slice)) slice = next - now > 0 ? next - now : 0;
     /* Not watching, it says so before it reads the count again, as a submission counts its task before it reads that:
      * one of the two sees the other, and a submission that finds every worker busy wakes it. */
     xb_atomic_store32(&timerIdle, !watching, XB_SEQ_CST);
-    if (watching || !xb_atomic_load32(&queued, XB_SEQ_CST)) xb_park_wait_blocking(&timerWake, seen, slice);
+    if (watching || !xb_atomic_load32(&counts.queued.n, XB_SEQ_CST)) xb_park_wait_blocking(&timerWake, seen, slice);
     xb_atomic_store32(&timerIdle, 0, XB_RELAXED);
   }
 }
@@ -753,7 +765,7 @@ void xb_sched_stop(void) {
   xb_mutex_unlock(&poolLock);
   while (w) {
     worker *n = w->idleNext;
-    xb_atomic_add32(&active, 1, XB_ACQ_REL);
+    xb_atomic_add32(&counts.active.n, 1, XB_ACQ_REL);
     xb_atomic_store32(&w->wake, 1, XB_RELEASE);
     xb_park_wake(&w->wake, 1);
     w = n;
@@ -774,7 +786,7 @@ void xb_sched_end(xb_ctx *ctx) {
     for (uint32_t k = 0; !t && k < feederSlots; ++k) t = runq_get(feeders[k]); /* no thief: every worker ended */
     xb_mutex_unlock(&poolLock);
     if (!t) break;
-    xb_atomic_add32(&queued, (uint32_t)-1, XB_RELAXED);
+    xb_atomic_add32(&counts.queued.n, (uint32_t)-1, XB_RELAXED);
     xb_item task;
     xb_set_ptr(&task, XB_T_OBJECT, t);
     xb_gc_root_push(ctx, &task);

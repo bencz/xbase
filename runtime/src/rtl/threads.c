@@ -14,27 +14,41 @@ void xbf_EVAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 /* The looks at a held lock's state before its waiter sleeps (no pause instruction: loads only). */
 #define LOCK_SPINS 128u
 
-/* How long a wait sleeps before it looks for a QUIT again. */
-#define WAIT_LOOK_NS ((int64_t)50 * XB_NS_PER_MS)
-
 /* The threads ThreadStart() started that have not ended, which the program's end waits for; `ending` while threads are
  * asked to QUIT (a QUIT, the start procedure returned): a thread that starts then quits at once. */
 static uint32_t running;
 static uint32_t ending;
 
-int xb_wait_until(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value, int64_t deadline) {
+/* A thread counted in `running` ended, or did not start: the program's end, which waits for the count to change
+ * (xb_threads_end), is woken. */
+static void thread_gone(void) {
+  xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL);
+  xb_park_wake(&running, 1);
+}
+
+/* The wait's word is published in the context (waitingOn) before the QUIT is tested: xb_gc_raise_all, which raises
+ * the QUIT and then wakes the word it reads there, finds the waiter (both sequentially consistent), and the park tests
+ * the QUIT again under its bucket's lock: no wait outlives a QUIT, and none looks at the clock meanwhile. The object
+ * stays where it is while its waiter sleeps (its stack, which points into it, pins it). */
+static int wait_until(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value, int64_t deadline) {
   for (;;) {
     const uint32_t *word = xb_object_word(object, k);
+    xb_atomic_storeptr((void **)&ctx->waitingOn, (void *)(uintptr_t)word, XB_SEQ_CST);
     if (xb_atomic_load32(word, XB_ACQUIRE) != value) return XB_WAIT_CHANGED;
     if ((xb_pending_get(ctx) & XB_PENDING_QUIT) || xb_atomic_load32(&ending, XB_ACQUIRE)) return XB_WAIT_QUIT;
-    int64_t slice = WAIT_LOOK_NS;
+    int64_t left = -1;
     if (deadline >= 0) {
-      int64_t left = deadline - xb_platform_monotonic_ns();
+      left = deadline - xb_platform_monotonic_ns();
       if (left <= 0) return XB_WAIT_TIMED_OUT;
-      if (left < slice) slice = left;
     }
-    xb_park_wait_blocking(word, value, slice);
+    xb_park_wait_blocking_stop(word, value, &ctx->pending, XB_PENDING_QUIT, left);
   }
+}
+
+int xb_wait_until(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value, int64_t deadline) {
+  int r = wait_until(ctx, object, k, value, deadline);
+  xb_atomic_storeptr((void **)&ctx->waitingOn, NULL, XB_RELEASE);
+  return r;
 }
 
 int xb_wait_while(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value) {
@@ -75,8 +89,8 @@ void xb_quit_all(const xb_ctx *ctx) {
 
 void xb_threads_end(xb_ctx *ctx) {
   if (xb_atomic_load32(&running, XB_ACQUIRE)) xb_quit_all(ctx);
-  for (uint32_t seen; (seen = xb_atomic_load32(&running, XB_ACQUIRE)) != 0;)
-    xb_park_wait_blocking(&running, seen, WAIT_LOOK_NS);
+  /* each thread's end wakes this wait (program_thread_main) */
+  for (uint32_t seen; (seen = xb_atomic_load32(&running, XB_ACQUIRE)) != 0;) xb_park_wait_blocking(&running, seen, -1);
   xb_sched_end(ctx); /* the tasks that did not start are canceled */
   xb_atomic_store32(&ending, 0, XB_SEQ_CST); /* none runs (a QUIT ended them too): threads may start again */
 }
@@ -131,7 +145,7 @@ static void program_thread_main(void *p) {
   xb_sched_thread_end();
   xb_ctx_free(ctx);
   xb_gc_thread_detach();
-  if (xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL) == 1) xb_park_wake(&running, 1);
+  thread_gone();
 }
 
 int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg, size_t stack) {
@@ -141,7 +155,7 @@ int xb_program_thread_start(void (*body)(xb_ctx *ctx, void *arg), void *arg, siz
   xb_atomic_add32(&running, 1, XB_ACQ_REL);
   xb_thread h;
   if (!xb_thread_start(&h, stack, program_thread_main, t)) {
-    xb_atomic_add32(&running, (uint32_t)-1, XB_ACQ_REL);
+    thread_gone();
     free(t);
     return 0;
   }
@@ -799,7 +813,7 @@ static void semaphore_release(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *a
       return;
     }
   } while (!xb_atomic_cas32(word, &before, before + (uint32_t)n, XB_ACQ_REL));
-  if (!before) xb_park_wake(word, n > 1);
+  if (!before) xb_park_wake(word, 0); /* one: each waiter that takes a place with more left wakes the next */
   released(ctx, &argv[0], &semaphore_waits);
   xb_set_int(r, before);
 }

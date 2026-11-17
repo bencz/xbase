@@ -1,0 +1,6 @@
+
+none before:          0
+four of six: .T. .T.          0
+the other two: .T.          0
+past the maximum: Semaphore full SEMAPHORE:RELEASE          0
+blocked threads end with the program

@@ -52,6 +52,16 @@ int xb_error_is(const xb_item *it);
  * raised it, which __ErrorCalls() gives; anything else is left alone. */
 void xb_error_add_calls(xb_ctx *ctx, const xb_item *error, const xb_item *calls);
 
+/* The lines of the call stack where an error is being handled, as the default handler reports them, into `*out`
+ * (rooted): for the levels ProcName() gives from 0, the innermost XB_CALLS_SHOWN, each "\n" + "Called from " (for the
+ * first, "Waited for in " when `error` is an Error object that carries the lines of a task it failed) + NAME(line) +
+ * two blanks, then XB_CALLS_NOT_SHOWN on a line of its own when more were left. One walk of the frames. */
+void xb_error_call_lines(xb_ctx *ctx, const xb_item *error, xb_item *out);
+
+/* In a task, fails it with `value` (an Error object keeps `calls`, a string of xb_error_call_lines, when not NULL): a
+ * request that unwinds to the task's end, which no sequence takes: 1; elsewhere nothing, 0. */
+int xb_error_fail_task(xb_ctx *ctx, const xb_item *value, const xb_item *calls);
+
 /* xb_error with a description of its own instead of the generic code's. */
 int xb_error_described(xb_ctx *ctx, xb_item *result, int32_t gencode, int32_t subcode, const char *description,
                        const char *operation, uint32_t flags, uint32_t argc, const xb_item *args);

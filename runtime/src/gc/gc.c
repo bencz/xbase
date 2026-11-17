@@ -1192,8 +1192,13 @@ void xb_gc_unregister(xb_ctx *ctx) {
 
 void xb_gc_raise_all(const xb_ctx *except, uint32_t bits) {
   lock_between_collections();
-  for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
-    if (ctx != except) xb_pending_set(ctx, bits);
+  for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext) {
+    if (ctx == except) continue;
+    xb_pending_set(ctx, bits);
+    xb_atomic_fence(XB_SEQ_CST); /* the bits, before the word the context waits on is read: see xb_wait_until */
+    const uint32_t *word = xb_atomic_loadptr((void *const *)&ctx->waitingOn, XB_SEQ_CST);
+    if (word && (bits & XB_PENDING_QUIT)) xb_park_wake(word, 1);
+  }
   xb_mutex_unlock(&heap.lock);
 }
 

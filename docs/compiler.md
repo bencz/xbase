@@ -147,6 +147,15 @@ Statements:
 - `TRY ... [CATCH [v] ...] [FINALLY ...] END` (`END TRY` too): a sequence whose error block is `{| e | Break( e ) }`,
   so an error reaches `CATCH` as its `Error` object and a `Throw( x )` as `x`; `FINALLY` is its `ALWAYS`. `RETURN`,
   `EXIT` and `LOOP` may leave its body and `CATCH` (`FINALLY` runs first), not `FINALLY`.
+- `AWAIT FOR EACH [k =>] x IN expr ... NEXT` (`END` too), in an `ASYNC` function or the procedure that starts the
+  program, not in a codeblock (else one error for the statement: its own `AWAIT`s are marked `AwaitExpr::generated`,
+  which sema leaves to it; the body is checked still): the parser builds an `AwaitEachStmt`. Hidden `LOCAL`s (names no
+  program can write) take, in order, `__AwaitEach( expr )` (the asynchronous enumerator), the values of `x` and `k` to
+  put back and a position; then a sequence whose body is `DO WHILE AWAIT e:MoveNextAsync()`, `x := IIF(
+  __AwaitEachAwaits( e ), AWAIT e:Current, e:Current )`, `k := __AwaitEachKey( e, ++position )`, then the body, and
+  whose `ALWAYS` code puts `x` and `k` back on every way out, as `FOR EACH` does. One variable (with its key) and one
+  collection, neither a field; not `DESCEND`, whose elements would all be needed first; not `YIELD` in the body (`YIELD
+  cannot be inside AWAIT FOR EACH`: the `ALWAYS` code would not run for a generator left there).
 - `USING [v :=] expr ... END` (`END USING` too): `expr` is evaluated once into a `LOCAL` of its own
   (`UsingStmt::hidden`, a name no program can write), then `v` (when written) is assigned from it and the body runs;
   however they end (their end, `RETURN`, `EXIT`, `LOOP`, a `BREAK`, an error, `QUIT`), `__Dispose()` sends the value

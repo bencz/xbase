@@ -1,0 +1,10 @@
+
+canceled loop: .T. 12 left: Task canceled
+the value went on: after
+canceled before:  left: Task canceled
+own token: waits on .F.
+own token canceled: .T. .T.
+second while one waits: BASE/9035 Enumerator waiting already CHANNELENUMERATOR:MOVENEXTASYNC
+the first took it: .T. one
+then again: .T. two
+no token: BASE/9024 Argument error CHANNEL:GETENUMERATOR O

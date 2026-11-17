@@ -26,7 +26,7 @@ STATIC FUNCTION DefError( oError )
       RETURN .F.
    ENDIF
    cBefore := __ErrorCalls( oError )
-   cCalls := Calls( iif( Empty( cBefore ), "Called from ", "Waited for in " ) )
+   cCalls := __CallLines( oError ) // "Waited for in " first when cBefore has lines
    IF __TaskFail( oError, cCalls ) // in a task: it fails with the error, whatever sequence is around
       RETURN .F.
    ENDIF
@@ -34,21 +34,6 @@ STATIC FUNCTION DefError( oError )
    ErrorLevel( 1 )
    QUIT
 RETURN .F.
-
-// The lines of the call stack where the error happened (its innermost XB_CALLS_SHOWN calls), the first one with
-// cFirst. Hidden from the call stack as DefError(): level 0 is where the error happened.
-STATIC FUNCTION Calls( cFirst )
-   LOCAL c := "", n := 0, cWord := cFirst
-   DO WHILE !Empty( ProcName( n ) )
-      IF n == XB_CALLS_SHOWN
-         c += Chr( 10 ) + XB_CALLS_NOT_SHOWN
-         EXIT
-      ENDIF
-      c += Chr( 10 ) + cWord + ProcName( n ) + "(" + LTrim( Str( ProcLine( n ) ) ) + ")  "
-      cWord := "Called from "
-      n++
-   ENDDO
-RETURN c
 
 // "Error SUBSYSTEM/subcode  description: operation", with the file name instead of the operation when there is one
 // ("Warning" below ES_ERROR), then the system's error code when there is one.

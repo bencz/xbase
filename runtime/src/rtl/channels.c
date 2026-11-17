@@ -7,7 +7,8 @@
  * the lock is released, so that the lock is held for the rings alone: no wake, no continuation and no allocation of a
  * waiter under it. A send that needs no wait returns the one task completed with .T. that all share. FOR EACH goes
  * through a channel with an enumerator of its own (each FOR EACH one), whose MoveNext() takes the next value, waiting
- * for it. */
+ * for it; its MoveNextAsync() waits as a receiver whose entry is the pair {task, enumerator}: the value given to it
+ * goes into the enumerator's CURRENT and the task completes with .T. (with .F. when the channel is closed). */
 #include "rtl/flows.h"
 
 #include "core/shared.h"
@@ -47,15 +48,31 @@ static int is_closed(const xb_item *ch) {
   return xb_atomic_load32(xb_object_word(ch, H_CLOSED), XB_ACQUIRE) != 0;
 }
 
+enum { E_CURRENT, E_CHANNEL, E_TOKEN, E_WAITING, E_COUNT_ }; /* an enumerator's variables (below) */
+
+/* A receiver's entry: its task, or for an enumerator's MoveNextAsync() the pair {task, enumerator}. */
+static int receiver_gone(void *arg, const xb_item *entry) {
+  return entry->type == XB_T_ARRAY ? xb_ring_pair_gone(arg, entry) : xb_ring_task_gone(arg, entry);
+}
+
 /* `v` claimed for the first receiver waiting that was not canceled (completed by xb_claims_settle): whether one took
- * it. */
+ * it. An enumerator's takes it into its CURRENT, here (a stripe's lock a moment, when the enumerator is shared), and
+ * its task completes with .T. */
 static int deliver(const xb_item *ch, const xb_item *v, xb_claims *c) {
   while (xb_ring_count(ch, receivers)) {
     xb_ring_pop(ch, receivers, &c->held);
-    if (xb_task_claim(&c->held)) {
+    if (c->held.type != XB_T_ARRAY) {
+      if (!xb_task_claim(&c->held)) continue;
       xb_claims_add(c, &c->held, v);
       return 1;
     }
+    const xb_array *pair = c->held.v.p;
+    xb_item task = pair->items[0], yes;
+    if (!xb_task_claim(&task)) continue;
+    xb_object_put(pair->items[1].v.p, E_CURRENT, v);
+    xb_set_logical(&yes, 1);
+    xb_claims_add(c, &task, &yes);
+    return 1;
   }
   return 0;
 }
@@ -248,7 +265,7 @@ static void channel_receive_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_ite
       return;
     }
     if (waiting) {
-      xb_ring_push(&argv[0], receivers, r, xb_ring_task_gone, NULL);
+      xb_ring_push(&argv[0], receivers, r, receiver_gone, NULL);
       unlock(&argv[0]);
       xb_claims_settle(ctx, &c);
       xb_gc_root_pop(ctx, 3);
@@ -299,16 +316,19 @@ static void channel_try_receive(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item 
   xb_set_logical(r, got);
 }
 
-/* oChannel:Close(): no value is sent any more: the receivers and senders waiting fail with the error "Channel closed";
- * the values kept are still received. Closing again does nothing. */
+/* oChannel:Close(): no value is sent any more: the receivers and senders waiting fail with the error "Channel closed"
+ * (an enumerator's MoveNextAsync() completes with .F.); the values kept are still received. Closing again does
+ * nothing. */
 static void channel_close(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   xb_set_nil(r);
   if (is_closed(&argv[0])) return;
-  xb_item error;
+  xb_item error, no;
   xb_set_nil(&error);
-  xb_claims c;
+  xb_set_logical(&no, 0);
+  xb_claims c, ended;
   xb_claims_root(ctx, &c);
+  xb_claims_root(ctx, &ended);
   xb_gc_root_push(ctx, &error);
   xb_error_object(ctx, &error, 0, XB_CODE_CHANNEL_CLOSED, "Channel closed", "CHANNEL:CLOSE");
   c.fail = 1;
@@ -317,7 +337,12 @@ static void channel_close(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv)
     xb_atomic_store32(xb_object_word(&argv[0], H_CLOSED), 1, XB_RELEASE);
     while (xb_ring_count(&argv[0], receivers)) { /* those canceled meanwhile passed over */
       xb_ring_pop(&argv[0], receivers, &c.held);
-      if (xb_task_claim(&c.held)) xb_claims_add(&c, &c.held, &error);
+      if (c.held.type != XB_T_ARRAY) {
+        if (xb_task_claim(&c.held)) xb_claims_add(&c, &c.held, &error);
+        continue;
+      }
+      xb_item task = ((xb_array *)c.held.v.p)->items[0];
+      if (xb_task_claim(&task)) xb_claims_add(&ended, &task, &no);
     }
     while (xb_ring_count(&argv[0], senders)) {
       xb_ring_pop(&argv[0], senders, &c.held);
@@ -327,7 +352,8 @@ static void channel_close(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv)
   }
   unlock(&argv[0]);
   xb_claims_settle(ctx, &c);
-  xb_gc_root_pop(ctx, 3);
+  xb_claims_settle(ctx, &ended);
+  xb_gc_root_pop(ctx, 5);
 }
 
 /* oChannel:Count(): the values kept, not received yet. */
@@ -347,10 +373,11 @@ static void channel_is_closed(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *a
   xb_set_logical(r, is_closed(&argv[0]));
 }
 
-/* Enumerators: the channel, and the value MoveNext() took last (CURRENT, read only). */
-
-enum { E_CURRENT, E_CHANNEL, E_COUNT_ };
-static const xb_class_var enumerator_vars[] = {{"CURRENT", XB_VAR_READ}, {"(CHANNEL)", XB_VAR_ANY}};
+/* Enumerators: the channel, the value MoveNext() or MoveNextAsync() took last (CURRENT, read only), the token their
+ * GetEnumerator() was given (the one a MoveNextAsync() without its own takes), and the task of the MoveNextAsync()
+ * that waits for a value (WAITING, under the channel's lock: NIL, or a task that may have ended meanwhile). */
+static const xb_class_var enumerator_vars[] = {
+  {"CURRENT", XB_VAR_READ}, {"(CHANNEL)", XB_VAR_ANY}, {"(TOKEN)", XB_VAR_ANY}, {"(WAITING)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(enumerator_vars) == E_COUNT_, "one E_ index per channel enumerator variable");
 
 /* The next value into `*out`, waiting for one: 0 once the channel is closed and empty (or a QUIT ended the wait). */
@@ -367,7 +394,7 @@ static int receive(xb_ctx *ctx, const xb_item *ch, xb_item *out) {
     lock(ch);
     if (take_next(ch, out, &c)) got = 1;
     else if (is_closed(ch)) got = 0;
-    else if (waiting) xb_ring_push(ch, receivers, &task, xb_ring_task_gone, NULL);
+    else if (waiting) xb_ring_push(ch, receivers, &task, receiver_gone, NULL);
     unlock(ch);
     xb_claims_settle(ctx, &c);
     if (got >= 0 || waiting) break;
@@ -400,17 +427,101 @@ static void enumerator_move_next(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item
   xb_set_logical(r, got);
 }
 
-static const xb_class_method enumerator_methods[] = {{"MOVENEXT", enumerator_move_next}};
+/* Whether a MoveNextAsync() of the enumerator waits for a value (under the channel's lock). */
+static int enumerator_waits(const xb_item *e) {
+  xb_item waiting;
+  xb_object_get(e->v.p, E_WAITING, &waiting);
+  return waiting.type != XB_T_NIL && !xb_task_is_final(&waiting);
+}
+
+/* oEnumerator:MoveNextAsync( [oToken] ): a task of whether a value came, taken into CURRENT: at once when there is one
+ * (completed with .T.) or the channel is closed and empty (.F.); else when a sender gives one, or the channel is closed
+ * (.F.); the token (else the one GetEnumerator() was given) cancels the wait. The waiting task and its pair are made
+ * before the lock is taken again. Asked while another of the enumerator's waits (both would take their values into
+ * one CURRENT), it raises BASE/9035. */
+static void enumerator_move_next_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  xb_item token, ch, value, pair, flag;
+  xb_set_nil(r);
+  xb_set_nil(&value);
+  xb_set_nil(&pair);
+  if (argc > 1 && argv[1].type != XB_T_NIL) token = argv[1];
+  else xb_object_get(argv[0].v.p, E_TOKEN, &token);
+  if (!xb_task_token_ok(&token)) {
+    xb_flow_arg_error(ctx, XB_CODE_TASK, "CHANNELENUMERATOR:MOVENEXTASYNC", argc, argv);
+    return;
+  }
+  xb_object_get(argv[0].v.p, E_CHANNEL, &ch);
+  xb_claims c;
+  xb_claims_root(ctx, &c);
+  xb_gc_root_push(ctx, &token);
+  xb_gc_root_push(ctx, &ch);
+  xb_gc_root_push(ctx, &value);
+  xb_gc_root_push(ctx, &pair);
+  for (int waiting = 0;; waiting = 1) {
+    lock(&ch);
+    if (enumerator_waits(&argv[0])) { /* again once the task is made: another flow's may have gone in line meanwhile */
+      unlock(&ch);
+      if (waiting && xb_task_claim(r)) xb_task_cancel_claimed(ctx, r);
+      xb_set_nil(r);
+      xb_error_described(ctx, NULL, EG_ARG, XB_CODE_ENUMERATOR_WAITING, "Enumerator waiting already",
+                         "CHANNELENUMERATOR:MOVENEXTASYNC", 0, argc, argv);
+      break;
+    }
+    int mine = !waiting || (!xb_ring_count(&ch, values) && !is_closed(&ch)) || xb_task_claim(r);
+    if (mine && take_next(&ch, &value, &c)) {
+      unlock(&ch);
+      xb_claims_settle(ctx, &c);
+      xb_object_put(argv[0].v.p, E_CURRENT, &value);
+      xb_set_logical(&flag, 1);
+      if (waiting) xb_task_settle_claimed(ctx, r, 1, &flag);
+      else xb_task_completed(ctx, r, &flag);
+      break;
+    }
+    if (mine && is_closed(&ch)) {
+      unlock(&ch);
+      xb_claims_settle(ctx, &c);
+      xb_set_logical(&flag, 0);
+      if (waiting) xb_task_settle_claimed(ctx, r, 1, &flag);
+      else xb_task_completed(ctx, r, &flag);
+      break;
+    }
+    if (mine && waiting) {
+      xb_ring_push(&ch, receivers, &pair, receiver_gone, NULL);
+      xb_object_put(argv[0].v.p, E_WAITING, r);
+      unlock(&ch);
+      xb_claims_settle(ctx, &c);
+      break;
+    }
+    unlock(&ch);
+    xb_claims_settle(ctx, &c);
+    if (!mine) break; /* its token canceled it meanwhile */
+    if (!xb_task_promise(ctx, r, &token, "CHANNELENUMERATOR:MOVENEXTASYNC", argc, argv)) break;
+    xb_array *a = xb_array_alloc(2); /* a safepoint: `r` and the enumerator are rooted */
+    a->items[0] = *r;
+    a->items[1] = argv[0];
+    xb_set_array(&pair, a);
+    xb_share(&pair);
+  }
+  xb_gc_root_pop(ctx, 6);
+}
+
+static const xb_class_method enumerator_methods[] = {{"MOVENEXT", enumerator_move_next},
+                                                     {"MOVENEXTASYNC", enumerator_move_next_async}};
 static const xb_class enumerator_class = {"CHANNELENUMERATOR", E_COUNT_, enumerator_vars, NULL,
                                           XB_TABLE_SIZE(enumerator_methods), enumerator_methods};
 
-/* oChannel:GetEnumerator(): an enumerator of the values as they come, until the channel is closed and empty (FOR EACH
- * waits for each). */
+/* oChannel:GetEnumerator( [oToken] ): an enumerator of the values as they come, until the channel is closed and empty
+ * (FOR EACH waits for each, AWAIT FOR EACH awaits each); the token cancels the waits of its MoveNextAsync() calls
+ * that are given none of their own (AWAIT FOR EACH x IN oChannel:GetEnumerator( oToken )). */
 static void channel_get_enumerator(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
-  XB_UNUSED(ctx);
-  XB_UNUSED(argc);
+  xb_set_nil(r);
+  if (argc > 1 && !xb_task_token_ok(&argv[1])) {
+    xb_flow_arg_error(ctx, XB_CODE_TASK, "CHANNEL:GETENUMERATOR", argc, argv); /* a token's, as MoveNextAsync's */
+    return;
+  }
   xb_object *e = xb_object_new(&enumerator_class);
   e->vars[E_CHANNEL] = argv[0];
+  if (argc > 1) e->vars[E_TOKEN] = argv[1];
   xb_gc_write(e);
   xb_set_object(r, e);
 }

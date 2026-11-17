@@ -13,9 +13,9 @@
 typedef struct stripe {
   uint32_t seq;
   uint32_t lock;
-  char pad[64 - 2 * sizeof(uint32_t)];
+  char pad[XB_CACHE_LINE - 2 * sizeof(uint32_t)];
 } stripe;
-static _Alignas(64) stripe stripes[STRIPES];
+static _Alignas(XB_CACHE_LINE) stripe stripes[STRIPES];
 
 static stripe *stripe_of(const void *obj) {
   uintptr_t a = (uintptr_t)obj / 16u;

@@ -369,10 +369,18 @@ void xb_ctx_free(xb_ctx *ctx) {
 /* The stack error leaves its handler the room above `stack_low` + XB_STACK_FLOOR while it runs. */
 #define XB_STACK_RESERVE ((size_t)1 << 20)
 #define XB_STACK_FLOOR ((size_t)64 << 10)
+/* The room above the stack error's limit a waiter needs to run a task inline, on top of its own calls. */
+#define XB_STACK_INLINE ((size_t)1 << 20)
 
 void xb_ctx_set_stack(xb_ctx *ctx, const char *low) {
   ctx->stack_low = low;
   ctx->stack_limit = low ? low + XB_STACK_RESERVE : NULL;
+}
+
+int xb_stack_room(const xb_ctx *ctx) {
+  /* where the thread's stack is now (it grows down, as the limit's check takes it to); in the reserve, no room */
+  char here;
+  return !ctx->stack_limit || (uintptr_t)&here >= (uintptr_t)ctx->stack_limit + XB_STACK_INLINE;
 }
 
 /* Raised before the body of a function whose frame lies below the limit: the error's handler (ErrorSys, a BEGIN

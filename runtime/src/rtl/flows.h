@@ -24,7 +24,8 @@ enum {
   XB_CODE_OPERATION_CANCELED,
   XB_CODE_CHANNEL,
   XB_CODE_CHANNEL_CLOSED,
-  XB_CODE_MUTEX_OUTER
+  XB_CODE_MUTEX_OUTER,
+  XB_CODE_ENUMERATOR_WAITING = 9035 /* after 9032 (Memory low) and the CHARACTER methods' (types.h) */
 };
 
 /* The word of an object's own variable `k`: its 32-bit value (v.l), changed atomically. An object moves only while
@@ -100,9 +101,9 @@ void xb_claims_settle(xb_ctx *ctx, xb_claims *c);
 enum { XB_WAIT_QUIT = -1, XB_WAIT_TIMED_OUT, XB_WAIT_CHANGED };
 
 /* Waits while the word of `object`'s variable `k` is `value`, until the monotonic clock reaches `deadline` (< 0: no
- * limit), a while at a time in a blocking operation (collections go on without the waiter), so that a QUIT finds it,
- * and the program's end (code an ALWAYS runs while a QUIT is set aside waits no more). `object` is an item that keeps
- * the object. xb_wait_while: no limit, 1 once the word changed, 0 for a QUIT or the program's end. */
+ * limit), in a blocking operation (collections go on without the waiter); a QUIT wakes it (the context's waitingOn),
+ * and so does the program's end (code an ALWAYS runs while a QUIT is set aside waits no more). `object` is an item
+ * that keeps the object. xb_wait_while: no limit, 1 once the word changed, 0 for a QUIT or the program's end. */
 int xb_wait_until(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value, int64_t deadline);
 int xb_wait_while(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value);
 

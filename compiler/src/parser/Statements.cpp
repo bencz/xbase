@@ -1,6 +1,8 @@
 // Statements: declarations, IF, DO CASE, SWITCH, loops.
 #include "parser/Parser.h"
 
+#include "xbrt.h" // the literal width rule
+
 namespace xb {
 
 // Every statement records where it ends: Clipper shows that line for all of
@@ -42,6 +44,7 @@ StmtPtr Parser::parseStmtKind() {
   if (atStmtKw("WITH") && isKw(ahead(), "OBJECT")) return parseWithObject();
   if (atStmtKw("USING") && aheadOperand()) return parseUsing(); // USING( ... ) is a call, as YIELD( ... )
   if (atStmtKw("FOR")) return isKw(ahead(), "EACH") && !isAssignAfterEach() ? parseForEach() : parseFor();
+  if (atStmtKw("AWAIT") && isKw(ahead(), "FOR") && isKw(ahead(2), "EACH")) return parseAwaitEach();
   // YIELD( ... ) stays a call of a function Yield(), as in Clipper
   if (atStmtKw("YIELD") && aheadOperand()) {
     advance();
@@ -305,6 +308,118 @@ StmtPtr Parser::parseSwitch() {
     st->cases.push_back(std::move(c));
   }
   closeBlock({"ENDSWITCH", "END"}, "SWITCH", openLoc);
+  return st;
+}
+
+// AWAIT FOR EACH [k =>] x IN expr ... NEXT: the statement AwaitEachStmt builds (AST.h); one variable (with its key)
+// and one collection, not DESCEND.
+StmtPtr Parser::parseAwaitEach() {
+  SourceLoc openLoc = cur().loc;
+  advance(); // AWAIT
+  advance(); // FOR
+  advance(); // EACH
+  auto st = std::make_unique<AwaitEachStmt>(openLoc);
+  std::string n = std::to_string(++awaitEachCount_);
+  auto hidden = [&](const std::string &what) { return "(AWAIT EACH " + what + " " + n + ")"; };
+  auto var = [&](const std::string &name) { return std::make_unique<VarExpr>(openLoc, name); };
+  std::string x, k;
+  bool ok = true;
+  auto loopVar = [&](std::string &name) {
+    if (ok && at(Tok::Ident)) {
+      name = cur().upper;
+      advance();
+    } else if (ok) {
+      expect(Tok::Ident, "loop variable");
+      ok = false;
+    }
+  };
+  loopVar(x);
+  if (ok && accept(Tok::FatArrow)) {
+    k = x;
+    loopVar(x);
+    if (ok && k == x) diag_.error(openLoc, "AWAIT FOR EACH k => v needs two different variables");
+  }
+  ExprPtr source;
+  if (ok && at(Tok::Comma)) {
+    diag_.error(cur().loc, "AWAIT FOR EACH walks one collection with one variable");
+    ok = false;
+  }
+  if (ok && atKw("IN")) {
+    advance();
+    source = parseExpr();
+    if (at(Tok::Comma)) {
+      diag_.error(cur().loc, "AWAIT FOR EACH walks one collection with one variable");
+      ok = false;
+    } else if (atKw("DESCEND")) {
+      diag_.error(cur().loc, "AWAIT FOR EACH cannot DESCEND: its elements come one at a time");
+      ok = false;
+    }
+  } else if (ok) {
+    diag_.error(cur().loc, "expected IN, " + found());
+    ok = false;
+  }
+  if (!ok) {
+    skipToEndOfStmt();
+    endOfStmt();
+    parseBlock({"NEXT", "END"});
+    closeBlock({"NEXT", "END"}, "AWAIT FOR EACH", openLoc);
+    return nullptr;
+  }
+  endOfStmt();
+
+  auto declare = [&](const std::string &name, ExprPtr init) {
+    LocalDecl d;
+    d.loc = openLoc;
+    d.name = name;
+    d.init = std::move(init);
+    st->hidden.push_back(std::move(d));
+  };
+  auto each = std::make_unique<CallExpr>(openLoc, "__AWAITEACH");
+  each->args.push_back(std::move(source));
+  declare(hidden("ENUMERATOR"), std::move(each));
+  declare(hidden("VALUE"), var(x));
+  if (!k.empty()) {
+    declare(hidden("KEY"), var(k));
+    declare(hidden("POSITION"),
+            std::make_unique<NumberExpr>(openLoc, true, 0, 0.0, 0, xb_num_literal_width(0, 0, 0.0, 1, 0)));
+  }
+
+  auto seq = std::make_unique<SequenceStmt>(openLoc);
+  seq->leavable = true;
+  seq->hasAlways = true;
+  auto send = [&](const char *message) {
+    auto s = std::make_unique<SendExpr>(openLoc, var(hidden("ENUMERATOR")), message);
+    s->withArgs = true;
+    return s;
+  };
+  auto await = [&](ExprPtr operand) {
+    auto e = std::make_unique<AwaitExpr>(openLoc, std::move(operand));
+    e->generated = true;
+    return e;
+  };
+  auto loop = std::make_unique<WhileStmt>(openLoc, await(send("MOVENEXTASYNC")));
+  auto current = [&] { return std::make_unique<SendExpr>(openLoc, var(hidden("ENUMERATOR")), "CURRENT"); };
+  auto awaits = std::make_unique<CallExpr>(openLoc, "__AWAITEACHAWAITS");
+  awaits->args.push_back(var(hidden("ENUMERATOR")));
+  auto value = std::make_unique<IIfExpr>(openLoc, std::move(awaits), await(current()), current());
+  loop->body.push_back(
+      std::make_unique<ExprStmt>(openLoc, std::make_unique<AssignExpr>(openLoc, var(x), std::move(value))));
+  if (!k.empty()) { // k: the position, or a hash's key (__AwaitEachKey)
+    auto key = std::make_unique<CallExpr>(openLoc, "__AWAITEACHKEY");
+    key->args.push_back(var(hidden("ENUMERATOR")));
+    key->args.push_back(std::make_unique<IncDecExpr>(openLoc, true, true, var(hidden("POSITION"))));
+    loop->body.push_back(
+        std::make_unique<ExprStmt>(openLoc, std::make_unique<AssignExpr>(openLoc, var(k), std::move(key))));
+  }
+  for (StmtPtr &b : parseBlock({"NEXT", "END"})) loop->body.push_back(std::move(b));
+  closeBlock({"NEXT", "END"}, "AWAIT FOR EACH", openLoc);
+  seq->body.push_back(std::move(loop));
+  seq->always.push_back(std::make_unique<ExprStmt>(
+      openLoc, std::make_unique<AssignExpr>(openLoc, var(x), var(hidden("VALUE")))));
+  if (!k.empty())
+    seq->always.push_back(std::make_unique<ExprStmt>(
+        openLoc, std::make_unique<AssignExpr>(openLoc, var(k), var(hidden("KEY")))));
+  st->seq.push_back(std::move(seq));
   return st;
 }
 

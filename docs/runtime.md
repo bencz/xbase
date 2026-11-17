@@ -478,7 +478,12 @@ it, and assigning the variable changes nothing in the collection. A generator's 
 (`xb_gen_move_next`, its `Current` copied); compiled code does both in place for a local one (docs/compiler.md). `k` in
 `FOR EACH k => x` is the position. With `DESCEND` the enumerator's elements are gathered into an array first. An object
 without an enumerator is the error of any other value that is no collection (`BASE/1068`). The paths of arrays, strings
-and hashes come first and do not change.
+and hashes come first and do not change. `AWAIT FOR EACH` (`core/control.c`) takes its asynchronous enumerator from
+`__AwaitEach`: the object itself when it answers `MoveNextAsync`, what `GetAsyncEnumerator()` gives, else what `FOR
+EACH` would go through (`xb_each_source`), itself when that answers `MoveNextAsync` (a channel's enumerator), else an
+`AwaitEach` object whose `MoveNextAsync` takes the next element at once (a task completed with `.T.`, `.F.` at the end)
+into its `Current`, keeping a hash's key (`__AwaitEachKey`); the loop awaits that `Current` (`__AwaitEachAwaits`), so a
+collection of tasks gives their results in order.
 
 ### Generators
 
@@ -895,13 +900,13 @@ them touches only the flow's own (`XB_PENDING_UNWIND`). The check stays valid ac
 
 A runtime error (`core/error.c`, `xb_error` and `xb_arg_error` in `core/error.h`; `xb_error_of` for one with another
 subsystem, a file name or a system code) makes an `Error` object (see [Objects and messages](#objects-and-messages)):
-subsystem `BASE` (the work areas' errors are `DBCMD` and the driver's name, [rdd.md](rdd.md#work-areas)), the subcode,
-the generic code (`error.ch`, shared with xBase code like `set.ch`) and its description (in the current language,
-[Languages](#languages)), the operation, severity `ES_ERROR`, `canSubstitute`, and in `args` the operands of an operator
-or the arguments of a function (NIL when there are none). Then it evaluates the context's error block with it
-(`ErrorBlock( [bNew] )` returns the block and replaces it with a codeblock argument; the block and the `BREAK` value are
-roots of the collector). With no error block (a program's `ErrorSys()` set none) the error is unrecoverable:
-`Unrecoverable error 9002: No ERRORBLOCK() for error`. After the block:
+subsystem `BASE` (one string never collected, shared by every error; the work areas' errors are `DBCMD` and the driver's
+name, [rdd.md](rdd.md#work-areas)), the subcode, the generic code (`error.ch`, shared with xBase code like `set.ch`) and
+its description (in the current language, [Languages](#languages)), the operation, severity `ES_ERROR`, `canSubstitute`,
+and in `args` the operands of an operator or the arguments of a function (NIL when there are none). Then it evaluates
+the context's error block with it (`ErrorBlock( [bNew] )` returns the block and replaces it with a codeblock argument;
+the block and the `BREAK` value are roots of the collector). With no error block (a program's `ErrorSys()` set none) the
+error is unrecoverable: `Unrecoverable error 9002: No ERRORBLOCK() for error`. After the block:
 
 - a request to unwind is pending (the block called `Break()`, or quit): the operation fails with it;
 - the error may be retried (`XB_ERR_RETRY`, `xb_error_retry`: `canRetry`, with `tries` counting the attempts from 1;
@@ -912,14 +917,17 @@ roots of the collector). With no error block (a program's `ErrorSys()` set none)
 - the error allows substitution (`XB_ERR_SUBSTITUTE`: operators, `SWITCH`, a non-numeric index, messages, `Eval` and
   the runtime functions, except `ASize`, `AEval`, `AFill`, `Set` and the array dimension): the block's return value
   becomes the operation's result, and the program goes on;
-- otherwise (a bound error, an assignment to an element, a condition that is not logical, the collection of
-  `FOR EACH`, ...) the program ends: `Unrecoverable error 9001: Error recovery failure` on standard error, exit code
-  1, a `QUIT` pending.
+- otherwise (a bound error, an assignment to an element, a condition that is not logical, the collection of `FOR EACH`,
+  ...) the program ends: `Unrecoverable error 9001: Error recovery failure` on standard error, exit code 1, a `QUIT`
+  pending.
 
-Which errors allow substitution, and their `args`, follow Clipper/Harbour. An error raised while the error block runs
-is handled the same way, nested at most 8 deep (`XB_ERROR_MAX_DEPTH`); one more ends the program (`Unrecoverable
-error 9003: Too many recursive error handler calls`). In a `FOR` test, a substituted result stands for the comparison
-`counter > limit` (`<` stepping back): a logical, else the error of a condition.
+Which errors allow substitution, and their `args`, follow Clipper/Harbour. An error raised while the error block runs is
+handled the same way, nested at most 8 deep (`XB_ERROR_MAX_DEPTH`); one more ends the program (`Unrecoverable error
+9003: Too many recursive error handler calls`). In a task, none of these three ends the program: the task fails with the
+error no handler could take (the one the block returned for, the one raised with no block, the innermost of the
+recursion), its lines of the calls kept, as the default handler fails a task with an error nobody handled
+(`xb_error_fail_task`, `core/error.c`); its waiter gets the error. In a `FOR` test, a substituted result stands for the
+comparison `counter > limit` (`<` stepping back): a logical, else the error of a condition.
 
 A context starts with no error block. The program's startup calls `ErrorSys()` by name after the `STATIC`
 initializations and before the `INIT` procedures ([Program startup](#program-startup)): the runtime's, in xBase
@@ -937,7 +945,9 @@ task (its lines kept) is reported with them first, then the handler's own calls,
 the default (Clipper's `Alert()`) waits for the terminal layer. An unrecoverable error lists the levels as
 `Called from NAME(line) in FILE` (without ` in FILE` for a runtime function). Both list the innermost `XB_CALLS_SHOWN`
 (100) levels and then, when there are more, the line `(further calls not shown)` (`include/error.ch`): the reference
-lists every level, which after a runaway recursion means millions of lines.
+lists every level, which after a runaway recursion means millions of lines. The handler's lines come from
+`__CallLines( oError )` (`xb_error_call_lines`, `core/error.c`, which a task failed by an unrecoverable error uses too),
+one walk of the frames (asking `ProcName( n )` level by level would walk them again for each).
 
 `Break( [xValue] )` (and the `BREAK [value]` command, `__Break`, and `Throw( [xValue] )`) stores the value in the
 context and raises `XB_PENDING_BREAK`. In a `BEGIN SEQUENCE` handler, `xb_seq_catch` takes a `BREAK` that is the only
@@ -1111,13 +1121,13 @@ Conventions:
 - `Empty` is true for `NIL`, `0`, a string of blanks (as above), `.F.`, an empty array, an empty hash and the empty
   date.
 - `Set( n [, x] )` returns the setting before the call. `_SET_EXACT` takes a logical or a string starting with
-  `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020);
-  `_SET_FIXED`, `_SET_DELETED`, `_SET_SOFTSEEK` and `_SET_UNIQUE` take a logical or `ON`/`OFF` as `_SET_EXACT` does
-  ([rdd.md](rdd.md#orders));
-  `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run of `Y`s has 4 or more, off
-  otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it in front when the picture
-  has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name ([Languages](#languages)),
-  `_SET_CODEPAGE` a codepage's ([Codepages](#codepages)). Other values change nothing.
+  `ON`/`OFF`; `_SET_DECIMALS` and `_SET_EPOCH` take a number of 0 or more (a negative one is error 2020; so is a count
+  of decimals past 65535, the most a number keeps, which the reference keeps and formats modulo 65536); `_SET_FIXED`,
+  `_SET_DELETED`, `_SET_SOFTSEEK` and `_SET_UNIQUE` take a logical or `ON`/`OFF` as `_SET_EXACT` does
+  ([rdd.md](rdd.md#orders)); `_SET_DATEFORMAT` takes a string (kept whole) and sets `SET CENTURY` on when its first run
+  of `Y`s has 4 or more, off otherwise; `__SetCentury( [lOn] )` rewrites that run of `Y`s as `YYYY` or `YY` (or puts it
+  in front when the picture has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name
+  ([Languages](#languages)), `_SET_CODEPAGE` a codepage's ([Codepages](#codepages)). Other values change nothing.
 - `__GcCollect( [lYoung] )`, `__GcMemory()`: see [Garbage collector](#garbage-collector). `__MemNamesInUse( [lLetGo] )`:
   see [Memory variables](#memory-variables).
 - `AScan( a, xSearch, [nStart], [nCount] )` returns the position of the first element of the range equal to `xSearch`
@@ -1162,7 +1172,8 @@ Conventions:
   operand counts and codes are the table `xb_bit_function` in `xbrt.h`, which the compiler reads too. The `Char*()`
   functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)), the thread and task functions 9016 to 9031
   ([concurrency.md](concurrency.md#threads)), a size no memory holds 9032 (`Memory low`), and the `CHARACTER` methods
-  given an argument that is no string `Split` 9033, `StartsWith` and `EndsWith` 9034.
+  given an argument that is no string `Split` 9033, `StartsWith` and `EndsWith` 9034, a channel enumerator's
+  `MoveNextAsync` while another of its own waits 9035.
 - `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
   program started from a monotonic clock (`xb_program_elapsed_ms`), for timing: the difference of two calls.
@@ -1256,7 +1267,10 @@ of the collector; English, made when first needed), `__LanguageCurrent()` gives 
 generic code, a hash of subcodes), else the generic code's. `Set( _SET_LANGUAGE )` returns the current language's name;
 a name in any letter case selects, and one the runtime has no language for leaves it as it is. A description an error
 carries itself (a class error's, ...) stays English. `__LanguageCurrent()` hands out the very texts the runtime reads,
-which are never to be changed. The texts are UTF-8 bytes (`Len( "Terça-feira" )` is 12), as the source is.
+which are never to be changed. The English texts, which every environment that starts without texts takes (a thread's,
+an asynchronous function's), are made once for the process and shared (`core/language.c`, a root of the collector): an
+error raised in a new environment does not make them again. The texts are UTF-8 bytes (`Len( "Terça-feira" )` is 12), as
+the source is.
 
 ## Codepages
 
@@ -1272,7 +1286,9 @@ leaves it as it is.
   another number of bytes keeps its case (`ß`, `ı`). `IsAlpha`, `IsUpper` and `IsLower` read the first character.
 - The data (`core/codepage_data.c`, generated: it says how) holds the Unicode 18.0 letters by class (uppercase,
   lowercase, other) and the simple case mappings that keep the UTF-8 length, as runs of code points, and for each
-  single-byte codepage the code point, the upper and lower case and the class of each of its bytes.
+  single-byte codepage the code point, the upper and lower case and the class of each of its bytes. Writing a character
+  in a single-byte codepage searches that codepage's table backwards (its 256 pairs of character and byte in the order
+  of the character, made once for all the codepages: the lowest byte of a character), not its 256 bytes.
 - In UTF-8 a byte that starts no valid sequence (overlong forms, surrogates and code points past U+10FFFF included) is
   a character of its own, U+FFFD, and keeps its case.
 - xbase's own functions count characters: `CharLen( c )`, `CharSubStr( c, nStart, [nCount] )` (a negative start counts
@@ -1404,8 +1420,11 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   stack, pinned). The thread restores the environment, evaluates the block (`xb_eval_work`), stores the result, sets its
   done word and wakes the joiners, frees its context and detaches from the collector. A `Mutex` is three words in its
   object's own variables (the state, 0 free, 1 held, 2 held with waiters; the holder's `xb_flow_self`; the depth), a
-  `Thread`'s done flag one: changed with atomic operations, waited on in the parking lot a while at a time (50 ms) in a
-  blocking operation, so collections go on and a `QUIT` is seen; the object a waiter waits on is pinned by its stack. An
+  `Thread`'s done flag one: changed with atomic operations, waited on in the parking lot in a blocking operation, so
+  collections go on, until its value changes or a `QUIT` comes: the waiter publishes the word in its context
+  (`waitingOn`) before it tests for a `QUIT`, the park tests the context's pending `QUIT` again under its bucket's lock
+  (`xb_park_wait_blocking_stop`), and `xb_gc_raise_all` raises the `QUIT` and then wakes the word it reads there, so no
+  wait outlives a `QUIT` and none looks at the clock meanwhile; the object a waiter waits on is pinned by its stack. An
   `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local. `QUIT` in a
   thread raises it on every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before the `EXIT`
   procedures and after them) does too when threads still run, and waits until none does; a thread made meanwhile quits
@@ -1423,9 +1442,9 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   too at once (they would wait behind others for what their flow has). A `Condition` keeps its waiters and the signals
   given to them in one word (16 bits each: a waiter takes a signal and leaves in one compare-and-swap, so a signal never
   outlives the waiters it was for) and a generation each signal changes, which waiters park on; a `Semaphore` its count
-  and maximum (a `Release()` wakes waiters when the count leaves 0, and a waiter that takes a place and leaves others
-  wakes the next). Their waits take a limit in milliseconds on the monotonic clock. The words, the waits with a limit,
-  the checks of arguments and the error codes that threads and tasks share are in `rtl/flows.h`.
+  and maximum (`Release( n )` wakes one waiter when the count leaves 0: each that takes a place with more left wakes the
+  next). Their waits take a limit in milliseconds on the monotonic clock. The words, the waits with a limit, the checks
+  of arguments and the error codes that threads and tasks share are in `rtl/flows.h`.
 - The scheduler (`core/sched.c`, [concurrency.md](concurrency.md#scheduler)) and tasks (`rtl/tasks.c`,
   [concurrency.md](concurrency.md#tasks)). Workers are program threads started when tasks first need them, `target` of
   them active at once (one per processor, or `//WORKERS:n`), up to 1024 with those that took the place of blocked ones.
@@ -1492,7 +1511,12 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   pruning. Channels (`rtl/channels.c`, their rings and the claims of their waiters in `rtl/waiters.c`, shared with
   `Mutex` and `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a
   runtime class's object (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext`
-  takes the next value (waiting for it) into `Current`. Their error codes are xbase's own: 9016 to 9031.
+  takes the next value (waiting for it) into `Current`, and whose `MoveNextAsync` waits as a receiver whose entry in the
+  ring is the pair `{task, enumerator}`: the value delivered goes into the enumerator's `Current` under the channel's
+  lock and the task completes with `.T.`; `Close` completes such tasks with `.F.` instead of failing them. The
+  enumerator keeps the token `GetEnumerator` was given and the task of its `MoveNextAsync` that waits (read and set
+  under the channel's lock: a second one while it waits raises 9035). Their error codes are xbase's own: 9016 to 9031,
+  and 9035.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread and

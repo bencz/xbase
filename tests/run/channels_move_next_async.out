@@ -1,0 +1,10 @@
+
+drained: .T. 123456
+closed and empty: .F. .F. NIL
+waits: .F.
+closed while it waits: .T. .F. .F.
+canceled: .T. .T.
+the value went to no canceled waiter: .T. kept
+in the order they came:         10 .T.         20         30 .T.         40
+two enumerators: x y
+MoveNext beside it: .T. z
