@@ -4,5 +4,7 @@
     <TargetFramework>net$(BundledNETCoreAppPackageVersion.Split('.')[0]).0</TargetFramework>
     <Optimize>true</Optimize>
     <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 </Project>

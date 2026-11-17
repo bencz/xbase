@@ -1,5 +1,7 @@
 build/
 *.o
 *.obj
-bench/csharp/*/bin/
-bench/csharp/*/obj/
+bench/csharp/bin/
+bench/csharp/obj/
+build-release/
+__pycache__/

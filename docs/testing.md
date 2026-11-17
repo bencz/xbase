@@ -95,11 +95,36 @@ SEEK, walked, kept up to date as records are appended; its files are deleted at 
 short tasks joined, a 50,000-link continuation chain, tasks waiting for tasks they start) and channels (`channels`:
 producer and consumer tasks over a bounded channel, then `TrySend`/`TryReceive` pairs), asynchronous functions
 (`async`: a million calls awaited that complete at once, round trips between two of them over channels, ten thousand
-suspended at once; `async_pi`: the Basel sum over 32 of them awaiting CPU-bound tasks, every processor busy). Each one
-times its own work
-with `ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name>
+suspended at once; `async_pi`: the Basel sum over 32 of them awaiting CPU-bound tasks, every processor busy), and
+calls of a function with a short loop (`bitlookup`: the bitwise AND from a table of nibbles). Each one times its own
+work with `ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name>
 <milliseconds> ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`
 (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every program
 `XB_BENCH_REPEAT` times (a cache variable, default 3), the best time of each in a table, and a failure when one does not
 run or reports `WRONG`. It warns when the build is not Release. Performance changes are measured with it, before and
 after.
+
+The same programs in other languages, for a comparative base (the same algorithm, sizes and checks, the same output
+line), are in `bench/c/` (one file each, `bench.h` shared; 64-bit integers as `int64_t`), `bench/rust/` (standard
+library only), `bench/csharp/` (one project, `Bench <name>`), `bench/java/` (one class each), `bench/js/` (Node.js) and
+`bench/python/` (CPython and PyPy). Each uses its language's own tools where xBase uses the runtime's (its sort, its
+strings, its tasks, channels and `async`); `bench/c/pi.c` and the other `pi` ports are translated statement by
+statement from `bench/pi.prg`. Where a compiler would remove the work the benchmark measures, the port keeps it as
+xbase does it: `bitlookup` makes its 7 calls of `AND()` a pair (IOR and XOR written out as the `.prg`'s macros expand
+them; C `noinline, noipa`, Rust `inline(never)` with `black_box` arguments, C# `NoInlining`; the Java and JavaScript
+JITs may still inline them), C's `generator` steps through function pointers it cannot follow. The differences that
+remain: C's `strings` and `crc32` build their text in buffers without allocating; Rust's channel has one receiver,
+which its two consumers share under a mutex; JavaScript's `async` has no pool of threads that runs JavaScript, so
+`TaskRun()` there is a turn of the event loop, and its `loops` sums in `BigInt` (the sum passes 2^53, past a double's
+exact integers). A language without a counterpart of a feature has no version of that benchmark (Java has no `async`,
+C no tasks or channels). Go versions are not written yet.
+
+`bench/compare.sh` (bash 4 and GNU `timeout`) and `bench/compare.ps1` (PowerShell 7.2) build each with every compiler
+or interpreter found and print a Markdown table of the best time of each (`-n`/`-Runs` runs, CPython once; `-l`/`-Langs`
+picks languages by key: `xbase`, `harbour`, `c`, `rust`, `csharp`, `java`, `go`, `node`, `pypy`, `python`): xbase from
+a Release build (`build-release`, configured when missing; another build is refused), each benchmark target built
+again and a failed build shown as `fail`; Harbour from the `.prg` themselves when it is installed (`hbmk2 -gc3`, its C
+output compiled with `-O2` as `xbc -O2`; the programs that use xbase's own language left out; `bench/compat.ch` gives
+`ElapsedMs()` from `Date()` and `Seconds()` for it), C with `gcc -O2`, Rust with `rustc -C opt-level=2`, C# in Release,
+Python with `-B` (no compiled files beside the sources). The programs run in `<build>/compare/run`, under a memory limit
+and the time limit (`-t`/`-Limit`). The README shows its table.
