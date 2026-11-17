@@ -2,6 +2,12 @@
 
 #include "xir/IR.h"
 
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <utility>
+#include <vector>
+
 namespace xb::xir {
 
 // The optimization passes on xIR (docs/xir.md, Passes). Each one transforms a
@@ -10,6 +16,11 @@ namespace xb::xir {
 // A STATIC FUNCTION whose calls in the module pass no reference never runs its body versioned for references
 // (`NAME.byref`): its versioning test becomes false and that body leaves the module (Versioning.cpp).
 bool dropReferenceBodies(Module &m);
+
+// When no call of `f` passes a reference: its versioning test becomes false and the branch to its body versioned for
+// references goes; that body, which only the test reached, is returned (null without a test) for the caller to remove
+// (Versioning.cpp).
+Function *dropReferenceTest(Function &f);
 
 // A call of a small function of the module, or of a function of the runtime's carried sources (Module::library), runs
 // its body in place, shown on the call stack as the function (inline.enter, inline.leave), its variables the caller's
@@ -52,6 +63,21 @@ bool removeDeadCode(Function &f);
 // type continues in a generic copy of the rest of the function
 // (TypedContinuations.cpp).
 bool typedContinuations(Function &f);
+
+// The typed copies of the module's functions made so far, by function and parameter types (Specialize.cpp).
+using TypedCopies = std::map<std::pair<const Function *, std::vector<uint32_t>>, Function *>;
+
+// A call of a function of the module whose arguments hold numbers, logicals or dates goes to a copy of the function
+// whose parameters have those types (Function::paramTypes), made once and optimized by `optimizeCopy`
+// (Specialize.cpp).
+bool specializeCalls(Module &m, Function &f, TypedCopies &copies, const std::function<void(Function &)> &optimizeCopy);
+
+// A STATIC FUNCTION that only its typed copies stand for now (nothing calls or names it) leaves the module, with its
+// body versioned for references (Specialize.cpp).
+bool dropCopiedFunctions(Module &m, const TypedCopies &copies);
+
+// The return types of a typed copy whose calls of itself give what it returns: the least fixed point (Specialize.cpp).
+void settleReturnTypes(Function &f);
 
 // Peels the first pass of a small innermost loop that carries a value whose type the first pass changes (a sum that
 // starts at the integer 0 and adds doubles): the loop proper then carries it with one type (PeelTypes.cpp).

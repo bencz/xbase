@@ -673,6 +673,17 @@ std::optional<ExternDecl> Parser::parseExtern() {
       if (!at(Tok::Number) || !cur().isInt || cur().ival < 1 || (size_t)cur().ival > d.name.size())
         return fail("ABBREV needs a length between 1 and the length of the name");
       d.abbrev = (uint32_t)cur().ival;
+    } else if (attr == "RESULT") {
+      advance();
+      if (!at(Tok::Ident)) return fail("RESULT needs the ValType() letters of the types the function returns");
+      for (char letter : cur().upper) {
+        // Every tag ValType() shows with the letter (not U: a cell or a reference shows as NIL).
+        uint32_t tags = 0;
+        for (uint32_t t = 0; letter != 'U' && t < sizeof XB_TYPE_LETTERS - 1; ++t)
+          if (XB_TYPE_LETTERS[t] == letter) tags |= 1u << t;
+        if (!tags) return fail(std::string("RESULT: '") + letter + "' is not a ValType() letter of a type returned");
+        d.resultTypes |= tags;
+      }
     } else {
       return fail("unknown EXTERN FUNCTION attribute");
     }

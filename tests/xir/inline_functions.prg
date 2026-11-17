@@ -1,6 +1,7 @@
 // Calls of small functions of the module, inlined: an argument without a reference runs the body after the versioning
 // test (the parameter a value promote-variables takes), one with a reference (@n) the body versioned for references;
-// the function's variables still in memory are cleared before inline.leave. A recursive call stays a call.
+// the function's variables still in memory are cleared before inline.leave. A recursive call stays a call: Fact( 3 )
+// goes to its copy typed for a number (FACT.typed1), which calls itself, and the STATIC function itself leaves.
 FUNCTION Main( n )
    LOCAL s := Sq( n )
    Bump( @n )

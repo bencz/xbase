@@ -93,6 +93,14 @@ inline const BlockParam *asParam(const Value *v) {
 // The block that defines the value (null for a constant).
 const BasicBlock *definingBlock(const Value *v);
 
+// How many instructions the blocks, or the function, hold: the size limits of the passes.
+size_t instructionCount(const std::vector<BasicBlock *> &blocks);
+size_t instructionCount(const Function &f);
+
+// The first function of the module's source that is not an INIT or EXIT procedure: the program's start when no
+// module has a public MAIN (the driver's choice), so a pass never removes it, whatever calls it.
+const Function *firstProgramFunction(const Module &m);
+
 // A function of the program that reads no arguments as received (readsArgs, `...`) and is not the body versioned for
 // references: calls of its module pass the parameters' items in registers to its direct entry (codegen).
 bool hasDirectEntry(const Function &f);
@@ -125,6 +133,9 @@ enum class Access : uint8_t {
               // holds one (tested at run time; a parameter may have been passed by reference)
 };
 
+// A parameter of its function: its caller may have passed it by reference, or a typed copy typed it.
+inline bool isParameter(const Var *v) { return v && v->kind == Var::Kind::Frame && v->param; }
+
 // Its own item may hold a cell: a STATIC, or a frame variable that is shared
 // or a parameter. Others are never shared and never hold a reference.
 inline bool mayBeInCell(const Var &v) {
@@ -146,6 +157,7 @@ struct Callee {
   bool native = false;          // external: written in C (runtime prefix), else another module's
   bool readsCallerArgs = false; // ARGS: it reads the arguments its caller received (PCount(), __ArgError())
   bool fold = false;            // FOLD: a call on constants is evaluated when compiling (opt/Fold's evaluateCall)
+  uint32_t resultTypes = 0;     // RESULT: the types (a TypeSet) a call that raises no error gives; 0: any
   // The arguments it takes as references (bit k: argument k, bit 31: argument 31 and after; xb_refs_take, as
   // xb_funcref's): a native function's declared ones, every one for an xBase function. A call with `...` passes the
   // arguments on as they are there, references included; a send or an array literal passes their values.
@@ -295,6 +307,9 @@ public:
   // The types its result may hold (a TypeSet, Types.h): every type until the pass manager, having optimized it,
   // narrows them to what its RETURNs give (returnTypes).
   uint32_t returnTypes = ~0u;
+  // A typed copy (passes/Specialize.cpp): the types each parameter holds (a TypeSet each), which every call of it
+  // passes; empty for any function else.
+  std::vector<uint32_t> paramTypes;
   std::vector<std::unique_ptr<Var>> vars;      // frame variables (index = slot), then captures
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   std::vector<std::unique_ptr<Constant>> constants;

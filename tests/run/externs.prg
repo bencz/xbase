@@ -1,6 +1,6 @@
 // Calls resolved through EXTERN FUNCTION declarations: abbreviated names of functions that allow them, a runtime
 // function the program redefines (not reserved), an identical redeclaration, and Len() folded on constants.
-EXTERN FUNCTION SubStr( cString, nStart, [nCount] ) NATIVE RESERVED CHECKED ABBREV 4 FOLD
+EXTERN FUNCTION SubStr( cString, nStart, [nCount] ) NATIVE RESERVED CHECKED ABBREV 4 FOLD RESULT C
 
 PROCEDURE Main()
    LOCAL a := { 1, 2, 3 }

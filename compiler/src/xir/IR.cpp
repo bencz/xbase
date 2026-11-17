@@ -17,6 +17,24 @@ const BasicBlock *definingBlock(const Value *v) {
   return nullptr;
 }
 
+size_t instructionCount(const std::vector<BasicBlock *> &blocks) {
+  size_t n = 0;
+  for (const BasicBlock *b : blocks) n += b->insts.size();
+  return n;
+}
+
+size_t instructionCount(const Function &f) {
+  size_t n = 0;
+  for (auto &b : f.blocks) n += b->insts.size();
+  return n;
+}
+
+const Function *firstProgramFunction(const Module &m) {
+  for (auto &f : m.functions)
+    if (f->kind == Function::Kind::Program && !f->startup) return f.get();
+  return nullptr;
+}
+
 bool hasDirectEntry(const Function &f) {
   return f.kind == Function::Kind::Program && !f.readsArgs && !f.byRefBody && !f.usesRest;
 }

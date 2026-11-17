@@ -190,6 +190,9 @@ private:
   void emitBinary(const xir::Instruction &i);
   void emitDivMod(const xir::Instruction &i, llvm::Value *a, llvm::Value *b, llvm::Value *d);
   llvm::Value *doubleRemainder(llvm::Value *x, llvm::Value *y);
+  // trunc( v ) without a call: what llvm.trunc gives, which a target without the instruction (x86-64 before
+  // SSE4.1) makes a call of the C library.
+  llvm::Value *truncDouble(llvm::Value *v);
   llvm::Value *setDecimals();
   void emitForTest(const xir::Instruction &i);
   bool emitBitCall(const xir::Instruction &i);

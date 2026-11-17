@@ -413,12 +413,13 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
                               b_.CreateFCmpOLT(v, ConstantFP::get(f64, (double)XB_NUM_FITS_MIN)));
     Value *width = b_.CreateSelect(b_.CreateICmpNE(own, ConstantInt::get(i64_, 0)), own,
                                    b_.CreateSelect(wide, widthWord(XB_NUM_WIDE_WIDTH), widthWord(XB_NUM_WIDTH)));
-    Value *tr = b_.CreateUnaryIntrinsic(Intrinsic::trunc, v);
-    Value *inRange = b_.CreateAnd(b_.CreateFCmpOGE(tr, ConstantFP::get(f64, -9223372036854775808.0)),
-                                  b_.CreateFCmpOLT(tr, ConstantFP::get(f64, 9223372036854775808.0)));
+    // A double in [-2^63, 2^63) converts truncated, as trunc() then the conversion would (no double lies between
+    // -2^63 - 1 and -2^63).
+    Value *inRange = b_.CreateAnd(b_.CreateFCmpOGE(v, ConstantFP::get(f64, -9223372036854775808.0)),
+                                  b_.CreateFCmpOLT(v, ConstantFP::get(f64, 9223372036854775808.0)));
     branchLikely(inRange, fits, slow); // NaN and the rest: the runtime keeps them doubles
     b_.SetInsertPoint(fits);
-    storeWords(d, b_.CreateOr(headerWord(XB_T_INT, 0, 0), width), b_.CreateFPToSI(tr, i64_));
+    storeWords(d, b_.CreateOr(headerWord(XB_T_INT, 0, 0), width), b_.CreateFPToSI(v, i64_));
     break;
   }
   case Inline::Abs: { // an integer not below 0 as it is; a negative one negated (computed width), not INT64_MIN; a
@@ -503,8 +504,7 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     Value *tenfold = b_.CreateFMul(scaled, fp(10.0));
     tenfold = b_.CreateFAdd(tenfold, b_.CreateSelect(b_.CreateFCmpOLT(tenfold, fp(0.0)), fp(-5.0), fp(5.0)));
     Value *back = b_.CreateFDiv(tenfold, fp(10.0));
-    Value *r = b_.CreateUnaryIntrinsic(Intrinsic::trunc,
-                                       b_.CreateIntrinsic(Intrinsic::fma, {f64}, {back, fp(DBL_EPSILON), back}));
+    Value *r = truncDouble(b_.CreateIntrinsic(Intrinsic::fma, {f64}, {back, fp(DBL_EPSILON), back}));
     r = b_.CreateSelect(up, b_.CreateFDiv(r, p), b_.CreateFMul(r, p));
     // 0 for 0; a number whose scaled value reaches 2^52 as it is (its own nearest rounding)
     Value *coarse = b_.CreateAnd(up, b_.CreateFCmpOGE(b_.CreateFMul(b_.CreateUnaryIntrinsic(Intrinsic::fabs, v), p),

@@ -1,0 +1,15 @@
+
+fib       6765       6765.0          1.5          0         -3 N      75025
+big .T. N         56 .T.
+assigned         28.00          0         35.00
+strings ababab          9 .T.
+by ref         11         11         12         11
+macro         55        144         89
+logical .F. .F. NIL
+date 20261119 20270101
+mutual .T. .T. .F.
+text       2000 BBBB
+pcount          2          1
+error       1081 + Argument error
+substituted sub          2.50 C
+stack STACK(114) STACK(111) STACK(111) MAIN(30) 

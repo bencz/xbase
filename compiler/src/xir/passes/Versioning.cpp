@@ -14,6 +14,17 @@
 
 namespace xb::xir {
 
+Function *dropReferenceTest(Function &f) {
+  Instruction *test = versioning(f);
+  if (!test) return nullptr;
+  Function *byRef = referenceBody(*test);
+  test->operand(0)->replaceAllUsesWith(Builder(&f).boolean(false));
+  foldConstants(f);
+  simplifyCFG(f);
+  removeDeadCode(f);
+  return byRef;
+}
+
 bool dropReferenceBodies(Module &m) {
   // What may reach each function with a reference: a call passing one or `...`, forwarding its arguments, or any
   // other use of the function (`func.ref`: Eval(), Do() and :Exec() pass what they are given).
@@ -30,14 +41,8 @@ bool dropReferenceBodies(Module &m) {
   for (auto &fp : m.functions) {
     Function &f = *fp;
     if (f.kind != Function::Kind::Program || !f.internal || f.method || f.startup || f.byRefBody) continue;
-    Instruction *test = versioning(f);
-    if (!test || calls[&f]) continue;
-    Function *byRef = referenceBody(*test);
-    test->operand(0)->replaceAllUsesWith(Builder(&f).boolean(false));
-    foldConstants(f);
-    simplifyCFG(f);
-    removeDeadCode(f);
-    dropped.insert(byRef); // only the test of `f` called it
+    if (calls[&f]) continue;
+    if (Function *byRef = dropReferenceTest(f)) dropped.insert(byRef); // only the test of `f` called it
   }
   if (dropped.empty()) return false;
   // The codeblocks those bodies make (each made by one `block` instruction, of its creator) go with them.

@@ -116,13 +116,11 @@ bool worthGuarding(const Instruction &i, const TypeInfo &types, const Loops &loo
 } // namespace
 
 bool typedContinuations(Function &f) {
-  size_t count = 0;
   for (auto &b : f.blocks) {
     if (b->unwind) return false; // unwind blocks take no parameters: the copy could not be joined there
     if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return false; // resumable: values in the frame
-    count += b->insts.size();
   }
-  if (count > kMaxInstructions) return false;
+  if (instructionCount(f) > kMaxInstructions) return false;
 
   std::vector<Instruction *> checked;
   std::unordered_set<const Instruction *> guards;

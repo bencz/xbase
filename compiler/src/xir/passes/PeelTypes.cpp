@@ -104,9 +104,7 @@ void peel(Function &f, const Loop &l) {
 } // namespace
 
 bool peelForTypes(Function &f) {
-  size_t count = 0;
-  for (auto &b : f.blocks) count += b->insts.size();
-  if (count > kMaxFunction) return false;
+  if (instructionCount(f) > kMaxFunction) return false;
   bool changed = false;
   for (unsigned n = 0; n < kMaxPeeled; ++n) {
     CFG cfg(f);

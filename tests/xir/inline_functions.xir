@@ -19,7 +19,7 @@ entry:
   inline.leave
   %13 = load $f0 maybe_ref
   %14 = binary add %2, %13
-  %15 = call FACT 3:w10
+  %15 = call FACT.typed1 3:w10
   %16 = binary add %14, %15
   ret %16
 }
@@ -46,22 +46,6 @@ body:
   ret
 }
 
-function FACT internal params 1 {
-  $f0 = frame 0 "K"
-entry:
-  %0 = load $f0
-  %1 = binary le %0, 1:w10
-  %2 = truth %1
-  cond_br %2, iif.end(1:w10), iif.else
-iif.else:
-  %4 = binary sub %0, 1:w10
-  %5 = call FACT %4
-  %6 = binary mul %0, %5
-  br iif.end(%6)
-iif.end(%8: item):
-  ret %8
-}
-
 function BUMP.byref internal params 1 {
   $f0 = frame 0 "X"
 entry:
@@ -70,4 +54,20 @@ entry:
   store $f0 maybe_ref, %1
   barrier $f0 maybe_ref
   ret
+}
+
+function FACT.typed1 internal params 1 {
+  $f0 = frame 0 "K"
+entry:
+  %0 = load $f0
+  %1 = binary le %0, 1:w10
+  %2 = truth %1
+  cond_br %2, iif.end(1:w10), iif.else
+iif.else:
+  %4 = binary sub %0, 1:w10
+  %5 = call FACT.typed1 %4
+  %6 = binary mul %0, %5
+  br iif.end(%6)
+iif.end(%8: item):
+  ret %8
 }

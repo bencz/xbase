@@ -76,6 +76,10 @@ std::unique_ptr<TargetMachine> createTargetMachine(const TargetConfig &cfg, std:
   if (!target) return nullptr;
   std::string cpu, features;
   if (!resolveCpu(cfg, triple, cpu, features, err)) return nullptr;
+  // xBase doubles are IEEE doubles, rounded after each operation: 32-bit x86 code computes them with SSE2 (every x86
+  // since the Pentium 4), not the x87 unit, whose registers keep more precision between operations. Features given
+  // explicitly come after, so they may still say otherwise.
+  if (triple.getArch() == Triple::x86) features = features.empty() ? "+sse2" : "+sse2," + features;
   TargetOptions opts;
   std::optional<Reloc::Model> rm;
   if (cfg.pic) rm = Reloc::PIC_;

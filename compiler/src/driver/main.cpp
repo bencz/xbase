@@ -260,8 +260,7 @@ const xb::xir::Function *startFunction(const std::vector<Source> &sources) {
     for (auto &f : s.xir->functions)
       if (f->kind == xb::xir::Function::Kind::Program && !f->internal && f->name == "MAIN") return f.get();
   for (const Source &s : sources)
-    for (auto &f : s.xir->functions)
-      if (f->kind == xb::xir::Function::Kind::Program && !f->startup) return f.get();
+    if (const xb::xir::Function *f = xb::xir::firstProgramFunction(*s.xir)) return f;
   return nullptr;
 }
 

@@ -33,11 +33,6 @@ constexpr size_t kMaxFunctionWithBlockInstructions = 200;
 // Nothing is inlined into a function that has grown past this.
 constexpr size_t kMaxCallerInstructions = 3000;
 
-size_t countInstructions(const std::vector<BasicBlock *> &blocks) {
-  size_t n = 0;
-  for (const BasicBlock *b : blocks) n += b->insts.size();
-  return n;
-}
 
 std::vector<BasicBlock *> allBlocks(const Function &f) {
   std::vector<BasicBlock *> out;
@@ -56,7 +51,7 @@ void eraseInstruction(Instruction *i) {
 // variable a block captures gets a fresh cell on every entry, whose store replaces the cell an earlier entry left.
 bool inlinable(const Function &callee, const std::vector<BasicBlock *> &body, size_t maxInstructions) {
   if (callee.readsParams || callee.usesRest || callee.callsPrivates) return false;
-  if (countInstructions(body) > maxInstructions) return false;
+  if (instructionCount(body) > maxInstructions) return false;
   for (const BasicBlock *blk : body) {
     if (blk->unwind) return false;
     for (auto &i : blk->insts)
@@ -70,18 +65,6 @@ bool inlinable(const Function &callee, const std::vector<BasicBlock *> &body, si
 // leave the inlined frame shown).
 bool inlinableCall(const Instruction &call) {
   return call.op == Op::Call && !call.hasRest() && !call.parent->unwind;
-}
-
-Constant *copyConstant(Function &f, const Constant &c) {
-  f.constants.push_back(std::make_unique<Constant>(c.lit, c.type()));
-  Constant *n = f.constants.back().get();
-  n->logical = c.logical;
-  n->ival = c.ival;
-  n->dval = c.dval;
-  n->width = c.width;
-  n->dec = c.dec;
-  n->str = c.str;
-  return n;
 }
 
 // A frame variable with no cell and no reference passed in: read and written directly.
@@ -343,14 +326,14 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
 // Inlines the calls found while the function stays within kMaxCallerInstructions (an Eval's block that nothing else
 // uses any more is no longer made); true when it inlined one.
 bool inlineFound(Function &f, std::vector<std::pair<Instruction *, Inlined>> &found, bool evals) {
-  size_t size = countInstructions(allBlocks(f));
+  size_t size = instructionCount(allBlocks(f));
   bool changed = false;
   for (auto &[call, in] : found) {
     if (size > kMaxCallerInstructions) break;
     auto *mk = evals ? static_cast<Instruction *>(call->operand(0)) : nullptr;
     inlineCall(f, call, in);
     if (mk && mk->users().empty()) eraseInstruction(mk);
-    size += countInstructions(in.body);
+    size += instructionCount(in.body);
     changed = true;
   }
   return changed;

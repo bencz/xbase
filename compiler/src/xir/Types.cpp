@@ -195,7 +195,16 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   case Op::FuncRef: return {typeBit(XB_T_SYMBOL), false};
   case Op::Call:
   case Op::CallForward: // what the module's function returns (its errors are its own: none substitutes the call)
+    if (!i.callee.function && i.callee.resultTypes) // a runtime function's (RESULT), unless an error substitutes it
+      return {i.callee.resultTypes & kAnyType, true};
     return {i.callee.function ? i.callee.function->returnTypes & kAnyType : kAnyType, false};
+  case Op::Load: { // a parameter of a typed copy, which no store changes: the types its calls pass
+    const Function *f = i.parent->parent;
+    const Var *v = i.var;
+    if (isParameter(v) && v->index < f->paramTypes.size() && !v->shared && i.access == Access::Direct)
+      return {f->paramTypes[v->index] & kAnyType, false};
+    return {kAnyType, false};
+  }
   default: return {kAnyType, false}; // read from memory, or made by the runtime
   }
 }

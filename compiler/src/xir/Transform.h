@@ -28,6 +28,9 @@ struct BlockCopy {
 BlockCopy copyBlocks(Function &f, const std::vector<BasicBlock *> &originals, const std::string &suffix,
                      const std::function<Value *(Value *)> &outside = {});
 
+// A constant of function `f` equal to `c` (each function holds its own constants).
+Constant *copyConstant(Function &f, const Constant &c);
+
 // A value of type `t` for a use that never runs: NIL, false, 0.
 Value *undefinedValue(Function &f, Type t);
 

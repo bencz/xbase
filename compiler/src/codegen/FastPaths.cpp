@@ -411,10 +411,17 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
   return true;
 }
 
-// `/` and `%` of two numbers and a divisor other than 0 (-0 included): a
-// double with SET DECIMALS decimals, as xb_op_div and xb_op_mod make it; `%`
-// of two integers is their remainder (0 for a divisor of -1). Anything else
-// calls the operator, which raises the errors.
+// trunc( v ) without a call (CodeGen.h).
+Value *CodeGen::truncDouble(Value *v) {
+  // Below 2^52 in magnitude through an integer (the sign kept: trunc( -0.5 ) is -0.0); a larger magnitude, an
+  // infinity or NaN is integral already, or stays itself.
+  Type *f64 = b_.getDoubleTy();
+  Value *small = b_.CreateFCmpOLT(b_.CreateUnaryIntrinsic(Intrinsic::fabs, v), ConstantFP::get(f64, XB_DBL_INTEGRAL));
+  Value *whole = b_.CreateFPToSI(b_.CreateSelect(small, v, ConstantFP::get(f64, 0.0)), i64_);
+  Value *t = b_.CreateBinaryIntrinsic(Intrinsic::copysign, b_.CreateSIToFP(whole, f64), v);
+  return b_.CreateSelect(small, t, v);
+}
+
 // fmod( x, y ) (y not 0, else anything): for two integers below 2^63 in
 // magnitude (doubles that hold integers convert to int64 exactly), their
 // integer remainder with x's sign, which is fmod's exactly (fmod's result is a
@@ -423,7 +430,7 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
 Value *CodeGen::doubleRemainder(Value *x, Value *y) {
   Type *f64 = b_.getDoubleTy();
   auto integral = [&](Value *v) {
-    Value *whole = b_.CreateFCmpOEQ(v, b_.CreateUnaryIntrinsic(Intrinsic::trunc, v));
+    Value *whole = b_.CreateFCmpOEQ(v, truncDouble(v));
     return b_.CreateAnd(whole, b_.CreateFCmpOLT(b_.CreateUnaryIntrinsic(Intrinsic::fabs, v),
                                                 ConstantFP::get(f64, 9223372036854775808.0)));
   };
@@ -452,6 +459,10 @@ Value *CodeGen::setDecimals() {
   return b_.CreateTrunc(loadFrom(i32_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxDecimals), Mem::Ctx), i16_);
 }
 
+// `/` and `%` of two numbers and a divisor other than 0 (-0 included): a
+// double with SET DECIMALS decimals, as xb_op_div and xb_op_mod make it; `%`
+// of two integers is their remainder (0 for a divisor of -1). Anything else
+// calls the operator, which raises the errors.
 void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *d) {
   BasicBlock *dblBB = newBlock("double"), *other = newBlock("other"), *numBB = newBlock("num");
   BasicBlock *slow = newBlock("op"), *join = newBlock("join");

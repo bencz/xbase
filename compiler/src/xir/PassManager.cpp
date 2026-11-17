@@ -6,6 +6,8 @@
 #include "xir/Verifier.h"
 #include "xir/passes/Passes.h"
 
+#include <functional>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -96,17 +98,35 @@ std::string optimize(Module &m, bool final) {
     for (auto &f : m.functions)
       if (std::string report = verify(m, *f); !report.empty() && bad.empty())
         bad = "after drop-reference-bodies: " + report;
-  for (Function *f : calleesFirst(m)) {
+  auto rounds = [&](Function &f) {
     for (unsigned round = 0; round < kMaxRounds && bad.empty(); ++round) {
       bool changed = false;
       for (const Pass &p : kPipeline)
-        if (bad.empty()) changed |= run(p, *f);
+        if (bad.empty()) changed |= run(p, f);
       if (!changed) break;
     }
+  };
+  // Calls whose arguments have types a typed copy takes go to it (made and optimized at once, before the caller uses
+  // what it returns); the caller's pipeline runs again on what its callees now tell of their results.
+  TypedCopies copies;
+  std::function<void(Function &)> optimizeCopy = [&](Function &c) {
+    if (std::string report = verify(m, c); !report.empty() && bad.empty())
+      bad = "after specialize-calls: " + report;
+    rounds(c);
+    if (bad.empty() && specializeCalls(m, c, copies, optimizeCopy)) rounds(c);
+    settleReturnTypes(c);
+  };
+  for (Function *f : calleesFirst(m)) {
+    rounds(*f);
+    if (bad.empty() && specializeCalls(m, *f, copies, optimizeCopy)) rounds(*f);
     // What its callers, optimized after it, know of its result (a function of a cycle entered before it is not
     // narrowed yet, so it gives every type there).
     f->returnTypes = returnTypes(*f);
   }
+  if (bad.empty() && dropCopiedFunctions(m, copies))
+    for (auto &f : m.functions)
+      if (std::string report = verify(m, *f); !report.empty() && bad.empty())
+        bad = "after dropping copied functions: " + report;
   if (final) // on the functions inlining copied in too (optimized where they come from)
     for (auto &f : m.functions)
       for (const Pass &p : kFinal)

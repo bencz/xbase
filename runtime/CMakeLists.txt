@@ -120,3 +120,9 @@ xb_target_warnings(xbrt)
 if(MSVC)
   target_compile_options(xbrt PRIVATE /volatile:ms)
 endif()
+# Doubles rounded after each operation, as xbc's code computes them: on 32-bit x86 with SSE2, not the x87 unit (MSVC
+# uses SSE2 there by default).
+if(NOT MSVC AND CMAKE_C_SIZEOF_DATA_PTR EQUAL 4 AND (XB_TARGET MATCHES "^i[3-6]86" OR
+   (NOT XB_TARGET AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86)$")))
+  target_compile_options(xbrt PRIVATE -msse2 -mfpmath=sse)
+endif()

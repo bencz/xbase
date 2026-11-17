@@ -233,6 +233,7 @@ Callee Generator::calleeOf(const CallExpr &c) {
     callee.native = c.callee && c.callee->native;
     callee.readsCallerArgs = c.callee && c.callee->args;
     callee.fold = c.callee && c.callee->fold;
+    callee.resultTypes = c.callee ? c.callee->resultTypes : 0;
     if (c.callee) callee.byref = c.callee->refMask();
   } else {
     callee.function = funcs_.at(c.name);

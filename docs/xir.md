@@ -97,7 +97,10 @@ dates and numbers a date; the bit operators on numbers an integer; ...; `=`, `==
 left, any type: its class may define the operator, whose method gives the result even where the operands make no
 error, as in `o == NIL`; other operators on an object fail without one, which counts),
 `unary` (`~` gives an integer), `from_bool`,
-literals and the constructors give their type, a call of a function of the module (or `call.forward`) gives the types
+literals and the constructors give their type, a parameter of a typed copy the types its calls pass
+(`Function::paramTypes`, `specialize-calls` below), a call of a runtime function declared with `RESULT` the types it
+returns or, when it fails, the value an error block substitutes (any type, unless `subst.check` follows), a call of a
+function of the module (or `call.forward`) gives the types
 its `RETURN`s give (`Function::returnTypes`, below), and anything else read from memory (a variable, an element,
 another call's result) may hold any type. The lowering uses it to keep values that never refer to a heap object out of
 the frame ([compiler.md](compiler.md#xir-to-llvm)), where a value has a single possible type, uses it as a constant
@@ -233,6 +236,21 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   `subst.check` with a mask (`imm`, the number types) right after the value, into the same copy otherwise, so the loop
   keeps its values typed and out of the frame. The guarded value itself keeps a home the collector sees
   (`xir::guarded`): until its check it may hold anything, and the pending test after a call may collect.
+- `specialize-calls`, on each function after its pipeline (then the pipeline again when it changed it): a call of a
+  function of the module (a `FUNCTION` or `PROCEDURE` with parameters, not a method, an `INIT` or `EXIT` procedure, a
+  body versioned for references, one that reads its arguments as received (`PCount()`, `PValue()`, `...`), a
+  generator, an `ASYNC` function, nor one that makes codeblocks or has unwind blocks; at most 2000 instructions) that
+  passes no reference nor `...` and whose arguments the type inference finds all numbers, all logicals or all dates for
+  some parameter goes to a copy of the function typed for them (`NAME.typedN`, at most 4 a function, shown on the call
+  stack as the function: `stackName`): the copy's parameters have those types (`Function::paramTypes`; a parameter the
+  body writes keeps any type), its versioning test is false (no call of it passes a reference) and its body versioned
+  for references goes. The copy is made once per function and parameter types, optimized at once (its own calls with
+  such arguments go to it, so a recursive function calls its copy), and its return types are the least fixed point of
+  what its `RETURN`s give with its calls of itself giving the types found so far, from none (`settleReturnTypes`).
+  Once every function is done, a `STATIC FUNCTION` its copies replaced, which no root reaches any more, leaves the
+  module with its body versioned for references (`dropCopiedFunctions`; the module's first function, which may be the
+  program's start, `firstProgramFunction`, stays). `Fib( n - 1 ) + Fib( n - 2 )` then computes with numbers in
+  registers.
 - `peel-for-types`, after `typed-continuations`: a small innermost loop (at most 80 instructions, in a function of at
   most 600; up to 4 loops) without a suspension point or an inlined body's frame, one of whose header's parameters gets
   one number type from the loop's passes and another number type from outside (a sum that starts at the integer 0 and

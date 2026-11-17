@@ -5,6 +5,19 @@
 
 namespace xb::xir {
 
+Constant *copyConstant(Function &f, const Constant &c) {
+  f.constants.push_back(std::make_unique<Constant>(c.lit, c.type()));
+  Constant *n = f.constants.back().get();
+  n->logical = c.logical;
+  n->ival = c.ival;
+  n->dval = c.dval;
+  n->width = c.width;
+  n->dec = c.dec;
+  n->str = c.str;
+  return n;
+}
+
+
 BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k) {
   BasicBlock *tail = f.addBlock(b->name);
   for (size_t j = k + 1; j < b->insts.size(); ++j) {

@@ -512,6 +512,8 @@ struct ExternDecl {
   bool params = false;           // PARAMS: ARGS, and reads and writes that function's parameters (PValue)
   bool privates = false;         // PRIVATES: creates PRIVATEs of the function calling it (RESTORE)
   uint32_t abbrev = 0;           // ABBREV n: shortest accepted abbreviation (0: none)
+  uint32_t resultTypes = 0;      // RESULT letters: the type tags (a bit each) of what a call that raises no error
+                                 // gives; 0: any
   std::vector<bool> byRef;       // NATIVE: per parameter, `@name`: receives a reference passed to it
   bool restByRef = false;        // NATIVE: `@...`: so do the arguments past the named parameters
   static constexpr uint32_t kUnlimited = UINT32_MAX;
