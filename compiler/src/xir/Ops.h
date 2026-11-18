@@ -89,6 +89,7 @@ enum class Op : uint8_t {
   UnboxI64,       // Item -> I64: the integer such an item holds
   UnboxBool,      // Item -> Bool: the logical such an item holds
   GenNew,         // callee: a generator's resume function; args -> Item: the enumerator, its arguments saved
+  AgenNew,        // callee: an asynchronous generator's resume function; args -> Item: its enumerator, as gen.new
   GenRestore,     // var: the enumerator (parameter 0) -> I64: its frame back from the enumerator; the state to resume
                   // in (0 at the start)
   GenDone,        // var: the generator ended: the enumerator has no more elements
@@ -114,6 +115,8 @@ enum class Op : uint8_t {
                   // and state `index` goes on at the target
   AsyncSuspend,   // var, index: Item; resume: the task awaited, the frame saved in the task; the step returns, and
                   // point `index` goes on at the target once the awaited task ended
+  AsyncYield,     // var, index: Item; resume: an asynchronous generator's YIELD of the element, the frame saved in the
+                  // task; the step returns, and point `index` goes on at the target at the next MoveNextAsync()
   Ret,            // [Item]
 };
 
@@ -157,6 +160,6 @@ const OpInfo &opInfo(Op op);
 inline const char *opName(Op op) { return opInfo(op).name; }
 inline bool isTerminator(Op op) { return (opInfo(op).effects & Terminator) != 0; }
 // A resumable function's step ends there; the next one goes on at its target (Resumable.cpp).
-inline bool isSuspension(Op op) { return op == Op::GenYield || op == Op::AsyncSuspend; }
+inline bool isSuspension(Op op) { return op == Op::GenYield || op == Op::AsyncSuspend || op == Op::AsyncYield; }
 
 } // namespace xb::xir

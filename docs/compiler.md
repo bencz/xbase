@@ -126,7 +126,9 @@ Statements:
   it. Not in a codeblock, nor in any part of a `BEGIN SEQUENCE` with `ALWAYS`, a `TRY` with `FINALLY` or a `USING` (a
   generator left before its end would never run that code); in another sequence an error of a later step reaches its
   `RECOVER` or `CATCH`, and between the steps the caller runs with its own error block. A generator takes no `...`,
-  reads no arguments as received (`PCount()`, `PValue()`, `PARAMETERS`) and creates no `PRIVATE` or `PUBLIC`.
+  reads no arguments as received (`PCount()`, `PValue()`, `PARAMETERS`) and, unless it is `ASYNC`, creates no `PRIVATE`
+  or `PUBLIC` (its steps run in its caller's environment). `YIELD` in an `ASYNC` function makes it an asynchronous
+  generator ([concurrency.md](concurrency.md#language)).
 - `ASYNC FUNCTION`, `ASYNC PROCEDURE`, `ASYNC METHOD` (also after `STATIC`, `INIT` or `EXIT`; a class declares
   `ASYNC METHOD name` and its implementation must be `ASYNC` too, and not `INLINE`) make an asynchronous function
   ([concurrency.md](concurrency.md#asynchronous-functions)); `AWAIT expr` is a unary operator, at the level of `-`
@@ -153,9 +155,11 @@ Statements:
   program can write) take, in order, `__AwaitEach( expr )` (the asynchronous enumerator), the values of `x` and `k` to
   put back and a position; then a sequence whose body is `DO WHILE AWAIT e:MoveNextAsync()`, `x := IIF(
   __AwaitEachAwaits( e ), AWAIT e:Current, e:Current )`, `k := __AwaitEachKey( e, ++position )`, then the body, and
-  whose `ALWAYS` code puts `x` and `k` back on every way out, as `FOR EACH` does. One variable (with its key) and one
-  collection, neither a field; not `DESCEND`, whose elements would all be needed first; not `YIELD` in the body (`YIELD
-  cannot be inside AWAIT FOR EACH`: the `ALWAYS` code would not run for a generator left there).
+  whose `ALWAYS` code puts `x` and `k` back on every way out, as `FOR EACH` does. That sequence is marked
+  `SequenceStmt::restoresOnly`: its `ALWAYS` code only puts variables back, so `YIELD` may stand in the body of an
+  asynchronous generator (one left there leaves them as they are, as `FOR EACH` does); in a synchronous generator (the
+  start procedure) `YIELD cannot be inside AWAIT FOR EACH`. One variable (with its key) and one collection, neither a
+  field; not `DESCEND`, whose elements would all be needed first.
 - `USING [v :=] expr ... END` (`END USING` too): `expr` is evaluated once into a `LOCAL` of its own
   (`UsingStmt::hidden`, a name no program can write), then `v` (when written) is assigned from it and the body runs;
   however they end (their end, `RETURN`, `EXIT`, `LOOP`, a `BREAK`, an error, `QUIT`), `__Dispose()` sends the value
@@ -462,6 +466,11 @@ the result before it goes further (an invalid xIR is an internal error). From `-
   functions (`fusedCallee`) or of a message evaluates the arguments, then `await.fuse` (the entry, none for a message),
   the call, and `await.fused`: when it holds, the call's value is the result itself; otherwise the `AWAIT` of that
   task. The entry is hidden from the call stack (the resume function shows, with its caller below in the first step).
+- An asynchronous generator (`YIELD` in an `ASYNC` function) is generated as an `ASYNC` function but for its entry,
+  which returns `agen.new` of its resume function with its arguments (`xb_agen_new`: the enumerator, nothing run; the
+  entry is no `AWAIT`'s fused callee and shows on the call stack, as a generator's does), and its `YIELD`, the
+  terminator `async.yield` (`xb_async_yield`: the frame saved in the task, the element in the enumerator; point k goes
+  on at the next `MoveNextAsync()`). `RETURN` and the end return: the task ends, which ends the enumeration.
 - A codeblock becomes an xIR function of its own (`<function>.blockN`) whose frame holds its parameters; `block`
   creates it with the cells of the variables it captures (moving them into cells if they are not yet).
 - `STATIC` initializers form the module initialization function.

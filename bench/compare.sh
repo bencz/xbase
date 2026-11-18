@@ -49,7 +49,7 @@ declare -A TITLE=([xbase]=xbase [harbour]=Harbour [c]=C [rust]=Rust [csharp]=C# 
                   [node]=JavaScript [pypy]="Python (PyPy)" [python]="Python (CPython)")
 # What Harbour has no counterpart of (YIELD, a pool of tasks, bounded channels, ASYNC); those of its own forms in
 # bench/harbour/ that run threads, built with its threaded runtime.
-HARBOUR_SKIP=" generator tasks channels async "
+HARBOUR_SKIP=" generator tasks channels async async_generator "
 HARBOUR_MT=" async_pi "
 declare -A JAVA=([fib]=Fib [loops]=Loops [sieve]=Sieve [matmul]=MatMul [qsort]=QSort [asort]=ASort [strings]=Strings
                  [crc32]=Crc32 [float]=FloatBench [mixed]=Mixed [oop]=Oop [gc]=Gc [bitlookup]=BitLookup

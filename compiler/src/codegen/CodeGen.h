@@ -312,6 +312,7 @@ private:
   llvm::FunctionCallee rtSendFrom_, rtClassInstance_, rtClassesRegister_, rtObjectGet_, rtObjectSet_;
   llvm::FunctionCallee rtGenNew_, rtGenRestore_, rtGenYield_, rtGenDone_;
   llvm::FunctionCallee rtAsyncNew_, rtAsyncRestore_, rtAsyncSuspend_, rtAwaitReady_, rtAwaitResult_, rtAwaitWait_;
+  llvm::FunctionCallee rtAgenNew_, rtAsyncYield_;
   llvm::FunctionCallee rtAwaitFuse_, rtAwaitFused_;
   llvm::GlobalVariable *classTable_ = nullptr; // the module's xb_class_def array, or null
   void genClasses(const xir::Module &m);

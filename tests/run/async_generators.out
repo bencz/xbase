@@ -1,0 +1,22 @@
+
+lazy:          0
+await each: 10 20 30  started:          1
+by hand: .T.         10 .T.         20 .F. .F.         20
+for each: 10 20 30 40  consumer:        150
+never suspends: .T. .T.         10 .T. .T.
+nothing: .F.
+fails: first .T. one then BASE/1081 Argument error + then .F.
+second while one waits: BASE/9035 Enumerator waiting already ASYNCGENERATOR:MOVENEXTASYNC first: .T.         10
+canceled: .T. .T. then .F.
+the element yielded after the cancel: U
+chained: 40 80 120 160 
+exit inside: 10 20 30 -1  then return: 50 
+private loop variable: 10 20 outer  outer
+try inside: 1 caught + 3 
+private of the body: .T. inner U outer
+another thread: 10 20 30 
+elements: .T. U .T.          3
+method: 101 102 103 
+first step here, the rest on a thread: 10 20 30
+inside a handled sequence: 0.33 1.00 3.00 -1 
+abandoned: collected

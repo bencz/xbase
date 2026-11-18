@@ -1,0 +1,4 @@
+
+main returns, waiting: .T.
+at the end: canceled .T. completed .T.
+then: .F.

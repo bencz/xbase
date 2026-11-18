@@ -137,9 +137,52 @@ void xb_thread_join(xb_thread t) {
   free(t);
 }
 
+/* The handles of the threads detached (xb_platform_threads_wait), under their lock: those that ended are closed when
+ * the list is full, so a program that starts threads again and again keeps few. */
+static SRWLOCK detachedLock = SRWLOCK_INIT;
+static HANDLE *detached;
+static size_t detachedLen, detachedCap;
+/* How long the program's end waits for the threads still finishing (they have run their last code of the runtime's,
+ * so they end at once: the limit keeps a system that stalls one from holding the process). */
+#define THREADS_END_WAIT_MS 5000u
+
 void xb_thread_detach(xb_thread t) {
-  CloseHandle(t->thread);
+  HANDLE h = t->thread;
+  AcquireSRWLockExclusive(&detachedLock);
+  if (detachedLen == detachedCap) { /* the ended ones closed, then room made if still full */
+    size_t kept = 0;
+    for (size_t i = 0; i < detachedLen; ++i) {
+      if (WaitForSingleObject(detached[i], 0) == WAIT_OBJECT_0) CloseHandle(detached[i]);
+      else detached[kept++] = detached[i];
+    }
+    detachedLen = kept;
+  }
+  if (detachedLen == detachedCap) {
+    size_t cap = detachedCap ? detachedCap * 2 : 64;
+    HANDLE *grown = realloc(detached, cap * sizeof *grown);
+    if (grown) {
+      detached = grown;
+      detachedCap = cap;
+    }
+  }
+  if (detachedLen < detachedCap) {
+    detached[detachedLen++] = h;
+    h = NULL;
+  }
+  ReleaseSRWLockExclusive(&detachedLock);
+  if (h) CloseHandle(h); /* no memory to keep it: not waited for */
   if (InterlockedDecrement(&t->holders) == 0) free(t); /* it has ended */
+}
+
+void xb_platform_threads_wait(void) {
+  AcquireSRWLockExclusive(&detachedLock);
+  for (size_t i = 0; i < detachedLen; i += MAXIMUM_WAIT_OBJECTS) {
+    size_t n = detachedLen - i < MAXIMUM_WAIT_OBJECTS ? detachedLen - i : MAXIMUM_WAIT_OBJECTS;
+    WaitForMultipleObjects((DWORD)n, detached + i, TRUE, THREADS_END_WAIT_MS);
+  }
+  for (size_t i = 0; i < detachedLen; ++i) CloseHandle(detached[i]);
+  detachedLen = 0;
+  ReleaseSRWLockExclusive(&detachedLock);
 }
 
 void xb_thread_yield(void) { SwitchToThread(); }

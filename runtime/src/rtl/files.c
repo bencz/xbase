@@ -99,7 +99,8 @@ void xbf_FREAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     int32_t err = 0;
     if (n < 1 || (uint64_t)n > len) { /* nothing is read, but the handle is still checked: FError() 6 for a bad one */
       char none;
-      set_error(ctx, xb_platform_file_read(f, &none, 0, &err) >= 0, err);
+      int ok = xb_platform_file_read(f, &none, 0, &err) >= 0; /* before `err` is read: argument order is unspecified */
+      set_error(ctx, ok, err);
     } else {
       xb_set_str(&buffer[1], xb_str_alloc(len));
       memcpy(buffer[1].v.s->data, buffer[0].v.s->data, len);

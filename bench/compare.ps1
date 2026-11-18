@@ -36,7 +36,7 @@ $Title = @{ xbase = "xbase"; harbour = "Harbour"; c = "C"; rust = "Rust"; csharp
             node = "JavaScript"; pypy = "Python (PyPy)"; python = "Python (CPython)" }
 # What Harbour has no counterpart of (YIELD, a pool of tasks, bounded channels, ASYNC); those of its own forms in
 # bench/harbour/ that run threads, built with its threaded runtime.
-$HarbourSkip = "generator", "tasks", "channels", "async"
+$HarbourSkip = "generator", "tasks", "channels", "async", "async_generator"
 $HarbourMt = "async_pi"
 $Java = @{ fib = "Fib"; loops = "Loops"; sieve = "Sieve"; matmul = "MatMul"; qsort = "QSort"; asort = "ASort";
            strings = "Strings"; crc32 = "Crc32"; float = "FloatBench"; mixed = "Mixed"; oop = "Oop"; gc = "Gc";

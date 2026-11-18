@@ -15,8 +15,8 @@ bool isItemResult(const Value *v) { return v->kind() == Value::Kind::Instruction
 // Operations whose operands go in consecutive slots (a call to a direct entry passes words in registers).
 bool isGroupUser(const Instruction &i) {
   return (i.op == Op::Call && !isDirectCall(i)) || i.op == Op::Send || i.op == Op::SendMacro || i.op == Op::ArrayLit ||
-         i.op == Op::HashLit || i.op == Op::MacroCall || i.op == Op::GenNew || i.op == Op::AsyncNew ||
-         i.op == Op::InlineEnter;
+         i.op == Op::HashLit || i.op == Op::MacroCall || i.op == Op::GenNew || i.op == Op::AgenNew ||
+         i.op == Op::AsyncNew || i.op == Op::InlineEnter;
 }
 
 } // namespace

@@ -83,7 +83,7 @@ Function *Generator::declare(const FuncDecl &f) {
   case FuncDecl::Startup::Exit: mod_->exitProcs.push_back(fn); break;
   }
   fn->startup = f.startup != FuncDecl::Startup::None;
-  if (f.async) asyncEntries_.insert(fn);
+  if (f.async && !f.generator) asyncEntries_.insert(fn); // an asynchronous generator's call makes no task
   return fn;
 }
 
@@ -139,7 +139,8 @@ void Generator::genResumable(const FuncDecl &f, Function *fn) {
   cur_.fn = fn;
   cur_.b = std::make_unique<Builder>(fn);
   fn->stackName = f.name;
-  fn->hidden = (runtimeLibrary_ && f.isStatic) || f.async; // the call stack shows its resume function, running
+  // an ASYNC function's entry: the call stack shows its resume function, running (a generator's runs later)
+  fn->hidden = (runtimeLibrary_ && f.isStatic) || (f.async && !f.generator);
   fn->numParams = (uint32_t)f.params.size() - 1;
   fn->method = f.ofClass != nullptr;
   Builder &b = *cur_.b;
@@ -151,7 +152,8 @@ void Generator::genResumable(const FuncDecl &f, Function *fn) {
     p->param = true;
     args.push_back(b.load(p, Access::MaybeRef)); // the values: references are not kept
   }
-  b.ret(f.async ? b.asyncNew(fn, resume, args) : b.genNew(resume, args));
+  if (f.async && f.generator) b.ret(b.agenNew(resume, args));
+  else b.ret(f.async ? b.asyncNew(fn, resume, args) : b.genNew(resume, args));
 }
 
 // The frame holds the parameters, then the LOCALs; a shared one moves into a

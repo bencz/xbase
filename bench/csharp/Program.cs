@@ -29,6 +29,7 @@ static class Program {
     case "channels": await ChannelsBench.Run(); break;
     case "async": await AsyncBench.Run(); break;
     case "async_pi": await AsyncPi.Run(); break;
+    case "async_generator": await AsyncGeneratorBench.Run(); break;
     default: Console.Error.WriteLine("usage: Bench <name>"); Environment.Exit(2); break;
     }
   }

@@ -90,6 +90,11 @@ typedef struct xb_thread_impl *xb_thread;
 int xb_thread_start(xb_thread *t, size_t stack_size, void (*fn)(void *), void *arg);
 void xb_thread_join(xb_thread t);
 void xb_thread_detach(xb_thread t);
+/* Waits until every thread detached so far has ended at the system's level (past its last instruction), for the
+ * process to end alone: on Windows a thread that ends while the process exits can give the process its own exit code
+ * instead of the one the program set. POSIX systems end every thread with the process and keep the code given: nothing
+ * to wait for. Called when those threads are known to be leaving (the program's end waited for them). */
+void xb_platform_threads_wait(void);
 void xb_thread_yield(void);
 
 /* The calling thread's stack as the system reserved it: `*low` the lowest address code may use (above its guard

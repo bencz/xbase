@@ -36,7 +36,8 @@ void Generator::genStmt(const Stmt &s) {
     std::vector<std::pair<Var *, Value *>> setAside = setHandlersAside();
     BasicBlock *resume = cur_.fn->addBlock("gen.resume");
     cur_.resumes.push_back(resume);
-    b.genYield(frameVar(0), value, resume, (uint32_t)cur_.resumes.size());
+    if (cur_.async) b.asyncYield(frameVar(0), value, resume, (uint32_t)cur_.resumes.size());
+    else b.genYield(frameVar(0), value, resume, (uint32_t)cur_.resumes.size());
     b.setBlock(resume);
     takeHandlersBack(setAside);
     break;
@@ -152,7 +153,8 @@ void Generator::genReturn(const ReturnStmt &r) {
   Builder &b = *cur_.b;
   Value *value = r.value ? genExpr(*r.value) : nullptr;
   exitCleanups(0, true);
-  if (cur_.generator) { // the end of the enumeration (Sema allows no value)
+  if (cur_.generator && !cur_.async) { // the end of the enumeration (Sema allows no value); an asynchronous
+                                       // generator's task ends, which ends its enumeration
     b.genDone(frameVar(0));
     b.ret(b.logical(false));
   } else {

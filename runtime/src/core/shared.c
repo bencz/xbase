@@ -159,7 +159,9 @@ static void visit(walk *w, const xb_item *it) {
   if (!xb_type_is_heap(it->type)) return;
   if (it->type == XB_T_STRING && (it->v.s->flags & XB_STR_STATIC)) return; /* no heap object: it never changes */
   void *obj = it->v.p;
-  if (xb_atomic_or8(&xb_gc_header(obj)->state, XB_GC_SHARED, XB_RELAXED) & XB_GC_SHARED) return; /* shared already */
+  /* shared already: a load sees it (sharing is never undone), else the read-modify-write decides between threads */
+  if (xb_atomic_load8(&xb_gc_header(obj)->state, XB_RELAXED) & XB_GC_SHARED) return;
+  if (xb_atomic_or8(&xb_gc_header(obj)->state, XB_GC_SHARED, XB_RELAXED) & XB_GC_SHARED) return;
   if (w->len == w->cap) {
     size_t n = w->cap ? w->cap * 2 : 64;
     void **list = realloc(w->objs, n * sizeof *list);

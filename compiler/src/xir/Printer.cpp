@@ -191,7 +191,9 @@ private:
     case Op::ParamsRef:
       for (Var *c : i.captures) out_ += " " + varName(*c);
       break;
-    case Op::CallForward: case Op::GenNew: case Op::AsyncNew: out_ += " " + i.callee.function->name; break;
+    case Op::CallForward: case Op::GenNew: case Op::AgenNew: case Op::AsyncNew:
+      out_ += " " + i.callee.function->name;
+      break;
     case Op::AwaitFuse: out_ += i.callee.function ? " " + i.callee.function->name : std::string(" send"); break;
     default:
       break;

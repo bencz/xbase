@@ -387,6 +387,7 @@ StmtPtr Parser::parseAwaitEach() {
   auto seq = std::make_unique<SequenceStmt>(openLoc);
   seq->leavable = true;
   seq->hasAlways = true;
+  seq->restoresOnly = true;
   auto send = [&](const char *message) {
     auto s = std::make_unique<SendExpr>(openLoc, var(hidden("ENUMERATOR")), message);
     s->withArgs = true;

@@ -268,7 +268,7 @@ private:
     case Op::BoxI64: expect(i, 1, {Type::I64}); break;
     case Op::BoxBool: expect(i, 1, {Type::Bool}); break;
     case Op::UnboxI64: case Op::UnboxBool: expect(i, 1, {Type::Item}); break;
-    case Op::GenNew: case Op::AsyncNew:
+    case Op::GenNew: case Op::AgenNew: case Op::AsyncNew:
       allItems(i);
       if (!i.callee.function) fail(std::string(opName(i.op)) + " without a resume function");
       if (i.op == Op::AsyncNew && !i.blockFn) fail("async.new without its entry");
@@ -339,7 +339,7 @@ private:
       }
       break;
     }
-    case Op::GenYield: case Op::AsyncSuspend:
+    case Op::GenYield: case Op::AsyncSuspend: case Op::AsyncYield:
       expect(i, 1, {Type::Item});
       holderVar(i);
       if (i.targets.size() != 1 || !owned_.count(i.targets[0].block) || !i.targets[0].args.empty() ||

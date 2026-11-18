@@ -13,9 +13,10 @@ Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar
 **FUNCTION**, **PROCEDURE**, **LOCAL**, **STATIC**, **RETURN**, **IF**, **DO CASE**, **SWITCH**, **WHILE**, **FOR**,
 **FOR EACH**, **EXIT**, **LOOP**, **DO ... WITH**, **PRIVATE**, **PUBLIC**, **MEMVAR**, **FIELD**, **PARAMETERS**,
 **INIT PROCEDURE**, **EXIT PROCEDURE**, **EXTERN FUNCTION** (an xbase declaration), **BEGIN SEQUENCE** (with `WITH` and
-`ALWAYS`), **TRY** (an xbase statement), **WITH OBJECT**, **USING** (an xbase statement), **YIELD** (generators),
-**ASYNC FUNCTION**, **ASYNC PROCEDURE**, **ASYNC METHOD**, the **AWAIT** operator and **AWAIT FOR EACH** (xbase's own),
-**DECLARE**, **EXTERNAL** (Clipper's name list), **ANNOUNCE**, **CLASS ... ENDCLASS** and **METHOD** (xbase's classes)
+`ALWAYS`), **TRY** (an xbase statement), **WITH OBJECT**, **USING** (an xbase statement), **YIELD** (generators;
+asynchronous ones in `ASYNC` functions), **ASYNC FUNCTION**, **ASYNC PROCEDURE**, **ASYNC METHOD**, the **AWAIT**
+operator and **AWAIT FOR EACH** (xbase's own), **DECLARE**, **EXTERNAL** (Clipper's name list), **ANNOUNCE**, **CLASS
+... ENDCLASS** and **METHOD** (xbase's classes)
 
 ## Commands (std.ch)
 

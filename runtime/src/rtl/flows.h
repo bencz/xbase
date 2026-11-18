@@ -102,8 +102,9 @@ enum { XB_WAIT_QUIT = -1, XB_WAIT_TIMED_OUT, XB_WAIT_CHANGED };
 
 /* Waits while the word of `object`'s variable `k` is `value`, until the monotonic clock reaches `deadline` (< 0: no
  * limit), in a blocking operation (collections go on without the waiter); a QUIT wakes it (the context's waitingOn),
- * and so does the program's end (code an ALWAYS runs while a QUIT is set aside waits no more). `object` is an item
- * that keeps the object. xb_wait_while: no limit, 1 once the word changed, 0 for a QUIT or the program's end. */
+ * and so does the program's end for code an ALWAYS runs while a QUIT is set aside (others wait for the QUIT that comes
+ * to them: they leave with it pending). `object` is an item that keeps the object. xb_wait_while: no limit, 1 once the
+ * word changed, 0 for a QUIT or the program's end. */
 int xb_wait_until(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value, int64_t deadline);
 int xb_wait_while(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value);
 
@@ -157,5 +158,21 @@ void xb_task_completed(xb_ctx *ctx, xb_item *r, const xb_item *value);
 /* Waits for a task to end (no limit): 1 with its result in `*out` when it completed; 0 when it failed, was canceled,
  * or a QUIT ended the wait. */
 int xb_task_wait_result(xb_ctx *ctx, const xb_item *task, xb_item *out);
+
+/* Asynchronous generators (rtl/agen.c): the body runs as an asynchronous function's steps (rtl/tasks.c) whose step
+ * record knows the enumerator `gen`. xb_async_gen_start runs its first step on the caller's thread, the arguments
+ * `argv` (stable while it runs); at a YIELD (xb_async_yield) the body's task parks, waiting for nothing, and
+ * xb_agen_yield takes `*value` as the element and the task `*task`, which the next MoveNextAsync() resumes
+ * (xb_task_resume: its step at once on this thread when `here` (the caller found room on the stack), 1; else
+ * scheduled on a worker, 0). A body's task canceled before it ran again (the program's end) tells its enumerator.
+ * xb_agen_step_awaits, before a step that suspends at an AWAIT is registered (nothing can resume it yet), and
+ * xb_agen_step_ended, after every step's own end, tell the enumerator how it ended (XB_AGEN_*; `*failure` the value of
+ * one that failed). */
+enum { XB_AGEN_YIELDED = 1, XB_AGEN_AWAITING, XB_AGEN_ENDED, XB_AGEN_FAILED, XB_AGEN_CANCELED };
+void xb_async_gen_start(xb_ctx *ctx, const xb_item *gen, xb_func resume, uint32_t argc, const xb_item *argv);
+void xb_agen_yield(xb_ctx *ctx, const xb_item *gen, const xb_item *value, const xb_item *task);
+void xb_agen_step_awaits(xb_ctx *ctx, const xb_item *gen);
+int xb_task_resume(xb_ctx *ctx, const xb_item *task, int here);
+void xb_agen_step_ended(xb_ctx *ctx, const xb_item *gen, int outcome, const xb_item *failure);
 
 #endif

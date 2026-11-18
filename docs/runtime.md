@@ -548,6 +548,38 @@ made. A request ends at an error (`raise`), where an unwinding stops (`xb_seq_ca
 none outlives the `AWAIT` that made it. A step runs as its function's flow (`xb_flow_enter`; the number in the task,
 `V_FLOW`), so a lock it holds goes with it across `AWAIT`.
 
+### Asynchronous generators
+
+`rtl/agen.c` ([concurrency.md](concurrency.md#language)). An asynchronous generator's enumerator is an object of the
+runtime class `ASYNCGENERATOR` (`xb_agen_new`): `Current` (read only), a state word (idle, running, yielded, done), its
+resume function, its arguments until the body starts, the task of the `MoveNextAsync()` that waits, the body's task once
+it parked at a `YIELD`, and an element kept apart. The body runs as an asynchronous function's steps (`rtl/tasks.c`)
+whose step record knows the enumerator (`xb_async_step.gen`; the body's task keeps it in its `V_TASKS` variable, which
+no combinator uses there). At a `YIELD`, `xb_async_yield` saves the frame and parks the task: it waits for nothing (no
+continuation, and it is not shared: only the enumerator reaches it, which shares it as it takes it when it is shared
+itself), and the enumerator takes the element and, the first time, the task, the same to the body's end
+(`xb_agen_yield`): the element is `Current` at once, or, when a token may cancel that `MoveNextAsync()` (a flag in the
+state word), kept apart until the step's end makes it `Current` (dropped when it was canceled). Each variable is written
+only when it changes, since a shared enumerator's writes take a stripe's lock. `MoveNextAsync( [oToken] )` takes the
+state to running with one compare-and-swap; from idle it runs the first step on the caller's thread
+(`xb_async_gen_start`, the arguments copied where nothing moves them, any fused `AWAIT` request ended), from yielded it
+resumes the parked task (`xb_task_resume`: its step right there when the stack has room, else the task shared and
+scheduled on a worker). Its task is made before the step only when a token may cancel it or the step goes to a worker;
+otherwise the step tells how it ended to that `MoveNextAsync()` on its thread (a thread-local request): a step that
+yielded or ended gives the task completed with `.T.` (the one task all share) or `.F.`, one that failed a task failed
+with the error, and one that suspends at an `AWAIT` makes the waiting task then, before anything can resume it
+(`xb_agen_step_awaits`). After every step's own end, `xb_agen_step_ended` settles the waiting task (claimed, unless its
+token canceled it): a step that yielded leaves the state yielded and completes it with `.T.`; one that ended completes
+it with `.F.`, one that failed fails it with the error, a `QUIT` cancels it, and those leave the state done (`.F.` from
+then on). The state is stored before the task completes, so its waiter finds it. A body's task canceled before it ran
+again (queued at the program's end, `xb_task_cancel`) cancels that waiting task too. A `MoveNextAsync()` decides once
+whether the step runs on its thread (`xb_stack_room`), and passes that decision on. A canceled task ends the
+enumeration: while the body runs, a `MoveNextAsync()` that finds its waiting task ended answers `.F.`, and the step that
+then yields finds it canceled and makes the state done. Another `MoveNextAsync()` while one waits raises `BASE/9035`.
+`MoveNext()` is `MoveNextAsync()` waited for (`xb_await_wait`: a failure raised as `Result` raises it). A million
+elements of a body that does not suspend, through `AWAIT FOR EACH`: about 85 ms (half of it the parking of the body's
+environment).
+
 ## Classes
 
 Classes compiled from xBase (`types/class.c`, `xb_class_def` in `xbrt.h`) are described by their module and
@@ -1186,7 +1218,7 @@ Conventions:
   functions and `CPConvert` have 9009 to 9015 ([Codepages](#codepages)), the thread and task functions 9016 to 9031
   ([concurrency.md](concurrency.md#threads)), a size no memory holds 9032 (`Memory low`), and the `CHARACTER` methods
   given an argument that is no string `Split` 9033, `StartsWith` and `EndsWith` 9034, a channel enumerator's
-  `MoveNextAsync` while another of its own waits 9035.
+  `MoveNextAsync` (and an asynchronous generator's) while another of its own waits 9035.
 - `Seconds()` gives the seconds since midnight, local time, to the millisecond, with SET DECIMALS decimals;
   `Time()` the local time as `"hh:mm:ss"`. `ElapsedMs()`, an xbase function, gives the milliseconds since the
   program started from a monotonic clock (`xb_program_elapsed_ms`), for timing: the difference of two calls.
@@ -1437,8 +1469,12 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   collections go on, until its value changes or a `QUIT` comes: the waiter publishes the word in its context
   (`waitingOn`) before it tests for a `QUIT`, the park tests the context's pending `QUIT` again under its bucket's lock
   (`xb_park_wait_blocking_stop`), and `xb_gc_raise_all` raises the `QUIT` and then wakes the word it reads there, so no
-  wait outlives a `QUIT` and none looks at the clock meanwhile; the object a waiter waits on is pinned by its stack. An
-  `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local. `QUIT` in a
+  wait outlives a `QUIT` and none looks at the clock meanwhile; the object a waiter waits on is pinned by its stack.
+  While the program is ending (`ending`, stored before the `QUIT` reaches the contexts), a waiter whose `QUIT` is set
+  aside (`ALWAYS` code running, counted in `xb_ctx.quitAside` by `xb_seq_suspend` and `xb_seq_resume`), or the context
+  ending the program (`xb_threads_end`), waits no more; any other waits for its `QUIT`, so that it leaves with the
+  request pending (a `Join()` that saw `ending` first once returned with none, and its caller went on: seen on ppc64).
+  An `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local. `QUIT` in a
   thread raises it on every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before the `EXIT`
   procedures and after them) does too when threads still run, and waits until none does; a thread made meanwhile quits
   at once. A `Mutex`'s `Hold()` returns a `MutexHolder` (the mutex in its own variable) whose `Dispose()` releases it
@@ -1533,7 +1569,11 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread and
-  its starter each letting go of its record, the last one freeing it; `xb_thread_yield`, a waiter's back-off), mutexes
+  its starter each letting go of its record, the last one freeing it; `xb_platform_threads_wait`, which the program's
+  `main` calls last: on Windows it waits until every detached thread has ended at the system's level (their handles
+  kept, those that ended closed when the list fills), since a thread that ends while the process exits can give the
+  process its own exit code instead of the program's (seen under Wine about once in two hundred ends); POSIX ends every
+  thread with the process and keeps the code, so it waits for nothing; `xb_thread_yield`, a waiter's back-off), mutexes
   (`xb_mutex`, with `trylock`), condition variables (`xb_cond`, with waits timed on the monotonic clock: POSIX binds the
   condition to it, macOS waits for a relative time, Windows in whole milliseconds rounded up), reader-writer locks
   (`xb_rwlock`; on glibc of the kind where a waiting writer goes before readers that come after it, elsewhere with the

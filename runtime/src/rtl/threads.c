@@ -28,14 +28,18 @@ static void thread_gone(void) {
 
 /* The wait's word is published in the context (waitingOn) before the QUIT is tested: xb_gc_raise_all, which raises
  * the QUIT and then wakes the word it reads there, finds the waiter (both sequentially consistent), and the park tests
- * the QUIT again under its bucket's lock: no wait outlives a QUIT, and none looks at the clock meanwhile. The object
- * stays where it is while its waiter sleeps (its stack, which points into it, pins it). */
+ * the QUIT again under its bucket's lock: no wait outlives a QUIT, and none looks at the clock meanwhile. While the
+ * program is ending (`ending`, stored before the QUIT reaches the contexts) a context whose QUIT is set aside, or that
+ * ends the program itself, waits no more; any other waits for its QUIT, so that it leaves with the request pending
+ * (else it would go on as if its wait had ended normally). The object stays where it is while its waiter sleeps (its
+ * stack, which points into it, pins it). */
 static int wait_until(xb_ctx *ctx, const xb_item *object, uint32_t k, uint32_t value, int64_t deadline) {
   for (;;) {
     const uint32_t *word = xb_object_word(object, k);
     xb_atomic_storeptr((void **)&ctx->waitingOn, (void *)(uintptr_t)word, XB_SEQ_CST);
     if (xb_atomic_load32(word, XB_ACQUIRE) != value) return XB_WAIT_CHANGED;
-    if ((xb_pending_get(ctx) & XB_PENDING_QUIT) || xb_atomic_load32(&ending, XB_ACQUIRE)) return XB_WAIT_QUIT;
+    if (xb_pending_get(ctx) & XB_PENDING_QUIT) return XB_WAIT_QUIT;
+    if (ctx->quitAside && xb_atomic_load32(&ending, XB_ACQUIRE)) return XB_WAIT_QUIT;
     int64_t left = -1;
     if (deadline >= 0) {
       left = deadline - xb_platform_monotonic_ns();
@@ -88,11 +92,13 @@ void xb_quit_all(const xb_ctx *ctx) {
 }
 
 void xb_threads_end(xb_ctx *ctx) {
+  ++ctx->quitAside; /* its own waits meanwhile end at once: no QUIT comes to it */
   if (xb_atomic_load32(&running, XB_ACQUIRE)) xb_quit_all(ctx);
   /* each thread's end wakes this wait (program_thread_main) */
   for (uint32_t seen; (seen = xb_atomic_load32(&running, XB_ACQUIRE)) != 0;) xb_park_wait_blocking(&running, seen, -1);
   xb_sched_end(ctx); /* the tasks that did not start are canceled */
   xb_atomic_store32(&ending, 0, XB_SEQ_CST); /* none runs (a QUIT ended them too): threads may start again */
+  --ctx->quitAside;
 }
 
 /* Threads: the result, whether it ended, the block and its arguments (an array, NIL once it ended), the thread's

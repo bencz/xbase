@@ -314,6 +314,12 @@ Instruction *Builder::genNew(Function *resume, const std::vector<Value *> &args)
   i->callee.function = resume;
   return i;
 }
+Instruction *Builder::agenNew(Function *resume, const std::vector<Value *> &args) {
+  Instruction *i = make(Op::AgenNew, Type::Item);
+  for (Value *a : args) i->addOperand(a);
+  i->callee.function = resume;
+  return i;
+}
 Instruction *Builder::genRestore(Var *gen) {
   Instruction *i = make(Op::GenRestore, Type::I64);
   i->var = gen;
@@ -355,6 +361,14 @@ Instruction *Builder::awaitFuse(Function *entry) {
 Instruction *Builder::awaitFused() { return make(Op::AwaitFused, Type::Bool); }
 Instruction *Builder::asyncSuspend(Var *task, Value *awaited, BasicBlock *resume, uint32_t point) {
   Instruction *i = make(Op::AsyncSuspend, Type::Void, {awaited});
+  i->var = task;
+  i->index = point;
+  i->targets.push_back({resume, {}});
+  return i;
+}
+
+Instruction *Builder::asyncYield(Var *task, Value *value, BasicBlock *resume, uint32_t point) {
+  Instruction *i = make(Op::AsyncYield, Type::Void, {value});
   i->var = task;
   i->index = point;
   i->targets.push_back({resume, {}});

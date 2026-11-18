@@ -157,6 +157,8 @@ void CodeGen::initTypes() {
   rtAsyncNew_ = rt("xb_async_new", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
   rtAsyncRestore_ = rt("xb_async_restore", i32_, {ptrTy_, ptrTy_, i32_});
   rtAsyncSuspend_ = rt("xb_async_suspend", voidTy, {ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
+  rtAgenNew_ = rt("xb_agen_new", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_});
+  rtAsyncYield_ = rt("xb_async_yield", voidTy, {ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
   rtAwaitFuse_ = rt("xb_await_fuse", voidTy, {ptrTy_, ptrTy_});
   rtAwaitFused_ = rt("xb_await_fused", i32_, {ptrTy_});
   rtAwaitReady_ = rt("xb_await_ready", i32_, {ptrTy_});
@@ -175,7 +177,7 @@ void CodeGen::initTypes() {
                            rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_,
                            rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_, rtMvPrivate_, rtMvPublic_,
                            rtMvParam_, rtGenRestore_, rtGenYield_, rtGenDone_, rtAsyncRestore_, rtAsyncSuspend_,
-                           rtAwaitReady_, rtAwaitFuse_, rtAwaitFused_})
+                           rtAsyncYield_, rtAwaitReady_, rtAwaitFuse_, rtAwaitFused_})
     quietCalls_.insert(c.getCallee());
   static const std::pair<BinOp, const char *> bins[] = {
       {BinOp::Add, "xb_op_add"}, {BinOp::Sub, "xb_op_sub"},       {BinOp::Mul, "xb_op_mul"},

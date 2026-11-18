@@ -227,6 +227,9 @@ void xb_thread_detach(xb_thread t) {
   if (xb_atomic_add32(&t->holders, (uint32_t)-1, XB_ACQ_REL) == 1) free(t); /* it has ended */
 }
 
+/* The process's end ends every thread and keeps its exit code (platform.h). */
+void xb_platform_threads_wait(void) {}
+
 void xb_thread_yield(void) { sched_yield(); }
 
 struct xb_mutex_impl {

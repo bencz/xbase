@@ -34,14 +34,15 @@ enum { S_CREATED, S_SCHEDULED, S_RUNNING, S_CLAIMED, S_CLAIMED_CANCELED, S_COMPL
  * made with, V_RESULT, unless code claimed it first). */
 enum { K_RUN, K_PROMISE, K_WHEN_ALL, K_WHEN_ANY, K_DELAY, K_SIGNAL, K_TIMEOUT, K_ASYNC, K_YIELD, K_WAIT };
 
-/* The variables: the state and the kind (words), the result (or the failure's value), the block and its arguments
- * and the environment's snapshot (until it runs), the continuations, a word (a combinator's count, when all: the tasks
+/* The variables: the state and the kind (words), the result (or the failure's value), the block and its arguments and
+ * the environment's snapshot (until it runs), the continuations, a word (a combinator's count, when all: the tasks
  * still to complete; when any: whether one did; a cancellation signal's: whether its source was disposed), the tasks a
- * combinator waits for, a signal's deadline (its latest CancelAfter: the only timer of it that counts), and the
- * continuations pushed since the list was last pruned whole (low 32 bits) with the ones that list kept (high); an
- * asynchronous function's resume function (its address), the point to resume at and its flow's number (the owner of
- * the locks it holds, xb_flow_self), which only its steps read, one at a time, each published to the next by the
- * continuation that schedules it (its frame is the work's place, V_WORK). */
+ * combinator waits for (an asynchronous generator's body: its enumerator, rtl/agen.c), a signal's deadline (its latest
+ * CancelAfter: the only timer of it that counts), and the continuations pushed since the list was last pruned whole
+ * (low 32 bits) with the ones that list kept (high); an asynchronous function's resume function (its address), the
+ * point to resume at and its flow's number (the owner of the locks it holds, xb_flow_self), which only its steps read,
+ * one at a time, each published to the next by the continuation that schedules it (its frame is the work's place,
+ * V_WORK). */
 enum {
   V_STATE, V_KIND, V_RESULT, V_WORK, V_ENV, V_NEXT, V_COUNT, V_TASKS, V_TIMER, V_LINKS, V_RESUME, V_POINT, V_FLOW,
   V_COUNT_
@@ -426,7 +427,22 @@ struct xb_async_step {
   uint32_t argc;
   int first;
   xb_flow flow; /* the function's (xb_flow_self while its steps run): one number for all its steps */
+  xb_item gen;  /* an asynchronous generator's body: its enumerator (rtl/agen.c), else NIL */
+  int yielded;  /* the step suspended at a YIELD (xb_async_yield), not at an AWAIT */
 };
+
+/* How an asynchronous generator's step ended (XB_AGEN_*), for its enumerator, read before step_ended settles the task
+ * (and clears the request): what failed it in `*failure` (rooted). */
+static int gen_outcome(xb_ctx *ctx, const struct xb_async_step *st, xb_item *failure) {
+  uint32_t ended = xb_pending_get(ctx) & XB_PENDING_UNWIND;
+  if (ended & XB_PENDING_QUIT) return XB_AGEN_CANCELED;
+  if (ended) {
+    *failure = ctx->break_value;
+    return XB_AGEN_FAILED;
+  }
+  if (st->awaited.type != XB_T_NIL) return st->yielded ? XB_AGEN_YIELDED : XB_AGEN_AWAITING;
+  return XB_AGEN_ENDED;
+}
 
 /* Runs the step `st` (its items rooted) with its environment set: the resume function's result in `*result`. A step
  * that suspends parks its environment; one that ends ends it (its tables closed: errors there are still the task's). */
@@ -448,9 +464,10 @@ static void async_step_run(xb_ctx *ctx, struct xb_async_step *st, xb_item *resul
 
 /* How a step of a task ended, the task in `*task` (rooted; NIL for an asynchronous function's first step that made
  * none): what failed it or the QUIT that cancels it (the QUIT stays: the thread ends, or unwinds); else, suspended, it
- * waits for `awaited`, registered last of all (that one's end may run the next step at once, on another thread).
- * Returns 1 when it completed, its result in `*result`, for the caller to settle. */
-static int step_ended(xb_ctx *ctx, xb_item *task, const xb_item *awaited, xb_item *result) {
+ * waits for `awaited`, registered last of all (that one's end may run the next step at once, on another thread), or
+ * when `parked` (an asynchronous generator's YIELD) for nothing: its enumerator resumes it (xb_task_resume). Returns 1
+ * when it completed, its result in `*result`, for the caller to settle. */
+static int step_ended(xb_ctx *ctx, xb_item *task, const xb_item *awaited, xb_item *result, int parked) {
   uint32_t ended = xb_pending_get(ctx) & XB_PENDING_UNWIND;
   uint32_t state = S_COMPLETED;
   if (ended & XB_PENDING_QUIT) {
@@ -465,9 +482,11 @@ static int step_ended(xb_ctx *ctx, xb_item *task, const xb_item *awaited, xb_ite
     xb_pending_clear(ctx, ended);
     state = S_FAILED;
   } else if (awaited->type != XB_T_NIL) {
-    xb_share(task); /* others reach it from now on: its frame */
+    /* others reach it from now on (its frame), through what it waits for; a parked one only through its enumerator,
+     * which shares it as it takes it when it is shared itself (xb_agen_yield) */
+    if (!parked) xb_share(task);
     xb_atomic_store32(xb_object_word(task, V_STATE), S_CREATED, XB_RELEASE);
-    add_continuation(ctx, awaited, task);
+    if (!parked) add_continuation(ctx, awaited, task);
     return 0;
   } else {
     return 1;
@@ -489,15 +508,19 @@ static int step_ended(xb_ctx *ctx, xb_item *task, const xb_item *awaited, xb_ite
 static void run_step(xb_ctx *ctx, const xb_item *task) {
   xb_env_reap(ctx);
   xb_await_fused(ctx); /* a request no unwinding ended (a task that failed) is no step's */
-  struct xb_async_step st = {*task, {0}, NULL, NULL, NULL, 0, 0, {0, NULL}};
-  xb_item result, work;
+  struct xb_async_step st = {*task, {0}, NULL, NULL, NULL, 0, 0, {0, NULL}, {0}, 0};
+  xb_item result, work, failure;
   xb_set_nil(&st.awaited);
+  xb_set_nil(&st.gen);
   xb_set_nil(&result);
   xb_set_nil(&work);
+  xb_set_nil(&failure);
   xb_gc_root_push(ctx, &st.task);
   xb_gc_root_push(ctx, &st.awaited);
   xb_gc_root_push(ctx, &result);
   xb_gc_root_push(ctx, &work);
+  xb_gc_root_push(ctx, &st.gen);
+  xb_gc_root_push(ctx, &failure);
   uint32_t trap = ctx->error_trap;
   int32_t trapped = ctx->error_trapped;
   ctx->error_trap = 0;
@@ -512,6 +535,7 @@ static void run_step(xb_ctx *ctx, const xb_item *task) {
     st.resume = (xb_func)(uintptr_t)it.v.i;
     xb_object_get(task->v.p, V_FLOW, &it);
     st.flow.number = (uint64_t)it.v.i;
+    xb_object_get(task->v.p, V_TASKS, &st.gen); /* an asynchronous generator's body: its enumerator */
     xb_env_unpark(ctx, st.env);
     async_step_run(ctx, &st, &result);
   } else {
@@ -531,8 +555,11 @@ static void run_step(xb_ctx *ctx, const xb_item *task) {
   --ctx->task_depth;
   ctx->error_trap = trap;
   ctx->error_trapped = trapped;
-  if (step_ended(ctx, &st.task, &st.awaited, &result)) complete(ctx, &st.task, S_COMPLETED, &result);
-  xb_gc_root_pop(ctx, 4);
+  int outcome = st.gen.type != XB_T_NIL ? gen_outcome(ctx, &st, &failure) : 0;
+  if (outcome == XB_AGEN_AWAITING) xb_agen_step_awaits(ctx, &st.gen); /* before anything may resume it */
+  if (step_ended(ctx, &st.task, &st.awaited, &result, st.yielded)) complete(ctx, &st.task, S_COMPLETED, &result);
+  if (st.gen.type != XB_T_NIL) xb_agen_step_ended(ctx, &st.gen, outcome, &failure);
+  xb_gc_root_pop(ctx, 6);
   xb_stack_give_back(); /* a step that went deep */
 }
 
@@ -546,11 +573,30 @@ void xb_task_run(xb_ctx *ctx, xb_item *task) {
   if (claim(task)) run_step(ctx, task);
 }
 
+int xb_task_resume(xb_ctx *ctx, const xb_item *task, int here) {
+  uint32_t created = S_CREATED;
+  if (!here) { /* a worker runs it, on a stack of its own: shared first (a parked task may be local) */
+    xb_share(task);
+    if (xb_atomic_cas32(xb_object_word(task, V_STATE), &created, S_SCHEDULED, XB_ACQ_REL))
+      xb_sched_submit(task->v.p, xb_sched_in_worker());
+    return 0;
+  }
+  if (!xb_atomic_cas32(xb_object_word(task, V_STATE), &created, S_RUNNING, XB_ACQ_REL)) return 0;
+  run_step(ctx, task);
+  return 1;
+}
+
 void xb_task_cancel(xb_ctx *ctx, xb_item *task) {
   if (!claim(task)) return;
-  xb_item nil;
+  xb_item nil, gen;
   xb_set_nil(&nil);
+  xb_set_nil(&gen);
+  xb_gc_root_push(ctx, &gen);
+  if (xb_atomic_load32(xb_object_word(task, V_KIND), XB_RELAXED) == K_ASYNC) xb_object_get(task->v.p, V_TASKS, &gen);
   complete(ctx, task, S_CANCELED, &nil);
+  /* an asynchronous generator's body, never to run again: the task of its MoveNextAsync() canceled too */
+  if (gen.type != XB_T_NIL) xb_agen_step_ended(ctx, &gen, XB_AGEN_CANCELED, &nil);
+  xb_gc_root_pop(ctx, 1);
 }
 
 /* The looks at a running task's state before its waiter sleeps (loads only). */
@@ -1147,32 +1193,39 @@ void xbf_TASKTIMEOUT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* Asynchronous functions (xbrt.h). */
 
-void xb_async_new(xb_ctx *ctx, xb_item *r, xb_func entry, xb_func resume, uint32_t argc, xb_item *argv) {
-  /* Fused: AWAIT of this very call, from the frame that called it (the entry's frame is the innermost). */
-  int fused = ctx->async_fuse == entry && ctx->frames && ctx->frames->prev == ctx->async_fuse_frame;
-  if (fused) ctx->async_fuse = NULL;
+/* The first step of an asynchronous function (`st`, its items rooted), on the caller's thread, in an environment of
+ * its own inherited from the caller's, with no Type() trap of the caller's around it. */
+static void first_step(xb_ctx *ctx, struct xb_async_step *st, xb_item *result) {
   xb_env_reap(ctx);
-  struct xb_async_step st = {{0}, {0}, resume, NULL, argv, argc, 1, {0, NULL}};
-  xb_item result;
-  xb_set_nil(&st.task);
-  xb_set_nil(&st.awaited);
-  xb_set_nil(&result);
-  xb_gc_root_push(ctx, &st.task);
-  xb_gc_root_push(ctx, &st.awaited);
-  xb_gc_root_push(ctx, &result);
   uint32_t trap = ctx->error_trap;
   int32_t trapped = ctx->error_trapped;
   ctx->error_trap = 0;
   ++ctx->task_depth;
   const xb_frame *base = ctx->task_base;
   ctx->task_base = ctx->frames;
-  st.env = xb_env_inherit(ctx);
-  async_step_run(ctx, &st, &result);
+  st->env = xb_env_inherit(ctx);
+  async_step_run(ctx, st, result);
   ctx->task_base = base;
   --ctx->task_depth;
   ctx->error_trap = trap;
   ctx->error_trapped = trapped;
-  if (!step_ended(ctx, &st.task, &st.awaited, &result)) {
+}
+
+void xb_async_new(xb_ctx *ctx, xb_item *r, xb_func entry, xb_func resume, uint32_t argc, xb_item *argv) {
+  /* Fused: AWAIT of this very call, from the frame that called it (the entry's frame is the innermost). */
+  int fused = ctx->async_fuse == entry && ctx->frames && ctx->frames->prev == ctx->async_fuse_frame;
+  if (fused) ctx->async_fuse = NULL;
+  struct xb_async_step st = {{0}, {0}, resume, NULL, argv, argc, 1, {0, NULL}, {0}, 0};
+  xb_item result;
+  xb_set_nil(&st.task);
+  xb_set_nil(&st.awaited);
+  xb_set_nil(&st.gen);
+  xb_set_nil(&result);
+  xb_gc_root_push(ctx, &st.task);
+  xb_gc_root_push(ctx, &st.awaited);
+  xb_gc_root_push(ctx, &result);
+  first_step(ctx, &st, &result);
+  if (!step_ended(ctx, &st.task, &st.awaited, &result, 0)) {
     *r = st.task;
   } else if (fused) { /* the result itself: no task */
     *r = result;
@@ -1182,6 +1235,27 @@ void xb_async_new(xb_ctx *ctx, xb_item *r, xb_func entry, xb_func resume, uint32
     t->vars[V_RESULT] = result; /* local, new: no barrier */
   }
   xb_gc_root_pop(ctx, 3);
+}
+
+void xb_async_gen_start(xb_ctx *ctx, const xb_item *gen, xb_func resume, uint32_t argc, const xb_item *argv) {
+  struct xb_async_step st = {{0}, {0}, resume, NULL, argv, argc, 1, {0, NULL}, *gen, 0};
+  xb_item result, failure;
+  xb_set_nil(&st.task);
+  xb_set_nil(&st.awaited);
+  xb_set_nil(&result);
+  xb_set_nil(&failure);
+  xb_gc_root_push(ctx, &st.task);
+  xb_gc_root_push(ctx, &st.awaited);
+  xb_gc_root_push(ctx, &st.gen);
+  xb_gc_root_push(ctx, &result);
+  xb_gc_root_push(ctx, &failure);
+  first_step(ctx, &st, &result);
+  int outcome = gen_outcome(ctx, &st, &failure);
+  if (outcome == XB_AGEN_AWAITING) xb_agen_step_awaits(ctx, &st.gen); /* before anything may resume it */
+  if (step_ended(ctx, &st.task, &st.awaited, &result, st.yielded) && st.task.type != XB_T_NIL)
+    complete(ctx, &st.task, S_COMPLETED, &result);
+  xb_agen_step_ended(ctx, &st.gen, outcome, &failure);
+  xb_gc_root_pop(ctx, 5);
 }
 
 int32_t xb_async_restore(xb_ctx *ctx, xb_item *slots, uint32_t nslots) {
@@ -1205,12 +1279,20 @@ void xb_async_suspend(xb_ctx *ctx, const xb_item *slots, uint32_t nslots, uint32
     xb_object *t = task_new(&st->task, K_ASYNC, S_RUNNING);
     xb_set_int(&t->vars[V_RESUME], (int64_t)(uintptr_t)st->resume);
     xb_set_int(&t->vars[V_ENV], (int64_t)(uintptr_t)st->env);
+    t->vars[V_TASKS] = st->gen; /* an asynchronous generator's enumerator (NIL else): local, new, no barrier */
   }
   xb_frame_store(ctx, &st->task, V_WORK, slots, nslots);
   xb_object *t = st->task.v.p;
   xb_set_int(&t->vars[V_POINT], point); /* no heap references: no barrier; read by the next step only */
   xb_set_int(&t->vars[V_FLOW], (int64_t)st->flow.number); /* given when a step first took a lock */
   st->awaited = *awaited;
+}
+
+void xb_async_yield(xb_ctx *ctx, const xb_item *slots, uint32_t nslots, uint32_t point, const xb_item *value) {
+  struct xb_async_step *st = ctx->async_step;
+  xb_async_suspend(ctx, slots, nslots, point, &st->gen); /* parked: nothing to wait for (step_ended) */
+  st->yielded = 1;
+  xb_agen_yield(ctx, &st->gen, value, &st->task);
 }
 
 void xb_await_fuse(xb_ctx *ctx, xb_func entry) {

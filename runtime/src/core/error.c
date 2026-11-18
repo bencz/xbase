@@ -418,10 +418,12 @@ void xb_seq_restore(xb_ctx *ctx, const xb_item *old) { ctx->env->error_block = *
 uint32_t xb_seq_suspend(xb_ctx *ctx) {
   uint32_t requests = xb_pending_get(ctx) & XB_PENDING_UNWIND;
   xb_pending_clear(ctx, requests);
+  if (requests & XB_PENDING_QUIT) ++ctx->quitAside;
   return requests;
 }
 
 void xb_seq_resume(xb_ctx *ctx, uint32_t requests, const xb_item *value) {
+  if (requests & XB_PENDING_QUIT) --ctx->quitAside;
   if (xb_pending_get(ctx) & XB_PENDING_UNWIND) { /* ALWAYS made its own: it replaces them, but a QUIT stays */
     xb_pending_set(ctx, requests & XB_PENDING_QUIT);
     return;

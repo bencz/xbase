@@ -91,14 +91,16 @@ doubles (`mixed`: `i + 3.14`, `i / 4`, `Int()`, comparisons across both), and me
 (`oop`: method calls, one through `Super`, variable reads and assignments), generators (`generator`: one feeding
 another), the collector (`gc`: strings and small arrays of many sizes replaced at random among others that stay, the
 heap's fragmentation; its memory is read with `/usr/bin/time`), and an order over a table (`index`: built, searched with
-SEEK, walked, kept up to date as records are appended; its files are deleted at the end), tasks (`tasks`: 200,000
-short tasks joined, a 50,000-link continuation chain, tasks waiting for tasks they start) and channels (`channels`:
-producer and consumer tasks over a bounded channel, then `TrySend`/`TryReceive` pairs), asynchronous functions
-(`async`: a million calls awaited that complete at once, round trips between two of them over channels, ten thousand
-suspended at once; `async_pi`: the Basel sum over 32 of them awaiting CPU-bound tasks, every processor busy), and
-calls of a function with a short loop (`bitlookup`: the bitwise AND from a table of nibbles). Each one times its own
-work with `ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name>
-<milliseconds> ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`
+SEEK, walked, kept up to date as records are appended; its files are deleted at the end), tasks (`tasks`: 200,000 short
+tasks joined, a 50,000-link continuation chain, tasks waiting for tasks they start) and channels (`channels`: producer
+and consumer tasks over a bounded channel, then `TrySend`/`TryReceive` pairs), asynchronous functions (`async`: a
+million calls awaited that complete at once, round trips between two of them over channels, ten thousand suspended at
+once; `async_pi`: the Basel sum over 32 of them awaiting CPU-bound tasks, every processor busy), asynchronous generators
+(`async_generator`: a pipeline of three, a source of a million numbers that yields the thread every thousand, a filter
+and a map, through `AWAIT FOR EACH`; in C#, JavaScript and Python with their asynchronous iterators), and calls of a
+function with a short loop (`bitlookup`: the bitwise AND from a table of nibbles). Each one times its own work with
+`ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name> <milliseconds>
+ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`
 (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every program
 `XB_BENCH_REPEAT` times (a cache variable, default 3), the best time of each in a table, and a failure when one does not
 run or reports `WRONG`. It warns when the build is not Release. Performance changes are measured with it, before and

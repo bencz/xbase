@@ -46,8 +46,8 @@ bool copyable(const Function &g) {
   for (auto &b : g.blocks) {
     if (b->unwind) return false;
     for (auto &i : b->insts)
-      if (i->op == Op::MakeBlock || i->op == Op::GenNew || i->op == Op::AsyncNew || isSuspension(i->op) ||
-          i->op == Op::ArgsRest)
+      if (i->op == Op::MakeBlock || i->op == Op::GenNew || i->op == Op::AgenNew || i->op == Op::AsyncNew ||
+          isSuspension(i->op) || i->op == Op::ArgsRest)
         return false;
   }
   return true;

@@ -80,5 +80,6 @@ int main(int argc, char **argv) {
   if (xb_thread_start(&thread, XB_PROGRAM_STACK_SIZE, run_program, &p)) xb_thread_join(thread);
   else run_program(&p); /* on this thread, with the stack the system gave it */
   xb_gc_trim_end();
+  xb_platform_threads_wait(); /* no thread of the runtime's ends with the process: it keeps the program's exit code */
   return xb_exit_code();
 }

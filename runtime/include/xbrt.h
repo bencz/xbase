@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 50u
+#define XB_ABI_VERSION 51u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -762,8 +762,14 @@ void     xb_gen_done(xb_ctx *ctx, const xb_item *gen);
  * AWAIT of a call to an asynchronous function: xb_await_fuse(entry) right before the call (NULL `entry`: a send, whose
  * compiled method is the entry) asks that function's first step, when it ends without suspending, for its result itself
  * instead of a task (no task made); xb_await_fused right after the call tells whether `*r` is that result (1) or a task
- * (0), and ends the request (an error ends it too). */
+ * (0), and ends the request (an error ends it too).
+ * An asynchronous generator (an ASYNC function with YIELD; rtl/agen.c): calling it makes its enumerator
+ * (xb_agen_new: `resume` and the arguments kept) and runs nothing; its resume function is an asynchronous function's,
+ * whose task drives the body, and a YIELD saves its slots with xb_async_yield (`point` goes on after it, `*value` the
+ * element) and returns: the body goes on at the next MoveNextAsync(). */
 void     xb_async_new(xb_ctx *ctx, xb_item *r, xb_func entry, xb_func resume, uint32_t argc, xb_item *argv);
+void     xb_agen_new(xb_ctx *ctx, xb_item *r, xb_func resume, uint32_t argc, const xb_item *argv);
+void     xb_async_yield(xb_ctx *ctx, const xb_item *slots, uint32_t nslots, uint32_t point, const xb_item *value);
 int32_t  xb_async_restore(xb_ctx *ctx, xb_item *slots, uint32_t nslots);
 void     xb_async_suspend(xb_ctx *ctx, const xb_item *slots, uint32_t nslots, uint32_t point, const xb_item *awaited);
 int32_t  xb_await_ready(const xb_item *v);

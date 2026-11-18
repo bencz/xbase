@@ -407,6 +407,8 @@ struct SequenceStmt : Stmt {
   Block recover;
   bool hasAlways = false;
   Block always;
+  bool restoresOnly = false;     // its ALWAYS code only puts variables back (AWAIT FOR EACH's): YIELD may stand in it,
+                                 // a generator left there leaving them as they are, as FOR EACH does
   explicit SequenceStmt(SourceLoc l) : Stmt(StmtKind::Sequence, l) {}
 };
 

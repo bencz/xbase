@@ -70,12 +70,21 @@ NEXT
   `MoveNextAsync()`, a task of a logical, and `Current`: a channel's enumerator, a class's; an object that answers
   `GetAsyncEnumerator()` gives one), a channel's values as they come too; over an ordinary collection (an array, a hash,
   a string, an enumerator, a generator) it awaits each element that is a task, in order (a collection of tasks); `k` is
-  the position, a hash's key; the variables are put back after the loop, as `FOR EACH` puts them; a field cannot be one,
-  the statement cannot stand in a codeblock, and `YIELD` cannot stand in its body. The loop calls `MoveNextAsync()`
-  without a token: one that should end it is given to the enumerator, as `AWAIT FOR EACH x IN oChannel:GetEnumerator(
-  oToken )` (canceled, the step's `AWAIT` fails as canceled, and no value goes to the loop that was left) (done,
-  [compiler.md](compiler.md#grammar)). Asynchronous generators: `YIELD` in an `ASYNC` function; calling it returns an
-  asynchronous enumerator (planned).
+  the position, a hash's key; the variables are put back after the loop, as `FOR EACH` puts them (a generator left at a
+  `YIELD` in its body leaves them as they are, as with `FOR EACH`); a field cannot be one, and the statement cannot
+  stand in a codeblock. The loop calls `MoveNextAsync()` without a token: one that should end it is given to the
+  enumerator, as `AWAIT FOR EACH x IN oChannel:GetEnumerator( oToken )` (canceled, the step's `AWAIT` fails as canceled,
+  and no value goes to the loop that was left) (done, [compiler.md](compiler.md#grammar)).
+- Asynchronous generators: `YIELD` in an `ASYNC` function (or method). Calling one runs nothing and returns its
+  enumerator (`AsyncGenerator`, [runtime.md](runtime.md#asynchronous-generators)): `MoveNextAsync( [oToken] )` gives a
+  task of whether an element came, then in `Current`; the first one runs the body on the caller's thread, each later one
+  runs its next step at once when the stack has room (else a worker does), up to a `YIELD` (`.T.`) or the end (`.F.`,
+  and `.F.` from then on); an `AWAIT` in the body suspends it, the task still waiting; an error fails the task and ends
+  the enumeration. One `MoveNextAsync()` at a time: another while one waits raises `BASE/9035`; its token cancels the
+  wait and ends the enumeration (what the body yields then is dropped). `MoveNext()` waits (`FOR EACH`), and `AWAIT FOR
+  EACH` awaits each step; `YIELD` may stand in an `AWAIT FOR EACH`'s body, so generators chain. Unlike a synchronous
+  generator, the body may create `PRIVATE`s (its environment is its own, as any `ASYNC` function's). A generator left at
+  a `YIELD` is collected whole, body and environment. Done.
 - `[AWAIT] USING [v :=] expr ... END [USING]`: the body runs, then the value's `Dispose()` (with `AWAIT`, `AWAIT
   DisposeAsync()`; `USING AWAIT expr` is `USING` of the awaited value) when it ends in any way (`RETURN`, `EXIT`,
   `LOOP`, an error, `BREAK`, `QUIT`), as `ALWAYS` would. Without `AWAIT` it is done
@@ -301,8 +310,8 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   take (no error block, a handler that returns for an error that cannot go on, handlers recursing too deep: the
   unrecoverable errors 9001 to 9003 elsewhere). A task run inline inside `Type()` has errors of its own, not `Type()`'s.
   A `BREAK` that leaves the block fails it with the `BREAK`'s value. `QUIT` ends the program, the task canceled; a wait
-  for a task (or a `Mutex`, a `Condition`...) ends when the program is ending, also in code an `ALWAYS` runs meanwhile.
-  At the program's end the tasks that never started are canceled.
+  for a task (or a `Mutex`, a `Condition`...) ends when the program is ending: with the `QUIT` that comes to its
+  context, at once in code an `ALWAYS` runs meanwhile. At the program's end the tasks that never started are canceled.
 - `oTask:ContinueWith( bWork )`: a task that runs `Eval( bWork, oTask )` once oTask ended (completed, failed or
   canceled), scheduled to run next on the worker that completed it (on the pool when another thread did).
   `TaskWhenAll( aTasks )`: a task that completes once all did, with their results in an array in their order; failed
@@ -557,7 +566,7 @@ Each phase ends with its tests, its benchmarks measured before and after, the do
    asynchronous I/O that needs it (phase 5).
 4. **The compiler**: `ASYNC` functions, procedures and methods, `AWAIT` everywhere in them, the start procedure
    awaiting, errors and cancellation across `AWAIT`, the completed fast path and fused calls (done, step 4a);
-   `AWAIT FOR EACH` (done); asynchronous generators; asynchronous codeblocks; `AWAIT USING` (`USING` is done).
+   `AWAIT FOR EACH` and asynchronous generators (done); asynchronous codeblocks; `AWAIT USING` (`USING` is done).
 5. **Asynchronous I/O**: the reactors (io_uring and epoll, kqueue, IOCP), sockets, asynchronous files, name resolution
    on the blocking pool; the echo server benchmark.
 6. **The database**: awaitable operations on the blocking pool for every driver, lock waits with timeouts and tokens,

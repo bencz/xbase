@@ -68,6 +68,7 @@ public:
   Instruction *seqCatch();
   Instruction *seqValue();
   Instruction *genNew(Function *resume, const std::vector<Value *> &args);
+  Instruction *agenNew(Function *resume, const std::vector<Value *> &args);
   Instruction *genRestore(Var *gen);
   Instruction *genDone(Var *gen);
   Instruction *genYield(Var *gen, Value *value, BasicBlock *resume, uint32_t state);
@@ -79,6 +80,7 @@ public:
   Instruction *awaitFuse(Function *entry);
   Instruction *awaitFused();
   Instruction *asyncSuspend(Var *task, Value *awaited, BasicBlock *resume, uint32_t point);
+  Instruction *asyncYield(Var *task, Value *value, BasicBlock *resume, uint32_t point);
   Instruction *inlineEnter(Function *shown, const std::vector<Value *> &args = {});
   Instruction *inlineLeave();
   Instruction *seqWith(Value *handler);

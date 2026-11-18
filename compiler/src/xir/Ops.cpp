@@ -80,6 +80,7 @@ constexpr OpInfo kOps[] = {
     {Op::UnboxI64, "unbox.i64", 0},
     {Op::UnboxBool, "unbox.bool", 0},
     {Op::GenNew, "gen.new", Allocates | ReadsHeap},
+    {Op::AgenNew, "agen.new", Allocates | ReadsHeap},
     {Op::GenRestore, "gen.restore", WritesVar | ReadsHeap | WritesState},
     {Op::GenDone, "gen.done", WritesHeap | WritesState},
     {Op::AsyncNew, "async.new", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},
@@ -95,6 +96,7 @@ constexpr OpInfo kOps[] = {
     {Op::CondBr, "cond_br", Terminator},
     {Op::GenYield, "gen.yield", Terminator | ReadsVar | WritesHeap | WritesState | Allocates},
     {Op::AsyncSuspend, "async.suspend", Terminator | ReadsVar | WritesHeap | WritesState | Allocates},
+    {Op::AsyncYield, "async.yield", Terminator | ReadsVar | WritesHeap | WritesState | Allocates},
     {Op::Ret, "ret", Terminator},
 };
 

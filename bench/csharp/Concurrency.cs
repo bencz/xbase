@@ -1,6 +1,7 @@
-// bench/tasks, channels, async and async_pi .prg in C#: the same work and checks, with .NET's Task, Channel and
-// async/await.
+// bench/tasks, channels, async, async_pi and async_generator .prg in C#: the same work and checks, with .NET's Task,
+// Channel, async/await and asynchronous iterators (IAsyncEnumerable, await foreach).
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Channels;
@@ -106,5 +107,30 @@ static class AsyncPi {
     double[] partial = await Task.WhenAll(Enumerable.Range(0, 32).Select(Partial));
     double pi = Math.Sqrt(partial.Sum() * 6);
     Program.Report("async_pi", sw, Math.Abs(Math.PI - pi) < 1e-9);
+  }
+}
+
+static class AsyncGeneratorBench {
+  static async IAsyncEnumerable<long> Source(long n) {
+    for (long k = 1; k <= n; k++) {
+      if (k % 1000 == 0) await Task.Yield();
+      yield return k;
+    }
+  }
+
+  static async IAsyncEnumerable<long> Evens(IAsyncEnumerable<long> g) {
+    await foreach (var x in g)
+      if (x % 2 == 0) yield return x;
+  }
+
+  static async IAsyncEnumerable<long> Doubled(IAsyncEnumerable<long> g) {
+    await foreach (var x in g) yield return x * 2;
+  }
+
+  public static async Task Run() {
+    var sw = Stopwatch.StartNew();
+    long s = 0;
+    await foreach (var x in Doubled(Evens(Source(1000000)))) s += x;
+    Program.Report("async_generator", sw, s == 500001000000);
   }
 }

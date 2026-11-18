@@ -624,11 +624,13 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::BoxBool: storeLogical(dest(i), value(ops[0])); break;
   case Op::UnboxI64: values_[&i] = intValue(addr(ops[0])); break;
   case Op::UnboxBool: values_[&i] = logicalValue(addr(ops[0])); break;
-  case Op::GenNew: {
+  case Op::GenNew:
+  case Op::AgenNew: {
     Value *argv = operandGroup(i);
     Value *d = dest(i);
     setNil(d);
-    b_.CreateCall(rtGenNew_, {fnCtx_, d, functions_.at(i.callee.function), ConstantInt::get(i32_, ops.size()), argv});
+    b_.CreateCall(i.op == Op::GenNew ? rtGenNew_ : rtAgenNew_,
+                  {fnCtx_, d, functions_.at(i.callee.function), ConstantInt::get(i32_, ops.size()), argv});
     break;
   }
   case Op::GenRestore: emitGenRestore(i); break;
@@ -742,9 +744,11 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateBr(fnExit_);
     break;
   case Op::AsyncSuspend: // the frame and the task awaited into the task; the step returns
+  case Op::AsyncYield:   // the frame into the task, the element into the enumerator; the step returns
     shareOnEdge(i.parent, i.targets[0].block);
-    b_.CreateCall(rtAsyncSuspend_, {fnCtx_, fnBase_, ConstantInt::get(i32_, plan_->savedSize()),
-                                    ConstantInt::get(i32_, i.index), addr(ops[0])});
+    b_.CreateCall(i.op == Op::AsyncSuspend ? rtAsyncSuspend_ : rtAsyncYield_,
+                  {fnCtx_, fnBase_, ConstantInt::get(i32_, plan_->savedSize()), ConstantInt::get(i32_, i.index),
+                   addr(ops[0])});
     if (fnRet_) setNil(fnRet_);
     b_.CreateBr(fnExit_);
     break;

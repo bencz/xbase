@@ -6,8 +6,8 @@
 // time limit (.F., NIL for HoldAsync), one granted before its limit (.T.), and one a token cancels (passed over: the
 // next waiter gets the lock); blocking waiters beside asynchronous ones; a flow with two waiters in line and another
 // flow's between them (its second gets the lock with its first); Condition:Wait() handing the lock to an asynchronous
-// waiter; Semaphore:WaitAsync() letting at most its places in at once, its order after a canceled waiter, and its
-// limit; argument errors.
+// waiter; Semaphore:WaitAsync() letting at most its places in at once (and that many: those inside wait on a gate
+// opened once all 300 are started), its order after a canceled waiter, and its limit; argument errors.
 PROCEDURE Main()
    LOCAL oM := Mutex(), oS, a := {}, k, aLog := {}, aCount := { 0 }, oIn, oMax, s, t, e
 
@@ -66,9 +66,11 @@ PROCEDURE Main()
    oMax := AtomicInt()
    a := {}
    aLog := {}
+   s := TaskCompletionSource()
    FOR k := 1 TO 300
-      AAdd( a, Limited( oS, oIn, oMax, aLog, k ) )
+      AAdd( a, Limited( oS, oIn, oMax, aLog, k, s:Task ) )
    NEXT
+   s:SetResult( .T. )
    ? "semaphore:", TaskWhenAll( a ):Wait( 30000 ), oMax:Value, oS:Count(), Len( aLog )
    ? "semaphore order:", SemaphoreOrder()
    ? "places:", oS:WaitAsync():Result, oS:WaitAsync():Result, oS:WaitAsync():Result, oS:WaitAsync( 30 ):Result, ;
@@ -206,14 +208,16 @@ ASYNC FUNCTION Counted( oM, aCount )
    END
 RETURN NIL
 
-// Counts the functions inside at once (the most in oMax) and logs each.
-ASYNC FUNCTION Limited( oS, oIn, oMax, aLog, k )
+// Counts the functions inside at once (the most in oMax) and logs each; inside, waits for the gate (the first ones in
+// stay until every function is started) and lets the thread go once.
+ASYNC FUNCTION Limited( oS, oIn, oMax, aLog, k, tGate )
    LOCAL n, m
    AWAIT oS:WaitAsync()
    AAdd( aLog, k )
    n := oIn:Add( 1 )
    DO WHILE ( m := oMax:Value ) < n .AND. ! oMax:CompareExchange( m, n )
    ENDDO
+   AWAIT tGate
    AWAIT TaskYield()
    oIn:Add( -1 )
    oS:Release()

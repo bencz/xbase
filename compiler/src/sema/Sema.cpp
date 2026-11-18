@@ -21,7 +21,7 @@ struct Sema::Scope {
   bool inBlock = false;          // the statements of an extended codeblock
   bool inAlways = false;         // any part of a BEGIN SEQUENCE with ALWAYS or a TRY with FINALLY: YIELD cannot
                                  // suspend there, since a generator left before its end would never run that code
-  bool inAwaitEach = false;      // the body of an AWAIT FOR EACH, whose variables are restored that way
+  bool inAwaitEach = false;      // the body of an AWAIT FOR EACH: YIELD there only in an asynchronous generator
 };
 
 void Sema::run(Module &m) {
@@ -171,8 +171,8 @@ bool Sema::mayStart(const FuncDecl &f) const {
 void Sema::func(FuncDecl &f) {
   curFunc_ = &f;
   Scope s;
-  if (f.generator) f.params.insert(f.params.begin(), Param{f.loc, "(GENERATOR)"}); // the enumerator it runs for
-  else if (f.async) f.params.insert(f.params.begin(), Param{f.loc, "(TASK)"});       // the task it runs for
+  if (f.async) f.params.insert(f.params.begin(), Param{f.loc, "(TASK)"});               // the task it runs for
+  else if (f.generator) f.params.insert(f.params.begin(), Param{f.loc, "(GENERATOR)"}); // the enumerator it runs for
   frames_.push_back({{}, {}, {}, {}, &f.boxed, nullptr});
   for (const Param &p : f.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, s.next}).second)
@@ -181,7 +181,6 @@ void Sema::func(FuncDecl &f) {
   }
   block(f.body, s);
   const char *what = f.async ? "an ASYNC function" : "a generator";
-  if (f.async && f.generator) diag_.error(f.loc, "an ASYNC function cannot YIELD");
   if (f.resumable() && f.variadic) diag_.error(f.loc, std::string(what) + " cannot take '...'");
   if (f.resumable() && f.readsArgs) // its frame is the resume function's, whose argument is the enumerator or task
     diag_.error(f.loc, std::string(what) + " cannot read its arguments as received (PCount(), PValue(), PARAMETERS)");
@@ -346,7 +345,9 @@ void Sema::stmt(Stmt &st, Scope &s) {
   case StmtKind::Private:
   case StmtKind::Public:
     if (s.inBlock) diag_.error(st.loc, "PRIVATE and PUBLIC are not allowed in a codeblock");
-    if (curFunc_->generator) diag_.error(st.loc, "PRIVATE and PUBLIC are not allowed in a generator");
+    // a generator's steps run in its caller's environment; an asynchronous one's body has its own, as an ASYNC function
+    if (curFunc_->generator && !curFunc_->async)
+      diag_.error(st.loc, "PRIVATE and PUBLIC are not allowed in a generator");
     for (LocalDecl &d : static_cast<LocalStmt &>(st).decls) {
       if (d.init) expr(*d.init, s); // before the variable exists: it reads the one visible
       if (d.macro) expr(*d.macro, s);
@@ -444,7 +445,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
   }
   case StmtKind::Yield:
     expr(*static_cast<YieldStmt &>(st).value, s);
-    if (s.inAwaitEach)
+    if (s.inAwaitEach && !curFunc_->async) // a synchronous generator's step would wait inside it (the start procedure)
       diag_.error(st.loc, "YIELD cannot be inside AWAIT FOR EACH");
     else if (s.inAlways)
       diag_.error(st.loc, "YIELD cannot be inside a BEGIN SEQUENCE with ALWAYS, a TRY with FINALLY or a USING");
@@ -490,7 +491,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
     auto &q = static_cast<SequenceStmt &>(st);
     if (q.handler) expr(*q.handler, s);
     bool wasInAlways = s.inAlways;
-    s.inAlways = s.inAlways || q.hasAlways;
+    s.inAlways = s.inAlways || (q.hasAlways && !q.restoresOnly);
     auto fenced = [&](Block &b, const char *fence) { // b, which RETURN, EXIT and LOOP may not leave
       Scope inner = s;
       inner.fence = fence;
