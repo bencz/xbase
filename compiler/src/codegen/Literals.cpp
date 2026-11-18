@@ -58,9 +58,13 @@ Constant *CodeGen::literal(const xir::Constant &c) {
     return lit;
   }
   case xir::Constant::Lit::Integer: {
-    std::string key = "i" + std::to_string(c.ival) + ":" + std::to_string(c.width);
+    // A width that is the default one of a computed integer of that value (xb_num_int_width) is stored as a computed
+    // integer's (0): the runtime reads the two alike, and the loops' values then have one header word whether they
+    // start as a literal or are computed (constant type tags for LLVM).
+    uint16_t width = c.width == xb_num_int_width(c.ival) ? 0 : c.width;
+    std::string key = "i" + std::to_string(c.ival) + ":" + std::to_string(width);
     Constant *&lit = numLits_[key];
-    if (!lit) lit = literalItem(XB_T_INT, c.width, 0, ConstantInt::get(i64_, (uint64_t)c.ival, true));
+    if (!lit) lit = literalItem(XB_T_INT, width, 0, ConstantInt::get(i64_, (uint64_t)c.ival, true));
     return lit;
   }
   case xir::Constant::Lit::Double: {

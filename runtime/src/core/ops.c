@@ -156,7 +156,7 @@ void xb_num_default_dec(xb_ctx *ctx, xb_item *r, double value) {
 void xb_op_pow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_POW, a, b, NULL)) return;
   if (!xb_is_number(a) || !xb_is_number(b)) { arg_error2(ctx, r, 1088, "^", a, b); return; }
-  xb_set_double(r, pow(xb_num_value(a), xb_num_value(b)), xb_decimals(ctx));
+  xb_set_double(r, xb_math_pow(xb_num_value(a), xb_num_value(b)), xb_decimals(ctx));
 }
 
 void xb_op_neg(xb_ctx *ctx, xb_item *r, const xb_item *a) {

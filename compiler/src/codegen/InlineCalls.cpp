@@ -97,13 +97,14 @@ Value *CodeGen::defaultWidth(Value *wide) {
 void CodeGen::emitIntOfQuotient(const xir::Instruction &div, Value *d, BasicBlock *join) {
   Value *a = addr(div.operand(0)), *bv = addr(div.operand(1));
   BasicBlock *general = newBlock("idiv.general");
-  xir::TypeSet ints = xir::typeBit(XB_T_INT);
+  xir::TypeSet ints = xir::kIntType;
   if ((plan_->types().of(div.operand(0)) & ints) && (plan_->types().of(div.operand(1)) & ints)) {
     BasicBlock *both = newBlock("idiv.ints"), *divide = newBlock("idiv"), *quotient = newBlock("idiv.q");
     branchLikely(bothInts(typeOf(div.operand(0), a), typeOf(div.operand(1), bv)), both, general);
     b_.SetInsertPoint(both);
     Value *x = intValue(a), *y = intValue(bv);
-    Value *limit = ConstantInt::get(i64_, (uint64_t)1 << 53), *half = ConstantInt::get(i64_, (uint64_t)1 << 52);
+    Value *limit = ConstantInt::get(i64_, (uint64_t)1 << XB_DBL_EXACT_BITS);
+    Value *half = ConstantInt::get(i64_, (uint64_t)1 << (XB_DBL_EXACT_BITS - 1));
     Value *small = b_.CreateAnd(b_.CreateICmpULT(b_.CreateAdd(x, half), limit),
                                 b_.CreateICmpULT(b_.CreateAdd(y, half), limit));
     branchLikely(b_.CreateAnd(small, b_.CreateICmpNE(y, ConstantInt::get(i64_, 0))), divide, general);
@@ -588,10 +589,10 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     if (kind == Inline::Sqrt) { // a negative number: 0
       r = b_.CreateSelect(negative, ConstantFP::get(f64, 0.0), b_.CreateUnaryIntrinsic(Intrinsic::sqrt, v));
     } else if (kind == Inline::Exp) { // an overflow: 0
-      Value *e = b_.CreateUnaryIntrinsic(Intrinsic::exp, v);
+      Value *e = b_.CreateCall(rtExp_, {v}); // xbmath.h, not the system's exp(): the same result everywhere
       r = b_.CreateSelect(b_.CreateFCmpOEQ(e, ConstantFP::getInfinity(f64)), ConstantFP::get(f64, 0.0), e);
     } else { // a negative number: minus infinity, as Log( 0 )
-      r = b_.CreateSelect(negative, ConstantFP::getInfinity(f64, true), b_.CreateUnaryIntrinsic(Intrinsic::log, v));
+      r = b_.CreateSelect(negative, ConstantFP::getInfinity(f64, true), b_.CreateCall(rtLog_, {v}));
     }
     storeDouble(d, r, setDecimals());
     break;

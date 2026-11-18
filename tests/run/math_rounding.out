@@ -1,0 +1,12 @@
+
+Exp constant: .T. .T. .T.
+Exp run time: .T. .T. .T.
+pow constant: .T. .T. .T. .T.
+pow run time: .T. .T. .T. .T.
+pow macro: .T. .T.
+halfway: .T. .T. .T.
+roots: .T. .T. .T. .T.
+subnormal: .T. .T. .T. .T.
+exact:       1024.00 .T.         -8.00          4.00          1.00 .T. .T.
+edges:          0.00          0.00          0.00 *********************** *********************** *********************** .T.
+Log: .T. .T.

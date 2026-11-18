@@ -142,12 +142,12 @@ void removeTest(const PendingTest &t) {
   if (t.load->use_empty()) t.load->eraseFromParent(); // an atomic load is not dead to the optimizer
 }
 
-// Whether running the header again, with the values its PHIs had, changes nothing: no call, no atomic or volatile
-// access, and stores only when it loads nothing (they store again what they stored, the frame's homes of the loop's
-// variables).
-bool rerunnable(const BasicBlock &header) {
+// Whether running the block of an exit test again, with the values its PHIs had, changes nothing: no call, no atomic
+// or volatile access, and stores only when it loads nothing (they store again what they stored, the frame's homes of
+// the loop's variables).
+bool rerunnable(const BasicBlock &test) {
   bool loads = false, stores = false;
-  for (const Instruction &i : header) {
+  for (const Instruction &i : test) {
     if (auto *ld = dyn_cast<LoadInst>(&i)) {
       if (!ld->isSimple()) return false;
       loads = true;
@@ -173,7 +173,8 @@ Value *atHeader(Loop &loop, BasicBlock *latch, Value *v) {
 // The uses, on the way from a poll's slow path on, of values the loop computes after its header: the new poll enters
 // that path from the header, where each such value is the one its PHI carries to the next pass (atHeader). False when
 // one has no such PHI, is the header's own (the next pass's there), or is an inner loop's (whose own polls may rewrite
-// its uses: each loop rewrites only its own).
+// its uses: each loop rewrites only its own). The way stops at the header: past it, a pass computes its values anew
+// before any use (each value's definition dominates its uses), as on any other pass.
 bool carriedPast(Loop &loop, LoopInfo &li, const PendingTest &poll,
                  std::vector<std::pair<Instruction *, Use *>> &uses) {
   std::unordered_set<const BasicBlock *> reached{poll.slow};
@@ -182,7 +183,7 @@ bool carriedPast(Loop &loop, LoopInfo &li, const PendingTest &poll,
     BasicBlock *b = work.back();
     work.pop_back();
     for (BasicBlock *s : successors(b))
-      if (reached.insert(s).second) work.push_back(s);
+      if (s != loop.getHeader() && reached.insert(s).second) work.push_back(s);
   }
   BasicBlock *latch = poll.br->getParent();
   for (BasicBlock *b : loop.blocks())
@@ -199,14 +200,18 @@ bool carriedPast(Loop &loop, LoopInfo &li, const PendingTest &poll,
   return true;
 }
 
-// The counted loop polls when its variable reaches the stop, in the branch of its exit test (the header); when a
-// request is pending, it goes where `poll` would have gone at the end of the pass before, with the header's values.
+// The counted loop polls when its variable reaches the stop, in the branch of its exit test; when a request is pending,
+// it goes where `poll` would have gone. The test is the header's (then with the header's values, those of the pass
+// before: atHeader), or the one of the block `poll` goes on to, which its block dominates (a loop LLVM rotated: then
+// with the values the pass has there).
 void stripMine(Function &f, Loop &loop, const Counted &c, const PendingTest &poll, BasicBlock *pre, Value *start,
                const std::vector<std::pair<Instruction *, Use *>> &carried) {
   LLVMContext &ctx = f.getContext();
   auto *br = cast<BranchInst>(c.test->getTerminator());
   BasicBlock *stay = br->getSuccessor(c.stay), *exit = br->getSuccessor(1 - c.stay);
   BasicBlock *header = loop.getHeader(), *latch = poll.br->getParent();
+  bool atTop = c.test == header;
+  auto passed = [&](Value *v) { return atTop ? atHeader(loop, latch, v) : v; };
   IRBuilder<> b(pre->getTerminator());
   Value *stop0 = nextStop(b, c, start);
 
@@ -215,12 +220,18 @@ void stripMine(Function &f, Loop &loop, const Counted &c, const PendingTest &pol
   BasicBlock *rearm = BasicBlock::Create(ctx, "poll.rearm", &f, stay);
   b.SetInsertPoint(rearm);
   Value *stop1 = nextStop(b, c, c.x);
-  b.CreateBr(header);
-  for (PHINode &phi : header->phis()) phi.addIncoming(&phi, rearm);
+  b.CreateBr(c.test);
+  for (PHINode &phi : c.test->phis()) phi.addIncoming(&phi, rearm);
 
+  // The stop on each way back to the header and into the test.
   PHINode *stop = PHINode::Create(c.x->getType(), 2, "poll.stop", header->begin());
+  SSAUpdater up;
+  up.Initialize(c.x->getType(), "poll.stop");
+  up.AddAvailableValue(header, stop);
+  up.AddAvailableValue(rearm, stop1);
+  Value *stopAtTest = atTop ? stop : up.GetValueInMiddleOfBlock(c.test);
   b.SetInsertPoint(br);
-  br->setCondition(b.CreateICmp(c.pred, c.x, stop));
+  br->setCondition(b.CreateICmp(c.pred, c.x, stopAtTest));
   br->setSuccessor(0, stay);
   br->setSuccessor(1, reached);
   MDBuilder md(ctx);
@@ -236,48 +247,50 @@ void stripMine(Function &f, Loop &loop, const Counted &c, const PendingTest &pol
   pending->copyMetadata(*poll.load);
   b.CreateCondBr(b.CreateICmpNE(pending, ConstantInt::get(pending->getType(), 0)), poll.slow, rearm,
                  md.createUnlikelyBranchWeights());
-  for (PHINode &phi : poll.slow->phis())
-    phi.addIncoming(atHeader(loop, latch, phi.getIncomingValueForBlock(latch)), check);
+  for (PHINode &phi : poll.slow->phis()) phi.addIncoming(passed(phi.getIncomingValueForBlock(latch)), check);
   for (auto [value, use] : carried) {
-    SSAUpdater up;
-    up.Initialize(value->getType(), value->getName());
-    up.AddAvailableValue(value->getParent(), value);
-    up.AddAvailableValue(check, atHeader(loop, latch, value));
-    up.RewriteUse(*use);
+    SSAUpdater carry;
+    carry.Initialize(value->getType(), value->getName());
+    carry.AddAvailableValue(value->getParent(), value);
+    carry.AddAvailableValue(check, atHeader(loop, latch, value));
+    carry.RewriteUse(*use);
   }
 
-  // The stop on each way back to the header.
-  SSAUpdater up;
-  up.Initialize(c.x->getType(), "poll.stop");
-  up.AddAvailableValue(header, stop);
-  up.AddAvailableValue(rearm, stop1);
-  for (BasicBlock *from : predecessors(header))
-    stop->addIncoming(from == pre ? stop0 : up.GetValueAtEndOfBlock(from), from);
+  std::vector<BasicBlock *> preds(pred_begin(header), pred_end(header));
+  for (BasicBlock *from : preds) stop->addIncoming(from == pre ? stop0 : up.GetValueAtEndOfBlock(from), from);
 }
 
-// A loop that is not counted polls once every kPassesPerPoll passes of its back edge from `poll`'s block: a count in a
-// register goes down on it, and only when it runs out does the loop load the pending requests.
+// A loop that is not counted (or whose poll goes on elsewhere than to its header: a loop LLVM rotated) polls once every
+// kPassesPerPoll passes of `poll`: a count in a register goes down on it, and only when it runs out does the loop load
+// the pending requests.
 void countDown(Function &f, Loop &loop, const PendingTest &poll) {
   LLVMContext &ctx = f.getContext();
-  BasicBlock *header = loop.getHeader(), *latch = poll.br->getParent();
+  BasicBlock *header = loop.getHeader(), *at = poll.br->getParent(), *cont = poll.cont;
   Type *ty = Type::getInt32Ty(ctx);
   PHINode *left = PHINode::Create(ty, 2, "poll.left", header->begin());
-  BasicBlock *check = BasicBlock::Create(ctx, "poll", &f, header);
+  BasicBlock *check = BasicBlock::Create(ctx, "poll", &f, cont);
   IRBuilder<> b(poll.br);
   Value *next = b.CreateSub(left, ConstantInt::get(ty, 1), "poll.left");
   MDBuilder md(ctx);
-  b.CreateCondBr(b.CreateICmpEQ(next, ConstantInt::get(ty, 0)), check, header, md.createBranchWeights(1, 63));
-  // The test moves to its own block on the way back: the header and the slow path receive from it what they did from
-  // the latch.
+  b.CreateCondBr(b.CreateICmpEQ(next, ConstantInt::get(ty, 0)), check, cont, md.createBranchWeights(1, 63));
+  // The test moves to its own block on the way on: where it went on to and the slow path receive from it what they
+  // did from its block.
   poll.br->removeFromParent();
   poll.br->insertInto(check, check->end());
   cast<Instruction>(poll.br->getCondition())->moveBefore(poll.br->getIterator());
   poll.load->moveBefore(cast<Instruction>(poll.br->getCondition())->getIterator());
-  for (PHINode &phi : header->phis())
-    if (&phi != left) phi.addIncoming(phi.getIncomingValueForBlock(latch), check);
-  for (PHINode &phi : poll.slow->phis()) phi.replaceIncomingBlockWith(latch, check);
-  for (BasicBlock *from : predecessors(header)) // anew from outside the loop and after a poll
-    left->addIncoming(from == latch ? next : ConstantInt::get(ty, kPassesPerPoll), from);
+  for (PHINode &phi : cont->phis())
+    if (&phi != left) phi.addIncoming(phi.getIncomingValueForBlock(at), check);
+  for (PHINode &phi : poll.slow->phis()) phi.replaceIncomingBlockWith(at, check);
+  // The count on each way back to the header: one less after the test's block, anew after a poll and from outside.
+  SSAUpdater up;
+  up.Initialize(ty, "poll.left");
+  up.AddAvailableValue(header, left);
+  up.AddAvailableValue(at, next);
+  up.AddAvailableValue(check, ConstantInt::get(ty, kPassesPerPoll));
+  std::vector<BasicBlock *> preds(pred_begin(header), pred_end(header));
+  for (BasicBlock *from : preds)
+    left->addIncoming(loop.contains(from) ? up.GetValueAtEndOfBlock(from) : ConstantInt::get(ty, kPassesPerPoll), from);
 }
 
 } // namespace
@@ -318,18 +331,29 @@ bool placeLoopPolls(Function &f, FunctionAnalysisManager &fam) {
       plans.push_back(std::move(p));
       continue;
     }
-    // One poll, on the back edge from the latch to the header. A counted loop's exit test is the header's, which
-    // computes nothing else that its running again (after a poll) would repeat; another loop counts its passes down.
+    // One poll. A counted loop's exit test, which computes nothing else that its running again (after a poll) would
+    // repeat, polls; another loop counts its passes down.
     BasicBlock *header = loop->getHeader();
     const PendingTest &poll = p.polls[0];
     // Only an innermost loop polls less than on every pass: an outer loop's pass runs its inner loops, whose polls
     // start anew on each entry (a loop shorter than the stride has none), so its own poll bounds the passes between
     // two of them.
-    if (!loop->isInnermost() || p.polls.size() != 1 || poll.cont != header || loop->contains(poll.slow)) continue;
-    bool ok = countedExit(*loop, li, se, header, p.counted) && rerunnable(*header) &&
-              availableAt(dt, poll.load->getPointerOperand(), header) && carriedPast(*loop, li, poll, p.carried);
-    for (PHINode &phi : poll.slow->phis())
-      ok = ok && atHeader(*loop, poll.br->getParent(), phi.getIncomingValueForBlock(poll.br->getParent()));
+    if (!loop->isInnermost() || p.polls.size() != 1 || loop->contains(poll.slow) || !loop->contains(poll.cont))
+      continue;
+    // The exit test that polls: the header's, which `poll` goes on to (the values its slow path receives are the
+    // pass before's: carried to the header), or the one of the block `poll` goes on to, which its block dominates
+    // (the pass's own values reach it).
+    BasicBlock *test = poll.cont;
+    bool ok = countedExit(*loop, li, se, test, p.counted) && rerunnable(*test) &&
+              availableAt(dt, poll.load->getPointerOperand(), test);
+    if (test == header) {
+      ok = ok && carriedPast(*loop, li, poll, p.carried);
+      for (PHINode &phi : poll.slow->phis())
+        ok = ok && atHeader(*loop, poll.br->getParent(), phi.getIncomingValueForBlock(poll.br->getParent()));
+    } else { // the test sees every value of the variable (`ne` must meet the stop): it runs on every pass
+      ok = ok && dt.dominates(poll.br->getParent(), test);
+      for (BasicBlock *l : latches) ok = ok && dt.dominates(test, l);
+    }
     BasicBlock *pre = ok ? loop->getLoopPreheader() : nullptr;
     if (ok && !pre) {
       pre = InsertPreheaderForLoop(loop, &dt, &li, nullptr, false);

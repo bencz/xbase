@@ -79,6 +79,9 @@ else()
   # Atomic operations of every size the runtime uses (platform/atomic.h); a target without native ones for some size
   # (older ARM, some 32-bit systems) gets them from libatomic.
   include(CheckCSourceCompiles)
+  include(CMakePushCheckState)
+  cmake_push_check_state()
+  list(JOIN XB_TARGET_C_FLAGS " " CMAKE_REQUIRED_FLAGS) # a command line: the flags apart
   check_c_source_compiles("
     #include <stddef.h>
     #include <stdint.h>
@@ -89,6 +92,7 @@ else()
                    __atomic_fetch_add(&s, 1, __ATOMIC_ACQ_REL) + (int)__atomic_fetch_add(&d, 1, __ATOMIC_ACQ_REL) +
                    __atomic_compare_exchange_n(&p, &e, &p, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
     }" XB_ATOMICS_NATIVE)
+  cmake_pop_check_state()
   if(NOT XB_ATOMICS_NATIVE)
     target_link_libraries(xbrt PUBLIC atomic)
   endif()
@@ -116,16 +120,20 @@ add_custom_command(OUTPUT ${XB_RUNTIME_SYMBOLS}
 target_sources(xbrt PRIVATE ${XB_RUNTIME_SYMBOLS})
 
 target_include_directories(xbrt PUBLIC include PRIVATE src)
+# The target's flags (top-level CMakeLists.txt), for the runtime and every program linked with it.
+target_compile_options(xbrt PUBLIC ${XB_TARGET_C_FLAGS})
+target_link_options(xbrt PUBLIC ${XB_TARGET_C_FLAGS})
 # set.ch is shared with xBase code, so setting numbers are defined once.
 target_include_directories(xbrt PRIVATE ${PROJECT_SOURCE_DIR}/include)
 xb_target_warnings(xbrt)
+# The runtime's target is 32-bit x86: named, or the host's when none is.
+set(XB_TARGET_X86_32 OFF)
+if(XB_TARGET MATCHES "^i[3-6]86" OR
+   (NOT XB_TARGET AND CMAKE_C_SIZEOF_DATA_PTR EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86)$"))
+  set(XB_TARGET_X86_32 ON)
+endif()
+xb_exact_doubles(xbrt ${XB_TARGET_X86_32})
 # Volatile loads acquire and volatile stores release on every architecture (platform/atomic.h).
 if(MSVC)
   target_compile_options(xbrt PRIVATE /volatile:ms)
-endif()
-# Doubles rounded after each operation, as xbc's code computes them: on 32-bit x86 with SSE2, not the x87 unit (MSVC
-# uses SSE2 there by default).
-if(NOT MSVC AND CMAKE_C_SIZEOF_DATA_PTR EQUAL 4 AND (XB_TARGET MATCHES "^i[3-6]86" OR
-   (NOT XB_TARGET AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86)$")))
-  target_compile_options(xbrt PRIVATE -msse2 -mfpmath=sse)
 endif()

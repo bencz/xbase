@@ -16,6 +16,10 @@
 // loop keeps its values typed and out of the frame; another type goes on in
 // the copy, as before.
 //
+// A speculation is a guard, in a loop, of a value the loop computes with: + - * of two integers whose ranges may
+// overflow, against the integers alone (an overflow's double goes on in the copy). The loop's values then stay
+// integers (Types.h: those whose ranges keep them integers need no guard), in registers.
+//
 // The copy is made once per function and entered after each checked
 // operation; the values of the function that reach it are joined to the
 // copy's own by block parameters (SSA reconstruction on demand, as in Braun et
@@ -39,7 +43,7 @@ namespace {
 // values live there are joined: both are bounded, so that compile time and
 // code size stay so. The checks kept are those of the most nested loops.
 constexpr size_t kMaxInstructions = 500;
-constexpr size_t kMaxChecks = 16;
+constexpr size_t kMaxChecks = 64;
 
 // An operation of a loop that takes its operand as a number (an operand of another type is an error, or another
 // operation altogether).
@@ -83,17 +87,9 @@ bool entersLoopAsNumber(const Instruction &i, const Loops &loops) {
   return false;
 }
 
-// An operation worth checking: in a loop, its error may substitute the
-// result, the types it gives itself hold no heap reference (the value can
-// stay out of the frame) or are a single type (its tag is a constant: a
-// string concatenation), and another operation computes with it (an index
-// too) or a loop carries it (a condition tests the type anyway; a variable or
-// a call takes the value whatever its type).
-bool worthChecking(const Instruction &i, const TypeInfo &types, const Loops &loops) {
-  if (i.type() != Type::Item || !loops.innermost(i.parent) || !types.maySubstitute(i)) return false;
-  TypeSet own = types.of(&i);
-  bool single = (own & (own - 1)) == 0;
-  if (own == 0 || ((own & kHeapTypes) != 0 && !single)) return false;
+// Whether another operation computes with `i` (an index too), or a branch carries it: its type then matters to them
+// (a condition tests the type anyway; a variable or a call takes the value whatever its type).
+bool computedWith(const Instruction &i) {
   for (const Instruction *u : i.users())
     switch (u->op) {
     case Op::Binary: case Op::Unary: case Op::ForTest: case Op::SwitchCheck: case Op::Index: case Op::IndexSet:
@@ -105,12 +101,76 @@ bool worthChecking(const Instruction &i, const TypeInfo &types, const Loops &loo
   return false;
 }
 
+// An operation worth checking: in a loop, its error may substitute the
+// result, the types it gives itself hold no heap reference (the value can
+// stay out of the frame) or are a single type (its tag is a constant: a
+// string concatenation), and it is computed with (computedWith).
+bool worthChecking(const Instruction &i, const TypeInfo &types, const Loops &loops) {
+  if (i.type() != Type::Item || !loops.innermost(i.parent) || !types.maySubstitute(i)) return false;
+  TypeSet own = types.of(&i);
+  bool single = (own & (own - 1)) == 0;
+  if (own == 0 || ((own & kHeapTypes) != 0 && !single)) return false;
+  return computedWith(i);
+}
+
 // A value worth a guard: made outside an innermost loop that takes it as a number, of a type the code would not know
 // there (`types` as code generation sees them: what an error may substitute counts), which may be a number.
 bool worthGuarding(const Instruction &i, const TypeInfo &types, const Loops &loops) {
   TypeSet t = types.of(&i);
   if (i.type() != Type::Item || (t & ~kNumberTypes) == 0 || (t & kNumberTypes) == 0) return false;
   return entersLoopAsNumber(i, loops);
+}
+
+// The values of the loops that are integers once the speculations hold: the greatest set where each is an
+// integer already, + - * of two of them (its guard: no overflow), Int() of one divided by a constant (Types.h), or a
+// block parameter all of whose arguments are (a value the loop carries: its start and what each pass computes). Found
+// by taking out, until none is left to take, what breaks the rules.
+std::unordered_set<const Value *> speculatedIntegers(const Function &f, const CFG &cfg, const TypeInfo &types,
+                                                     const Loops &loops) {
+  std::unordered_set<const Value *> set;
+  std::vector<const Value *> candidates;
+  for (BasicBlock *b : cfg.order()) {
+    if (!loops.innermost(b)) continue;
+    for (auto &p : b->params)
+      if (p->type() == Type::Item) candidates.push_back(p.get());
+    for (auto &i : b->insts)
+      if (i->type() == Type::Item) candidates.push_back(i.get());
+  }
+  set.insert(candidates.begin(), candidates.end());
+  std::unordered_map<const Value *, std::vector<const Value *>> incoming;
+  for (auto &[block, terms] : predecessorTerminators(f))
+    for (const Instruction *t : terms) {
+      if (!cfg.reachable(t->parent)) continue;
+      for (const Target &tg : t->targets)
+        for (size_t k = 0; k < tg.args.size(); ++k) incoming[tg.block->params[k].get()].push_back(tg.args[k]);
+    }
+  auto integer = [&](const Value *v) { return types.of(v) == kIntType || set.count(v) != 0; };
+  auto holds = [&](const Value *v) {
+    if (const auto *i = dynamic_cast<const Instruction *>(v)) {
+      if (arithmetic(*i)) return integer(i->operand(0)) && integer(i->operand(1));
+      if (const Value *x = intQuotientDividend(*i)) return integer(x);
+      return types.of(i) == kIntType;
+    }
+    auto it = incoming.find(v);
+    if (it == incoming.end() || it->second.empty()) return false;
+    return std::all_of(it->second.begin(), it->second.end(), integer);
+  };
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (const Value *v : candidates)
+      if (set.count(v) && !holds(v)) {
+        set.erase(v);
+        changed = true;
+      }
+  }
+  return set;
+}
+
+// A value worth a speculation (see above): + - * of two integers once the speculations hold (`ints`), which may
+// overflow (`types` as code generation sees them).
+bool worthSpeculating(const Instruction &i, const TypeInfo &types, const std::unordered_set<const Value *> &ints) {
+  return i.type() == Type::Item && ints.count(&i) && computedWith(i) && arithmetic(i) &&
+         types.of(&i) != kIntType && !types.fits(i);
 }
 
 } // namespace
@@ -123,19 +183,24 @@ bool typedContinuations(Function &f) {
   if (instructionCount(f) > kMaxInstructions) return false;
 
   std::vector<Instruction *> checked;
-  std::unordered_set<const Instruction *> guards;
+  std::unordered_map<const Instruction *, TypeSet> guards; // the types each guard lets on
   {
     CFG cfg(f);
     TypeInfo types(cfg, Substitution::None), seen(cfg);
     Loops loops(cfg);
+    std::unordered_set<const Value *> ints = speculatedIntegers(f, cfg, seen, loops);
     for (BasicBlock *b : cfg.order())
-      for (auto &i : b->insts)
-        if (worthChecking(*i, types, loops)) {
+      for (auto &i : b->insts) {
+        if (worthSpeculating(*i, seen, ints)) { // a guard against fewer types than a check's
+          checked.push_back(i.get());
+          guards[i.get()] = kIntType;
+        } else if (worthChecking(*i, types, loops)) {
           checked.push_back(i.get());
         } else if (worthGuarding(*i, seen, loops)) {
           checked.push_back(i.get());
-          guards.insert(i.get());
+          guards[i.get()] = kNumberTypes;
         }
+      }
     std::stable_sort(checked.begin(), checked.end(), [&](const Instruction *a, const Instruction *b) {
       return loops.depth(a->parent) > loops.depth(b->parent);
     });
@@ -167,7 +232,7 @@ bool typedContinuations(Function &f) {
     b->takeTerminator();
     builder.setBlock(b);
     Instruction *check = builder.substCheck(i);
-    if (guards.count(i)) check->imm = kNumberTypes;
+    if (auto g = guards.find(i); g != guards.end()) check->imm = g->second;
     builder.condBr(check, enter, after[n]);
     builder.setBlock(enter);
     Value *substituted = builder.substValue(i);

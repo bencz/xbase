@@ -130,6 +130,25 @@ be zero: not a non-zero constant), `unary` and `switch.check` fail for types the
 of the mask (see `typed-continuations` in [Passes](#passes)).
 `Substitution::None` types every operation as if no error block substituted anything.
 
+Integer ranges (`IntRange`, the values an item holds when it is an integer) grow with the types in the same optimistic
+fixpoint, since each needs the other: `+`, `-` and `*` of two integers give an integer, not a double, when the operands'
+ranges keep the result within int64 (`TypeInfo::fits`, the corners computed with LLVM's checked arithmetic), and
+`Int( x / k )` of an integer `x` (`k` an integer constant other than -1, 0 and 1, `intQuotientDividend`) is an integer
+(its range exact only within 2^53, where the double quotient is). `BitAnd` with a non-negative constant is within it, a
+negation negates the range and `Int()` of an integer keeps it, and a value an error may substitute has any range,
+checked or not (a `subst.check` lets a substituted value of the operation's own types through). A block parameter's
+range is widened once it has grown twice: on the side that grows, to the next of the function's integer constants, their
+neighbours (c - 1, c + 1) or the end of int64 (thresholds), so that the fixpoint ends; two rounds of narrowing then
+compute every range again from the others, and the types once more with the ranges fixed. The tests bound the values
+they compare (`Bound`): a FOR's true branch bounds its counter by its limit (no greater; no less with a negative step)
+when both and the step are integers and the step's sign is known, and either branch of a comparison `<` `<=` `>` `>=` of
+two numbers bounds each operand by the other when that is an integer (the false branch by the negation). Such a bound
+holds in the blocks its branch dominates when the branch's edge is the only way into its block from outside it (its
+other predecessors are back edges), at most 16 of each value (the first in reverse postorder: a value compared in
+thousands of places would make each look-up as long), and for the arguments that branch passes to a block parameter in
+any case (a loop's back edge from an `IF n > 3; EXIT`). `--dump-xir-types` prints the types after each item value and
+block parameter.
+
 ## Passes
 
 The syntax tree is folded first (`opt/Fold`, [compiler.md](compiler.md#constant-folding)). From `-O1` on, the pass
@@ -233,7 +252,7 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   branch passes on, ends its block with `subst.check` (its result is not of its own types: only a substituted value can
   be) and a `cond_br` to a block that takes the value with `subst.value` and enters a generic copy of the function right
   after the copy of the operation. The copy is made once per function, of at most 500 instructions (a larger one doubles
-  code that LLVM unrolls and splits again), with at most 16 checks, those of the most nested loops (`Loops` in
+  code that LLVM unrolls and splits again), with at most 64 checks, those of the most nested loops (`Loops` in
   `Analysis`); not in a function with unwind blocks, which take no parameters. The values that reach the copy are joined
   to its own by block parameters, built on demand from the uses (Braun et al.), and parameters that receive one value
   only are removed. The copy's operations keep giving any type, so a substituted value of any type runs correctly, while
@@ -246,7 +265,12 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   them as numbers (a `FOR`'s start or limit, an operand of `-`, `*`, `/`, `%`, `^`, a comparison, a negation):
   `subst.check` with a mask (`imm`, the number types) right after the value, into the same copy otherwise, so the loop
   keeps its values typed and out of the frame. The guarded value itself keeps a home the collector sees
-  (`xir::guarded`): until its check it may hold anything, and the pending test after a call may collect.
+  (`TypeInfo::guardNeedsHome`) when until its check it may hold anything (a substituted error, a value read from
+  memory: the pending test after a call may collect). It also speculates: in a loop, `+`, `-` and `*` of two values
+  that are integers once the speculations hold (the greatest set of the loops' values that are integers, `+ - *` or
+  `Int( x / k )` of such, or block parameters all of whose arguments are) and whose ranges may overflow get a guard
+  against the integers alone (`subst.check` with the integer mask; an overflow's double goes on in the copy), so the
+  loop computes with integers in registers; one whose ranges cannot overflow (`fits`) needs none.
 - `resolve-sends`, after `fold-constants`: a `send` (without `...`, not one an AWAIT fuses) to an object whose class
   `ClassInfo` knows reaches what `ClassModel` finds for it from the send's class (`classIndex`) and `Super`: a method
   becomes a `call` of its function (which `inline-functions` may then inline: a method is inlined like a function,
@@ -259,18 +283,18 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   function of the module (a `FUNCTION`, `PROCEDURE` or method with parameters, not an `INIT` or `EXIT` procedure, a body
   versioned for references, one that reads its arguments as received (`PCount()`, `PValue()`, `...`), a generator, an
   `ASYNC` function, nor one that makes codeblocks or has unwind blocks; at most 2000 instructions) that passes no
-  reference nor `...` and whose arguments the type inference finds all numbers, all logicals or all dates for some
-  parameter, or objects of one class `ClassInfo` knows, goes to a copy of the function typed for them (`NAME.typedN`, at
-  most 4 a function, shown on the call stack as the function: `stackName`): the copy's parameters have those types and
-  classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes keeps any type and class; a
-  method's copy, its Self of a known class, resolves the sends to Self), its versioning test is false (no call of it
-  passes a reference) and its body versioned for references goes. The copy is made once per function and parameter
-  types, optimized at once (its own calls with such arguments go to it, so a recursive function calls its copy), and its
-  return types are the least fixed point of what its `RETURN`s give with its calls of itself giving the types found so
-  far, from none (`settleReturnTypes`). Once every function is done, a `STATIC FUNCTION` its copies replaced, which no
-  root reaches any more, leaves the module with its body versioned for references (`dropCopiedFunctions`; the module's
-  first function, which may be the program's start, `firstProgramFunction`, stays). `Fib( n - 1 ) + Fib( n - 2 )` then
-  computes with numbers in registers.
+  reference nor `...` and whose arguments the type inference finds all integers, else all numbers, all logicals or all
+  dates for some parameter, or objects of one class `ClassInfo` knows, goes to a copy of the function typed for them
+  (`NAME.typedN`, at most 4 a function, shown on the call stack as the function: `stackName`): the copy's parameters
+  have those types and classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes keeps any
+  type and class; a method's copy, its Self of a known class, resolves the sends to Self), its versioning test is false
+  (no call of it passes a reference) and its body versioned for references goes. The copy is made once per function and
+  parameter types, optimized at once (its own calls with such arguments go to it, so a recursive function calls its
+  copy), and its return types are the least fixed point of what its `RETURN`s give with its calls of itself giving the
+  types found so far, from none (`settleReturnTypes`). Once every function is done, a `STATIC FUNCTION` its copies
+  replaced, which no root reaches any more, leaves the module with its body versioned for references
+  (`dropCopiedFunctions`; the module's first function, which may be the program's start, `firstProgramFunction`, stays).
+  `Fib( n - 1 ) + Fib( n - 2 )` then computes with numbers in registers.
 - `peel-for-types`, after `typed-continuations`: a small innermost loop (at most 80 instructions, in a function of at
   most 600; up to 4 loops) without a suspension point or an inlined body's frame, one of whose header's parameters gets
   one number type from the loop's passes and another number type from outside (a sum that starts at the integer 0 and

@@ -225,7 +225,7 @@ void FramePlan::chooseHomes() {
   for (BasicBlock *b : cfg_.order())
     for (auto &i : b->insts)
       if (isItemResult(i.get()) && !homes_.count(i.get()) && !unit_.count(i.get()) && types_.noHeap(i.get()) &&
-          !xir::guarded(*i))
+          !types_.guardNeedsHome(*i))
         homes_[i.get()] = {Home::Kind::Local, 0, nullptr};
   // Every other item value gets a slot of its own.
   for (BasicBlock *b : cfg_.order()) {

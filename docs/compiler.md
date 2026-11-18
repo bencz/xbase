@@ -361,7 +361,8 @@ Code generation has two steps: the syntax tree becomes xIR ([xir.md](xir.md)), w
 
 `xir/Gen*.cpp` (`xir::Generator`) emits each function's xIR in Clipper's evaluation order; `xir/Verifier.*` checks
 the result before it goes further (an invalid xIR is an internal error). From `-O1` on the xIR passes run
-([xir.md](xir.md#passes)); `--dump-xir=<file>` writes the xIR that is lowered to LLVM.
+([xir.md](xir.md#passes)); `--dump-xir=<file>` writes the xIR that is lowered to LLVM, with the inferred types of its
+item values and block parameters when `--dump-xir-types` is given too ([xir.md](xir.md#types)).
 
 - Evaluation order: binary operators evaluate the left operand, then the right; calls evaluate their arguments in order;
   `x := v` evaluates `v`, then stores; `x op= v` loads `x`, then evaluates `v`; `a[i] := v` evaluates `v`, then `a`,
@@ -536,6 +537,9 @@ emits the object file.
   stores. A copy of a literal item stores its two words as constants (`literalWords_`; a string literal's only on
   targets where its pointer fills the value word, a narrower one being widened by an instruction): a choice between two
   literals (`iif( l, "T", "F" )`) is then one between constants, where loads would become branches in code generation.
+  An integer literal whose display width is the one a computed integer of its value shows (`xb_num_int_width`: 10
+  from -999999999 to 999999999, 20 below) is stored with width 0, as computed integers are (the runtime reads both
+  alike): a loop's variable that starts as `0` and is then computed keeps one header word, whose type LLVM then knows.
 - The entry block allocates the frame of the planned size on the stack (`pushFrame`: an `alloca` of `xb_frame`, see
   [runtime.md](runtime.md#frames)), copies the parameters into the first slots (in a direct entry, from the words in
   registers; otherwise branch-free from a selected source, `argv[k]` or a `NIL` constant: `argItem`), clears the other
@@ -573,40 +577,42 @@ emits the object file.
   `xb_dbl_fits_i64` of its truncation would allow), with the double's width, its own or else the default one
   (`xb_num_dbl_width`'s rule, from the constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`,
   `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too) calls the runtime; `Int( x / y )`, whose division is right before
-  it and used nowhere else, is lowered as one (`emitIntOfQuotient`): two integers in [-2^52, 2^52), `y` not 0,
-  give their truncated integer quotient (`sdiv`, which the double quotient truncated equals) with the width `Int()`
-  would give that double, unless the quotient is `XB_NUM_FITS_MAX` or `XB_NUM_FITS_MIN`, where the double may lie past
-  the bound; anything else is the division (`emitDivMod`) and then `Int()` as above; `Abs()` of an integer not below 0
-  is it, of a negative one (not INT64_MIN) its negation, of a double its magnitude with its decimals; `Max()` and
-  `Min()` of two numbers (compared as doubles) or two dates copy the first when it wins or ties, else the second;
-  `Round( n, d )` with an integer `d` within 22 places is `xbf_ROUND`'s formula (a table of the exact powers of ten,
-  `fma`, `XB_DBL_INTEGRAL`; the truncation `truncDouble`, through an integer below 2^52, since `llvm.trunc` is a call of
-  the C library where the target lacks the instruction, as x86-64 without SSE4.1 does, and so is `doubleRemainder`'s
-  test of integral operands); `Sqrt()`, `Exp()` and `Log()` of a number are the C library's (`llvm.sqrt`, `llvm.exp`,
-  `llvm.log`) with Clipper's results outside the reals and SET DECIMALS decimals; `Mod()` of two numbers and a base
-  other than 0 is `doubleRemainder` moved to the base's sign; outside an inlined body, `PCount()` is the function's own
-  `argc` (less `Self` in a method), and `PValue( n )` with an integer `n` copies the parameter's slot or the argument as
-  passed (`NIL` outside 1 .. `argc`); `ValType()` of a value is the shared one-byte string of its tag's letter
-  (`XB_TYPE_LETTERS`, the runtime's table too; a memo field's value, `XB_STR_MEMO`, calls the function); anything else
-  calls the function, which raises the errors, and so does a `PValue()` of an argument that is a reference. A call whose
-  only argument is `...`, to a function that takes references, in a function with no other `...` and no
-  `PCount()`/`PValue()`, passes the arguments where they are instead of copying them (`forwardInPlace_`). `append`
-  copies a string's bytes into the room of the variable's growing string in place (one store for one byte) when they
-  fit, and calls `xb_op_append` otherwise. A `load` that an `append` of its variable reaches with no other load in
-  between ends the growth before the value goes on (`shareString`), unless only `Len()` and `Asc()` read its value, in
-  place; a forward data flow finds them (`findSharingLoads`), where a block entered by unwinding (a `BEGIN SEQUENCE`
-  handler, a `FOR EACH` cleanup) starts with every such variable growing, and a block reached growing along some edges
-  only, from which every path ends the growth before any append (a loop that reads what a loop before it built), ends it
-  on those edges instead, so the loop does not test it again; the edge of a `gen.yield` ends it before the frame is
-  saved, since the next step enters through the dispatch. The bit operators and functions take two integers in two
-  instructions and convert doubles on a path of their own, and the fast paths of calls read their operands in place: the
-  argument group is built only for the call. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at
-  the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another
-  module's function to `xbp_NAME`, one to a function of the module to its direct entry when it has one (below), else to
-  it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module
-  initialization are internal, under names nothing looks up, so modules sharing the object never clash. A call, a send
-  or an array literal with `...` (`withRest`) passes the count and the items of a frame built for it on the stack
-  ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions leave such calls alone.
+  it and used nowhere else, is lowered as one (`emitIntOfQuotient`): two integers in [-2^52, 2^52), `y` not 0, give
+  their truncated integer quotient (`sdiv`, which the double quotient truncated equals) with the width `Int()` would
+  give that double, unless the quotient is `XB_NUM_FITS_MAX` or `XB_NUM_FITS_MIN`, where the double may lie past the
+  bound; anything else is the division (`emitDivMod`) and then `Int()` as above; `Abs()` of an integer not below 0 is
+  it, of a negative one (not INT64_MIN) its negation, of a double its magnitude with its decimals; `Max()` and `Min()`
+  of two numbers (compared as doubles) or two dates copy the first when it wins or ties, else the second; `Round( n, d
+  )` with an integer `d` within 22 places is `xbf_ROUND`'s formula (a table of the exact powers of ten, `fma`,
+  `XB_DBL_INTEGRAL`; the truncation `truncDouble`, through an integer below 2^52, since `llvm.trunc` is a call of the C
+  library where the target lacks the instruction, as x86-64 without SSE4.1 does, and so is `doubleRemainder`'s test of
+  integral operands); `Sqrt()` of a number is `llvm.sqrt` (IEEE's, the same everywhere), `Exp()` and `Log()` call the
+  runtime's `xb_exp` and `xb_log` (`xbmath.h`, the same on every system, not the C library's `llvm.exp` and `llvm.log`;
+  declared without memory access, so that LLVM still folds repeated calls), each with Clipper's results outside the
+  reals and SET DECIMALS decimals; `Mod()` of two numbers and a base other than 0 is `doubleRemainder` moved to the
+  base's sign; outside an inlined body, `PCount()` is the function's own `argc` (less `Self` in a method), and `PValue(
+  n )` with an integer `n` copies the parameter's slot or the argument as passed (`NIL` outside 1 .. `argc`);
+  `ValType()` of a value is the shared one-byte string of its tag's letter (`XB_TYPE_LETTERS`, the runtime's table too;
+  a memo field's value, `XB_STR_MEMO`, calls the function); anything else calls the function, which raises the errors,
+  and so does a `PValue()` of an argument that is a reference. A call whose only argument is `...`, to a function that
+  takes references, in a function with no other `...` and no `PCount()`/`PValue()`, passes the arguments where they are
+  instead of copying them (`forwardInPlace_`). `append` copies a string's bytes into the room of the variable's growing
+  string in place (one store for one byte) when they fit, and calls `xb_op_append` otherwise. A `load` that an `append`
+  of its variable reaches with no other load in between ends the growth before the value goes on (`shareString`), unless
+  only `Len()` and `Asc()` read its value, in place; a forward data flow finds them (`findSharingLoads`), where a block
+  entered by unwinding (a `BEGIN SEQUENCE` handler, a `FOR EACH` cleanup) starts with every such variable growing, and a
+  block reached growing along some edges only, from which every path ends the growth before any append (a loop that
+  reads what a loop before it built), ends it on those edges instead, so the loop does not test it again; the edge of a
+  `gen.yield` ends it before the frame is saved, since the next step enters through the dispatch. The bit operators and
+  functions take two integers in two instructions and convert doubles on a path of their own, and the fast paths of
+  calls read their operands in place: the argument group is built only for the call. Calls set the result slot to `NIL`,
+  then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or
+  `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module to its
+  direct entry when it has one (below), else to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC`
+  function, a codeblock and a module initialization are internal, under names nothing looks up, so modules sharing the
+  object never clash. A call, a send or an array literal with `...` (`withRest`) passes the count and the items of a
+  frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions
+  leave such calls alone.
 - Direct entries (`directEntries`, `xir::hasDirectEntry`): a function of the program that does not read its arguments as
   received (its frame keeps none, `readsArgs`, and it has no `...`, `usesRest`) and is not the body versioned for
   references (`byRefBody`) gets its body in an internal function, `xb.direct.NAME`, taking the context, the result slot,
@@ -814,10 +820,16 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 `codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
 host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), then, from `-O1` on, splits the
 loops whose fast paths have cold edges (`LoopSplit.*`, below), places the polls of the loops' back edges (`LoopPolls.*`,
-below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds), versions the fast loops on
-their other invariant tests (`versionInvariantColdExits`, `LoopSplit.*`, below), each followed by the function
-simplification pipeline on the functions it changed, and writes the object with the target's object writer (code
-generation runs on the legacy pass manager: in LLVM 22 it is the one every target implements).
+below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds), versions the fast loops on their
+other invariant tests (`versionInvariantColdExits`, `LoopSplit.*`, below), each followed by the function simplification
+pipeline on the functions it changed, and writes the object with the target's object writer (code generation runs on the
+legacy pass manager: in LLVM 22 it is the one every target implements). At `-O0` (no xIR passes, LLVM's `-O0` pipeline)
+every function first gets the passes whose time follows its size (`cleanUpFunctions`, below: SROA, early CSE,
+instruction combining, CFG simplification), and code generation allocates registers (`CodeGenOptLevel::Less`, as at
+`-O1`): the fast allocator of `None` gives every value a stack slot of its own, so that a function of inline fast paths
+took kilobytes of stack per call (the `recursion_deep` test's function 3.8 KB on 32-bit x86 and 2.4 KB on x86-64; 0.7 KB
+and 0.2 KB so), and `xbc` emits no debugging information that such code would serve. It costs compile time: the
+`large_function` test at `-O0` takes 4.4 s instead of 1.4 s (`-O2`: 5.4 s).
 
 A function of more than 60000 instructions as code generation makes it (`kLargeFunction`: a procedure of a few thousand
 statements) does not go through that pipeline: several of its passes and of code generation's take time that grows
@@ -825,7 +837,7 @@ faster than a function's size (merging stores into `memset`s, turning selects in
 dominator tree each time), and such a function took minutes. Measured through the whole pipeline (x86-64, a Release
 `xbc`): the `pi` benchmark's function of 50000 instructions takes 2.9 s, the statements of the `large_function` test cut
 to 60000 and 100000 instructions 0.9 s and 1.8 s, and all of them (408000) 31 s. It gets passes whose time follows its
-size (`optimizeLargeFunctions`: SROA, which keeps its `Local` items in registers, early CSE, instruction combining, CFG
+size (`cleanUpFunctions`: SROA, which keeps its `Local` items in registers, early CSE, instruction combining, CFG
 simplification), then is marked `optnone` and `noinline`: the pipeline skips it (`OptNoneInstrumentation`), the loop
 passes above leave it, nothing is inlined into it nor it into its caller, and code generation selects its instructions
 as at `-O0`. Its xIR is optimized as any other function's. The size is the one before LLVM inlines anything: a function
@@ -865,28 +877,31 @@ load and a branch on every pass, which in a loop of a few instructions costs as 
 that serves a safepoint (`xb.safepoint`, after a call) runs on every pass (its block dominates the latches) needs no
 poll: its polls go. Of the others, only an innermost loop polls less than once a pass (an outer loop's pass runs its
 inner loops, whose polls start anew on each entry, so its own poll bounds the passes between two of them). A counted
-loop, whose header's exit test compares an induction variable of constant step (scalar evolution) with a value the loop
-does not change (`ne`, or `<`, `<=` going up, `>`, `>=` going down, signed or not), polls in that test's branch (strip
-mining): the test compares with a stop, the exit's value or the variable's value `kPassesPerPoll` (1024) passes ahead
-(the stride must fit the variable's type; for `ne`, the exit's value only when the step divides the distance to it, or
-the variable would step over it and never poll again), kept in a PHI of the header; reaching it, a rare block tells the
-exit from a poll, which loads the pending requests and, when one is set, enters the old poll's slow path (in the generic
-copy) as if the previous pass's back edge had polled, with the header's values (the values computed after the header and
-used on that path must be ones the header's PHIs carry over; their uses are rewritten); then a new stop is computed and
-the header runs again (it must compute nothing that running again would change: no call, no atomic access, stores only
-of what it does not load; the slow path must be outside the loop, and the header's own values must not be used on it,
-being the next pass's there). A loop whose count is known and below the stride ends up with no poll at all (the stop is
-the exit's value). Another loop counts its passes down in a register (`poll.left`) and loads the pending requests once
-every 1024 passes. Every loop is planned first, while the analyses describe the function (a counted loop gets a
-preheader then), and changed after: each poll's branch is read again then (a preheader inserted for another loop may
-have split the edge to where it goes on), and a counted loop whose preheader another loop's change took (an edge from
-its slow path into the header) keeps polling on every pass. So a thread in loops without calls reaches a safepoint
-within 1024 passes of an innermost loop or one pass of another, at the cost of the counted loop's own test, or a
-decrement and a branch. Measured against the code
-before stop-the-world collections (perf stat, x86-64, the best of 5 runs): `loops` 2% more cycles (9% with a load on
-each pass), `pi` 2% (8%), `qsort`, `sieve` and `asort` 1 to 2%, the others within 1%; `crc32` and `mixed` are 29% and 7%
-faster (their loops back on fast paths after a slow one), `index` 8% (the index page cache,
-[rdd.md](rdd.md#performance)).
+loop, whose exit test compares an induction variable of constant step (scalar evolution) with a value the loop does not
+change (`ne`, or `<`, `<=` going up, `>`, `>=` going down, signed or not), polls in that test's branch (strip mining)
+when the test is the header's, where the poll goes on to, or the one of the block the poll goes on to, which the poll's
+block dominates (a loop LLVM rotated, the test after the body; the poll's slow path then receives that pass's own values
+and the test's block, not the header, runs again after a poll, with the same conditions): the test compares with a stop,
+the exit's value or the variable's value `kPassesPerPoll` (1024) passes ahead (the stride must fit the variable's type;
+for `ne`, the exit's value only when the step divides the distance to it, or the variable would step over it and never
+poll again), kept in a PHI of the header; reaching it, a rare block tells the exit from a poll, which loads the pending
+requests and, when one is set, enters the old poll's slow path (in the generic copy) as if the previous pass's back edge
+had polled, with the header's values (the values computed after the header and used on that path must be ones the
+header's PHIs carry over; their uses are rewritten); then a new stop is computed and the header runs again (it must
+compute nothing that running again would change: no call, no atomic access, stores only of what it does not load; the
+slow path must be outside the loop, and the header's own values must not be used on it, being the next pass's there; the
+search for such uses stops at the header, past which a pass computes its values anew). A loop whose count is known and
+below the stride ends up with no poll at all (the stop is the exit's value). Any other loop (its poll going on to any
+block of the loop) counts its passes down in a register (`poll.left`, joined on the ways back to the header) and loads
+the pending requests once every 1024 passes. Every loop is planned first, while the analyses describe the function (a
+counted loop gets a preheader then), and changed after: each poll's branch is read again then (a preheader inserted for
+another loop may have split the edge to where it goes on), and a counted loop whose preheader another loop's change took
+(an edge from its slow path into the header) keeps polling on every pass. So a thread in loops without calls reaches a
+safepoint within 1024 passes of an innermost loop or one pass of another, at the cost of the counted loop's own test, or
+a decrement and a branch. Measured against the code before stop-the-world collections (perf stat, x86-64, the best of 5
+runs): `loops` 2% more cycles (9% with a load on each pass), `pi` 2% (8%), `qsort`, `sieve` and `asort` 1 to 2%, the
+others within 1%; `crc32` and `mixed` are 29% and 7% faster (their loops back on fast paths after a slow one), `index`
+8% (the index page cache, [rdd.md](rdd.md#performance)).
 
 Loop guards (`codegen/LoopGuards.*`), on the loops the simplification rotated after the polls: a loop's header that
 computes nothing but its PHIs and a branch on a condition the loop does not change (LLVM moved what it reads out of the

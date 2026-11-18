@@ -78,18 +78,23 @@ static xb_names names;
 static xb_class_def **byId;
 static uint32_t capById;
 
-/* The SCALAR CLASSes of the types, as modules register them (the first of a type stays); used until a class is
- * associated with the type (ClassAssociate). */
+/* The SCALAR CLASSes of the types, as modules register them (the first of a type stays): the program's
+ * (`typeClasses`), then the runtime's (`runtimeTypeClasses`, XB_CLASS_RUNTIME), which answers what the program's does
+ * not; used until a class is associated with the type (ClassAssociate). Which registers first depends on the system's
+ * order of the modules' constructors, so the two are kept apart. */
 static xb_class_def *typeClasses[XB_T_COUNT_];
+static xb_class_def *runtimeTypeClasses[XB_T_COUNT_];
 
 void xb_classes_register(xb_class_def *defs, uint32_t n) {
   for (uint32_t k = 0; k < n; ++k) {
     if (defs[k].flags & XB_CLASS_STATIC) continue;
-    if (defs[k].flags & XB_CLASS_SCALAR)
+    if (defs[k].flags & XB_CLASS_SCALAR) {
+      xb_class_def **of = defs[k].flags & XB_CLASS_RUNTIME ? runtimeTypeClasses : typeClasses;
       for (uint32_t t = 0; t < XB_T_COUNT_; ++t) {
         const char *name = xb_type_class_name(t);
-        if (name && !typeClasses[t] && strcmp(name, defs[k].name) == 0) typeClasses[t] = &defs[k];
+        if (name && !of[t] && strcmp(name, defs[k].name) == 0) of[t] = &defs[k];
       }
+    }
     uint32_t before = names.count, id = xb_names_add(&names, defs[k].name, strlen(defs[k].name));
     if (names.count == before) continue;
     if (id == capById) {
@@ -570,10 +575,13 @@ int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
   uint32_t t = argv[0].type;
   if (t >= XB_T_COUNT_) return 0;
   cls *c = xb_atomic_loadptr((void *const *)&scalars[t], XB_ACQUIRE);
-  if (!c && typeClasses[t]) { /* the type's own class: what it does not answer keeps Clipper's error */
-    c = prepare(ctx, typeClasses[t]);
-    if (!c) return 1; /* the error is pending */
-    if (!lookup(c, message)) return 0;
+  /* the type's own classes, the program's then the runtime's: what neither answers keeps Clipper's error */
+  for (int k = 0; !c && k < 2; ++k) {
+    xb_class_def *def = k == 0 ? typeClasses[t] : runtimeTypeClasses[t];
+    if (!def) continue;
+    cls *own = prepare(ctx, def);
+    if (!own) return 1; /* the error is pending */
+    if (lookup(own, message)) c = own;
   }
   if (!c) return 0;
   dispatch(ctx, r, c, message, from, super, NULL, argc, argv);

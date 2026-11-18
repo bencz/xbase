@@ -1,5 +1,9 @@
-# xIR test: the xIR xbc generates for tests/xir/<name>.prg must equal <name>.xir.
-execute_process(COMMAND ${XBC} ${SRC} -o ${OUT}.o --dump-xir=${OUT}.xir RESULT_VARIABLE rc ERROR_VARIABLE err)
+# xIR test: the xIR xbc generates for tests/xir/<name>.prg must equal <name>.xir (with the inferred types, TYPES on).
+set(flags --dump-xir=${OUT}.xir)
+if(TYPES)
+  list(APPEND flags --dump-xir-types)
+endif()
+execute_process(COMMAND ${XBC} ${SRC} -o ${OUT}.o ${flags} RESULT_VARIABLE rc ERROR_VARIABLE err)
 if(NOT rc EQUAL 0)
   message(FATAL_ERROR "xbc failed:\n${err}")
 endif()

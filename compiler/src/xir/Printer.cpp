@@ -1,7 +1,11 @@
 // Text form of xIR, for --dump-xir and tests. The compiler never reads it.
 #include "xir/Printer.h"
 
+#include "xir/Analysis.h"
+#include "xir/Types.h"
+
 #include <cstdio>
+#include <memory>
 
 namespace xb::xir {
 
@@ -70,10 +74,15 @@ std::string quoted(const std::string &s) {
 
 class Printer {
 public:
-  explicit Printer(std::string &out) : out_(out) {}
+  Printer(std::string &out, bool types) : out_(out), withTypes_(types) {}
 
   void function(const Function &f) {
     f.renumber();
+    std::unique_ptr<CFG> cfg;
+    if (withTypes_ && !f.blocks.empty()) {
+      cfg = std::make_unique<CFG>(f);
+      types_ = std::make_unique<TypeInfo>(*cfg);
+    }
     static const char *const kinds[] = {"function", "block", "module_init"};
     out_ += std::string(kinds[(int)f.kind]) + " " + f.name + (f.internal ? " internal" : "") +
             " params " + std::to_string(f.numParams) + (f.readsArgs ? " args" : "") + (f.method ? " method" : "") +
@@ -81,6 +90,7 @@ public:
     for (auto &v : f.vars) out_ += "  " + varName(*v) + " = " + varDesc(*v) + "\n";
     for (auto &b : f.blocks) block(*b);
     out_ += "}\n";
+    types_.reset();
   }
 
   void module(const Module &m) {
@@ -142,7 +152,7 @@ private:
       out_ += "(";
       for (size_t i = 0; i < b.params.size(); ++i)
         out_ += std::string(i ? ", " : "") + "%" + std::to_string(b.params[i]->id) + ": " +
-                typeName(b.params[i]->type());
+                typeName(b.params[i]->type()) + typesOf(b.params[i].get());
       out_ += ")";
     }
     if (b.unwind) out_ += " unwind " + b.unwind->name;
@@ -204,23 +214,57 @@ private:
     if (i.op == Op::Br) out_ += " " + target(i.targets[0]);
     if (isSuspension(i.op)) out_ += ", " + std::to_string(i.index) + ", " + target(i.targets[0]);
     if (i.op == Op::CondBr) out_ += ", " + target(i.targets[0]) + ", " + target(i.targets[1]);
+    if (i.type() == Type::Item) out_ += typesOf(&i);
     out_ += "\n";
   }
 
+  static const char *tagName(xb_type t) {
+    switch (t) {
+    case XB_T_NIL: return "nil";
+    case XB_T_LOGICAL: return "logical";
+    case XB_T_INT: return "int";
+    case XB_T_DOUBLE: return "double";
+    case XB_T_STRING: return "string";
+    case XB_T_ARRAY: return "array";
+    case XB_T_BLOCK: return "block";
+    case XB_T_CELL: return "cell";
+    case XB_T_REF: return "ref";
+    case XB_T_OBJECT: return "object";
+    case XB_T_HASH: return "hash";
+    case XB_T_DATE: return "date";
+    case XB_T_SYMBOL: return "symbol";
+    case XB_T_COUNT_: break;
+    }
+    return "?";
+  }
+
+  // " {int,double}": the types the inference finds an item value may hold; nothing without --dump-xir-types.
+  std::string typesOf(const Value *v) const {
+    if (!types_ || v->type() != Type::Item) return "";
+    TypeSet t = types_->of(v);
+    if (t == kAnyType) return " {any}";
+    std::string s;
+    for (int k = 0; k < XB_T_COUNT_; ++k)
+      if (t & typeBit(xb_type(k))) s += std::string(s.empty() ? "" : ",") + tagName(xb_type(k));
+    return " {" + s + "}";
+  }
+
   std::string &out_;
+  bool withTypes_;
+  std::unique_ptr<TypeInfo> types_;
 };
 
 } // namespace
 
-std::string print(const Module &m) {
+std::string print(const Module &m, bool types) {
   std::string out;
-  Printer(out).module(m);
+  Printer(out, types).module(m);
   return out;
 }
 
-std::string print(const Function &f) {
+std::string print(const Function &f, bool types) {
   std::string out;
-  Printer(out).function(f);
+  Printer(out, types).function(f);
   return out;
 }
 

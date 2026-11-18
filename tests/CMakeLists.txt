@@ -178,7 +178,8 @@ xb_add_codegen_test(stack_limit_check x86_64-linux-gnu "@xbp_SUM\\(.*call void @
 # Below it, xb_stack_deep first (a deep stack's mark), declared to touch the context alone (the body after it stays
 # optimized as without it).
 xb_add_codegen_test(stack_deep_mark x86_64-linux-gnu
-  "memory\\(argmem: readwrite\\)\ndeclare i32 @xb_stack_deep\\(ptr, i64\\).*@xbp_SUM\\(.*call i32 @xb_stack_deep" loop_poll)
+  "memory\\(argmem: readwrite\\)\ndeclare i32 @xb_stack_deep\\(ptr, i64\\).*@xbp_SUM\\(.*call i32 @xb_stack_deep"
+  loop_poll)
 # A counted loop polls when it reaches a stop, in its exit test's branch; a loop whose end depends on its data counts
 # its passes down between polls (LoopPolls).
 xb_add_codegen_test(loop_strip_mined x86_64-linux-gnu "\npoll\\.reached[0-9]*:" loop_stops)
@@ -187,16 +188,20 @@ xb_add_codegen_test(loop_count_down x86_64-linux-gnu "%poll\\.left[0-9.a-z]* = p
 xb_add_codegen_test(loop_reenter x86_64-linux-gnu "\n[A-Za-z0-9._]*\\.reenter:" loop_reenter)
 # A nest whose fast copy makes no call is split whole: its outer loop is entered again too (docs/compiler.md, object
 # emission).
-xb_add_codegen_test(loop_nest_split x86_64-linux-gnu "\nfor\\.test(\\.i)?\\.reenter:" loop_nest_split)
+# The generic copy's back edge enters the loop again: through a preheader of its own, or an edge block LLVM made of it.
+xb_add_codegen_test(loop_nest_split x86_64-linux-gnu
+  "\n(for\\.test(\\.i)?\\.reenter|[A-Za-z0-9._]*\\.generic\\.for\\.test(\\.i)?\\.again[A-Za-z0-9._]*):" loop_nest_split)
 # A loop that makes no call reads on entry the sharing state of a matrix it indexes by its counter.
 xb_add_codegen_test(loop_entry_state x86_64-linux-gnu "\n[A-Za-z0-9._]*\\.states[0-9]*:" loop_nests)
 
-# xIR tests: the xIR of tests/xir/<name>.prg (--dump-xir) must equal <name>.xir.
+# xIR tests: the xIR of tests/xir/<name>.prg (--dump-xir) must equal <name>.xir; types_<name> with the inferred types
+# (--dump-xir-types).
 file(GLOB XB_XIR_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/xir ${CMAKE_CURRENT_SOURCE_DIR}/xir/*.prg)
 foreach(t ${XB_XIR_TESTS})
   string(REGEX REPLACE "\\.prg$" "" t ${t})
+  string(REGEX MATCH "^types_" types ${t})
   add_test(NAME xir.${t}
-    COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.prg
+    COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DTYPES=${types} -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.prg
             -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.xir -DOUT=${CMAKE_CURRENT_BINARY_DIR}/xir_${t}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/xir_test.cmake)
 endforeach()

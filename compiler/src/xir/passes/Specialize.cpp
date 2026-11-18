@@ -23,8 +23,9 @@ namespace xb::xir {
 namespace {
 
 // The classes of argument types a copy is made for: those without heap references whose operations the code makes
-// inline. A parameter of any other type stays of any type.
-constexpr TypeSet kClasses[] = {kNumberTypes, typeBit(XB_T_LOGICAL), typeBit(XB_T_DATE)};
+// inline, the integers alone first (the copy then computes with integers only, where their ranges allow). A parameter
+// of any other type stays of any type.
+constexpr TypeSet kClasses[] = {kIntType, kNumberTypes, typeBit(XB_T_LOGICAL), typeBit(XB_T_DATE)};
 
 // At most this many copies of a function, each of at most this many instructions.
 constexpr size_t kMaxCopies = 4;

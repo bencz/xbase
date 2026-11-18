@@ -7,7 +7,7 @@ Tests run through CTest (`ctest --test-dir build --output-on-failure`); `tests/C
 | Execution | `tests/run/<name>.prg`, `<name>.out`, optional `<name>.rc`, `<name>.err`, `<name>.args`, `<name>.in`, `<name>.serial`, `<name>.with/*.prg`, `<name>.d/*.prg`, `<name>.rt/*.prg` | The program is compiled with `xbc` (together with the modules in `<name>.with/`, in the same run), linked with `xbrt` (and with the modules in `<name>.d/`, each compiled on its own with `--no-entry`, and in `<name>.rt/`, compiled as modules of the runtime with `--runtime`) and run, with the command-line arguments in `<name>.args` (one per line; CTest cannot pass an empty one) and `<name>.in` as standard input; standard output must equal `<name>.out`, the exit code must equal `<name>.rc` (default 0), and standard error must contain `<name>.err`. A test with `<name>.serial` (empty) runs alone: it commits much memory (a recursion to the end of the stack, about 1 GB on 64-bit targets). |
 | Preprocessor | `tests/pp/<name>.prg`, `<name>.ppo` | `xbc -E` output must equal `<name>.ppo`. More, in `tests/CMakeLists.txt`: `pp.custom_std` (`-u<file>`), `pp.sources_pattern` (several sources and a file pattern, `tests/pp/glob`), and `pp.target_*` (the names predefined for each `--target`, `tests/pp/target`). |
 | Compile failure | `tests/fail/<name>.prg`, `<name>.err`, optional `<name>.with/*.prg`, `<name>.args` | Compiling (with the modules in `<name>.with/`, and the `xbc` options in `<name>.args`, one per line) must fail, report the text in `<name>.err`, and report exactly one error. |
-| xIR | `tests/xir/<name>.prg`, `<name>.xir` | The xIR `xbc --dump-xir` writes (after the xIR passes, at the default `-O2`) must equal `<name>.xir`. |
+| xIR | `tests/xir/<name>.prg`, `<name>.xir` | The xIR `xbc --dump-xir` writes (after the xIR passes, at the default `-O2`; a `types_<name>` test with `--dump-xir-types`) must equal `<name>.xir`. |
 | Code generation | `xb_add_codegen_test` in `tests/CMakeLists.txt` | The IR `xbc --dump-ir` emits for a cross target must match a regular expression. |
 | Declarations | `runtime.declarations` (`tests/declarations_test.cmake`) | `include/rtl.ch` declares exactly the `xbf_` functions defined in `runtime/src`. |
 | Platform | `tests/platform/<name>.c`, optional `<name>.prg` | A C program linked with `xbrt` (and with `<name>.prg`, compiled with `--no-entry`, whose functions it calls as `xbp_NAME`) exercises the runtime's own services (threads, locks, atomics, waiting on an address, collections while compiled loops run) under contention, and exits with 0 when every check passed (`check.h`). |
@@ -67,7 +67,11 @@ build/compiler/xbc --target=powerpc-linux-gnu tests/run/funcs.prg -o /tmp/claude
 build/compiler/xbc --target=s390x-linux-gnu tests/run/funcs.prg -o /tmp/claude/funcs-s390x.o
 ```
 
-Running big-endian programs needs a target sysroot and an emulator (for example `qemu-s390x`); this is not automated.
+A 32-bit build runs the whole suite on a 64-bit host: `-DXB_TARGET_C_FLAGS=-m32 -DXB_TARGET=i686-pc-linux-gnu`
+([README.md](../README.md#build)); the tests of the address space (`platform.address_space`, `platform.workers_most`)
+measure the process's `RLIMIT_AS`, so the suite runs without a `ulimit -v` of its own (a cgroup's memory limit bounds
+it instead). Running big-endian programs needs a target sysroot and an emulator (for example `qemu-s390x`); this is not
+automated.
 
 ## Sanitizers
 

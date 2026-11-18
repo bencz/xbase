@@ -119,8 +119,8 @@ Value *CodeGen::isNumberType(Value *type) {
 // converts them, so that the result does not depend on how a target keeps
 // doubles in its registers.
 Value *CodeGen::exactAsDouble(Value *item, Value *type) {
-  Value *small = b_.CreateICmpULE(b_.CreateAdd(intValue(item), ConstantInt::get(i64_, 1ull << 53)),
-                                  ConstantInt::get(i64_, 1ull << 54));
+  Value *small = b_.CreateICmpULE(b_.CreateAdd(intValue(item), ConstantInt::get(i64_, 1ull << XB_DBL_EXACT_BITS)),
+                                  ConstantInt::get(i64_, 1ull << (XB_DBL_EXACT_BITS + 1)));
   return b_.CreateOr(b_.CreateICmpNE(type, ConstantInt::get(i32_, XB_T_INT)), small);
 }
 

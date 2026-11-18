@@ -68,6 +68,7 @@ const char *kUsage =
     "  --depfile=<file>   write a Make-style dependency file for the object\n"
     "  --dump-ir=<file>   debug: also write the LLVM module as text\n"
     "  --dump-xir=<file>  debug: also write the module's xIR as text\n"
+    "  --dump-xir-types   debug: with --dump-xir, each item value's inferred types too\n"
     "  --print-targets    list the targets this xbc can generate code for\n"
     "  --version\n";
 
@@ -318,6 +319,7 @@ void checkDuplicates(const std::vector<Source> &sources, xb::Diagnostics &diag) 
 static int compile(int argc, char **argv) {
   xb::TargetConfig tcfg;
   std::string output, irDump, xirDump, depFile, stdFile = "std.ch";
+  bool xirTypes = false;
   std::vector<std::string> inputs, includeDirs, defines;
   bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false, runtimeLibrary = false;
   xb::Sema::Undeclared undeclared = xb::Sema::Undeclared::Warn;
@@ -349,6 +351,7 @@ static int compile(int argc, char **argv) {
     }
     else if (startsWith(a, "--dump-ir=")) irDump = a + 10;
     else if (startsWith(a, "--dump-xir=")) xirDump = a + 11;
+    else if (std::strcmp(a, "--dump-xir-types") == 0) xirTypes = true;
     else if (startsWith(a, "--depfile=")) depFile = a + 10;
     else if (!std::strcmp(a, "--print-targets")) {
       xb::initializeTargets();
@@ -447,7 +450,7 @@ static int compile(int argc, char **argv) {
         return 1;
       }
     }
-    if (!xirDump.empty()) xirText += xb::xir::print(*s.xir);
+    if (!xirDump.empty()) xirText += xb::xir::print(*s.xir, xirTypes);
   }
   if (!xirDump.empty()) {
     std::ofstream out(xirDump, std::ios::binary);

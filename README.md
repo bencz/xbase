@@ -20,9 +20,10 @@ The build is warning-free on GCC and Clang (`-Wall -Wextra -Wpedantic -Wshadow -
 default (`-DXB_WARNINGS_AS_ERRORS=OFF` exists for local experiments only).
 
 Part of the runtime is written in xBase and compiled by the `xbc` the build makes, as are the tests and benchmarks,
-for the C compiler's target. A build whose C compiler targets another machine through its flags names it, e.g. a
-32-bit build with GCC: `-DCMAKE_C_FLAGS=-m32 -DXB_TARGET=i686-pc-linux-gnu`. The `xbc` of the build runs during the
-build, so a cross build whose toolchain builds `xbc` for another machine cannot build the runtime yet.
+for the C compiler's target. A build whose runtime targets another machine through C compiler flags gives them, for
+the runtime and the programs only (`xbc` runs on the host), and names the target, e.g. a 32-bit build with GCC:
+`-DXB_TARGET_C_FLAGS=-m32 -DXB_TARGET=i686-pc-linux-gnu`. The `xbc` of the build runs during the build, so a cross
+build whose toolchain builds `xbc` for another machine cannot build the runtime yet.
 
 ## Test
 
@@ -106,5 +107,6 @@ Useful options (`xbc --help` lists all of them):
 | `-O0` .. `-O3` | optimization level (default `-O2`) |
 | `--cpu=<name>` | target CPU; default `generic` (runs on any CPU of the target), `native` for this machine only |
 | `--dump-xir=<file>`, `--dump-ir=<file>` | debugging: write the module's xIR or LLVM IR as text |
+| `--dump-xir-types` | with `--dump-xir`: each item value and block parameter followed by its inferred types |
 
 Documentation for contributors starts at [docs/README.md](docs/README.md).

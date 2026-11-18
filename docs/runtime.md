@@ -67,7 +67,7 @@ links it into its thread context's chain (`xb_ctx.frames`) at entry, with the pa
 other slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors return normally (the pending
 flag), so the chain is always right. The collector scans the frames of every context's chain. A frame dies with its
 function: nothing keeps a pointer to a slot (a variable that outlives it moves into a heap cell first). The program runs
-on a thread whose stack is reserved at 1 GB on 64-bit targets and 256 MB on 32-bit ones (`XB_PROGRAM_STACK_SIZE` in
+on a thread whose stack is reserved at 1 GB on 64-bit targets and 384 MB on 32-bit ones (`XB_PROGRAM_STACK_SIZE` in
 `core/main.c`; pages are committed as used), so deep recursion has room.
 
 Running out of it is an error, not the end of the process: the context knows the lowest address of its thread's stack
@@ -656,19 +656,21 @@ first time it is used (its class function, or a subclass):
 - Built-in types as classes: a `SCALAR CLASS type` (`XB_CLASS_SCALAR`, named as `ClassName()` names the type: `ARRAY`,
   `CHARACTER`, `HASH`, `NUMERIC`, `DATE`, `BLOCK`, ...; it has no class function and no instance variables) is the class
   of the type's values when no class is associated with the type: a message to such a value reaches its methods, the
-  value as `Self`, and one the class does not answer keeps Clipper's error (`No exported method`). The runtime's
+  value as `Self`, and one the class does not answer keeps Clipper's error (`No exported method`). A program's `SCALAR
+  CLASS` of a type answers first and the runtime's answers what it does not (the compiler marks the runtime's classes
+  `XB_CLASS_RUNTIME`, so the order the system runs the modules' registrations in does not matter). The runtime's
   (`rtl/collections.prg`) give the type's functions as messages (`a:Len()`, `a:Add( x )`, `a:Sort()`, `"x":Upper()`,
   `s:Split( "," )`, `h:Keys()`, `n:Round( 2 )`, `d:Year()`, `b:Eval( ... )`); `ARRAY`, `CHARACTER` and `HASH` inherit
   `Enumerable`, whose methods work on any collection through `FOR EACH` over `Self`: `Select( bMap )`, `Where( bTest )`,
-  `Take( n )`, `Skip( n )`, `TakeWhile( bTest )`, `SkipWhile( bTest )`, `SelectMany( bMap )`, `Concat( xOther )`,
-  `Zip( xOther, [bCombine] )`, `Distinct( [bKey] )` (equal by `==`; numbers, strings and dates found through a hash) and
+  `Take( n )`, `Skip( n )`, `TakeWhile( bTest )`, `SkipWhile( bTest )`, `SelectMany( bMap )`, `Concat( xOther )`, `Zip(
+  xOther, [bCombine] )`, `Distinct( [bKey] )` (equal by `==`; numbers, strings and dates found through a hash) and
   `Reverse()` are generators (the sequence is made as it is gone through, so they chain); `OrderBy( [bKey] )` and
   `OrderByDescending( [bKey] )` give an array ordered as `ASort` orders values (the primitive `__ValueLess`), equal keys
   in their order; `GroupBy( bKey )` gives a hash of each key to the array of its elements, `ToHash( bKey, [bValue] )` a
   hash; and `ToArray()`, `Count( [bTest] )`, `Any( [bTest] )`, `All( bTest )`, `First( [bTest] )`, `Last( [bTest] )`,
-  `Contains( x )`, `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )`, `Min( [bValue] )`, `Max( [bValue] )`,
-  `Average( [bValue] )` (the last three NIL without elements) and `ForEach( bBlock )` go through it at once. A class
-  that inherits `Enumerable` only needs `GetEnumerator()`; a generator's enumerator answers `Enumerable`'s messages too
+  `Contains( x )`, `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )`, `Min( [bValue] )`, `Max( [bValue] )`, `Average(
+  [bValue] )` (the last three NIL without elements) and `ForEach( bBlock )` go through it at once. A class that inherits
+  `Enumerable` only needs `GetEnumerator()`; a generator's enumerator answers `Enumerable`'s messages too
   (`xb_class_send_as`). `ClassName()` and `ValType()` of the values stay Clipper's.
 - Scalar classes: `ASSOCIATE CLASS name WITH TYPE type` (`std.ch`, `ClassAssociate( name(), "type" )`; a type as
   `ClassName()` names it: `ARRAY`, `BLOCK`, `CHARACTER`, `DATE`, `HASH`, `LOGICAL`, `NIL`, `NUMERIC`) makes values of
@@ -1115,6 +1117,20 @@ Conventions:
   truncates without that adjustment.
 - `Sqrt` of a negative number and an `Exp` that overflows give 0; `Log` of a negative number gives minus infinity, like
   `Log( 0 )`.
+- `^`, `Exp` and `Log` are xbase's own (`runtime/include/xbmath.h`), not the C library's, whose last bit differs from
+  one system to another (glibc's and MinGW's round some arguments wrongly; the reference uses them): table-driven
+  reductions (ln by 1 / (1 + j / 128), e^y by 2^(j / 64)), then double-double arithmetic (about 106 bits) rounded once,
+  subnormal results too, so the result is the correctly rounded double, the same everywhere, except for an argument
+  whose result lies within about 2^-90 of a tie between two doubles (`Exp( 2^-53 )` is one). A quick form first (the
+  series in double beyond its first terms, relative error below 2^-66 for ln and 2^-62 for e^y) gives the result when
+  its error bound cannot change the rounding (Ziv's strategy), else the full form decides. `^`'s exact and halfway
+  results (an integer exponent, or `n / 2^k` of an exact root, such as `7 ^ 19` and `1046529 ^ 1.5`) are computed
+  exactly, ties to even, and `x ^ 0.5` is IEEE's square root. C's special cases of `pow` hold (`0 ^ 0` is 1, a negative
+  base needs an integer exponent). The compiler folds `^` of constants with the same code, and its inline `Exp()` and
+  `Log()` call `xb_exp` and `xb_log`; none of them writes `errno`. They cost more than the C library's (x86-64: `^`
+  about 150 ns, `Exp` 60 ns, `Log` 45 ns, against 10, 3 and 3 ns). The runtime and `xbc` are compiled without
+  contracting `a * b + c` into fused multiply-adds and, on 32-bit x86, with SSE2 rather than the x87 unit
+  (`xb_exact_doubles` in CMake), on which double-double arithmetic depends.
 - `Replicate` raises `String overflow` (1234) when the result size overflows.
 - `PadL`/`PadR`/`PadC( x, nLength, [cFill] )` (`Pad` is `PadR`) pad a string, a number (as `Str` gives it, without
   its leading blanks) or a date (as `DToC` gives it) with the fill's first character (a blank by default, also for an

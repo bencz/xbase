@@ -24,11 +24,13 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "xbmath.h" /* ^, Exp(), Log(): the same doubles on every system */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 51u
+#define XB_ABI_VERSION 52u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -313,6 +315,10 @@ void     xb_op_mul(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_div(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_mod(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_pow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+/* [ABI] e^x and ln( x ) of doubles (xbmath.h): what Exp() and Log() compute, called by the code xbc makes inline for
+ * them; they read and write no memory. */
+double   xb_exp(double x);
+double   xb_log(double x);
 void     xb_op_neg(xb_ctx *ctx, xb_item *r, const xb_item *a);
 void     xb_op_eq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);      /* =  */
 void     xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b); /* == */
@@ -587,6 +593,8 @@ void     xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache
 #define XB_MEMBER_SHARED    8u  /* a class variable whose subclasses share it */
 #define XB_CLASS_STATIC     1u  /* xb_class_def flags: STATIC CLASS */
 #define XB_CLASS_SCALAR     2u  /* SCALAR CLASS: the class of the values of a type, named as ClassName() names it */
+#define XB_CLASS_RUNTIME    4u  /* a class of the runtime (xbc --runtime): a program's SCALAR CLASS of a type answers
+                                   first, whatever order the modules register in */
 /* What ClassName() gives for values that are not objects: the names of the types' classes (SCALAR CLASS). */
 #define XB_TYPE_NAME_NIL       "NIL"
 #define XB_TYPE_NAME_LOGICAL   "LOGICAL"
@@ -642,7 +650,7 @@ typedef struct xb_class_def {
   uint32_t nfriendFunctions;
   xb_func init;             /* NULL: every variable starts as NIL */
   xb_func destructor;       /* DESTRUCTOR, or NULL */
-  uint32_t flags;           /* XB_CLASS_STATIC */
+  uint32_t flags;           /* XB_CLASS_STATIC, XB_CLASS_SCALAR, XB_CLASS_RUNTIME */
   void *runtime;
 } xb_class_def;
 void     xb_classes_register(xb_class_def *defs, uint32_t n);
@@ -1041,10 +1049,6 @@ static inline const xb_bit_function *xb_bit_function_of(xb_bit_op op) {
   return &table[op];
 }
 
-/* 2^52: every double of this magnitude or more is an integer (the step between doubles is 1 or more there); Round()
- * gives such a scaled value back as it is, in the runtime and in the compiler's inline code. */
-#define XB_DBL_INTEGRAL 4503599627370496.0
-
 /* Display width of an integer constant in the program (a literal or a folded
  * expression): 10 columns plus one per digit beyond nine, 20 for values of
  * -1000000000 or less. Computed integers use xb_num_int_width instead. */
@@ -1160,7 +1164,7 @@ static inline int xb_fold_numbers(xb_fold_op op, const xb_folded *a, const xb_fo
     return 1;
   case XB_FOLD_POW:
     if (runtime) return 0;
-    *r = xb_folded_double(pow(x, y), XB_DEC_AT_RUN);
+    *r = xb_folded_double(xb_math_pow(x, y), XB_DEC_AT_RUN);
     return 1;
   }
   return 0;

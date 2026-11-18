@@ -28,27 +28,33 @@ for.test.2:
 for.body.2:
   %18 = binary add %7, %12
   %19 = binary add.one %6, 1:w0
-  br for.test(%19, %18)
+  %20 = subst.check guard 4 %19
+  cond_br %20, for.body.2.subst, for.test(%19, %18)
 for.body.any:
-  %21 = index %27, %25
-  %22 = binary mul %21, 2:w10
-  br for.body.2.any(%25, %26, %27, %22)
+  %22 = index %28, %26
+  %23 = binary mul %22, 2:w10
+  br for.body.2.any(%26, %27, %28, %23)
 seq.exit.any:
-  ret %26
-for.test.2.any(%25: item, %26: item, %27: item, %28: item):
-  %29 = for.test %25, %28, 1:w0
-  cond_br %29, for.body.any, seq.exit.any
-for.body.2.any(%31: item, %32: item, %33: item, %34: item):
-  %35 = binary add %32, %34
-  %36 = binary add.one %31, 1:w0
-  %37 = call LEN native %33
-  br for.test.2.any(%36, %35, %33, %37)
+  ret %27
+for.test.2.any(%26: item, %27: item, %28: item, %29: item):
+  %30 = for.test %26, %29, 1:w0
+  cond_br %30, for.body.any, seq.exit.any
+for.body.2.any(%32: item, %33: item, %34: item, %35: item):
+  %36 = binary add %33, %35
+  %37 = binary add.one %32, 1:w0
+  br for.body.2.any.2(%34, %36, %37)
+for.body.2.any.2(%39: item, %40: item, %41: item):
+  %42 = call LEN native %39
+  br for.test.2.any(%41, %40, %39, %42)
 for.test.subst:
-  %39 = subst.value %8
-  br for.test.2.any(%6, %7, %4, %39)
+  %44 = subst.value %8
+  br for.test.2.any(%6, %7, %4, %44)
 for.body.subst:
-  %41 = subst.value %12
-  br for.body.2.any(%6, %7, %4, %41)
+  %46 = subst.value %12
+  br for.body.2.any(%6, %7, %4, %46)
+for.body.2.subst:
+  %48 = subst.value %19
+  br for.body.2.any.2(%4, %18, %48)
 }
 
 function SUM.byref internal params 1 {
@@ -74,27 +80,33 @@ for.test.2:
 for.body.2:
   %15 = binary add %2, %9
   %16 = binary add.one %1, 1:w0
-  br for.test(%16, %15)
+  %17 = subst.check guard 4 %16
+  cond_br %17, for.body.2.subst, for.test(%16, %15)
+for.test.any(%19: item, %20: item):
+  %21 = load $f0 maybe_ref
+  %22 = call LEN native %21
+  br for.test.2.any(%19, %20, %22)
 for.body.any:
-  %18 = load $f0 maybe_ref
-  %19 = index %18, %23
-  %20 = binary mul %19, 2:w10
-  br for.body.2.any(%23, %24, %20)
+  %24 = load $f0 maybe_ref
+  %25 = index %24, %29
+  %26 = binary mul %25, 2:w10
+  br for.body.2.any(%29, %30, %26)
 seq.exit.any:
-  ret %24
-for.test.2.any(%23: item, %24: item, %25: item):
-  %26 = for.test %23, %25, 1:w0
-  cond_br %26, for.body.any, seq.exit.any
-for.body.2.any(%28: item, %29: item, %30: item):
-  %31 = binary add %29, %30
-  %32 = binary add.one %28, 1:w0
-  %33 = load $f0 maybe_ref
-  %34 = call LEN native %33
-  br for.test.2.any(%32, %31, %34)
+  ret %30
+for.test.2.any(%29: item, %30: item, %31: item):
+  %32 = for.test %29, %31, 1:w0
+  cond_br %32, for.body.any, seq.exit.any
+for.body.2.any(%34: item, %35: item, %36: item):
+  %37 = binary add %35, %36
+  %38 = binary add.one %34, 1:w0
+  br for.test.any(%38, %37)
 for.test.subst:
-  %36 = subst.value %4
-  br for.test.2.any(%1, %2, %36)
+  %40 = subst.value %4
+  br for.test.2.any(%1, %2, %40)
 for.body.subst:
-  %38 = subst.value %9
-  br for.body.2.any(%1, %2, %38)
+  %42 = subst.value %9
+  br for.body.2.any(%1, %2, %42)
+for.body.2.subst:
+  %44 = subst.value %16
+  br for.test.any(%44, %15)
 }

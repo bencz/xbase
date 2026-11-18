@@ -18,11 +18,14 @@ int main(void) {
 #else
 #include <sys/resource.h>
 
+/* More than pointers reach (a limit of a 64-bit rlim_t past a 32-bit size_t). */
+static int beyond_pointers(uint64_t limit) { return limit > SIZE_MAX; }
+
 int main(void) {
   xb_platform_init();
   struct rlimit was;
   CHECK(getrlimit(RLIMIT_AS, &was) == 0);
-  int none = was.rlim_cur == RLIM_INFINITY || (uint64_t)was.rlim_cur > SIZE_MAX; /* more than pointers reach: none */
+  int none = was.rlim_cur == RLIM_INFINITY || beyond_pointers((uint64_t)was.rlim_cur);
   CHECK(xb_platform_address_space() == (none ? SIZE_MAX : (size_t)was.rlim_cur));
   rlim_t lower = (rlim_t)1 << 30;
   if (sizeof(void *) >= 8 && sizeof(rlim_t) >= 8) lower <<= 6;

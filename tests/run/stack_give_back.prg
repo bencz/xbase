@@ -1,7 +1,8 @@
 // A stack that went deep gives its pages back once it is shallow again: on a thread of 16 MB of stack, a recursion
 // the stack error ends, recovered by BEGIN SEQUENCE, leaves the resident memory about where it was before (the pages
 // it touched, more than 10 MB, given back), and a second one reaches the same depth (the stack grows again as before);
-// on the program's thread a recursion of some 40 MB that returns gives them back at the next sequence that recovers,
+// on the program's thread a recursion of 400000 levels (tens of MB, whatever a level's frame: more than the
+// memory the thread before gives back meanwhile) that returns gives them back at the next sequence that recovers,
 // and so do a codeblock made from text and a function forwarding `...`, recursing past the mark (no stack error
 // there: it is only the mark), each after a while (a thread gives its pages back at most every 100 ms). Where the
 // system does not tell the resident memory, the comparisons hold as such.
@@ -49,7 +50,7 @@ STATIC FUNCTION Returns()
 RETURN Grown( nBefore, nDeep, nAfter )
 
 STATIC FUNCTION Deep( n )
-   IF n == 120000
+   IF n == 400000
       nDeep := Resident()
       RETURN 0
    ENDIF

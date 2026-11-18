@@ -87,6 +87,13 @@ void CodeGen::initTypes() {
     f->setNoSync();
     f->setDoesNotFreeMemory();
   }
+  for (auto [callee, name] : {std::pair{&rtExp_, "xb_exp"}, std::pair{&rtLog_, "xb_log"}}) {
+    *callee = rt(name, b_.getDoubleTy(), {b_.getDoubleTy()});
+    auto *f = cast<Function>(callee->getCallee());
+    f->setDoesNotAccessMemory();
+    f->setWillReturn();
+    f->setNoSync();
+  }
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtBitNot_ = rt("xb_op_bitnot", voidTy, {ptrTy_, ptrTy_, ptrTy_});
@@ -315,7 +322,8 @@ void CodeGen::genClasses(const xir::Module &m) {
                 table(ptrTy_, friendClasses, "xb.class.friends"), ConstantInt::get(i32_, friendClasses.size()),
                 table(ptrTy_, friendFunctions, "xb.class.friends"), ConstantInt::get(i32_, friendFunctions.size()),
                 fnOrNull(c.init), fnOrNull(c.destructor),
-                ConstantInt::get(i32_, (c.isStatic ? XB_CLASS_STATIC : 0u) | (c.scalar ? XB_CLASS_SCALAR : 0u)),
+                ConstantInt::get(i32_, (c.isStatic ? XB_CLASS_STATIC : 0u) | (c.scalar ? XB_CLASS_SCALAR : 0u) |
+                                            (runtimeLibrary_ ? XB_CLASS_RUNTIME : 0u)),
                 ConstantPointerNull::get(ptrTy_)}));
   }
   classTable_->setInitializer(ConstantArray::get(ty, defs));

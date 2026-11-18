@@ -81,6 +81,12 @@ if(NOT LLVM_ENABLE_RTTI)
   target_compile_options(xbc PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>:-fno-rtti>)
 endif()
 xb_target_warnings(xbc)
+# xbc folds ^ with xbmath.h: on a 32-bit x86 host, with SSE2 as the runtime.
+set(XB_HOST_X86_32 OFF)
+if(CMAKE_CXX_SIZEOF_DATA_PTR EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86|AMD64|x86_64)$")
+  set(XB_HOST_X86_32 ON)
+endif()
+xb_exact_doubles(xbc ${XB_HOST_X86_32})
 
 # Every target LLVM was built with is linked in: xbc can cross-compile to all of them.
 if(LLVM_LINK_LLVM_DYLIB)

@@ -176,12 +176,15 @@ void xbf_MIN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) { minmax(c
 /* Results outside the reals follow Clipper: Sqrt() of a negative number and
  * an Exp() that overflows give 0, Log() of a negative number gives the same
  * as Log( 0 ), minus infinity (shown as stars). */
+double xb_exp(double x) { return xb_math_exp(x); }
+double xb_log(double x) { return xb_math_log(x); }
+
 static double math_sqrt(double x) { return x < 0 ? 0.0 : sqrt(x); }
 static double math_exp(double x) {
-  double r = exp(x);
+  double r = xb_math_exp(x);
   return xb_dbl_infinite(r) ? 0.0 : r;
 }
-static double math_log(double x) { return x < 0 ? -HUGE_VAL : log(x); }
+static double math_log(double x) { return x < 0 ? -HUGE_VAL : xb_math_log(x); }
 
 static void math1(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, double (*f)(double), int code,
                   const char *fn) {

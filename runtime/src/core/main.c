@@ -6,13 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The program's stack: compiled functions keep their item frames on it, so
- * deep recursion needs more than the default of a process's first thread
- * (1 MB on Windows). Reserved, not committed: unused pages cost nothing, so a
- * 64-bit target, whose calls may take twice the stack of others (the ppc64
- * ELF ABI's), reserves 1 GB; a 32-bit one, whose address space is small,
- * 256 MB. */
-#define XB_PROGRAM_STACK_SIZE (sizeof(void *) >= 8 ? (size_t)1 << 30 : (size_t)256 << 20)
+/* The program's stack: compiled functions keep their item frames on it, so deep recursion needs more than the default
+ * of a process's first thread (1 MB on Windows). Reserved, not committed: unused pages cost nothing, so a 64-bit
+ * target, whose calls may take twice the stack of others (the ppc64 ELF ABI's), reserves 1 GB; a 32-bit one, whose
+ * address space is small, 384 MB (200000 levels of a function of a dozen statements, as the recursion_deep test
+ * makes, take about 270 MB there: an item is four registers of the few a 32-bit x86 has). */
+#define XB_PROGRAM_STACK_SIZE (sizeof(void *) >= 8 ? (size_t)1 << 30 : (size_t)384 << 20)
 
 typedef struct program {
   int argc;

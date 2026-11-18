@@ -34,9 +34,12 @@ void initializeTargets() {
 
 void printTargets() { TargetRegistry::printRegisteredTargetsForVersion(outs()); }
 
+// -O0 allocates registers too (after cleanUpFunctions): the fast allocator gives every value a stack slot of its own,
+// and a function of inline fast paths then takes kilobytes of stack per call (a deep recursion would need several
+// times the stack -O2 code does), while xbc emits no debugging information that such code would serve.
 static CodeGenOptLevel cgLevel(unsigned l) {
   switch (l) {
-  case 0: return CodeGenOptLevel::None;
+  case 0:
   case 1: return CodeGenOptLevel::Less;
   case 3: return CodeGenOptLevel::Aggressive;
   default: return CodeGenOptLevel::Default;
@@ -100,16 +103,21 @@ constexpr unsigned kGuardRounds = 3;
 // simplifies), is generated as -O0 does, and is never inlined.
 constexpr unsigned kLargeFunction = 60000;
 
-// Marks the functions too large to optimize fully (kLargeFunction) and gives them their own passes.
-static void optimizeLargeFunctions(Module &m, FunctionAnalysisManager &fam) {
+// Passes whose time grows with a function's size (its locals become registers, common subexpressions and constants
+// fold, its control flow simplifies): for the functions too large to optimize fully (kLargeFunction), which they mark
+// so, and at -O0 for every function (`all`), whose code generation then keeps few values in memory.
+static void cleanUpFunctions(Module &m, FunctionAnalysisManager &fam, bool all) {
   FunctionPassManager fpm;
   fpm.addPass(SROAPass(SROAOptions::ModifyCFG));
   fpm.addPass(EarlyCSEPass());
   fpm.addPass(InstCombinePass());
   fpm.addPass(SimplifyCFGPass());
   for (Function &f : m) {
-    if (f.isDeclaration() || f.getInstructionCount() <= kLargeFunction) continue;
+    if (f.isDeclaration()) continue;
+    bool large = f.getInstructionCount() > kLargeFunction;
+    if (!large && !all) continue;
     fpm.run(f, fam);
+    if (!large) continue;
     f.addFnAttr(Attribute::NoInline);
     f.addFnAttr(Attribute::OptimizeNone);
   }
@@ -120,7 +128,7 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   FunctionAnalysisManager fam;
   CGSCCAnalysisManager cgam;
   ModuleAnalysisManager mam;
-  // The pipeline skips the functions marked optnone (optimizeLargeFunctions).
+  // The pipeline skips the functions marked optnone (cleanUpFunctions).
   PassInstrumentationCallbacks pic;
   OptNoneInstrumentation optNone(/*DebugLogging=*/false);
   optNone.registerCallbacks(pic);
@@ -135,7 +143,7 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
                         : optLevel == 1 ? OptimizationLevel::O1
                         : optLevel == 3 ? OptimizationLevel::O3
                                         : OptimizationLevel::O2;
-  if (optLevel != 0) optimizeLargeFunctions(m, fam);
+  cleanUpFunctions(m, fam, optLevel == 0);
   ModulePassManager mpm = optLevel == 0 ? pb.buildO0DefaultPipeline(lvl) : pb.buildPerModuleDefaultPipeline(lvl);
   mpm.run(m, mam);
   if (optLevel == 0) return;
