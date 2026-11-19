@@ -6,11 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Array( n1 [, n2 ...] ): nested arrays of NIL; NULL when no memory holds one (sizes the program chose). */
-static xb_array *make_dims(xb_ctx *ctx, uint32_t ndims, const xb_item *dims, xb_item *holder) {
+/* Array( n1 [, n2 ...] ): nested arrays of NIL, in form `elems`; NULL when no memory holds one (sizes the program
+ * chose). */
+static xb_array *make_dims(xb_ctx *ctx, uint32_t ndims, const xb_item *dims, xb_item *holder, uint32_t elems) {
   int64_t n = xb_num_to_i64(&dims[0]);
   if (n < 0) n = 0;
-  xb_array *a = xb_array_try_alloc((uint64_t)n);
+  xb_array *a = xb_array_try_alloc((uint64_t)n, elems);
   if (!a) return NULL;
   xb_set_array(holder, a); /* keeps `a` reachable while sub-arrays are allocated */
   if (ndims > 1) {
@@ -18,7 +19,7 @@ static xb_array *make_dims(xb_ctx *ctx, uint32_t ndims, const xb_item *dims, xb_
     xb_set_nil(&sub);
     xb_gc_root_push(ctx, &sub);
     for (int64_t i = 0; i < n; ++i) {
-      if (!make_dims(ctx, ndims - 1, dims + 1, &sub)) {
+      if (!make_dims(ctx, ndims - 1, dims + 1, &sub, elems)) {
         xb_gc_root_pop(ctx, 1);
         return NULL;
       }
@@ -40,7 +41,10 @@ void xbf_ARRAY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       return;
     }
   }
-  if (!make_dims(ctx, argc, argv, ret)) {
+  /* One dimension: an array of NILs, whose first store gives it its form. More: arrays of items, rows included,
+   * whose first stores, one per row, would each go to the runtime (a fast loop changes no form), and the loops that
+   * fill them row by row on to their generic copies. */
+  if (!make_dims(ctx, argc, argv, ret, argc == 1 ? XB_ELEMS_NIL : XB_ELEMS_ITEMS)) {
     xb_set_nil(ret);
     xb_error_memory(ctx, ret, "ARRAY", argc, argv);
   }

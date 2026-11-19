@@ -73,9 +73,9 @@ static inline int64_t xb_array_index(const xb_array *a, int64_t n) {
 /* Lengths are 64-bit so that a length past XB_ARRAY_MAX_LEN is caught before
  * it is narrowed to size_t (on 32-bit hosts). */
 xb_array *xb_array_alloc(uint64_t len); /* `len` NIL items */
-/* An array of the program (XB_ELEMS_NIL) of a length it chose (Array()): NULL when it is past the largest array or no
- * memory holds it. */
-xb_array *xb_array_try_alloc(uint64_t len);
+/* An array of a length the program chose (Array()), of NILs in form `elems` (XB_ELEMS_ITEMS or XB_ELEMS_NIL): NULL when
+ * it is past the largest array or no memory holds it. */
+xb_array *xb_array_try_alloc(uint64_t len, uint32_t elems);
 /* The visible length set to `len`, new items NIL; `a` must be reachable. xb_array_resize is for an array no other
  * thread reaches (one the runtime has just made); xb_array_resize_any for any, where a shared one (core/shared.h)
  * grows into storage allocated before its lock is taken (rooted in `ctx` meanwhile) and changes under the lock. */

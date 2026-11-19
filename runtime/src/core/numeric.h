@@ -11,6 +11,8 @@ xb_str *xb_num_to_str(const xb_item *it, int width, int dec);
  * fit, or when dec >= width), written to `out` (`width` bytes; no NUL), nothing allocated for a number of up to 60
  * digits; a database's numeric field holds this text. */
 void xb_num_to_field_buf(const xb_item *it, int width, int dec, char *out);
+/* v rounded to d decimals, half away from zero (a negative d rounds to tens, hundreds, ...): Round()'s rule. */
+double xb_num_round(double v, int64_t d);
 /* Val( c ) of the `len` bytes at `s`: the number, with the width and decimals its text gives. */
 void xb_num_parse(const char *s, size_t len, xb_item *r);
 

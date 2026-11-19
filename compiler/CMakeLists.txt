@@ -67,6 +67,7 @@ add_executable(xbc
   src/codegen/CodeGen.cpp
   src/codegen/FastPaths.cpp
   src/codegen/FramePlan.cpp
+  src/codegen/FrameSetup.cpp
   src/codegen/InlineCalls.cpp
   src/codegen/Instructions.cpp
   src/codegen/Literals.cpp

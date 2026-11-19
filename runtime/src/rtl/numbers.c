@@ -125,36 +125,14 @@ void xbf_ABS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   else xb_set_double(ret, fabs(xb_num_value(&argv[0])), argv[0].type == XB_T_DOUBLE ? argv[0].dec : 0);
 }
 
-/* Round( n, nDec ): half away from zero; a negative nDec rounds to tens,
- * hundreds, ... The half is added to ten times the scaled value and the sum
- * divided back, which is how Clipper gets its results in the last bit, then
- * raised by about one unit in the last place (times 1 + DBL_EPSILON) before
- * truncating, so that a decimal half stored just below it, like 2.675, still
- * rounds up; a value whose scaled magnitude reaches 2^52 is already its own
- * nearest rounding. Int() truncates the value as it is. */
+/* Round( n, nDec ): xb_num_round. Int() truncates the value as it is. */
 void xbf_ROUND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc < 2 || !xb_is_number(&argv[0]) || !xb_is_number(&argv[1])) {
     xb_fn_arg_error(ctx, ret, 1094, "ROUND", argc, argv);
     return;
   }
   int64_t d = xb_num_to_i64(&argv[1]);
-  double v = xb_num_value(&argv[0]);
-  double p = pow(10.0, d < 0 ? -(double)d : (double)d);
-  double r;
-  if (v == 0.0 || (d < 0 && xb_dbl_infinite(p))) {
-    r = 0.0;
-  } else if (d >= 0 && fabs(v) * p >= XB_DBL_INTEGRAL) {
-    r = v; /* the doubles near v are at least a step apart: v is already the nearest to its rounding */
-  } else {
-    double tenfold = (d >= 0 ? v * p : v / p) * 10.0;
-    tenfold += tenfold < 0 ? -5.0 : 5.0;
-    double back = tenfold / 10.0;
-    /* back * (1 + DBL_EPSILON) rounded once (fma): a unit that computes with
-     * more bits (x87) would round that product twice, and it often falls on
-     * the midpoint between two doubles there */
-    r = trunc(fma(back, DBL_EPSILON, back));
-    r = d >= 0 ? r / p : r * p; /* not finite when the scaling overflows, like Clipper */
-  }
+  double r = xb_num_round(xb_num_value(&argv[0]), d);
   if (d <= 0 && xb_dbl_fits_i64(r)) xb_set_int(ret, (int64_t)r);
   else xb_set_double(ret, r, (uint16_t)(d <= 0 ? 0 : d > UINT16_MAX ? UINT16_MAX : d));
 }

@@ -338,9 +338,20 @@ std::vector<InvariantExit> invariantColdExits(const Loop &loop, const DominatorT
   std::vector<InvariantExit> out;
   std::unordered_set<const LoadInst *> used;
   unsigned formKind = pre->getContext().getMDKindID(kFormTest);
+  // The paths of compact forms: the loop that runs when every exit stays takes the path of items at each form test, so
+  // an exit on the other side of one counts for nothing (and would send an array of items to the copy).
+  std::vector<BasicBlockEdge> compactSides;
+  for (BasicBlock *b : loop.blocks())
+    if (auto *br = dyn_cast<BranchInst>(b->getTerminator()); br && br->isConditional() && br->getMetadata(formKind))
+      compactSides.emplace_back(b, br->getSuccessor(1));
+  auto onCompactSide = [&](const BasicBlock *b) {
+    return std::any_of(compactSides.begin(), compactSides.end(),
+                       [&](const BasicBlockEdge &e) { return dt.dominates(e, b); });
+  };
   for (BasicBlock *b : loop.blocks()) {
     auto *br = dyn_cast<BranchInst>(b->getTerminator());
     if (!br || !br->isConditional()) continue;
+    if (onCompactSide(b)) continue;
     if (br->getMetadata(formKind)) {
       std::unordered_set<const LoadInst *> reads;
       if (computableOnEntry(loop, dt, pre, states, br->getCondition(), reads)) {
@@ -525,10 +536,17 @@ bool unswitchFormTests(Function &f, FunctionAnalysisManager &) {
       break;
     }
     if (!chosen) return changed;
-    BasicBlock *pre = chosen->getLoopPreheader();
+    BasicBlock *pre = chosen->getLoopPreheader(), *header = chosen->getHeader();
     ValueToValueMapTy vmap;
     version(f, *chosen, pre, {}, {{test, 1}}, copies, &vmap);
-    // The copy's tests are plain branches: it runs when the array is compact on entry, and is versioned no more.
+    // The copy runs when the array does not hold items on entry, and the condition the loop does not change says so
+    // on every pass: its test goes to the other side alone (the path of a compact form, which tests the rest). Its
+    // other form tests are plain branches: the copy is versioned no more.
+    auto *copyTest = cast<BranchInst>(cast<BasicBlock>(vmap[header])->getTerminator());
+    BasicBlock *compact = copyTest->getSuccessor(1);
+    copyTest->getSuccessor(0)->removePredecessor(copyTest->getParent(), /*KeepOneInputPHIs=*/true);
+    BranchInst::Create(compact, copyTest->getIterator());
+    copyTest->eraseFromParent();
     for (BasicBlock *b : copyBlocks(*chosen, vmap)) b->getTerminator()->setMetadata(formKind, nullptr);
     changed = true;
   }

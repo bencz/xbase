@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 53u
+#define XB_ABI_VERSION 54u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -146,9 +146,9 @@ enum {
  * width or decimals (xb_header_word( type, 0, 0 )): NIL, a logical, an
  * integer other than XB_ELEMS_INT_NIL. A store of any other value turns the
  * array into one of items first, in place (the room is there: it allocates
- * nothing); nothing turns it back. A new array of the program starts as
- * XB_ELEMS_NIL, which the first value stored in it makes logical, integer or
- * items; the runtime's own arrays, and every array other threads may reach,
+ * nothing); nothing turns it back. A new array of the program (Array( n )
+ * of one dimension, a literal) starts as XB_ELEMS_NIL, which the first value
+ * stored in it makes logical, integer or items; the runtime's own arrays, and every array other threads may reach,
  * hold items. Compiled code reads `len`, `data` and the state byte to access
  * elements in place: one test of the byte tells a local array of items (the
  * usual one) from all the others. */
@@ -395,11 +395,6 @@ int32_t  xb_cond_error(xb_ctx *ctx, const xb_item *a);
 void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems);
 void     xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
 void     xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value);
-/* `v` into element `index` (0-based, within its length) of a local array whose form does not hold it in place (one of
- * NILs, or a compact one given another value): the array takes the form that holds it first, in place, and the store
- * gets its write barrier. Compiled code calls it from the store's inline path; it allocates nothing, runs no code of
- * the program and shares nothing. */
-void     xb_array_store(xb_array *a, size_t index, const xb_item *v);
 /* A hash literal: `n` keys and values alternating in `kv` (2n consecutive
  * frame slots); a key that is not a string, a number or a date is an error. */
 void     xb_hash_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *kv);

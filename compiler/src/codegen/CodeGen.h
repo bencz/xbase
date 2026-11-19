@@ -238,12 +238,11 @@ private:
   llvm::Value *numberAsInteger(llvm::Value *item, llvm::Value *type);
   llvm::Value *bitApply(xb_bit_op op, llvm::Value *x, llvm::Value *y);
   void inlineIndex(const xir::Instruction &i, llvm::Value *base, llvm::Value *idx, llvm::BasicBlock *slow,
-                   llvm::BasicBlock *items, llvm::BasicBlock *compact, llvm::Value *&array, llvm::Value *&pos,
-                   llvm::Value *&state);
-  void switchCompact(llvm::Value *state, llvm::BasicBlock *nils, llvm::BasicBlock *logical, llvm::BasicBlock *integer);
+                   llvm::BasicBlock *items, llvm::BasicBlock *compact, uint8_t form, llvm::Value *&array,
+                   llvm::Value *&pos, llvm::Value *&state);
   void emitIndex(const xir::Instruction &i);
-  void emitCompactRead(bool logical, llvm::Value *d, llvm::Value *array, llvm::Value *pos, llvm::Value *state,
-                       llvm::BasicBlock *compact, llvm::BasicBlock *slow, llvm::BasicBlock *join);
+  void emitCompactRead(bool logical, llvm::Value *d, llvm::Value *array, llvm::Value *pos, llvm::BasicBlock *compact,
+                       llvm::BasicBlock *slow, llvm::BasicBlock *join);
   void emitIndexSet(const xir::Instruction &i);
 
   // Instructions.cpp
@@ -309,7 +308,7 @@ private:
   llvm::FunctionCallee rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArgsRest_;
   llvm::FunctionCallee rtExp_, rtLog_; // xb_exp, xb_log: no memory touched
-  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtArrayStore_, rtWriteItem_, rtWriteItems_, rtCellOf_,
+  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtWriteItems_, rtCellOf_,
       rtBlockNew_, rtRootPush_, rtRootPop_;
   llvm::FunctionCallee rtEnumLen_, rtEachSource_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefLoad_;
   llvm::FunctionCallee rtRefStore_;

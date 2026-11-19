@@ -620,42 +620,57 @@ void xbf_MUTEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_object(ret, m);
 }
 
-/* Conditions: the waiters and the signals given to them in one word (16 bits each: a waiter takes its signal and
- * leaves in one step, and a signal never outlives the waiters it was for), and a generation that each signal changes,
- * which waiters park on. */
+/* Conditions: one 64-bit word holds the waiters, the signals given to them (16 bits each: a waiter takes its signal and
+ * leaves in one step, and a signal never outlives the waiters it was for) and the generation of the last signal
+ * (32 bits). A waiter takes only a signal given after it came (a generation other than the one it came in): a thread
+ * that starts waiting right after a NotifyAll() must not take the signal of one that waited before it, which would
+ * wait on with no one to wake it. A second word, which every signal and every departure from a full word change,
+ * is what waiters park on. */
 
-enum { C_WAITERS, C_GENERATION, C_COUNT_ };
-static const xb_class_var condition_vars[] = {{"(WAITERS)", XB_VAR_ANY}, {"(GENERATION)", XB_VAR_ANY}};
+enum { C_STATE, C_PARK, C_COUNT_ };
+static const xb_class_var condition_vars[] = {{"(STATE)", XB_VAR_ANY}, {"(PARK)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(condition_vars) == C_COUNT_, "one C_ index per Condition variable");
 
-#define C_WAITER 1u
-#define C_SIGNAL (1u << 16)
+#define C_WAITER 1ull
+#define C_SIGNAL (1ull << 16)
+#define C_GENERATION (1ull << 32)
 #define C_FIELD 0xFFFFu
-#define C_SIGNALS(w) ((w) >> 16)
-#define C_WAITING(w) ((w) & C_FIELD)
+#define C_SIGNALS(w) ((uint32_t)((w) >> 16) & C_FIELD)
+#define C_WAITING(w) ((uint32_t)(w) & C_FIELD)
+#define C_GENERATION_OF(w) ((uint32_t)((w) >> 32))
 
-/* A waiter left, the word `before` it did: a thread waiting for a place (the word was full) is woken. */
-static void condition_left(const xb_item *c, uint32_t before) {
-  if (C_WAITING(before) == C_FIELD) xb_park_wake(xb_object_word(c, C_WAITERS), 0);
+/* The parking word changed and its waiters woken: a signal, or a place among the waiters. */
+static void condition_wake(const xb_item *c, int all) {
+  xb_atomic_add32(xb_object_word(c, C_PARK), 1, XB_RELEASE);
+  xb_park_wake(xb_object_word(c, C_PARK), all);
 }
 
-/* A waiter leaves: with its signal when one is there (1), else without (0). */
-static int condition_leave(const xb_item *c) {
-  uint32_t *word = xb_object_word(c, C_WAITERS), w = xb_atomic_load32(word, XB_ACQUIRE);
+/* A waiter left, the word `before` it did: the threads waiting for a place (the word was full) are woken. */
+static void condition_left(const xb_item *c, uint64_t before) {
+  if (C_WAITING(before) == C_FIELD) condition_wake(c, 1);
+}
+
+/* A waiter that came in generation `came` leaves: with a signal given since when one is there (1), else without (0). */
+static int condition_leave(const xb_item *c, uint32_t came) {
+  uint64_t *word = xb_object_word64(c, C_STATE), w = xb_atomic_load64(word, XB_ACQUIRE);
   for (;;) {
-    uint32_t signalled = C_SIGNALS(w) > 0;
-    if (xb_atomic_cas32(word, &w, w - C_WAITER - (signalled ? C_SIGNAL : 0), XB_ACQ_REL)) {
+    uint64_t signalled = C_SIGNALS(w) > 0 && C_GENERATION_OF(w) != came;
+    if (xb_atomic_cas64(word, &w, w - C_WAITER - (signalled ? C_SIGNAL : 0), XB_ACQ_REL)) {
       condition_left(c, w);
       return (int)signalled;
     }
   }
 }
 
-/* The calling thread counted as a waiter: 0 when the word counts as many as it can. */
-static int condition_join(const xb_item *c) {
-  uint32_t *word = xb_object_word(c, C_WAITERS), w = xb_atomic_load32(word, XB_RELAXED);
+/* The calling thread counted as a waiter, the generation it came in into *came: 0 when the word counts as many as it
+ * can. */
+static int condition_join(const xb_item *c, uint32_t *came) {
+  uint64_t *word = xb_object_word64(c, C_STATE), w = xb_atomic_load64(word, XB_RELAXED);
   while (C_WAITING(w) != C_FIELD)
-    if (xb_atomic_cas32(word, &w, w + C_WAITER, XB_ACQ_REL)) return 1;
+    if (xb_atomic_cas64(word, &w, w + C_WAITER, XB_ACQ_REL)) {
+      *came = C_GENERATION_OF(w);
+      return 1;
+    }
   return 0;
 }
 
@@ -672,46 +687,45 @@ static void condition_wait(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv
     return;
   }
   if (!xb_deadline_arg(ctx, "CONDITION:WAIT", XB_CODE_CONDITION, 2, argc, argv, &deadline)) return;
-  int joined = condition_join(&argv[0]); /* before the mutex goes: a Notify() after it finds this waiter */
+  uint32_t came = 0;
+  int joined = condition_join(&argv[0], &came); /* before the mutex goes: a Notify() after it finds this waiter */
   uint32_t depth = *xb_object_word(&argv[1], M_DEPTH);
   *xb_object_word(&argv[1], M_DEPTH) = 1;
   mutex_release(ctx, &argv[1], xb_flow_self());
   int notified = 0, ended = XB_WAIT_CHANGED;
-  if (!joined) {
-    while (ended == XB_WAIT_CHANGED) {
-      uint32_t w = xb_atomic_load32(xb_object_word(&argv[0], C_WAITERS), XB_ACQUIRE);
+  while (ended == XB_WAIT_CHANGED) {
+    uint32_t park = xb_atomic_load32(xb_object_word(&argv[0], C_PARK), XB_ACQUIRE);
+    uint64_t *word = xb_object_word64(&argv[0], C_STATE), w = xb_atomic_load64(word, XB_ACQUIRE);
+    if (!joined) {
       if (C_WAITING(w) != C_FIELD) break;
-      ended = xb_wait_until(ctx, &argv[0], C_WAITERS, w, deadline);
+    } else if (C_SIGNALS(w) && C_GENERATION_OF(w) != came) {
+      if (!xb_atomic_cas64(word, &w, w - C_WAITER - C_SIGNAL, XB_ACQ_REL)) continue; /* the word changed: again */
+      condition_left(&argv[0], w);
+      notified = 1;
+      break;
+    } else if (C_SIGNALS(w)) {
+      /* Signals for others: a Notify() woke one thread, perhaps this one in their place, which passes the wake on. */
+      xb_park_wake(xb_object_word(&argv[0], C_PARK), 0);
     }
-  } else {
-    while (ended == XB_WAIT_CHANGED) {
-      uint32_t generation = xb_atomic_load32(xb_object_word(&argv[0], C_GENERATION), XB_ACQUIRE);
-      uint32_t *word = xb_object_word(&argv[0], C_WAITERS), w = xb_atomic_load32(word, XB_ACQUIRE);
-      if (C_SIGNALS(w) && xb_atomic_cas32(word, &w, w - C_WAITER - C_SIGNAL, XB_ACQ_REL)) {
-        condition_left(&argv[0], w);
-        notified = 1;
-        break;
-      }
-      if (C_SIGNALS(w)) continue; /* another waiter took one meanwhile: look again */
-      ended = xb_wait_until(ctx, &argv[0], C_GENERATION, generation, deadline);
-    }
-    if (!notified) notified = condition_leave(&argv[0]); /* a signal given as it gave up is its own */
+    ended = xb_wait_until(ctx, &argv[0], C_PARK, park, deadline);
   }
+  if (joined && !notified) notified = condition_leave(&argv[0], came); /* a signal given as it gave up is its own */
   if (ended == XB_WAIT_QUIT || !mutex_take(ctx, &argv[1])) return;
   *xb_object_word(&argv[1], M_DEPTH) = depth;
   xb_set_logical(r, notified);
 }
 
-/* Signals for `wanted` more of the waiters that have none (all of them: UINT32_MAX), then the waiters woken. */
+/* Signals for `wanted` more of the waiters that have none (all of them: UINT32_MAX), in a new generation, then the
+ * waiters woken. */
 static void condition_signal(const xb_item *c, uint32_t wanted, int all) {
-  uint32_t *word = xb_object_word(c, C_WAITERS), w = xb_atomic_load32(word, XB_ACQUIRE), given;
+  uint64_t *word = xb_object_word64(c, C_STATE), w = xb_atomic_load64(word, XB_ACQUIRE);
+  uint32_t given;
   do {
     uint32_t idle = C_WAITING(w) - C_SIGNALS(w);
     given = idle < wanted ? idle : wanted;
     if (!given) return;
-  } while (!xb_atomic_cas32(word, &w, w + given * C_SIGNAL, XB_ACQ_REL));
-  xb_atomic_add32(xb_object_word(c, C_GENERATION), 1, XB_RELEASE);
-  xb_park_wake(xb_object_word(c, C_GENERATION), all);
+  } while (!xb_atomic_cas64(word, &w, w + given * C_SIGNAL + C_GENERATION, XB_ACQ_REL));
+  condition_wake(c, all);
 }
 
 /* oCondition:Notify(): one waiting thread goes on (none waits: nothing happens). */
@@ -741,7 +755,8 @@ void xbf_CONDITION(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   XB_UNUSED(argv);
   xb_object *c = xb_object_new(&condition_class);
-  for (uint32_t k = 0; k < C_COUNT_; ++k) xb_set_logical(&c->vars[k], 0);
+  xb_set_int(&c->vars[C_STATE], 0);
+  xb_set_logical(&c->vars[C_PARK], 0);
   xb_set_object(ret, c);
 }
 

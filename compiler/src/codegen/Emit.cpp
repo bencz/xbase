@@ -1,5 +1,9 @@
 #include "codegen/Emit.h"
 
+#include <algorithm>
+#include <unordered_set>
+
+#include "codegen/FrameSetup.h"
 #include "codegen/LoopGuards.h"
 #include "codegen/LoopPolls.h"
 #include "codegen/LoopSplit.h"
@@ -16,6 +20,7 @@
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar/EarlyCSE.h>
 #include <llvm/Transforms/Scalar/SROA.h>
@@ -184,6 +189,28 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   again(versionInvariantColdExits, "loop versioning");
   again(unswitchFormTests, "form tests");
   again(hoistLoopGuards, "loop guards");
+  // Last, the frames: set up where a path first needs one, which the loops' changes above may have moved. The copies
+  // of whole functions that small entries call are simplified too, and the small entries go into their callers.
+  std::unordered_set<const Function *> before;
+  for (Function &f : m) before.insert(&f);
+  again(sinkFrameSetup, "frame setup");
+  std::vector<Function *> callers;
+  for (Function &f : m)
+    if (!f.isDeclaration() && !before.count(&f)) callers.push_back(&f);
+  for (Function &f : m)
+    if (f.hasFnAttribute(Attribute::AlwaysInline))
+      for (User *u : f.users())
+        if (auto *call = dyn_cast<CallBase>(u)) callers.push_back(call->getFunction());
+  if (callers.empty()) return;
+  ModulePassManager inliner;
+  inliner.addPass(AlwaysInlinerPass());
+  inliner.run(m, mam);
+  std::sort(callers.begin(), callers.end());
+  callers.erase(std::unique(callers.begin(), callers.end()), callers.end());
+  for (Function *f : callers) {
+    fam.invalidate(*f, PreservedAnalyses::none());
+    fpm.run(*f, fam);
+  }
 }
 
 // Code generation runs on the legacy pass manager: in LLVM 22 it is the one

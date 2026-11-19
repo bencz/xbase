@@ -52,11 +52,9 @@ inline constexpr const char *kFormTest = "xb.form";
 // with the guards' rounds; returns whether the function changed.
 bool unswitchFormTests(llvm::Function &f, llvm::FunctionAnalysisManager &fam);
 
-// The function attribute of the runtime's write barriers (xb_gc_write_item, xb_gc_remember) and of xb_array_store:
-// they record what changed for the collector (the last one stores an element, the array taking the form that holds
-// it), run no code of the program and share nothing, so the loop passes above do not count a call to one as a call.
-// An array's form changes there only out of NIL or a compact form, never out of items: an array of items on entry
-// stays one.
+// The function attribute of the runtime's write barriers (xb_gc_write_item, xb_gc_remember): they
+// record what changed for the collector, run no code of the program and share nothing, so the loop passes above do
+// not count a call to one as a call.
 inline constexpr const char *kBarrierAttr = "xb-barrier";
 
 } // namespace xb

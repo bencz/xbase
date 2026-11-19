@@ -1,0 +1,26 @@
+module APPEND_ACROSS_BLOCKS
+
+function MAIN params 0 {
+  $f0 = frame 0 "C"
+entry:
+  store $f0, ""
+  br for.test(1:w10)
+for.test(%2: item):
+  %3 = for.test %2, 10:w10, 1:w0
+  cond_br %3, for.body, for.end
+for.body:
+  append $f0, "ab"
+  %6 = binary add.one %2, 1:w0
+  br for.test(%6)
+for.end:
+  %8 = load $f0
+  %9 = call QOUT native %8
+  ret
+}
+
+function ID internal params 1 {
+  $f0 = frame 0 "X"
+entry:
+  %0 = load $f0
+  ret %0
+}

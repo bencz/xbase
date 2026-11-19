@@ -157,6 +157,13 @@ static inline uint64_t xb_atomic_add64(uint64_t *p, uint64_t v, int order) {
   XB_ATOMIC_UNUSED(order);
   return (uint64_t)_InterlockedExchangeAdd64((volatile __int64 *)p, (__int64)v);
 }
+static inline int xb_atomic_cas64(uint64_t *p, uint64_t *expected, uint64_t desired, int order) {
+  XB_ATOMIC_UNUSED(order);
+  uint64_t found = (uint64_t)_InterlockedCompareExchange64((volatile __int64 *)p, (__int64)desired, (__int64)*expected);
+  if (found == *expected) return 1;
+  *expected = found;
+  return 0;
+}
 
 static inline void xb_atomic_fence(int order) {
   volatile long barrier = 0;
@@ -207,6 +214,9 @@ static inline int xb_atomic_casptr(void **p, void **expected, void *desired, int
 static inline uint64_t xb_atomic_load64(const uint64_t *p, int order) { return __atomic_load_n(p, order); }
 static inline void xb_atomic_store64(uint64_t *p, uint64_t v, int order) { __atomic_store_n(p, v, order); }
 static inline uint64_t xb_atomic_add64(uint64_t *p, uint64_t v, int order) { return __atomic_fetch_add(p, v, order); }
+static inline int xb_atomic_cas64(uint64_t *p, uint64_t *expected, uint64_t desired, int order) {
+  return __atomic_compare_exchange_n(p, expected, desired, 0, order, XB_ATOMIC_FAIL_ORDER(order));
+}
 
 static inline void xb_atomic_fence(int order) { __atomic_thread_fence(order); }
 

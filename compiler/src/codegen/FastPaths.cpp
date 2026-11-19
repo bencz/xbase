@@ -696,16 +696,16 @@ void CodeGen::emitForTest(const xir::Instruction &i) {
 // (1-based; a double is truncated, as xb_num_to_i64 does) and the array is
 // local: branches to `items` for an array of items, to `compact` for one of a
 // compact form, with the array, the 0-based position and the array's state
-// byte (its form); any other case (a shared array included, whose items the
-// runtime reads and writes whole, and one of a compact form when `compact` is
-// null) branches to `slow`. An integer index, the
+// byte; any other case (a shared array included, whose items the runtime
+// reads and writes whole, and one of a compact form other than `form`, any of
+// them when `compact` is null) branches to `slow`. An integer index, the
 // usual one, has a path of its own. A shared array goes to the runtime first:
 // its length, read meanwhile, decides nothing. The state byte tells a local
 // array of items from the others in one test; one on an invariant array
 // leaves a fast loop with the tests versionInvariantColdExits makes once,
 // before it.
 void CodeGen::inlineIndex(const xir::Instruction &i, Value *base, Value *idx, BasicBlock *slow, BasicBlock *items,
-                          BasicBlock *compact, Value *&array, Value *&pos, Value *&state) {
+                          BasicBlock *compact, uint8_t form, Value *&array, Value *&pos, Value *&state) {
   Value *baseType = typeOf(i.operand(0), base), *idxType = typeOf(i.operand(1), idx);
   Value *isArray = b_.CreateICmpEQ(baseType, ConstantInt::get(i32_, XB_T_ARRAY));
   BasicBlock *intIdx = newBlock("index.int"), *notInt = newBlock("index.other"), *dblIdx = newBlock("index.double");
@@ -754,22 +754,12 @@ void CodeGen::inlineIndex(const xir::Instruction &i, Value *base, Value *idx, Ba
   test->setMetadata(kFormTest, MDNode::get(ctx_, {}));
   b_.SetInsertPoint(ofItems);
   branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), items, slow); // 1 <= idx <= len
+  // A shared array holds items: a compact form is a local array's, so one test of the form says both.
   b_.SetInsertPoint(other);
   BasicBlock *local = newBlock("index.compact.local");
-  branchLikely(isLocalState(state), local, slow);
+  branchLikely(b_.CreateICmpEQ(elemsOf(state), ConstantInt::get(i8_, form)), local, slow);
   b_.SetInsertPoint(local);
   branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), compact, slow);
-}
-
-// The weight of a likely branch whose other side is rare but no cold edge (LoopSplit's are below 1/64).
-constexpr uint32_t kRareWeight = 16;
-
-// The paths of a local array that does not hold items (its state byte `state`): logicals, integers, and NILs, the
-// form of a new array until its first store. None of them is a cold path.
-void CodeGen::switchCompact(Value *state, BasicBlock *nils, BasicBlock *logical, BasicBlock *integer) {
-  SwitchInst *sw = b_.CreateSwitch(elemsOf(state), nils, 2);
-  sw->addCase(ConstantInt::get(i8_, XB_ELEMS_LOGICAL), logical);
-  sw->addCase(ConstantInt::get(i8_, XB_ELEMS_INT), integer);
 }
 
 // Whether element read `i` is tested as a logical (a condition, .NOT.).
@@ -793,13 +783,14 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
   Value *base = addr(i.operand(0)), *idx = addr(i.operand(1)), *d = dest(i);
   BasicBlock *slow = newBlock("index.call"), *join = newBlock("index.end"), *items = newBlock("index.items");
   Value *array, *pos, *state;
-  bool rows = onlyIndexed(i);
+  bool rows = onlyIndexed(i), logical = readAsLogical(i);
   BasicBlock *compact = rows ? nullptr : newBlock("index.compact");
-  inlineIndex(i, base, idx, slow, items, compact, array, pos, state); // base and idx are read before d is written
+  // base and idx are read before d is written
+  inlineIndex(i, base, idx, slow, items, compact, logical ? XB_ELEMS_LOGICAL : XB_ELEMS_INT, array, pos, state);
   b_.SetInsertPoint(items);
   copyItem(d, arrayElement(array, pos));
   b_.CreateBr(join);
-  if (!rows) emitCompactRead(readAsLogical(i), d, array, pos, state, compact, slow, join);
+  if (!rows) emitCompactRead(logical, d, array, pos, compact, slow, join);
   b_.SetInsertPoint(slow);
   callItemOp(rtIndex_, d, {base, idx});
   checkPending(unwind_);
@@ -809,16 +800,13 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
 
 // The path of a read of an array of a compact form, from block `compact` into `d`, then to `join`: one form inline,
 // the logicals' for a read tested as a logical, the integers' for any other (each inline path joins the path of items
-// and costs it registers). The other forms go to the runtime, as cold paths: an array of NILs (a new one, which its
-// first store gives a form), and a NIL among logicals or integers (0, XB_ELEMS_INT_NIL), rare where speed counts, so
-// that the inline path gives a value of one type.
-void CodeGen::emitCompactRead(bool logical, Value *d, Value *array, Value *pos, Value *state, BasicBlock *compact,
-                              BasicBlock *slow, BasicBlock *join) {
-  BasicBlock *form = newBlock(logical ? "index.logical" : "index.int"), *one = newBlock("index.compact.one");
+// and costs it registers), which inlineIndex tested. The other forms go to the runtime, as cold paths: an array of
+// NILs (a new one, which its first store gives a form), and a NIL among logicals or integers (0, XB_ELEMS_INT_NIL),
+// rare where speed counts, so that the inline path gives a value of one type.
+void CodeGen::emitCompactRead(bool logical, Value *d, Value *array, Value *pos, BasicBlock *compact, BasicBlock *slow,
+                              BasicBlock *join) {
+  BasicBlock *one = newBlock("index.compact.one");
   b_.SetInsertPoint(compact);
-  branchLikely(b_.CreateICmpEQ(elemsOf(state), ConstantInt::get(i8_, logical ? XB_ELEMS_LOGICAL : XB_ELEMS_INT)),
-               form, slow);
-  b_.SetInsertPoint(form);
   if (logical) {
     Value *byte = tag(b_.CreateLoad(i8_, compactElement(array, i8_, pos), "byte"), Mem::HeapItem);
     branchLikely(b_.CreateICmpNE(byte, ConstantInt::get(i8_, 0)), one, slow);
@@ -834,54 +822,43 @@ void CodeGen::emitCompactRead(bool logical, Value *d, Value *array, Value *pos, 
 }
 
 // The store in place needs the write barrier only for a value that refers to
-// a heap object (xb_type_is_heap). A compact form takes in place what it
-// holds (an item whose header word is NIL's, or a logical's or an integer's
-// with no width or decimals); any other value, and the first store into an
-// array of NILs, goes through xb_array_store, which gives the array the form
-// that holds it (no cold path: a loop that fills a new array stays fast).
+// a heap object (xb_type_is_heap). An array of a compact form takes in place
+// a value whose header word it holds (NIL's, or a logical's or an integer's
+// with no width or decimals), one form inline: the logicals' for a value that
+// can only be a logical or NIL, the integers' for any other. Any other case
+// (another form, the first store into an array of NILs, a value the form does
+// not hold) goes to the runtime, as a cold path, which gives the array the form
+// that holds it: no fast loop changes an array's form, so a loop on one it does
+// not change is versioned on it (LoopSplit.h).
 void CodeGen::emitIndexSet(const xir::Instruction &i) {
   Value *base = addr(i.operand(0)), *idx = addr(i.operand(1)), *v = addr(i.operand(2));
   BasicBlock *slow = newBlock("index.set.call"), *join = newBlock("index.set.end");
-  BasicBlock *items = newBlock("index.set.items"), *logical = newBlock("index.set.logical");
-  BasicBlock *integer = newBlock("index.set.int"), *compact = newBlock("index.set.compact");
-  BasicBlock *change = newBlock("index.set.form");
+  BasicBlock *items = newBlock("index.set.items"), *compact = newBlock("index.set.compact");
+  BasicBlock *put = newBlock("index.set.put");
   Value *array, *pos, *state;
-  inlineIndex(i, base, idx, slow, items, compact, array, pos, state);
+  xir::TypeSet t = plan_->types().of(i.operand(2));
+  xir::TypeSet logicals = xir::typeBit(XB_T_LOGICAL) | xir::typeBit(XB_T_NIL);
+  bool logical = t != 0 && (t & ~logicals) == 0 && (t & xir::typeBit(XB_T_LOGICAL));
+  inlineIndex(i, base, idx, slow, items, compact, logical ? XB_ELEMS_LOGICAL : XB_ELEMS_INT, array, pos, state);
   b_.SetInsertPoint(compact);
-  switchCompact(state, change, logical, integer);
-  Value *nilHeader = headerWord(XB_T_NIL, 0, 0);
-  MDBuilder md(ctx_);
-  // A value the form does not hold is rare, but no cold path: its store keeps the loop on its fast paths.
-  MDNode *rare = md.createBranchWeights(kRareWeight, 1);
-
-  b_.SetInsertPoint(logical);
   Value *header = loadHeader(v);
-  Value *isNil = b_.CreateICmpEQ(header, nilHeader);
-  BasicBlock *logicalStore = newBlock("index.set.byte");
-  b_.CreateCondBr(b_.CreateOr(isNil, b_.CreateICmpEQ(header, headerWord(XB_T_LOGICAL, 0, 0))), logicalStore, change,
-                  rare);
-  b_.SetInsertPoint(logicalStore);
-  Value *byte = b_.CreateSelect(isNil, ConstantInt::get(i8_, 0),
-                                b_.CreateSelect(logicalValue(v), ConstantInt::get(i8_, XB_ELEMS_TRUE),
-                                                ConstantInt::get(i8_, XB_ELEMS_FALSE)));
-  tag(b_.CreateStore(byte, compactElement(array, i8_, pos)), Mem::HeapItem);
-  b_.CreateBr(join);
-
-  b_.SetInsertPoint(integer);
-  header = loadHeader(v);
-  isNil = b_.CreateICmpEQ(header, nilHeader);
-  Value *n = intValue(v);
-  Value *fits = b_.CreateAnd(b_.CreateICmpEQ(header, headerWord(XB_T_INT, 0, 0)),
-                             b_.CreateICmpNE(n, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL)));
-  BasicBlock *intStore = newBlock("index.set.word");
-  b_.CreateCondBr(b_.CreateOr(isNil, fits), intStore, change, rare);
-  b_.SetInsertPoint(intStore);
-  Value *word = b_.CreateSelect(isNil, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL), n);
-  tag(b_.CreateStore(word, compactElement(array, i64_, pos)), Mem::HeapItem);
-  b_.CreateBr(join);
-
-  b_.SetInsertPoint(change);
-  b_.CreateCall(rtArrayStore_, {array, b_.CreateZExtOrTrunc(pos, intPtrTy_), callArg(v, 2)});
+  Value *isNil = b_.CreateICmpEQ(header, headerWord(XB_T_NIL, 0, 0));
+  if (logical) {
+    branchLikely(b_.CreateOr(isNil, b_.CreateICmpEQ(header, headerWord(XB_T_LOGICAL, 0, 0))), put, slow);
+    b_.SetInsertPoint(put);
+    Value *byte = b_.CreateSelect(isNil, ConstantInt::get(i8_, 0),
+                                  b_.CreateSelect(logicalValue(v), ConstantInt::get(i8_, XB_ELEMS_TRUE),
+                                                  ConstantInt::get(i8_, XB_ELEMS_FALSE)));
+    tag(b_.CreateStore(byte, compactElement(array, i8_, pos)), Mem::HeapItem);
+  } else {
+    Value *n = intValue(v);
+    Value *fits = b_.CreateAnd(b_.CreateICmpEQ(header, headerWord(XB_T_INT, 0, 0)),
+                               b_.CreateICmpNE(n, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL)));
+    branchLikely(b_.CreateOr(isNil, fits), put, slow);
+    b_.SetInsertPoint(put);
+    Value *word = b_.CreateSelect(isNil, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL), n);
+    tag(b_.CreateStore(word, compactElement(array, i64_, pos)), Mem::HeapItem);
+  }
   b_.CreateBr(join);
 
   b_.SetInsertPoint(items);

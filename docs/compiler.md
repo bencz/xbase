@@ -573,17 +573,19 @@ emits the object file.
   calls `xb_gc_write_item` only for a value of a heap type (`xb_type_is_heap`); a shared array's items are the runtime's
   to read and write whole, and an index out of bounds calls the runtime, which raises the error. A local array of a
   compact form ([runtime.md](runtime.md#values)) has paths of its own, after a branch that is no cold path (`kFormTest`,
-  below): a store of a value whose header word the form holds writes its byte or word in place, any other value (and the
-  first store into an array of `NIL`s) calls `xb_array_store`, inline too, so a loop that fills a new array or turns one
-  stays on its fast paths; a read inlines one form, the logicals' when a condition or `.NOT.` tests the element
-  (`readAsLogical`), the integers' otherwise, and gives an item of that one type (each inline path joins the path of
-  items and costs it registers: three of them made `matmul`'s loop 16% slower), while an array of `NIL`s, the other
-  compact form and a `NIL` among logicals or integers go to the runtime, as cold paths. A read whose every use indexes
-  the element (a row of an array of arrays: an element of a compact form would be an error there, `onlyIndexed`) has no
-  compact path at all. A comparison whose only use is the `truth` right after it gives that test its boolean directly,
-  without the logical item. The bit operators (`&` `|` `^^` `<<` `>>` `~`) and the calls to a bit function (`BitAnd`,
-  ..., the table `xb_bit_function` in `xbrt.h`) with number operands are the machine operation (`and`, `or`, `xor`,
-  `shl`, `ashr`, `lshr`, a select for counts outside 0..63), a double taken as an integer by `llvm.fptosi.sat`
+  below), for one form each, which one test of the form (a compact form is a local array's) selects: a read inlines the
+  logicals' when a condition or `.NOT.` tests the element (`readAsLogical`), the integers' otherwise, and gives an item
+  of that one type (each inline path joins the path of items and costs it registers: three of them made `matmul`'s loop
+  16% slower); a store the logicals' for a value that can only be a logical or `NIL`, the integers' for any other, and
+  writes its byte or word in place for a value whose header word the form holds. Everything else goes to the runtime, as
+  cold paths: another form, an array of `NIL`s (a new one: its first store gives it a form), a `NIL` among logicals or
+  integers on a read, a value the form does not hold on a store (the runtime turns the array). So no fast loop changes
+  an array's form, and a loop on an array it does not change is versioned on the form (below). A read whose every use
+  indexes the element (a row of an array of arrays: an element of a compact form would be an error there, `onlyIndexed`)
+  has no compact path at all. A comparison whose only use is the `truth` right after it gives that test its boolean
+  directly, without the logical item. The bit operators (`&` `|` `^^` `<<` `>>` `~`) and the calls to a bit function
+  (`BitAnd`, ..., the table `xb_bit_function` in `xbrt.h`) with number operands are the machine operation (`and`, `or`,
+  `xor`, `shl`, `ashr`, `lshr`, a select for counts outside 0..63), a double taken as an integer by `llvm.fptosi.sat`
   (truncated, saturated, NaN 0, as `xb_dbl_to_i64`); other operands call the runtime operator or function, which raises
   the error. `=`, `==` and `!=` of two one-character strings compare their bytes in place (so `ValType( x ) == "C"`
   calls nothing). Unary `-` of an integer other than INT64_MIN or of a double is done in place too. `InlineCalls.cpp`
@@ -839,7 +841,8 @@ host), runs LLVM's default optimization pipeline for the `-O` level (new pass ma
 loops whose fast paths have cold edges (`LoopSplit.*`, below), places the polls of the loops' back edges (`LoopPolls.*`,
 below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds, each followed by the versioning
 of loops on their arrays' forms, `unswitchFormTests`), versions the fast loops on their other invariant tests
-(`versionInvariantColdExits`, `LoopSplit.*`, below; then the forms and the guards once more), each followed by the
+(`versionInvariantColdExits`, `LoopSplit.*`, below; then the forms and the guards once more), sets frames up where they
+are needed (`FrameSetup.*`, below, whose small entries are then inlined: `AlwaysInlinerPass`), each followed by the
 function simplification pipeline on the functions it changed, and writes the object with the target's object writer
 (code generation runs on the legacy pass manager: in LLVM 22 it is the one every target implements). At `-O0` (no xIR
 passes, LLVM's `-O0` pipeline) every function first gets the passes whose time follows its size (`cleanUpFunctions`,
@@ -947,27 +950,41 @@ leave, or an item holds no such object, an exact copy of the loop runs, which le
 otherwise the loop runs with those branches gone. Values of the loop used past it become the join of the loop's and the
 copy's (`SSAUpdater`); a loop is versioned once, its copy never, and the copies grow a function by at most its own size.
 Unlike the guards, the branch need not be the header's: the copy, not the generic loop, takes the first pass. A form
-test whose condition can be computed on entry counts as such a branch, its compact side as the one that leaves.
+test whose condition can be computed on entry counts as such a branch, its compact side as the one that leaves, and the
+exits on that side count for nothing (the loop that runs when none leaves takes the path of items). With the
+sharing tests of compiled code (step 3 of [concurrency.md](concurrency.md#shared-objects)), nests split whole and the
+versioning, measured against the code before them (the best of 7 runs, x86-64): `pi` 16 to 18% faster, `matmul` 6 to
+11%, `qsort` 7%, the others within their noise (`generator`, `sieve` and `fib` within 2%).
 
 Form tests (`unswitchFormTests` in `codegen/LoopSplit.*`), with each round of guards and after the versioning: an
 innermost loop whose header is the form test of an array the loop does not change (its condition moved out of the loop,
 `makeLoopInvariant`) is versioned on it the same way: the loop runs with the path of items alone when the array holds
-items on entry (an array of items stays one: forms only turn into items), its exact copy otherwise, whose test is then a
-plain branch (the copy is versioned no more; each pass grows a function by at most its own size). The test, which is no
+items on entry, its copy otherwise, which takes the path of the compact form alone (no fast loop changes a form: what
+the test reads on entry it reads on every pass), its other form tests plain branches (the copy is versioned no more;
+each pass grows a function by at most its own size). The test, which is no
 guard (both its sides stay in the loop), no longer stands between the guards before it and those after it, so they leave
 the loop in turn: a loop over an invariant row of an array of arrays (`matmul`'s) reads the row in its preheader again.
-The versioning makes a preheader for a loop entered from several blocks. With a single compact path inline per read
-(above), the forms leave every benchmark but `pi` as fast as before or faster (the best of 3 runs, x86-64, against the
-code before the forms): `sieve` takes 59% fewer cycles, `bitlookup` 8%, `crc32` and `matmul` 3%, `qsort` 2%, `asort`
-1.6%; `pi`, whose tape of 128000 integers runs its loops in the versions of a compact array, takes 2% more (18% more
-instructions: a test of the sentinel per read).
+The versioning makes a preheader for a loop entered from several blocks. A loop of `pi`'s kind (a tape of integers
+indexed by a moving cell, read and written) runs 56% faster than with items, in a function of its own (perf stat,
+x86-64).
 
 Memory classes of `memset`s (`codegen/MemoryTags.*`): every access the lowering makes carries its memory class
 (`Mem`, TBAA), so that a loop's loads of what it does not change (an array's header, an object's state byte) leave
 it; but MemCpyOpt merges the two stores of a constant item (a `NIL`) into a `memset` that has none, which may write
 anything, and the loads stay. `TagItemMemsets`, run where the pipeline's peephole and late scalar extension points
 are, gives a `memset` within the items of an alloca (a frame's slots, a local item, an array of items) the class of
-items again; the lowering names the class in the module (`xb.item.tbaa`). With the
-sharing tests of compiled code (step 3 of [concurrency.md](concurrency.md#shared-objects)), nests split whole and the
-versioning, measured against the code before them (the best of 7 runs, x86-64): `pi` 16 to 18% faster, `matmul` 6 to
-11%, `qsort` 7%, the others within their noise (`generator`, `sieve` and `fib` within 2%).
+items again; the lowering names the class in the module (`xb.item.tbaa`).
+
+Frames set up where they are needed (`sinkFrameSetup` in `codegen/FrameSetup.*`), last: the entry of a direct entry
+writes its frame's slots (the parameters, `NIL` in the others) and header, links it into the context's chain and tests
+the stack's limit, but nothing needs that before the first instruction that touches the frame, touches the chain (an
+inlined body links a frame of its own) or calls a function (anything may collect, raise an error or walk the chain). The
+setup moves to that instruction on every path (the first of a block that no other such block dominates), behind a flag
+the entry makes false and a setup true (the simplification turns it into PHIs and folds the tests a setup dominates): it
+writes the slots with the values they had on entry, which nothing touched before, and the unlink at the exit stores the
+caller's frame, which the chain still holds when nothing was linked. An entry that needs the frame itself (a mark of
+PRIVATEs) is left as it is. Then, when the part of the function before any setup reads memory but writes only its result
+and its own locals and can return (at most `kMaxLeafEntry` instructions), the function becomes that part, a small entry
+whose ways into a setup call a copy of the whole function with the same arguments (the copy does the part again: nothing
+it did was seen), marked `alwaysinline`: its callers then take a leaf's early return in place, without a call. `fib`'s
+`n < 2` is one: its calls take 47% fewer cycles and 26% fewer instructions (perf stat, x86-64).

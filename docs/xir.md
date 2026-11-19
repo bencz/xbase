@@ -212,11 +212,12 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   The verifier checks that `inline.enter` and `inline.leave` nest (`openInlineBodies` in `Analysis`: the functions of
   the bodies open where each block starts, the same on every path into it, also through the copies
   `typed-continuations` makes).
-- `append-in-place`, before `promote-variables`: `store x (binary add (load x) y)`, with the load and the add in the
-  store's block, used only there, and no other write of `x` between the load and the store, becomes `append x, y` when
-  `x` is a `LOCAL` only the function sees (`directLocals` in `Analysis`) and holds strings (a string constant is stored
-  into it or appended to it, and no number, logical or date constant is). The variable then stays in the frame, where
-  `xb_op_append` grows its string in place; a numeric accumulator, which promotion keeps in registers, is left alone.
+- `append-in-place`, before `promote-variables`: `store x (binary add (load x) y)`, with the add in the store's block,
+  the load in a block that dominates it (an inlined body or a branch may lie between: `c += F( x )`), both used only
+  there, and no write of `x` on any way from the load to the store, becomes `append x, y` when `x` is a `LOCAL` only the
+  function sees (`directLocals` in `Analysis`) and holds strings (a string constant is stored into it or appended to it,
+  and no number, logical or date constant is). The variable then stays in the frame, where `xb_op_append` grows its
+  string in place; a numeric accumulator, which promotion keeps in registers, is left alone.
 - `promote-variables` (mem2reg): `LOCAL`s reached only by direct `load` and `store` (not shared, not parameters, not
   `FOR EACH` variables) become SSA values, except in a function with `BEGIN SEQUENCE`. Block parameters go where
   definitions meet, in the iterated dominance frontiers of the blocks that store (the entry defines the variable as

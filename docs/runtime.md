@@ -59,24 +59,24 @@ typedef struct xb_item {
   `XB_ELEMS_INT_NIL` for `NIL`). The compact forms hold only values whose header word is their type's with no width or
   decimals: `NIL`, logicals, and integers other than `XB_ELEMS_INT_NIL`. A loop over a large array of logicals or
   integers then reads and writes a byte or a word per element where an item takes 16, which the caches hold eight or two
-  times as long (`sieve` takes 59% fewer cycles). An array of the program starts as `XB_ELEMS_NIL`: `Array()` (its
-  innermost dimension; the outer ones hold arrays), and a literal, which takes the form that holds its elements (`{}`
-  and literals of `NIL`s that of `NIL`s); the first value stored makes it logical, integer or items. Storing a value the
-  form does not hold turns the array into items first, in place, from its last element down (an item covers only the
-  places of the elements at or past its own): no allocation, so it may happen anywhere; nothing turns an array back. The
-  runtime's own arrays (frames, task lists, `Directory()`'s rows, ...) are made as items (`xb_array_alloc`), and so is
-  every array other threads may reach: `xb_share` turns one before it can be reached, so only a local array changes
-  form, and only its own thread changes its state byte while it runs (a load and a store; a publication, which turns the
-  arrays of the program's storage, runs while the other threads are stopped). C code reads and writes elements in place
-  through `xb_array_items`, which turns an array of another form first, or handles the forms itself: `xb_array_get`,
-  `xb_array_put`, `xb_array_last`, `xb_array_append`, `AIns`/`ADel`, resizing and `xb_array_snapshot` (whose copy keeps
-  the form) in `types/array.c`, and the collector. `AClone` copies the form; the other array functions (`ASort`,
-  `AScan`, `AEval`, ...) read through `xb_array_items` or `xb_array_get`.
+  times as long (`sieve` takes 59% fewer cycles). An array of the program starts as `XB_ELEMS_NIL`: `Array( n )` of one
+  dimension (with more, every level holds items: the rows' first stores, one per row, would each go to the runtime, and
+  the loops that fill them row by row on to their generic copies), and a literal, which takes the form that holds its
+  elements (`{}` and literals of `NIL`s that of `NIL`s); the first value stored makes it logical, integer or items.
+  Storing a value the form does not hold turns the array into items first, in place, from its last element down (an item
+  covers only the places of the elements at or past its own): no allocation, so it may happen anywhere; nothing turns an
+  array back. The runtime's own arrays (frames, task lists, `Directory()`'s rows, ...) are made as items
+  (`xb_array_alloc`), and so is every array other threads may reach: `xb_share` turns one before it can be reached, so
+  only a local array changes form, and only its own thread changes its state byte while it runs (a load and a store; a
+  publication, which turns the arrays of the program's storage, runs while the other threads are stopped). C code reads
+  and writes elements in place through `xb_array_items`, which turns an array of another form first, or handles the
+  forms itself: `xb_array_get`, `xb_array_put`, `xb_array_last`, `xb_array_append`, `AIns`/`ADel`, resizing and
+  `xb_array_snapshot` (whose copy keeps the form) in `types/array.c`, and the collector. `AClone` copies the form; the
+  other array functions (`ASort`, `AScan`, `AEval`, ...) read through `xb_array_items` or `xb_array_get`.
 - Compiled code reads `len`, `data` and the state byte to access elements in place: one test of the byte tells a
   local array of items, the usual one, from the others, and the paths of the compact forms follow
-  ([compiler.md](compiler.md#xir-to-llvm)); a store whose value the form does not hold, or the first one into an
-  array of `NIL`s, calls `xb_array_store`, which gives the array the form that holds it, allocates nothing and runs no
-  code of the program.
+  ([compiler.md](compiler.md#xir-to-llvm)); a store whose value the form does not hold, and the first one into an
+  array of `NIL`s, go through `xb_op_index_set`, which gives the array the form that holds it.
 - Hashes (`xb_hash` in `types/types.h`) map keys to values in insertion order; see [Hashes](#hashes).
 - Codeblocks (`xb_block`: function, captured cells) and cells (`xb_cell`: one item at offset 0) are described in
   [Codeblocks](#codeblocks), objects in [Objects and messages](#objects-and-messages).
@@ -1530,12 +1530,15 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   try once it is in the ring, tries again: one of the two sees the other. A new waiter goes in line whenever one waits
   (strict order), unless its flow holds the lock already. A `Mutex` also keeps how many waiters each flow has in line (a
   hash): once a flow holds the lock, granted or taken with `Lock()` or `TryLock()`, its waiters further in line take it
-  too at once (they would wait behind others for what their flow has). A `Condition` keeps its waiters and the signals
-  given to them in one word (16 bits each: a waiter takes a signal and leaves in one compare-and-swap, so a signal never
-  outlives the waiters it was for) and a generation each signal changes, which waiters park on; a `Semaphore` its count
-  and maximum (`Release( n )` wakes one waiter when the count leaves 0: each that takes a place with more left wakes the
-  next). Their waits take a limit in milliseconds on the monotonic clock. The words, the waits with a limit, the checks
-  of arguments and the error codes that threads and tasks share are in `rtl/flows.h`.
+  too at once (they would wait behind others for what their flow has). A `Condition` keeps its waiters, the signals
+  given to them (16 bits each: a waiter takes a signal and leaves in one compare-and-swap, so a signal never outlives
+  the waiters it was for) and the generation of the last signal (32 bits) in one 64-bit word: a waiter takes only a
+  signal given after it came (one that starts waiting right after a `NotifyAll()` would take another's otherwise, which
+  would wait on unwoken), and parks on a second word that each signal, and each departure from a full word, changes (one
+  that a `Notify()` woke for another passes the wake on); a `Semaphore` its count and maximum (`Release( n )` wakes one
+  waiter when the count leaves 0: each that takes a place with more left wakes the next). Their waits take a limit in
+  milliseconds on the monotonic clock. The words, the waits with a limit, the checks of arguments and the error codes
+  that threads and tasks share are in `rtl/flows.h`.
 - The scheduler (`core/sched.c`, [concurrency.md](concurrency.md#scheduler)) and tasks (`rtl/tasks.c`,
   [concurrency.md](concurrency.md#tasks)). Workers are program threads started when tasks first need them, `target` of
   them active at once (one per processor, or `//WORKERS:n`), up to 1024 with those that took the place of blocked ones.

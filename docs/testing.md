@@ -103,7 +103,18 @@ million calls awaited that complete at once, round trips between two of them ove
 once; `async_pi`: the Basel sum over 32 of them awaiting CPU-bound tasks, every processor busy), asynchronous generators
 (`async_generator`: a pipeline of three, a source of a million numbers that yields the thread every thousand, a filter
 and a map, through `AWAIT FOR EACH`; in C#, JavaScript and Python with their asynchronous iterators), and calls of a
-function with a short loop (`bitlookup`: the bitwise AND from a table of nibbles). Each one times its own work with
+function with a short loop (`bitlookup`: the bitwise AND from a table of nibbles). Beside these, programs after the
+classic benchmark suites and everyday xBase work, each named for what it measures: numeric kernels (`n_body`,
+`spectral_norm`, `fft`, `linpack`, `dgemm`, `whetstone`, `dhrystone`, `ray_tracer`, ...), recursion and search (`tak`,
+`ackermann`, `n_queens`, `sudoku_solver`, `knapsack`, `dijkstra`, ...), sorting (`merge_sort`, `heap_sort`,
+`radix_sort`, ...), checksums and hashes (`crc_adler_fnv`, `md5_sha1`), text (`fasta`, `k_nucleotide`,
+`reverse_complement`, `levenshtein`, `base64`, `csv_parse`, ...), hashes and arrays (`hash_massivo`, `lru_cache`,
+`trie`, `array_growth`, ...), codeblocks (`codeblock_eval`, `map_filter_reduce`, `closure_capture`, ...), objects
+(`method_call_overhead`, `virtual_dispatch`, `object_churn`, ...), business data (`relatorio_agregacao`,
+`pivot_crosstab`, `sequential_scan` over a DBF, `json_roundtrip`, `log_processing`, ...), threads and tasks
+(`producer_consumer`, `work_stealing`, `parallel_map`, `shared_counter`, `pipeline_tasks`, `chameneos_redux`) and the
+memory objects take (`memory_footprint`, checked against `__GcMemory()`). The numeric and algorithmic ones have a C
+port in `bench/c/`. Each one times its own work with
 `ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name> <milliseconds>
 ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`
 (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every program

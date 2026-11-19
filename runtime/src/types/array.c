@@ -230,11 +230,6 @@ xb_array *xb_array_snapshot(xb_ctx *ctx, const xb_array *a) {
   }
 }
 
-void xb_array_store(xb_array *a, size_t index, const xb_item *v) {
-  store(a, index, v);
-  xb_gc_write_item(a, index);
-}
-
 static XB_NOINLINE int put_shared(xb_array *a, size_t i, const xb_item *v) {
   xb_share(v); /* before another thread can reach it */
   xb_seq_lock(a);
@@ -474,7 +469,7 @@ static xb_array *array_alloc(uint64_t newLen, int fallible, uint32_t elems) {
 
 xb_array *xb_array_alloc(uint64_t len) { return array_alloc(len, 0, XB_ELEMS_ITEMS); }
 
-xb_array *xb_array_try_alloc(uint64_t len) { return array_alloc(len, 1, XB_ELEMS_NIL); }
+xb_array *xb_array_try_alloc(uint64_t len, uint32_t elems) { return array_alloc(len, 1, elems); }
 
 void xb_set_array(xb_item *it, xb_array *a) { xb_set_ptr(it, XB_T_ARRAY, a); }
 

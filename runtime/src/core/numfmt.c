@@ -7,6 +7,7 @@
  * non-finite value, fills the whole field with '*'. */
 #include "xbrt_int.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +50,23 @@ static void format_int(char *s, int64_t v, int width, int dec) {
   } while (mag);
   for (size_t i = 0; i < n; ++i) digits[i] = rev[n - 1 - i];
   if (!place(s, width, dec, v < 0, digits, n, NULL)) overflow(s, field_len(width, dec));
+}
+
+/* The half is added to ten times the scaled value and the sum divided back, which is how Clipper gets its results in
+ * the last bit, then raised by about one unit in the last place (times 1 + DBL_EPSILON) before truncating, so that a
+ * decimal half stored just below it, like 2.675 or 8904.185, still rounds up; a value whose scaled magnitude reaches
+ * 2^52 is already its own nearest rounding. */
+double xb_num_round(double v, int64_t d) {
+  double p = pow(10.0, d < 0 ? -(double)d : (double)d);
+  if (v == 0.0 || (d < 0 && xb_dbl_infinite(p))) return 0.0;
+  if (d >= 0 && fabs(v) * p >= XB_DBL_INTEGRAL) return v; /* the doubles near v are a step apart or more */
+  double tenfold = (d >= 0 ? v * p : v / p) * 10.0;
+  tenfold += tenfold < 0 ? -5.0 : 5.0;
+  double back = tenfold / 10.0;
+  /* back * (1 + DBL_EPSILON) rounded once (fma): a unit that computes with more bits (x87) would round that product
+   * twice, and it often falls on the midpoint between two doubles there */
+  double r = trunc(fma(back, DBL_EPSILON, back));
+  return d >= 0 ? r / p : r * p; /* not finite when the scaling overflows, like Clipper */
 }
 
 static void format_double(char *s, double v, int width, int dec) {
