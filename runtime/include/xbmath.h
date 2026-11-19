@@ -63,14 +63,29 @@ static inline xb_dd xb_dd_quick(double a, double b) {
   return r;
 }
 
-/* a * b exactly, |a| and |b| below 2^996 (Veltkamp's split in halves of 26 bits, Dekker's product) */
+/* Whether the target computes fma() in one instruction (a fused multiply-add of the hardware, which the compiler
+ * guarantees when it defines these): xb_dd_prod then takes it, else Dekker's product, the same exact result. */
+#if defined(__FMA__) || defined(__ARM_FEATURE_FMA) || defined(__aarch64__) || defined(_M_ARM64)
+#define XB_MATH_FMA 1
+#else
+#define XB_MATH_FMA 0
+#endif
+
+/* a * b exactly, |a| and |b| below 2^996: with the hardware's fused multiply-add, its rounding error fma( a, b, -p );
+ * else Veltkamp's split in halves of 26 bits and Dekker's product. Both give the same exact pair. */
 static inline xb_dd xb_dd_prod(double a, double b) {
+#if XB_MATH_FMA
+  double p = a * b;
+  xb_dd r = {p, fma(a, b, -p)};
+  return r;
+#else
   const double split = 134217729.0; /* 2^27 + 1 */
   double p = a * b, t = split * a, ah = t - (t - a), al = a - ah;
   t = split * b;
   double bh = t - (t - b), bl = b - bh;
   xb_dd r = {p, ((ah * bh - p) + ah * bl + al * bh) + al * bl};
   return r;
+#endif
 }
 
 static inline xb_dd xb_dd_add(xb_dd a, xb_dd b) {

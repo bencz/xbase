@@ -5,14 +5,15 @@
  * error near 2^-100), which leaves undecided only the arguments whose result lies within about that much of a tie
  * between two doubles; those take the full form's nearest double.
  *
- * Sines and cosines reduce x to r = x - k pi / 2, |r| <= pi / 4, then r to a_j + t, a_j = j / 64 and |t| <= 1 / 128:
- * sin( r ) = S_j cos( t ) + C_j sin( t ), cos( r ) = C_j cos( t ) - S_j sin( t ), from a table of S_j = sin( a_j ) and
- * C_j = cos( a_j ) as double-doubles. Below |x| = 2^20 both forms reduce with pi / 2 in parts of 33 bits (k times a
- * part is exact), the fast one with four (two summed in double) and the full one with all five; beyond, only the full
- * form, which reduces x exactly from the bits of 2 / pi (Payne and Hanek: x 2 / pi modulo 4, with 1536 bits of 2 / pi,
- * enough for any double). The fast form sums the terms after the table's in double, the full one in double-double. Arc
- * tangents reduce u in [0, 1] to c_j = j / 64 and t = (u - c_j) / (1 + u c_j): atan( u ) = atan( c_j ) + atan( t ), the
- * series of atan( t ) to t^17. */
+ * Sines and cosines take x = n pi / 128 + t, n = 64 k + i: sin( x ) and cos( x ) are +- sin( a ) or +- cos( a ) by the
+ * quadrant k, a = i pi / 128 + t, |t| <= pi / 256, and sin( a ) = S cos( t ) + C sin( t ), cos( a ) = C cos( t ) - S
+ * sin( t ), from a table of S = sin( i pi / 128 ) and C = cos( i pi / 128 ) as double-doubles. The fast form takes |x|
+ * below 2^14 in one step, with pi / 128 in parts of 33 bits (n times a part is exact), and sums the terms after the
+ * table's in double. The full form first reduces x to r = x - k pi / 2, |r| <= pi / 4: below |x| = 2^20 with pi / 2 in
+ * five parts (the first four of 33 bits), beyond exactly from the bits of 2 / pi (Payne and Hanek: x 2 / pi modulo 4,
+ * with 1536 bits of 2 / pi, enough for any double); then r = i pi / 128 + t, in double-double. Arc tangents reduce u in
+ * [0, 1] to c_j = j / 64 and t = (u - c_j) / (1 + u c_j): atan( u ) = atan( c_j ) + atan( t ), the series of atan( t )
+ * to t^17. */
 #include "xbrt_int.h"
 
 #include <float.h>
@@ -28,63 +29,74 @@ static const uint32_t xb_trig_two_over_pi[48] = {
   0x6599855F, 0x14A06840, 0x8DFFD880, 0x4D732731, 0x06061556, 0xCA73A8C9,
 };
 
-/* sin( j / 64 ) and cos( j / 64 ), j = 0 .. 52 (52 / 64 is past pi / 4). */
+/* sin( i pi / 128 ) and cos( i pi / 128 ), i = 0 .. 63. */
 static const struct xb_trig_row {
   xb_dd s, c;
 } xb_trig_sincos[] = {
   {{0.0, 0.0}, {1.0, 0.0}},
-  {{0.015624364224883372, -1.2650937552759816e-19}, {0.9998779321710066, 3.216122229972341e-17}},
-  {{0.03124491398532608, -1.562781562225433e-18}, {0.9995117584851364, -3.418806487972947e-17}},
-  {{0.04685783574813424, -2.3419368365610254e-18}, {0.9989015683384429, -2.1425557800399754e-17}},
-  {{0.0624593178423802, -2.040259504585711e-18}, {0.9980475107000991, 3.3232291674141346e-17}},
-  {{0.07804555138996731, -5.449443782005793e-18}, {0.9969497940760287, -1.2467075728553626e-17}},
-  {{0.09361273123551289, 1.4628632005878733e-18}, {0.9956086864580017, 3.312922430932991e-17}},
-  {{0.10915705687532236, 6.6284699502736666e-18}, {0.9940245152582091, 1.3287985046260087e-17}},
-  {{0.12467473338522769, -2.925947496057858e-18}, {0.992197667229329, 4.754870575189364e-17}},
-  {{0.1401619723470637, -9.946847113883478e-18}, {0.9901285883701071, -4.589906353553811e-18}},
-  {{0.15561499277355603, 8.886053372342288e-18}, {0.9878177838164719, 4.91917302237681e-17}},
-  {{0.17103002203139503, -9.954774726452923e-18}, {0.9852658177182139, -4.925721262944555e-17}},
-  {{0.18640329676226988, 2.3493796901281573e-18}, {0.9824733131012553, -3.919920375420088e-17}},
-  {{0.2017310638016388, 5.587232815460113e-18}, {0.9794409517155483, 1.3108769521526758e-17}},
-  {{0.21700958109501015, 1.1170071073364376e-17}, {0.9761694738686353, -7.850690609285027e-18}},
-  {{0.23223511861151147, -8.318080852687206e-18}, {0.9726596782449127, 2.3920264546490165e-17}},
-  {{0.24740395925452294, -7.53102495590706e-18}, {0.9689124217106447, 5.071436662403936e-17}},
-  {{0.2625123997691533, -2.2534597527902125e-17}, {0.964928619104771, -3.0345542681018625e-18}},
-  {{0.2775567516463363, 1.7674070262791822e-17}, {0.9607092430155619, -2.807827063516729e-17}},
-  {{0.29253334202332754, 7.516944930327352e-18}, {0.9562553235431753, -3.148450868841629e-17}},
-  {{0.30743851458038085, 1.1004366442765296e-19}, {0.9515679480481722, -3.8614834675674123e-17}},
-  {{0.3222686304333866, 2.093773358126606e-17}, {0.9466482608860534, -3.911683334934152e-17}},
-  {{0.33702006902225307, 1.0312279860787216e-17}, {0.9414974631278811, -4.8523830236797095e-18}},
-  {{0.3516892289948141, -2.5616208736069942e-17}, {0.9361168122670553, -5.2350302039683216e-17}},
-  {{0.36627252908604757, -9.938814562106524e-18}, {0.9305076219123143, 4.488760003328074e-18}},
-  {{0.38076640899239017, 2.1372528646211374e-17}, {0.924671261467036, 5.5444125388034563e-17}},
-  {{0.39516733024093426, -1.9613487871414228e-17}, {0.9186091557949183, -4.0564150104514996e-17}},
-  {{0.40947177705329507, -5.679403000091266e-18}, {0.9123227848721178, 2.6349040211413332e-17}},
-  {{0.42367625720393803, -2.331800700068871e-17}, {0.9058136834259364, 4.2864666490805214e-17}},
-  {{0.4377773028727551, 7.64345629962023e-18}, {0.8990834405601384, 9.076951775075616e-18}},
-  {{0.4517714714916838, -8.234073942098903e-18}, {0.8921336993669944, 2.3160655211380166e-17}},
-  {{0.46565534658516017, 1.459870391051426e-17}, {0.8849661565261433, -7.690557775987357e-18}},
-  {{0.479425538604203, -5.103969860556013e-18}, {0.8775825618903728, -4.2623149864279997e-17}},
-  {{0.49307868575392305, 5.605083973871755e-18}, {0.8699847180584174, 1.657385110740923e-17}},
-  {{0.5066114548142574, -3.269413423618168e-17}, {0.8621744799348805, 4.4132427578105805e-18}},
-  {{0.520020541953727, -3.983266745698455e-17}, {0.8541537542773854, 5.420565102675286e-18}},
-  {{0.5333026735360201, 5.129318115032044e-17}, {0.8459244992310679, 1.549506647350329e-17}},
-  {{0.5464546069192036, 8.399754840929507e-18}, {0.8374887238505236, 4.3337026043948396e-17}},
-  {{0.5594731312473669, 1.575565514488728e-17}, {0.8288484876093257, 1.1163935406617444e-17}},
-  {{0.5723550682345072, 2.6575872357215316e-17}, {0.820005899897234, -3.912431748209128e-17}},
-  {{0.5850972729404622, -5.4883972461161805e-17}, {0.8109631195052179, -3.091333486122179e-17}},
-  {{0.5976966345387015, 5.450323593054385e-17}, {0.8017223540984184, 4.0134533311087014e-17}},
-  {{0.6101500770757914, -1.479826990758988e-17}, {0.7922858596771786, -2.9049779312834576e-17}},
-  {{0.6224545602223437, -6.049035765709707e-18}, {0.7826559400262728, -1.474071641211487e-17}},
-  {{0.6346070800152693, -3.4568582392624965e-17}, {0.7728349461524715, 4.231014921891023e-17}},
-  {{0.6466046695911524, 4.567647714393289e-19}, {0.7628252757105762, 1.6672995021546628e-17}},
-  {{0.6584443999105676, -3.7736386700306717e-17}, {0.7526293724180665, -1.2970993013150526e-17}},
-  {{0.6701233804731629, 6.183536725574959e-18}, {0.7422497254585013, -1.2339303604869521e-17}},
-  {{0.6816387600233341, 4.410467313197903e-17}, {0.7316888688738209, -1.0475824306512768e-17}},
-  {{0.692987727246318, -5.3543290798909455e-17}, {0.7209493809456964, 3.494986701478816e-17}},
-  {{0.7041675114545337, -3.94095700584825e-17}, {0.7100338835660797, 1.505272211891291e-17}},
-  {{0.7151753832640076, -1.466099578328228e-17}, {0.6989450415971057, -5.5261332036460915e-18}},
-  {{0.7260086552607126, -1.573621815339587e-17}, {0.6876855622205048, 3.5430696752823923e-17}}
+  {{0.024541228522912288, -9.186849012577878e-20}, {0.9996988186962042, -2.985148640379975e-17}},
+  {{0.049067674327418015, -6.79610372051828e-19}, {0.9987954562051724, -1.2291693337075465e-17}},
+  {{0.07356456359966743, -2.7784941506273593e-18}, {0.9972904566786902, 9.164769537110173e-18}},
+  {{0.0980171403295606, -1.634582362244256e-18}, {0.9951847266721969, -4.248691367830441e-17}},
+  {{0.1224106751992162, 2.8354501489965335e-18}, {0.99247953459871, 3.1093055095428906e-17}},
+  {{0.14673047445536175, 3.726947147046568e-18}, {0.989176509964781, -4.098730993704711e-17}},
+  {{0.17096188876030122, 9.19199801817591e-18}, {0.9852776423889412, 2.3155637027900207e-17}},
+  {{0.19509032201612828, -7.991079068461731e-18}, {0.9807852804032304, 1.8546939997825006e-17}},
+  {{0.2191012401568698, -3.6513812299150776e-19}, {0.9757021300385286, -2.5572556081259686e-17}},
+  {{0.2429801799032639, -8.751431529719663e-18}, {0.970031253194544, 1.8365300348428844e-17}},
+  {{0.26671275747489837, 2.0941222578826688e-17}, {0.9637760657954398, 2.646395056122003e-17}},
+  {{0.2902846772544624, -1.892797870777425e-17}, {0.9569403357322088, 4.05538698618757e-17}},
+  {{0.31368174039889146, 1.4560447299968912e-17}, {0.9495281805930367, -7.55441519280433e-18}},
+  {{0.33688985339222005, -4.200094003347509e-19}, {0.9415440651830208, -2.789637954769834e-17}},
+  {{0.35989503653498817, -1.7601687123839282e-17}, {0.9329927988347388, 4.2041415555384355e-17}},
+  {{0.3826834323650898, -1.0050772696461588e-17}, {0.9238795325112867, 1.7645047084336677e-17}},
+  {{0.40524131400498986, 9.911140194289988e-18}, {0.9142097557035307, -3.631618252781442e-17}},
+  {{0.4275550934302821, 9.411189816295473e-18}, {0.9039892931234433, -6.609754468748431e-18}},
+  {{0.4496113296546066, 4.883192423203524e-18}, {0.8932243011955153, -4.116123915190891e-18}},
+  {{0.47139673682599764, 6.516678136069013e-18}, {0.881921264348355, -1.9843248405890562e-17}},
+  {{0.49289819222978404, -1.0257831676562186e-18}, {0.8700869911087115, -4.188851086854997e-17}},
+  {{0.5141027441932218, -4.5712707523615624e-17}, {0.8577286100002721, -4.818344793633662e-17}},
+  {{0.5349976198870973, -5.3683132708358134e-17}, {0.8448535652497071, -4.363136029687964e-17}},
+  {{0.5555702330196022, 4.709410940561677e-17}, {0.8314696123025452, 1.4073856984728024e-18}},
+  {{0.5758081914178453, -3.7909495458942734e-17}, {0.8175848131515837, -1.4883149812426772e-17}},
+  {{0.5956993044924334, -1.3438641936579467e-17}, {0.8032075314806449, -3.306060980481491e-17}},
+  {{0.6152315905806268, 2.623141776726695e-17}, {0.7883464276266062, 3.439699315405971e-17}},
+  {{0.6343932841636455, 1.0420901929280035e-17}, {0.773010453362737, -3.256590703364977e-17}},
+  {{0.6531728429537768, 8.569564206002624e-18}, {0.7572088465064846, -1.9909098777335502e-17}},
+  {{0.6715589548470184, -4.048903774929669e-17}, {0.7409511253549591, -1.4708616952297345e-17}},
+  {{0.6895405447370669, -1.588932329480679e-17}, {0.7242470829514669, 2.9198471334403004e-17}},
+  {{0.7071067811865476, -4.833646656726457e-17}, {0.7071067811865476, -4.833646656726457e-17}},
+  {{0.7242470829514669, 2.9198471334403004e-17}, {0.6895405447370669, -1.588932329480679e-17}},
+  {{0.7409511253549591, -1.4708616952297345e-17}, {0.6715589548470184, -4.048903774929669e-17}},
+  {{0.7572088465064846, -1.9909098777335502e-17}, {0.6531728429537768, 8.569564206002624e-18}},
+  {{0.773010453362737, -3.256590703364977e-17}, {0.6343932841636455, 1.0420901929280035e-17}},
+  {{0.7883464276266062, 3.439699315405971e-17}, {0.6152315905806268, 2.623141776726695e-17}},
+  {{0.8032075314806449, -3.306060980481491e-17}, {0.5956993044924334, -1.3438641936579467e-17}},
+  {{0.8175848131515837, -1.4883149812426772e-17}, {0.5758081914178453, -3.7909495458942734e-17}},
+  {{0.8314696123025452, 1.4073856984728024e-18}, {0.5555702330196022, 4.709410940561677e-17}},
+  {{0.8448535652497071, -4.363136029687964e-17}, {0.5349976198870973, -5.3683132708358134e-17}},
+  {{0.8577286100002721, -4.818344793633662e-17}, {0.5141027441932218, -4.5712707523615624e-17}},
+  {{0.8700869911087115, -4.188851086854997e-17}, {0.49289819222978404, -1.0257831676562186e-18}},
+  {{0.881921264348355, -1.9843248405890562e-17}, {0.47139673682599764, 6.516678136069013e-18}},
+  {{0.8932243011955153, -4.116123915190891e-18}, {0.4496113296546066, 4.883192423203524e-18}},
+  {{0.9039892931234433, -6.609754468748431e-18}, {0.4275550934302821, 9.411189816295473e-18}},
+  {{0.9142097557035307, -3.631618252781442e-17}, {0.40524131400498986, 9.911140194289988e-18}},
+  {{0.9238795325112867, 1.7645047084336677e-17}, {0.3826834323650898, -1.0050772696461588e-17}},
+  {{0.9329927988347388, 4.2041415555384355e-17}, {0.35989503653498817, -1.7601687123839282e-17}},
+  {{0.9415440651830208, -2.789637954769834e-17}, {0.33688985339222005, -4.200094003347509e-19}},
+  {{0.9495281805930367, -7.55441519280433e-18}, {0.31368174039889146, 1.4560447299968912e-17}},
+  {{0.9569403357322088, 4.05538698618757e-17}, {0.2902846772544624, -1.892797870777425e-17}},
+  {{0.9637760657954398, 2.646395056122003e-17}, {0.26671275747489837, 2.0941222578826688e-17}},
+  {{0.970031253194544, 1.8365300348428844e-17}, {0.2429801799032639, -8.751431529719663e-18}},
+  {{0.9757021300385286, -2.5572556081259686e-17}, {0.2191012401568698, -3.6513812299150776e-19}},
+  {{0.9807852804032304, 1.8546939997825006e-17}, {0.19509032201612828, -7.991079068461731e-18}},
+  {{0.9852776423889412, 2.3155637027900207e-17}, {0.17096188876030122, 9.19199801817591e-18}},
+  {{0.989176509964781, -4.098730993704711e-17}, {0.14673047445536175, 3.726947147046568e-18}},
+  {{0.99247953459871, 3.1093055095428906e-17}, {0.1224106751992162, 2.8354501489965335e-18}},
+  {{0.9951847266721969, -4.248691367830441e-17}, {0.0980171403295606, -1.634582362244256e-18}},
+  {{0.9972904566786902, 9.164769537110173e-18}, {0.07356456359966743, -2.7784941506273593e-18}},
+  {{0.9987954562051724, -1.2291693337075465e-17}, {0.049067674327418015, -6.79610372051828e-19}},
+  {{0.9996988186962042, -2.985148640379975e-17}, {0.024541228522912288, -9.186849012577878e-20}}
 };
 
 /* atan( j / 64 ), j = 0 .. 64. */
@@ -129,6 +141,11 @@ static const xb_dd xb_trig_pi_180 = {0.017453292519943295, 2.9486522708701687e-1
 static const xb_dd xb_trig_180_pi = {57.29577951308232, -1.9878495670576283e-15};
 static const xb_dd xb_trig_inv_ln10 = {0.4342944819032518, 1.098319650216765e-17};
 
+/* pi / 128 as a double-double, and in parts, the first three of 33 bits (n times one, n below 2^20, is exact). */
+static const xb_dd xb_trig_pi_128 = {0.02454369260617026, 9.567553118338697e-19};
+static const double xb_trig_cw128[4] = {0.024543692605220713, 9.495469541099947e-13, 3.1597910136111976e-23,
+                                        1.3247543219326406e-33};
+
 /* pi / 2 in parts: the first four of 33 bits, so that k times one, k below 2^20, is exact. */
 static const double xb_trig_cw[5] = {1.5707963267341256, 6.077100506303966e-11, 2.0222662487111665e-21,
                                      8.478427660348229e-32, 2.0670321098263988e-43};
@@ -136,19 +153,25 @@ static const double xb_trig_cw[5] = {1.5707963267341256, 6.077100506303966e-11, 
 /* Below this magnitude sin, tan, atan, asin, sinh and tanh of x round to x, and cos and cosh to 1: their next term is
  * below a quarter of a unit in the last place (2^-27). */
 #define XB_TRIG_TINY 7.450580596923828e-09
-/* Cody and Waite's reduction takes |x| below this (2^20); Payne and Hanek's any x. */
-#define XB_TRIG_FAST_MAX 1048576.0
-/* 2 / pi and pi / 4 as doubles; the tables' step, 1 / 64; the least |r| the fast form takes (2^-30: below, the
- * reduction's error would be too large a part of r). */
+/* Cody and Waite's reduction takes |x| below this (2^20); Payne and Hanek's any x. The fast form of sines and cosines
+ * takes |x| below 2^14 (n = x 128 / pi below 2^20). */
+#define XB_TRIG_PARTS_MAX 1048576.0
+#define XB_TRIG_FAST_MAX 16384.0
+/* 2 / pi, 128 / pi and pi / 4 as doubles; the arc tangents' table step, 1 / 64; the least |r| the fast form takes on
+ * its own (2^-30: below, the reduction's error would be too large a part of r). */
 #define XB_TRIG_2_PI 0.6366197723675814
+#define XB_TRIG_128_PI 40.74366543152521
 #define XB_TRIG_PI_4 0.7853981633974483
 #define XB_TRIG_STEPS 64.0
 #define XB_TRIG_FAST_MIN_R 9.313225746154785e-10
-/* The relative error bounds: the fast forms' of sine, cosine and arc tangent (2^-62: their errors measured below
- * 2^-65.4 and 2^-66.5 of the result), of Tan() and Cot(), a quotient of two (2^-61), of those built on
- * xbmath.h's fast and quick forms, Log10() and the hyperbolic functions (2^-57), and the full forms' (2^-96). */
-#define XB_TRIG_FAST_ERR 2.168404344971009e-19
-#define XB_TRIG_TAN_ERR 4.336808689942018e-19
+/* The relative error bounds. The fast forms': of sine and cosine 2^-61 (the terms after the table's, at most 2.2e-6,
+ * summed with five roundings, an error below 2^-69.3 of a result above sin( pi / 256 ), 2^-6.35: 2^-63; measured
+ * below 2^-63.9), of Tan() and Cot(), a quotient of two, 2^-60, of arc tangents 2^-62 (measured below 2^-66.5), of
+ * those built on xbmath.h's fast and quick forms, Log10() and the hyperbolic functions, 2^-57. The full forms':
+ * 2^-96. */
+#define XB_TRIG_FAST_ERR 4.336808689942018e-19
+#define XB_TRIG_TAN_ERR 8.673617379884035e-19
+#define XB_TRIG_ATAN_ERR 2.168404344971009e-19
 #define XB_TRIG_QUICK_ERR 6.938893903907228e-18
 #define XB_TRIG_FULL_ERR 1.262177448353619e-29
 /* Words of 2 / pi that one reduction multiplies (256 bits), and those of the table. */
@@ -247,15 +270,12 @@ static int reduce_full(double x, xb_dd *r) {
   return k;
 }
 
-/* sin( r ) and cos( r ) of |r| <= pi / 4 + 2^-20 in double-double (the full form). */
-static void sincos_full(xb_dd r, xb_dd *sn, xb_dd *cs) {
-  int neg = r.hi < 0;
-  if (neg) r = (xb_dd){-r.hi, -r.lo};
-  int j = (int)xb_math_nearest(r.hi * XB_TRIG_STEPS);
-  xb_dd minus = {-j / XB_TRIG_STEPS, 0.0}, one = {1.0, 0.0};
-  xb_dd t = xb_dd_add(r, minus), z = xb_dd_mul(t, t);
+/* sin( a ) and cos( a ) of a = i pi / 128 + t from the table's S = sin( i pi / 128 ) and C = cos( i pi / 128 ) and
+ * the series of t in double-double: S + (S (cos t - 1) + C sin t) and C + (C (cos t - 1) - S sin t), sin t to t^11
+ * and cos t to t^12 (|t| <= pi / 256: the next terms below 2^-108). */
+static void sincos_table(const struct xb_trig_row *row, xb_dd t, xb_dd *sn, xb_dd *cs) {
+  xb_dd z = xb_dd_mul(t, t), ps = {0.0, 0.0}, pc = {0.0, 0.0}, one = {1.0, 0.0};
   /* sin( t ) = t (1 - z / 3! + z^2 / 5! - ... - z^5 / 11!), cos( t ) - 1 = z (-1 / 2! + z / 4! - ... + z^5 / 12!) */
-  xb_dd ps = {0.0, 0.0}, pc = {0.0, 0.0};
   for (int n = 11; n >= 3; n -= 2) {
     xb_dd c = xb_math_fact[n - 2];
     if ((n / 2) % 2) c = (xb_dd){-c.hi, -c.lo};
@@ -267,49 +287,48 @@ static void sincos_full(xb_dd r, xb_dd *sn, xb_dd *cs) {
     pc = xb_dd_add(c, xb_dd_mul(pc, z));
   }
   xb_dd st = xb_dd_mul(t, xb_dd_add(one, xb_dd_mul(ps, z))), ctm = xb_dd_mul(pc, z);
-  const struct xb_trig_row *row = &xb_trig_sincos[j];
-  /* S cos t + C sin t = S + S (cos t - 1) + C sin t; C cos t - S sin t = C + C (cos t - 1) - S sin t */
   *sn = xb_dd_add(row->s, xb_dd_add(xb_dd_mul(row->s, ctm), xb_dd_mul(row->c, st)));
   xb_dd sst = xb_dd_mul(row->s, st);
   *cs = xb_dd_add(row->c, xb_dd_add(xb_dd_mul(row->c, ctm), (xb_dd){-sst.hi, -sst.lo}));
+}
+
+/* sin( r ) and cos( r ) of |r| <= pi / 4 + 2^-20 in double-double (the full form): r = i pi / 128 + t. */
+static void sincos_full(xb_dd r, xb_dd *sn, xb_dd *cs) {
+  int neg = r.hi < 0;
+  if (neg) r = (xb_dd){-r.hi, -r.lo};
+  int i = (int)xb_math_nearest(r.hi * XB_TRIG_128_PI);
+  xb_dd t = xb_dd_add(r, xb_dd_mul_d(xb_trig_pi_128, -(double)i));
+  sincos_table(&xb_trig_sincos[i], t, sn, cs);
   if (neg) *sn = (xb_dd){-sn->hi, -sn->lo};
 }
 
-/* The fast form's sin( r ) and cos( r ) of a double-double r, |r| <= pi / 4 + 2^-20 and above 2^-30 (when smaller,
- * its relative error would be too large: 0, and the full form takes it). The table's terms as double-doubles, the
- * rest in double: S + (S (cos t - 1) + C t + C (sin t - t)) with C t exact. */
-static int sincos_fast(xb_dd r, xb_dd *sn, xb_dd *cs) {
-  int neg = r.hi < 0;
-  if (neg) r = (xb_dd){-r.hi, -r.lo};
-  if (r.hi < XB_TRIG_FAST_MIN_R) return 0;
-  int j = (int)xb_math_nearest(r.hi * XB_TRIG_STEPS);
-  xb_dd t = xb_dd_sum(r.hi, -j / XB_TRIG_STEPS); /* exact (a two-sum) */
-  t.lo += r.lo;
-  double a = t.hi, z = a * a;
+/* The fast form of sines and cosines, |x| below 2^14: x = n pi / 128 + r, n = 64 k + i (n's low bits: i in 0 .. 63
+ * and the quadrant k), r by the parts of pi / 128 (x - n p1 exact: the two are within a factor 2), |r| <= pi / 256;
+ * sin( a ) and cos( a ) of a = i pi / 128 + r, the table's terms as double-doubles, the rest in double (the products
+ * C r and S r exact; cos( r ) - 1 at r.hi + r.lo has the term -r.hi r.lo). 0 when i = 0 and |r| is below 2^-30 (the
+ * reduction's error would be too large a part of the result): the full form takes it. */
+static int sincos_fast(double x, int *k, xb_dd *sn, xb_dd *cs) {
+  double n = xb_math_nearest(x * XB_TRIG_128_PI);
+  xb_dd r = xb_dd_sum(x - n * xb_trig_cw128[0], -n * xb_trig_cw128[1]);
+  r = xb_dd_quick(r.hi, r.lo - (n * xb_trig_cw128[2] + n * xb_trig_cw128[3])); /* r.lo within half a unit of r.hi */
+  int64_t ni = (int64_t)n;
+  int i = (int)(ni & 63);
+  *k = (int)((ni >> 6) & 3);
+  if (i == 0 && fabs(r.hi) < XB_TRIG_FAST_MIN_R) return 0;
+  double a = r.hi, z = a * a, rlo = r.lo;
   double sinRest = a * z * (-1.0 / 6 + z * (1.0 / 120 + z * (-1.0 / 5040 + z / 362880)));
   double cosRest = z * (-0.5 + z * (1.0 / 24 + z * (-1.0 / 720 + z / 40320)));
-  const struct xb_trig_row *row = &xb_trig_sincos[j];
+  double tlo = rlo * a; /* cos( r ) - 1 at r.hi + r.lo: its derivative's term, -r.hi r.lo */
+  const struct xb_trig_row *row = &xb_trig_sincos[i];
   xb_dd ct = xb_dd_prod(row->c.hi, a);
   xb_dd s1 = xb_dd_sum(row->s.hi, ct.hi);
-  double tlo = t.lo * a; /* cos( t ) - 1 at t.hi + t.lo: its derivative's term, -t.hi t.lo */
-  double sRest = s1.lo + ct.lo + row->s.lo + row->s.hi * (cosRest - tlo) + row->c.hi * (t.lo + sinRest) + row->c.lo * a;
+  double sRest = s1.lo + ct.lo + row->s.lo + row->s.hi * (cosRest - tlo) + row->c.hi * (rlo + sinRest) + row->c.lo * a;
   *sn = xb_dd_quick(s1.hi, sRest);
   xb_dd st = xb_dd_prod(row->s.hi, a);
   xb_dd c1 = xb_dd_sum(row->c.hi, -st.hi);
-  double cRest = c1.lo - st.lo + row->c.lo + row->c.hi * (cosRest - tlo) - row->s.hi * (t.lo + sinRest) - row->s.lo * a;
+  double cRest = c1.lo - st.lo + row->c.lo + row->c.hi * (cosRest - tlo) - row->s.hi * (rlo + sinRest) - row->s.lo * a;
   *cs = xb_dd_quick(c1.hi, cRest);
-  if (neg) *sn = (xb_dd){-sn->hi, -sn->lo};
   return 1;
-}
-
-/* The fast form's reduction of |x| below 2^20: x - k pi / 2 with the parts of 33 bits (x - k p1 exact: the two are
- * within a factor 2), as a double-double. */
-static int reduce_fast(double x, xb_dd *r) {
-  double k = xb_math_nearest(x * XB_TRIG_2_PI);
-  xb_dd a = xb_dd_sum(x - k * xb_trig_cw[0], -k * xb_trig_cw[1]);
-  a.lo -= k * xb_trig_cw[2] + k * xb_trig_cw[3];
-  *r = xb_dd_quick(a.hi, a.lo);
-  return (int)((int64_t)k & 3);
 }
 
 /* The full form's reduction of |x| below 2^20: x - k pi / 2 with all five parts of pi / 2 (185 bits) in
@@ -351,17 +370,14 @@ static double trig(double x, int which) {
   if (fabs(x) < XB_TRIG_TINY) return which == 3 ? cot_tiny(x) : which == 1 ? 1.0 : x;
   xb_dd r, sn, cs;
   int k;
-  if (fabs(x) < XB_TRIG_FAST_MAX) {
-    k = reduce_fast(x, &r);
-    if (sincos_fast(r, &sn, &cs)) {
-      double v;
-      if (xb_math_sure(quadrant(which, k, sn, cs, 1), 0, which >= 2 ? XB_TRIG_TAN_ERR : XB_TRIG_FAST_ERR, &v)) return v;
-    }
+  if (fabs(x) < XB_TRIG_FAST_MAX && sincos_fast(x, &k, &sn, &cs)) {
+    double v;
+    if (xb_math_sure(quadrant(which, k, sn, cs, 1), 0, which >= 2 ? XB_TRIG_TAN_ERR : XB_TRIG_FAST_ERR, &v)) return v;
   }
   if (fabs(x) <= XB_TRIG_PI_4) {
     k = 0;
     r = (xb_dd){x, 0.0};
-  } else if (fabs(x) < XB_TRIG_FAST_MAX) {
+  } else if (fabs(x) < XB_TRIG_PARTS_MAX) {
     k = reduce_parts(x, &r);
   } else {
     k = reduce_full(x, &r);
@@ -442,7 +458,7 @@ static double atan2_settled(xb_dd y, xb_dd x) {
     x = (xb_dd){x.hi * s, x.lo * s};
   }
   double r;
-  if (xb_math_sure(atan2_dd(y, x, 1), 0, XB_TRIG_FAST_ERR, &r)) return r;
+  if (xb_math_sure(atan2_dd(y, x, 1), 0, XB_TRIG_ATAN_ERR, &r)) return r;
   return settle(atan2_dd(y, x, 0), XB_TRIG_FULL_ERR);
 }
 
