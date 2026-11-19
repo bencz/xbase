@@ -1,6 +1,6 @@
 // bench/fft.prg in JavaScript: the fast Fourier transform (iterative radix 2, in place, on arrays of real and imaginary
 // parts): 65,536 complex points from a linear congruential generator, transformed forward and back 10 times. The
-// twiddle factors come from the half-angle formulas (Math.sqrt) and complex multiplication; the check is the
+// twiddle factors come from Math.cos and Math.sin of 2 pi / 2^k and complex multiplication; the check is the
 // spectrum's sum of magnitudes and the round trip's largest error. The generator's product passes 2^53; only its low
 // 31 bits are kept, so Math.imul (the low 32 bits of the product, exact) gives the same values as the .prg's 64-bit
 // integers.
@@ -53,16 +53,11 @@ for (let i = 0; i < n; i++) {
   im[i] = seed / 1073741824.0 - 1.0;
 }
 const re0 = re.slice(), im0 = im.slice();
-// cos and sin of 2 pi / 2^k, for k from 1: the angle halved each step
+// cos and sin of 2 pi / 2^k, for k from 1
 const cosT = new Array(logN), sinT = new Array(logN);
-cosT[0] = -1.0;
-sinT[0] = 0.0;
-let c = 0.0, s = 1.0;
-for (let i = 1; i < logN; i++) {
-  cosT[i] = c;
-  sinT[i] = s;
-  c = Math.sqrt((1.0 + cosT[i]) * 0.5);
-  s = sinT[i] / (2.0 * c);
+for (let i = 0; i < logN; i++) {
+  cosT[i] = Math.cos(2.0 * Math.PI / 2 ** (i + 1));
+  sinT[i] = Math.sin(2.0 * Math.PI / 2 ** (i + 1));
 }
 for (let rep = 1; rep <= 10; rep++) {
   fft(re, im, n, cosT, sinT, -1.0);

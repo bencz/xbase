@@ -134,8 +134,8 @@ command_of() {
       mt=()
       [[ $HARBOUR_MT == *" $b "* ]] && mt=(-mt)
       mkdir -p "$OUT/harbour" && (cd "$OUT/harbour" && rm -f "$b" &&
-        hbmk2 "${mt[@]}" -static -gtcgi -q -w0 -gc3 -cflag=-O2 -u+hbclass.ch -u+"$ROOT/bench/compat.ch" "$src" \
-          -o"$b" >/dev/null 2>&1) && { echo "$exe"; return; } ;;
+        hbmk2 "${mt[@]}" -static -gtcgi -q -w0 -gc3 -cflag=-O2 -u+hbclass.ch -u+"$ROOT/bench/compat.ch" hbct.hbc \
+          "$src" -o"$b" >/dev/null 2>&1) && { echo "$exe"; return; } ;;
     c)
       [ -f "bench/c/$b.c" ] || return
       gcc -O2 -o "$OUT/c-$b" "bench/c/$b.c" -lm -lpthread 2>/dev/null && { echo "$OUT/c-$b"; return; } ;;

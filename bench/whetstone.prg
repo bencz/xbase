@@ -1,8 +1,7 @@
 // Whetstone (Curnow and Wichmann's synthetic benchmark, its modules scaled by a loop count of 5,000): array elements,
 // an array as a parameter, conditional jumps, integer arithmetic, procedure calls with a parameter by reference,
-// array references, and Sqrt( Exp( Log( x ) / t ) ). Module 7 (Sin, Cos, ATan) is left out: xbase has no
-// trigonometric functions. The modules the reference C version runs zero times (1 and 10) are left out too. The check
-// is the sum of the values each module leaves.
+// trigonometric functions (Sin, Cos, ATan), array references, and Sqrt( Exp( Log( x ) / t ) ). The modules the
+// reference C version runs zero times (1 and 10) are left out. The check is the sum of the values each module leaves.
 STATIC t := 0.499975, t1 := 0.50025, t2 := 2.0, e1, j, k, l
 
 PROCEDURE Main()
@@ -49,6 +48,13 @@ PROCEDURE Main()
       e1[ k - 1 ] := j * k * l
    NEXT
    check += j + k + l + e1[ 1 ] + e1[ 2 ] + e1[ 3 ] + e1[ 4 ]
+   x := 0.5
+   y := 0.5
+   FOR i := 1 TO 32 * nLoop
+      x := t * ATan( t2 * Sin( x ) * Cos( x ) / ( Cos( x + y ) + Cos( x - y ) - 1.0 ) )
+      y := t * ATan( t2 * Sin( y ) * Cos( y ) / ( Cos( x + y ) + Cos( x - y ) - 1.0 ) )
+   NEXT
+   check += x + y
    x := 1.0
    y := 1.0
    z := 1.0
@@ -71,7 +77,7 @@ PROCEDURE Main()
       x := Sqrt( Exp( Log( x ) / t1 ) )
    NEXT
    check += x
-   ? "whetstone", ElapsedMs() - tm, IIf( Abs( check - 30.95582672351981 ) < 0.000000001, "ok", "WRONG" )
+   ? "whetstone", ElapsedMs() - tm, IIf( Abs( check - 30.95612841002271 ) < 0.000000001, "ok", "WRONG" )
    RETURN
 
 STATIC PROCEDURE PA( e )

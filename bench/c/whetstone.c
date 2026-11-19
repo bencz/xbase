@@ -1,6 +1,5 @@
-/* bench/whetstone.prg in C: Whetstone's modules 2, 3, 4, 6, 8, 9 and 11 scaled by a loop count of 5,000 (module 7,
- * the trigonometric one, is left out as in the .prg); the check is the sum of the values each module leaves. Arrays
- * are 1-based as in the .prg (element 0 unused). */
+/* bench/whetstone.prg in C: Whetstone's modules 2, 3, 4, 6, 7, 8, 9 and 11 scaled by a loop count of 5,000; the check
+ * is the sum of the values each module leaves. Arrays are 1-based as in the .prg (element 0 unused). */
 #include "bench.h"
 #include <math.h>
 
@@ -64,6 +63,13 @@ int main(void) {
     e1[k - 1] = (double)(j * k * l);
   }
   check += (double)(j + k + l) + e1[1] + e1[2] + e1[3] + e1[4];
+  x = 0.5;
+  y = 0.5;
+  for (int64_t i = 1; i <= 32 * nLoop; ++i) {
+    x = t * atan(t2 * sin(x) * cos(x) / (cos(x + y) + cos(x - y) - 1.0));
+    y = t * atan(t2 * sin(y) * cos(y) / (cos(x + y) + cos(x - y) - 1.0));
+  }
+  check += x + y;
   x = 1.0;
   y = 1.0;
   z = 1.0;
@@ -80,6 +86,6 @@ int main(void) {
   x = 0.75;
   for (int64_t i = 1; i <= 93 * nLoop; ++i) x = sqrt(exp(log(x) / t1));
   check += x;
-  bench_report("whetstone", tm, fabs(check - 30.95582672351981) < 0.000000001);
+  bench_report("whetstone", tm, fabs(check - 30.95612841002271) < 0.000000001);
   return 0;
 }

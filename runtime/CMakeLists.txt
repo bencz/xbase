@@ -14,6 +14,7 @@ add_library(xbrt STATIC
   src/core/names.c
   src/core/symbols.c
   src/core/numfmt.c
+  src/core/trig.c
   src/core/ops.c
   src/core/set.c
   src/core/sched.c

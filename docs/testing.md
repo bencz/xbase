@@ -168,13 +168,13 @@ A language without a counterpart of a program has no version of it: C none of `a
 `tasks`, `channels`, `async`, `async_generator`, `higher_order_chain` (lazy enumerables), `pipeline_tasks`,
 `work_stealing`, `shared_counter` (atomics) and `memory_footprint`. Go versions are not written yet.
 
-`bench/compare.sh` (bash 4 and GNU `timeout`) and `bench/compare.ps1` (PowerShell 7.2) build each with every compiler
-or interpreter found and print a Markdown table of the best time of each (`-n`/`-Runs` runs, CPython once; `-l`/`-Langs`
-picks languages by key: `xbase`, `harbour`, `c`, `rust`, `csharp`, `java`, `go`, `node`, `pypy`, `python`): xbase from
-a Release build (`build-release`, configured when missing; another build is refused), each benchmark target built
-again and a failed build shown as `fail`; Harbour from the `.prg` themselves, or their forms in `bench/harbour/`,
-when it is installed (`hbmk2 -gc3`, its C output compiled with `-O2` as `xbc -O2`, its class syntax header given on
-the command line, its threaded runtime for `async_pi`; `bench/compat.ch` gives `ElapsedMs()` from `Date()` and
-`Seconds()` for it), C with `gcc -O2`, Rust with `rustc -C opt-level=2`, C# in Release,
-Python with `-B` (no compiled files beside the sources). The programs run in `<build>/compare/run`, under a memory limit
-and the time limit (`-t`/`-Limit`). The README shows its table.
+`bench/compare.sh` (bash 4 and GNU `timeout`) and `bench/compare.ps1` (PowerShell 7.2) build each with every compiler or
+interpreter found and print a Markdown table of the best time of each (`-n`/`-Runs` runs, CPython once; `-l`/`-Langs`
+picks languages by key: `xbase`, `harbour`, `c`, `rust`, `csharp`, `java`, `go`, `node`, `pypy`, `python`): xbase from a
+Release build (`build-release`, configured when missing; another build is refused), each benchmark target built again
+and a failed build shown as `fail`; Harbour from the `.prg` themselves, or their forms in `bench/harbour/`, when it is
+installed (`hbmk2 -gc3`, its C output compiled with `-O2` as `xbc -O2`, its class syntax header given on the command
+line, its CA-Tools library linked for the math functions, its threaded runtime for the programs that run threads;
+`bench/compat.ch` gives `ElapsedMs()` from `Date()` and `Seconds()` for it), C with `gcc -O2`, Rust with `rustc -C
+opt-level=2`, C# in Release, Python with `-B` (no compiled files beside the sources). The programs run in
+`<build>/compare/run`, under a memory limit and the time limit (`-t`/`-Limit`). The README shows its table.

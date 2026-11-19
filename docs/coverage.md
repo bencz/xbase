@@ -163,6 +163,10 @@ monotonic clock, for timing), the bit functions **BitAnd**, **BitOr**, **BitXor*
 **CharAsc**, **CharAt**, **CharChr**, **CharLeft**, **CharLen**, **CharRight**, **CharSubStr** and **CPConvert** (see
 [runtime.md](runtime.md#codepages)).
 
+Math, from the CA-Tools library ([runtime.md](runtime.md#functions)): **ACos**, **ASin**, **ATan**, **Atn2**,
+**Ceiling**, **Cos**, **Cosh**, **Cot**, **DToR**, **Fact**, **Floor**, **Log10**, **Pi**, **RToD**, **Sign**,
+**Sin**, **Sinh**, **Tan**, **Tanh**.
+
 Hashes ([runtime.md](runtime.md#hashes)): **Hash**, **HAllocate**, **HCaseMatch**, **HClear**, **HClone**, **HCopy**,
 **HDel**, **HDelAt**, **HEval**, **HFill**, **HGet**, **HGetDef**, **HHasKey**, **HKeyAt**, **HKeys**, **HMerge**,
 **HPairAt**, **HPos**, **HScan**, **HSet**, **HSort**, **HValueAt**, **HValues**.

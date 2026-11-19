@@ -1,6 +1,6 @@
-// bench/whetstone.prg in Rust: Whetstone's modules 2, 3, 4, 6, 8, 9 and 11 scaled by a loop count of 5,000 (module 7,
-// the trigonometric one, is left out as in the .prg); the procedures are not inlined; the check is the sum of the
-// values each module leaves. Arrays are 1-based as in the .prg (element 0 unused).
+// bench/whetstone.prg in Rust: Whetstone's modules 2, 3, 4, 6, 7, 8, 9 and 11 scaled by a loop count of 5,000; the
+// procedures are not inlined; the check is the sum of the values each module leaves. Arrays are 1-based as in the
+// .prg (element 0 unused).
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -67,6 +67,13 @@ fn main() {
         e1[(k - 1) as usize] = (j * k * l) as f64;
     }
     check += (j + k + l) as f64 + e1[1] + e1[2] + e1[3] + e1[4];
+    let mut x = 0.5f64;
+    let mut y = 0.5f64;
+    for _ in 0..32 * n_loop {
+        x = T * (T2 * x.sin() * x.cos() / ((x + y).cos() + (x - y).cos() - 1.0)).atan();
+        y = T * (T2 * y.sin() * y.cos() / ((x + y).cos() + (x - y).cos() - 1.0)).atan();
+    }
+    check += x + y;
     let (x, y) = (1.0, 1.0);
     let mut z = 1.0;
     for _ in 0..899 * n_loop {
@@ -85,6 +92,6 @@ fn main() {
         x = (x.ln() / T1).exp().sqrt();
     }
     check += x;
-    let ok = (check - 30.95582672351981).abs() < 0.000000001;
+    let ok = (check - 30.95612841002271).abs() < 0.000000001;
     println!("whetstone {} {}", tm.elapsed().as_millis(), if ok { "ok" } else { "WRONG" });
 }

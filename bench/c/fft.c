@@ -1,5 +1,5 @@
 /* bench/fft.prg in C: the iterative radix-2 FFT of 65,536 complex points from a linear congruential generator,
- * forward and back 10 times, twiddle factors from the half-angle formulas. */
+ * forward and back 10 times, twiddle factors from cos and sin of 2 pi / 2^k. */
 #include "bench.h"
 #include <math.h>
 #include <stdlib.h>
@@ -51,7 +51,8 @@ int main(void) {
   int64_t n = (int64_t)1 << logN, seed = 2024;
   size_t bytes = sizeof(double) * (size_t)n;
   double *re = malloc(bytes), *im = malloc(bytes), *re0 = malloc(bytes), *im0 = malloc(bytes);
-  double cosT[64], sinT[64], c, s, spec = 0.0, maxErr = 0.0;
+  double cosT[64], sinT[64], spec = 0.0, maxErr = 0.0;
+  const double pi = 3.14159265358979323846;
   for (int64_t i = 0; i < n; ++i) {
     seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
     re[i] = (double)seed / 1073741824.0 - 1.0;
@@ -60,16 +61,10 @@ int main(void) {
   }
   memcpy(re0, re, bytes);
   memcpy(im0, im, bytes);
-  /* cos and sin of 2 pi / 2^k, for k from 1: the angle halved each step */
-  cosT[0] = -1.0;
-  sinT[0] = 0.0;
-  c = 0.0;
-  s = 1.0;
-  for (int i = 1; i < logN; ++i) {
-    cosT[i] = c;
-    sinT[i] = s;
-    c = sqrt((1.0 + cosT[i]) * 0.5);
-    s = sinT[i] / (2.0 * c);
+  /* cos and sin of 2 pi / 2^k, for k from 1 */
+  for (int i = 0; i < logN; ++i) {
+    cosT[i] = cos(2.0 * pi / (double)((int64_t)1 << (i + 1)));
+    sinT[i] = sin(2.0 * pi / (double)((int64_t)1 << (i + 1)));
   }
   for (int rep = 1; rep <= 10; ++rep) {
     fft(re, im, n, cosT, sinT, -1.0);

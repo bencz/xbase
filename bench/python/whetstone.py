@@ -1,8 +1,8 @@
 # bench/whetstone.prg in Python: Whetstone (Curnow and Wichmann's synthetic benchmark, its modules scaled by a loop
 # count of 5,000): list elements, a list as a parameter, conditional jumps, integer arithmetic, procedure calls,
-# list references, and sqrt(exp(log(x) / t)); modules 1, 7 and 10 left out as the .prg does. The list e1 keeps the
-# .prg's 1-based indexes (element 0 unused); P3's parameter by reference is returned instead. The check is the sum of
-# the values each module leaves.
+# trigonometric functions (sin, cos, atan), list references, and sqrt(exp(log(x) / t)); modules 1 and 10 left out as
+# the .prg does. The list e1 keeps the .prg's 1-based indexes (element 0 unused); P3's parameter by reference is
+# returned instead. The check is the sum of the values each module leaves.
 import math
 
 from bench import report, start
@@ -70,6 +70,11 @@ def run():
         e1[l - 1] = j + k + l
         e1[k - 1] = j * k * l
     check += j + k + l + e1[1] + e1[2] + e1[3] + e1[4]
+    x = y = 0.5
+    for _ in range(32 * n_loop):
+        x = t * math.atan(t2 * math.sin(x) * math.cos(x) / (math.cos(x + y) + math.cos(x - y) - 1.0))
+        y = t * math.atan(t2 * math.sin(y) * math.cos(y) / (math.cos(x + y) + math.cos(x - y) - 1.0))
+    check += x + y
     x = y = z = 1.0
     for _ in range(899 * n_loop):
         z = p3(x, y)
@@ -83,7 +88,7 @@ def run():
     for _ in range(93 * n_loop):
         x = math.sqrt(math.exp(math.log(x) / t1))
     check += x
-    return abs(check - 30.95582672351981) < 0.000000001
+    return abs(check - 30.95612841002271) < 0.000000001
 
 
 tm = start()

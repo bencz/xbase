@@ -183,6 +183,108 @@ void xbf_LOG(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   math1(ctx, ret, argc, argv, math_log, 1095, "LOG");
 }
 
+/* The CA-Tools math functions (core/trig.c): a double with SET DECIMALS decimals, a NaN or an infinity (shown as
+ * stars) outside their domain, as in CA-Tools; a missing or non-numeric argument is an argument error (CA-Tools gives
+ * 0), with xbase's own codes from 9036. */
+enum { CODE_SIN = 9036, CODE_COS, CODE_TAN, CODE_COT, CODE_ASIN, CODE_ACOS, CODE_ATAN, CODE_ATN2, CODE_SINH,
+       CODE_COSH, CODE_TANH, CODE_LOG10, CODE_DTOR, CODE_RTOD, CODE_FLOOR, CODE_CEILING, CODE_SIGN, CODE_FACT };
+
+void xbf_SIN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_sin, CODE_SIN, "SIN");
+}
+void xbf_COS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_cos, CODE_COS, "COS");
+}
+void xbf_TAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_tan, CODE_TAN, "TAN");
+}
+void xbf_COT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_cot, CODE_COT, "COT");
+}
+void xbf_ASIN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_asin, CODE_ASIN, "ASIN");
+}
+void xbf_ACOS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_acos, CODE_ACOS, "ACOS");
+}
+void xbf_ATAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_atan, CODE_ATAN, "ATAN");
+}
+void xbf_SINH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_sinh, CODE_SINH, "SINH");
+}
+void xbf_COSH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_cosh, CODE_COSH, "COSH");
+}
+void xbf_TANH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_tanh, CODE_TANH, "TANH");
+}
+void xbf_LOG10(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_log10, CODE_LOG10, "LOG10");
+}
+void xbf_DTOR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_dtor, CODE_DTOR, "DTOR");
+}
+void xbf_RTOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  math1(ctx, ret, argc, argv, xb_rtod, CODE_RTOD, "RTOD");
+}
+
+/* Atn2( nY, nX ): C's atan2( y, x ). */
+void xbf_ATN2(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 2 || !xb_is_number(&argv[0]) || !xb_is_number(&argv[1])) {
+    xb_fn_arg_error(ctx, ret, CODE_ATN2, "ATN2", argc, argv);
+    return;
+  }
+  xb_set_double(ret, xb_atan2(xb_num_value(&argv[0]), xb_num_value(&argv[1])), xb_decimals(ctx));
+}
+
+/* Pi(): the double nearest pi. */
+void xbf_PI(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_set_double(ret, XB_PI, xb_decimals(ctx));
+}
+
+/* Floor( n ) and Ceiling( n ): an integer (a double with no decimals past 64 bits). */
+static void rounded(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int up, int code, const char *fn) {
+  if (argc < 1 || !xb_is_number(&argv[0])) {
+    xb_fn_arg_error(ctx, ret, code, fn, argc, argv);
+    return;
+  }
+  if (argv[0].type == XB_T_INT) {
+    xb_set_int(ret, argv[0].v.i);
+    return;
+  }
+  double r = up ? ceil(argv[0].v.d) : floor(argv[0].v.d);
+  if (xb_dbl_fits_i64(r)) xb_set_int(ret, (int64_t)r);
+  else xb_set_double(ret, r, 0);
+}
+void xbf_FLOOR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  rounded(ctx, ret, argc, argv, 0, CODE_FLOOR, "FLOOR");
+}
+void xbf_CEILING(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  rounded(ctx, ret, argc, argv, 1, CODE_CEILING, "CEILING");
+}
+
+/* Sign( n ): -1, 0 or 1 (0 for a NaN). */
+void xbf_SIGN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1 || !xb_is_number(&argv[0])) {
+    xb_fn_arg_error(ctx, ret, CODE_SIGN, "SIGN", argc, argv);
+    return;
+  }
+  double v = xb_num_value(&argv[0]);
+  xb_set_int(ret, v > 0 ? 1 : v < 0 ? -1 : 0);
+}
+
+/* Fact( n ): xb_fact, a double with SET DECIMALS decimals. */
+void xbf_FACT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  if (argc < 1 || !xb_is_number(&argv[0])) {
+    xb_fn_arg_error(ctx, ret, CODE_FACT, "FACT", argc, argv);
+    return;
+  }
+  xb_set_double(ret, xb_fact(xb_num_value(&argv[0])), xb_decimals(ctx));
+}
+
 /* The bit functions (xb_bit_apply and xb_bit_function in xbrt.h): numbers are
  * taken as integers (truncated, saturated to 64 bits; NaN is 0); anything else,
  * or a missing argument, is an argument error. */

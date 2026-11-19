@@ -170,17 +170,12 @@ static class FftBench {
     }
     var re0 = (double[])re.Clone();
     var im0 = (double[])im.Clone();
-    // cos and sin of 2 pi / 2^k, for k from 1: the angle halved each step
+    // cos and sin of 2 pi / 2^k, for k from 1
     var cosT = new double[logN];
     var sinT = new double[logN];
-    cosT[0] = -1.0;
-    sinT[0] = 0.0;
-    double c = 0.0, s = 1.0;
-    for (int i = 1; i < logN; i++) {
-      cosT[i] = c;
-      sinT[i] = s;
-      c = Math.Sqrt((1.0 + cosT[i]) * 0.5);
-      s = sinT[i] / (2.0 * c);
+    for (int i = 0; i < logN; i++) {
+      cosT[i] = Math.Cos(2.0 * Math.PI / (1L << (i + 1)));
+      sinT[i] = Math.Sin(2.0 * Math.PI / (1L << (i + 1)));
     }
     for (int rep = 1; rep <= 10; rep++) {
       Fft(re, im, n, cosT, sinT, -1.0);
@@ -407,6 +402,13 @@ static class WhetstoneBench {
       e1[k - 1] = j * k * l;
     }
     check += j + k + l + e1[1] + e1[2] + e1[3] + e1[4];
+    x = 0.5;
+    y = 0.5;
+    for (long i = 1; i <= 32 * nLoop; i++) {
+      x = t * Math.Atan(t2 * Math.Sin(x) * Math.Cos(x) / (Math.Cos(x + y) + Math.Cos(x - y) - 1.0));
+      y = t * Math.Atan(t2 * Math.Sin(y) * Math.Cos(y) / (Math.Cos(x + y) + Math.Cos(x - y) - 1.0));
+    }
+    check += x + y;
     x = 1.0;
     y = 1.0;
     z = 1.0;
@@ -423,7 +425,7 @@ static class WhetstoneBench {
     x = 0.75;
     for (long i = 1; i <= 93 * nLoop; i++) x = Math.Sqrt(Math.Exp(Math.Log(x) / t1));
     check += x;
-    Program.Report("whetstone", sw, Math.Abs(check - 30.95582672351981) < 0.000000001);
+    Program.Report("whetstone", sw, Math.Abs(check - 30.95612841002271) < 0.000000001);
   }
 }
 

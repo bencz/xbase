@@ -1,7 +1,7 @@
 # bench/fft.prg in Python: the fast Fourier transform (iterative radix 2, in place, on lists of real and imaginary
 # parts), 65,536 complex points from a linear congruential generator, transformed forward and back 10 times. The
-# twiddle factors come from the half-angle formulas (sqrt) and complex multiplication; the check is the spectrum's sum
-# of magnitudes and the round trip's largest error.
+# twiddle factors come from cos and sin of 2 pi / 2^k and complex multiplication; the check is the spectrum's sum of
+# magnitudes and the round trip's largest error.
 import math
 
 from bench import report, start
@@ -50,14 +50,11 @@ def run():
         seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
         im[i] = seed / 1073741824.0 - 1.0
     re0, im0 = re[:], im[:]
+    # cos and sin of 2 pi / 2^k, for k from 1
     cos_t, sin_t = [0.0] * log_n, [0.0] * log_n
-    cos_t[0], sin_t[0] = -1.0, 0.0
-    c, s = 0.0, 1.0
-    for i in range(1, log_n):
-        cos_t[i] = c
-        sin_t[i] = s
-        c = math.sqrt((1.0 + cos_t[i]) * 0.5)
-        s = sin_t[i] / (2.0 * c)
+    for i in range(log_n):
+        cos_t[i] = math.cos(2.0 * math.pi / (1 << (i + 1)))
+        sin_t[i] = math.sin(2.0 * math.pi / (1 << (i + 1)))
     for rep in range(1, 11):
         fft(re, im, n, cos_t, sin_t, -1.0)
         if rep == 1:

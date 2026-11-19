@@ -1,7 +1,7 @@
 // bench/fft.prg in Rust: the fast Fourier transform (iterative radix 2, in place, on vectors of real and imaginary
 // parts): 65,536 complex points from a linear congruential generator, transformed forward and back 10 times. The
-// twiddle factors come from the half-angle formulas (sqrt) and complex multiplication; the check is the spectrum's
-// sum of magnitudes and the round trip's largest error.
+// twiddle factors come from cos and sin of 2 pi / 2^k and complex multiplication; the check is the spectrum's sum of
+// magnitudes and the round trip's largest error.
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -61,17 +61,12 @@ fn main() {
     }
     let re0 = re.clone();
     let im0 = im.clone();
-    // cos and sin of 2 pi / 2^k, for k from 1: the angle halved each step
+    // cos and sin of 2 pi / 2^k, for k from 1
     let mut cos_t = vec![0.0f64; log_n];
     let mut sin_t = vec![0.0f64; log_n];
-    cos_t[0] = -1.0;
-    sin_t[0] = 0.0;
-    let (mut c, mut s) = (0.0f64, 1.0f64);
-    for i in 1..log_n {
-        cos_t[i] = c;
-        sin_t[i] = s;
-        c = ((1.0 + cos_t[i]) * 0.5).sqrt();
-        s = sin_t[i] / (2.0 * c);
+    for i in 0..log_n {
+        cos_t[i] = (2.0 * std::f64::consts::PI / (1u64 << (i + 1)) as f64).cos();
+        sin_t[i] = (2.0 * std::f64::consts::PI / (1u64 << (i + 1)) as f64).sin();
     }
     let (mut spec, mut max_err) = (0.0f64, 0.0f64);
     for rep in 1..=10 {

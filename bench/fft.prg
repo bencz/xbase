@@ -1,9 +1,9 @@
 // The fast Fourier transform (iterative radix 2, in place, on arrays of real and imaginary parts): 65,536 complex
 // points from a linear congruential generator, transformed forward and back 10 times. The twiddle factors come from
-// the half-angle formulas (Sqrt) and complex multiplication; the check is the spectrum's sum of magnitudes and the
+// Cos() and Sin() of 2 pi / 2^k and complex multiplication; the check is the spectrum's sum of magnitudes and the
 // round trip's largest error.
 PROCEDURE Main()
-   LOCAL t := ElapsedMs(), logN := 16, n, re, im, re0, im0, cosT, sinT, c, s, i, rep, seed := 2024
+   LOCAL t := ElapsedMs(), logN := 16, n, re, im, re0, im0, cosT, sinT, i, rep, seed := 2024
    LOCAL spec := 0.0, maxErr := 0.0, ok
    n := 1 << logN
    re := Array( n )
@@ -16,18 +16,12 @@ PROCEDURE Main()
    NEXT
    re0 := AClone( re )
    im0 := AClone( im )
-   // cos and sin of 2 pi / 2^k, for k from 1: the angle halved each step
+   // cos and sin of 2 pi / 2^k, for k from 1
    cosT := Array( logN )
    sinT := Array( logN )
-   cosT[ 1 ] := -1.0
-   sinT[ 1 ] := 0.0
-   c := 0.0
-   s := 1.0
-   FOR i := 2 TO logN
-      cosT[ i ] := c
-      sinT[ i ] := s
-      c := Sqrt( ( 1.0 + cosT[ i ] ) * 0.5 )
-      s := sinT[ i ] / ( 2.0 * c )
+   FOR i := 1 TO logN
+      cosT[ i ] := Cos( 2 * Pi() / ( 1 << i ) )
+      sinT[ i ] := Sin( 2 * Pi() / ( 1 << i ) )
    NEXT
    FOR rep := 1 TO 10
       Fft( re, im, n, cosT, sinT, -1.0 )

@@ -140,8 +140,8 @@ function CommandOf([string]$l, [string]$b) {
       $mt = @()
       if ($HarbourMt -contains $b) { $mt = @("-mt") }
       try {
-        hbmk2 @mt -static -gtcgi -q -w0 -gc3 -cflag=-O2 "-u+hbclass.ch" "-u+$Root/bench/compat.ch" $src "-o$b" 2>&1 |
-          Out-Null
+        hbmk2 @mt -static -gtcgi -q -w0 -gc3 -cflag=-O2 "-u+hbclass.ch" "-u+$Root/bench/compat.ch" hbct.hbc $src `
+          "-o$b" 2>&1 | Out-Null
       } finally { Pop-Location }
       if ($LASTEXITCODE -eq 0) { return , @(Join-Path $dir "$b$Exe") }
       return "fail"

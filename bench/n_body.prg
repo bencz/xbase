@@ -2,7 +2,7 @@
 // doubles in arrays (one per coordinate), the system's energy before and after.
 PROCEDURE Main()
    LOCAL t := ElapsedMs(), steps := 500000, nb := 5, i, j, k, e0, e1
-   LOCAL pi := 3.141592653589793, solarMass, days := 365.24, dt := 0.01
+   LOCAL pi := Pi(), solarMass, days := 365.24, dt := 0.01
    LOCAL dx, dy, dz, d2, mag, mi, mj, px := 0.0, py := 0.0, pz := 0.0
    LOCAL x, y, z, vx, vy, vz, m, ok
    solarMass := 4.0 * pi * pi

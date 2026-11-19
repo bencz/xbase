@@ -1167,6 +1167,22 @@ Conventions:
   about 150 ns, `Exp` 22 ns, `Log` 30 ns, against 10, 4 and 4 ns). The runtime and `xbc` are compiled without
   contracting `a * b + c` into fused multiply-adds and, on 32-bit x86, with SSE2 rather than the x87 unit
   (`xb_exact_doubles` in CMake), on which double-double arithmetic depends.
+- The CA-Tools math functions (`core/trig.c`, `rtl/numbers.c`) are correctly rounded the same way, the same doubles
+  everywhere: `Sin`, `Cos`, `Tan` and `Cot` reduce any argument exactly (`Sin( 10^22 )` is -0.8522008497671888), from
+  1536 bits of 2 / pi beyond 2^20 (Payne and Hanek) and below it with pi / 2 in parts of 33 bits, then a table of
+  sin and cos at j / 64; `ATan`, `Atn2( nY, nX )` (C's atan2), `ASin` and `ACos` go through a table of atan( j / 64 );
+  `Sinh`, `Cosh` and `Tanh` through e^x (a series near 0); `Log10` through ln; `DToR` and `RToD` multiply by the
+  constant as a double-double. Each takes a fast form first, then a full one in double-double (relative error near
+  2^-100) when the fast one's bound leaves the rounding open (x86-64: `Sin` and `Cos` about 38 ns, `Tan` 48, `ATan`
+  66, `Log10` 29, the hyperbolic functions up to 160, against 7 to 13 for glibc).
+  Their results have SET DECIMALS decimals; outside the domain they are a NaN or an infinity (stars: `ASin( 2 )`,
+  `Log10( 0 )`, `Cot( 0 )`, `Sinh( 1000 )`), in the widths these take everywhere in xbase (a NaN 13 columns with 2
+  decimals, an infinity 23; the reference's CA-Tools shows its NaNs in 23 too). `Pi()` is the double nearest pi. `Floor` and `Ceiling` give integers (a
+  double with no decimals past 64 bits), `Sign` -1, 0 or 1. `Fact( n )` truncates n and gives n! correctly rounded up
+  to 170 (the reference loses digits from 21! and gives -1 past 21), -1 below 0 or past 170, with SET DECIMALS
+  decimals. A missing or non-numeric argument is an argument error with xbase's codes 9036 (`Sin`) to 9053 (`Fact`)
+  in the order of `rtl/numbers.c` (the reference returns 0). These are not reserved names: a program's own function
+  of one of them comes first.
 - `Replicate` raises `String overflow` (1234) when the result size overflows.
 - `PadL`/`PadR`/`PadC( x, nLength, [cFill] )` (`Pad` is `PadR`) pad a string, a number (as `Str` gives it, without
   its leading blanks) or a date (as `DToC` gives it) with the fill's first character (a blank by default, also for an

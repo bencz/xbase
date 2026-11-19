@@ -13,6 +13,28 @@ xb_str *xb_num_to_str(const xb_item *it, int width, int dec);
 void xb_num_to_field_buf(const xb_item *it, int width, int dec, char *out);
 /* v rounded to d decimals, half away from zero (a negative d rounds to tens, hundreds, ...): Round()'s rule. */
 double xb_num_round(double v, int64_t d);
+/* The CA-Tools functions of core/trig.c, correctly rounded: sine, cosine, tangent, cotangent (a NaN for an infinity;
+ * cot( 0 ) an infinity), arc tangent and C's atan2, arc sine and arc cosine (a NaN outside [-1, 1]), the hyperbolic
+ * functions, the base-10 logarithm (0 gives minus infinity, a negative number a NaN), and degrees to radians and
+ * back. */
+double xb_sin(double x);
+double xb_cos(double x);
+double xb_tan(double x);
+double xb_cot(double x);
+double xb_atan(double x);
+double xb_atan2(double y, double x);
+double xb_asin(double x);
+double xb_acos(double x);
+double xb_sinh(double x);
+double xb_cosh(double x);
+double xb_tanh(double x);
+double xb_log10(double x);
+double xb_dtor(double x);
+double xb_rtod(double x);
+/* n! of n truncated, correctly rounded, from 0 to 170; -1 for any other n and a NaN (as CA-Tools: no factorial). */
+double xb_fact(double n);
+/* The double nearest pi. */
+#define XB_PI 3.141592653589793
 /* Val( c ) of the `len` bytes at `s`: the number, with the width and decimals its text gives. */
 void xb_num_parse(const char *s, size_t len, xb_item *r);
 

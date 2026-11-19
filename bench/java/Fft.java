@@ -1,7 +1,7 @@
 // bench/fft.prg in Java: the fast Fourier transform (iterative radix 2, in place, on arrays of real and imaginary
 // parts): 65,536 complex points from a linear congruential generator, transformed forward and back 10 times. The
-// twiddle factors come from the half-angle formulas (sqrt) and complex multiplication; the check is the spectrum's sum
-// of magnitudes and the round trip's largest error.
+// twiddle factors come from cos and sin of 2 pi / 2^k and complex multiplication; the check is the spectrum's sum of
+// magnitudes and the round trip's largest error.
 public class Fft {
   // The transform of re + i im in place; sign -1 forward, 1 backward (unscaled).
   static void fft(double[] re, double[] im, int n, double[] cosT, double[] sinT, double sign) {
@@ -47,7 +47,7 @@ public class Fft {
     long t = System.nanoTime(), seed = 2024;
     int logN = 16, n = 1 << logN;
     double[] re = new double[n], im = new double[n], cosT = new double[logN], sinT = new double[logN];
-    double c, s, spec = 0.0, maxErr = 0.0;
+    double spec = 0.0, maxErr = 0.0;
     for (int i = 0; i < n; i++) {
       seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
       re[i] = seed / 1073741824.0 - 1.0;
@@ -55,16 +55,10 @@ public class Fft {
       im[i] = seed / 1073741824.0 - 1.0;
     }
     double[] re0 = re.clone(), im0 = im.clone();
-    // cos and sin of 2 pi / 2^k, for k from 1: the angle halved each step
-    cosT[0] = -1.0;
-    sinT[0] = 0.0;
-    c = 0.0;
-    s = 1.0;
-    for (int i = 1; i < logN; i++) {
-      cosT[i] = c;
-      sinT[i] = s;
-      c = Math.sqrt((1.0 + cosT[i]) * 0.5);
-      s = sinT[i] / (2.0 * c);
+    // cos and sin of 2 pi / 2^k, for k from 1
+    for (int i = 0; i < logN; i++) {
+      cosT[i] = Math.cos(2.0 * Math.PI / (1L << (i + 1)));
+      sinT[i] = Math.sin(2.0 * Math.PI / (1L << (i + 1)));
     }
     for (int rep = 1; rep <= 10; rep++) {
       fft(re, im, n, cosT, sinT, -1.0);

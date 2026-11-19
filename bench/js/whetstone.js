@@ -1,8 +1,8 @@
 // bench/whetstone.prg in JavaScript: Whetstone (Curnow and Wichmann's synthetic benchmark, its modules scaled by a
 // loop count of 5,000): array elements, an array as a parameter, conditional jumps, integer arithmetic, procedure calls
-// with a parameter by reference (a one-element array here), array references, and
-// Math.sqrt( Math.exp( Math.log( x ) / t ) ). Modules 1, 7 and 10 are left out, as in the .prg. The check is the sum
-// of the values each module leaves. e1 is numbered from 1, as in the .prg (element 0 unused).
+// with a parameter by reference (a one-element array here), trigonometric functions (Math.sin, Math.cos, Math.atan),
+// array references, and Math.sqrt( Math.exp( Math.log( x ) / t ) ). Modules 1 and 10 are left out, as in the .prg.
+// The check is the sum of the values each module leaves. e1 is numbered from 1, as in the .prg (element 0 unused).
 const { report } = require("./bench.js");
 const t = 0.499975, t1 = 0.50025, t2 = 2.0;
 let e1, j, k, l;
@@ -61,7 +61,14 @@ for (let i = 1; i <= 210 * nLoop; i++) {
   e1[k - 1] = j * k * l;
 }
 check += j + k + l + e1[1] + e1[2] + e1[3] + e1[4];
-let x = 1.0, y = 1.0;
+let x = 0.5, y = 0.5;
+for (let i = 1; i <= 32 * nLoop; i++) {
+  x = t * Math.atan(t2 * Math.sin(x) * Math.cos(x) / (Math.cos(x + y) + Math.cos(x - y) - 1.0));
+  y = t * Math.atan(t2 * Math.sin(y) * Math.cos(y) / (Math.cos(x + y) + Math.cos(x - y) - 1.0));
+}
+check += x + y;
+x = 1.0;
+y = 1.0;
 const z = [1.0];
 for (let i = 1; i <= 899 * nLoop; i++) p3(x, y, z);
 check += x + y + z[0];
@@ -76,4 +83,4 @@ check += e1[1] + e1[2] + e1[3] + e1[4];
 let w = 0.75;
 for (let i = 1; i <= 93 * nLoop; i++) w = Math.sqrt(Math.exp(Math.log(w) / t1));
 check += w;
-report("whetstone", tm, Math.abs(check - 30.95582672351981) < 0.000000001);
+report("whetstone", tm, Math.abs(check - 30.95612841002271) < 0.000000001);
