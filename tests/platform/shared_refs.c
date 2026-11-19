@@ -122,7 +122,7 @@ int main(void) {
   for (int k = 0; k < SHARED; ++k) xb_set_nil(&shared[k]);
   xb_gc_add_root(shared, SHARED);
   xb_set_array(&shared[0], xb_array_alloc(4));
-  xb_set_int(&((xb_array *)shared[0].v.p)->items[1], 0); /* read before the first write */
+  xb_set_int(&xb_array_items(shared[0].v.p)[1], 0); /* read before the first write */
   xb_ref_init(&shared[1], &shared[0], 2, 0); /* @a[2] */
   xb_item var;
   xb_set_int(&var, 0);

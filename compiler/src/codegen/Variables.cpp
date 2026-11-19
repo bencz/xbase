@@ -59,8 +59,10 @@ Value *CodeGen::storageLocal() {
 // unordered atomic load: other threads may set the byte's other bits, and only the thread that reaches a local object
 // can share it, so what this thread read holds until it calls something that could. For an object an item holds
 // (`fromItem`: `obj` is the item's pointer word), the load says where the item's header word and type are
-// (kStateLoad, for versionInvariantColdExits).
-Value *CodeGen::isLocal(Value *obj, bool fromItem) {
+// (kStateLoad, for versionInvariantColdExits). An array's form, in the same byte, changes only in the runtime too.
+Value *CodeGen::isLocal(Value *obj, bool fromItem) { return isLocalState(objectState(obj, fromItem)); }
+
+LoadInst *CodeGen::objectState(Value *obj, bool fromItem) {
   LoadInst *state = stateByte(obj, AtomicOrdering::Unordered);
   if (fromItem) {
     int64_t header = -static_cast<int64_t>(dl_.getStructLayout(itemTy_)->getElementOffset(FValue));
@@ -68,7 +70,19 @@ Value *CodeGen::isLocal(Value *obj, bool fromItem) {
                          ConstantAsMetadata::get(ConstantInt::get(i64_, headerShift(FType)))};
     state->setMetadata(kStateLoad, MDNode::get(ctx_, where));
   }
-  return isLocalState(state);
+  return state;
+}
+
+// A local array of items (XB_ELEMS_ITEMS): one test of its state byte.
+Value *CodeGen::isLocalItems(Value *state) {
+  return b_.CreateICmpEQ(b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_SHARED | XB_GC_STATE_ELEMS)),
+                         ConstantInt::get(i8_, 0));
+}
+
+// An array's form (XB_ELEMS_ITEMS ...), from its state byte.
+Value *CodeGen::elemsOf(Value *state) {
+  return b_.CreateAnd(b_.CreateLShr(state, ConstantInt::get(i8_, XB_GC_STATE_ELEMS_SHIFT)),
+                      ConstantInt::get(i8_, XB_GC_STATE_ELEMS_MASK));
 }
 
 Value *CodeGen::isLocalState(Value *state) {
@@ -229,9 +243,10 @@ Value *CodeGen::hashEntryAt(Value *hash, Value *pos0, BasicBlock *miss) {
   return b_.CreateInBoundsGEP(hentryTy_, entries, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "entry");
 }
 
-// The element an xb_ref designates, when it is in place (see xb_ref in xbrt.h): an array's element within it, or the
-// entry at a position of a hash without holes, of a local array or hash; branches to `miss` otherwise (a shared
-// collection, anything else), where the runtime finds it or raises the bound error.
+// The element an xb_ref designates, when it is in place (see xb_ref in xbrt.h): an array's element within it (an array
+// of items), or the entry at a position of a hash without holes, of a local array or hash; branches to `miss`
+// otherwise (a shared collection, a compact array, anything else), where the runtime finds it or raises the bound
+// error.
 Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss) {
   Value *coll = heapItem(b_.CreateStructGEP(refTy_, ref, RefColl));
   Value *type = itemType(coll);
@@ -244,7 +259,7 @@ Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss) {
   b_.SetInsertPoint(arr);
   Value *array = itemPointer(coll, "arr");
   BasicBlock *arrayLocal = newBlock("ref.array.local");
-  branchLikely(isLocal(array), arrayLocal, miss);
+  branchLikely(isLocalItems(objectState(array)), arrayLocal, miss); // a compact form: the runtime
   b_.SetInsertPoint(arrayLocal);
   BasicBlock *inArray = newBlock("ref.array.in");
   branchLikely(b_.CreateICmpULT(pos0, arrayLength(array)), inArray, miss);

@@ -34,10 +34,17 @@ Value *CodeGen::arrayLength(Value *array) {
                               i64_);
 }
 
-// The address of 0-based element `pos0` of an array (within its length).
+// The address of 0-based element `pos0` of an array of items (XB_ELEMS_ITEMS, within its length).
 Value *CodeGen::arrayElement(Value *array, Value *pos0) {
-  Value *items = loadFrom(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayItems), Mem::ArrayHeader, "items");
+  Value *items = loadFrom(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayData), Mem::ArrayHeader, "items");
   return heapItem(b_.CreateInBoundsGEP(itemTy_, items, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "elem"));
+}
+
+// The address of 0-based element `pos0` of an array of a compact form, whose elements are of type `ty`. Its accesses
+// are tagged as heap items: the storage is the one items take when the array turns.
+Value *CodeGen::compactElement(Value *array, Type *ty, Value *pos0) {
+  Value *data = loadFrom(ptrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayData), Mem::ArrayHeader, "data");
+  return b_.CreateInBoundsGEP(ty, data, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "elem");
 }
 
 Value *CodeGen::intValue(Value *item) {
@@ -687,70 +694,112 @@ void CodeGen::emitForTest(const xir::Instruction &i) {
 
 // The element base[idx] when base is an array and idx a number within it
 // (1-based; a double is truncated, as xb_num_to_i64 does) and the array is
-// local: its address, in the block where that holds; any other case (a shared
-// array included, whose items the runtime reads and writes whole) branches to
-// `slow`. Also gives the array and the 0-based position. An integer index, the
+// local: branches to `items` for an array of items, to `compact` for one of a
+// compact form, with the array, the 0-based position and the array's state
+// byte (its form); any other case (a shared array included, whose items the
+// runtime reads and writes whole, and one of a compact form when `compact` is
+// null) branches to `slow`. An integer index, the
 // usual one, has a path of its own. A shared array goes to the runtime first:
-// its length, read meanwhile, decides nothing. The sharing test is a branch
-// of its own (one byte tested): one on an invariant array leaves a fast loop
-// with the tests versionInvariantColdExits makes once, before it.
-Value *CodeGen::inlineElement(const xir::Instruction &i, Value *base, Value *idx, BasicBlock *slow, Value *&array,
-                               Value *&pos) {
+// its length, read meanwhile, decides nothing. The state byte tells a local
+// array of items from the others in one test; one on an invariant array
+// leaves a fast loop with the tests versionInvariantColdExits makes once,
+// before it.
+void CodeGen::inlineIndex(const xir::Instruction &i, Value *base, Value *idx, BasicBlock *slow, BasicBlock *items,
+                          BasicBlock *compact, Value *&array, Value *&pos, Value *&state) {
   Value *baseType = typeOf(i.operand(0), base), *idxType = typeOf(i.operand(1), idx);
   Value *isArray = b_.CreateICmpEQ(baseType, ConstantInt::get(i32_, XB_T_ARRAY));
   BasicBlock *intIdx = newBlock("index.int"), *notInt = newBlock("index.other"), *dblIdx = newBlock("index.double");
-  BasicBlock *inBounds = newBlock("element");
+  BasicBlock *at = newBlock("index.at");
   // An integer index is the usual one: a loop indexing with doubles runs in the
   // generic copy of splitColdLoopPaths, which keeps the double path inline.
   branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_INT))), intIdx, notInt);
   b_.SetInsertPoint(notInt);
   branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
-  auto arrayAndLen = [&](Value *&arr) {
-    arr = itemPointer(base, "arr");
-    BasicBlock *local = newBlock("index.local");
-    branchLikely(isLocal(arr), local, slow);
-    b_.SetInsertPoint(local);
-    return arrayLength(arr);
-  };
   Value *one = ConstantInt::get(i64_, 1);
 
   b_.SetInsertPoint(intIdx);
-  Value *intArr, *intLen = arrayAndLen(intArr);
   Value *intPos = b_.CreateSub(intValue(idx), one);
-  branchLikely(b_.CreateICmpULT(intPos, intLen), inBounds, slow); // 1 <= idx <= len
-  BasicBlock *intEnd = b_.GetInsertBlock();
+  b_.CreateBr(at);
 
-  // A double from 1 to len + 1 (excluded) truncates to a position; NaN and
-  // anything else go to the runtime. The position is checked again as an
-  // integer: len + 1 rounds for huge arrays.
+  // A double from 1 to 2^63 (excluded) truncates to a position, which the
+  // length then bounds; NaN and anything else go to the runtime.
   b_.SetInsertPoint(dblIdx);
-  Value *dblArr, *dblLen = arrayAndLen(dblArr);
   Type *f64 = b_.getDoubleTy();
   Value *d = b_.CreateBitCast(intValue(idx), f64);
-  Value *end = b_.CreateFAdd(b_.CreateUIToFP(dblLen, f64), ConstantFP::get(f64, 1.0));
-  Value *fits = b_.CreateAnd(b_.CreateFCmpOGE(d, ConstantFP::get(f64, 1.0)), b_.CreateFCmpOLT(d, end));
+  Value *fits = b_.CreateAnd(b_.CreateFCmpOGE(d, ConstantFP::get(f64, 1.0)),
+                             b_.CreateFCmpOLT(d, ConstantFP::get(f64, 0x1p63)));
   Value *dblPos = b_.CreateSub(b_.CreateFPToSI(b_.CreateSelect(fits, d, ConstantFP::get(f64, 1.0)), i64_), one);
-  b_.CreateCondBr(b_.CreateAnd(fits, b_.CreateICmpULT(dblPos, dblLen)), inBounds, slow);
-  BasicBlock *dblEnd = b_.GetInsertBlock();
+  branchLikely(fits, at, slow);
 
-  b_.SetInsertPoint(inBounds);
-  PHINode *arr = b_.CreatePHI(ptrTy_, 2, "arr");
-  arr->addIncoming(intArr, intEnd);
-  arr->addIncoming(dblArr, dblEnd);
+  b_.SetInsertPoint(at);
   PHINode *p = b_.CreatePHI(i64_, 2, "pos");
-  p->addIncoming(intPos, intEnd);
-  p->addIncoming(dblPos, dblEnd);
-  array = arr;
+  p->addIncoming(intPos, intIdx);
+  p->addIncoming(dblPos, dblIdx);
+  array = itemPointer(base, "arr");
   pos = p;
-  return arrayElement(array, pos);
+  state = objectState(array);
+  BasicBlock *ofItems = newBlock("index.items.local");
+  if (!compact) {
+    branchLikely(isLocalItems(state), ofItems, slow);
+    b_.SetInsertPoint(ofItems);
+    branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), items, slow);
+    return;
+  }
+  // The path of items is the likely one, for the layout and the registers; but an array of a compact form is no cold
+  // path (kFormTest: splitColdLoopPaths does not leave the fast loop for it, a loop on an invariant array keeps one
+  // path, LoopSplit.h).
+  BasicBlock *other = newBlock("index.not.items");
+  MDBuilder md(ctx_);
+  BranchInst *test = b_.CreateCondBr(isLocalItems(state), ofItems, other, md.createLikelyBranchWeights());
+  test->setMetadata(kFormTest, MDNode::get(ctx_, {}));
+  b_.SetInsertPoint(ofItems);
+  branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), items, slow); // 1 <= idx <= len
+  b_.SetInsertPoint(other);
+  BasicBlock *local = newBlock("index.compact.local");
+  branchLikely(isLocalState(state), local, slow);
+  b_.SetInsertPoint(local);
+  branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), compact, slow);
 }
 
+// The weight of a likely branch whose other side is rare but no cold edge (LoopSplit's are below 1/64).
+constexpr uint32_t kRareWeight = 16;
+
+// The paths of a local array that does not hold items (its state byte `state`): logicals, integers, and NILs, the
+// form of a new array until its first store. None of them is a cold path.
+void CodeGen::switchCompact(Value *state, BasicBlock *nils, BasicBlock *logical, BasicBlock *integer) {
+  SwitchInst *sw = b_.CreateSwitch(elemsOf(state), nils, 2);
+  sw->addCase(ConstantInt::get(i8_, XB_ELEMS_LOGICAL), logical);
+  sw->addCase(ConstantInt::get(i8_, XB_ELEMS_INT), integer);
+}
+
+// Whether element read `i` is tested as a logical (a condition, .NOT.).
+static bool readAsLogical(const xir::Instruction &i) {
+  for (const xir::Instruction *u : i.users())
+    if (u->op == xir::Op::Truth || (u->op == xir::Op::Unary && u->unop == UnOp::Not)) return true;
+  return false;
+}
+
+// Whether every use of element read `i` indexes it (a row of an array of arrays): an element of a compact form, never
+// an array, would be an error there.
+static bool onlyIndexed(const xir::Instruction &i) {
+  for (const xir::Instruction *u : i.users())
+    if ((u->op != xir::Op::Index && u->op != xir::Op::IndexSet) || u->operand(0) != &i) return false;
+  return !i.users().empty();
+}
+
+// A compact element becomes an item (emitCompactRead). A read that only indexes the element takes the runtime's path
+// for a compact array: its error.
 void CodeGen::emitIndex(const xir::Instruction &i) {
   Value *base = addr(i.operand(0)), *idx = addr(i.operand(1)), *d = dest(i);
-  BasicBlock *slow = newBlock("index.call"), *join = newBlock("index.end");
-  Value *array, *pos;
-  copyItem(d, inlineElement(i, base, idx, slow, array, pos)); // base and idx are read before d is written
+  BasicBlock *slow = newBlock("index.call"), *join = newBlock("index.end"), *items = newBlock("index.items");
+  Value *array, *pos, *state;
+  bool rows = onlyIndexed(i);
+  BasicBlock *compact = rows ? nullptr : newBlock("index.compact");
+  inlineIndex(i, base, idx, slow, items, compact, array, pos, state); // base and idx are read before d is written
+  b_.SetInsertPoint(items);
+  copyItem(d, arrayElement(array, pos));
   b_.CreateBr(join);
+  if (!rows) emitCompactRead(readAsLogical(i), d, array, pos, state, compact, slow, join);
   b_.SetInsertPoint(slow);
   callItemOp(rtIndex_, d, {base, idx});
   checkPending(unwind_);
@@ -758,13 +807,85 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
   b_.SetInsertPoint(join);
 }
 
+// The path of a read of an array of a compact form, from block `compact` into `d`, then to `join`: one form inline,
+// the logicals' for a read tested as a logical, the integers' for any other (each inline path joins the path of items
+// and costs it registers). The other forms go to the runtime, as cold paths: an array of NILs (a new one, which its
+// first store gives a form), and a NIL among logicals or integers (0, XB_ELEMS_INT_NIL), rare where speed counts, so
+// that the inline path gives a value of one type.
+void CodeGen::emitCompactRead(bool logical, Value *d, Value *array, Value *pos, Value *state, BasicBlock *compact,
+                              BasicBlock *slow, BasicBlock *join) {
+  BasicBlock *form = newBlock(logical ? "index.logical" : "index.int"), *one = newBlock("index.compact.one");
+  b_.SetInsertPoint(compact);
+  branchLikely(b_.CreateICmpEQ(elemsOf(state), ConstantInt::get(i8_, logical ? XB_ELEMS_LOGICAL : XB_ELEMS_INT)),
+               form, slow);
+  b_.SetInsertPoint(form);
+  if (logical) {
+    Value *byte = tag(b_.CreateLoad(i8_, compactElement(array, i8_, pos), "byte"), Mem::HeapItem);
+    branchLikely(b_.CreateICmpNE(byte, ConstantInt::get(i8_, 0)), one, slow);
+    b_.SetInsertPoint(one);
+    storeLogical(d, b_.CreateICmpEQ(byte, ConstantInt::get(i8_, XB_ELEMS_TRUE)));
+  } else {
+    Value *n = tag(b_.CreateLoad(i64_, compactElement(array, i64_, pos), "n"), Mem::HeapItem);
+    branchLikely(b_.CreateICmpNE(n, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL)), one, slow);
+    b_.SetInsertPoint(one);
+    storeInt(d, n);
+  }
+  b_.CreateBr(join);
+}
+
 // The store in place needs the write barrier only for a value that refers to
-// a heap object (xb_type_is_heap).
+// a heap object (xb_type_is_heap). A compact form takes in place what it
+// holds (an item whose header word is NIL's, or a logical's or an integer's
+// with no width or decimals); any other value, and the first store into an
+// array of NILs, goes through xb_array_store, which gives the array the form
+// that holds it (no cold path: a loop that fills a new array stays fast).
 void CodeGen::emitIndexSet(const xir::Instruction &i) {
   Value *base = addr(i.operand(0)), *idx = addr(i.operand(1)), *v = addr(i.operand(2));
   BasicBlock *slow = newBlock("index.set.call"), *join = newBlock("index.set.end");
-  Value *array, *pos;
-  copyItem(inlineElement(i, base, idx, slow, array, pos), v);
+  BasicBlock *items = newBlock("index.set.items"), *logical = newBlock("index.set.logical");
+  BasicBlock *integer = newBlock("index.set.int"), *compact = newBlock("index.set.compact");
+  BasicBlock *change = newBlock("index.set.form");
+  Value *array, *pos, *state;
+  inlineIndex(i, base, idx, slow, items, compact, array, pos, state);
+  b_.SetInsertPoint(compact);
+  switchCompact(state, change, logical, integer);
+  Value *nilHeader = headerWord(XB_T_NIL, 0, 0);
+  MDBuilder md(ctx_);
+  // A value the form does not hold is rare, but no cold path: its store keeps the loop on its fast paths.
+  MDNode *rare = md.createBranchWeights(kRareWeight, 1);
+
+  b_.SetInsertPoint(logical);
+  Value *header = loadHeader(v);
+  Value *isNil = b_.CreateICmpEQ(header, nilHeader);
+  BasicBlock *logicalStore = newBlock("index.set.byte");
+  b_.CreateCondBr(b_.CreateOr(isNil, b_.CreateICmpEQ(header, headerWord(XB_T_LOGICAL, 0, 0))), logicalStore, change,
+                  rare);
+  b_.SetInsertPoint(logicalStore);
+  Value *byte = b_.CreateSelect(isNil, ConstantInt::get(i8_, 0),
+                                b_.CreateSelect(logicalValue(v), ConstantInt::get(i8_, XB_ELEMS_TRUE),
+                                                ConstantInt::get(i8_, XB_ELEMS_FALSE)));
+  tag(b_.CreateStore(byte, compactElement(array, i8_, pos)), Mem::HeapItem);
+  b_.CreateBr(join);
+
+  b_.SetInsertPoint(integer);
+  header = loadHeader(v);
+  isNil = b_.CreateICmpEQ(header, nilHeader);
+  Value *n = intValue(v);
+  Value *fits = b_.CreateAnd(b_.CreateICmpEQ(header, headerWord(XB_T_INT, 0, 0)),
+                             b_.CreateICmpNE(n, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL)));
+  BasicBlock *intStore = newBlock("index.set.word");
+  b_.CreateCondBr(b_.CreateOr(isNil, fits), intStore, change, rare);
+  b_.SetInsertPoint(intStore);
+  Value *word = b_.CreateSelect(isNil, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL), n);
+  tag(b_.CreateStore(word, compactElement(array, i64_, pos)), Mem::HeapItem);
+  b_.CreateBr(join);
+
+  b_.SetInsertPoint(change);
+  b_.CreateCall(rtArrayStore_, {array, b_.CreateZExtOrTrunc(pos, intPtrTy_), callArg(v, 2)});
+  b_.CreateBr(join);
+
+  b_.SetInsertPoint(items);
+  copyItem(arrayElement(array, pos), v);
   Value *type = typeOf(i.operand(2), v);
   Value *heap = b_.CreateICmpULE(b_.CreateSub(type, ConstantInt::get(i32_, XB_T_HEAP_FIRST)),
                                  ConstantInt::get(i32_, XB_T_HEAP_LAST - XB_T_HEAP_FIRST));

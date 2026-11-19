@@ -32,16 +32,17 @@ static void check_range(xb_ctx *ctx, size_t n, int carded, size_t first, size_t 
   CHECK((xb_array_cards(a) != NULL) == carded);
   CHECK(!(xb_gc_header(a)->state & (XB_GC_REMEMBERED | XB_GC_CARDED))); /* the barrier alone records it */
   xb_str *s = xb_str_new(TEXT, strlen(TEXT));                          /* young; the array is old */
-  for (size_t k = first; k <= last; ++k) xb_set_int(&a->items[k], (int64_t)k);
-  xb_set_str(&a->items[at], s);
+  for (size_t k = first; k <= last; ++k) xb_set_int(&xb_array_items(a)[k], (int64_t)k);
+  xb_set_str(&xb_array_items(a)[at], s);
   xb_gc_write_items(a, first, last + 1);
   for (int round = 0; round < 3; ++round) {
     xb_gc_collect_young();
     for (int k = 0; k < 20000; ++k) xb_set_str(&junk, xb_str_new("garbage over freed memory", 25));
   }
   a = keep.v.p;
-  CHECK(a->items[at].type == XB_T_STRING);
-  CHECK(a->items[at].v.s->len == strlen(TEXT) && memcmp(a->items[at].v.s->data, TEXT, strlen(TEXT)) == 0);
+  const xb_item *it = &xb_array_items(a)[at];
+  CHECK(it->type == XB_T_STRING);
+  CHECK(it->v.s->len == strlen(TEXT) && memcmp(it->v.s->data, TEXT, strlen(TEXT)) == 0);
   xb_gc_root_pop(ctx, 2);
 }
 

@@ -137,8 +137,8 @@ void xbf_HPAIRAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_gc_root_push(ctx, &pair[1]);
   if (xb_hash_entry(h, pos_arg(argc, argv), &pair[0], &pair[1])) {
     xb_array *a = xb_array_alloc(2);
-    a->items[0] = pair[0];
-    a->items[1] = pair[1];
+    xb_array_items(a)[0] = pair[0];
+    xb_array_items(a)[1] = pair[1];
     xb_set_array(ret, a);
   } else {
     pos_error(ctx, "HPAIRAT", argc, argv);
@@ -158,7 +158,7 @@ static void hash_column(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv,
   xb_array *a = xb_array_alloc(((const xb_hash *)from->v.p)->len);
   xb_hash *src = from->v.p; /* where it is after the allocation */
   xb_hash_compact(src);
-  for (uint32_t k = 0; k < src->len; ++k) a->items[k] = values ? src->entries[k].value : src->entries[k].key;
+  for (uint32_t k = 0; k < src->len; ++k) xb_array_items(a)[k] = values ? src->entries[k].value : src->entries[k].key;
   xb_set_array(ret, a);
 }
 

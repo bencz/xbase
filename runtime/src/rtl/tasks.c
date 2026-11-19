@@ -152,9 +152,10 @@ enum { F_LIST, F_ANTECEDENT, F_BELOW, F_COUNT_ };
 static void push_list(xb_item *stack, const xb_item *list, const xb_item *antecedent) {
   if (list->type != XB_T_ARRAY) return;
   xb_array *f = xb_array_alloc(F_COUNT_); /* `f`, on the stack, stays where it is */
-  f->items[F_LIST] = *list;
-  f->items[F_ANTECEDENT] = *antecedent;
-  f->items[F_BELOW] = *stack;
+  xb_item *frame = xb_array_items(f);
+  frame[F_LIST] = *list;
+  frame[F_ANTECEDENT] = *antecedent;
+  frame[F_BELOW] = *stack;
   xb_gc_write(f);
   xb_set_array(stack, f);
 }
@@ -186,7 +187,7 @@ static void when_all_done(xb_ctx *ctx, const xb_item *combinator, xb_item *stack
     xb_set_array(&results, a);
     for (size_t k = 0; k < n; ++k) {
       xb_array_get(tasks.v.p, k, &it);
-      xb_object_get(it.v.p, V_RESULT, &a->items[k]);
+      xb_object_get(it.v.p, V_RESULT, &xb_array_items(a)[k]);
     }
     xb_gc_write_items(a, 0, n);
   } else if (outcome == S_CANCELED) {
@@ -272,15 +273,16 @@ static void drain(xb_ctx *ctx, xb_item *stack) {
   xb_gc_root_push(ctx, &antecedent);
   while (stack->type == XB_T_ARRAY) {
     xb_array *f = stack->v.p; /* local: read and written in place */
-    if (f->items[F_LIST].type != XB_T_ARRAY) {
-      *stack = f->items[F_BELOW];
+    xb_item *frame = xb_array_items(f);
+    if (frame[F_LIST].type != XB_T_ARRAY) {
+      *stack = frame[F_BELOW];
       continue;
     }
-    xb_item node = f->items[F_LIST];
+    xb_item node = frame[F_LIST];
     xb_array_get(node.v.p, 0, &target);
-    xb_array_get(node.v.p, 1, &f->items[F_LIST]);
+    xb_array_get(node.v.p, 1, &frame[F_LIST]);
     xb_gc_write(f);
-    antecedent = f->items[F_ANTECEDENT];
+    antecedent = frame[F_ANTECEDENT];
     fire(ctx, &target, &antecedent, stack);
   }
   xb_gc_root_pop(ctx, 2);
@@ -333,8 +335,8 @@ static uint32_t prune(xb_ctx *ctx, xb_item *list) {
   for (walk = *list; walk.type == XB_T_ARRAY; xb_array_get(walk.v.p, 1, &walk)) /* the live targets, reversed */
     if (xb_array_get(walk.v.p, 0, &t) && !dead_target(&t)) {
       xb_array *a = xb_array_alloc(2); /* `a`, on the stack, stays where it is; `t` too */
-      a->items[0] = t;
-      a->items[1] = live;
+      xb_array_items(a)[0] = t;
+      xb_array_items(a)[1] = live;
       xb_gc_write(a);
       xb_set_array(&live, a);
       ++n;
@@ -342,8 +344,8 @@ static uint32_t prune(xb_ctx *ctx, xb_item *list) {
   xb_set_nil(list);
   for (walk = live; walk.type == XB_T_ARRAY; xb_array_get(walk.v.p, 1, &walk)) { /* reversed again: in order */
     xb_array *a = xb_array_alloc(2);
-    xb_array_get(walk.v.p, 0, &a->items[0]);
-    a->items[1] = *list;
+    xb_array_get(walk.v.p, 0, &xb_array_items(a)[0]);
+    xb_array_items(a)[1] = *list;
     xb_gc_write(a);
     xb_set_array(list, a);
   }
@@ -391,8 +393,8 @@ static void add_continuation(xb_ctx *ctx, const xb_item *antecedent, const xb_it
     }
     xb_array *a = xb_array_alloc(2); /* `a`, on the stack, stays where it is */
     xb_set_array(&node, a);
-    a->items[0] = *target;
-    a->items[1] = kept;
+    xb_array_items(a)[0] = *target;
+    xb_array_items(a)[1] = kept;
     xb_gc_write(a);
     xb_share(&node);
     xb_set_int(&links, (int64_t)((live << 32) | (pushed_since + 1)));
@@ -694,7 +696,7 @@ static void task_error(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
 static void run_task_new(xb_ctx *ctx, xb_item *ret, uint32_t state, uint32_t argc, const xb_item *argv) {
   xb_object *t = task_new(ret, K_RUN, state); /* `t`, on the stack, stays where it is */
   xb_array *work = xb_array_alloc(argc);
-  memcpy(work->items, argv, argc * sizeof *argv);
+  memcpy(xb_array_items(work), argv, argc * sizeof *argv);
   xb_gc_write_items(work, 0, argc);
   xb_set_array(&t->vars[V_WORK], work);
   xb_gc_write(t);
@@ -1159,9 +1161,9 @@ void xbf_TASKWORKERS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   uint32_t alive, runAtOnce, most;
   xb_sched_workers(&alive, &runAtOnce, &most);
   xb_array *a = xb_array_alloc(3);
-  xb_set_int(&a->items[0], alive);
-  xb_set_int(&a->items[1], runAtOnce);
-  xb_set_int(&a->items[2], most);
+  xb_set_int(&xb_array_items(a)[0], alive);
+  xb_set_int(&xb_array_items(a)[1], runAtOnce);
+  xb_set_int(&xb_array_items(a)[2], most);
   xb_set_array(ret, a);
 }
 

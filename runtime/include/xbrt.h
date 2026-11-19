@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 52u
+#define XB_ABI_VERSION 53u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -133,16 +133,40 @@ enum {
 };
 #define XB_PENDING_UNWIND (XB_PENDING_BREAK | XB_PENDING_QUIT | XB_PENDING_TRAP | XB_PENDING_FAIL)
 
-/* [ABI] An array: `len` items at `items`, which start in the same
+/* [ABI] An array: `len` elements at `data`, which start in the same
  * allocation (`inline_items`); when it grows past that, they move to an
- * object of their own. Compiled code reads `len` and `items` to access
- * elements in place. */
+ * object of their own. That storage always has room for `cap` items, and
+ * the form of the elements, bits XB_GC_STATE_ELEMS of the array's GC state
+ * byte (xb_gc_write below), says how they are stored in it:
+ * - XB_ELEMS_ITEMS: as items, any values;
+ * - XB_ELEMS_NIL: not at all, every element is NIL;
+ * - XB_ELEMS_LOGICAL: one byte each, 0 for NIL, XB_ELEMS_FALSE, XB_ELEMS_TRUE;
+ * - XB_ELEMS_INT: an int64_t each, XB_ELEMS_INT_NIL for NIL.
+ * The compact forms hold only items whose header word is their type's with no
+ * width or decimals (xb_header_word( type, 0, 0 )): NIL, a logical, an
+ * integer other than XB_ELEMS_INT_NIL. A store of any other value turns the
+ * array into one of items first, in place (the room is there: it allocates
+ * nothing); nothing turns it back. A new array of the program starts as
+ * XB_ELEMS_NIL, which the first value stored in it makes logical, integer or
+ * items; the runtime's own arrays, and every array other threads may reach,
+ * hold items. Compiled code reads `len`, `data` and the state byte to access
+ * elements in place: one test of the byte tells a local array of items (the
+ * usual one) from all the others. */
+enum {
+  XB_ELEMS_ITEMS   = 0,
+  XB_ELEMS_NIL     = 1,
+  XB_ELEMS_LOGICAL = 2,
+  XB_ELEMS_INT     = 3,
+};
+#define XB_ELEMS_INT_NIL INT64_MIN
+#define XB_ELEMS_FALSE   1 /* XB_ELEMS_LOGICAL's bytes; 0 is NIL */
+#define XB_ELEMS_TRUE    2
 typedef struct xb_array xb_array;
 #ifndef __cplusplus
 struct xb_array {
   size_t   len;
   size_t   cap;
-  xb_item *items;
+  void    *data;
   xb_item  inline_items[];
 };
 #endif
@@ -288,11 +312,11 @@ int32_t  xb_pending_gc(xb_ctx *ctx);
 
 /* The layout the module was compiled for: offsets of xb_str.data,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
- * xb_ctx.stack_limit, xb_array.items (after len and cap), xb_ref.value (after coll and index),
+ * xb_ctx.stack_limit, xb_array.data (after len and cap), xb_ref.value (after coll and index),
  * xb_hash.entries (after its five counts) and xb_object.vars (after cls and nvars). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
-                      uint32_t ctx_stack_limit_offset, uint32_t array_items_offset, uint32_t ref_value_offset,
+                      uint32_t ctx_stack_limit_offset, uint32_t array_data_offset, uint32_t ref_value_offset,
                       uint32_t hash_entries_offset, uint32_t object_vars_offset);
 /* A frame (its address) below the context's stack_limit: xb_stack_deep gives
  * 1 when that limit was only the mark of a deep stack (core/ctx.c), whose
@@ -371,6 +395,11 @@ int32_t  xb_cond_error(xb_ctx *ctx, const xb_item *a);
 void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems);
 void     xb_op_index(xb_ctx *ctx, xb_item *r, const xb_item *base, const xb_item *idx);
 void     xb_op_index_set(xb_ctx *ctx, const xb_item *base, const xb_item *idx, const xb_item *value);
+/* `v` into element `index` (0-based, within its length) of a local array whose form does not hold it in place (one of
+ * NILs, or a compact one given another value): the array takes the form that holds it first, in place, and the store
+ * gets its write barrier. Compiled code calls it from the store's inline path; it allocates nothing, runs no code of
+ * the program and shares nothing. */
+void     xb_array_store(xb_array *a, size_t index, const xb_item *v);
 /* A hash literal: `n` keys and values alternating in `kv` (2n consecutive
  * frame slots); a key that is not a string, a number or a date is an error. */
 void     xb_hash_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *kv);
@@ -919,6 +948,9 @@ static inline void xb_set_ptr(xb_item *it, xb_type type, void *p) {
 #define XB_GC_STATE_OLD      1u   /* bit: survived a collection */
 #define XB_GC_STATE_RECORDED 2u   /* bit: in the remembered set, to be traced whole */
 #define XB_GC_STATE_SHARED   0x20u /* bit: reachable by more than one flow (docs/concurrency.md) */
+#define XB_GC_STATE_ELEMS_SHIFT 6u
+#define XB_GC_STATE_ELEMS_MASK 3u
+#define XB_GC_STATE_ELEMS    (XB_GC_STATE_ELEMS_MASK << XB_GC_STATE_ELEMS_SHIFT) /* bits: an array's form */
 void xb_gc_remember(void *obj);
 /* The barrier's test on an object's state byte: an old object not yet recorded is recorded. */
 static inline int xb_gc_needs_record(uint8_t state) {

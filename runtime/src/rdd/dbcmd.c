@@ -276,15 +276,16 @@ void xbf_DBSTRUCT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_array(ret, list);
   for (uint32_t k = 0; k < n; ++k) {
     xb_array *row = xb_array_alloc(4);
-    xb_set_array(&list->items[k], row);
+    xb_set_array(&xb_array_items(list)[k], row);
     xb_gc_write_item(list, k);
     const xb_field_info *fi = &a->fields[k];
-    xb_set_str(&row->items[0], xb_str_new(fi->name, strlen(fi->name)));
+    xb_item *cols = xb_array_items(row);
+    xb_set_str(&cols[0], xb_str_new(fi->name, strlen(fi->name)));
     xb_gc_write_item(row, 0);
-    xb_set_str(&row->items[1], xb_str_new(&fi->type, 1));
+    xb_set_str(&cols[1], xb_str_new(&fi->type, 1));
     xb_gc_write_item(row, 1);
-    xb_set_int(&row->items[2], fi->len);
-    xb_set_int(&row->items[3], fi->dec);
+    xb_set_int(&cols[2], fi->len);
+    xb_set_int(&cols[3], fi->dec);
   }
 }
 
@@ -295,16 +296,18 @@ int xb_db_struct(const xb_item *spec, xb_field_info **out, uint32_t *count) {
   xb_field_info *fields = calloc(n ? n : 1, sizeof *fields);
   if (!fields) xb_gc_fatal("out of memory");
   for (size_t k = 0; ok && k < n; ++k) {
-    const xb_array *row = list->items[k].type == XB_T_ARRAY ? list->items[k].v.p : NULL;
-    ok = row && row->len >= 3 && row->items[0].type == XB_T_STRING && row->items[1].type == XB_T_STRING &&
-         row->items[1].v.s->len > 0 && xb_is_number(&row->items[2]);
+    const xb_item *it = &xb_array_items(list)[k];
+    const xb_array *row = it->type == XB_T_ARRAY ? it->v.p : NULL;
+    const xb_item *cols = row ? xb_array_items(row) : NULL;
+    ok = row && row->len >= 3 && cols[0].type == XB_T_STRING && cols[1].type == XB_T_STRING && cols[1].v.s->len > 0 &&
+         xb_is_number(&cols[2]);
     if (!ok) break;
     xb_field_info *fi = &fields[k];
-    const xb_str *fname = row->items[0].v.s;
+    const xb_str *fname = cols[0].v.s;
     for (size_t i = 0; i < fname->len && i < XB_FIELD_NAME_SIZE - 1; ++i) fi->name[i] = xb_ascii_upper(fname->data[i]);
-    fi->type = xb_ascii_upper(row->items[1].v.s->data[0]);
-    int64_t len = xb_num_to_i64(&row->items[2]);
-    int64_t dec = row->len > 3 && xb_is_number(&row->items[3]) ? xb_num_to_i64(&row->items[3]) : 0;
+    fi->type = xb_ascii_upper(cols[1].v.s->data[0]);
+    int64_t len = xb_num_to_i64(&cols[2]);
+    int64_t dec = row->len > 3 && xb_is_number(&cols[3]) ? xb_num_to_i64(&cols[3]) : 0;
     ok = fi->name[0] && len >= 0 && len <= UINT32_MAX && dec >= 0 && dec <= UINT32_MAX;
     fi->len = ok ? (uint32_t)len : 0;
     fi->dec = ok ? (uint32_t)dec : 0;
@@ -667,7 +670,7 @@ void xbf_DBRLOCKLIST(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   uint32_t n = a ? a->nlocks : 0;
   xb_array *list = xb_array_alloc(n);
   xb_set_array(ret, list);
-  for (uint32_t k = 0; k < n; ++k) xb_set_int(&list->items[k], a->locks[k]);
+  for (uint32_t k = 0; k < n; ++k) xb_set_int(&xb_array_items(list)[k], a->locks[k]);
 }
 
 /* NetErr( [lNew] ): whether the last USE or APPEND failed for another user's lock; lNew sets it. */

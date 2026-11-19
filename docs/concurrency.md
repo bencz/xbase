@@ -445,13 +445,15 @@ environments, and the variables made in them, come with `ThreadStart`) and the f
 - **Access.** A shared object's items are read under its sequence counter (read, check, retry: no lock, no write) and
   written, grown and shrunk under its lock: those of its stripe, one of a table chosen by its address, whose lock word a
   contended waiter sleeps on in the parking lot. Compiled code's in-place reads and writes (an array's elements and
-  length, a hash's keys in `FOR EACH`, a cell's value, a loop's reference, an object's instance variable at a send)
-  test the header bit first (one byte loaded
-  and a branch, predicted; a fast loop that makes no call tests it once, before it, for an array it does not change:
-  [compiler.md](compiler.md#object-emission)) and call the runtime when it is set
-  ([compiler.md](compiler.md#xir-to-llvm)). Strings are immutable; a shared string never grows in place (its append flag
-  is cleared when it is shared). Read-only operations that reorganize a hash (compaction, the position tree) run under
-  the lock when it is shared.
+  length, a hash's keys in `FOR EACH`, a cell's value, a loop's reference, an object's instance variable at a send) test
+  the header bit first (one byte loaded and a branch, predicted; a fast loop that makes no call tests it once, before
+  it, for an array it does not change: [compiler.md](compiler.md#object-emission)) and call the runtime when it is set
+  ([compiler.md](compiler.md#xir-to-llvm)). A shared array holds items: one of a compact form (bytes or words of
+  logicals and integers, [runtime.md](runtime.md#values)) turns into items in place as it is shared, before another flow
+  can reach it (the arrays of the program's storage at its publication, while the other threads are stopped), so only
+  the flow that reaches a local array changes its form while that flow runs. Strings are immutable; a shared string
+  never grows in place (its append flag is cleared when it is shared). Read-only operations that reorganize a hash
+  (compaction, the position tree) run under the lock when it is shared.
 - **Lifetime.** A collection happens only at safepoints, and no code holds the address of a shared object's storage
   across one: a read under the sequence counter has no safepoint inside, compiled code tests the header bit at each
   access and reads the storage's address again after every call, and the runtime's loops that run code between accesses

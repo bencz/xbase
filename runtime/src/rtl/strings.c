@@ -323,7 +323,7 @@ void xbf___SPLIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     size_t at = k + 1 < pieces ? xb_bytes_find(sep->data, n, s->data + i, s->len - i, 0) : s->len - i + 1;
     xb_str *piece = xb_str_new(s->data + i, at - 1);
     a = ret->v.p; /* the array may have moved */
-    xb_set_str(&a->items[k], piece);
+    xb_set_str(&xb_array_items(a)[k], piece);
     xb_gc_write_item(a, k);
     i += at - 1 + n;
   }

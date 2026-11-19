@@ -35,8 +35,11 @@ namespace xb {
 namespace {
 
 // An edge is cold when its branch weight is below 1/64 of the branch's
-// total: the lowering weights its slow paths as unlikely.
+// total: the lowering weights its slow paths as unlikely. A form test
+// (kFormTest) is weighted for the layout of the path of items alone: an array
+// of a compact form takes its other side on every pass, no cold path.
 bool coldEdge(const Instruction &term, unsigned succ) {
+  if (term.getMetadata(term.getContext().getMDKindID(kFormTest))) return false;
   SmallVector<uint32_t, 4> weights;
   if (!extractBranchWeights(term, weights) || weights.size() != term.getNumSuccessors()) return false;
   uint64_t total = 0;
@@ -322,7 +325,8 @@ bool computableOnEntry(const Loop &loop, const DominatorTree &dt, const BasicBlo
   return true;
 }
 
-// A branch of the loop whose condition is computable on entry and whose cold successor `cold` is outside the loop.
+// A branch of the loop whose condition is computable on entry and whose cold successor `cold` is outside the loop, or
+// a test of an array's form (kFormTest), whose `cold` successor is the path of a compact form.
 struct InvariantExit {
   BranchInst *br;
   unsigned cold;
@@ -333,9 +337,18 @@ std::vector<InvariantExit> invariantColdExits(const Loop &loop, const DominatorT
                                               std::vector<StateLoad> &states) {
   std::vector<InvariantExit> out;
   std::unordered_set<const LoadInst *> used;
+  unsigned formKind = pre->getContext().getMDKindID(kFormTest);
   for (BasicBlock *b : loop.blocks()) {
     auto *br = dyn_cast<BranchInst>(b->getTerminator());
     if (!br || !br->isConditional()) continue;
+    if (br->getMetadata(formKind)) {
+      std::unordered_set<const LoadInst *> reads;
+      if (computableOnEntry(loop, dt, pre, states, br->getCondition(), reads)) {
+        out.push_back({br, 1});
+        used.insert(reads.begin(), reads.end());
+      }
+      continue;
+    }
     for (unsigned k = 0; k < 2; ++k)
       if (!loop.contains(br->getSuccessor(k)) && loop.contains(br->getSuccessor(1 - k)) && coldEdge(*br, k)) {
         std::unordered_set<const LoadInst *> reads;
@@ -356,11 +369,13 @@ std::vector<InvariantExit> invariantColdExits(const Loop &loop, const DominatorT
 // otherwise, where the exits become branches to their other side. A value of the loop used past it becomes the join
 // of the loop's and the clone's.
 void version(Function &f, Loop &loop, BasicBlock *pre, const std::vector<StateLoad> &states,
-             const std::vector<InvariantExit> &exits, std::unordered_set<const BasicBlock *> &copies) {
+             const std::vector<InvariantExit> &exits, std::unordered_set<const BasicBlock *> &copies,
+             ValueToValueMapTy *mapped = nullptr) {
   std::vector<BasicBlock *> blocks(loop.block_begin(), loop.block_end());
   SmallVector<BasicBlock *, 8> exitBlocks;
   loop.getUniqueExitBlocks(exitBlocks);
-  ValueToValueMapTy vmap;
+  ValueToValueMapTy own;
+  ValueToValueMapTy &vmap = mapped ? *mapped : own;
   cloneLoop(f, blocks, vmap, ".exact");
   BasicBlock *header = loop.getHeader();
   auto *copyHeader = cast<BasicBlock>(vmap[header]);
@@ -464,7 +479,60 @@ void version(Function &f, Loop &loop, BasicBlock *pre, const std::vector<StateLo
   }
 }
 
+// The copies of a loop's blocks that version() made.
+std::vector<BasicBlock *> copyBlocks(const Loop &loop, ValueToValueMapTy &vmap) {
+  std::vector<BasicBlock *> out;
+  for (BasicBlock *b : loop.blocks())
+    if (auto it = vmap.find(b); it != vmap.end()) out.push_back(cast<BasicBlock>(it->second));
+  return out;
+}
+
+// Whether the loop tests an array's form (kFormTest).
+bool hasFormTest(const Loop &loop) {
+  unsigned formKind = loop.getHeader()->getContext().getMDKindID(kFormTest);
+  for (BasicBlock *b : loop.blocks())
+    if (b->getTerminator()->getMetadata(formKind)) return true;
+  return false;
+}
+
 } // namespace
+
+bool unswitchFormTests(Function &f, FunctionAnalysisManager &) {
+  std::unordered_set<const BasicBlock *> copies;
+  uint64_t budget = f.getInstructionCount(), grown = 0;
+  bool changed = false;
+  unsigned formKind = f.getContext().getMDKindID(kFormTest);
+  while (true) {
+    DominatorTree dt(f);
+    LoopInfo li(dt);
+    Loop *chosen = nullptr;
+    BranchInst *test = nullptr;
+    for (Loop *l : li.getLoopsInPreorder()) {
+      auto *br = dyn_cast<BranchInst>(l->getHeader()->getTerminator());
+      bool hoisted = false; // a condition computed in the loop from what it does not change goes out first
+      if (!l->isInnermost() || copies.count(l->getHeader()) || !br || !br->isConditional() ||
+          !br->getMetadata(formKind) || !l->contains(br->getSuccessor(0)) || !l->contains(br->getSuccessor(1)) ||
+          !l->isSafeToClone() ||
+          !l->getLoopPreheader() || !l->makeLoopInvariant(br->getCondition(), hoisted))
+        continue;
+      changed |= hoisted;
+      uint64_t size = 0;
+      for (BasicBlock *b : l->blocks()) size += b->size();
+      if (size > kMaxLoopInstructions || grown + size > budget) continue;
+      chosen = l;
+      test = br;
+      grown += size;
+      break;
+    }
+    if (!chosen) return changed;
+    BasicBlock *pre = chosen->getLoopPreheader();
+    ValueToValueMapTy vmap;
+    version(f, *chosen, pre, {}, {{test, 1}}, copies, &vmap);
+    // The copy's tests are plain branches: it runs when the array is compact on entry, and is versioned no more.
+    for (BasicBlock *b : copyBlocks(*chosen, vmap)) b->getTerminator()->setMetadata(formKind, nullptr);
+    changed = true;
+  }
+}
 
 bool versionInvariantColdExits(Function &f, FunctionAnalysisManager &) {
   // One loop at a time, outer loops first, with the analyses made again: a version changes the blocks around the loop.
@@ -483,6 +551,10 @@ bool versionInvariantColdExits(Function &f, FunctionAnalysisManager &) {
         continue;
       done.insert(l->getHeader());
       BasicBlock *pre = l->getLoopPreheader();
+      if (!pre && hasFormTest(*l)) { // entered from several blocks: one is made, which they all go through
+        pre = InsertPreheaderForLoop(l, &dt, &li, nullptr, /*PreserveLCSSA=*/false);
+        changed |= pre != nullptr;
+      }
       uint64_t size = 0;
       for (BasicBlock *b : l->blocks()) size += b->size();
       if (!pre || !isa<BranchInst>(pre->getTerminator()) || size > kMaxLoopInstructions || grown + size > budget)

@@ -231,7 +231,7 @@ static int call_init(xb_ctx *ctx, cls *c) {
   int ok = !(xb_pending_get(ctx) & XB_PENDING_UNWIND);
   if (ok && values.type == XB_T_ARRAY) {
     const xb_array *a = values.v.p;
-    for (uint32_t i = 0; i < def->nvars + def->nclassVars && i < a->len; ++i) c->initial[i] = a->items[i];
+    for (uint32_t i = 0; i < def->nvars + def->nclassVars && i < a->len; ++i) c->initial[i] = xb_array_items(a)[i];
   }
   xb_gc_root_pop(ctx, 1);
   return ok;

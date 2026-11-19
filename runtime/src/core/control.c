@@ -74,7 +74,7 @@ static void gather(xb_ctx *ctx, xb_item *r, const xb_item *e) {
   while (move_next(ctx, &from) && current(ctx, &element, &from)) {
     xb_array *a = r->v.p;
     xb_array_resize(a, a->len + 1);
-    a->items[a->len - 1] = element;
+    xb_array_items(a)[a->len - 1] = element;
     xb_gc_write_item(a, a->len - 1);
   }
   xb_gc_root_pop(ctx, 2);

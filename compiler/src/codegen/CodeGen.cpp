@@ -2,6 +2,7 @@
 #include "codegen/CodeGen.h"
 #include "codegen/LoopSplit.h"
 #include "codegen/LoopPolls.h"
+#include "codegen/MemoryTags.h"
 
 #include "xbrt.h" // constants only (type tags, ABI version) - never layouts
 
@@ -46,7 +47,7 @@ void CodeGen::initTypes() {
   if (dl_.getTypeAllocSize(rep) != unionSize_)
     diag_.error({}, "unsupported target: pointer wider than 64 bits");
 
-  itemTy_ = StructType::create(ctx_, {i32_, i16_, i16_, rep}, "xb_item");
+  itemTy_ = StructType::create(ctx_, {i32_, i16_, i16_, rep}, kItemTypeName);
   itemSize_ = dl_.getTypeAllocSize(itemTy_);
   itemAlign_ = dl_.getABITypeAlign(itemTy_);
 
@@ -72,6 +73,7 @@ void CodeGen::initTypes() {
     MDNode *type = md.createTBAAScalarTypeNode(name, root);
     tbaa_[(size_t)m] = md.createTBAAStructTagNode(type, type, 0);
   }
+  mod_.getOrInsertNamedMetadata(kItemTagName)->addOperand(tbaa_[(size_t)Mem::Item]); // TagItemMemsets
   ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, ptrTy_}, "xb_ctx_head"); // the [ABI] fields of xb_ctx
   nilItem_ = new GlobalVariable(mod_, itemTy_, true, GlobalValue::InternalLinkage, Constant::getNullValue(itemTy_),
                                 "xb.nil");
@@ -116,6 +118,7 @@ void CodeGen::initTypes() {
   rtIndex_ = rt("xb_op_index", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtIndexSet_ = rt("xb_op_index_set", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtWriteItem_ = rt("xb_gc_write_item", voidTy, {ptrTy_, intPtrTy_});
+  rtArrayStore_ = rt("xb_array_store", voidTy, {ptrTy_, intPtrTy_, ptrTy_});
   rtWriteItems_ = rt("xb_gc_write_items", voidTy, {ptrTy_, intPtrTy_, intPtrTy_});
   rtCellOf_ = rt("xb_cell_of", ptrTy_, {ptrTy_, ptrTy_, i32_});
   rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, i32_});
@@ -176,10 +179,10 @@ void CodeGen::initTypes() {
   rtObjectSet_ = rt("xb_op_object_set", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
-  for (FunctionCallee c : {rtWriteItem_, rtWriteItems_, rtGcRemember_})
+  for (FunctionCallee c : {rtWriteItem_, rtWriteItems_, rtGcRemember_, rtArrayStore_})
     cast<Function>(c.getCallee())->addFnAttr(kBarrierAttr);
-  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtWriteItems_, rtGcRemember_, rtCellOf_, rtBlockNew_, rtRootPush_,
-                           rtRootPop_, rtArrayNew_,
+  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtWriteItems_, rtGcRemember_, rtArrayStore_, rtCellOf_,
+                           rtBlockNew_, rtRootPush_, rtRootPop_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
                            rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_,
                            rtAbiCheck_, rtModuleRegister_, rtMvMark_, rtMvRelease_, rtMvPrivate_, rtMvPublic_,
@@ -726,7 +729,7 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t ctxFrames = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxFrames);
   uint64_t ctxDecimals = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxDecimals);
   uint64_t ctxStackLimit = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxStackLimit);
-  uint64_t arrayItems = dl_.getStructLayout(arrayTy_)->getElementOffset(ArrayItems);
+  uint64_t arrayData = dl_.getStructLayout(arrayTy_)->getElementOffset(ArrayData);
   uint64_t refValue = dl_.getStructLayout(refTy_)->getElementOffset(RefValue);
   uint64_t hashEntries = dl_.getStructLayout(hashTy_)->getElementOffset(HashEntries);
   uint64_t objectVars = dl_.getStructLayout(objectTy_)->getElementOffset(ObjectVars);
@@ -734,7 +737,7 @@ void CodeGen::genEntry(const xir::Function &start) {
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
                               ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
                               ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, ctxStackLimit),
-                              ConstantInt::get(i32_, arrayItems),
+                              ConstantInt::get(i32_, arrayData),
                               ConstantInt::get(i32_, refValue), ConstantInt::get(i32_, hashEntries),
                               ConstantInt::get(i32_, objectVars)});
   b_.CreateCall(rtProgramRun_, {ctx, functions_.at(&start), fn->getArg(1), fn->getArg(2)});

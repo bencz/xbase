@@ -34,7 +34,7 @@ void xb_gen_new(xb_ctx *ctx, xb_item *r, xb_func resume, uint32_t argc, const xb
   xb_array *frame = xb_array_alloc((uint64_t)argc + 1); /* slot 0, the enumerator itself, is the resume's argument */
   xb_set_array(&g->vars[XB_GEN_FRAME], frame);
   xb_gc_write(g);
-  if (argc) memcpy(frame->items + 1, argv, argc * sizeof *argv);
+  if (argc) memcpy(xb_array_items(frame) + 1, argv, argc * sizeof *argv);
   xb_gc_write_items(frame, 1, (size_t)argc + 1);
 }
 
@@ -57,13 +57,13 @@ void xb_frame_store_slow(xb_ctx *ctx, const xb_item *holder, uint32_t k, const x
   if (frame->len < nslots) xb_array_resize_any(ctx, frame, nslots);
   if (!xb_is_shared(o)) { /* its frame too (only it reaches the frame): in place, as items built in locals and then
                             * copied would stall the copies' loads */
-    xb_frame_copy(frame->items, slots, nslots);
+    xb_frame_copy(xb_array_items(frame), slots, nslots);
     xb_gc_write_items(frame, 1, nslots);
     return;
   }
   for (uint32_t s = 1; s < nslots; ++s) xb_share(&slots[s]); /* before another thread can reach them */
   xb_seq_lock(frame);
-  for (uint32_t s = 1; s < nslots; ++s) xb_seq_store(&frame->items[s], &slots[s]);
+  for (uint32_t s = 1; s < nslots; ++s) xb_seq_store(&xb_array_items(frame)[s], &slots[s]);
   xb_gc_write_items(frame, 1, nslots);
   xb_seq_unlock(frame);
 }

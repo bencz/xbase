@@ -23,7 +23,7 @@ int main(void) {
     for (uint32_t k = 0; k < OBJECTS; ++k) {
       xb_str *s = xb_str_new("a block's worth of strings", 24 + k % 9);
       a = keep.v.p; /* the array may have moved */
-      xb_set_str(&a->items[k], s);
+      xb_set_str(&xb_array_items(a)[k], s);
       xb_gc_write_item(a, k);
     }
     size_t peak = xb_gc_heap_bytes();

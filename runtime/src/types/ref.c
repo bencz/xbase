@@ -180,7 +180,7 @@ void xb_ref_load(xb_ctx *ctx, uint32_t type, void *target, xb_item *dst) {
     if (ref->coll.type == XB_T_ARRAY) {
       const xb_array *a = ref->coll.v.p;
       if (!xb_is_shared(a) && ref->index >= 1 && (uint64_t)ref->index <= a->len) {
-        *dst = a->items[ref->index - 1];
+        xb_array_get(a, (size_t)(ref->index - 1), dst); /* in its form: a read turns nothing */
         return;
       }
     } else if (ref->coll.type != XB_T_HASH) {

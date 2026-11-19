@@ -234,7 +234,7 @@ void xbf_THREADSTART(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   xb_set_object(ret, xb_object_new(&thread_class)); /* rooted there from now on */
   xb_array *work = xb_array_alloc(argc);
-  memcpy(work->items, argv, argc * sizeof *argv);
+  memcpy(xb_array_items(work), argv, argc * sizeof *argv);
   xb_gc_write_items(work, 0, argc);
   xb_object *t = ret->v.p;
   xb_set_array(&t->vars[T_WORK], work);
@@ -315,7 +315,7 @@ static int waiter_gone(void *arg, const xb_item *w) {
   if (w->type != XB_T_ARRAY) return 1;
   if (!xb_ring_pair_gone(NULL, w)) return 0;
   const waits_of *of = arg;
-  if (of->k->flows != NO_FLOWS) flow_waiters(NULL, of->o, of->k, (uint64_t)((xb_array *)w->v.p)->items[W_FLOW].v.i, 0);
+  if (of->k->flows != NO_FLOWS) flow_waiters(NULL, of->o, of->k, (uint64_t)xb_array_items(w->v.p)[W_FLOW].v.i, 0);
   return 1;
 }
 
@@ -327,14 +327,14 @@ static void grant_owner(const xb_item *o, const waits *k, uint64_t owner, xb_cla
   for (uint32_t i = 0; i < xb_ring_count(o, k->ring); ++i) {
     const xb_item *e = xb_ring_at(o, k->ring, i);
     if (e->type != XB_T_ARRAY) continue;
-    const xb_array *w = e->v.p;
-    if ((uint64_t)w->items[W_FLOW].v.i != owner || xb_task_is_final(&w->items[W_TASK]) || !k->take(o, owner)) continue;
-    if (xb_task_claim(&w->items[W_TASK])) {
+    xb_item *w = xb_array_items(e->v.p);
+    if ((uint64_t)w[W_FLOW].v.i != owner || xb_task_is_final(&w[W_TASK]) || !k->take(o, owner)) continue;
+    if (xb_task_claim(&w[W_TASK])) {
       c->held = *e;
       xb_ring_set(o, k->ring, i, &nil);
       flow_waiters(NULL, o, k, owner, 0);
-      w = c->held.v.p;
-      xb_claims_add(c, &w->items[W_TASK], &w->items[W_VALUE]);
+      w = xb_array_items(c->held.v.p);
+      xb_claims_add(c, &w[W_TASK], &w[W_VALUE]);
     } else {
       k->give_back(o, owner); /* it ended as it was granted */
     }
@@ -355,15 +355,15 @@ static void grant(xb_ctx *ctx, const xb_item *o, const waits *k) {
       xb_ring_pop(o, k->ring, &c.held);
       continue;
     }
-    const xb_array *w = e->v.p;
-    uint64_t flow = (uint64_t)w->items[W_FLOW].v.i;
-    int gone = xb_task_is_final(&w->items[W_TASK]);
+    xb_item *w = xb_array_items(e->v.p);
+    uint64_t flow = (uint64_t)w[W_FLOW].v.i;
+    int gone = xb_task_is_final(&w[W_TASK]);
     if (!gone && !k->take(o, flow)) break; /* none free: the next release grants again */
     xb_ring_pop(o, k->ring, &c.held);
     if (k->flows != NO_FLOWS) flow_waiters(NULL, o, k, flow, 0);
-    w = c.held.v.p;
+    w = xb_array_items(c.held.v.p);
     if (gone) continue;
-    if (xb_task_claim(&w->items[W_TASK])) xb_claims_add(&c, &w->items[W_TASK], &w->items[W_VALUE]);
+    if (xb_task_claim(&w[W_TASK])) xb_claims_add(&c, &w[W_TASK], &w[W_VALUE]);
     else k->give_back(o, flow); /* it ended as it was granted */
   }
   if (k->flows != NO_FLOWS && xb_ring_count(o, k->ring)) {
@@ -406,9 +406,10 @@ static int wait_async(xb_ctx *ctx, xb_item *r, const xb_item *o, const waits *k,
   if (ok) {
     xb_array *w = xb_array_alloc(W_COUNT_); /* `w`, on the stack, stays where it is */
     xb_set_array(&waiter, w);
-    w->items[W_TASK] = *r;
-    xb_set_int(&w->items[W_FLOW], (int64_t)self);
-    w->items[W_VALUE] = *granted;
+    xb_item *items = xb_array_items(w);
+    items[W_TASK] = *r;
+    xb_set_int(&items[W_FLOW], (int64_t)self);
+    items[W_VALUE] = *granted;
     xb_gc_write(w);
     xb_share(&waiter);
     waits_of of = {o, k};

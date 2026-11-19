@@ -725,7 +725,7 @@ static uint32_t add_const(fn *f, const xb_item *value) {
   xb_array *a = f->self.v.p;
   size_t k = a->len;
   xb_array_resize(a, k + 1);
-  a->items[k] = *value;
+  xb_array_items(a)[k] = *value;
   xb_gc_write_item(a, k);
   return (uint32_t)k;
 }
@@ -733,7 +733,7 @@ static uint32_t add_string(fn *f, const char *s, size_t len) {
   xb_array *a = f->self.v.p;
   size_t k = a->len;
   xb_array_resize(a, k + 1); /* room first: the string is reachable as soon as it exists */
-  xb_set_str(&a->items[k], xb_str_new(s, len));
+  xb_set_str(&xb_array_items(a)[k], xb_str_new(s, len));
   xb_gc_write_item(a, k);
   return (uint32_t)k;
 }
@@ -1074,7 +1074,7 @@ static void fn_finish(gen *g, fn *f, xb_item *out) {
   word(&header, f->nparams + f->maxDepth + 1); /* + the scratch item */
   bytes(&header, f->code, f->len);
   xb_array *a = f->self.v.p;
-  xb_set_str(&a->items[0], xb_str_new((const char *)header.code, header.len));
+  xb_set_str(&xb_array_items(a)[0], xb_str_new((const char *)header.code, header.len));
   xb_gc_write_item(a, 0);
   *out = f->self;
   xb_gc_root_pop(g->ctx, 1);

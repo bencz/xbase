@@ -335,10 +335,9 @@ static void delimiters(text *t, const xb_item *v) {
     t->delim = s->len ? s->data[0] : 0;
   } else if (v->type == XB_T_ARRAY) {
     const xb_array *arr = v->v.p;
-    if (arr->len > 0 && arr->items[0].type == XB_T_STRING)
-      t->delim = arr->items[0].v.s->len ? arr->items[0].v.s->data[0] : 0;
-    if (arr->len > 1 && arr->items[1].type == XB_T_STRING && arr->items[1].v.s->len)
-      t->sep = arr->items[1].v.s->data[0];
+    const xb_item *parts = xb_array_items(arr);
+    if (arr->len > 0 && parts[0].type == XB_T_STRING) t->delim = parts[0].v.s->len ? parts[0].v.s->data[0] : 0;
+    if (arr->len > 1 && parts[1].type == XB_T_STRING && parts[1].v.s->len) t->sep = parts[1].v.s->data[0];
   }
 }
 

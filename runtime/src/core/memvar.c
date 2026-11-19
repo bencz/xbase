@@ -770,13 +770,13 @@ void xb_memvar_capture(xb_ctx *ctx, xb_item *r) {
     const bslot *s = &b->slots[i];
     if (s->id == NO_ID || s->cell.type != XB_T_CELL) continue;
     if (xb_atomic_load32(&spelling_of(s->id)->permanent, XB_RELAXED)) {
-      xb_set_int(&a->items[k], s->id);
+      xb_set_int(&xb_array_items(a)[k], s->id);
     } else { /* its text: the snapshot holds no number, which may go to another name once the bindings let it go */
       size_t len;
       const char *name = xb_memvar_name(s->id, &len);
-      xb_set_str(&a->items[k], xb_str_new(name, len)); /* `b` does not change: nothing runs while it is read */
+      xb_set_str(&xb_array_items(a)[k], xb_str_new(name, len)); /* `b` does not change: nothing runs while it is read */
     }
-    a->items[k + 1] = s->cell;
+    xb_array_items(a)[k + 1] = s->cell;
     k += 2;
     xb_gc_write(a);
   }

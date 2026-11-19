@@ -160,8 +160,9 @@ void xb_clone_deep(xb_ctx *ctx, xb_item *ret, const xb_item *root) {
         if (clone_item(&m, &h->entries[i].value)) xb_gc_write(h);
     } else {
       xb_array *a = v.copy.v.p;
+      if (xb_array_elems(a) != XB_ELEMS_ITEMS) continue; /* a compact form holds no array or hash: the copy keeps it */
       for (size_t i = 0; i < a->len; ++i)
-        if (clone_item(&m, &a->items[i])) xb_gc_write_item(a, i);
+        if (clone_item(&m, &xb_array_items(a)[i])) xb_gc_write_item(a, i);
     }
   }
   xb_gc_release();

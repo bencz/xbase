@@ -23,7 +23,7 @@ static xb_array *make_dims(xb_ctx *ctx, uint32_t ndims, const xb_item *dims, xb_
         return NULL;
       }
       a = holder->v.p;
-      a->items[i] = sub;
+      xb_array_items(a)[i] = sub;
       xb_gc_write_item(a, (size_t)i); /* `a` may have aged while the sub-array was allocated */
     }
     xb_gc_root_pop(ctx, 1);
@@ -213,9 +213,10 @@ static void order_values(const xb_ctx *ctx, size_t *pos, size_t first, size_t n,
 static void place(xb_array *a, const size_t *pos, size_t first, size_t n) {
   xb_item *vals = malloc(n * sizeof *vals + 1);
   if (!vals) xb_gc_fatal("out of memory");
-  for (size_t k = 0; k < n; ++k) vals[k] = a->items[pos[k]];
+  xb_item *items = xb_array_items(a);
+  for (size_t k = 0; k < n; ++k) vals[k] = items[pos[k]];
   for (size_t k = 0; k < n; ++k) {
-    xb_seq_store(&a->items[first + k], &vals[k]);
+    xb_seq_store(&items[first + k], &vals[k]);
     xb_gc_write_item(a, first + k); /* a young element may move to another card */
   }
   free(vals);
@@ -348,7 +349,7 @@ static void sort_locked(const xb_ctx *ctx, uint32_t argc, const xb_item *argv, x
   size_t first = 0, n = sort_range(argc, argv, a->len, &first);
   if (n) {
     size_t *pos = positions(first, n);
-    order_values(ctx, pos, first, n, a->items);
+    order_values(ctx, pos, first, n, xb_array_items(a));
     place(a, pos, first, n);
     free(pos);
   }
@@ -391,11 +392,13 @@ static void sort_shared(xb_ctx *ctx, uint32_t argc, xb_item *argv) {
     size_t at = 0;
     xb_seq_lock(a);
     const xb_array *was = seen.v.p, *copy = args[0].v.p;
+    xb_item *items = xb_array_items(a); /* shared: items, as the snapshots */
+    const xb_item *wasItems = xb_array_items(was), *copyItems = xb_array_items(copy);
     int same = sort_range(argc, argv, a->len, &at) == n && at == first &&
-               memcmp(&a->items[first], &was->items[first], n * sizeof(xb_item)) == 0;
+               memcmp(&items[first], &wasItems[first], n * sizeof(xb_item)) == 0;
     for (size_t k = first; (same || last) && k < first + n && k < a->len; ++k) {
-      if (memcmp(&a->items[k], &was->items[k], sizeof(xb_item)) != 0) continue; /* written meanwhile */
-      xb_seq_store(&a->items[k], &copy->items[k]);
+      if (memcmp(&items[k], &wasItems[k], sizeof(xb_item)) != 0) continue; /* written meanwhile */
+      xb_seq_store(&items[k], &copyItems[k]);
       xb_gc_write_item(a, k);
     }
     xb_seq_unlock(a);
@@ -417,7 +420,7 @@ void xbf_ASORT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   size_t *pos = positions(first, n);
   xb_array *a = argv[0].v.p;
   if (argc < 4 || argv[3].type != XB_T_BLOCK) { /* no code runs: the array stays local */
-    order_values(ctx, pos, first, n, a->items);
+    order_values(ctx, pos, first, n, xb_array_items(a));
     place(a, pos, first, n);
     free(pos);
     return;

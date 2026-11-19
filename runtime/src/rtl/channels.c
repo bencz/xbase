@@ -67,9 +67,9 @@ static int deliver(const xb_item *ch, const xb_item *v, xb_claims *c) {
       return 1;
     }
     const xb_array *pair = c->held.v.p;
-    xb_item task = pair->items[0], yes;
+    xb_item task = xb_array_items(pair)[0], yes;
     if (!xb_task_claim(&task)) continue;
-    xb_object_put(pair->items[1].v.p, E_CURRENT, v);
+    xb_object_put(xb_array_items(pair)[1].v.p, E_CURRENT, v);
     xb_set_logical(&yes, 1);
     xb_claims_add(c, &task, &yes);
     return 1;
@@ -90,7 +90,7 @@ static void refill(const xb_item *ch, xb_claims *c) {
   while (xb_ring_count(ch, senders) && has_room(ch)) {
     xb_ring_pop(ch, senders, &c->held); /* the pair, which keeps its task and value */
     const xb_array *a = c->held.v.p;
-    xb_item task = a->items[0], value = a->items[1];
+    xb_item task = xb_array_items(a)[0], value = xb_array_items(a)[1];
     if (xb_task_claim(&task)) {
       xb_ring_push(ch, values, &value, NULL, NULL);
       xb_claims_add(c, &task, &yes);
@@ -188,8 +188,8 @@ static void channel_send_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *
     }
     xb_array *a = xb_array_alloc(2); /* `a`, on the stack, stays where it is */
     xb_set_array(&pair, a);
-    a->items[0] = *r;
-    a->items[1] = value;
+    xb_array_items(a)[0] = *r;
+    xb_array_items(a)[1] = value;
     xb_gc_write(a);
     xb_share(&pair);
   }
@@ -341,12 +341,12 @@ static void channel_close(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv)
         if (xb_task_claim(&c.held)) xb_claims_add(&c, &c.held, &error);
         continue;
       }
-      xb_item task = ((xb_array *)c.held.v.p)->items[0];
+      xb_item task = xb_array_items(c.held.v.p)[0];
       if (xb_task_claim(&task)) xb_claims_add(&ended, &task, &no);
     }
     while (xb_ring_count(&argv[0], senders)) {
       xb_ring_pop(&argv[0], senders, &c.held);
-      xb_item task = ((xb_array *)c.held.v.p)->items[0];
+      xb_item task = xb_array_items(c.held.v.p)[0];
       if (xb_task_claim(&task)) xb_claims_add(&c, &task, &error);
     }
   }
@@ -497,8 +497,8 @@ static void enumerator_move_next_async(xb_ctx *ctx, xb_item *r, uint32_t argc, x
     if (!mine) break; /* its token canceled it meanwhile */
     if (!xb_task_promise(ctx, r, &token, "CHANNELENUMERATOR:MOVENEXTASYNC", argc, argv)) break;
     xb_array *a = xb_array_alloc(2); /* a safepoint: `r` and the enumerator are rooted */
-    a->items[0] = *r;
-    a->items[1] = argv[0];
+    xb_array_items(a)[0] = *r;
+    xb_array_items(a)[1] = argv[0];
     xb_set_array(&pair, a);
     xb_share(&pair);
   }

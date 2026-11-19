@@ -32,7 +32,7 @@ static void graph(void) {
   }
   xb_set_array(&a, xb_array_alloc(7));
   xb_set_array(&inner, xb_array_alloc(1));
-  xb_set_str(&((xb_array *)inner.v.p)->items[0], xb_str_new("deep", 4));
+  xb_set_str(&xb_array_items(inner.v.p)[0], xb_str_new("deep", 4));
   xb_set_hash(&h, xb_hash_alloc());
   xb_set_str(&key, xb_str_new("key", 3)); /* longer than a byte: a string of one byte is static */
   xb_set_str(&val, xb_str_new("value", 5));
@@ -47,15 +47,16 @@ static void graph(void) {
   xb_op_append(ctx, &grown, &tail); /* a string with room to grow in place */
   CHECK(grown.v.s->flags & XB_STR_APPEND);
   xb_array *arr = a.v.p;
-  arr->items[0] = a; /* a cycle */
-  arr->items[1] = inner;
-  arr->items[2] = h;
-  arr->items[3] = blk;
-  arr->items[4] = grown;
-  xb_set_str(&arr->items[5], xb_str_new("x", 1)); /* static: one byte, and empty */
-  xb_set_str(&arr->items[6], xb_str_new("", 0));
+  xb_item *items = xb_array_items(arr);
+  items[0] = a; /* a cycle */
+  items[1] = inner;
+  items[2] = h;
+  items[3] = blk;
+  items[4] = grown;
+  xb_set_str(&items[5], xb_str_new("x", 1)); /* static: one byte, and empty */
+  xb_set_str(&items[6], xb_str_new("", 0));
   xb_share(&a);
-  CHECK(is_shared(&a) && is_shared(&inner) && is_shared(&((xb_array *)inner.v.p)->items[0]));
+  CHECK(is_shared(&a) && is_shared(&inner) && is_shared(&xb_array_items(inner.v.p)[0]));
   CHECK(is_shared(&h) && xb_is_shared(cell) && is_shared(&blk) && is_shared(&grown));
   CHECK(!(grown.v.s->flags & XB_STR_APPEND));
   xb_hentry *e = ((xb_hash *)h.v.p)->entries;
@@ -65,7 +66,7 @@ static void graph(void) {
   CHECK(is_shared(&a) && is_shared(&inner) && is_shared(&grown));
   xb_item fresh;
   xb_set_array(&fresh, xb_array_alloc(1));
-  ((xb_array *)fresh.v.p)->items[0] = a; /* shared already: the walk stops there */
+  xb_array_items(fresh.v.p)[0] = a; /* shared already: the walk stops there */
   xb_share(&fresh);
   CHECK(is_shared(&fresh));
   xb_gc_root_pop(ctx, (unsigned)(sizeof roots / sizeof *roots));
@@ -82,7 +83,7 @@ static void writer(void *arg) {
     if ((round / ITEMS + me) & 1u) xb_set_int(&v, (int64_t)round); /* each item gets both kinds, by turns */
     else xb_set_double(&v, 0.5 + (double)round, 1);
     size_t at = (round * 7u + me) % ITEMS;
-    xb_seq_put(a, &a->items[at], &v);
+    xb_seq_put(a, &xb_array_items(a)[at], &v);
     if (me == 0 && round % 50000u == 0) { /* the lock kept a while: the other writer sleeps for it */
       xb_seq_lock(a);
       xb_platform_sleep_ms(3);
@@ -106,7 +107,7 @@ static void reader(void *arg) {
   uint32_t n = 0;
   while (xb_atomic_load32(&writersLeft, XB_ACQUIRE)) {
     xb_item v;
-    xb_seq_get(a, &v, &a->items[n++ % ITEMS]);
+    xb_seq_get(a, &v, &xb_array_items(a)[n++ % ITEMS]);
     if (v.type == XB_T_INT ? (uint64_t)v.v.i >= ((uint64_t)1 << 32)
                            : v.type == XB_T_DOUBLE ? !(v.v.d >= 0.5) : v.type != XB_T_NIL)
       xb_atomic_add32(&bad, 1, XB_RELAXED);

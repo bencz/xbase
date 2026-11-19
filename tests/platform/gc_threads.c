@@ -58,12 +58,12 @@ static void mutate(void *arg) {
     for (uint32_t k = 0; k < 8; ++k) { /* garbage around it, of every kind */
       xb_array *a = xb_array_alloc(k + 1);
       xb_set_array(&scratch, a);
-      xb_set_str(&a->items[0], text(me, round, k));
+      xb_set_str(&xb_array_items(a)[0], text(me, round, k));
       xb_gc_write_item(a, 0);
     }
     if (!whole(held, me, round, slot)) xb_atomic_add32(&bad, 1, XB_RELAXED);
     xb_array *a = kept.v.p;
-    xb_set_str(&a->items[slot], held);
+    xb_set_str(&xb_array_items(a)[slot], held);
     xb_gc_write_item(a, slot);
     keptRound[slot] = round;
     if (xb_pending_get(ctx)) xb_pending_gc(ctx); /* a poll, as compiled code makes */
@@ -73,10 +73,9 @@ static void mutate(void *arg) {
       xb_blocking_run(pause_2ms, NULL);
     }
   }
-  const xb_array *a = kept.v.p;
+  const xb_item *items = xb_array_items(kept.v.p);
   for (uint32_t slot = 0; slot < KEPT; ++slot)
-    if (keptRound[slot] && (a->items[slot].type != XB_T_STRING ||
-                            !whole(a->items[slot].v.s, me, keptRound[slot], slot)))
+    if (keptRound[slot] && (items[slot].type != XB_T_STRING || !whole(items[slot].v.s, me, keptRound[slot], slot)))
       xb_atomic_add32(&bad, 1, XB_RELAXED);
   xb_gc_root_pop(ctx, 3);
   xb_ctx_free(ctx);

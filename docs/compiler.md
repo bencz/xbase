@@ -567,23 +567,32 @@ emits the object file.
   runtime gives (the larger for `+` and `-`, the sum for `*`); two doubles, the usual case of these paths, take a path
   of their own (their bits and decimals as they are, no test of exactness); the comparisons of two numbers (integers
   exactly, others as doubles with IEEE 754's comparisons, as `xb_compare` and `xb_order_is` make them); `for.test` with
-  an integer counter, limit and step; `index` and `index.set` of a local array (its header's state byte tested first,
-  `isLocal`: a shared array's items are the runtime's to read and write whole) with an index within it, an integer or a
-  truncated double (the array's `len` and `items`, `xb_array` in `xbrt.h`), where the store calls `xb_gc_write_item`
-  only for a value of a heap type (`xb_type_is_heap`), and an index out of bounds calls the runtime, which raises the
-  error. A comparison whose only use is the `truth` right after it gives that test its boolean directly, without the
-  logical item. The bit operators (`&` `|` `^^` `<<` `>>` `~`) and the calls to a bit function (`BitAnd`, ..., the table
-  `xb_bit_function` in `xbrt.h`) with number operands are the machine operation (`and`, `or`, `xor`, `shl`, `ashr`,
-  `lshr`, a select for counts outside 0..63), a double taken as an integer by `llvm.fptosi.sat` (truncated, saturated,
-  NaN 0, as `xb_dbl_to_i64`); other operands call the runtime operator or function, which raises the error. `=`, `==`
-  and `!=` of two one-character strings compare their bytes in place (so `ValType( x ) == "C"` calls nothing). Unary `-`
-  of an integer other than INT64_MIN or of a double is done in place too. `InlineCalls.cpp` does a few runtime functions
-  in place when their arguments allow it, with their rules: `Len()` of a string or a local array, `Asc()` of a string,
-  `Chr()` of a number, `SubStr( c, n, 1 )` with `n` within `c` (the last two give the shared one-byte string,
-  `xb_str_bytes`), and an `Asc()` whose argument is the `SubStr()` right before it, used nowhere else, reads the byte
-  itself; `Int()` of an integer is it, of a double its conversion when it lies in [-2^63, 2^63) (truncated, as
-  `xb_dbl_fits_i64` of its truncation would allow), with the double's width, its own or else the default one
-  (`xb_num_dbl_width`'s rule, from the constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`,
+  an integer counter, limit and step; `index` and `index.set` of a local array with an index within it, an integer or a
+  truncated double below 2^63 (the array's `len` and `data`, `xb_array` in `xbrt.h`). One test of the array's state byte
+  (`isLocalItems`: neither shared nor of a compact form, the usual case) leads to the path of items, where the store
+  calls `xb_gc_write_item` only for a value of a heap type (`xb_type_is_heap`); a shared array's items are the runtime's
+  to read and write whole, and an index out of bounds calls the runtime, which raises the error. A local array of a
+  compact form ([runtime.md](runtime.md#values)) has paths of its own, after a branch that is no cold path (`kFormTest`,
+  below): a store of a value whose header word the form holds writes its byte or word in place, any other value (and the
+  first store into an array of `NIL`s) calls `xb_array_store`, inline too, so a loop that fills a new array or turns one
+  stays on its fast paths; a read inlines one form, the logicals' when a condition or `.NOT.` tests the element
+  (`readAsLogical`), the integers' otherwise, and gives an item of that one type (each inline path joins the path of
+  items and costs it registers: three of them made `matmul`'s loop 16% slower), while an array of `NIL`s, the other
+  compact form and a `NIL` among logicals or integers go to the runtime, as cold paths. A read whose every use indexes
+  the element (a row of an array of arrays: an element of a compact form would be an error there, `onlyIndexed`) has no
+  compact path at all. A comparison whose only use is the `truth` right after it gives that test its boolean directly,
+  without the logical item. The bit operators (`&` `|` `^^` `<<` `>>` `~`) and the calls to a bit function (`BitAnd`,
+  ..., the table `xb_bit_function` in `xbrt.h`) with number operands are the machine operation (`and`, `or`, `xor`,
+  `shl`, `ashr`, `lshr`, a select for counts outside 0..63), a double taken as an integer by `llvm.fptosi.sat`
+  (truncated, saturated, NaN 0, as `xb_dbl_to_i64`); other operands call the runtime operator or function, which raises
+  the error. `=`, `==` and `!=` of two one-character strings compare their bytes in place (so `ValType( x ) == "C"`
+  calls nothing). Unary `-` of an integer other than INT64_MIN or of a double is done in place too. `InlineCalls.cpp`
+  does a few runtime functions in place when their arguments allow it, with their rules: `Len()` of a string or a local
+  array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n, 1 )` with `n` within `c` (the last two give the shared
+  one-byte string, `xb_str_bytes`), and an `Asc()` whose argument is the `SubStr()` right before it, used nowhere else,
+  reads the byte itself; `Int()` of an integer is it, of a double its conversion when it lies in [-2^63, 2^63)
+  (truncated, as `xb_dbl_fits_i64` of its truncation would allow), with the double's width, its own or else the default
+  one (`xb_num_dbl_width`'s rule, from the constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`,
   `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too) calls the runtime; `Int( x / y )`, whose division is right before
   it and used nowhere else, is lowered as one (`emitIntOfQuotient`): two integers in [-2^52, 2^52), `y` not 0, give
   their truncated integer quotient (`sdiv`, which the double quotient truncated equals) with the width `Int()` would
@@ -828,16 +837,17 @@ otherwise its own digit count. Literals too large for 64-bit integers become dou
 `codegen/Emit.*` initializes every target LLVM was built with, creates the `TargetMachine` for `--target` (default: the
 host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), then, from `-O1` on, splits the
 loops whose fast paths have cold edges (`LoopSplit.*`, below), places the polls of the loops' back edges (`LoopPolls.*`,
-below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds), versions the fast loops on their
-other invariant tests (`versionInvariantColdExits`, `LoopSplit.*`, below), each followed by the function simplification
-pipeline on the functions it changed, and writes the object with the target's object writer (code generation runs on the
-legacy pass manager: in LLVM 22 it is the one every target implements). At `-O0` (no xIR passes, LLVM's `-O0` pipeline)
-every function first gets the passes whose time follows its size (`cleanUpFunctions`, below: SROA, early CSE,
-instruction combining, CFG simplification), and code generation allocates registers (`CodeGenOptLevel::Less`, as at
-`-O1`): the fast allocator of `None` gives every value a stack slot of its own, so that a function of inline fast paths
-took kilobytes of stack per call (the `recursion_deep` test's function 3.8 KB on 32-bit x86 and 2.4 KB on x86-64; 0.7 KB
-and 0.2 KB so), and `xbc` emits no debugging information that such code would serve. It costs compile time: the
-`large_function` test at `-O0` takes 4.4 s instead of 1.4 s (`-O2`: 5.4 s).
+below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds, each followed by the versioning
+of loops on their arrays' forms, `unswitchFormTests`), versions the fast loops on their other invariant tests
+(`versionInvariantColdExits`, `LoopSplit.*`, below; then the forms and the guards once more), each followed by the
+function simplification pipeline on the functions it changed, and writes the object with the target's object writer
+(code generation runs on the legacy pass manager: in LLVM 22 it is the one every target implements). At `-O0` (no xIR
+passes, LLVM's `-O0` pipeline) every function first gets the passes whose time follows its size (`cleanUpFunctions`,
+below: SROA, early CSE, instruction combining, CFG simplification), and code generation allocates registers
+(`CodeGenOptLevel::Less`, as at `-O1`): the fast allocator of `None` gives every value a stack slot of its own, so that
+a function of inline fast paths took kilobytes of stack per call (the `recursion_deep` test's function 3.8 KB on 32-bit
+x86 and 2.4 KB on x86-64; 0.7 KB and 0.2 KB so), and `xbc` emits no debugging information that such code would serve. It
+costs compile time: the `large_function` test at `-O0` takes 4.4 s instead of 1.4 s (`-O2`: 5.4 s).
 
 A function of more than 60000 instructions as code generation makes it (`kLargeFunction`: a procedure of a few thousand
 statements) does not go through that pipeline: several of its passes and of code generation's take time that grows
@@ -860,6 +870,8 @@ given explicitly comes after. `--cpu=native` (host target only) uses the CPU and
 Loops without slow paths (`codegen/LoopSplit.*`): every inline fast path keeps a call to the runtime for the other
 cases, behind an edge weighted unlikely (`branchLikely`: edges to runtime calls, and to the rare double index; a choice
 between two inline paths, such as an integer or a double operand, or a variable that holds a cell, is a plain branch).
+The test of an array's form (`kFormTest`) is weighted for the path of items too, but is no cold edge: an array of a
+compact form takes its other side on every pass.
 The loops with such cold edges, found once per function, are put in simplified and LCSSA form and cloned twice: a
 generic copy and the loop again. A nest is split whole, from its outermost loop that fits the limits below and whose
 fast copy would make no call (`hotCall`: a call reached from the header without a cold edge; the write barriers, whose
@@ -934,7 +946,28 @@ thread may write, is not read so) (without a call, no object this thread alone r
 leave, or an item holds no such object, an exact copy of the loop runs, which leaves where the loop would have;
 otherwise the loop runs with those branches gone. Values of the loop used past it become the join of the loop's and the
 copy's (`SSAUpdater`); a loop is versioned once, its copy never, and the copies grow a function by at most its own size.
-Unlike the guards, the branch need not be the header's: the copy, not the generic loop, takes the first pass. With the
+Unlike the guards, the branch need not be the header's: the copy, not the generic loop, takes the first pass. A form
+test whose condition can be computed on entry counts as such a branch, its compact side as the one that leaves.
+
+Form tests (`unswitchFormTests` in `codegen/LoopSplit.*`), with each round of guards and after the versioning: an
+innermost loop whose header is the form test of an array the loop does not change (its condition moved out of the loop,
+`makeLoopInvariant`) is versioned on it the same way: the loop runs with the path of items alone when the array holds
+items on entry (an array of items stays one: forms only turn into items), its exact copy otherwise, whose test is then a
+plain branch (the copy is versioned no more; each pass grows a function by at most its own size). The test, which is no
+guard (both its sides stay in the loop), no longer stands between the guards before it and those after it, so they leave
+the loop in turn: a loop over an invariant row of an array of arrays (`matmul`'s) reads the row in its preheader again.
+The versioning makes a preheader for a loop entered from several blocks. With a single compact path inline per read
+(above), the forms leave every benchmark but `pi` as fast as before or faster (the best of 3 runs, x86-64, against the
+code before the forms): `sieve` takes 59% fewer cycles, `bitlookup` 8%, `crc32` and `matmul` 3%, `qsort` 2%, `asort`
+1.6%; `pi`, whose tape of 128000 integers runs its loops in the versions of a compact array, takes 2% more (18% more
+instructions: a test of the sentinel per read).
+
+Memory classes of `memset`s (`codegen/MemoryTags.*`): every access the lowering makes carries its memory class
+(`Mem`, TBAA), so that a loop's loads of what it does not change (an array's header, an object's state byte) leave
+it; but MemCpyOpt merges the two stores of a constant item (a `NIL`) into a `memset` that has none, which may write
+anything, and the loads stay. `TagItemMemsets`, run where the pipeline's peephole and late scalar extension points
+are, gives a `memset` within the items of an alloca (a frame's slots, a local item, an array of items) the class of
+items again; the lowering names the class in the module (`xb.item.tbaa`). With the
 sharing tests of compiled code (step 3 of [concurrency.md](concurrency.md#shared-objects)), nests split whole and the
 versioning, measured against the code before them (the best of 7 runs, x86-64): `pi` 16 to 18% faster, `matmul` 6 to
 11%, `qsort` 7%, the others within their noise (`generator`, `sieve` and `fib` within 2%).

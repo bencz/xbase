@@ -203,9 +203,9 @@ static void transfer_begin(transfer *t, xb_area *src, xb_area *dst, const xb_arr
   for (size_t k = 0; k < (list ? list->len : dst->nfields); ++k) {
     int64_t from, to;
     if (list) {
-      const xb_item *it = &list->items[k];
+      const xb_item *it = &xb_array_items(list)[k];
       const xb_array *row = it->type == XB_T_ARRAY ? it->v.p : NULL;
-      if (row && row->len > 0) it = &row->items[0];
+      if (row && row->len > 0) it = &xb_array_items(row)[0];
       if (it->type != XB_T_STRING) continue;
       from = xb_area_field_index(src, it->v.s->data, it->v.s->len);
       to = xb_area_field_index(dst, it->v.s->data, it->v.s->len);
@@ -419,12 +419,14 @@ void xbf___DBSORTTO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   s.key = malloc((ok && spec->len ? spec->len : 1) * sizeof *s.key);
   if (!s.key) xb_gc_fatal("out of memory");
   for (size_t k = 0; ok && k < spec->len; ++k) { /* checked and copied once: the blocks may change the array */
-    const xb_array *row = spec->items[k].type == XB_T_ARRAY ? spec->items[k].v.p : NULL;
-    int64_t f = row && row->len >= 3 && xb_is_number(&row->items[0]) ? xb_num_to_i64(&row->items[0]) : 0;
-    ok = f >= 1 && f <= src->nfields && src->fields[f - 1].type != 'M' && row->items[1].type == XB_T_LOGICAL &&
-         row->items[2].type == XB_T_LOGICAL && s.width + key_width(&src->fields[f - 1]) <= UINT32_MAX;
+    const xb_item *it = &xb_array_items(spec)[k];
+    const xb_array *row = it->type == XB_T_ARRAY ? it->v.p : NULL;
+    const xb_item *cols = row ? xb_array_items(row) : NULL;
+    int64_t f = row && row->len >= 3 && xb_is_number(&cols[0]) ? xb_num_to_i64(&cols[0]) : 0;
+    ok = f >= 1 && f <= src->nfields && src->fields[f - 1].type != 'M' && cols[1].type == XB_T_LOGICAL &&
+         cols[2].type == XB_T_LOGICAL && s.width + key_width(&src->fields[f - 1]) <= UINT32_MAX;
     if (!ok) break;
-    s.key[s.nkeys++] = (sort_key){(uint32_t)(f - 1), row->items[1].v.l, row->items[2].v.l};
+    s.key[s.nkeys++] = (sort_key){(uint32_t)(f - 1), cols[1].v.l, cols[2].v.l};
     s.width += key_width(&src->fields[f - 1]);
   }
   const xb_rdd *rdd;
@@ -542,7 +544,7 @@ void xbf___DBTOTALTO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     if (src->fields[k].type != 'M') kept[count++] = src->fields[k];
   int ok = name && sums;
   for (size_t k = 0; ok && k < sums->len; ++k) {
-    const xb_item *it = &sums->items[k];
+    const xb_item *it = &xb_array_items(sums)[k];
     int64_t from = it->type == XB_T_STRING ? xb_area_field_index(src, it->v.s->data, it->v.s->len) : -1;
     ok = from >= 0 && strchr("NF", src->fields[from].type);
     if (!ok) {

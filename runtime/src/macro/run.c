@@ -31,7 +31,7 @@ static int memvar_at(xb_ctx *ctx, const xb_array *fa, uint32_t w, int assign, xb
     *m = memvar_of(w);
     return 1;
   }
-  const xb_str *name = fa->items[w & ~XB_MACRO_NAMED].v.s; /* NUL-terminated, upper case */
+  const xb_str *name = xb_array_items(fa)[w & ~XB_MACRO_NAMED].v.s; /* NUL-terminated, upper case */
   for (uint16_t tries = 1;; ++tries) {
     uint32_t id = xb_memvar_use(ctx, name->data, name->len, assign, slot);
     if (id != UINT32_MAX) {
@@ -43,7 +43,7 @@ static int memvar_at(xb_ctx *ctx, const xb_array *fa, uint32_t w, int assign, xb
     memcpy(upper, name->data, n);
     upper[n] = 0;
     if (!xb_error_retry(ctx, EG_NOVAR, 1003, upper, tries)) return 0;
-    name = fa->items[w & ~XB_MACRO_NAMED].v.s; /* the block ran: the constant may have moved */
+    name = xb_array_items(fa)[w & ~XB_MACRO_NAMED].v.s; /* the block ran: the constant may have moved */
   }
 }
 
@@ -87,7 +87,7 @@ static const xb_proc block_proc = XB_RUNTIME_PROC("&", XB_PROC_HIDDEN | XB_PROC_
  * collector sees every item. */
 static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, xb_item *argv, xb_block *self) {
   const xb_array *fa = code->v.p;
-  const unsigned char *pc = (const unsigned char *)fa->items[0].v.s->data;
+  const unsigned char *pc = (const unsigned char *)xb_array_items(fa)[0].v.s->data;
   uint32_t nparams = word(&pc), nslots = word(&pc);
   const unsigned char *ops = pc;
   union {
@@ -130,7 +130,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     case MO_NIL: xb_set_nil(&s[++sp]); break;
     case MO_TRUE: xb_set_logical(&s[++sp], 1); break;
     case MO_FALSE: xb_set_logical(&s[++sp], 0); break;
-    case MO_CONST: s[++sp] = fa->items[word(&pc)]; break;
+    case MO_CONST: s[++sp] = xb_array_items(fa)[word(&pc)]; break;
     case MO_MV_GET:
     case MO_MV_REF: {
       uint32_t w = word(&pc), slot;
@@ -159,7 +159,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       uint32_t w = word(&pc), slot;
       xb_field_cache cache = {0};
       xb_set_nil(r);
-      const char *field = w & XB_MACRO_NAMED ? fa->items[w & ~XB_MACRO_NAMED].v.s->data : memvar_of(w).name;
+      const char *field = w & XB_MACRO_NAMED ? xb_array_items(fa)[w & ~XB_MACRO_NAMED].v.s->data : memvar_of(w).name;
       if (!xb_field_try(ctx, r, field, &cache)) {
         xb_memvar m;
         if (memvar_at(ctx, fa, w, 0, &m, &slot)) {
@@ -174,10 +174,10 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     case MO_FIELD:
     case MO_FIELD_SET: {
       uint32_t alias = word(&pc);
-      const char *name = fa->items[word(&pc)].v.s->data;
+      const char *name = xb_array_items(fa)[word(&pc)].v.s->data;
       xb_field_cache cache = {0};
       int onStack = alias == XB_MACRO_STACK_ALIAS;
-      const char *aliasName = alias >= XB_MACRO_STACK_ALIAS ? NULL : fa->items[alias].v.s->data;
+      const char *aliasName = alias >= XB_MACRO_STACK_ALIAS ? NULL : xb_array_items(fa)[alias].v.s->data;
       if (op == MO_FIELD) {
         xb_set_nil(r);
         xb_field_get(ctx, r, onStack ? &s[sp] : NULL, aliasName, name, &cache);
@@ -328,7 +328,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       break;
     }
     case MO_NO_FUNC: {
-      const char *name = fa->items[word(&pc)].v.s->data;
+      const char *name = xb_array_items(fa)[word(&pc)].v.s->data;
       size_t base = sp + 1 - word(&pc);
       xb_set_nil(r);
       if (!xb_error(ctx, r, EG_NOFUNC, 1001, name, XB_ERR_SUBSTITUTE, 0, NULL)) goto out;
@@ -337,7 +337,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       break;
     }
     case MO_SEND: {
-      const char *message = fa->items[word(&pc)].v.s->data;
+      const char *message = xb_array_items(fa)[word(&pc)].v.s->data;
       size_t base = sp + 1 - word(&pc);
       xb_set_nil(r);
       xb_op_send(ctx, r, message, (uint32_t)(sp + 1 - base), &s[base]);
@@ -347,7 +347,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       break;
     }
     case MO_BLOCK: { /* its function in cell 0, then the cells of the variables it captures */
-      const xb_item *child = &fa->items[word(&pc)];
+      const xb_item *child = &xb_array_items(fa)[word(&pc)];
       uint32_t ncap = word(&pc);
       xb_block_new(ctx, r, block_fn, 1 + ncap);
       ++sp; /* the block, rooted, while its cells are made (read again after each: a collection may move it) */

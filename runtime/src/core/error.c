@@ -111,7 +111,7 @@ static void make_error(xb_ctx *ctx, const failure *f, xb_item *r) {
   xb_set_object(r, e);
   if (argc) { /* without arguments, `args` stays NIL, as in the reference */
     xb_array *a = xb_array_alloc(argc);
-    for (uint32_t i = 0; i < argc; ++i) a->items[i] = args[i];
+    for (uint32_t i = 0; i < argc; ++i) xb_array_items(a)[i] = args[i];
     xb_set_array(&e->vars[ERR_ARGS], a);
     xb_gc_write(e);
   }

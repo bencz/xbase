@@ -57,7 +57,7 @@ private:
     FrameSlots = 6
   };
   enum CtxField : unsigned { CtxPending = 0, CtxDecimals = 1, CtxFrames = 2, CtxStackLimit = 3 };
-  enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayItems = 2 };
+  enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayData = 2 };
   enum ObjectField : unsigned { ObjectCls = 0, ObjectVars = 2 }; // xb_object
   enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
   enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 5 };           // xb_hash
@@ -157,6 +157,9 @@ private:
   llvm::LoadInst *stateByte(llvm::Value *obj, llvm::AtomicOrdering order);
   llvm::Value *storageLocal();
   llvm::Value *isLocalState(llvm::Value *state);
+  llvm::Value *isLocalItems(llvm::Value *state);
+  llvm::Value *elemsOf(llvm::Value *state);
+  llvm::LoadInst *objectState(llvm::Value *obj, bool fromItem = true);
   void recordIfOld(llvm::Value *obj, llvm::Value *state);
   llvm::Value *isLocal(llvm::Value *obj, bool fromItem = true);
   VarTarget varTarget(const xir::Var &v, xir::Access a, bool load = false);
@@ -181,6 +184,7 @@ private:
   llvm::Value *itemPointer(llvm::Value *item, const char *name);
   llvm::Value *arrayLength(llvm::Value *array);
   llvm::Value *arrayElement(llvm::Value *array, llvm::Value *pos0);
+  llvm::Value *compactElement(llvm::Value *array, llvm::Type *ty, llvm::Value *pos0);
   void storeInt(llvm::Value *dst, llvm::Value *v);
   void storeDouble(llvm::Value *dst, llvm::Value *v, llvm::Value *dec);
   llvm::Value *isNumberType(llvm::Value *type);
@@ -233,9 +237,13 @@ private:
   void emitNeg(const xir::Instruction &i);
   llvm::Value *numberAsInteger(llvm::Value *item, llvm::Value *type);
   llvm::Value *bitApply(xb_bit_op op, llvm::Value *x, llvm::Value *y);
-  llvm::Value *inlineElement(const xir::Instruction &i, llvm::Value *base, llvm::Value *idx, llvm::BasicBlock *slow,
-                             llvm::Value *&array, llvm::Value *&pos);
+  void inlineIndex(const xir::Instruction &i, llvm::Value *base, llvm::Value *idx, llvm::BasicBlock *slow,
+                   llvm::BasicBlock *items, llvm::BasicBlock *compact, llvm::Value *&array, llvm::Value *&pos,
+                   llvm::Value *&state);
+  void switchCompact(llvm::Value *state, llvm::BasicBlock *nils, llvm::BasicBlock *logical, llvm::BasicBlock *integer);
   void emitIndex(const xir::Instruction &i);
+  void emitCompactRead(bool logical, llvm::Value *d, llvm::Value *array, llvm::Value *pos, llvm::Value *state,
+                       llvm::BasicBlock *compact, llvm::BasicBlock *slow, llvm::BasicBlock *join);
   void emitIndexSet(const xir::Instruction &i);
 
   // Instructions.cpp
@@ -280,7 +288,7 @@ private:
   llvm::FunctionType *blockFnTy_ = nullptr;
   llvm::FunctionType *initFnTy_ = nullptr;
   llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, ncells, cells[] }
-  llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, items } (its items follow)
+  llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, data } (its items follow)
   llvm::StructType *objectTy_ = nullptr;    // xb_object: { cls, nvars, vars }
   llvm::StructType *refTy_ = nullptr;       // xb_ref: { coll, index, value, key, loop }
   llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, entries, hashes, index, tree }
@@ -301,8 +309,8 @@ private:
   llvm::FunctionCallee rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArgsRest_;
   llvm::FunctionCallee rtExp_, rtLog_; // xb_exp, xb_log: no memory touched
-  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtWriteItems_, rtCellOf_, rtBlockNew_,
-      rtRootPush_, rtRootPop_;
+  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtArrayStore_, rtWriteItem_, rtWriteItems_, rtCellOf_,
+      rtBlockNew_, rtRootPush_, rtRootPop_;
   llvm::FunctionCallee rtEnumLen_, rtEachSource_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefLoad_;
   llvm::FunctionCallee rtRefStore_;
   llvm::FunctionCallee rtSwitchCheck_;

@@ -74,7 +74,7 @@ void xb_ring_init(xb_object *o, xb_ring g);
 static inline uint32_t xb_ring_count(const xb_item *o, xb_ring g) { return xb_object_u32(o, g.count); }
 static inline const xb_item *xb_ring_at(const xb_item *o, xb_ring g, uint32_t k) {
   const xb_array *a = ((const xb_object *)o->v.p)->vars[g.items].v.p;
-  return &a->items[(xb_object_u32(o, g.head) + k) % a->len];
+  return &xb_array_items(a)[(xb_object_u32(o, g.head) + k) % a->len];
 }
 void xb_ring_set(const xb_item *o, xb_ring g, uint32_t k, const xb_item *v);
 void xb_ring_push(const xb_item *o, xb_ring g, const xb_item *v, xb_ring_gone gone, void *arg);

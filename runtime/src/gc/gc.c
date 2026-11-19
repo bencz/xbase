@@ -1232,8 +1232,10 @@ void xb_gc_root_push(xb_ctx *ctx, xb_item *it) { xb_root_push(ctx, it); }
 
 void xb_gc_root_pop(xb_ctx *ctx, unsigned n) { xb_root_pop(ctx, n); }
 
-/* A collection's state for an object (while the world is stopped), its sharing kept. */
-static void set_state(xb_gc_hdr *h, uint8_t state) { h->state = (uint8_t)((h->state & XB_GC_SHARED) | state); }
+/* A collection's state for an object (while the world is stopped), its sharing and an array's form kept. */
+static void set_state(xb_gc_hdr *h, uint8_t state) {
+  h->state = (uint8_t)((h->state & (XB_GC_SHARED | XB_GC_STATE_ELEMS)) | state);
+}
 
 /* The lines a block object covers get the collection's epoch, and become
  * old lines with `old`. */
@@ -1416,7 +1418,7 @@ static xb_gc_hdr *evacuate(xb_gc_hdr *h) {
   if (h->kind == XB_GC_ARRAY) {
     const xb_array *from = (const xb_array *)(h + 1);
     xb_array *a = (xb_array *)(to + 1);
-    if (from->items == from->inline_items) a->items = a->inline_items;
+    if (from->data == from->inline_items) a->data = a->inline_items;
   }
   h->flags |= XB_GC_HDR_MOVED;
   set_link(h, to);
@@ -1463,10 +1465,11 @@ static void merge_remembered(xb_tlh *t) {
 void xb_gc_remember(void *obj) { record(xb_gc_header(obj), XB_GC_REMEMBERED); }
 
 void xb_gc_write_item(xb_array *a, size_t index) {
-  if (index < a->len && !xb_type_is_heap(a->items[index].type)) return; /* refers to no object */
   xb_gc_hdr *h = xb_gc_header(a);
-  if ((xb_atomic_load8(&h->state, XB_RELAXED) & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED)
-    return; /* young, or traced whole anyway */
+  uint8_t state = xb_atomic_load8(&h->state, XB_RELAXED);
+  if ((state & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED) return; /* young, or traced whole anyway */
+  if (xb_elems_of_state(state) != XB_ELEMS_ITEMS) return;                  /* a compact form holds no object */
+  if (index < a->len && !xb_type_is_heap(((const xb_item *)a->data)[index].type)) return; /* refers to no object */
   uint8_t *cards = xb_array_cards(a);
   if (!cards || index >= a->cap) {
     record(h, XB_GC_REMEMBERED);
@@ -1478,12 +1481,14 @@ void xb_gc_write_item(xb_array *a, size_t index) {
 
 void xb_gc_write_items(xb_array *a, size_t from, size_t to) {
   xb_gc_hdr *h = xb_gc_header(a);
-  if ((xb_atomic_load8(&h->state, XB_RELAXED) & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED)
-    return; /* young, or traced whole anyway */
+  if ((xb_atomic_load8(&h->state, XB_RELAXED) & (XB_GC_MARKED | XB_GC_REMEMBERED)) != XB_GC_MARKED ||
+      xb_array_elems(a) != XB_ELEMS_ITEMS)
+    return; /* young, or traced whole anyway; or a compact form, which holds no object */
+  const xb_item *items = a->data;
   for (size_t k = from; k < to;) { /* each card once, by an item of it that refers to an object (any past the length) */
     size_t end = (k | (((size_t)1 << XB_ARRAY_CARD_SHIFT) - 1)) + 1;
     if (end > to) end = to;
-    while (k < end && k < a->len && !xb_type_is_heap(a->items[k].type)) ++k;
+    while (k < end && k < a->len && !xb_type_is_heap(items[k].type)) ++k;
     if (k < end) xb_gc_write_item(a, k);
     if (xb_atomic_load8(&h->state, XB_RELAXED) & XB_GC_REMEMBERED) return; /* recorded whole: no card counts */
     k = end;
@@ -1530,7 +1535,7 @@ static int trace_cards(xb_array *a) {
       size_t from = c << XB_ARRAY_CARD_SHIFT, to = from + ((size_t)1 << XB_ARRAY_CARD_SHIFT);
       if (to > a->len) to = a->len;
       int keep = 0;
-      for (size_t i = from; i < to; ++i) keep |= mark_item(&a->items[i]);
+      for (size_t i = from; i < to; ++i) keep |= mark_item(&((xb_item *)a->data)[i]);
       cards[c] = (uint8_t)keep;
       young |= keep;
     }
@@ -1547,8 +1552,9 @@ static int trace(xb_gc_hdr *h) {
   switch ((xb_gc_kind)h->kind) {
     case XB_GC_ARRAY: {
       xb_array *a = obj;
-      if (a->items != a->inline_items) REACH(a->items, &young);
-      for (size_t i = 0; i < a->len; ++i) young |= mark_item(&a->items[i]);
+      if (a->data != a->inline_items) REACH(a->data, &young);
+      if (xb_array_elems(a) == XB_ELEMS_ITEMS) /* a compact form holds no object */
+        for (size_t i = 0; i < a->len; ++i) young |= mark_item(&((xb_item *)a->data)[i]);
       uint8_t *cards = xb_array_cards(a); /* everything was scanned */
       if (cards) memset(cards, 0, xb_array_card_count(a->cap));
       break;
@@ -1615,10 +1621,11 @@ static void retain(xb_gc_hdr *h, uint8_t how) {
 /* Traces a queued object; an aged one is promoted by this collection, so it is
  * retained if it still refers to young objects. */
 static void trace_queued(xb_gc_hdr *h) {
-  if (h->kind == XB_GC_ARRAY && ((xb_array *)(h + 1))->len > XB_GC_SLICE) { /* a slice at a time (drain) */
+  const xb_array *array = h->kind == XB_GC_ARRAY ? (const xb_array *)(h + 1) : NULL;
+  if (array && xb_array_elems(array) == XB_ELEMS_ITEMS && array->len > XB_GC_SLICE) { /* a slice at a time (drain) */
     xb_array *a = (xb_array *)(h + 1);
     int young = 0;
-    if (a->items != a->inline_items) REACH(a->items, &young);
+    if (a->data != a->inline_items) REACH(a->data, &young);
     if (heap.slicesLen == heap.slicesCap) {
       size_t n = heap.slicesCap ? heap.slicesCap * 2 : 64;
       xb_slice *list = realloc(heap.slices, n * sizeof *list);
@@ -1638,7 +1645,7 @@ static void trace_slice(void) {
   xb_slice *s = &heap.slices[heap.slicesLen - 1];
   xb_array *a = (xb_array *)(s->h + 1);
   size_t end = s->next + XB_GC_SLICE < a->len ? s->next + XB_GC_SLICE : a->len;
-  for (size_t i = s->next; i < end; ++i) s->young |= mark_item(&a->items[i]);
+  for (size_t i = s->next; i < end; ++i) s->young |= mark_item(&((xb_item *)a->data)[i]);
   s->next = end;
   if (end < a->len) return;
   uint8_t *cards = xb_array_cards(a); /* everything was scanned */

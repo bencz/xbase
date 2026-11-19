@@ -104,7 +104,7 @@ static void reader(void *arg) {
         xbf_HKEYS(w.ctx, &w.ret, 1, w.args);
         const xb_array *keys = w.ret.v.p;
         for (size_t i = 0; i < keys->len; ++i)
-          if (keys->items[i].type != XB_T_STRING) xb_atomic_add32(&bad, 1, XB_RELAXED);
+          if (xb_array_items(keys)[i].type != XB_T_STRING) xb_atomic_add32(&bad, 1, XB_RELAXED);
       }
     } else {
       key(&w.args[1], "s", n % KEYS);

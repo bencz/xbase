@@ -113,7 +113,7 @@ static void reader(void *arg) {
       xbf_ACLONE(w.ctx, &w.ret, 1, w.args);
       const xb_array *c = w.ret.v.p;
       for (size_t i = 0; i < c->len; ++i)
-        if (!valid(&c->items[i], 0)) xb_atomic_add32(&bad, 1, XB_RELAXED);
+        if (!valid(&xb_array_items(c)[i], 0)) xb_atomic_add32(&bad, 1, XB_RELAXED);
     }
     poll(&w, n);
   }
@@ -170,8 +170,8 @@ int main(void) {
   uint8_t *seen = calloc(APPENDERS * ADDS, 1);
   CHECK(seen);
   for (size_t i = 0; i < a->len; ++i) {
-    int64_t k = untag(&a->items[i]);
-    CHECK(k >= 0 && k < (int64_t)(APPENDERS * ADDS) && !seen[k] && xb_is_shared(a->items[i].v.s));
+    int64_t k = untag(&xb_array_items(a)[i]);
+    CHECK(k >= 0 && k < (int64_t)(APPENDERS * ADDS) && !seen[k] && xb_is_shared(xb_array_items(a)[i].v.s));
     seen[k] = 1;
   }
   free(seen);

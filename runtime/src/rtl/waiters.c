@@ -23,7 +23,7 @@ static xb_array *ring_array(const xb_item *o, xb_ring g) {
 
 /* Item k of a ring's array, read and written in place under the lock (the write followed by its barrier). */
 static void slot_put(xb_array *a, size_t k, const xb_item *v) {
-  a->items[k] = *v;
+  xb_array_items(a)[k] = *v;
   xb_gc_write_item(a, k);
 }
 
@@ -35,7 +35,8 @@ static void ring_move(const xb_item *o, xb_ring g, uint32_t cap) {
   xb_item grown;
   xb_array *a = xb_array_alloc(cap); /* `a`, on the stack, stays where it is; so does `from` */
   xb_set_array(&grown, a);
-  for (uint32_t k = 0; k < n; ++k) a->items[k] = from->items[(head + k) % was];
+  xb_item *to = xb_array_items(a);
+  for (uint32_t k = 0; k < n; ++k) to[k] = xb_array_items(from)[(head + k) % was];
   xb_gc_write_items(a, 0, n);
   xb_share(&grown);
   xb_object *obj = o->v.p;
@@ -53,12 +54,12 @@ static void ring_compact(const xb_item *o, xb_ring g, xb_ring_gone gone, void *a
   xb_item nil;
   xb_set_nil(&nil);
   for (uint32_t k = 0; k < n; ++k) {
-    const xb_item *it = &a->items[(head + k) % cap];
+    const xb_item *it = &xb_array_items(a)[(head + k) % cap];
     if (gone(arg, it)) continue;
     if (kept != k) slot_put(a, (head + kept) % cap, it);
     ++kept;
   }
-  for (uint32_t k = kept; k < n; ++k) a->items[(head + k) % cap] = nil;
+  for (uint32_t k = kept; k < n; ++k) xb_array_items(a)[(head + k) % cap] = nil;
   set_var(o, g.count, kept);
 }
 
@@ -86,8 +87,9 @@ void xb_ring_pop(const xb_item *o, xb_ring g, xb_item *out) {
   xb_array *a = ring_array(o, g);
   uint32_t head = var(o, g.head), n = var(o, g.count);
   size_t cap = a->len;
-  *out = a->items[head];
-  xb_set_nil(&a->items[head]);
+  xb_item *items = xb_array_items(a);
+  *out = items[head];
+  xb_set_nil(&items[head]);
   set_var(o, g.head, (uint32_t)((head + 1) % cap));
   set_var(o, g.count, n - 1);
   if (cap > 4 * RING_FIRST && (n - 1) * 4 <= cap) ring_move(o, g, (uint32_t)(cap / 2));
@@ -100,7 +102,7 @@ int xb_ring_task_gone(void *arg, const xb_item *task) {
 
 int xb_ring_pair_gone(void *arg, const xb_item *pair) {
   XB_UNUSED(arg);
-  return xb_task_is_final(&((const xb_array *)pair->v.p)->items[0]);
+  return xb_task_is_final(&xb_array_items(pair->v.p)[0]);
 }
 
 void xb_claims_root(xb_ctx *ctx, xb_claims *c) {
@@ -116,13 +118,14 @@ void xb_claims_add(xb_claims *c, const xb_item *task, const xb_item *value) {
   xb_array *a = c->list.type == XB_T_ARRAY ? c->list.v.p : NULL;
   if (!a || 2 * c->n + 2 > a->len) {
     xb_array *grown = xb_array_alloc(a ? 2 * a->len : 8); /* on the stack, stays where it is; `a` too */
-    for (uint32_t k = 0; k < 2 * c->n; ++k) grown->items[k] = a->items[k];
+    if (c->n) memcpy(xb_array_items(grown), xb_array_items(a), 2 * c->n * sizeof(xb_item));
     xb_gc_write_items(grown, 0, 2 * c->n);
     xb_set_array(&c->list, grown);
     a = grown;
   }
-  a->items[2 * c->n] = *task;
-  a->items[2 * c->n + 1] = *value;
+  xb_item *items = xb_array_items(a);
+  items[2 * c->n] = *task;
+  items[2 * c->n + 1] = *value;
   xb_gc_write_items(a, 2 * c->n, 2 * c->n + 2);
   ++c->n;
 }
@@ -130,7 +133,8 @@ void xb_claims_add(xb_claims *c, const xb_item *task, const xb_item *value) {
 void xb_claims_settle(xb_ctx *ctx, xb_claims *c) {
   for (uint32_t k = 0; k < c->n; ++k) {
     xb_array *a = c->list.v.p; /* again after each: settling may collect */
-    xb_item task = a->items[2 * k], value = a->items[2 * k + 1];
+    const xb_item *items = xb_array_items(a);
+    xb_item task = items[2 * k], value = items[2 * k + 1];
     xb_task_settle_claimed(ctx, &task, !c->fail, &value);
   }
   xb_set_nil(&c->list);

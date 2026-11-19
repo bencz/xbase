@@ -48,12 +48,35 @@ typedef struct xb_item {
   argument, a return value, and a function that gives its argument back unchanged, such as `AllTrim()` of a string
   with no blanks); any string made from it (`+`, `Upper()`, `HardCR()`, ...) is a plain `C` one. Other strings have
   `width` 0.
-- Arrays (`xb_array` in `xbrt.h`: `len`, `cap`, `items`; `types/array.c`, functions in `rtl/arrays.c`) are 1-based.
-  Their items start in the array's own allocation and move to a separate heap object when the array grows past it.
+- Arrays (`xb_array` in `xbrt.h`: `len`, `cap`, `data`; `types/array.c`, functions in `rtl/arrays.c`) are 1-based.
+  Their elements start in the array's own allocation and move to a separate heap object when the array grows past it.
   A local array that `ASize` leaves with a quarter of its room or less (of 1024 items or more) gives a peak's room
-  back: items in storage of their own move into storage twice as large as they need; items in the array's own
-  allocation stay, and the collector trims the rest of it (`xb_gc_trim`). Compiled code reads `len` and `items` to
-  access elements in place.
+  back: elements in storage of their own move into storage twice as large as they need; elements in the array's own
+  allocation stay, and the collector trims the rest of it (`xb_gc_trim`).
+- An array's storage always has room for `cap` items, and the form of its elements, two bits of its state byte
+  (`XB_GC_STATE_ELEMS`), says how they are stored there: as items (`XB_ELEMS_ITEMS`), not at all (`XB_ELEMS_NIL`: every
+  element is `NIL`), one byte each (`XB_ELEMS_LOGICAL`: 0 `NIL`, 1 `.F.`, 2 `.T.`) or an `int64_t` each (`XB_ELEMS_INT`,
+  `XB_ELEMS_INT_NIL` for `NIL`). The compact forms hold only values whose header word is their type's with no width or
+  decimals: `NIL`, logicals, and integers other than `XB_ELEMS_INT_NIL`. A loop over a large array of logicals or
+  integers then reads and writes a byte or a word per element where an item takes 16, which the caches hold eight or two
+  times as long (`sieve` takes 59% fewer cycles). An array of the program starts as `XB_ELEMS_NIL`: `Array()` (its
+  innermost dimension; the outer ones hold arrays), and a literal, which takes the form that holds its elements (`{}`
+  and literals of `NIL`s that of `NIL`s); the first value stored makes it logical, integer or items. Storing a value the
+  form does not hold turns the array into items first, in place, from its last element down (an item covers only the
+  places of the elements at or past its own): no allocation, so it may happen anywhere; nothing turns an array back. The
+  runtime's own arrays (frames, task lists, `Directory()`'s rows, ...) are made as items (`xb_array_alloc`), and so is
+  every array other threads may reach: `xb_share` turns one before it can be reached, so only a local array changes
+  form, and only its own thread changes its state byte while it runs (a load and a store; a publication, which turns the
+  arrays of the program's storage, runs while the other threads are stopped). C code reads and writes elements in place
+  through `xb_array_items`, which turns an array of another form first, or handles the forms itself: `xb_array_get`,
+  `xb_array_put`, `xb_array_last`, `xb_array_append`, `AIns`/`ADel`, resizing and `xb_array_snapshot` (whose copy keeps
+  the form) in `types/array.c`, and the collector. `AClone` copies the form; the other array functions (`ASort`,
+  `AScan`, `AEval`, ...) read through `xb_array_items` or `xb_array_get`.
+- Compiled code reads `len`, `data` and the state byte to access elements in place: one test of the byte tells a
+  local array of items, the usual one, from the others, and the paths of the compact forms follow
+  ([compiler.md](compiler.md#xir-to-llvm)); a store whose value the form does not hold, or the first one into an
+  array of `NIL`s, calls `xb_array_store`, which gives the array the form that holds it, allocates nothing and runs no
+  code of the program.
 - Hashes (`xb_hash` in `types/types.h`) map keys to values in insertion order; see [Hashes](#hashes).
 - Codeblocks (`xb_block`: function, captured cells) and cells (`xb_cell`: one item at offset 0) are described in
   [Codeblocks](#codeblocks), objects in [Objects and messages](#objects-and-messages).
@@ -213,8 +236,9 @@ rest of the runtime and compiled code use.
   collection does not scan old objects. The state byte sits `XB_GC_STATE_BACK` bytes before the object; its bits
   `XB_GC_STATE_OLD` and `XB_GC_STATE_RECORDED` tell whether a store must record it (`xb_gc_write` in `xbrt.h`). C code
   calls `xb_gc_write(obj)` after storing into a heap object (a grown array's item storage, a reference's character) and
-  `xb_gc_write_item(array, index)` after storing an array element (it returns at once for a value of a type that refers
-  to no object, `xb_type_is_heap`; compiled code that stores an element in place calls it only for such values);
+  `xb_gc_write_item(array, index)` after storing an array element (it returns at once for a young array, an array of a
+  compact form and a value of a type that refers to no object, `xb_type_is_heap`; compiled code that stores an element
+  in place calls it only for such values);
   compiled code tests the byte inline after storing into a local cell and calls `xb_gc_remember`; a store through
   anything else goes through the runtime (`xb_ref_store`). The
   barrier comes after the store, with no allocation in between, and an item a call produces never goes straight into a
@@ -228,7 +252,9 @@ rest of the runtime and compiled code use.
   copied elements) records each card the run covers by an item of the run that refers to an object, whichever of
   them does.
 - Collection: marking uses an explicit stack; an array of more than 4096 items is traced a slice of 4096 at a time
-  (`xb_slice`), so the stack holds a slice's children, not a long array's all. The collector's vectors (the stack, the
+  (`xb_slice`), so the stack holds a slice's children, not a long array's all. An array of a compact form refers to no
+  object: its storage is marked, its elements are not read. A collection keeps an object's form bits, as it keeps its
+  sharing bit. The collector's vectors (the stack, the
   remembered set, the lists of survivors, aged, pinned and retained objects, the threads' lists) give back what they
   grew past 64 K entries when a collection uses a quarter of it at most. Marking an object gives the lines it covers the
   collection's epoch, and making it old (a full collection, a promotion) makes them old lines. A line is then free when
@@ -246,9 +272,9 @@ rest of the runtime and compiled code use.
   and moves every object it reaches in them into free blocks. The old place keeps the address of the copy
   (`XB_GC_HDR_MOVED`; the address is stored past a string's flags, which stay readable, since a string is tested for
   `XB_STR_STATIC` before its header: a literal has none), every reference the collection sees is set to the copy (roots,
-  fields, an array's own items, a hash's tables inside its entry store, a codeblock's cells, the collector's own lists),
-  and the emptied blocks become free. When the heap is about to grow (no free or recyclable block left, no block a chunk
-  never handed out: taking a given-back block from the system again is growing too), at least a young budget was
+  fields, an array's own elements, a hash's tables inside its entry store, a codeblock's cells, the collector's own
+  lists), and the emptied blocks become free. When the heap is about to grow (no free or recyclable block left, no block
+  a chunk never handed out: taking a given-back block from the system again is growing too), at least a young budget was
   allocated since the last full collection, and a quarter of the heap is free lines of blocks such a collection may
   empty, it runs first instead, on a thread that may move objects. A size class's blocks are compacted too: for each
   class, its blocks by how full they are, the sparsest ones (at most half their slots taken) whose objects all fit the

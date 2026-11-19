@@ -50,7 +50,7 @@ void xb_agen_new(xb_ctx *ctx, xb_item *r, xb_func resume, uint32_t argc, const x
   xb_set_logical(&g->vars[G_STATE], AG_IDLE); /* the word read and changed atomically (its v.l) */
   xb_set_int(&g->vars[G_RESUME], (int64_t)(uintptr_t)resume);
   xb_array *a = xb_array_alloc(argc); /* a safepoint: `*r` (the caller's) keeps the enumerator, its frame `argv` */
-  for (uint32_t i = 0; i < argc; ++i) a->items[i] = argv[i];
+  for (uint32_t i = 0; i < argc; ++i) xb_array_items(a)[i] = argv[i];
   g = r->v.p;
   xb_set_array(&g->vars[G_ARGS], a);
   xb_gc_write(g);

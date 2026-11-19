@@ -252,16 +252,16 @@ static void add_entry(xb_item *out, const xb_dir_entry *e) {
   size_t at = list->len;
   xb_array_resize(list, (uint64_t)at + 1);
   xb_array *entry = xb_array_alloc(5);
-  xb_set_array(&list->items[at], entry);
+  xb_set_array(&xb_array_items(list)[at], entry);
   xb_gc_write_item(list, at);
-  xb_set_str(&entry->items[0], xb_str_new(e->name, strlen(e->name)));
+  xb_set_str(&xb_array_items(entry)[0], xb_str_new(e->name, strlen(e->name)));
   xb_gc_write_item(entry, 0);
-  xb_set_int(&entry->items[1], e->size);
-  xb_set_date(&entry->items[2], xb_date_encode(e->year, e->month, e->day));
+  xb_set_int(&xb_array_items(entry)[1], e->size);
+  xb_set_date(&xb_array_items(entry)[2], xb_date_encode(e->year, e->month, e->day));
   char time[9] = {(char)('0' + e->hour / 10),   (char)('0' + e->hour % 10),   ':',
                   (char)('0' + e->minute / 10), (char)('0' + e->minute % 10), ':',
                   (char)('0' + e->second / 10), (char)('0' + e->second % 10), '\0'};
-  xb_set_str(&entry->items[3], xb_str_new(time, 8));
+  xb_set_str(&xb_array_items(entry)[3], xb_str_new(time, 8));
   xb_gc_write_item(entry, 3);
   static const struct {
     uint32_t bit;
@@ -272,7 +272,7 @@ static void add_entry(xb_item *out, const xb_dir_entry *e) {
   size_t n = 0;
   for (size_t k = 0; k < sizeof letters / sizeof letters[0]; ++k)
     if (e->attrs & letters[k].bit) attrs[n++] = letters[k].letter;
-  xb_set_str(&entry->items[4], xb_str_new(attrs, n));
+  xb_set_str(&xb_array_items(entry)[4], xb_str_new(attrs, n));
   xb_gc_write_item(entry, 4);
 }
 

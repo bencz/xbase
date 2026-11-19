@@ -87,7 +87,7 @@ static void names(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int m
   xb_array *a = xb_array_alloc(n);
   xb_set_array(ret, a); /* rooted there while the names are made */
   for (uint32_t k = 0; k < n; ++k) {
-    xb_set_str(&a->items[k], xb_str_new(list[k], strlen(list[k])));
+    xb_set_str(&xb_array_items(a)[k], xb_str_new(list[k], strlen(list[k])));
     xb_gc_write(a);
   }
   free(list);

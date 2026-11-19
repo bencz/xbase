@@ -8,23 +8,139 @@
 /* A shared array's fields change under its lock while readers load them under its sequence counter: they are
  * stored with release and loaded with acquire order (core/shared.h). */
 #if defined(__GNUC__) || defined(__clang__)
-static xb_item *items_of(const xb_array *a) { return __atomic_load_n(&a->items, __ATOMIC_ACQUIRE); }
-static void set_items(xb_array *a, xb_item *items) { __atomic_store_n(&a->items, items, __ATOMIC_RELEASE); }
+static xb_item *items_of(const xb_array *a) { return __atomic_load_n(&a->data, __ATOMIC_ACQUIRE); }
+static void set_items(xb_array *a, xb_item *items) { __atomic_store_n(&a->data, (void *)items, __ATOMIC_RELEASE); }
 #else
-static xb_item *items_of(const xb_array *a) { return xb_atomic_loadptr((void *const *)&a->items, XB_ACQUIRE); }
-static void set_items(xb_array *a, xb_item *items) { xb_atomic_storeptr((void **)&a->items, items, XB_RELEASE); }
+static xb_item *items_of(const xb_array *a) { return xb_atomic_loadptr((void *const *)&a->data, XB_ACQUIRE); }
+static void set_items(xb_array *a, xb_item *items) { xb_atomic_storeptr((void **)&a->data, items, XB_RELEASE); }
 #endif
+
+/* The forms of the elements (xb_array in xbrt.h): a shared array holds items, so only the paths of a local one read and
+ * write the others. */
+
+/* An array's form changes only while one thread reaches it, which is then the only one to change its state byte
+ * while it runs: the collector, and a publication's xb_share (which turns the arrays of the program's storage), change
+ * it while that thread is stopped, and another thread records only a shared object. A load and a store, no
+ * read-modify-write. */
+static void set_elems(xb_array *a, uint32_t elems) {
+  uint8_t *state = &xb_gc_header(a)->state;
+  uint8_t was = xb_atomic_load8(state, XB_RELAXED);
+  xb_atomic_store8(state, (uint8_t)((was & ~XB_GC_STATE_ELEMS) | elems << XB_GC_STATE_ELEMS_SHIFT), XB_RELAXED);
+}
+
+/* The bytes an element takes in each form. */
+static size_t elem_size(uint32_t elems) {
+  switch (elems) {
+    case XB_ELEMS_NIL: return 0;
+    case XB_ELEMS_LOGICAL: return 1;
+    case XB_ELEMS_INT: return sizeof(int64_t);
+    default: return sizeof(xb_item);
+  }
+}
+
+/* The form an array of form `elems` needs to hold `v` too: its own when it holds it already, else the compact form of
+ * v (a NIL holds every form, NIL itself turns nothing), else items. */
+static uint32_t form_with(uint32_t elems, const xb_item *v) {
+  uint32_t own = XB_ELEMS_ITEMS;
+  if (v->width == 0 && v->dec == 0) {
+    if (v->type == XB_T_NIL) return elems;
+    if (v->type == XB_T_LOGICAL) own = XB_ELEMS_LOGICAL;
+    if (v->type == XB_T_INT && v->v.i != XB_ELEMS_INT_NIL) own = XB_ELEMS_INT;
+  }
+  return elems == XB_ELEMS_NIL || elems == own ? own : XB_ELEMS_ITEMS;
+}
+
+/* Element `i` of a local array of form `elems` into *dst. */
+static inline void read_elem(const xb_array *a, uint32_t elems, size_t i, xb_item *dst) {
+  switch (elems) {
+    case XB_ELEMS_ITEMS: *dst = ((const xb_item *)a->data)[i]; return;
+    case XB_ELEMS_LOGICAL: {
+      uint8_t b = ((const uint8_t *)a->data)[i];
+      if (b)
+        xb_set_logical(dst, b == XB_ELEMS_TRUE);
+      else
+        xb_set_nil(dst);
+      return;
+    }
+    case XB_ELEMS_INT: {
+      int64_t n;
+      memcpy(&n, (const char *)a->data + i * sizeof n, sizeof n);
+      if (n != XB_ELEMS_INT_NIL)
+        xb_set_int(dst, n);
+      else
+        xb_set_nil(dst);
+      return;
+    }
+    default: xb_set_nil(dst); return;
+  }
+}
+
+/* `v` into element `i` (below the room) of a local array whose form, `elems`, holds it. */
+static inline void write_elem(xb_array *a, uint32_t elems, size_t i, const xb_item *v) {
+  switch (elems) {
+    case XB_ELEMS_ITEMS: ((xb_item *)a->data)[i] = *v; return;
+    case XB_ELEMS_LOGICAL:
+      ((uint8_t *)a->data)[i] = v->type == XB_T_NIL ? 0 : v->v.l ? XB_ELEMS_TRUE : XB_ELEMS_FALSE;
+      return;
+    case XB_ELEMS_INT: {
+      int64_t n = v->type == XB_T_NIL ? XB_ELEMS_INT_NIL : v->v.i;
+      memcpy((char *)a->data + i * sizeof n, &n, sizeof n);
+      return;
+    }
+    default: return;
+  }
+}
+
+/* Elements `from` .. `to` - 1 (below the room) of a local array set to NIL. */
+static void clear_elems(xb_array *a, size_t from, size_t to) {
+  uint32_t elems = xb_array_elems(a);
+  if (elems == XB_ELEMS_INT) {
+    xb_item nil;
+    xb_set_nil(&nil);
+    for (size_t i = from; i < to; ++i) write_elem(a, elems, i, &nil);
+    return;
+  }
+  size_t size = elem_size(elems); /* 0 is NIL as an item and as a logical */
+  if (size && to > from) memset((char *)a->data + from * size, 0, (to - from) * size);
+}
+
+/* A local array's elements in form `elems`, one that holds them all, in place: the storage has room for its items.
+ * Turned into items, element i is read before the item i takes its place, from the last one down: an item covers only
+ * the places of elements at or past its own. */
+static void retarget(xb_array *a, uint32_t elems) {
+  uint32_t was = xb_array_elems(a);
+  if (was == elems) return;
+  if (was == XB_ELEMS_NIL) {
+    set_elems(a, elems);
+    clear_elems(a, 0, a->len);
+    return;
+  }
+  for (size_t i = a->len; i-- > 0;) {
+    xb_item v;
+    read_elem(a, was, i, &v);
+    ((xb_item *)a->data)[i] = v;
+  }
+  set_elems(a, elems);
+}
+
+void xb_array_to_items(xb_array *a) { retarget(a, XB_ELEMS_ITEMS); }
+
+/* `v` into element `i` (below the room) of a local array, which takes the form that holds it first. */
+static void store(xb_array *a, size_t i, const xb_item *v) {
+  uint32_t form = form_with(xb_array_elems(a), v);
+  retarget(a, form);
+  write_elem(a, form, i, v);
+}
+
+/* The state byte of an array: whether it is shared, its form. */
+static inline uint8_t state_of(const xb_array *a) { return xb_atomic_load8(&xb_gc_header(a)->state, XB_RELAXED); }
 
 size_t xb_array_length(const xb_array *a) {
   return xb_is_shared(a) ? xb_atomic_loadsz(&a->len, XB_ACQUIRE) : a->len;
 }
 
-int xb_array_get(const xb_array *a, size_t i, xb_item *dst) {
-  if (!xb_is_shared(a)) {
-    if (i >= a->len) return 0;
-    *dst = a->items[i];
-    return 1;
-  }
+/* The paths of a shared array are functions of their own (XB_NOINLINE): the local ones then need no frame. */
+static XB_NOINLINE int get_shared(const xb_array *a, size_t i, xb_item *dst) {
   for (;;) { /* into a local item first: a read a writer overlapped must never reach `dst`, a root perhaps */
     uint32_t seq = xb_seq_read_begin(a);
     xb_item v;
@@ -36,12 +152,15 @@ int xb_array_get(const xb_array *a, size_t i, xb_item *dst) {
   }
 }
 
-int xb_array_last(const xb_array *a, xb_item *dst) {
-  if (!xb_is_shared(a)) {
-    if (!a->len) return 0;
-    *dst = a->items[a->len - 1];
-    return 1;
-  }
+int xb_array_get(const xb_array *a, size_t i, xb_item *dst) {
+  uint8_t state = state_of(a);
+  if (state & XB_GC_SHARED) return get_shared(a, i, dst);
+  if (i >= a->len) return 0;
+  read_elem(a, xb_elems_of_state(state), i, dst);
+  return 1;
+}
+
+static XB_NOINLINE int last_shared(const xb_array *a, xb_item *dst) {
   for (;;) { /* the length and the element in one read */
     uint32_t seq = xb_seq_read_begin(a);
     xb_item v;
@@ -51,6 +170,14 @@ int xb_array_last(const xb_array *a, xb_item *dst) {
     if (len) *dst = v;
     return len != 0;
   }
+}
+
+int xb_array_last(const xb_array *a, xb_item *dst) {
+  uint8_t state = state_of(a);
+  if (state & XB_GC_SHARED) return last_shared(a, dst);
+  if (!a->len) return 0;
+  read_elem(a, xb_elems_of_state(state), a->len - 1, dst);
+  return 1;
 }
 
 /* Optimistic reads of a shared array before its copy is made under the lock. */
@@ -65,7 +192,7 @@ static xb_array *copy_locked(xb_ctx *ctx, const xb_array *a, size_t room) {
   xb_seq_lock(a);
   size_t len = a->len;
   xb_array *copy = held.v.p;
-  if (len <= room) memcpy(copy->items, a->items, len * sizeof(xb_item));
+  if (len <= room) memcpy(copy->data, a->data, len * sizeof(xb_item));
   xb_seq_unlock(a);
   xb_gc_root_pop(ctx, 1);
   if (len > room) return NULL;
@@ -77,8 +204,11 @@ static xb_array *copy_locked(xb_ctx *ctx, const xb_array *a, size_t room) {
 xb_array *xb_array_snapshot(xb_ctx *ctx, const xb_array *a) {
   if (!xb_is_shared(a)) {
     xb_array *copy = xb_array_alloc(a->len); /* `a` is reachable */
-    memcpy(copy->items, a->items, a->len * sizeof(xb_item));
-    return copy;
+    if (!xb_is_shared(a)) { /* the allocation is a safepoint, where it may have been published */
+      set_elems(copy, xb_array_elems(a));
+      memcpy(copy->data, a->data, a->len * elem_size(xb_array_elems(a)));
+      return copy;
+    }
   }
   /* Storage for the length seen, then all the items in one read of that length. A long read that writers keep
    * overtaking is made under the lock after SNAPSHOT_TRIES of them, with room for twice the length each time the
@@ -95,27 +225,34 @@ xb_array *xb_array_snapshot(xb_ctx *ctx, const xb_array *a) {
     uint32_t seq = xb_seq_read_begin(a);
     int same = xb_atomic_loadsz(&a->len, XB_ACQUIRE) == len;
     const xb_item *items = items_of(a);
-    for (size_t i = 0; same && i < len; ++i) xb_seq_load(&copy->items[i], &items[i]);
+    for (size_t i = 0; same && i < len; ++i) xb_seq_load(&((xb_item *)copy->data)[i], &items[i]);
     if (xb_seq_read_valid(a, seq) && same) return copy;
   }
 }
 
-int xb_array_put(xb_array *a, size_t i, const xb_item *v) {
-  if (!xb_is_shared(a)) {
-    if (i >= a->len) return 0;
-    a->items[i] = *v;
-    xb_gc_write_item(a, i);
-    return 1;
-  }
+void xb_array_store(xb_array *a, size_t index, const xb_item *v) {
+  store(a, index, v);
+  xb_gc_write_item(a, index);
+}
+
+static XB_NOINLINE int put_shared(xb_array *a, size_t i, const xb_item *v) {
   xb_share(v); /* before another thread can reach it */
   xb_seq_lock(a);
   int in = i < a->len;
   if (in) {
-    xb_seq_store(&a->items[i], v);
+    xb_seq_store(&((xb_item *)a->data)[i], v);
     xb_gc_write_item(a, i);
   }
   xb_seq_unlock(a);
   return in;
+}
+
+int xb_array_put(xb_array *a, size_t i, const xb_item *v) {
+  if (xb_is_shared(a)) return put_shared(a, i, v);
+  if (i >= a->len) return 0;
+  store(a, i, v);
+  xb_gc_write_item(a, i);
+  return 1;
 }
 
 /* Storage for `cap` items, its cards clean; `fallible`: NULL when there is no memory for it (xb_gc_try_alloc). */
@@ -152,12 +289,12 @@ static int resize_shared(xb_ctx *ctx, xb_array *a, size_t len, int fallible) {
   xb_seq_lock(a);
   if (len > a->cap) {
     xb_item *items = spare.v.p; /* where a collection while the lock was waited for left it */
-    if (a->len) memcpy(items, a->items, a->len * sizeof(xb_item)); /* no other thread writes them now */
+    if (a->len) memcpy(items, a->data, a->len * sizeof(xb_item)); /* no other thread writes them now */
     set_items(a, items);
     xb_atomic_storesz(&a->cap, room, XB_RELEASE);
     xb_gc_write(a); /* new storage: the whole array is traced */
   }
-  for (size_t i = a->len; i < len; ++i) xb_seq_store(&a->items[i], &nil);
+  for (size_t i = a->len; i < len; ++i) xb_seq_store(&((xb_item *)a->data)[i], &nil);
   xb_atomic_storesz(&a->len, len, XB_RELEASE);
   xb_seq_unlock(a);
   xb_gc_root_pop(ctx, 1);
@@ -173,8 +310,8 @@ static int local_room(xb_array *a, size_t len, int fallible) {
   xb_item *items = storage_of(cap, fallible); /* `a` is reachable */
   if (!items) return -1; /* no memory: only when fallible */
   if (xb_is_shared(a)) return 0;
-  if (a->len) memcpy(items, a->items, a->len * sizeof(xb_item));
-  a->items = items;
+  if (a->len) memcpy(items, a->data, a->len * elem_size(xb_array_elems(a))); /* the form after the allocation */
+  a->data = items;
   a->cap = cap;
   xb_gc_write(a); /* new storage: the whole array is traced */
   return 1;
@@ -186,9 +323,9 @@ static int local_room(xb_array *a, size_t len, int fallible) {
  * its cards after them, and the collector trims the rest (a large object). */
 #define XB_ARRAY_SHRINK_MIN 1024u
 static int local_shrink(xb_array *a, size_t len) {
-  if (a->items == a->inline_items) {
+  if (a->data == a->inline_items) {
     a->len = a->cap = len;
-    memset(a->items + len, 0, xb_array_card_count(len)); /* clean cards; the whole array traced next */
+    memset(a->inline_items + len, 0, xb_array_card_count(len)); /* clean cards; the whole array traced next */
     xb_gc_trim(a, sizeof(xb_array) + len * sizeof(xb_item) + xb_array_card_count(len));
     xb_gc_write(a);
     return 1;
@@ -196,8 +333,8 @@ static int local_shrink(xb_array *a, size_t len) {
   size_t cap = len * 2 > 16 ? len * 2 : 16;
   xb_item *items = storage(cap); /* `a` is reachable */
   if (xb_is_shared(a)) return 0;
-  memcpy(items, a->items, len * sizeof(xb_item));
-  a->items = items;
+  memcpy(items, a->data, len * elem_size(xb_array_elems(a)));
+  a->data = items;
   a->cap = cap;
   a->len = len;
   xb_gc_write(a); /* new storage: the whole array is traced */
@@ -226,7 +363,8 @@ int xb_array_resize_try(xb_ctx *ctx, xb_array *a, uint64_t newLen) { return resi
 
 void xb_array_append(xb_ctx *ctx, xb_array *a, const xb_item *v) {
   if (!xb_is_shared(a) && local_room(a, a->len + 1, 0)) {
-    a->items[a->len++] = *v;
+    store(a, a->len, v); /* within the room, past the elements its form may turn */
+    a->len++;
     xb_gc_write_item(a, a->len - 1);
     return;
   }
@@ -249,14 +387,14 @@ void xb_array_append(xb_ctx *ctx, xb_array *a, const xb_item *v) {
         continue;
       }
       xb_item *items = spare.v.p;
-      memcpy(items, a->items, a->len * sizeof(xb_item));
+      memcpy(items, a->data, a->len * sizeof(xb_item));
       set_items(a, items);
       xb_atomic_storesz(&a->cap, room, XB_RELEASE);
       xb_gc_write(a);
       xb_set_nil(&spare); /* taken: the next append makes its own */
       room = 0;
     }
-    xb_seq_store(&a->items[a->len], v);
+    xb_seq_store(&((xb_item *)a->data)[a->len], v);
     xb_atomic_storesz(&a->len, a->len + 1, XB_RELEASE);
     xb_gc_write_item(a, a->len - 1);
     xb_seq_unlock(a);
@@ -273,14 +411,20 @@ static void shift(xb_array *a, size_t at, int up) {
   if (shared) xb_seq_lock(a);
   if (at < a->len) {
     size_t last = a->len - 1, moved = last - at, hole = up ? at : last;
+    xb_item *items = a->data;
     if (!shared) {
-      memmove(&a->items[up ? at + 1 : at], &a->items[up ? at : at + 1], moved * sizeof(xb_item));
-    } else if (up) {
-      for (size_t i = last; i > at; --i) xb_seq_store(&a->items[i], &a->items[i - 1]);
+      size_t size = elem_size(xb_array_elems(a));
+      char *data = a->data;
+      memmove(data + (up ? at + 1 : at) * size, data + (up ? at : at + 1) * size, moved * size);
+      clear_elems(a, hole, hole + 1);
     } else {
-      for (size_t i = at; i < last; ++i) xb_seq_store(&a->items[i], &a->items[i + 1]);
+      if (up) {
+        for (size_t i = last; i > at; --i) xb_seq_store(&items[i], &items[i - 1]);
+      } else {
+        for (size_t i = at; i < last; ++i) xb_seq_store(&items[i], &items[i + 1]);
+      }
+      xb_seq_store(&items[hole], &nil);
     }
-    xb_seq_store(&a->items[hole], &nil);
     if (moved) xb_gc_write_items(a, up ? at + 1 : at, up ? last + 1 : last); /* young elements in other cards */
   }
   if (shared) xb_seq_unlock(a);
@@ -296,17 +440,17 @@ void xb_array_resize(xb_array *a, uint64_t newLen) {
   if (len > a->cap) {
     size_t cap = grown_cap(a->cap, len);
     xb_item *items = storage(cap); /* `a` is reachable */
-    if (a->len) memcpy(items, a->items, a->len * sizeof(xb_item));
-    a->items = items;
+    if (a->len) memcpy(items, a->data, a->len * elem_size(xb_array_elems(a)));
+    a->data = items;
     a->cap = cap;
     xb_gc_write(a); /* new storage: the whole array is traced */
   }
-  if (len > a->len) memset(a->items + a->len, 0, (len - a->len) * sizeof(xb_item)); /* NIL */
+  if (len > a->len) clear_elems(a, a->len, len);
   a->len = len;
 }
 
-/* A new array of `len` NIL items, with room for `len` items in its own allocation. */
-static xb_array *array_alloc(uint64_t newLen, int fallible) {
+/* A new array of `len` NILs in form `elems` (items or NIL), with room for `len` items in its own allocation. */
+static xb_array *array_alloc(uint64_t newLen, int fallible, uint32_t elems) {
   if (newLen > XB_ARRAY_MAX_LEN) {
     if (fallible) return NULL;
     xb_gc_fatal("array too large");
@@ -318,21 +462,34 @@ static xb_array *array_alloc(uint64_t newLen, int fallible) {
   if (!a) return NULL;
   a->len = len;
   a->cap = len;
-  a->items = a->inline_items;
-  memset(a->items, 0, len * sizeof(xb_item) + cards); /* NIL items, clean cards */
+  a->data = a->inline_items;
+  if (elems == XB_ELEMS_ITEMS) { /* a new object's state byte is clear: items */
+    memset(a->inline_items, 0, len * sizeof(xb_item) + cards); /* NIL items, clean cards */
+  } else {
+    set_elems(a, elems);
+    memset(a->inline_items + len, 0, cards); /* clean cards; NILs take no bytes */
+  }
   return a;
 }
 
-xb_array *xb_array_alloc(uint64_t len) { return array_alloc(len, 0); }
+xb_array *xb_array_alloc(uint64_t len) { return array_alloc(len, 0, XB_ELEMS_ITEMS); }
 
-xb_array *xb_array_try_alloc(uint64_t len) { return array_alloc(len, 1); }
+xb_array *xb_array_try_alloc(uint64_t len) { return array_alloc(len, 1, XB_ELEMS_NIL); }
 
 void xb_set_array(xb_item *it, xb_array *a) { xb_set_ptr(it, XB_T_ARRAY, a); }
 
+/* A literal: the form that holds its elements. */
 void xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems) {
   XB_UNUSED(ctx);
-  xb_array *a = xb_array_alloc(n); /* elems live in the caller's frame: still reachable */
-  if (n) memcpy(a->items, elems, n * sizeof(xb_item));
+  uint32_t form = XB_ELEMS_NIL;
+  for (uint32_t k = 0; k < n && form != XB_ELEMS_ITEMS; ++k) form = form_with(form, &elems[k]);
+  xb_array *a = array_alloc(n, 0, form == XB_ELEMS_ITEMS ? XB_ELEMS_ITEMS : XB_ELEMS_NIL); /* elems: in a frame */
+  if (form == XB_ELEMS_ITEMS) {
+    if (n) memcpy(a->data, elems, n * sizeof(xb_item));
+  } else {
+    retarget(a, form);
+    for (uint32_t k = 0; k < n; ++k) write_elem(a, form, k, &elems[k]);
+  }
   xb_set_array(r, a);
 }
 

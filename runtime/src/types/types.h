@@ -28,7 +28,25 @@ static inline size_t xb_array_card_count(size_t cap) {
   return cap >= XB_ARRAY_CARD_MIN ? (cap + ((size_t)1 << XB_ARRAY_CARD_SHIFT) - 1) >> XB_ARRAY_CARD_SHIFT : 0;
 }
 static inline uint8_t *xb_array_cards(const xb_array *a) {
-  return a->cap >= XB_ARRAY_CARD_MIN ? (uint8_t *)(a->items + a->cap) : NULL;
+  return a->cap >= XB_ARRAY_CARD_MIN ? (uint8_t *)((xb_item *)a->data + a->cap) : NULL;
+}
+
+/* The forms of an array's elements (xb_array in xbrt.h), bits of its state byte. An array of the program starts as
+ * XB_ELEMS_NIL;
+ * xb_array_items gives the elements of any array as items, turning one of a compact form into one of items first, in
+ * place (it allocates nothing, so it may run anywhere). C code reads and writes elements in place through it, unless
+ * it handles the forms itself (types/array.c, the collector). A shared array always holds items (xb_share turns it
+ * before another thread can reach it), so only a local one ever changes form. */
+static inline uint32_t xb_elems_of_state(uint8_t state) {
+  return (state >> XB_GC_STATE_ELEMS_SHIFT) & XB_GC_STATE_ELEMS_MASK;
+}
+static inline uint32_t xb_array_elems(const xb_array *a) {
+  return xb_elems_of_state(xb_atomic_load8(&xb_gc_header(a)->state, XB_RELAXED));
+}
+void xb_array_to_items(xb_array *a);
+static inline xb_item *xb_array_items(const xb_array *a) {
+  if (xb_array_elems(a) != XB_ELEMS_ITEMS) xb_array_to_items((xb_array *)a); /* the values stay: a read may turn it */
+  return a->data;
 }
 
 /* Longest array: its items must fit in addressable memory with room to grow. */
@@ -55,7 +73,8 @@ static inline int64_t xb_array_index(const xb_array *a, int64_t n) {
 /* Lengths are 64-bit so that a length past XB_ARRAY_MAX_LEN is caught before
  * it is narrowed to size_t (on 32-bit hosts). */
 xb_array *xb_array_alloc(uint64_t len); /* `len` NIL items */
-/* The same for a length the program chose: NULL when it is past the largest array or no memory holds it. */
+/* An array of the program (XB_ELEMS_NIL) of a length it chose (Array()): NULL when it is past the largest array or no
+ * memory holds it. */
 xb_array *xb_array_try_alloc(uint64_t len);
 /* The visible length set to `len`, new items NIL; `a` must be reachable. xb_array_resize is for an array no other
  * thread reaches (one the runtime has just made); xb_array_resize_any for any, where a shared one (core/shared.h)
@@ -261,7 +280,7 @@ static inline void xb_frame_copy(xb_item *to, const xb_item *from, uint32_t n) {
  * time runs a step. */
 static inline void xb_frame_load(const xb_array *frame, xb_item *slots, uint32_t nslots) {
   uint32_t n = nslots < frame->len ? nslots : (uint32_t)frame->len;
-  xb_frame_copy(slots, frame->items, n); /* one thread at a time runs a step */
+  xb_frame_copy(slots, xb_array_items(frame), n); /* one thread at a time runs a step */
 }
 void       xb_frame_store_slow(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots, uint32_t nslots);
 static inline void xb_frame_store(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots,
@@ -271,7 +290,7 @@ static inline void xb_frame_store(xb_ctx *ctx, const xb_item *holder, uint32_t k
                                                             * items built in locals and then copied would stall */
     xb_array *frame = o->vars[k].v.p;
     if (frame->len >= nslots) {
-      xb_frame_copy(frame->items, slots, nslots);
+      xb_frame_copy(xb_array_items(frame), slots, nslots);
       xb_gc_write_items(frame, 1, nslots);
       return;
     }

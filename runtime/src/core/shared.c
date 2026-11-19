@@ -181,7 +181,8 @@ void xb_share(const xb_item *it) {
       case XB_GC_STRING: xb_str_share(obj); break;
       case XB_GC_ARRAY: {
         xb_array *a = obj;
-        for (size_t i = 0; i < a->len; ++i) visit(&w, &a->items[i]);
+        const xb_item *items = xb_array_items(a); /* a shared array holds items: it turns before others reach it */
+        for (size_t i = 0; i < a->len; ++i) visit(&w, &items[i]);
         break;
       }
       case XB_GC_BLOCK: {

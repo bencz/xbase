@@ -3,6 +3,7 @@
 #include "codegen/LoopGuards.h"
 #include "codegen/LoopPolls.h"
 #include "codegen/LoopSplit.h"
+#include "codegen/MemoryTags.h"
 
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
@@ -133,6 +134,11 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   OptNoneInstrumentation optNone(/*DebugLogging=*/false);
   optNone.registerCallbacks(pic);
   PassBuilder pb(&tm, PipelineTuningOptions(), std::nullopt, &pic);
+  // After the passes that make memsets (MemCpyOpt, InstCombine): the next loop passes see their alias class.
+  pb.registerPeepholeEPCallback([](FunctionPassManager &f, OptimizationLevel) { f.addPass(TagItemMemsets()); });
+  pb.registerScalarOptimizerLateEPCallback([](FunctionPassManager &f, OptimizationLevel) {
+    f.addPass(TagItemMemsets());
+  });
   pb.registerModuleAnalyses(mam);
   pb.registerCGSCCAnalyses(cgam);
   pb.registerFunctionAnalyses(fam);
@@ -168,9 +174,16 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   again(placeLoopPolls, "loop polls");
   // On the loops the simplification has rotated: a guard out of a loop makes what it guarded invariant, whose own test
   // may then go out too.
-  for (unsigned round = 0; round < kGuardRounds; ++round) again(hoistLoopGuards, "loop guards");
-  // Then the tests a fast loop makes on what it does not change that are not its header's: tested once, before it.
+  for (unsigned round = 0; round < kGuardRounds; ++round) {
+    again(hoistLoopGuards, "loop guards");
+    again(unswitchFormTests, "form tests");
+  }
+  // Then the tests a fast loop makes on what it does not change that are not its header's: tested once, before it. The
+  // form test of an array that only then reads what the loop does not change (an invariant row of an array of
+  // arrays), and the guards after it, go out last.
   again(versionInvariantColdExits, "loop versioning");
+  again(unswitchFormTests, "form tests");
+  again(hoistLoopGuards, "loop guards");
 }
 
 // Code generation runs on the legacy pass manager: in LLVM 22 it is the one
