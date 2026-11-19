@@ -28,8 +28,10 @@ The lexer delivers one logical line at a time. A UTF-8 byte order mark at the st
   split into their characters before the markers are found, and the characters left as literals next to each other
   are joined again afterwards, so a marker written next to one keeps its brackets: `<a><<b>` is `<a>`, `<`, `<b>`;
   `<n>>2` is `<n>`, `>>`, `2`; `<x,...>>1` and `<a>>=<b>` work alike.
-- Numbers: decimal with optional fraction, and `0x` hexadecimal. The lexer computes the display width of numeric
-  literals (see [compiler.md](compiler.md#numeric-literals)).
+- Numbers: decimal with optional fraction, and `0x` hexadecimal. A hexadecimal literal of up to 64 bits is the
+  integer those bits make in two's complement, as in Clipper's descendants (`0xFFFFFFFFFFFFFFFF` is `-1`,
+  `0x8000000000000000` the lowest integer); a longer one is an error, where the reference keeps its low 64 bits. The
+  lexer computes the display width of numeric literals (see [compiler.md](compiler.md#numeric-literals)).
 - A line whose first token is `#` is a directive line. There `[` never starts a string, `\` escapes the next token, and
   `#` followed by `<` is a dumb-stringify result marker.
 - Identifiers keep their spelling (for `#define` and stringification) plus an upper-cased form used for keywords and

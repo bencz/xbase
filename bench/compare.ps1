@@ -36,12 +36,48 @@ $Title = @{ xbase = "xbase"; harbour = "Harbour"; c = "C"; rust = "Rust"; csharp
             node = "JavaScript"; pypy = "Python (PyPy)"; python = "Python (CPython)" }
 # What Harbour has no counterpart of (YIELD, a pool of tasks, bounded channels, ASYNC); those of its own forms in
 # bench/harbour/ that run threads, built with its threaded runtime.
-$HarbourSkip = "generator", "tasks", "channels", "async", "async_generator"
-$HarbourMt = "async_pi"
+$HarbourSkip = "generator", "tasks", "channels", "async", "async_generator", "higher_order_chain", "pipeline_tasks",
+               "work_stealing", "shared_counter", "memory_footprint"
+$HarbourMt = "async_pi", "parallel_map", "producer_consumer", "chameneos_redux"
 $Java = @{ fib = "Fib"; loops = "Loops"; sieve = "Sieve"; matmul = "MatMul"; qsort = "QSort"; asort = "ASort";
-           strings = "Strings"; crc32 = "Crc32"; float = "FloatBench"; mixed = "Mixed"; oop = "Oop"; gc = "Gc";
-           bitlookup = "BitLookup"; generator = "Generator"; pi = "Pi"; tasks = "Tasks"; channels = "Channels";
-           async_pi = "AsyncPi" }
+          strings = "Strings"; crc32 = "Crc32"; float = "FloatBench"; mixed = "Mixed"; oop = "Oop"; gc = "Gc";
+          bitlookup = "BitLookup"; generator = "Generator"; pi = "Pi"; tasks = "Tasks"; channels = "Channels";
+          async_pi = "AsyncPi"; ackermann = "Ackermann"; aeval_heval = "AevalHeval"; array_append = "ArrayAppend";
+          array_growth = "ArrayGrowth"; array_nested = "ArrayNested"; array_of_hashes = "ArrayOfHashes";
+          array_preallocate = "ArrayPreallocate"; asort_codeblock = "AsortCodeblock"; at_rat_strtran = "AtRatStrtran";
+          base64 = "Base64"; bfs_dfs = "BfsDfs"; binary_search = "BinarySearch"; binary_trees = "BinaryTrees";
+          black_scholes = "BlackScholes"; chameneos_redux = "ChameneosRedux"; closure_capture = "ClosureCapture";
+          codeblock_callback = "CodeblockCallback"; codeblock_eval = "CodeblockEval"; counting_sort = "CountingSort";
+          crc_adler_fnv = "CrcAdlerFnv"; csv_parse = "CsvParse"; date_time_ops = "DateTimeOps"; dgemm = "Dgemm";
+          dhrystone = "Dhrystone"; dijkstra = "Dijkstra"; fannkuch_redux = "FannkuchRedux"; fasta = "Fasta";
+          fft = "Fft"; gaussian_elimination = "GaussianElimination"; geracao_html = "GeracaoHtml";
+          hash_chaves_longas = "HashChavesLongas"; hash_massivo = "HashMassivo"; hash_resize = "HashResize";
+          heap_sort = "HeapSort"; higher_order_chain = "HigherOrderChain"; indexacao_simulada = "IndexacaoSimulada";
+          index = "Index"; inheritance_depth = "InheritanceDepth"; ini_parse = "IniParse";
+          jaro_winkler = "JaroWinkler"; join_arrays = "JoinArrays"; json_roundtrip = "JsonRoundtrip";
+          julia_set = "JuliaSet"; knapsack = "Knapsack"; k_nucleotide = "KNucleotide"; levenshtein = "Levenshtein";
+          linked_list = "LinkedList"; linpack = "Linpack"; log_processing = "LogProcessing";
+          longest_common_subsequence = "LongestCommonSubsequence"; long_short_mix = "LongShortMix";
+          lru_cache = "LruCache"; mandelbrot = "Mandelbrot"; map_filter_reduce = "MapFilterReduce";
+          md5_sha1 = "Md5Sha1"; memory_footprint = "MemoryFootprint"; merge_sort = "MergeSort";
+          meteor_contest = "MeteorContest"; method_call_overhead = "MethodCallOverhead";
+          monte_carlo_pi = "MonteCarloPi"; n_body = "NBody"; n_queens = "NQueens";
+          numerical_integration = "NumericalIntegration"; numeric_formatting = "NumericFormatting";
+          object_churn = "ObjectChurn"; object_creation = "ObjectCreation"; parallel_map = "ParallelMap";
+          pidigits = "Pidigits"; pivot_crosstab = "PivotCrosstab"; prime_sieve_atkin = "PrimeSieveAtkin";
+          producer_consumer = "ProducerConsumer"; property_access = "PropertyAccess"; radix_sort = "RadixSort";
+          random_massivo = "RandomMassivo"; ray_tracer = "RayTracer"; relatorio_agregacao = "RelatorioAgregacao";
+          reverse_complement = "ReverseComplement"; sequential_scan = "SequentialScan";
+          set_operations = "SetOperations"; shared_counter = "SharedCounter";
+          short_lived_objects = "ShortLivedObjects"; spectral_norm = "SpectralNorm";
+          string_builder = "StringBuilderBench"; string_concatenation = "StringConcatenation";
+          substr_massivo = "SubstrMassivo"; sudoku_solver = "SudokuSolver"; tak = "Tak";
+          tokenize_split = "TokenizeSplit"; towers_of_hanoi = "TowersOfHanoi"; trie = "Trie";
+          upper_lower_alltrim = "UpperLowerAllTrim"; url_encode = "UrlEncode"; validacao_dados = "ValidacaoDados";
+          virtual_dispatch = "VirtualDispatch"; whetstone = "Whetstone"; word_count = "WordCount";
+          work_stealing = "WorkStealing"; xml_simples = "XmlSimples" }
+# The Python ports named otherwise than their benchmark: a standard library module's name would hide that module.
+$Python = @{ base64 = "base64_bench" }
 $Built = @{}
 
 $Use = $All | Where-Object {
@@ -142,9 +178,9 @@ function CommandOf([string]$l, [string]$b) {
       return "fail"
     }
     "node" { if (Test-Path "bench/js/$b.js") { return , @("node", (Join-Path $Root "bench/js/$b.js")) } }
-    "pypy" { if (Test-Path "bench/python/$b.py") { return , @("pypy3", "-B", (Join-Path $Root "bench/python/$b.py")) } }
-    "python" {
-      if (Test-Path "bench/python/$b.py") { return , @("python3", "-B", (Join-Path $Root "bench/python/$b.py")) }
+    { $_ -eq "pypy" -or $_ -eq "python" } {
+      $py = "bench/python/$(if ($Python.ContainsKey($b)) { $Python[$b] } else { $b }).py"
+      if (Test-Path $py) { return , @($Tool[$l], "-B", (Join-Path $Root $py)) }
     }
   }
   return $null

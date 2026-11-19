@@ -832,7 +832,9 @@ for the target.
 The display width of a numeric literal's integer part is fixed at compile time, as in Clipper. An integer literal is
 a program constant: `xb_num_const_int_width` (10 columns plus one per digit beyond nine, 20 for -1000000000 or less;
 leading zeros do not count). A double literal gets `xb_num_dbl_width` when it has fewer than 10 integer digits,
-otherwise its own digit count. Literals too large for 64-bit integers become doubles.
+otherwise its own digit count. Decimal literals too large for 64-bit integers become doubles; a hexadecimal one is
+an integer of up to 64 bits, read as two's complement, with the integer literal's width (`0xFFFFFFFF` takes 11
+columns, `0xFFFFFFFFFFFFFFFF`, -1, 10), and one past 64 bits is an error.
 
 ## Object emission
 

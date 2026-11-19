@@ -23,7 +23,8 @@ void xb_mlex_init(mlexer *lx, const char *src, size_t len) {
 static int at(const mlexer *lx, size_t k, char c) { return lx->pos + k < lx->end && lx->pos[k] == c; }
 
 /* A number: decimal digits with an optional fraction, `.5`, or 0x hex
- * digits; the value and the display width as the compiler gives them. */
+ * digits (up to 64 bits, read as two's complement); the value and the display
+ * width as the compiler gives them. */
 static void lex_number(mlexer *lx, mtoken *t) {
   const char *p = lx->pos;
   char buf[64];
@@ -33,12 +34,13 @@ static void lex_number(mlexer *lx, mtoken *t) {
     int over = 0;
     for (; p < lx->end && is_hex(*p); ++p) {
       unsigned d = is_digit(*p) ? (unsigned)(*p - '0') : (unsigned)((*p | 0x20) - 'a' + 10);
-      if (v > ((uint64_t)INT64_MAX - d) / 16) over = 1;
+      if (v >> 60) over = 1; /* past 64 bits */
       v = v * 16 + d;
     }
     t->kind = over ? MT_BAD : MT_NUMBER;
     t->isInt = 1;
-    t->ival = (int64_t)v;
+    t->ival = v > (uint64_t)INT64_MAX ? -(int64_t)~v - 1 : (int64_t)v; /* 64 bits read as two's complement */
+    t->width = xb_num_literal_width(0, t->ival, 0.0, 0, 0);
     lx->pos = p;
     return;
   }

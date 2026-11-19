@@ -11,9 +11,11 @@
 #ifndef XBMATH_H
 #define XBMATH_H
 
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* Every integer of at most 2^XB_DBL_EXACT_BITS in magnitude is a double exactly (the significand's bits, with its
  * hidden one). */
@@ -22,6 +24,19 @@
 /* 2^52: every double of this magnitude or more is an integer (the step between doubles is 1 or more there); Round()
  * gives such a scaled value back as it is, in the runtime and in the compiler's inline code. */
 #define XB_DBL_INTEGRAL ((double)((uint64_t)1 << (XB_DBL_EXACT_BITS - 1)))
+
+/* A double's bits: the fraction's (below the exponent), and the exponent's bias. */
+#define XB_DBL_FRACTION_BITS (XB_DBL_EXACT_BITS - 1)
+#define XB_DBL_FRACTION_MASK (((uint64_t)1 << XB_DBL_FRACTION_BITS) - 1)
+#define XB_DBL_BIAS 1023
+
+/* 2^q of a q within the normal exponents (-1022 .. 1023), made from its bits: no call. */
+static inline double xb_math_pow2(int q) {
+  uint64_t bits = (uint64_t)(q + XB_DBL_BIAS) << XB_DBL_FRACTION_BITS;
+  double r;
+  memcpy(&r, &bits, sizeof r);
+  return r;
+}
 
 typedef struct xb_dd {
   double hi, lo;
@@ -258,16 +273,32 @@ static const xb_dd xb_math_fact[] = {
 
 static const xb_dd xb_math_ln2 = {0.6931471805599453, 2.3190468138462996e-17};
 
+/* x = m 2^e of a finite x > 0, m within [sqrt( 1/2 ), sqrt( 2 )), read from x's bits (a subnormal x scaled to a
+ * normal one first), and m's row of the table. |m r_j - 1| is below 0.0056 (1/256 over the least 1 + j / 128). */
+static inline const struct xb_math_log_row *xb_math_log_reduce(double x, int *e, double *m) {
+  uint64_t bits;
+  *e = 0;
+  if (x < DBL_MIN) {
+    x *= xb_math_pow2(XB_DBL_EXACT_BITS);
+    *e = -XB_DBL_EXACT_BITS;
+  }
+  memcpy(&bits, &x, sizeof bits);
+  *e += (int)(bits >> XB_DBL_FRACTION_BITS) - XB_DBL_BIAS;
+  bits = (bits & XB_DBL_FRACTION_MASK) | (uint64_t)XB_DBL_BIAS << XB_DBL_FRACTION_BITS; /* m in [1, 2) */
+  memcpy(m, &bits, sizeof *m);
+  if (*m >= 1.4142135623730951) {
+    *m *= 0.5;
+    ++*e;
+  }
+  return &xb_math_log_rows[(int)xb_math_nearest((*m - 1.0) * 128.0) - XB_MATH_LOG_JMIN];
+}
+
 /* ln( x ) of a finite x > 0: ln( m ) = ln( m r_j ) - ln( r_j ), m r_j = 1 + f exactly as a double-double with
- * |f| < 2^-8, ln( 1 + f ) = 2 atanh( s ), s = f / (2 + f): 2 s (1 + s^2 / 3 + ... + s^16 / 17), s^18 < 2^-160. */
+ * |f| < 0.0056, ln( 1 + f ) = 2 atanh( s ), s = f / (2 + f): 2 s (1 + s^2 / 3 + ... + s^16 / 17), s^18 < 2^-150. */
 static inline xb_dd xb_math_log_dd(double x) {
   int e;
-  double m = frexp(x, &e);
-  if (m < 0.70710678118654752) {
-    m *= 2.0;
-    --e;
-  }
-  const struct xb_math_log_row *row = &xb_math_log_rows[(int)xb_math_nearest((m - 1.0) * 128.0) - XB_MATH_LOG_JMIN];
+  double m;
+  const struct xb_math_log_row *row = xb_math_log_reduce(x, &e, &m);
   xb_dd minus1 = {-1.0, 0.0}, two = {2.0, 0.0}, one = {1.0, 0.0};
   xb_dd f = xb_dd_add(xb_dd_prod(m, row->r), minus1);
   xb_dd s = xb_dd_div(f, xb_dd_add(two, f)), z = xb_dd_mul(s, s);
@@ -286,16 +317,12 @@ static inline xb_dd xb_math_log_dd(double x) {
 #define XB_MATH_EXP_QUICK_ERR 2.168404344971009e-19
 
 /* ln( x ) as xb_math_log_dd, the series ln( 1 + f ) = f - f^2 / 2 + f^3 (1/3 - f / 4 + ... + f^6 / 9) with only the
- * first two terms in double-double (|f| < 2^-8: the rest is below 2^-70 of the result's size, f^10 / 10 below
- * 2^-80). */
+ * first two terms in double-double (|f| < 0.0056: the rest is below 2^-68 of the result's size, f^10 / 10 below
+ * 2^-78). */
 static inline xb_dd xb_math_log_quick(double x) {
   int e;
-  double m = frexp(x, &e);
-  if (m < 0.70710678118654752) {
-    m *= 2.0;
-    --e;
-  }
-  const struct xb_math_log_row *row = &xb_math_log_rows[(int)xb_math_nearest((m - 1.0) * 128.0) - XB_MATH_LOG_JMIN];
+  double m;
+  const struct xb_math_log_row *row = xb_math_log_reduce(x, &e, &m);
   xb_dd t = xb_dd_prod(m, row->r);
   xb_dd f = xb_dd_quick(t.hi - 1.0, t.lo); /* exact: t.hi within a factor 2 of 1; t.lo below its half unit */
   double a = f.hi;
@@ -312,12 +339,22 @@ static inline xb_dd xb_math_log_quick(double x) {
  * 64 in three parts, the first of 32 bits, so k times it is exact), k = 64 q + j: e^y = 2^q 2^(j / 64) e^r, e^r by
  * Taylor: quick, r + r^2 / 2 + ... + r^7 / 7! in double but for r itself (below 2^-64 of e^r off), or to r^13 / 13! in
  * double-double (below 2^-120). */
+#define XB_MATH_64_OVER_LN2 92.33248261689366
+static const double xb_math_ln2_64[3] = {0.01083042469326756, 2.9815858269852933e-12, 1.8144105045878957e-28};
+
+/* k = 64 q + j, j within 0 .. 63: j, and q in *q. */
+static inline int xb_math_exp_index(double k, int *q) {
+  int ki = (int)k, j = ((ki % 64) + 64) % 64;
+  *q = (ki - j) / 64;
+  return j;
+}
+
 static inline xb_dd xb_math_exp_parts(xb_dd y, int quick, int *q) {
-  const double l1 = 0.01083042469326756, l2 = 2.9815858269852933e-12, l3 = 1.8144105045878957e-28;
-  double k = xb_math_nearest(y.hi * 92.33248261689366);
-  xb_dd ylo = {y.lo, 0.0}, kl3 = {-k * l3, 0.0}, one = {1.0, 0.0};
-  xb_dd r = xb_dd_add(xb_dd_sum(y.hi, -k * l1), ylo);
-  r = xb_dd_add(xb_dd_add(r, xb_dd_prod(-k, l2)), kl3);
+  const double *l = xb_math_ln2_64;
+  double k = xb_math_nearest(y.hi * XB_MATH_64_OVER_LN2);
+  xb_dd ylo = {y.lo, 0.0}, kl3 = {-k * l[2], 0.0}, one = {1.0, 0.0};
+  xb_dd r = xb_dd_add(xb_dd_sum(y.hi, -k * l[0]), ylo);
+  r = xb_dd_add(xb_dd_add(r, xb_dd_prod(-k, l[1])), kl3);
   xb_dd sum;
   if (quick) {
     double a = r.hi;
@@ -331,9 +368,7 @@ static inline xb_dd xb_math_exp_parts(xb_dd y, int quick, int *q) {
     sum = xb_dd_add(one, xb_dd_mul(sum, r)); /* 1 + r + r^2 / 2 + ... */
     sum = xb_dd_add(one, xb_dd_mul(sum, r));
   }
-  int ki = (int)k, j = ((ki % 64) + 64) % 64;
-  *q = (ki - j) / 64;
-  return xb_dd_mul(xb_math_exp2_64[j], sum);
+  return xb_dd_mul(xb_math_exp2_64[xb_math_exp_index(k, q)], sum);
 }
 
 /* v 2^q's double when a relative error `err` of v cannot change it (1), else 0. v within [1/2, 4) (e^y's parts) or q
@@ -346,7 +381,7 @@ static inline int xb_math_sure(xb_dd v, int q, double err, double *r) {
     up = hi.hi + hi.lo;
     down = lo.hi + lo.lo;
     if (up != down) return 0;
-    *r = q == 0 ? up : ldexp(up, q);
+    *r = up * xb_math_pow2(q); /* exact: 2^q a normal double */
     return 1;
   }
   up = xb_dd_scale(hi, q);
@@ -376,13 +411,62 @@ static inline int xb_math_exp_dd(xb_dd y, double err, int full, double *r) {
   return 1;
 }
 
-/* Exp( x ) */
+/* The relative error bound of the first step of Exp(): 2^-58 (its error measured below 2^-60.5). */
+#define XB_MATH_EXP_FAST_ERR 3.469446951953614e-18
+
+/* e^x = v 2^q for x within -745.2 .. 709.8, the first step of Exp(): a few operations, which depend on one another
+ * little, where the double-double forms chain a hundred. x = k ln( 2 ) / 64 + r as xb_math_exp_parts makes them, r
+ * = a + e: a = x - k l1 exactly (k l1 has 49 bits) plus -k l2, rounded, e the rounding's error; e^r = 1 + r + r^2 / 2
+ * + ... + r^7 / 7! (the next term below 2^-65), and the table's 2^(j / 64) as a double-double T: v = T.hi + (T.hi a
+ * + (T.hi (t + e) + T.lo (1 + a))), t the terms from a^2 on, T.hi a exact as a double-double. Its error: the
+ * rounding of the sum, below 2^-60.5 of v, the reduction's (l3 left out, k l2 rounded), about 2^-74, and what the
+ * terms leave, below 2^-64. */
+static inline xb_dd xb_math_exp_fast_parts(double x, int *q) {
+  const double *l = xb_math_ln2_64;
+  double k = xb_math_nearest(x * XB_MATH_64_OVER_LN2);
+  double r = x - k * l[0]; /* exact: k l1 has 49 bits, and r is far smaller than x or k l1 */
+  xb_dd s = xb_dd_sum(r, -k * l[1]);
+  double a = s.hi, e = s.lo;
+  double t = a * a * (0.5 + a * (1.0 / 6 + a * (1.0 / 24 + a * (1.0 / 120 + a * (1.0 / 720 + a / 5040)))));
+  xb_dd tj = xb_math_exp2_64[xb_math_exp_index(k, q)];
+  xb_dd tr = xb_dd_prod(tj.hi, a);
+  return xb_dd_quick(tj.hi, tr.hi + (tr.lo + tj.hi * (t + e) + tj.lo * (1.0 + a)));
+}
+
+/* Exp( x ): the first step when its bound settles the double, else xb_math_exp_dd. */
 static inline double xb_math_exp(double x) {
   if (x != x) return x;
-  xb_dd y = {x, 0.0};
   double r;
+  if (x <= 709.8 && x >= -745.2) {
+    int q;
+    xb_dd v = xb_math_exp_fast_parts(x, &q); /* q set before it is read */
+    if (xb_math_sure(v, q, XB_MATH_EXP_FAST_ERR, &r)) return r;
+  }
+  xb_dd y = {x, 0.0};
   xb_math_exp_dd(y, 0.0, 1, &r);
   return r;
+}
+
+/* The relative error bound of the first step of Log(): 2^-58 (its error measured below 2^-60.3; |a| is below 0.0056,
+ * so the rest it rounds is far below the result, which is a itself for x near 1). */
+#define XB_MATH_LOG_FAST_ERR 3.469446951953614e-18
+
+/* ln( x ) of a finite x above 0, the first step of Log(): x = m 2^e (xb_math_log_reduce), f = m r_j - 1 as
+ * xb_math_log_quick makes it (its high part a, exact, and its low part), and e ln( 2 ) - ln( r_j ) + a summed exactly
+ * with the rest (the low parts, -a^2 / 2 + a^3 / 3 - ... - a^8 / 8 + a^9 / 9 in double, and the low part of f times
+ * 1 - a) added once: a few operations, which depend on one another little. */
+static inline xb_dd xb_math_log_fast(double x) {
+  int e;
+  double m;
+  const struct xb_math_log_row *row = xb_math_log_reduce(x, &e, &m);
+  xb_dd t = xb_dd_prod(m, row->r);
+  double a = t.hi - 1.0, lo = t.lo; /* exact: t.hi within a factor 2 of 1 */
+  double tail = 1.0 / 5 + a * (-1.0 / 6 + a * (1.0 / 7 + a * (-1.0 / 8 + a / 9)));
+  double terms = a * a * (-0.5 + a * (1.0 / 3 + a * (-1.0 / 4 + a * tail)));
+  xb_dd le = xb_dd_mul_d(xb_math_ln2, (double)e);
+  xb_dd s1 = xb_dd_sum(le.hi, -row->ln.hi), s2 = xb_dd_sum(s1.hi, a);
+  double rest = s1.lo + s2.lo + (le.lo - row->ln.lo) + (lo - a * lo) + terms;
+  return xb_dd_sum(s2.hi, rest);
 }
 
 /* Log( x ): 0 gives minus infinity, a negative number a NaN (C's log; the callers apply Clipper's) */
@@ -391,6 +475,7 @@ static inline double xb_math_log(double x) {
   if (x == 0.0) return -HUGE_VAL;
   if (x < 0.0) return NAN;
   double r;
+  if (xb_math_sure(xb_math_log_fast(x), 0, XB_MATH_LOG_FAST_ERR, &r)) return r;
   if (xb_math_sure(xb_math_log_quick(x), 0, XB_MATH_LOG_QUICK_ERR, &r)) return r;
   xb_dd l = xb_math_log_dd(x);
   return l.hi + l.lo;

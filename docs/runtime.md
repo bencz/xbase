@@ -1100,13 +1100,21 @@ numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`):
   `Transform()` with no template, or one of functions only, an integer's field is instead two columns wider and two
   per decimal, without decimals (`xb_num_fixed_int_extra`), and with one of functions only a double of any width
   takes SET DECIMALS decimals; `Str()` and templates with digits are not affected;
-- doubles keep 16 significant digits (later digits print as `0`) and are rounded half-up to the decimals;
+- doubles keep 16 significant digits (later digits print as `0`) and are rounded half-up to the decimals as Clipper
+  rounds them: when the shown digits hold at most 16 significant ones, the digit after the last one shown decides, a
+  4 counting as a 5 when the digits after it up to the 16th significant one are 9s and the 17th is 2 or more. So
+  `Str( 8904.185, 10, 2 )`, whose double lies a little below the half, is `8904.19`, and `Str( 9832.585, 10, 2 )`, a
+  little further below, `9832.58` (`Round()` rounds both up: its rule is its own). The digits are the double's exact
+  ones (`clipper_digits`, `core/numfmt.c`): Clipper takes the fraction's from repeated products by ten in doubles,
+  whose error reaches the 13th decimal and beyond, so with 13 or more decimals xbase may show a digit closer to the
+  value than the reference does (`Str( 8528950501312055 / 2 ^ 53, 18, 16 )` is `0.9469037222444915` here,
+  `0.9469037222444916` there);
 - a minus sign appears only when a non-zero digit is shown (`-0.001` with 2 decimals prints `0.00`);
 - a value that does not fit, and any infinite or NaN value, fills the field with `*`.
 
-The 16 digits are the correctly rounded ones. Harbour derives them by repeated floating-point division, which can
-change the last significant digits of values above 2^53 (`51090942171709440000` prints as `51090942171709430000`
-there).
+With more significant digits shown, the 16 are the correctly rounded ones. Harbour derives them by repeated
+floating-point division, which can change the last significant digits of values above 2^53 (`51090942171709440000`
+prints as `51090942171709430000` there).
 
 ## Functions
 
@@ -1147,14 +1155,16 @@ Conventions:
   one system to another (glibc's and MinGW's round some arguments wrongly; the reference uses them): table-driven
   reductions (ln by 1 / (1 + j / 128), e^y by 2^(j / 64)), then double-double arithmetic (about 106 bits) rounded once,
   subnormal results too, so the result is the correctly rounded double, the same everywhere, except for an argument
-  whose result lies within about 2^-90 of a tie between two doubles (`Exp( 2^-53 )` is one). A quick form first (the
-  series in double beyond its first terms, relative error below 2^-66 for ln and 2^-62 for e^y) gives the result when
-  its error bound cannot change the rounding (Ziv's strategy), else the full form decides. `^`'s exact and halfway
+  whose result lies within about 2^-90 of a tie between two doubles (`Exp( 2^-53 )` is one). `Exp` and `Log` first take
+  a fast form (the table's value as a double-double, the reduced argument's terms in double, summed once: relative error
+  below 2^-58), then for `Log` a quick form (the series in double beyond its first terms, below 2^-66; `^` takes the
+  quick forms, below 2^-62 for e^y); each gives the result when its error bound cannot change the rounding (Ziv's
+  strategy), else the next one, and the full form decides last (for about 1 argument in 128). `^`'s exact and halfway
   results (an integer exponent, or `n / 2^k` of an exact root, such as `7 ^ 19` and `1046529 ^ 1.5`) are computed
   exactly, ties to even, and `x ^ 0.5` is IEEE's square root. C's special cases of `pow` hold (`0 ^ 0` is 1, a negative
   base needs an integer exponent). The compiler folds `^` of constants with the same code, and its inline `Exp()` and
   `Log()` call `xb_exp` and `xb_log`; none of them writes `errno`. They cost more than the C library's (x86-64: `^`
-  about 150 ns, `Exp` 60 ns, `Log` 45 ns, against 10, 3 and 3 ns). The runtime and `xbc` are compiled without
+  about 150 ns, `Exp` 22 ns, `Log` 30 ns, against 10, 4 and 4 ns). The runtime and `xbc` are compiled without
   contracting `a * b + c` into fused multiply-adds and, on 32-bit x86, with SSE2 rather than the x87 unit
   (`xb_exact_doubles` in CMake), on which double-double arithmetic depends.
 - `Replicate` raises `String overflow` (1234) when the result size overflows.

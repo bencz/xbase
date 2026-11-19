@@ -113,8 +113,7 @@ classic benchmark suites and everyday xBase work, each named for what it measure
 (`method_call_overhead`, `virtual_dispatch`, `object_churn`, ...), business data (`relatorio_agregacao`,
 `pivot_crosstab`, `sequential_scan` over a DBF, `json_roundtrip`, `log_processing`, ...), threads and tasks
 (`producer_consumer`, `work_stealing`, `parallel_map`, `shared_counter`, `pipeline_tasks`, `chameneos_redux`) and the
-memory objects take (`memory_footprint`, checked against `__GcMemory()`). The numeric and algorithmic ones have a C
-port in `bench/c/`. Each one times its own work with
+memory objects take (`memory_footprint`, checked against `__GcMemory()`). Each one times its own work with
 `ElapsedMs()`, checks its result against a value computed independently, and prints one line: `<name> <milliseconds>
 ok|WRONG`. The `bench` target (not part of the default build or of `ctest`) compiles them with `-O2`
 (`bench/CMakeLists.txt`, through the same `xb_compile_prg` as the tests) and runs `bench/run_bench.cmake`: every program
@@ -124,20 +123,50 @@ after.
 
 The same programs in other languages, for a comparative base (the same algorithm, sizes and checks, the same output
 line), are in `bench/c/` (one file each, `bench.h` shared; 64-bit integers as `int64_t`), `bench/rust/` (standard
-library only), `bench/csharp/` (one project, `Bench <name>`), `bench/java/` (one class each), `bench/js/` (Node.js),
-`bench/python/` (CPython and PyPy) and `bench/harbour/` (Harbour, for the programs whose `.prg` it cannot compile as
-they are: its bit functions for the bit operators of `crc32` and `bitlookup`, its threads for the tasks of `async_pi`;
-it compiles the others themselves). Each uses its language's own tools where xBase uses the runtime's (its sort, its
-strings, its tasks, channels and `async`); `bench/c/pi.c` and the other `pi` ports are translated statement by statement
-from `bench/pi.prg`. Where a compiler would remove the work the benchmark measures, the port keeps it as xbase does it:
-`bitlookup` makes its 7 calls of `AND()` a pair (IOR and XOR written out as the `.prg`'s macros expand them; C
-`noinline, noipa`, Rust `inline(never)` with `black_box` arguments, C# `NoInlining`; the Java and JavaScript JITs may
-still inline them), C's `generator` steps through function pointers it cannot follow. The differences that remain: C's
-`strings` and `crc32` build their text in buffers without allocating; Rust's channel has one receiver, which its two
-consumers share under a mutex; JavaScript's `async` has no pool of threads that runs JavaScript, so `TaskRun()` there is
-a turn of the event loop, and its `loops` sums in `BigInt` (the sum passes 2^53, past a double's exact integers). A
-language without a counterpart of a feature has no version of that benchmark (Java has no `async`, C no tasks or
-channels, Harbour no `YIELD`, pool of tasks, bounded channel or `async`). Go versions are not written yet.
+library only), `bench/csharp/` (one project, `Bench <name>`; `Xbase.cs` holds the number formatting several programs
+need), `bench/java/` (one class each), `bench/js/` (Node.js), `bench/python/` (CPython and PyPy; `base64` is
+`base64_bench.py`, since a file named for a standard module would hide that module from the ports that import it) and
+`bench/harbour/` (Harbour, for the programs whose `.prg` it cannot compile as they are: its bit functions for xbase's
+bit operators, its hash functions and token splitter for xbase's, position loops for `FOR EACH` over a hash's pairs,
+its threads for tasks; it compiles the others themselves). Each uses its language's own tools where xBase uses the
+runtime's (its sort, strings, hash tables, threads, tasks, channels and `async`); where its library has none, the port
+writes one (C's hash tables, queues and pool of tasks, JSON in C and Java). `bench/c/pi.c` and the other `pi` ports
+are translated statement by statement from `bench/pi.prg`. Where a compiler would remove the work the benchmark
+measures, the port keeps it as xbase does it: `bitlookup` makes its 7 calls of `AND()` a pair (IOR and XOR written out
+as the `.prg`'s macros expand them; C `noinline, noipa`, Rust `inline(never)` with `black_box` arguments, C#
+`NoInlining`; the Java and JavaScript JITs may still inline them), C's `generator` steps through function pointers it
+cannot follow, and the calls, dispatch and objects the object benchmarks measure go through the same barriers. The
+ports follow two xBase rules that matter for them: a `FOR` loop's limit is evaluated at every test (`TO 3 + Rand( 6 )`
+draws again), and `%` gives a number with SET DECIMALS decimals (`Str( i % 100 )` is 13 columns wide).
+
+The differences that remain:
+
+- Text built by appending is a growing buffer in C (`strings`, `crc32` and the text benchmarks), a `StringBuilder` in
+  C# and Java, and a list joined at the end in Python (PyPy copies a string at every `+=`).
+- No DBF or NTX outside xbase and Harbour: `sequential_scan` writes its records, fixed-width text as a DBF keeps them
+  but without a header, to `bench_seqscan.dat` and scans that; `index` keeps its records in `bench_index.dat` (Java's
+  in memory) and its order in memory (a sorted set, or a sorted array in JavaScript and Python).
+- `memory_footprint` checks heap bytes only, where the language can measure them (Rust through a counting allocator, C#,
+  Java, JavaScript), without the counts of live objects.
+- Threads and tasks: Rust's channel has one receiver, which `channels`' two consumers share under a mutex, and its
+  `parallel_map` runs 64 threads; JavaScript's `tasks`, `channels`, `async` and `pipeline_tasks` take turns of the event
+  loop, while its threaded programs use `worker_threads` with shared memory (its `AtomicInt` 32-bit); Python's
+  `parallel_map` runs on a pool of processes (the interpreter lock) and its `work_stealing` on a pool of threads, with
+  no parallel speed-up; C's and JavaScript's `work_stealing` share one queue among the workers (none steals).
+- JavaScript computes in `BigInt` where integers pass 2^53 (`loops`, `random_massivo`, `radix_sort`'s total,
+  `meteor_contest`'s masks).
+- Harbour (`-gc3`) multiplies integers in doubles, so products above 2^53 are rounded: the programs that draw numbers
+  with `seed * 1103515245` print `WRONG` there (`black_scholes`, `dgemm`, `fft`, `md5_sha1`, `monte_carlo_pi`,
+  `radix_sort`, `random_massivo`), as `crc_adler_fnv` does (its FNV product loses its low bits there with any flags);
+  `linked_list` crashes it (it frees nested arrays recursively, and the 1,000,000-deep chain overflows its stack), and
+  `hash_resize` takes minutes (a hash's key deletion).
+
+A language without a counterpart of a program has no version of it: C none of `async`, `async_generator`, `index`
+(an index on disk would be a table engine) and `memory_footprint` (no collector); Rust none of `async` and
+`async_generator` (no executor in its standard library), `tasks` and `work_stealing` (no pool of tasks); Java none of
+`async`, `async_generator` and `pipeline_tasks`; Python none of `memory_footprint`; Harbour none of `generator`,
+`tasks`, `channels`, `async`, `async_generator`, `higher_order_chain` (lazy enumerables), `pipeline_tasks`,
+`work_stealing`, `shared_counter` (atomics) and `memory_footprint`. Go versions are not written yet.
 
 `bench/compare.sh` (bash 4 and GNU `timeout`) and `bench/compare.ps1` (PowerShell 7.2) build each with every compiler
 or interpreter found and print a Markdown table of the best time of each (`-n`/`-Runs` runs, CPython once; `-l`/`-Langs`

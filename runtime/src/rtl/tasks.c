@@ -604,12 +604,36 @@ void xb_task_cancel(xb_ctx *ctx, xb_item *task) {
 /* The looks at a running task's state before its waiter sleeps (loads only). */
 #define WAIT_SPINS 2048u
 
-/* Waits for the task to end: one still to start runs on this thread (inline) when there is no limit and the stack
- * has room for it (xb_stack_room: a chain of waits, each running the next, would otherwise overflow it). The outcome
- * of the wait (XB_WAIT_*). */
+/* Runs on this thread (inline) the task, when it is still to start and the stack has room for it (xb_stack_room: a
+ * chain of waits, each running the next, would otherwise overflow it); of TaskWhenAll(), the tasks it waits for that
+ * are still to start, the newest first (workers take the oldest), until it ended: a fork-join, whose tasks wait for
+ * TaskWhenAll() of the tasks they started, would otherwise have every worker wait for tasks no worker is left to
+ * run. Not those of TaskWhenAny(), which ends with the first task to end: its waiter would wait for the one it runs
+ * (a long one raced with a TaskDelay()). */
+static void run_inline(xb_ctx *ctx, const xb_item *task) {
+  uint32_t kind = xb_atomic_load32(xb_object_word(task, V_KIND), XB_RELAXED);
+  if (kind == K_WHEN_ANY) return;
+  if (kind != K_WHEN_ALL) {
+    if (state_of(task) == S_SCHEDULED && xb_stack_room(ctx) && claim(task)) run_step(ctx, task);
+    return;
+  }
+  xb_item tasks, it;
+  xb_set_nil(&it);
+  xb_object_get(task->v.p, V_TASKS, &tasks);
+  xb_gc_root_push(ctx, &tasks);
+  xb_gc_root_push(ctx, &it);
+  for (size_t k = xb_array_length(tasks.v.p); k-- > 0 && !FINAL(state_of(task));) {
+    if (xb_pending_get(ctx) & XB_PENDING_UNWIND) break;
+    if (xb_array_get(tasks.v.p, k, &it)) run_inline(ctx, &it);
+  }
+  xb_gc_root_pop(ctx, 2);
+}
+
+/* Waits for the task to end; with no limit, running it or its inputs inline first (run_inline). The outcome of the
+ * wait (XB_WAIT_*). */
 static int wait_task(xb_ctx *ctx, const xb_item *task, int64_t deadline) {
   yielded(ctx, task);
-  if (deadline < 0 && state_of(task) == S_SCHEDULED && xb_stack_room(ctx) && claim(task)) run_step(ctx, task);
+  if (deadline < 0) run_inline(ctx, task);
   for (uint32_t spin = 0; spin < WAIT_SPINS && !FINAL(state_of(task)); ++spin) { /* another side may be about to */
   }
   for (uint32_t s; !FINAL(s = state_of(task));) {

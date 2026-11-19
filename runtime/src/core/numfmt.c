@@ -2,9 +2,9 @@
  *
  * The field has `width` columns for the sign and integer digits, then a dot
  * and `dec` decimals. Doubles keep 16 significant digits (later digits print
- * as 0) and are then rounded half-up to `dec` decimals. A minus sign appears
- * only when a non-zero digit is shown. A value that does not fit, and any
- * non-finite value, fills the whole field with '*'. */
+ * as 0) and are then rounded half-up to `dec` decimals (clipper_digits). A
+ * minus sign appears only when a non-zero digit is shown. A value that does
+ * not fit, and any non-finite value, fills the whole field with '*'. */
 #include "xbrt_int.h"
 
 #include <float.h>
@@ -69,9 +69,101 @@ double xb_num_round(double v, int64_t d) {
   return d >= 0 ? r / p : r * p; /* not finite when the scaling overflows, like Clipper */
 }
 
+/* The fraction's first `count` decimal digits, exact: f, in [0, 1), is m / 2^s, held in 32-bit limbs (s is at most
+ * 1126: a subnormal's fraction), times ten once per digit, the bits from s up being the digit. */
+#define XB_FRACTION_LIMBS 37
+static void fraction_digits(double f, char *out, int count) {
+  uint32_t limb[XB_FRACTION_LIMBS] = {0};
+  int s = 0;
+  if (f > 0.0) {
+    int ex;
+    uint64_t m = (uint64_t)ldexp(frexp(f, &ex), XB_DBL_EXACT_BITS);
+    s = XB_DBL_EXACT_BITS - ex;
+    for (; !(m & 1); m >>= 1) --s;
+    limb[0] = (uint32_t)m;
+    limb[1] = (uint32_t)(m >> 32);
+  }
+  int top = s / 32, bit = s % 32, n = top + 2;
+  for (int k = 0; k < count; ++k) {
+    uint64_t carry = 0;
+    for (int i = 0; i < n; ++i) {
+      uint64_t p = (uint64_t)limb[i] * 10 + carry;
+      limb[i] = (uint32_t)p;
+      carry = p >> 32;
+    }
+    uint64_t high = limb[top] | (uint64_t)limb[top + 1] << 32;
+    out[k] = (char)('0' + (high >> bit));
+    limb[top] &= (uint32_t)(((uint64_t)1 << bit) - 1);
+    limb[top + 1] = 0;
+  }
+}
+
+/* The digits Clipper shows for |v| with `dec` decimals, when they hold at most XB_NUM_PRECISION significant digits,
+ * from the exact digits of the integer part and of the fraction: rounded half up on the digit after the last one
+ * shown, a 4 counting as a 5 when the digits after it up to the 16th significant one are 9s and the 17th is not 0 or
+ * 1, so that a decimal half stored just below it (8904.185 is 8904.18499999999949...) rounds up, as Clipper shows it.
+ * (Clipper takes the fraction's digits from repeated products by ten in doubles, whose error reaches the 13th
+ * decimal and beyond: there xbase's are the exact ones.) Writes the integer digits (no leading zeros but one) to
+ * `intDigits` and `dec` decimals to `frac`; 0, nothing written, when more significant digits would show (the
+ * caller's way, on 16 correctly rounded ones, takes those). */
+static int clipper_digits(double a, int dec, char *intDigits, size_t *intLen, char *frac) {
+  double whole, f = modf(a, &whole);
+  if (!(whole < (double)UINT64_MAX) || dec > XB_NUM_PRECISION) return 0;
+  char ints[24];
+  int len = 0;
+  for (uint64_t w = (uint64_t)whole; len == 0 || w; w /= 10) ints[len++] = (char)('0' + w % 10);
+  if (len > XB_NUM_PRECISION) return 0;
+  for (int i = 0, j = len - 1; i < j; ++i, --j) {
+    char c = ints[i];
+    ints[i] = ints[j];
+    ints[j] = c;
+  }
+  /* The fraction's digits: the `dec` shown, then those the precision leaves, and one more. */
+  char digits[2 * XB_NUM_PRECISION + 1];
+  fraction_digits(f, digits, dec + XB_NUM_PRECISION + 1);
+  int sig = whole >= 1.0 ? len : 0;
+  for (int k = 0; k < dec; ++k) sig += sig > 0 || digits[k] != '0';
+  if (sig > XB_NUM_PRECISION) return 0;
+  int room = sig > 0 ? XB_NUM_PRECISION - sig : 0, next = digits[dec] - '0';
+  if (next == 4 && room > 0) {
+    int t = 1;
+    for (; t <= room; ++t) {
+      int d = digits[dec + t] - '0';
+      if (d < 9 && (t != room || d < 2)) break;
+    }
+    if (t > room) next = 5;
+  }
+  /* The integer digits and the decimals, rounded up from the end when `next` is 5 or more. */
+  memcpy(intDigits + 1, ints, (size_t)len);
+  intDigits[0] = '0';
+  memcpy(frac, digits, (size_t)dec);
+  int carry = next >= 5;
+  for (int k = dec; carry && k-- > 0;) {
+    carry = frac[k] == '9';
+    frac[k] = carry ? '0' : (char)(frac[k] + 1);
+  }
+  for (int k = len + 1; carry && k-- > 0;) {
+    carry = intDigits[k] == '9';
+    intDigits[k] = carry ? '0' : (char)(intDigits[k] + 1);
+  }
+  size_t first = 0;
+  while (first + 1 < (size_t)len + 1 && intDigits[first] == '0') ++first;
+  memmove(intDigits, intDigits + first, (size_t)len + 1 - first);
+  *intLen = (size_t)len + 1 - first;
+  return 1;
+}
+
 static void format_double(char *s, double v, int width, int dec) {
   if (!xb_dbl_finite(v)) {
     overflow(s, field_len(width, dec));
+    return;
+  }
+  char intDigits[XB_NUM_PRECISION + 2], frac[XB_NUM_PRECISION];
+  size_t intLen;
+  if (clipper_digits(fabs(v), dec, intDigits, &intLen, frac)) {
+    int nonZero = !(intLen == 1 && intDigits[0] == '0');
+    for (int k = 0; k < dec; ++k) nonZero |= frac[k] != '0';
+    if (!place(s, width, dec, v < 0 && nonZero, intDigits, intLen, frac)) overflow(s, field_len(width, dec));
     return;
   }
 

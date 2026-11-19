@@ -269,6 +269,10 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   idle 2 seconds ends. A thread that waits with no limit for a task still to start runs it itself (inline), while its
   stack has 1 MB left above the stack error's limit (`xb_stack_room`, `core/ctx.c`): past that it waits, and a worker
   runs the task on a stack of its own, so a chain of tasks that each wait for the next does not overflow one stack.
+  One that waits for `TaskWhenAll()` runs the tasks of it still to start the same way, the newest first, until it
+  ended: a fork-join, whose tasks each wait for the tasks they started, finishes with any number of workers, where its
+  waits would otherwise hold every worker while the tasks they wait for stay in the queues. One that waits for
+  `TaskWhenAny()` runs none: it would wait for the one it runs, when another may end first.
   Synchronous code inside tasks therefore costs threads, up to the most workers or the threads the system lets start;
   past that the tasks left wait in the queues until a worker comes back, which may be never when what the blocked tasks
   wait for is one of those left (a task that would release their lock, close their channel). The asynchronous waits

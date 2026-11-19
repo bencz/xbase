@@ -175,10 +175,11 @@ void Lexer::lexNumber() {
     std::string h = src_.substr(hs, pos_ - hs);
     errno = 0;
     unsigned long long v = std::strtoull(h.c_str(), nullptr, 16);
-    if (errno == ERANGE || v > (unsigned long long)INT64_MAX) diag_.error(loc, "hexadecimal literal out of range");
+    if (errno == ERANGE) diag_.error(loc, "hexadecimal literal out of range");
     Token &t = add(Tok::Number, loc, src_.substr(start, pos_ - start));
     t.isInt = true;
-    t.ival = (int64_t)v;
+    t.ival = static_cast<int64_t>(v); // 64 bits read as two's complement: 0xFFFFFFFFFFFFFFFF is -1
+    t.width = xb_num_literal_width(0, t.ival, 0.0, 0, 0);
     return;
   }
 
