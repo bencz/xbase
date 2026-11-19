@@ -232,6 +232,23 @@ foreach(t ${XB_PLATFORM_TESTS})
   add_test(NAME platform.${name} COMMAND p_${name})
 endforeach()
 
+# The install (cmake --install into a folder of the build) and a program built from it alone (tests/package): the
+# layout, and xbc finding the standard headers there by itself. A build for another target (XB_TARGET_C_FLAGS) builds
+# the program for it too.
+set(XB_PACKAGE ${CMAKE_CURRENT_BINARY_DIR}/package)
+list(JOIN XB_TARGET_C_FLAGS " " XB_PACKAGE_C_FLAGS)
+add_test(NAME package.install
+  COMMAND ${CMAKE_COMMAND} --install ${PROJECT_BINARY_DIR} --prefix ${XB_PACKAGE}/root --config $<CONFIG>)
+add_test(NAME package.program
+  COMMAND ${CMAKE_CTEST_COMMAND} --build-and-test ${CMAKE_CURRENT_SOURCE_DIR}/package ${XB_PACKAGE}/build
+          --build-generator ${CMAKE_GENERATOR} --build-makeprogram ${CMAKE_MAKE_PROGRAM} --build-config $<CONFIG>
+          --build-options -DXBASE_ROOT=${XB_PACKAGE}/root -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+                          "-DCMAKE_C_FLAGS=${XB_PACKAGE_C_FLAGS}" -DXBC_TARGET=${XB_TARGET}
+          --test-command ${CMAKE_CTEST_COMMAND} -C $<CONFIG> --output-on-failure)
+set_tests_properties(package.install PROPERTIES FIXTURES_SETUP package)
+set_tests_properties(package.program PROPERTIES FIXTURES_REQUIRED package)
+
 # A test that hangs or loops must fail quickly instead of exhausting the machine.
 get_property(XB_ALL_TESTS DIRECTORY PROPERTY TESTS)
 set_tests_properties(${XB_ALL_TESTS} PROPERTIES TIMEOUT 30)
+set_tests_properties(package.program PROPERTIES TIMEOUT 300)

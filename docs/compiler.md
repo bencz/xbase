@@ -23,6 +23,14 @@ module that calls a function of the runtime's sources `xbc` carries (`driver/Run
 too, as modules of the runtime with `std.ch` and the target's defines only, for its calls to inline
 ([xir.md](xir.md#passes)); they are not lowered.
 
+The default include directories (`defaultIncludeDirs`), searched after the `-I` ones: where the install puts the
+standard headers, by the path from `xbc`'s own folder to them (`XB_INCLUDE_FROM_BIN`, computed by the top-level
+`CMakeLists.txt`: `../include` in a Windows package, `../include/xbase` in a system's install, so that an installed
+`xbc` needs no `-I`), then, when `xbc` was built with `XB_SOURCE_INCLUDE` (the default), the source tree's `include/`
+(`XB_DEFAULT_INCLUDE_DIR`: an `xbc` run from its build folder, as the tests run it; a package's `xbc` holds no such
+path). The build itself names the source tree's headers with `-I` when it compiles the runtime's xBase sources
+(`xb_compile_prg`).
+
 The program starts at the public function `MAIN` of any module, or else at the first function of the first source that
 has one (a `STATIC` function named `MAIN`, and `INIT` and `EXIT` procedures, do not count). Clipper starts at the first
 function; xbase prefers `MAIN`, so that `xbc *.prg` works whatever order the files come in, and a source may define

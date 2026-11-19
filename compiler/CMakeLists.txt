@@ -1,5 +1,27 @@
+# Every target LLVM was built with is linked in: xbc can cross-compile to all of them. LLVM's shared library when it
+# was built with one, unless XB_LLVM_STATIC asks for its static libraries (a package's xbc that needs no LLVM DLL),
+# and then the libraries LLVM's own need statically too where the system has them: zlib (FindZLIB's static choice,
+# made before LLVM looks for it) and zstd (its shared target's import library replaced by the static one beside it).
+option(XB_LLVM_STATIC "link xbc with LLVM's static libraries even where LLVM has a shared one" OFF)
+if(XB_LLVM_STATIC)
+  find_library(XB_ZLIB_ARCHIVE NAMES libz.a zlibstatic)
+  if(XB_ZLIB_ARCHIVE)
+    set(ZLIB_USE_STATIC_LIBS ON)
+  endif()
+endif()
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "xbc: using LLVM ${LLVM_PACKAGE_VERSION} (${LLVM_DIR})")
+if(XB_LLVM_STATIC AND TARGET zstd::libzstd_shared)
+  foreach(property IMPORTED_IMPLIB IMPORTED_IMPLIB_RELEASE IMPORTED_IMPLIB_NOCONFIG)
+    get_target_property(implib zstd::libzstd_shared ${property})
+    if(implib MATCHES "\\.dll\\.a$")
+      string(REGEX REPLACE "\\.dll\\.a$" ".a" archive "${implib}")
+      if(EXISTS "${archive}")
+        set_target_properties(zstd::libzstd_shared PROPERTIES ${property} "${archive}")
+      endif()
+    endif()
+  endforeach()
+endif()
 
 add_executable(xbc
   src/common/Diagnostics.cpp
@@ -71,7 +93,14 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/RuntimeSources.cpp
 target_include_directories(xbc PRIVATE src ${PROJECT_SOURCE_DIR}/runtime/include)
 # Third-party headers must never turn into warnings of ours.
 target_include_directories(xbc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
-target_compile_definitions(xbc PRIVATE XB_DEFAULT_INCLUDE_DIR="${PROJECT_SOURCE_DIR}/include")
+# The standard headers are looked for where the install puts them (XB_INCLUDE_FROM_BIN, top-level CMakeLists.txt)
+# and, when XB_SOURCE_INCLUDE is on, in this source tree (xbc run from its build folder, as the tests run it); a
+# package is built without it, so its xbc holds no path of the machine that built it.
+option(XB_SOURCE_INCLUDE "xbc also looks for the standard headers in this source tree (the tests need it)" ON)
+target_compile_definitions(xbc PRIVATE XB_INCLUDE_FROM_BIN="${XB_INCLUDE_FROM_BIN}")
+if(XB_SOURCE_INCLUDE)
+  target_compile_definitions(xbc PRIVATE XB_DEFAULT_INCLUDE_DIR="${PROJECT_SOURCE_DIR}/include")
+endif()
 target_compile_definitions(xbc PRIVATE XB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
   XB_VERSION_MINOR=${PROJECT_VERSION_MINOR} XB_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 separate_arguments(XB_LLVM_DEFS NATIVE_COMMAND ${LLVM_DEFINITIONS})
@@ -88,8 +117,8 @@ if(CMAKE_CXX_SIZEOF_DATA_PTR EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6
 endif()
 xb_exact_doubles(xbc ${XB_HOST_X86_32})
 
-# Every target LLVM was built with is linked in: xbc can cross-compile to all of them.
-if(LLVM_LINK_LLVM_DYLIB)
+# LLVM's libraries (XB_LLVM_STATIC, above).
+if(LLVM_LINK_LLVM_DYLIB AND NOT XB_LLVM_STATIC)
   target_link_libraries(xbc PRIVATE LLVM)
 else()
   llvm_map_components_to_libnames(XB_LLVM_LIBS
@@ -97,3 +126,5 @@ else()
     ${LLVM_TARGETS_TO_BUILD})
   target_link_libraries(xbc PRIVATE ${XB_LLVM_LIBS})
 endif()
+
+install(TARGETS xbc RUNTIME DESTINATION ${XB_INSTALL_BIN})

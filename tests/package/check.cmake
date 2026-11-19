@@ -1,0 +1,16 @@
+# The package test's program prints what expected.txt holds (line ends as the system writes them), and xbc read the
+# standard headers from the package's include/ (the dependency file names INCLUDE/std.ch).
+execute_process(COMMAND ${EXE} OUTPUT_VARIABLE out RESULT_VARIABLE rc)
+string(REPLACE "\r\n" "\n" out "${out}")
+file(READ ${EXPECTED} expected)
+if(NOT rc EQUAL 0 OR NOT out STREQUAL expected)
+  message(FATAL_ERROR "exit code ${rc}\n--- expected ---\n${expected}\n--- actual ---\n${out}")
+endif()
+file(READ ${DEPS} deps)
+string(REPLACE "\\ " " " deps "${deps}")
+file(TO_CMAKE_PATH "${INCLUDE}" include)
+file(TO_CMAKE_PATH "${deps}" deps)
+string(FIND "${deps}" "${include}/std.ch" at)
+if(at EQUAL -1)
+  message(FATAL_ERROR "xbc did not read std.ch from ${include}:\n${deps}")
+endif()

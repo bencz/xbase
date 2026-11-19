@@ -33,6 +33,9 @@
 #include <string>
 #include <vector>
 
+#ifndef XB_INCLUDE_FROM_BIN
+#error "XB_INCLUDE_FROM_BIN (where the standard headers are from xbc's folder) comes from the top-level CMakeLists.txt"
+#endif
 #ifndef XB_DEFAULT_INCLUDE_DIR
 #define XB_DEFAULT_INCLUDE_DIR ""
 #endif
@@ -107,14 +110,15 @@ bool writeDepFile(const std::string &path, const std::string &target, const std:
   return (bool)f;
 }
 
-// Directory with the standard headers: next to the binary (<prefix>/include)
-// or the source tree when running from a build directory.
+// Directory with the standard headers: where the install puts them, from the binary's folder (XB_INCLUDE_FROM_BIN),
+// or the source tree when running from a build directory (XB_DEFAULT_INCLUDE_DIR).
 std::vector<std::string> defaultIncludeDirs(const char *argv0) {
   std::vector<std::string> dirs;
   std::string exe = llvm::sys::fs::getMainExecutable(argv0, (void *)&defaultIncludeDirs);
   if (!exe.empty()) {
-    llvm::SmallString<256> p(llvm::sys::path::parent_path(llvm::sys::path::parent_path(exe)));
-    llvm::sys::path::append(p, "include");
+    llvm::SmallString<256> p(llvm::sys::path::parent_path(exe));
+    llvm::sys::path::append(p, XB_INCLUDE_FROM_BIN);
+    llvm::sys::path::remove_dots(p, /*remove_dot_dot=*/true);
     dirs.push_back(std::string(p));
   }
   if (*XB_DEFAULT_INCLUDE_DIR) dirs.push_back(XB_DEFAULT_INCLUDE_DIR);

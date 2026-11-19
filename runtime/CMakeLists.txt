@@ -137,3 +137,7 @@ xb_exact_doubles(xbrt ${XB_TARGET_X86_32})
 if(MSVC)
   target_compile_options(xbrt PRIVATE /volatile:ms)
 endif()
+
+# The package's runtime library and the C headers a NATIVE function written in C includes.
+install(TARGETS xbrt ARCHIVE DESTINATION ${XB_INSTALL_LIB})
+install(FILES include/xbrt.h include/xbmath.h include/xbclass.h DESTINATION ${XB_INSTALL_INCLUDE})

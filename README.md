@@ -25,6 +25,44 @@ the runtime and the programs only (`xbc` runs on the host), and names the target
 `-DXB_TARGET_C_FLAGS=-m32 -DXB_TARGET=i686-pc-linux-gnu`. The `xbc` of the build runs during the build, so a cross
 build whose toolchain builds `xbc` for another machine cannot build the runtime yet.
 
+## Packages
+
+`cmake --install build --prefix <dir>` installs `xbc`, the standard headers (`std.ch`, `fileio.ch`, ...) with the
+runtime's C headers (`xbrt.h`), the runtime library and the documentation. On Windows it makes the package a GitHub
+release carries (built with MSVC and with MinGW-w64 by `.github/workflows/release.yml`); elsewhere it follows the
+system's places (with the default prefix, `/usr/local`):
+
+| | Windows package (`--prefix <dir>/xbc`) | Linux, macOS, other systems |
+|---|---|---|
+| `xbc` | `bin/` | `bin/` |
+| headers | `include/` | `include/xbase/` |
+| runtime library | `libs/` (`xbrt.lib` from MSVC, `libxbrt.a` from MinGW) | `lib/` or `lib64/` (`libxbrt.a`) |
+| documentation | `docs/`, with `README.md` and `LICENSE` at the top | `share/doc/xbase/` |
+
+`xbc` finds the standard headers by the path from its own folder to where the install put them: a program needs no `-I`
+for them (on Linux, `cc hello.o -lxbrt -lm -lpthread` links a program, the library being in `/usr/local/lib` or
+`lib64`). A package is built with `-DXB_SOURCE_INCLUDE=OFF` (its `xbc` then holds no path to the source tree it came
+from) and, where LLVM has a shared library, `-DXB_LLVM_STATIC=ON` (its `xbc` needs no LLVM DLL). With the MSVC package,
+from a Visual Studio command prompt:
+
+```bat
+xbc\bin\xbc hello.prg -o hello.obj
+link hello.obj xbc\libs\xbrt.lib shell32.lib /out:hello.exe
+```
+
+With the MinGW-w64 package:
+
+```sh
+xbc/bin/xbc hello.prg -o hello.o
+gcc hello.o xbc/libs/libxbrt.a -lshell32 -o hello.exe
+```
+
+`tests/package` builds a program that way with CMake (`-DXBASE_ROOT=<dir>/xbc`), as the release workflow does on
+each package before it attaches it (and the tests do on an install into the build folder). Each package's `xbc`
+cross-compiles to the targets its LLVM was built with: the MSVC one to those of the LLVM project's Windows release
+(x86, ARM, AArch64, RISC-V, WebAssembly, BPF, NVPTX), the MinGW one to all of MSYS2's (PowerPC, MIPS, SystemZ, SPARC,
+LoongArch, ... too); `xbc --print-targets` lists them.
+
 ## Test
 
 ```sh

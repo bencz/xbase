@@ -1,0 +1,180 @@
+# The Windows packages of a GitHub release: when a release is published, xbc and the runtime are built with MSVC and
+# with MinGW-w64, installed into the package's folders (xbc/bin, include, libs, docs), tried on a small program built
+# from the package alone (tests/package), zipped and attached to the release. Run by hand (workflow_dispatch), it
+# does the same and keeps the zips as the run's artifacts.
+#
+# LLVM is never built here: the MSVC package uses the LLVM project's own Windows release, the MinGW one MSYS2's
+# packages, both of the version below (MSYS2's pinned by file, since its repository moves on), and the download is
+# cached. xbc links LLVM, zlib and zstd statically; each package's xbc.exe is checked to import system DLLs only and
+# run outside MSYS2, as a user's machine has it.
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  LLVM_VERSION: 22.1.8
+  MSYS2_LLVM: 22.1.8-2
+  TAG: ${{ github.event.release.tag_name || 'manual' }}
+
+jobs:
+  windows-msvc:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: LLVM (cached)
+        id: llvm
+        uses: actions/cache/restore@v4
+        with:
+          path: C:\clang+llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc
+          key: llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc
+
+      - name: LLVM (download)
+        if: steps.llvm.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $name = "clang+llvm-$env:LLVM_VERSION-x86_64-pc-windows-msvc"
+          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$env:LLVM_VERSION/$name.tar.xz"
+          curl.exe -sSfL -o "$env:RUNNER_TEMP\llvm.tar.xz" $url
+          7z x "$env:RUNNER_TEMP\llvm.tar.xz" -so | 7z x -si -ttar -o"C:\" | Out-Null
+          if (-not (Test-Path "C:\$name\lib\cmake\llvm\LLVMConfig.cmake")) { throw "no LLVMConfig.cmake in $name" }
+
+      - name: LLVM (save the download)
+        if: steps.llvm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:\clang+llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc
+          key: llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc
+
+      # LLVM's exports name the DIA SDK's diaguids.lib by its path on the machine that built the release: this
+      # runner's Visual Studio has it elsewhere.
+      - name: LLVM (DIA SDK path)
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $dia = ("$vs\DIA SDK\lib\amd64\diaguids.lib" -replace '\\', '/')
+          if (-not (Test-Path $dia)) { throw "no $dia" }
+          Get-ChildItem "C:\clang+llvm-$env:LLVM_VERSION-x86_64-pc-windows-msvc\lib\cmake\llvm\LLVMExports*.cmake" |
+            ForEach-Object { (Get-Content $_) -replace '[^";]*diaguids\.lib', $dia | Set-Content $_ }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $llvm = "C:/clang+llvm-$env:LLVM_VERSION-x86_64-pc-windows-msvc/lib/cmake/llvm"
+          cmake -S . -B build -A x64 "-DLLVM_DIR=$llvm" -DXB_SOURCE_INCLUDE=OFF -DBUILD_TESTING=OFF
+          cmake --build build --config Release --target xbc xbrt --parallel
+          cmake --install build --config Release --prefix pkg/xbc
+
+      - name: Try the package
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pkg/xbc/bin/xbc.exe --version
+          cmake -S tests/package -B pkgtest -A x64 "-DXBASE_ROOT=$PWD/pkg/xbc"
+          cmake --build pkgtest --config Release
+          ctest --test-dir pkgtest -C Release --output-on-failure
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path pkg/xbc -DestinationPath "xbase-$env:TAG-windows-x64-msvc.zip"
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          gh release upload $env:TAG "xbase-$env:TAG-windows-x64-msvc.zip" --clobber
+
+      - name: Keep as an artifact
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xbase-windows-x64-msvc
+          path: xbase-*-msvc.zip
+
+  windows-mingw:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          cache: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: LLVM (pinned)
+        shell: msys2 {0}
+        run: |
+          repo=https://repo.msys2.org/mingw/ucrt64
+          pacman -U --noconfirm "$repo/mingw-w64-ucrt-x86_64-llvm-libs-$MSYS2_LLVM-any.pkg.tar.zst" \
+                                "$repo/mingw-w64-ucrt-x86_64-llvm-tools-$MSYS2_LLVM-any.pkg.tar.zst" \
+                                "$repo/mingw-w64-ucrt-x86_64-llvm-$MSYS2_LLVM-any.pkg.tar.zst"
+          llvm-config --version
+
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DXB_LLVM_STATIC=ON -DXB_SOURCE_INCLUDE=OFF \
+                -DBUILD_TESTING=OFF -DCMAKE_EXE_LINKER_FLAGS=-static
+          cmake --build build --target xbc xbrt --parallel
+          cmake --install build --prefix pkg/xbc
+
+      # xbc.exe must need no DLL of MSYS2's: only Windows' own (its C runtime, UCRT, included).
+      - name: xbc's DLLs
+        shell: msys2 {0}
+        run: |
+          objdump -p pkg/xbc/bin/xbc.exe | sed -n 's/.*DLL Name: //p' | tee dlls.txt
+          system='kernel32|user32|advapi32|shell32|ole32|oleaut32|ws2_32|ntdll|psapi|shlwapi|version|bcrypt|crypt32'
+          if grep -viE "^($system|dbghelp|ucrtbase|msvcrt|api-ms-win-.*)\.dll$" dlls.txt; then
+            echo "xbc.exe needs a DLL that Windows does not have"; exit 1
+          fi
+
+      - name: Try the package
+        shell: msys2 {0}
+        run: |
+          cmake -S tests/package -B pkgtest -G Ninja "-DXBASE_ROOT=$PWD/pkg/xbc" -DCMAKE_EXE_LINKER_FLAGS=-static
+          cmake --build pkgtest
+          ctest --test-dir pkgtest --output-on-failure
+
+      - name: Run xbc outside MSYS2
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pkg/xbc/bin/xbc.exe --version
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path pkg/xbc -DestinationPath "xbase-$env:TAG-windows-x64-mingw.zip"
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          gh release upload $env:TAG "xbase-$env:TAG-windows-x64-mingw.zip" --clobber
+
+      - name: Keep as an artifact
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xbase-windows-x64-mingw
+          path: xbase-*-mingw.zip
