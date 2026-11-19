@@ -57,30 +57,32 @@ threads), Linux 7.3, idle: xbase 0.1 Release (`xbc -O2`), Harbour 3.2.1dev (`hbm
 `gcc -O2`), C (`gcc` 16.2 `-O2`), Rust 1.97 (`-C opt-level=2`), C# (.NET SDK 11.0.100-rc.3, Release, the default
 concurrent collector), Java (OpenJDK 27), JavaScript (Node.js 24; `loops` sums in `BigInt`, since its sum passes a
 double's exact integers), Python (PyPy 8.0, CPython 3.14). xbase is dynamically typed, as Harbour, JavaScript and Python
-are; C, Rust, C# and Java are statically typed.
+are; C, Rust, C# and Java are statically typed. CPython's `loops` was not measured: minutes of one core at full
+turbo froze that machine each time (a hardware fault, not the program's).
 
 | benchmark | xbase | Harbour | C | Rust | C# | Java | JavaScript | Python (PyPy) | Python (CPython) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| asort | 165 | 627 | 158 | 39 | 225 | 253 | 567 | 990 | 850 |
-| async_pi | 183 | 12495 | 174 | 181 | 181 | 238 | 221 | 282 | 10752 |
-| async | 152 | - | - | - | 156 | - | 123 | 774 | 822 |
-| bitlookup | 451 | 3669 | 44 | 35 | 191 | 30 | 43 | 179 | 2611 |
-| channels | 405 | - | - | 557 | 387 | 236 | - | 7000 | 1170 |
-| crc32 | 13 | 432 | 5 | 4 | 12 | 24 | 21 | 39 | 325 |
-| fib | 189 | 2039 | 27 | 43 | 90 | 75 | 173 | 221 | 1817 |
-| float | 31 | 1071 | 29 | 28 | 30 | 31 | 31 | 35 | 859 |
-| gc | 444 | 1209 | 345 | 438 | 3013 | 513 | 495 | 897 | 2837 |
-| generator | 61 | - | 4 | 6 | 9 | 17 | 64 | 50 | 166 |
-| index | 213 | 511 | - | - | - | - | - | - | - |
-| loops | 212 | 11210 | 163 | 69 | 162 | 195 | 9138 | 389 | 21820 |
-| matmul | 59 | 1354 | 9 | 14 | 13 | 17 | 31 | 46 | 522 |
-| mixed | 54 | 1617 | 38 | 49 | 47 | 53 | 68 | 65 | 2700 |
-| oop | 11 | 677 | 5 | 6 | 4 | 7 | 6 | 7 | 262 |
-| pi | 35 | 704 | 6 | 6 | 24 | 32 | 86 | 34 | 662 |
-| qsort | 118 | 1333 | 54 | 55 | 110 | 75 | 107 | 135 | 956 |
-| sieve | 198 | 2784 | 28 | 42 | 49 | 51 | 71 | 210 | 1214 |
-| strings | 414 | 2397 | 177 | 252 | 367 | 347 | 606 | 198 | 2361 |
-| tasks | 381 | - | - | - | 132 | 147 | - | 13410 | 2357 |
+| asort | 169 | 650 | 162 | 40 | 228 | 269 | 575 | 998 | 864 |
+| async_generator | 364 | - | - | - | 143 | - | 269 | 55 | 319 |
+| async_pi | 185 | 12526 | 177 | 184 | 186 | 245 | 224 | 287 | 12116 |
+| async | 149 | - | - | - | 154 | - | 122 | 790 | 832 |
+| bitlookup | 317 | 3840 | 45 | 35 | 200 | 31 | 46 | 183 | 2664 |
+| channels | 435 | - | - | 552 | 371 | 216 | - | 7205 | 1208 |
+| crc32 | 13 | 458 | 4 | 4 | 12 | 24 | 23 | 42 | 337 |
+| fib | 169 | 2117 | 27 | 44 | 96 | 77 | 178 | 223 | 1940 |
+| float | 30 | 1130 | 31 | 30 | 32 | 32 | 34 | 38 | 926 |
+| gc | 484 | 1285 | 360 | 487 | 3154 | 418 | 498 | 934 | 2911 |
+| generator | 61 | - | 8 | 4 | 10 | 17 | 70 | 51 | 172 |
+| index | 231 | 531 | - | - | - | - | - | - | - |
+| loops | 222 | 11707 | 163 | 69 | 166 | 202 | 10311 | 394 | - |
+| matmul | 57 | 1421 | 9 | 15 | 13 | 18 | 32 | 49 | 581 |
+| mixed | 50 | 1692 | 38 | 50 | 48 | 57 | 69 | 66 | 2817 |
+| oop | 12 | 708 | 5 | 6 | 4 | 7 | 6 | 7 | 271 |
+| pi | 35 | 725 | 6 | 9 | 24 | 32 | 81 | 35 | 689 |
+| qsort | 119 | 1380 | 57 | 57 | 114 | 76 | 110 | 143 | 1052 |
+| sieve | 206 | 2898 | 28 | 42 | 51 | 53 | 72 | 221 | 1288 |
+| strings | 436 | 2472 | 181 | 259 | 376 | 358 | 636 | 202 | 2470 |
+| tasks | 301 | - | - | - | 129 | 157 | - | 13670 | 2384 |
 
 ## Use
 
