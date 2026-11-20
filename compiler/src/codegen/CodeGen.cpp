@@ -13,6 +13,8 @@
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <optional>
+
 using namespace llvm;
 
 namespace xb {
@@ -395,9 +397,13 @@ bool CodeGen::finish(const xir::Function *start) {
 void CodeGen::directEntries(const xir::Module &m) {
   for (auto &f : m.functions) {
     if (!xir::hasDirectEntry(*f)) continue;
-    std::vector<Type *> params{ptrTy_, ptrTy_, ptrTy_};
+    bool words = returnsWords(*f);
+    std::vector<Type *> params{ptrTy_, ptrTy_}; // the context, then the result's item unless it returns words
+    if (words) params.pop_back();
+    params.push_back(ptrTy_); // the caller's frame
     for (uint32_t k = 0; k < f->numParams; ++k) params.insert(params.end(), {i64_, i64_});
-    Function *fn = Function::Create(FunctionType::get(Type::getVoidTy(ctx_), params, false),
+    Type *result = words ? static_cast<Type *>(StructType::get(ctx_, {i64_, i64_})) : Type::getVoidTy(ctx_);
+    Function *fn = Function::Create(FunctionType::get(result, params, false),
                                     GlobalValue::InternalLinkage, "xb.direct." + f->name, mod_);
     addAbiAttributes(fn);
     direct_[f.get()] = fn;
@@ -405,7 +411,8 @@ void CodeGen::directEntries(const xir::Module &m) {
 }
 
 // The dynamic entry of a function with a direct one: the parameters' items
-// from argv (NIL past argc), passed in registers.
+// from argv (NIL past argc), passed in registers; a result returned as words
+// written to `ret`.
 void CodeGen::genThunk(const xir::Function &f) {
   Function *thunk = functions_.at(&f);
   Function *body = direct_.at(&f);
@@ -414,12 +421,17 @@ void CodeGen::genThunk(const xir::Function &f) {
   Value *argc = thunk->getArg(2), *argv = thunk->getArg(3);
   fnCtx_ = thunk->getArg(0);
   Value *frames = loadFrom(ptrTy_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames), Mem::Ctx, "frames");
-  std::vector<Value *> args{fnCtx_, thunk->getArg(1), frames};
+  bool words = returnsWords(f);
+  std::vector<Value *> args{fnCtx_};
+  if (!words) args.push_back(thunk->getArg(1));
+  args.push_back(frames);
   for (uint32_t k = 0; k < f.numParams; ++k) {
     Words w = loadWords(argItem(argc, argv, k));
     args.insert(args.end(), {w.header, w.payload});
   }
-  b_.CreateCall(body, args)->setTailCall();
+  CallInst *result = b_.CreateCall(body, args);
+  if (words) storeWords(thunk->getArg(1), b_.CreateExtractValue(result, 0), b_.CreateExtractValue(result, 1));
+  else result->setTailCall();
   b_.CreateRetVoid();
 }
 
@@ -443,6 +455,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   words_.clear();
   wordsAt_.clear();
   locals_.clear();
+  paramItems_.clear();
   localItems_.clear();
   heapItems_.clear();
   scratch_.clear();
@@ -467,11 +480,19 @@ void CodeGen::genFunction(const xir::Function &f) {
   // Once per call: in a loop, a callee's change (PValue()) would reach the next pass.
   forwardInPlace_ = rests == 1 && !f.readsArgs && !xir::Loops(plan.cfg()).innermost(restBlock);
   Value *argc = nullptr, *argv = nullptr;
-  if (f.kind != xir::Function::Kind::ModuleInit) {
+  fnWords_ = fnDirect_ && returnsWords(f);
+  if (fnWords_) {
+    // The result, returned as its two words: an item of its own (registers), NIL when the function unwinds, so the
+    // caller's item that receives it stays valid for the collector.
+    fnRet_ = entryAlloca("result");
+    localItems_.insert(fnRet_);
+    setNil(fnRet_);
+  } else if (f.kind != xir::Function::Kind::ModuleInit) {
     fnRet_ = fn_->getArg(1);
     fnRet_->setName("ret");
   }
-  fnPrev_ = fnDirect_ ? fn_->getArg(2) : nullptr; // the caller's frame, which the context's chain has at the call
+  // The caller's frame, which the context's chain has at the call.
+  fnPrev_ = fnDirect_ ? fn_->getArg(fnWords_ ? 1 : 2) : nullptr;
   if (f.kind != xir::Function::Kind::ModuleInit && !fnDirect_) {
     argc = fn_->getArg(2);
     argv = fn_->getArg(3);
@@ -527,7 +548,12 @@ void CodeGen::genFunction(const xir::Function &f) {
   b_.SetInsertPoint(fnExit_);
   if (fnMark_) b_.CreateCall(rtMvRelease_, {fnCtx_, fnMark_});
   unlinkFrame(fnFrame_, fnPrev_);
-  b_.CreateRetVoid();
+  if (fnWords_) {
+    Words w = loadWords(fnRet_);
+    b_.CreateAggregateRet({w.header, w.payload});
+  } else {
+    b_.CreateRetVoid();
+  }
   placeLines();
   plan_ = nullptr;
 }
@@ -577,36 +603,72 @@ Value *CodeGen::innermostFrame() const {
 // The frame's line, stored right before each call that can see the call stack
 // (a function of the program, a send, a runtime function or operator, which
 // may raise an error): only there can it be read, so the fast paths of
-// operations store nothing, and their slow paths, which are cold, do. A block
-// stores a line once until another one is needed. A store marked with its line
-// (inline.enter's, into the frame below) is one stored already.
+// operations store nothing, and their slow paths, which are cold, do. A line
+// is stored once until another one is needed, also across blocks: where every
+// way into a block stored the same line into the same frame last, the block
+// starts with it stored (nothing but the function's own code writes its
+// frames' lines). A store marked with its line (inline.enter's, into the frame
+// below, and a link's line 0) is one stored already.
 void CodeGen::placeLines() {
-  for (BasicBlock &bb : *fn_) {
-    uint32_t stored = 0;
-    Value *storedIn = nullptr;
-    for (Instruction &inst : bb) {
-      MDNode *md = inst.getMetadata(lineKind_);
-      if (!md) continue;
-      inst.setMetadata(lineKind_, nullptr);
-      auto line = (uint32_t)mdconst::extract<ConstantInt>(md->getOperand(0))->getZExtValue();
-      auto in = callFrame_.find(&inst);
-      Value *frame = in == callFrame_.end() ? fnFrame_ : in->second;
-      auto *call = dyn_cast<CallInst>(&inst);
-      if (!call) {
-        stored = line;
-        storedIn = frame;
-        continue;
-      }
+  struct Stored {
+    uint32_t line = 0;
+    Value *frame = nullptr; // null: not known
+    bool operator==(const Stored &) const = default;
+  };
+  // The line a marked instruction stores, in which frame; nothing for a call that does not see the call stack.
+  auto lineOf = [&](Instruction &inst) -> std::optional<Stored> {
+    MDNode *md = inst.getMetadata(lineKind_);
+    if (!md) return std::nullopt;
+    if (auto *call = dyn_cast<CallInst>(&inst)) {
       const Function *callee = call->getCalledFunction();
-      if (callee && (callee->isIntrinsic() || quietCalls_.count(callee))) continue;
-      if (line == stored && frame == storedIn) continue;
-      Value *at = GetElementPtrInst::CreateInBounds(frameType(0), frame,
-                                                    {ConstantInt::get(i32_, 0), ConstantInt::get(i32_, FrameLine)},
-                                                    "line", call->getIterator());
-      auto *store = new StoreInst(ConstantInt::get(i32_, line), at, call->getIterator());
-      tag(store, Mem::FrameLink);
-      stored = line;
-      storedIn = frame;
+      if (callee && (callee->isIntrinsic() || quietCalls_.count(callee))) return std::nullopt;
+    }
+    auto in = callFrame_.find(&inst);
+    return Stored{(uint32_t)mdconst::extract<ConstantInt>(md->getOperand(0))->getZExtValue(),
+                  in == callFrame_.end() ? fnFrame_ : in->second};
+  };
+  // What each block stores last (none: what it starts with), then what each starts with: the same from every way
+  // into it, else nothing known; an optimistic fixed point, the blocks not reached yet left out.
+  std::unordered_map<const BasicBlock *, std::optional<Stored>> last;
+  for (BasicBlock &bb : *fn_)
+    for (Instruction &inst : bb)
+      if (std::optional<Stored> s = lineOf(inst)) last[&bb] = s;
+  std::unordered_map<const BasicBlock *, Stored> atStart, atEnd;
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (BasicBlock &bb : *fn_) {
+      std::optional<Stored> in;
+      bool entry = &bb == &fn_->getEntryBlock();
+      if (entry) in = Stored{};
+      for (BasicBlock *p : predecessors(&bb)) {
+        auto e = atEnd.find(p);
+        if (e == atEnd.end()) continue;
+        in = !in ? e->second : *in == e->second ? *in : Stored{};
+      }
+      if (!in) continue;
+      auto l = last.find(&bb);
+      Stored out = l != last.end() ? *l->second : *in;
+      auto s = atStart.find(&bb);
+      if (s != atStart.end() && s->second == *in && atEnd.at(&bb) == out) continue;
+      atStart[&bb] = *in;
+      atEnd[&bb] = out;
+      changed = true;
+    }
+  }
+  for (BasicBlock &bb : *fn_) {
+    Stored stored = atStart.count(&bb) ? atStart.at(&bb) : Stored{};
+    for (Instruction &inst : bb) {
+      std::optional<Stored> s = lineOf(inst);
+      inst.setMetadata(lineKind_, nullptr);
+      if (!s) continue;
+      auto *call = dyn_cast<CallInst>(&inst);
+      if (call && !(*s == stored)) {
+        Value *at = GetElementPtrInst::CreateInBounds(frameType(0), s->frame,
+                                                      {ConstantInt::get(i32_, 0), ConstantInt::get(i32_, FrameLine)},
+                                                      "line", call->getIterator());
+        tag(new StoreInst(ConstantInt::get(i32_, s->line), at, call->getIterator()), Mem::FrameLink);
+      }
+      stored = *s;
     }
   }
 }
@@ -616,12 +678,19 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
   BasicBlock &entry = fn_->getEntryBlock(); // a static alloca, whatever block the frame is linked in
   AllocaInst *frame = IRBuilder<>(&entry, entry.getFirstInsertionPt()).CreateAlloca(ty, nullptr, "frame");
   fnBase_ = b_.CreateConstInBoundsGEP2_32(ty, frame, 0, FrameSlots, "slots");
+  // In a direct body, the items in registers follow the context, the result's item (unless it returns words) and the
+  // caller's frame.
+  unsigned first = fnWords_ ? 2 : 3;
   for (uint32_t k = 0; k < nparams; ++k) {
-    if (fnDirect_) storeWords(slot(k), fn_->getArg(3 + 2 * k), fn_->getArg(4 + 2 * k)); // the items in registers
-    else copyItem(slot(k), argItem(argc, argv, k));
+    const xir::Var *v = plan_->param(k);
+    if (!v) report_fatal_error("xbc: a parameter has no variable");
+    Value *dst = rawAddress(*v); // its slot, or its item out of the frame (FramePlan::inRegisters)
+    if (fnDirect_) storeWords(dst, fn_->getArg(first + 2 * k), fn_->getArg(first + 1 + 2 * k));
+    else copyItem(dst, argItem(argc, argv, k));
   }
-  if (nslots > nparams)
-    b_.CreateMemSet(slot(nparams), b_.getInt8(0), (uint64_t)(nslots - nparams) * itemSize_, itemAlign_);
+  uint32_t inFrame = plan_->paramSlots();
+  if (nslots > inFrame)
+    b_.CreateMemSet(slot(inFrame), b_.getInt8(0), (uint64_t)(nslots - inFrame) * itemSize_, itemAlign_);
   if (keepArgs) { // only what PCount() and PValue() read; other frames leave the two fields unset
     tag(b_.CreateStore(argv, b_.CreateStructGEP(ty, frame, FrameArgv)), Mem::FrameLink);
     tag(b_.CreateStore(argc, b_.CreateStructGEP(ty, frame, FrameArgc)), Mem::FrameLink);
@@ -636,7 +705,10 @@ void CodeGen::linkFrame(Value *frame, Value *nslots, Value *proc, Value *prev) {
   StructType *ty = frameType(0);
   tag(b_.CreateStore(nslots, b_.CreateStructGEP(ty, frame, FrameCount)), Mem::FrameLink);
   tag(b_.CreateStore(proc, b_.CreateStructGEP(ty, frame, FrameProc)), Mem::FrameLink);
-  tag(b_.CreateStore(ConstantInt::get(i32_, 0), b_.CreateStructGEP(ty, frame, FrameLine)), Mem::FrameLink);
+  StoreInst *line = tag(b_.CreateStore(ConstantInt::get(i32_, 0), b_.CreateStructGEP(ty, frame, FrameLine)),
+                        Mem::FrameLink);
+  line->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, 0))));
+  callFrame_[line] = frame; // the frame holds line 0 now (placeLines)
   Value *frames = b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames);
   if (!prev) prev = loadFrom(ptrTy_, frames, Mem::Ctx, "prev");
   tag(b_.CreateStore(prev, b_.CreateStructGEP(ty, frame, FramePrev)), Mem::FrameLink);

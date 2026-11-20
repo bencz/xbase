@@ -201,10 +201,22 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
     if (f.hasFnAttribute(Attribute::AlwaysInline))
       for (User *u : f.users())
         if (auto *call = dyn_cast<CallBase>(u)) callers.push_back(call->getFunction());
-  if (callers.empty()) return;
-  ModulePassManager inliner;
-  inliner.addPass(AlwaysInlinerPass());
-  inliner.run(m, mam);
+  if (!callers.empty()) {
+    ModulePassManager inliner;
+    inliner.addPass(AlwaysInlinerPass());
+    inliner.run(m, mam);
+  }
+  // Then the tests of pending requests that the inlined small entries made repeat what was tested before them.
+  bool skipped = false;
+  for (Function &f : m)
+    if (!f.isDeclaration() && !f.hasOptNone() && skipRepeatedTests(f)) {
+      callers.push_back(&f);
+      skipped = true;
+    }
+  std::string err;
+  raw_string_ostream os(err);
+  if (skipped && verifyModule(m, &os))
+    report_fatal_error(Twine("xbc: internal error: skipping repeated tests broke the module:\n") + err);
   std::sort(callers.begin(), callers.end());
   callers.erase(std::unique(callers.begin(), callers.end()), callers.end());
   for (Function *f : callers) {

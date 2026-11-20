@@ -1,20 +1,22 @@
 /* Collections while other threads run compiled loops without calls (gc_loops.prg). Each loop reaches a safepoint
- * through its polls (a counted loop's at its stops, another's when its count of passes runs out), so every collection
- * ends: three threads spin in loops that never end (the test exits while they run; a loop that did not poll would hold
- * the first collection up until the test's time limit). A fourth thread runs Sums() over and over, its polls serving
- * the collections from the middle of its loops: its result is the same each time. */
+ * through its polls (a counted loop's at its stops, another's when its count of passes runs out, one of calls that
+ * return in place its test after them), so every collection ends: four threads spin in loops that never end (the
+ * test exits while they run; a loop that did not poll would hold the first collection up until the test's time
+ * limit). A fifth thread runs Sums() over and over, its polls serving the collections from the middle of its loops:
+ * its result is the same each time. */
 #include "check.h"
 #include "xbrt_int.h"
 
 void xbp_SPINCOUNTED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 void xbp_SPINWHILE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 void xbp_SPINPAST(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
+void xbp_SPINLEAVES(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 void xbp_SUMS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
-#define SPINNERS 3
+#define SPINNERS 4
 #define COLLECTIONS 2000
 
-static const xb_func spinners[SPINNERS] = {xbp_SPINCOUNTED, xbp_SPINWHILE, xbp_SPINPAST};
+static const xb_func spinners[SPINNERS] = {xbp_SPINCOUNTED, xbp_SPINWHILE, xbp_SPINPAST, xbp_SPINLEAVES};
 static uint32_t started, stop, sums, wrong;
 
 static void spin(void *which) {

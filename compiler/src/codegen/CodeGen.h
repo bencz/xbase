@@ -381,8 +381,10 @@ private:
   // takes references, in a function that reads its arguments nowhere else (PCount(), PValue()).
   bool forwardInPlace_ = false;
   bool fnDirect_ = false; // the function being generated is a direct body: no argc and argv
-  // A direct body's caller's frame (its argument): linking and unlinking the frame read no memory, which would make
-  // every call wait for the store of the call before (the chain of the context's frames). Null otherwise.
+  bool fnWords_ = false;  // a direct body that returns its result's words (returnsWords): fnRet_ is its own item
+  // A direct body's caller's frame (its argument): linking the frame reads no memory, which would make every call wait
+  // for the store of the call before (the chain of the context's frames); once frames are set up where they are needed
+  // (FrameSetup.h), the unlink reads it back from the frame. Null otherwise.
   llvm::Value *fnPrev_ = nullptr;
   bool runtimeLibrary_ = false;
   llvm::BasicBlock *fnExit_ = nullptr;
@@ -395,6 +397,7 @@ private:
   std::unordered_map<const xir::Value *, llvm::Value *> values_; // machine values; addresses of Place homes
   std::unordered_map<const xir::Instruction *, llvm::Value *> fusedTruth_; // truth tests a comparison answered
   std::unordered_map<const xir::Value *, llvm::AllocaInst *> locals_;       // Local homes
+  std::unordered_map<const xir::Var *, llvm::AllocaInst *> paramItems_;    // parameters out of the frame
   std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
   std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands

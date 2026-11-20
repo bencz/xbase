@@ -28,13 +28,23 @@ Value *CodeGen::capturedCell(const xir::Var &v) {
   return heapItem(loadFrom(ptrTy_, capturedCellAddress(fnSelf_, v.index), Mem::BlockCells, "cell"));
 }
 
-// The variable's own item: its frame slot or STATIC storage (which holds its
-// cell once it is shared), or a capture's cell; nothing is followed.
+// The variable's own item: its frame slot (or, for a parameter kept out of the
+// frame, an item of the function's own: FramePlan::inRegisters) or STATIC
+// storage (which holds its cell once it is shared), or a capture's cell;
+// nothing is followed.
 Value *CodeGen::rawAddress(const xir::Var &v) {
   switch (v.kind) {
   case xir::Var::Kind::Static: return staticAddress(v.index);
   case xir::Var::Kind::Capture: return capturedCell(v);
-  case xir::Var::Kind::Frame: return slot(plan_->slotOf(v));
+  case xir::Var::Kind::Frame: {
+    if (!plan_->inRegisters(v)) return slot(plan_->slotOf(v));
+    AllocaInst *&item = paramItems_[&v];
+    if (!item) {
+      item = entryAlloca("param");
+      localItems_.insert(item);
+    }
+    return item;
+  }
   }
   return nullptr;
 }

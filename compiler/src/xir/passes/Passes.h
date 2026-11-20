@@ -77,8 +77,14 @@ using TypedCopies = std::map<std::pair<const Function *, std::vector<uint32_t>>,
 // (Specialize.cpp).
 bool specializeCalls(Module &m, Function &f, TypedCopies &copies, const std::function<void(Function &)> &optimizeCopy);
 
+// Once every function is optimized, the calls between typed copies move to the copies the types of each other's
+// results ask for: one optimistic fixed point over every copy at once, which their own settling, one at a time, cannot
+// reach where they call each other (a result passed to a call, `Ack( m - 1, Ack( m, n - 1 ) )`); kept only when no
+// call then gives types beyond those the code around it was optimized for (Specialize.cpp).
+bool refineCopies(Module &m, TypedCopies &copies);
+
 // A STATIC FUNCTION that only its typed copies stand for now (nothing calls or names it) leaves the module, with its
-// body versioned for references (Specialize.cpp).
+// body versioned for references, and so does a copy nothing reaches any more (Specialize.cpp).
 bool dropCopiedFunctions(Module &m, const TypedCopies &copies);
 
 // The return types of a typed copy whose calls of itself give what it returns: the least fixed point (Specialize.cpp).

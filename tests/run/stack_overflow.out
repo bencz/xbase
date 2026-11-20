@@ -5,4 +5,5 @@ block: .T. Stack overflow .T.
 method: .T. Stack overflow NODE:DOWN .T.
 macro block: .T. Stack overflow .T.
 argument list: .T. Stack overflow .T.
-still running:        100
+typed: .T. Stack overflow CLIMB
+still running:        100          0

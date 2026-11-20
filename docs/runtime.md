@@ -116,12 +116,13 @@ typedef struct xb_item {
 Parameters, `LOCAL`s and temporaries of a compiled function live in its item frame (`xb_frame`: link, what the call
 stack shows, slot count, current line, the arguments as received, items), an `alloca` on the machine stack. The function
 links it into its thread context's chain (`xb_ctx.frames`) at entry, with the parameters copied into the first slots
-(from `argv`, `NIL` past `argc`, or from registers in a direct entry, [compiler.md](compiler.md#xir-to-llvm)) and the
-other slots `NIL`, and unlinks it at exit; every exit goes through one block, and errors return normally (the pending
-flag), so the chain is always right. The collector scans the frames of every context's chain. A frame dies with its
-function: nothing keeps a pointer to a slot (a variable that outlives it moves into a heap cell first). The program runs
-on a thread whose stack is reserved at 1 GB on 64-bit targets and 384 MB on 32-bit ones (`XB_PROGRAM_STACK_SIZE` in
-`core/main.c`; pages are committed as used), so deep recursion has room.
+(from `argv`, `NIL` past `argc`, or from registers in a direct entry, [compiler.md](compiler.md#xir-to-llvm); a typed
+copy keeps a parameter that holds no heap reference out of the frame) and the other slots `NIL`, and unlinks it at exit;
+every exit goes through one block, and errors return normally (the pending flag), so the chain is always right. The
+collector scans the frames of every context's chain. A frame dies with its function: nothing keeps a pointer to a slot
+(a variable that outlives it moves into a heap cell first). The program runs on a thread whose stack is reserved at 1 GB
+on 64-bit targets and 384 MB on 32-bit ones (`XB_PROGRAM_STACK_SIZE` in `core/main.c`; pages are committed as used), so
+deep recursion has room.
 
 Running out of it is an error, not the end of the process: the context knows the lowest address of its thread's stack
 the program may use (`xb_ctx_set_stack`, from `xb_platform_stack_bounds`: the system's bounds of the thread's stack,
@@ -989,7 +990,9 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   ([compiler.md](compiler.md#xir-to-llvm)).
 - The caller evaluates the arguments into consecutive slots of its own frame and sets `ret` to `NIL`; a callee that
   returns nothing leaves it untouched. Compiled code always writes `ret` when it returns (`NIL` for no value), so a call
-  to a direct entry within the module does not clear it first (when the callee unwinds, the result is not read). The
+  to a direct entry within the module does not clear it first (when the callee unwinds, the result is not read); a
+  direct entry whose results never refer to a heap object (and are not all `NIL`) returns its result's two words in
+  registers instead. The
   callee copies its parameters into its frame; missing arguments are `NIL`. An argument passed by reference is an
   `XB_T_CELL` or `XB_T_REF` item (see [References](#references)); a C function receives one only where its declaration
   says `@`.
@@ -1010,7 +1013,8 @@ requests. The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `X
 `XB_PENDING_FINALIZE` when there are objects to destroy, `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro
 operator](#macro-operator), and `XB_PENDING_FAIL` when a task fails: an error the default handler gave up on in a task,
 its value in the `BREAK` value's place, which no `BEGIN SEQUENCE` takes and the task's end does, see [Threads and
-synchronization](#threads-and-synchronization)). Compiled code tests the field after each fallible call; when it is set
+synchronization](#threads-and-synchronization)). Compiled code tests the field after each fallible call (not where no
+call ran since a test that found nothing to unwind for: [compiler.md](compiler.md#object-emission)); when it is set
 the code calls `xb_pending_gc` (or `xb_pending`, which never collects nor parks the thread, where a substituted result
 waits unseen: see [compiler.md](compiler.md#xir-to-llvm)), which serves a collection another thread makes (the thread
 parks: a safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a

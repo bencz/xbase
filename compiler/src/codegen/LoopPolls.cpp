@@ -2,6 +2,7 @@
 #include "codegen/LoopPolls.h"
 #include "codegen/Branches.h"
 
+#include <llvm/ADT/PostOrderIterator.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/ScalarEvolution.h>
 #include <llvm/Analysis/ScalarEvolutionExpressions.h>
@@ -15,6 +16,8 @@
 #include <llvm/Transforms/Utils/SSAUpdater.h>
 #include <llvm/Transforms/Utils/ScalarEvolutionExpander.h>
 
+#include <algorithm>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -48,8 +51,8 @@ bool nonZeroSuccessor(const CondBranch *br, Value *&value, unsigned &taken) {
 
 bool pendingTest(Instruction *term, const char *kind, PendingTest &t) {
   auto *br = condBranch(term);
-  Value *v;
-  unsigned taken;
+  Value *v = nullptr;
+  unsigned taken = 0;
   if (!nonZeroSuccessor(br, v, taken)) return false;
   auto *load = dyn_cast<LoadInst>(v);
   if (!load || !load->getMetadata(kind)) return false;
@@ -60,8 +63,8 @@ bool pendingTest(Instruction *term, const char *kind, PendingTest &t) {
 // The test's successors as its branch has them now: a preheader inserted for another loop after the test was found may
 // have split the edge to one (an outer loop's poll going on into an inner loop's header).
 void refresh(PendingTest &t) {
-  Value *v;
-  unsigned taken;
+  Value *v = nullptr;
+  unsigned taken = 0;
   nonZeroSuccessor(t.br, v, taken);
   t.slow = t.br->getSuccessor(taken);
   t.cont = t.br->getSuccessor(1 - taken);
@@ -295,6 +298,95 @@ void countDown(Function &f, Loop &loop, const PendingTest &poll) {
 }
 
 } // namespace
+
+bool skipRepeatedTests(Function &f) {
+  auto calls = [](const Instruction &i) { return isa<CallBase>(i) && !isa<IntrinsicInst>(i); };
+  // The slow path of each test, which serves the requests (one call) and goes on to the test's way on only when the
+  // call found none to unwind for (its result 0; else it goes elsewhere): the test passed then too.
+  std::unordered_map<const BasicBlock *, const BasicBlock *> served;
+  for (BasicBlock &b : f) {
+    PendingTest t;
+    for (const char *kind : {kSafepointMetadata, kPollMetadata}) {
+      if (!pendingTest(b.getTerminator(), kind, t) || t.slow == t.cont || t.slow->getSinglePredecessor() != &b ||
+          std::count_if(t.slow->begin(), t.slow->end(), calls) != 1)
+        continue;
+      Value *v = nullptr;
+      unsigned taken = 0;
+      auto *br = condBranch(t.slow->getTerminator());
+      if (nonZeroSuccessor(br, v, taken) && isa<CallBase>(v) && br->getSuccessor(1 - taken) == t.cont &&
+          br->getSuccessor(taken) != t.cont)
+        served[t.slow] = t.cont;
+    }
+  }
+  // Whether no call ran since a test that found nothing pending: at the end of each block along each edge (a test's
+  // way on, and its slow path's: yes); the greatest fixed point, from yes everywhere but at the function's entry. A way
+  // back (to a block no later in reverse postorder) carries none: a test a loop's passes go through serves the next
+  // pass, and goes only when an earlier test of the same pass is kept (so no cycle runs without a test, and a test
+  // that goes never stands for another that goes).
+  std::unordered_map<const BasicBlock *, size_t> order;
+  for (BasicBlock *b : ReversePostOrderTraversal<Function *>(&f)) order.emplace(b, order.size());
+  std::unordered_map<const BasicBlock *, bool> atStart;
+  auto edge = [&](BasicBlock *from, BasicBlock *to) {
+    auto o = order.find(to), p = order.find(from);
+    if (o == order.end() || p == order.end() || o->second <= p->second) return false;
+    PendingTest t;
+    for (const char *kind : {kSafepointMetadata, kPollMetadata})
+      if (pendingTest(from->getTerminator(), kind, t) && t.load->getParent() == from &&
+          std::none_of(t.load->getIterator(), from->end(), calls))
+        return to == t.cont && t.slow != t.cont;
+    if (auto s = served.find(from); s != served.end()) return to == s->second;
+    bool clean = atStart.at(from);
+    for (const Instruction &i : *from) clean = clean && !calls(i);
+    return clean;
+  };
+  for (BasicBlock &b : f) atStart[&b] = &b != &f.getEntryBlock();
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (BasicBlock &b : f) {
+      if (!atStart[&b]) continue;
+      for (BasicBlock *p : predecessors(&b))
+        if (!edge(p, &b)) {
+          atStart[&b] = false;
+          changed = true;
+          break;
+        }
+    }
+  }
+  bool changed = false;
+  for (BasicBlock &b : f) {
+    PendingTest t;
+    if (!pendingTest(b.getTerminator(), kSafepointMetadata, t) || t.load->getParent() != &b ||
+        std::any_of(b.begin(), t.load->getIterator(), calls))
+      continue;
+    if (atStart[&b]) { // nothing can be pending here
+      t.load->replaceAllUsesWith(ConstantInt::get(t.load->getType(), 0));
+      t.load->eraseFromParent();
+      changed = true;
+      continue;
+    }
+    // The ways in that ran no call find nothing pending; the others load the requests on their way.
+    std::vector<BasicBlock *> preds(pred_begin(&b), pred_end(&b));
+    if (std::none_of(preds.begin(), preds.end(), [&](BasicBlock *p) { return edge(p, &b); }) ||
+        std::find(preds.begin(), preds.end(), &b) != preds.end())
+      continue;
+    PHINode *phi = PHINode::Create(t.load->getType(), (unsigned)preds.size(), "pending", b.begin());
+    std::unordered_map<BasicBlock *, Value *> from;
+    for (BasicBlock *p : preds) {
+      Value *&v = from[p]; // one value per block, also for several edges from it
+      if (!v && edge(p, &b)) v = ConstantInt::get(t.load->getType(), 0);
+      if (!v) {
+        Instruction *load = t.load->clone();
+        load->insertBefore(p->getTerminator()->getIterator());
+        v = load;
+      }
+      phi->addIncoming(v, p);
+    }
+    t.load->replaceAllUsesWith(phi);
+    t.load->eraseFromParent();
+    changed = true;
+  }
+  return changed;
+}
 
 bool placeLoopPolls(Function &f, FunctionAnalysisManager &fam) {
   auto &dt = fam.getResult<DominatorTreeAnalysis>(f);

@@ -184,13 +184,18 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
 
 // A call to a function of the module with a direct entry: each parameter's
 // item as two words in registers (NIL for one not passed; arguments past the
-// parameters are evaluated and left out, as nothing reads them). The result is
-// not cleared first: a compiled function always writes it when it returns, and
-// when it unwinds the result is not read (its slot keeps a valid item for the
-// collector, as every slot does).
+// parameters are evaluated and left out, as nothing reads them). A result that
+// never refers to a heap object comes back as two words too (returnsWords),
+// stored into its home (NIL when the callee unwinds); any other is written by
+// the callee into the result's item, not cleared first: a compiled function
+// always writes it when it returns, and when it unwinds the result is not
+// read (its slot keeps a valid item for the collector, as every slot does).
 void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
   const xir::Function &callee = *i.callee.function;
-  std::vector<Value *> args{fnCtx_, d, innermostFrame()}; // the chain's frame at a call is the caller's
+  bool words = returnsWords(callee);
+  std::vector<Value *> args{fnCtx_};
+  if (!words) args.push_back(d);
+  args.push_back(innermostFrame()); // the chain's frame at a call is the caller's
   for (uint32_t k = 0; k < callee.numParams; ++k) {
     if (k >= i.operands().size()) {
       args.insert(args.end(), {headerWord(XB_T_NIL, 0, 0), ConstantInt::get(i64_, 0)});
@@ -200,7 +205,8 @@ void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
     args.push_back(loadHeader(item));        // the cached header when there is one
     args.push_back(loadWords(item).payload); // a pointer is read where it is
   }
-  b_.CreateCall(direct_.at(&callee), args);
+  Value *result = b_.CreateCall(direct_.at(&callee), args);
+  if (words) storeWords(d, b_.CreateExtractValue(result, 0), b_.CreateExtractValue(result, 1));
   checkPending(unwind_);
 }
 

@@ -11,6 +11,13 @@
 
 namespace xb {
 
+// Whether the direct entry of `f` (xir::hasDirectEntry) returns its result's two words in registers: the values it
+// returns never refer to a heap object (Function::returnTypes), so on its way back the result needs no item the
+// collector sees, and are not all NIL (a procedure's NIL, which its callers seldom read, gains nothing so; it changes
+// how a large body's registers are allocated). Any other direct entry writes its result into the caller's item, which
+// it receives (`ret`).
+bool returnsWords(const xir::Function &f);
+
 // Where an item value of an xIR function lives (docs/xir.md, phase 1).
 struct Home {
   enum class Kind : uint8_t {
@@ -28,9 +35,12 @@ struct Home {
 };
 
 // The frame of a function: the parameters in slots 0 .. numParams-1 (the
-// prologue copies them there), then the other frame variables still in memory
-// (those mem2reg did not make values), then temporaries. Every live item value that needs storage gets a slot; slots
-// are assigned by linear scan over live intervals and reused once free.
+// prologue copies them there; in a typed copy with a direct entry and no loop,
+// a parameter of types without heap references that nothing writes stays out
+// of the frame, in an item of its own: `inRegisters`), then the other frame variables still
+// in memory (those mem2reg did not make values), then temporaries. Every live
+// item value that needs storage gets a slot; slots are assigned by linear scan
+// over live intervals and reused once free.
 // Operands of a call or array literal (and the arguments an inline.enter passes,
 // kept while its body runs) take consecutive slots (a group), and a
 // value used only there is computed straight into its slot of the group; a
@@ -56,6 +66,10 @@ public:
   uint32_t frameSize() const { return frameSize_; }
   uint32_t savedSize() const { return savedSize_; } // the slots a resumable function's step keeps: all but shadows
   uint32_t slotOf(const xir::Var &v) const { return varSlot_.at(&v); } // a frame variable
+  // A parameter kept out of the frame: its item is the function's own, which the collector need not see.
+  bool inRegisters(const xir::Var &v) const { return registerParams_.count(&v) != 0; }
+  const xir::Var *param(uint32_t k) const { return params_.at(k); } // the variable of parameter k
+  uint32_t paramSlots() const { return paramSlots_; } // the parameters in the frame: its first slots
   const Home &home(const xir::Value *v) const;
   uint32_t groupBase(const xir::Instruction *user) const { return groupBase_.at(user); }
   bool inGroup(const xir::Instruction *user, size_t operand) const; // computed straight into its group slot
@@ -81,6 +95,7 @@ private:
     uint32_t slot = 0;
   };
 
+  void findRegisterParams();
   void placeVariables();
   void number();
   void chooseHomes();
@@ -101,8 +116,10 @@ private:
   xir::CFG cfg_;
   xir::TypeInfo types_;
   uint32_t frameSize_ = 0, savedSize_ = 0;
-  uint32_t numVarSlots_ = 0;
+  uint32_t numVarSlots_ = 0, paramSlots_ = 0;
   std::unordered_map<const xir::Var *, uint32_t> varSlot_;
+  std::vector<const xir::Var *> params_;                // by parameter number
+  std::unordered_set<const xir::Var *> registerParams_; // parameters out of the frame
   std::unordered_set<const xir::Var *> unwritten_; // frame variables nothing writes: a load of one is its item
   std::unordered_map<const xir::Value *, uint32_t> pos_;          // definition position
   std::unordered_map<const xir::BasicBlock *, uint32_t> start_, end_, blockIndex_;

@@ -78,17 +78,47 @@ bool needsFrame(const Instruction &i, const std::unordered_set<const Value *> &f
 // The largest part of a function before its setups that is made a small entry of its own (instructions).
 constexpr size_t kMaxLeafEntry = 48;
 
-// A small entry of its own: when the part of the function that runs before any setup (`sets`) reads memory but writes
-// only the result (through the result's argument) and can return, the function becomes that part, whose ways into a
-// setup call a copy of the whole function instead, with the same arguments (nothing the part did has been seen: the
-// copy does it again), and is marked to be inlined (alwaysinline): its callers then take a leaf's early return in
-// place, without a call (`fib`'s `n < 2`).
-void splitLeafEntry(Function &f, const std::vector<BasicBlock *> &sets, const Chain &chain) {
-  if (sets.empty() || f.arg_size() < 3) return;
-  const Value *result = f.getArg(1);
+// Whether `b` tests the flag before a setup (`setBlocks`): false where the part before any setup runs, which takes only
+// the setup's side there.
+bool testsFlag(BasicBlock *b, const std::unordered_set<const BasicBlock *> &setBlocks) {
+  return any_of(successors(b), [&](BasicBlock *n) { return setBlocks.count(n) != 0; });
+}
+
+// The blocks from which a return is reached without a setup.
+std::unordered_set<const BasicBlock *> waysToReturn(Function &f,
+                                                    const std::unordered_set<const BasicBlock *> &setBlocks) {
+  std::unordered_set<const BasicBlock *> toReturn;
+  std::vector<BasicBlock *> work;
+  for (BasicBlock &b : f)
+    if (isa<ReturnInst>(b.getTerminator())) {
+      toReturn.insert(&b);
+      work.push_back(&b);
+    }
+  while (!work.empty()) {
+    BasicBlock *b = work.back();
+    work.pop_back();
+    for (BasicBlock *p : predecessors(b))
+      if (!setBlocks.count(p) && !testsFlag(p, setBlocks) && toReturn.insert(p).second) work.push_back(p);
+  }
+  return toReturn;
+}
+
+// A small entry of its own: when the part of the function that runs before any setup (`sets`) on its ways to a return
+// reads memory but writes only the result (through the result's argument, unless it returns the result in registers)
+// and its own locals, and can return, the function becomes that part, whose ways into a setup, or into code that
+// returns only after one, call a copy of the whole function instead, with the same arguments (nothing the part did has
+// been seen: the copy does it again), and is marked to be inlined (alwaysinline): its callers then take a leaf's early
+// return in place, without a call (`fib`'s `n < 2`, `Ack`'s `m == 0`).
+void splitLeafEntry(Function &f, const std::vector<BasicBlock *> &sets,
+                    const std::unordered_set<const BasicBlock *> &unlinkBlocks) {
+  if (sets.empty()) return;
+  const Value *result = f.getReturnType()->isVoidTy() ? f.getArg(1) : nullptr;
   std::unordered_set<const BasicBlock *> setBlocks(sets.begin(), sets.end()), part;
+  std::unordered_set<const BasicBlock *> toReturn = waysToReturn(f, setBlocks);
+  if (!toReturn.count(&f.getEntryBlock())) return;
   std::vector<BasicBlock *> work{&f.getEntryBlock()};
   part.insert(&f.getEntryBlock());
+  std::vector<std::pair<BasicBlock *, BasicBlock *>> leaves; // the part's edges to code that returns after a setup
   size_t size = 0;
   bool returns = false;
   while (!work.empty()) {
@@ -98,7 +128,7 @@ void splitLeafEntry(Function &f, const std::vector<BasicBlock *> &sets, const Ch
       if (++size > kMaxLeafEntry) return;
       if (isa<ReturnInst>(i)) returns = true;
       if (isa<CallBase>(i) && !isa<IntrinsicInst>(i)) return;
-      // What the part may write: the result, the function's own locals (the copy has its own), the chain's unlink.
+      // What the part may write: the result, the function's own locals (the copy has its own).
       auto writable = [&](const Value *p) {
         const Value *o = getUnderlyingObject(p);
         return o == result || isa<AllocaInst>(o);
@@ -106,15 +136,19 @@ void splitLeafEntry(Function &f, const std::vector<BasicBlock *> &sets, const Ch
       if (auto *m = dyn_cast<MemIntrinsic>(&i)) {
         if (!writable(m->getDest())) return;
       } else if (auto *st = dyn_cast<StoreInst>(&i)) {
-        if (!writable(st->getPointerOperand()) && st->getValueOperand() != chain.prev) return;
+        if (!writable(st->getPointerOperand())) return;
       } else if (i.mayWriteToMemory() && !isa<AllocaInst>(i)) {
         return;
       }
     }
-    // At a test of the flag, false in the part, only the setup's side is taken: the part ends there.
-    bool test = any_of(successors(b), [&](BasicBlock *n) { return setBlocks.count(n) != 0; });
-    for (BasicBlock *next : successors(b))
-      if (!test && part.insert(next).second) work.push_back(next);
+    for (BasicBlock *next : successors(b)) { // a test of the flag is not on a way to a return: the part ends before
+      if (unlinkBlocks.count(next)) continue; // the unlink of a frame linked, which the part never does
+      if (!toReturn.count(next)) {
+        if (std::find(leaves.begin(), leaves.end(), std::pair{b, next}) == leaves.end()) leaves.push_back({b, next});
+      } else if (part.insert(next).second) {
+        work.push_back(next);
+      }
+    }
   }
   if (!returns) return;
   ValueToValueMapTy vmap;
@@ -123,16 +157,30 @@ void splitLeafEntry(Function &f, const std::vector<BasicBlock *> &sets, const Ch
   whole->setLinkage(GlobalValue::InternalLinkage);
   std::vector<Value *> args;
   for (Argument &a : f.args()) args.push_back(&a);
-  for (BasicBlock *set : sets) {
-    std::vector<BasicBlock *> preds(pred_begin(set), pred_end(set));
-    if (preds.empty()) continue;
-    BasicBlock *call = BasicBlock::Create(f.getContext(), "whole", &f, set);
+  auto callWhole = [&](BasicBlock *before) {
+    BasicBlock *call = BasicBlock::Create(f.getContext(), "whole", &f, before);
     IRBuilder<> b(call);
     CallInst *c = b.CreateCall(whole, args);
     c->setCallingConv(whole->getCallingConv());
     c->setTailCall();
-    b.CreateRetVoid();
+    if (f.getReturnType()->isVoidTy()) b.CreateRetVoid();
+    else b.CreateRet(c);
+    return call;
+  };
+  for (BasicBlock *set : sets) {
+    std::vector<BasicBlock *> preds(pred_begin(set), pred_end(set));
+    if (preds.empty()) continue;
+    BasicBlock *call = callWhole(set);
     for (BasicBlock *p : preds) p->getTerminator()->replaceSuccessorWith(set, call);
+  }
+  for (auto [from, to] : leaves) {
+    BasicBlock *call = callWhole(to);
+    Instruction *t = from->getTerminator();
+    for (unsigned k = 0; k < t->getNumSuccessors(); ++k)
+      if (t->getSuccessor(k) == to) {
+        to->removePredecessor(from, /*KeepOneInputPHIs=*/true);
+        t->setSuccessor(k, call);
+      }
   }
   removeUnreachableBlocks(f);
   f.removeFnAttr(Attribute::NoInline);
@@ -161,8 +209,12 @@ bool sinkFrameSetup(Function &f, FunctionAnalysisManager &) {
   Chain chain;
   chain.ctx = GetPointerBaseWithConstantOffset(link->getPointerOperand(), chain.offset, dl);
   if (!chain.ctx) return false;
+  StoreInst *keep = nullptr; // the store of the caller's frame into the frame's link
   for (Instruction &i : entry)
-    if (auto *s = dyn_cast<StoreInst>(&i); s && s->getPointerOperand() == frame) chain.prev = s->getValueOperand();
+    if (auto *s = dyn_cast<StoreInst>(&i); s && s->getPointerOperand() == frame) {
+      chain.prev = s->getValueOperand();
+      keep = s;
+    }
   if (!chain.prev || !isa<Argument>(chain.prev)) return false;
 
   // The stack's test: the entry's branch on a comparison of the frame's address, to a block that calls the runtime
@@ -281,6 +333,7 @@ bool sinkFrameSetup(Function &f, FunctionAnalysisManager &) {
   }
 
   // The entry goes on without the setup or the test.
+  MDNode *linkTbaa = keep->getMetadata(LLVMContext::MD_tbaa); // the frame's link's memory class, for the unlink below
   createBranch(join, test->getIterator());
   below->removePredecessor(&entry);
   test->eraseFromParent();
@@ -289,7 +342,36 @@ bool sinkFrameSetup(Function &f, FunctionAnalysisManager &) {
   join->removePredecessor(below);
   below->eraseFromParent();
   raise->eraseFromParent();
-  splitLeafEntry(f, sets, chain);
+
+  // When some way returns without a setup (an early return), only a frame linked is unlinked: that way leaves the chain
+  // as it found it and needs nothing kept for the way out (no register saved, no stack), and the caller's frame is read
+  // back from the frame's link: no register keeps it meanwhile. (Where every way sets the frame up, the flag would
+  // only stay live to the exit, through the loops.)
+  std::vector<StoreInst *> unlinks;
+  std::unordered_set<const BasicBlock *> setBlocks(sets.begin(), sets.end());
+  if (waysToReturn(f, setBlocks).count(&entry))
+    for (BasicBlock &b : f)
+      for (Instruction &i : b)
+        if (auto *s = dyn_cast<StoreInst>(&i); s && s->getValueOperand() == chain.prev) {
+          int64_t offset = 0;
+          if (GetPointerBaseWithConstantOffset(s->getPointerOperand(), offset, dl) == chain.ctx &&
+              offset == chain.offset)
+            unlinks.push_back(s);
+        }
+  std::unordered_set<const BasicBlock *> unlinkBlocks;
+  for (StoreInst *s : unlinks) {
+    IRBuilder<> b(s);
+    Instruction *then = SplitBlockAndInsertIfThen(b.CreateLoad(b.getInt1Ty(), linked, "frame.is.linked"),
+                                                  s->getIterator(), /*Unreachable=*/false);
+    s->moveBefore(then->getIterator());
+    b.SetInsertPoint(s);
+    LoadInst *prev = b.CreateLoad(chain.prev->getType(), frame, "prev");
+    prev->setMetadata(LLVMContext::MD_tbaa, linkTbaa);
+    s->setOperand(0, prev);
+    unlinkBlocks.insert(then->getParent());
+  }
+
+  splitLeafEntry(f, sets, unlinkBlocks);
   return true;
 }
 

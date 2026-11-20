@@ -21,9 +21,15 @@ bool isGroupUser(const Instruction &i) {
 
 } // namespace
 
+bool returnsWords(const Function &f) {
+  TypeSet r = f.returnTypes & kAnyType;
+  return hasDirectEntry(f) && (r & kHeapTypes) == 0 && (r & ~typeBit(XB_T_NIL)) != 0;
+}
+
 FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {
-  placeVariables();
   findUnwritten();
+  findRegisterParams();
+  placeVariables();
   number();
   chooseHomes();
   computeLiveness();
@@ -34,8 +40,22 @@ FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {
   placeLoopClears();
 }
 
-// Parameters keep their slots; the other frame variables something still
-// loads, stores or captures follow, in declaration order.
+// The parameters of a typed copy (Function::paramTypes) with a direct entry, which its calls pass in registers, that
+// hold no heap reference and that nothing writes: nothing reads them in the frame (a typed copy reads no arguments as
+// received and forwards none), and the collector need not see them. Only in a function without loops, whose calls
+// are short, so that writing them into the frame weighs: a value held through a loop keeps a register from it.
+void FramePlan::findRegisterParams() {
+  params_.assign(f_.numParams, nullptr);
+  for (auto &v : f_.vars)
+    if (isParameter(v.get()) && v->index < f_.numParams) params_[v->index] = v.get();
+  if (f_.paramTypes.empty() || !hasDirectEntry(f_) || !Loops(cfg_).all().empty()) return;
+  for (const Var *v : params_)
+    if (v && v->index < f_.paramTypes.size() && (f_.paramTypes[v->index] & kHeapTypes) == 0 && unwritten_.count(v))
+      registerParams_.insert(v);
+}
+
+// Parameters keep their slots, in order (but those in registers); the other frame variables something still loads,
+// stores or captures follow, in declaration order.
 void FramePlan::placeVariables() {
   std::unordered_set<const Var *> used;
   for (auto &b : f_.blocks)
@@ -43,8 +63,13 @@ void FramePlan::placeVariables() {
       if (i->var) used.insert(i->var);
       used.insert(i->captures.begin(), i->captures.end());
     }
+  for (const Var *p : params_)
+    if (p && !registerParams_.count(p)) varSlot_[p] = paramSlots_++;
+  numVarSlots_ = paramSlots_;
   for (auto &v : f_.vars)
-    if (v->kind == Var::Kind::Frame && (v->param || used.count(v.get()))) varSlot_[v.get()] = numVarSlots_++;
+    if (v->kind == Var::Kind::Frame && !varSlot_.count(v.get()) && !registerParams_.count(v.get()) &&
+        (v->param || used.count(v.get())))
+      varSlot_[v.get()] = numVarSlots_++;
 }
 
 // The frame variables nothing changes once the function runs (a parameter the
@@ -155,7 +180,8 @@ void FramePlan::chooseHomes() {
         homes_[b->insts[k - 1].get()] = {Home::Kind::Place, 0, &i};
         forwardedStores_.insert(&i);
       }
-      if (i.op == Op::Ret && i.operands().size() == 1) {
+      // A body that returns its result's words in registers has no caller's item to compute it into.
+      if (i.op == Op::Ret && i.operands().size() == 1 && !returnsWords(f_)) {
         const Value *v = i.operand(0);
         if (isItemResult(v) && v->hasOneUse() && static_cast<const Instruction *>(v)->parent == b &&
             static_cast<const Instruction *>(v)->op != Op::Load)

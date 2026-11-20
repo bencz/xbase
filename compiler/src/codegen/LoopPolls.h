@@ -16,6 +16,13 @@ namespace xb {
 // pending requests when the count runs out. Returns whether the function changed.
 bool placeLoopPolls(llvm::Function &f, llvm::FunctionAnalysisManager &fam);
 
+// A test of the pending requests that serves a safepoint (!xb.safepoint) where no call ran since the last test that
+// found none, on every way to it, tests nothing: only the runtime's calls make requests of the thread's own, and those
+// of other threads wait for the next test (a caller tests after every call, a loop on its back edge). It goes; where
+// only some ways into its block are such, they skip it (the small entries of callees inlined, FrameSetup.h, make
+// those: a leaf's early return calls nothing). Returns whether the function changed.
+bool skipRepeatedTests(llvm::Function &f);
+
 // The metadata the lowering puts on the loads of the pending requests: a back edge's poll, and a test that serves a
 // safepoint.
 inline constexpr const char *kPollMetadata = "xb.poll";

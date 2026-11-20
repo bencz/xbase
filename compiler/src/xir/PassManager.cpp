@@ -129,6 +129,10 @@ std::string optimize(Module &m, bool final) {
     // narrowed yet, so it gives every type there).
     f->returnTypes = returnTypes(*f);
   }
+  if (bad.empty() && refineCopies(m, copies))
+    for (auto &f : m.functions)
+      if (std::string report = verify(m, *f); !report.empty() && bad.empty())
+        bad = "after refining the typed copies: " + report;
   if (bad.empty() && dropCopiedFunctions(m, copies))
     for (auto &f : m.functions)
       if (std::string report = verify(m, *f); !report.empty() && bad.empty())

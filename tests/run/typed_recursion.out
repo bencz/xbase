@@ -1,0 +1,13 @@
+
+ack          1          4          9         61          9          9          2.5
+tak          7         12         30
+grow          3       1535 8589934591 N N .T. .T.
+nested         24 .T.
+lines          7 LINES(73)LINES(76)LINES(76) LINES(73)LINES(77)LINES(76) LINES(73)LINES(76)LINES(77) LINES(73)LINES(77)LINES(77) 
+loop          3 INNER(81) INNER(81) 
+kept          5          1
+words         -8 .T. .F. L 12/02/26 NIL
+deep +       1081 C +: (b)MAIN(31) BAD(114) BAD(116) BAD(116)
+substituted sxxx s          2
+strings          3          3          3          8 == -
+dynamic          9          7          3         29

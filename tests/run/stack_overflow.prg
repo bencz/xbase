@@ -1,7 +1,8 @@
 // Running out of stack: a call that would go past the limit raises the stack error (EG_LIMIT, "Stack overflow",
 // the called function as the operation) before its body runs, whatever recurses (a function, a codeblock through
-// Eval(), a method, a codeblock made from text, a function forwarding a list of arguments that grows at each level);
-// a sequence recovers from it, the program goes on, and it can happen again.
+// Eval(), a method, a codeblock made from text, a function forwarding a list of arguments that grows at each level,
+// a function on numbers whose calls pass each other's results, which runs on its typed copies with frames that hold
+// no slot); a sequence recovers from it, the program goes on, and it can happen again.
 #include "error.ch"
 
 STATIC s_nDepth := 0
@@ -50,7 +51,12 @@ PROCEDURE Main()
    CATCH oErr
       ? "argument list:", oErr:genCode == EG_LIMIT, oErr:description, s_nDepth > 1000
    END
-   ? "still running:", Deep2( 100 )
+   TRY
+      Climb( 1 )
+   CATCH oErr
+      ? "typed:", oErr:genCode == EG_LIMIT, oErr:description, oErr:operation
+   END
+   ? "still running:", Deep2( 100 ), Climb( -5 )
 RETURN
 
 FUNCTION Count()
@@ -66,3 +72,6 @@ RETURN Deep() + 1
 
 FUNCTION Deep2( n )
 RETURN iif( n == 0, 0, Deep2( n - 1 ) + 1 )
+
+STATIC FUNCTION Climb( n )
+RETURN iif( n < 0, 0, Climb( Climb( -1 ) + n + 1 ) )

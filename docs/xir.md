@@ -118,7 +118,8 @@ instead of reading it, and emits only the fast paths the operands' types allow.
 The return types of a function (`returnTypes`): the union of the types of the values its `ret`s give (`NIL` for a
 `ret` without one), with the function's own type inference; every type for a generator's resume function. The pass
 manager sets `Function::returnTypes` once it has optimized the function (every type until then), so its callers,
-optimized after it, use them; a function of a call cycle entered before it gives every type there. The function's own
+optimized after it, use them; a function of a call cycle entered before it gives every type there. The typed copies'
+are settled together at the end (`refineCopies`, `specialize-calls` below). The function's own
 errors cannot substitute the call's result (an error inside it substitutes the failed operation's, and the type
 inference of its `ret`s counts that), and a call it never enters (the stack's end) unwinds.
 
@@ -285,17 +286,36 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   versioned for references, one that reads its arguments as received (`PCount()`, `PValue()`, `...`), a generator, an
   `ASYNC` function, nor one that makes codeblocks or has unwind blocks; at most 2000 instructions) that passes no
   reference nor `...` and whose arguments the type inference finds all integers, else all numbers, all logicals or all
-  dates for some parameter, or objects of one class `ClassInfo` knows, goes to a copy of the function typed for them
-  (`NAME.typedN`, at most 4 a function, shown on the call stack as the function: `stackName`): the copy's parameters
-  have those types and classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes keeps any
-  type and class; a method's copy, its Self of a known class, resolves the sends to Self), its versioning test is false
-  (no call of it passes a reference) and its body versioned for references goes. The copy is made once per function and
-  parameter types, optimized at once (its own calls with such arguments go to it, so a recursive function calls its
-  copy), and its return types are the least fixed point of what its `RETURN`s give with its calls of itself giving the
-  types found so far, from none (`settleReturnTypes`). Once every function is done, a `STATIC FUNCTION` its copies
-  replaced, which no root reaches any more, leaves the module with its body versioned for references
-  (`dropCopiedFunctions`; the module's first function, which may be the program's start, `firstProgramFunction`, stays).
-  `Fib( n - 1 ) + Fib( n - 2 )` then computes with numbers in registers.
+  dates for some parameter (an argument with no type at all, the result of a call that never returns, takes the
+  integers: no value of it reaches the call), or objects of one class `ClassInfo` knows, goes to a copy of the function
+  typed for them (`NAME.typedN`, shown on the call stack as the function: `stackName`). A function has at most 4 copies
+  of each kind (`kMaxCopies`: those that know every parameter, its types or its object's class, and those that leave
+  some parameter of any type); past that, a call goes to the copy made already whose parameters take its arguments with
+  the fewest types (the first made of those), else to the function itself. The copy's parameters have those types and
+  classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes keeps any type and class; a
+  method's copy, its Self of a known class, resolves the sends to Self), its versioning test is false (no call of it
+  passes a reference) and its body versioned for references goes. The copy is made once per function and parameter
+  types, optimized at once (its own calls with such arguments go to it, so a recursive function calls its copy), and
+  its return types are the least fixed point of what its `RETURN`s give with its calls of itself giving the types found
+  so far, from none (`settleReturnTypes`). `Fib( n - 1 ) + Fib( n - 2 )` then computes with numbers in registers.
+
+  Settled one at a time, a copy that calls another copy sees its result of any type while that one is being optimized,
+  and a result passed to a call, `Ack( m - 1, Ack( m, n - 1 ) )`, then goes to the function itself, whose result is of
+  any type too. So once every function is done, `refineCopies` settles the copies' return types together: an optimistic
+  fixed point from none for every copy at once. Each round moves every call of a function that has copies or may have
+  them (in every function of the module, the copies too, each function again while one of its calls moves, so that a
+  result's new types reach the calls it goes to) to the copy its arguments' types now ask for, made then while the
+  function's budget allows (a copy of its body as optimized, not optimized again: its tidying after the versioning test
+  sees the return types the code was optimized for), else to what it called before (its copy still takes its
+  arguments: the code around the call may have lost their types since, as a body inlined in a function that keeps its
+  variables in memory); then each copy's return types grow by what its `RETURN`s give. The result is kept when it
+  settles within 32 rounds (`kMaxRefineRounds`) and no call then gives types beyond those of what it called before (the
+  code around it, and in a copy made there the code it copies, was optimized for those); otherwise every call, return
+  type and copy goes back as it was. Ackermann's function then runs on its copies typed for numbers: `ackermann` 19%
+  fewer instructions, `tak` 19% (perf stat, x86-64). Last, a `STATIC FUNCTION` its copies replaced, which no root
+  reaches any more, leaves the module with its body versioned for references, and so does a copy nothing reaches any
+  more (`dropCopiedFunctions`; the module's first function, which may be the program's start, `firstProgramFunction`,
+  stays).
 - `peel-for-types`, after `typed-continuations`: a small innermost loop (at most 80 instructions, in a function of at
   most 600; up to 4 loops) without a suspension point or an inlined body's frame, one of whose header's parameters gets
   one number type from the loop's passes and another number type from outside (a sum that starts at the integer 0 and

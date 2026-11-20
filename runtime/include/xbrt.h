@@ -212,7 +212,9 @@ struct xb_array {
 
 /* [ABI] What the call stack shows of a function (ProcName(), the "Called
  * from" lines): its name, "(b)NAME" for a codeblock of NAME; its number of
- * parameters, the first slots of its frame; its flags; and the name of its
+ * parameters, the first slots of its frame when it keeps its arguments
+ * (XB_PROC_ARGS; a typed copy may keep a parameter out of its frame); its
+ * flags; and the name of its
  * source file, without directories (ProcFile(); NULL for the runtime's
  * functions). Compiled code emits one constant per function. */
 typedef struct xb_proc {
