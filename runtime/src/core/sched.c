@@ -3,7 +3,11 @@
  * Workers are program threads (xb_program_thread_start), started when tasks first need them; `target` of them run tasks
  * at once (one per processor, or //WORKERS:n). Each has a queue of its own, a ring of RUNQ tasks that it fills at the
  * tail and takes from at the head, which other workers steal half of at once (one compare-and-swap of the head), and a
- * slot for the task to run next (a task it just made: locality), which a thief takes only when the ring is empty. Tasks
+ * slot for the task to run next (a task it just made: locality), which a thief takes only when the ring is empty. A
+ * chain of tasks run from that slot (each one making the next ready) shares one slice of time: once a link of it
+ * starts NEXT_SLICE_NS or more after the chain began, a task that waits (in the ring, the pool's queue, another
+ * worker's ring or a feeder's) runs before the next link, which begins a new chain; with none waiting, the chain gets
+ * another slice. So a chain never starves the other tasks. Tasks
  * from other threads go to their feeders (below); those a full ring sheds (half of it) go to the pool's queue, under
  * the pool's lock, which a worker looks at first once every GLOBAL_FIRST tasks.
  *
@@ -53,6 +57,7 @@
 #define MONITOR_NS ((int64_t)10 * XB_NS_PER_MS)
 #define SEARCH_NS ((int64_t)50 * XB_NS_PER_US)
 #define STEAL_NEXT_NS ((int64_t)5 * XB_NS_PER_US)
+#define NEXT_SLICE_NS ((int64_t)1 * XB_NS_PER_MS)
 #define STARVED_NS ((int64_t)2000 * XB_NS_PER_MS)
 /* The pace of new workers past twice the target: see may_spawn_locked. */
 #define SPAWN_STEP_NS ((int64_t)25 * XB_NS_PER_MS)
@@ -71,6 +76,9 @@ typedef struct worker {
   uint32_t run;        /* RUN_*: BLOCKED and LONG are not counted active */
   uint32_t runs;       /* tasks it started: the monitor's mark is undone when it finds another task than it saw */
   XB_ALIGN8 uint64_t runStart; /* the monotonic time its task started, or came back from blocking (the monitor's) */
+  uint64_t lastStart;  /* its owner's only: when its last task started, */
+  uint64_t chainStart; /* when the chain of tasks run from `next` that it belongs to began (its slice's start), */
+  int fromNext;        /* and whether the task found last came from `next` */
   uint32_t ticks;
   uint32_t seed;       /* where its search for a victim starts */
   struct worker *idleNext;
@@ -311,7 +319,14 @@ static worker *feeder(void) {
 static void *find_work(worker *w) {
   void *t = NULL;
   if (++w->ticks % GLOBAL_FIRST == 0) t = global_get(w);
-  if (!t) t = xb_atomic_xchgptr(&w->next, NULL, XB_ACQ_REL);
+  if (!t && w->lastStart - w->chainStart >= (uint64_t)NEXT_SLICE_NS) { /* the chain's slice is over: what waits first */
+    t = runq_get(w);
+    if (!t) t = global_get(w);
+    if (!t) t = steal(w); /* other workers' rings, the feeders' */
+    if (!t) w->chainStart = w->lastStart; /* nothing waits: the chain goes on for another slice */
+  }
+  w->fromNext = 0;
+  if (!t && (t = xb_atomic_xchgptr(&w->next, NULL, XB_ACQ_REL)) != NULL) w->fromNext = 1;
   if (!t) t = runq_get(w);
   if (!t) t = global_get(w);
   if (!t) t = steal(w);
@@ -421,7 +436,10 @@ static void run_task(xb_ctx *ctx, worker *w, void *t) {
   xb_set_ptr(&task, XB_T_OBJECT, t);
   xb_gc_root_push(ctx, &task);
   xb_atomic_add32(&w->runs, 1, XB_RELAXED);
-  xb_atomic_store64(&w->runStart, (uint64_t)xb_platform_monotonic_ns(), XB_RELAXED);
+  uint64_t now = (uint64_t)xb_platform_monotonic_ns();
+  w->lastStart = now;
+  if (!w->fromNext) w->chainStart = now;
+  xb_atomic_store64(&w->runStart, now, XB_RELAXED);
   xb_atomic_store32(&w->run, RUN_RUNNING, XB_SEQ_CST);
   xb_task_run(ctx, &task);
   if (xb_atomic_xchg32(&w->run, RUN_IDLE, XB_ACQ_REL) == RUN_LONG) { /* the monitor gave its place away */

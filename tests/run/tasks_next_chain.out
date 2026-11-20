@@ -1,0 +1,5 @@
+
+chain stopped by the worker's queued task: .T.
+chain stopped by the program thread's task: .T.
+chain stopped by a timer's continuation: .T.
+two chains take turns: .T.

@@ -248,15 +248,19 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   receive). *(Planned)*: the program's start procedure runs as the first task; today it runs on the program's thread,
   which submits tasks to the pool and waits for them as any other thread (a task it returns is waited for at its end).
 - Each worker has a queue of its own, a ring of 256 tasks it fills at the tail and takes from at the head, and a slot
-  for the task it made last (run next, for locality); a thread outside the pool that submits tasks (the program's
-  thread, `ThreadStart`'s) fills a ring of its own the same way, without a lock, which workers steal from as from one
-  another (the ring serves another thread once its thread ends); the half a full ring sheds goes to the pool's queue,
-  which a worker looks at first once every 61 tasks, taking its share of what waits. A worker that finds nothing steals
-  half of another's ring (that worker's next task when its ring is empty and its task has run 5 µs: a task that ends
-  soon runs the task it made ready itself, without a thread switch), searches 50 µs more while another worker runs (one
-  searcher at a time), then parks; a submission wakes a parked worker, or starts one, while fewer are active than the
-  target and none searches. The counters every worker changes (active, searching, queued and ended tasks) each sit on a
-  cache line of their own (`XB_CACHE_LINE`, `core/sync.h`), so that changing one does not slow the readers of another.
+  for the task it made last (run next, for locality). A chain of tasks run from that slot, each making the next ready,
+  shares one slice of time: once a link starts 1 ms or more after the chain began, a task that waits (in the ring, the
+  pool's queue, another worker's ring or a submitting thread's) runs before the next link, which begins a new chain;
+  with none waiting, the chain gets another slice. So a chain never starves the other tasks, wherever they wait. A
+  thread outside the pool that submits tasks (the program's thread, `ThreadStart`'s, the timers') fills a ring of its
+  own the same way, without a lock, which workers steal from as from one another (the ring serves another thread once
+  its thread ends); the half a full ring sheds goes to the pool's queue, which a worker looks at first once every 61
+  tasks, taking its share of what waits. A worker that finds nothing steals half of another's ring (that worker's next
+  task when its ring is empty and its task has run 5 µs: a task that ends soon runs the task it made ready itself,
+  without a thread switch), searches 50 µs more while another worker runs (one searcher at a time), then parks; a
+  submission wakes a parked worker, or starts one, while fewer are active than the target and none searches. The
+  counters every worker changes (active, searching, queued and ended tasks) each sit on a cache line of their own
+  (`XB_CACHE_LINE`, `core/sync.h`), so that changing one does not slow the readers of another.
 - **Blocking handoff**: every operation that may block the thread (file and lock I/O, `Mutex` waits, `Wait()`, console
   input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run`. While a worker running a task
   blocks with work waiting, another takes its place: an idle one woken, or a new one started, at once while fewer than
