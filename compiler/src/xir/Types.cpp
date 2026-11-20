@@ -134,8 +134,10 @@ bool intCall(const Instruction &i) {
          i.operands().size() == 1 && !i.hasRest();
 }
 
+// Two empty ranges give the one empty range: an empty one is any lo > hi (a bound that no value meets: 1..0 for a FOR
+// that never runs), and the fixpoints compare ranges, so two empty ones written differently would never settle.
 IntRange hull(IntRange a, IntRange b) {
-  if (a.empty()) return b;
+  if (a.empty()) return b.empty() ? IntRange{} : b;
   if (b.empty()) return a;
   return {std::min(a.lo, b.lo), std::max(a.hi, b.hi)};
 }

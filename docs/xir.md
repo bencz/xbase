@@ -139,7 +139,8 @@ ranges keep the result within int64 (`TypeInfo::fits`, the corners computed with
 negation negates the range and `Int()` of an integer keeps it, and a value an error may substitute has any range,
 checked or not (a `subst.check` lets a substituted value of the operation's own types through). A block parameter's
 range is widened once it has grown twice: on the side that grows, to the next of the function's integer constants, their
-neighbours (c - 1, c + 1) or the end of int64 (thresholds), so that the fixpoint ends; two rounds of narrowing then
+neighbours (c - 1, c + 1) or the end of int64 (thresholds), so that the fixpoint ends (and the hull of two empty ranges
+is the one empty range, however a bound wrote them: `1..0` for a FOR that never runs); two rounds of narrowing then
 compute every range again from the others, and the types once more with the ranges fixed. The tests bound the values
 they compare (`Bound`): a FOR's true branch bounds its counter by its limit (no greater; no less with a negative step)
 when both and the step are integers and the step's sign is known, and either branch of a comparison `<` `<=` `>` `>=` of

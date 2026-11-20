@@ -1,0 +1,6 @@
+
+string, no pass: []          1
+number, no pass:          0          1
+negative step, no pass:          0          5
+bound at run time, no pass:          0          1
+nested, no pass: []          1          0
