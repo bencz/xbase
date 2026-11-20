@@ -1,7 +1,7 @@
 // The database commands: USE (NEW, ALIAS), APPEND BLANK, REPLACE, assignments to alias->field and FIELD->field
 // (also with +=), alias->( expr ) and (n)->field, GO TOP/BOTTOM, GOTO, SKIP, COUNT, SUM, AVERAGE, LOCATE, DELETE and
-// RECALL with a scope, SET DELETED, REPLACE ALL, SET FILTER, SELECT, PACK, CLOSE and ZAP. The table is
-// "rdd_commands.dbf", deleted at the end.
+// RECALL with a scope, SET DELETED, REPLACE ALL, SET FILTER, SELECT, PACK, CLOSE and ZAP; REPLACE of aliased targets.
+// The tables are "rdd_commands.dbf" and "rdd_commands_a.dbf", deleted at the end.
 FIELD NAME, AGE, BORN, OK
 
 PROCEDURE Main()
@@ -78,4 +78,23 @@ PROCEDURE Main()
    ? "zap:", LastRec(), Eof()
    CLOSE ALL
    FErase( "rdd_commands.dbf" )
+   Aliased()
+RETURN
+
+// REPLACE puts _FIELD-> before each target: an alias of the target's own decides, as in Clipper (FIELD->, _FIELD->,
+// alias->, M-> for a memory variable); FIELD->FIELD-> and _FIELD->FIELD-> are the current area's field.
+STATIC PROCEDURE Aliased()
+   MEMVAR pAge
+   PRIVATE pAge := 1
+   dbCreate( "rdd_commands_a", { { "AGE", "N", 5, 0 }, { "NAME", "C", 5, 0 } } )
+   USE rdd_commands_a ALIAS T2 NEW
+   APPEND BLANK
+   REPLACE FIELD->AGE WITH 7, T2->NAME WITH "ab", _FIELD->AGE WITH FIELD->AGE + 1
+   ? "replace aliased:", AGE, NAME
+   REPLACE M->pAge WITH 5
+   ? "replace m->:", M->pAge, AGE
+   FIELD->FIELD->AGE := 9
+   ? "field->field->:", AGE, _FIELD->FIELD->AGE, FIELD->_FIELD->AGE
+   CLOSE
+   FErase( "rdd_commands_a.dbf" )
 RETURN

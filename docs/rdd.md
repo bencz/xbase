@@ -101,14 +101,16 @@ Where xbase does not follow the reference (each checked by `tests/run/rdd_checks
 
 The compiler resolves names; the runtime finds fields by name when the code runs.
 
-- `alias->name` is a field of the work area the alias names; `FIELD->name` (and `_FIELD->name`) one of the current
-  area; `FIELD->alias->name` one of the alias's. `( expr )->name` takes the area from the expression's value (an
-  alias, or a number from 1), and so does a macro before `->` (`&cAlias->name`, `&cAlias.->name`, `&( expr )->name`:
-  the text is the alias, not compiled). `M->name` and `MEMVAR->name` are memory variables. A macro after the arrow
-  names the field (or variable) when the code runs (`FIELD->&cName`, `alias->&cName`, `&cAlias->&cName`,
-  `FIELD->alias->&( expr )`, `M->&cName`; `REPLACE &cName WITH x` makes `_FIELD->&cName := x`): it is the macro of the
-  text the alias and the name make (`"alias->" + cName`), read and assigned as any macro; `( expr )->&name` is not
-  supported (the area there is a value, not text).
+- `alias->name` is a field of the work area the alias names; `FIELD->name` (and `_FIELD->name`) one of the current area;
+  `FIELD->alias->name` one of the alias's. After `FIELD->` or `_FIELD->` an inner alias decides, as in Clipper:
+  `FIELD->FIELD->name` is the current area's field and `_FIELD->M->name` a memory variable, so `REPLACE FIELD->name WITH
+  x` and `REPLACE M->name WITH x` work (REPLACE puts `_FIELD->` before its target). `( expr )->name` takes the area from
+  the expression's value (an alias, or a number from 1), and so does a macro before `->` (`&cAlias->name`,
+  `&cAlias.->name`, `&( expr )->name`: the text is the alias, not compiled). `M->name` and `MEMVAR->name` are memory
+  variables. A macro after the arrow names the field (or variable) when the code runs (`FIELD->&cName`, `alias->&cName`,
+  `&cAlias->&cName`, `FIELD->alias->&( expr )`, `M->&cName`; `REPLACE &cName WITH x` makes `_FIELD->&cName := x`): it is
+  the macro of the text the alias and the name make (`"alias->" + cName`), read and assigned as any macro; `( expr
+  )->&name` is not supported (the area there is a value, not text).
 - `alias->( expr, ... )` (also `( expr )->( ... )` and `&cAlias->( ... )`) evaluates the expressions with that area
   current and gives the last one's value: the compiler makes it `__AreaEval( alias, {|| expr, ... } )`.
 - `FIELD name, ... [IN alias]` declares fields as `MEMVAR` declares memory variables: before the first function for

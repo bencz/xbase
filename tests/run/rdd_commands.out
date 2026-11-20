@@ -24,3 +24,6 @@ struct:          4 NAME L
 closed: .F.           1
 alias: OTHER Bob                 2
 zap:          0 .T.
+replace aliased:     8 ab   
+replace m->:          5     8
+field->field->:     9     9     9

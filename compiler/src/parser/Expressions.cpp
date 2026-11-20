@@ -511,9 +511,15 @@ ExprPtr Parser::parseAliasedMacro(SourceLoc loc, ExprPtr prefix) {
 
 // What follows `alias->` (after an alias, FIELD or _FIELD, or a parenthesized expression naming the work area): a
 // field name, or a parenthesized expression (list) evaluated with that work area current, which becomes
-// __AreaEval( alias, {|| ... } ). After FIELD->alias-> only a field name.
+// __AreaEval( alias, {|| ... } ). After FIELD->alias-> only a field name. After FIELD-> (or _FIELD->, which REPLACE
+// puts before its target), an inner alias decides, as in Clipper: FIELD->FIELD->name is the field, _FIELD->M->name
+// the memory variable.
 ExprPtr Parser::parseAliased(SourceLoc loc, std::string alias, ExprPtr aliasExpr, bool aliasIsText) {
   bool fieldAlias = alias.empty() && !aliasExpr && at(Tok::Ident) && ahead().kind == Tok::Arrow;
+  if (fieldAlias) {
+    const std::string &inner = cur().upper;
+    if (inner == "FIELD" || inner == "_FIELD" || inner == "M" || inner == "MEMVAR") return parsePrimary();
+  }
   if (fieldAlias) { // FIELD->alias->name
     alias = cur().upper;
     advance();
