@@ -743,32 +743,61 @@ static int pack(xb_area *a, int32_t *err) {
     *err = XB_FERR_FAILURE;
     return 0;
   }
+  size_t len = d->recordLen, per = DBF_AHEAD / len ? DBF_AHEAD / len : 1; /* records read at a time */
+  unsigned char *in = malloc(per * len), *out = malloc(per * len);
   uint32_t *blocks = memos ? malloc(((size_t)d->count * memos + 1) * sizeof *blocks) : NULL;
-  if (memos && !blocks) xb_gc_fatal("out of memory");
+  if (!in || !out || (memos && !blocks)) xb_gc_fatal("out of memory");
   int ok = !memos || d->memoFormat->pack_begin(d->memo, &from, err);
-  for (uint32_t k = 1; ok && memos && k <= d->count; ++k) {
-    ok = xb_file_read_at(d->f, record_pos(d, k), d->record, d->recordLen, err);
-    if (ok && d->record[0] != DBF_DELETED) ok = copy_memos(a, blocks + (size_t)kept++ * memos, err);
+  for (uint32_t k = 1; ok && memos && k <= d->count; k += (uint32_t)per) {
+    size_t n = d->count - k + 1 < per ? d->count - k + 1 : per;
+    ok = xb_file_read_at(d->f, record_pos(d, k), in, n * len, err);
+    for (size_t j = 0; ok && j < n; ++j) {
+      if (in[j * len] == DBF_DELETED) continue;
+      memcpy(d->record, in + j * len, len);
+      ok = copy_memos(a, blocks + (size_t)kept++ * memos, err);
+    }
   }
+  /* The records kept move to the front: each written no later than read (the block read whole first), so the moves
+   * never write over a record still to read; the ones before the first deleted stay where they are. */
   kept = 0;
-  for (uint32_t k = 1; ok && k <= d->count; ++k) {
-    ok = xb_file_read_at(d->f, record_pos(d, k), d->record, d->recordLen, err);
-    if (!ok || d->record[0] == DBF_DELETED) continue;
-    if (memos) set_memos(a, blocks + (size_t)kept * memos, 0);
-    ++kept;
-    if (kept != k || memos) ok = xb_platform_file_write_at(d->f, record_pos(d, kept), d->record, d->recordLen, err);
+  size_t pending = 0;
+  uint32_t first = 0; /* where the records pending in `out` go */
+  for (uint32_t k = 1; ok && k <= d->count; k += (uint32_t)per) {
+    size_t n = d->count - k + 1 < per ? d->count - k + 1 : per;
+    ok = xb_file_read_at(d->f, record_pos(d, k), in, n * len, err);
+    for (size_t j = 0; ok && j < n; ++j) {
+      if (in[j * len] == DBF_DELETED) continue;
+      memcpy(d->record, in + j * len, len);
+      if (memos) set_memos(a, blocks + (size_t)kept * memos, 0);
+      ++kept;
+      if (kept == k + j && !memos) continue;
+      if (!pending) first = kept;
+      memcpy(out + pending++ * len, d->record, len);
+      if (pending == per) {
+        ok = xb_platform_file_write_at(d->f, record_pos(d, first), out, pending * len, err);
+        pending = 0;
+      }
+    }
   }
+  if (ok && pending) ok = xb_platform_file_write_at(d->f, record_pos(d, first), out, pending * len, err);
   free(blocks);
-  if (!ok) return 0;
-  d->count = kept;
-  if (!cut(d, err)) return 0;
-  if (memos && !d->memoFormat->pack_move(d->memo, from, &shift, err)) return 0;
-  for (uint32_t k = 1; shift && k <= d->count; ++k) {
-    if (!xb_file_read_at(d->f, record_pos(d, k), d->record, d->recordLen, err)) return 0;
-    set_memos(a, NULL, shift);
-    if (!xb_platform_file_write_at(d->f, record_pos(d, k), d->record, d->recordLen, err)) return 0;
+  if (ok) {
+    d->count = kept;
+    ok = cut(d, err) && (!memos || d->memoFormat->pack_move(d->memo, from, &shift, err));
   }
-  return !memos || d->memoFormat->pack_end(d->memo, from, shift, err);
+  for (uint32_t k = 1; ok && shift && k <= d->count; k += (uint32_t)per) { /* the memo blocks moved down by `shift` */
+    size_t n = d->count - k + 1 < per ? d->count - k + 1 : per;
+    ok = xb_file_read_at(d->f, record_pos(d, k), in, n * len, err);
+    for (size_t j = 0; ok && j < n; ++j) {
+      memcpy(d->record, in + j * len, len);
+      set_memos(a, NULL, shift);
+      memcpy(in + j * len, d->record, len);
+    }
+    ok = ok && xb_platform_file_write_at(d->f, record_pos(d, k), in, n * len, err);
+  }
+  free(in);
+  free(out);
+  return ok && (!memos || d->memoFormat->pack_end(d->memo, from, shift, err));
 }
 
 static int dbf_pack(xb_area *a, int32_t *err) {

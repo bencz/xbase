@@ -575,6 +575,9 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
   one call when the chunk is full, before the file is read where they are or past them, and on `COMMIT`, `PACK`,
   `ZAP` and closing; reading one of them takes it from there. Appending costs a write a chunk instead of one a record;
   an error writing them is raised by the operation that wrote the chunk.
+- `PACK` reads the records 64 KB at a time, and writes the ones it keeps moved to the front 64 KB at a time, each no
+  later in the file than where it was read (the chunk read whole first, so a move never writes over a record still to
+  read); those before the first deleted one stay where they are. Its memo steps read and write the records so too.
 - Copies between files copy a record's bytes whole when the fields are the same, else a field's bytes when they are a
   value in the stored form; values are read and written only for the other fields ([Copies between
   files](#copies-between-files)).
