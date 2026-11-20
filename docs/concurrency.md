@@ -287,8 +287,10 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
 - Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): a binary heap of deadlines that one thread serves, started with
   the pool: it sleeps until the earliest deadline and fires what is due; it is also the monitor, looking every 10 ms
   while tasks wait in the queues (with nothing queued it sleeps until its next timer, and a submission that finds every
-  worker busy wakes it). *(Planned)*: a hierarchical timing wheel per worker, so that hundreds of thousands of pending
-  timeouts cost constant time each.
+  worker busy wakes it). When the system gives it no thread, that is said once on standard error and the next timer
+  added tries again; till then no timer fires, so `:Wait( nMs )` on a delay gives `.F.` at its limit
+  (`tests/platform/no_threads`). *(Planned)*: a hierarchical timing wheel per worker, so that hundreds of thousands of
+  pending timeouts cost constant time each.
 - *(Planned)* A blocking pool, separate from the workers, runs work that has no asynchronous form (`getaddrinfo`, file
   I/O where the system has no asynchronous files, foreign libraries).
 

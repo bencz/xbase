@@ -22,6 +22,7 @@ add_library(xbrt STATIC
   src/core/sync.c
   src/core/text.c
   src/platform/blocking.c
+  src/platform/random.c
   src/gc/gc.c
   src/types/array.c
   src/types/block.c

@@ -506,12 +506,15 @@ static int fpt_pack_end(xb_memo *m, uint32_t from, uint32_t shift, int32_t *err)
          xb_platform_file_truncate(m->f, size, err);
 }
 
+static int fpt_sync(xb_memo *m, int32_t *err) { return xb_platform_file_sync(m->f, err); }
+
 const xb_memo_format xb_memo_fpt = {
     .ext = ".fpt",
     .version = 0xF5,
     .create = fpt_create,
     .open = fpt_open,
     .close = fpt_close,
+    .sync = fpt_sync,
     .read = fpt_read,
     .write = fpt_write,
     .zap = fpt_zap,

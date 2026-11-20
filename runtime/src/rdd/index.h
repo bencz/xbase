@@ -71,6 +71,8 @@ typedef struct xb_index_format {
   int (*let_go)(xb_bag *b, int32_t *err);
   /* Writes the pages and the header that changed; flush and close the bag. */
   int (*flush)(xb_bag *b, int32_t *err);
+  /* Has the system write the file to the disk (COMMIT, after flush; nothing for a bag open read-only). */
+  int (*sync)(xb_bag *b, int32_t *err);
   int (*close)(xb_bag *b, int32_t *err);
 
   /* The cursor of a tag. Each returns 1 on an entry (its record number in `recno`), 0 when there is none there (an

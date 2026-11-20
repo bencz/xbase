@@ -15,6 +15,7 @@ int xb_os_file_write_at(xb_file f, int64_t pos, const void *buf, size_t n, int32
 int64_t xb_os_file_seek(xb_file f, int64_t offset, int origin, int32_t *err);
 int xb_os_file_truncate(xb_file f, int64_t size, int32_t *err);
 int xb_os_file_close(xb_file f, int32_t *err);
+int xb_os_file_sync(xb_file f, int32_t *err);
 int xb_os_file_share(xb_file f, int kind, int32_t *err);
 int xb_os_file_lock(xb_file f, uint64_t pos, uint64_t len, int kind, int32_t *err);
 int xb_os_file_id(xb_file f, xb_file_id *id, int32_t *err);

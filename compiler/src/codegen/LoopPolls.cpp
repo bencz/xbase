@@ -1,5 +1,6 @@
 // Fewer polls on loops' back edges (see LoopPolls.h).
 #include "codegen/LoopPolls.h"
+#include "codegen/Branches.h"
 
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/ScalarEvolution.h>
@@ -31,14 +32,14 @@ constexpr uint64_t kPassesPerPoll = 1024;
 // A test of the pending requests: a branch on whether a load marked `kind` is non-zero, to the slow path (a call to
 // the runtime that serves the requests) or on.
 struct PendingTest {
-  BranchInst *br;
+  CondBranch *br;
   LoadInst *load;
   BasicBlock *slow, *cont;
 };
 
 // The successor a branch on `value != 0` (or, inverted, `value == 0`) takes when the value is non-zero.
-bool nonZeroSuccessor(const BranchInst *br, Value *&value, unsigned &taken) {
-  auto *cmp = br && br->isConditional() ? dyn_cast<ICmpInst>(br->getCondition()) : nullptr;
+bool nonZeroSuccessor(const CondBranch *br, Value *&value, unsigned &taken) {
+  auto *cmp = br ? dyn_cast<ICmpInst>(br->getCondition()) : nullptr;
   if (!cmp || !cmp->isEquality() || !match(cmp->getOperand(1), m_Zero())) return false;
   value = cmp->getOperand(0);
   taken = cmp->getPredicate() == ICmpInst::ICMP_NE ? 0 : 1;
@@ -46,7 +47,7 @@ bool nonZeroSuccessor(const BranchInst *br, Value *&value, unsigned &taken) {
 }
 
 bool pendingTest(Instruction *term, const char *kind, PendingTest &t) {
-  auto *br = dyn_cast<BranchInst>(term);
+  auto *br = condBranch(term);
   Value *v;
   unsigned taken;
   if (!nonZeroSuccessor(br, v, taken)) return false;
@@ -87,8 +88,8 @@ struct Counted {
 
 bool countedExit(Loop &loop, LoopInfo &li, ScalarEvolution &se, BasicBlock *b, Counted &c) {
   if (li.getLoopFor(b) != &loop) return false;
-  auto *br = dyn_cast<BranchInst>(b->getTerminator());
-  if (!br || !br->isConditional() || loop.contains(br->getSuccessor(0)) == loop.contains(br->getSuccessor(1)))
+  auto *br = condBranch(b->getTerminator());
+  if (!br || loop.contains(br->getSuccessor(0)) == loop.contains(br->getSuccessor(1)))
     return false;
   auto *cmp = dyn_cast<ICmpInst>(br->getCondition());
   if (!cmp || !cmp->getOperand(0)->getType()->isIntegerTy()) return false;
@@ -134,7 +135,7 @@ Value *nextStop(IRBuilder<> &b, const Counted &c, Value *x) {
 }
 
 void removeTest(const PendingTest &t) {
-  BranchInst::Create(t.cont, t.br->getIterator());
+  createBranch(t.cont, t.br->getIterator());
   t.slow->removePredecessor(t.br->getParent(), /*KeepOneInputPHIs=*/true); // others may still enter it
   auto *cmp = cast<Instruction>(t.br->getCondition());
   t.br->eraseFromParent();
@@ -207,7 +208,7 @@ bool carriedPast(Loop &loop, LoopInfo &li, const PendingTest &poll,
 void stripMine(Function &f, Loop &loop, const Counted &c, const PendingTest &poll, BasicBlock *pre, Value *start,
                const std::vector<std::pair<Instruction *, Use *>> &carried) {
   LLVMContext &ctx = f.getContext();
-  auto *br = cast<BranchInst>(c.test->getTerminator());
+  auto *br = cast<CondBranch>(c.test->getTerminator());
   BasicBlock *stay = br->getSuccessor(c.stay), *exit = br->getSuccessor(1 - c.stay);
   BasicBlock *header = loop.getHeader(), *latch = poll.br->getParent();
   bool atTop = c.test == header;

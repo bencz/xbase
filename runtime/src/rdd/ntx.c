@@ -1311,6 +1311,8 @@ static void ntx_set_type(xb_tag *t, char type) { t->info.type = type; }
 
 static int ntx_flush(xb_bag *b, int32_t *err) { return flush_tag(b->tag, err); }
 
+static int ntx_sync(xb_bag *b, int32_t *err) { return b->tag->readonly || xb_platform_file_sync(b->tag->f, err); }
+
 static int ntx_close(xb_bag *b, int32_t *err) {
   int ok = close_tag(b->tag, err);
   free(b);
@@ -1420,6 +1422,7 @@ const xb_index_format xb_index_ntx = {
     .hold = ntx_hold,
     .let_go = ntx_let_go,
     .flush = ntx_flush,
+    .sync = ntx_sync,
     .close = ntx_close,
     .first = ntx_first,
     .last = ntx_last,

@@ -105,6 +105,14 @@ void xb_area_error(xb_ctx *ctx, const xb_area *a, int32_t gencode, int32_t subco
   xb_error_of(ctx, a->rdd->name, gencode, subcode, operation, NULL, oscode, 0, 0, NULL, 0, NULL);
 }
 
+void xb_area_memory_error(xb_ctx *ctx, const char *operation) {
+  xb_item ignored; /* the error block's value, if it returns: the operation fails all the same */
+  xb_set_nil(&ignored);
+  xb_gc_root_push(ctx, &ignored);
+  xb_error_memory(ctx, &ignored, operation, 0, NULL);
+  xb_gc_root_pop(ctx, 1);
+}
+
 void xb_area_unused_error(xb_ctx *ctx, const char *fn) {
   xb_error_of(ctx, XB_DBCMD, EG_NOTABLE, 2001, fn, NULL, 0, 0, 0, NULL, 0, NULL);
 }

@@ -321,12 +321,15 @@ static int dbt_pack_end(xb_memo *m, uint32_t from, uint32_t shift, int32_t *err)
   return xb_platform_file_truncate(m->f, DBT_BLOCK + len, err) && write_next(m, err);
 }
 
+static int dbt_sync(xb_memo *m, int32_t *err) { return xb_platform_file_sync(m->f, err); }
+
 const xb_memo_format xb_memo_dbt = {
     .ext = ".dbt",
     .version = 0x83,
     .create = dbt_create,
     .open = dbt_open,
     .close = dbt_close,
+    .sync = dbt_sync,
     .read = dbt_read,
     .write = dbt_write,
     .zap = dbt_zap,

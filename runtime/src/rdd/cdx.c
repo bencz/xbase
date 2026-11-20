@@ -979,6 +979,8 @@ static int cdx_flush(xb_bag *b, int32_t *err) {
   return write_pages(b, err) && (!b->exclusive || write_head(b, err));
 }
 
+static int cdx_sync(xb_bag *b, int32_t *err) { return b->readonly || xb_platform_file_sync(b->f, err); }
+
 static int cdx_close(xb_bag *b, int32_t *err) {
   int ok = cdx_flush(b, err);
   int32_t closeErr = 0;
@@ -2220,6 +2222,7 @@ const xb_index_format xb_index_cdx = {
     .hold = cdx_hold,
     .let_go = cdx_let_go,
     .flush = cdx_flush,
+    .sync = cdx_sync,
     .close = cdx_close,
     .first = cdx_first,
     .last = cdx_last,

@@ -1,5 +1,6 @@
 // Loops whose cold paths leave for a generic copy (see LoopSplit.h).
 #include "codegen/LoopSplit.h"
+#include "codegen/Branches.h"
 
 #include <llvm/Analysis/BlockFrequencyInfo.h>
 #include <llvm/Analysis/BranchProbabilityInfo.h>
@@ -180,7 +181,7 @@ void split(Function &f, Loop &loop, const std::vector<ColdEdge> &cold) {
     auto *genHeader = cast<BasicBlock>(gen[back.header]), *genLatch = cast<BasicBlock>(gen[back.latch]);
     auto *againHeader = cast<BasicBlock>(again[back.header]);
     BasicBlock *reenter = BasicBlock::Create(f.getContext(), back.header->getName() + ".reenter", &f, againHeader);
-    BranchInst::Create(againHeader, reenter);
+    createBranch(againHeader, reenter);
     for (auto [phi, v] : back.entries) phi->addIncoming(v, reenter);
     genHeader->removePredecessor(genLatch, /*KeepOneInputPHIs=*/true);
     genLatch->getTerminator()->replaceSuccessorWith(genHeader, reenter);
@@ -328,7 +329,7 @@ bool computableOnEntry(const Loop &loop, const DominatorTree &dt, const BasicBlo
 // A branch of the loop whose condition is computable on entry and whose cold successor `cold` is outside the loop, or
 // a test of an array's form (kFormTest), whose `cold` successor is the path of a compact form.
 struct InvariantExit {
-  BranchInst *br;
+  CondBranch *br;
   unsigned cold;
 };
 
@@ -342,15 +343,15 @@ std::vector<InvariantExit> invariantColdExits(const Loop &loop, const DominatorT
   // an exit on the other side of one counts for nothing (and would send an array of items to the copy).
   std::vector<BasicBlockEdge> compactSides;
   for (BasicBlock *b : loop.blocks())
-    if (auto *br = dyn_cast<BranchInst>(b->getTerminator()); br && br->isConditional() && br->getMetadata(formKind))
+    if (auto *br = condBranch(b->getTerminator()); br && br->getMetadata(formKind))
       compactSides.emplace_back(b, br->getSuccessor(1));
   auto onCompactSide = [&](const BasicBlock *b) {
     return std::any_of(compactSides.begin(), compactSides.end(),
                        [&](const BasicBlockEdge &e) { return dt.dominates(e, b); });
   };
   for (BasicBlock *b : loop.blocks()) {
-    auto *br = dyn_cast<BranchInst>(b->getTerminator());
-    if (!br || !br->isConditional()) continue;
+    auto *br = condBranch(b->getTerminator());
+    if (!br) continue;
     if (onCompactSide(b)) continue;
     if (br->getMetadata(formKind)) {
       std::unordered_set<const LoadInst *> reads;
@@ -485,7 +486,7 @@ void version(Function &f, Loop &loop, BasicBlock *pre, const std::vector<StateLo
   for (const InvariantExit &x : exits) {
     BasicBlock *from = x.br->getParent(), *gone = x.br->getSuccessor(x.cold), *stay = x.br->getSuccessor(1 - x.cold);
     gone->removePredecessor(from, /*KeepOneInputPHIs=*/true);
-    BranchInst::Create(stay, x.br->getIterator());
+    createBranch(stay, x.br->getIterator());
     x.br->eraseFromParent();
   }
 }
@@ -517,11 +518,11 @@ bool unswitchFormTests(Function &f, FunctionAnalysisManager &) {
     DominatorTree dt(f);
     LoopInfo li(dt);
     Loop *chosen = nullptr;
-    BranchInst *test = nullptr;
+    CondBranch *test = nullptr;
     for (Loop *l : li.getLoopsInPreorder()) {
-      auto *br = dyn_cast<BranchInst>(l->getHeader()->getTerminator());
+      auto *br = condBranch(l->getHeader()->getTerminator());
       bool hoisted = false; // a condition computed in the loop from what it does not change goes out first
-      if (!l->isInnermost() || copies.count(l->getHeader()) || !br || !br->isConditional() ||
+      if (!l->isInnermost() || copies.count(l->getHeader()) || !br ||
           !br->getMetadata(formKind) || !l->contains(br->getSuccessor(0)) || !l->contains(br->getSuccessor(1)) ||
           !l->isSafeToClone() ||
           !l->getLoopPreheader() || !l->makeLoopInvariant(br->getCondition(), hoisted))
@@ -542,10 +543,10 @@ bool unswitchFormTests(Function &f, FunctionAnalysisManager &) {
     // The copy runs when the array does not hold items on entry, and the condition the loop does not change says so
     // on every pass: its test goes to the other side alone (the path of a compact form, which tests the rest). Its
     // other form tests are plain branches: the copy is versioned no more.
-    auto *copyTest = cast<BranchInst>(cast<BasicBlock>(vmap[header])->getTerminator());
+    auto *copyTest = cast<CondBranch>(cast<BasicBlock>(vmap[header])->getTerminator());
     BasicBlock *compact = copyTest->getSuccessor(1);
     copyTest->getSuccessor(0)->removePredecessor(copyTest->getParent(), /*KeepOneInputPHIs=*/true);
-    BranchInst::Create(compact, copyTest->getIterator());
+    createBranch(compact, copyTest->getIterator());
     copyTest->eraseFromParent();
     for (BasicBlock *b : copyBlocks(*chosen, vmap)) b->getTerminator()->setMetadata(formKind, nullptr);
     changed = true;
@@ -575,8 +576,7 @@ bool versionInvariantColdExits(Function &f, FunctionAnalysisManager &) {
       }
       uint64_t size = 0;
       for (BasicBlock *b : l->blocks()) size += b->size();
-      if (!pre || !isa<BranchInst>(pre->getTerminator()) || size > kMaxLoopInstructions || grown + size > budget)
-        continue;
+      if (!pre || !isBranch(pre->getTerminator()) || size > kMaxLoopInstructions || grown + size > budget) continue;
       states = stateLoads(*l, dt, pre);
       exits = invariantColdExits(*l, dt, pre, states);
       if (exits.empty() || exits.size() > kMaxColdEdges) continue;

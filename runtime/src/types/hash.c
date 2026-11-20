@@ -9,6 +9,72 @@
 #define MIN_CAPACITY 8u
 #define SHRINK_CAP 64u /* a store above this many entries goes when cleared, shrinks when mostly empty */
 
+/* Flooding. A key's hash is fixed (xb_hash_bytes, the integers' fold), so anyone can choose keys whose hashes share
+ * their low bits, and every probe among them walks them all: n insertions cost n^2 / 2 steps. An insertion whose
+ * probe goes past FLOOD_PROBE slots, which keys that do not collide on purpose never make (the index is at most half
+ * full), turns the table keyed (XB_HASH_KEYED) for good: every key's hash is computed again by SipHash-1-3 (Aumasson
+ * and Bernstein's keyed function, one compression and three finalization rounds) under a key the process draws from
+ * the system's randomness on first need, which no one outside it can know, and a string's own hash is not used. */
+#define FLOOD_PROBE 128u
+
+static uint64_t rotl64(uint64_t x, int b) { return (x << b) | (x >> (64 - b)); }
+
+static void sip_round(uint64_t v[4]) {
+  v[0] += v[1];
+  v[1] = rotl64(v[1], 13) ^ v[0];
+  v[0] = rotl64(v[0], 32);
+  v[2] += v[3];
+  v[3] = rotl64(v[3], 16) ^ v[2];
+  v[0] += v[3];
+  v[3] = rotl64(v[3], 21) ^ v[0];
+  v[2] += v[1];
+  v[1] = rotl64(v[1], 17) ^ v[2];
+  v[2] = rotl64(v[2], 32);
+}
+
+/* SipHash-1-3 of the n bytes at p under key k, the bytes read as little-endian words (ASCII letters upper-cased with
+ * `upper`), folded to 32 bits, never 0. */
+static uint32_t sip_hash(const uint64_t k[2], const char *p, size_t n, int upper) {
+  uint64_t v[4] = {k[0] ^ UINT64_C(0x736f6d6570736575), k[1] ^ UINT64_C(0x646f72616e646f6d),
+                   k[0] ^ UINT64_C(0x6c7967656e657261), k[1] ^ UINT64_C(0x7465646279746573)};
+  uint64_t last = (uint64_t)n << 56;
+  for (;;) {
+    size_t take = n < 8 ? n : 8;
+    uint64_t m = 0;
+    for (size_t i = 0; i < take; ++i) {
+      unsigned char c = (unsigned char)(upper ? xb_ascii_upper(p[i]) : p[i]);
+      m |= (uint64_t)c << (8 * i);
+    }
+    if (take < 8) m |= last; /* the final word: the rest and the length's low byte */
+    v[3] ^= m;
+    sip_round(v);
+    v[0] ^= m;
+    p += take;
+    n -= take;
+    if (take < 8) break;
+  }
+  v[2] ^= 0xff;
+  for (int r = 0; r < 3; ++r) sip_round(v);
+  uint64_t h = v[0] ^ v[1] ^ v[2] ^ v[3];
+  uint32_t r = (uint32_t)(h ^ (h >> 32));
+  return r ? r : 1u;
+}
+
+/* The process's key: drawn once, by the first thread that needs it (the others wait for it). */
+static uint64_t flood_key[2];
+static uint32_t flood_key_state; /* 0: not drawn, 1: being drawn, 2: ready */
+
+static const uint64_t *keyed_key(void) {
+  if (xb_atomic_load32(&flood_key_state, XB_ACQUIRE) == 2) return flood_key;
+  uint32_t none = 0;
+  if (xb_atomic_cas32(&flood_key_state, &none, 1, XB_ACQ_REL)) {
+    xb_platform_random(flood_key, sizeof flood_key);
+    xb_atomic_store32(&flood_key_state, 2, XB_RELEASE);
+  }
+  while (xb_atomic_load32(&flood_key_state, XB_ACQUIRE) != 2) xb_platform_sleep_ms(0);
+  return flood_key;
+}
+
 void xb_set_hash(xb_item *it, xb_hash *h) { xb_set_ptr(it, XB_T_HASH, h); }
 
 xb_hash *xb_hash_alloc(void) {
@@ -38,7 +104,31 @@ static uint32_t fold(uint64_t x) {
   return (uint32_t)(x ^ (x >> 32));
 }
 
+/* A key's hash in a keyed table: SipHash of its bytes, of an integer's 8 bytes, of a date's or a double's 8 bytes
+ * and a byte that tells which (little-endian whatever the target). */
+static uint32_t keyed_hash(const xb_hash *h, const xb_item *k) {
+  const uint64_t *key = keyed_key();
+  if (k->type == XB_T_STRING) return sip_hash(key, k->v.s->data, k->v.s->len, (h->flags & XB_HASH_IGNORECASE) != 0);
+  int64_t i;
+  uint64_t bits;
+  char kind = 'D';
+  if (k->type == XB_T_DATE) {
+    bits = (uint64_t)k->v.i;
+  } else if (integral_key(k, &i)) {
+    bits = (uint64_t)i;
+    kind = 'I';
+  } else {
+    memcpy(&bits, &k->v.d, sizeof bits);
+    kind = 'F';
+  }
+  char bytes[9];
+  for (int b = 0; b < 8; ++b) bytes[b] = (char)(bits >> (8 * b));
+  bytes[8] = kind;
+  return sip_hash(key, bytes, sizeof bytes, 0);
+}
+
 static uint32_t key_hash(const xb_hash *h, const xb_item *k) {
+  if (h->flags & XB_HASH_KEYED) return keyed_hash(h, k);
   if (k->type == XB_T_STRING) {
     xb_str *s = k->v.s;
     if (h->flags & XB_HASH_IGNORECASE) return xb_hash_bytes_as(s->data, s->len, 1);
@@ -253,16 +343,21 @@ static void make_room(xb_hash *h) {
   else xb_hash_reserve(h, h->cap ? h->cap * 2 : MIN_CAPACITY);
 }
 
-/* A new key, room made for it. */
+/* A new key, room made for it; a probe past FLOOD_PROBE slots turns the table keyed. */
 static void add_entry(xb_hash *h, const xb_item *key, const xb_item *value, uint32_t hv) {
   uint32_t e = h->used++;
   h->entries[e].key = *key;
   h->entries[e].value = *value;
   h->hashes[e] = hv;
-  h->index[slot_of(h, key, hv)] = e + 1;
+  uint32_t slot = slot_of(h, key, hv);
+  h->index[slot] = e + 1;
   ++h->len;
   if (h->tree) tree_update(h, e, 1);
   xb_gc_write(h);
+  if (((slot - hv) & h->imask) > FLOOD_PROBE && !(h->flags & XB_HASH_KEYED)) {
+    h->flags |= XB_HASH_KEYED;
+    xb_hash_reindex(h);
+  }
 }
 
 int64_t xb_hash_find(const xb_hash *h, const xb_item *key) {

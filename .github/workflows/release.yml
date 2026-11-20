@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 env:
-  LLVM_VERSION: 22.1.8
-  MSYS2_LLVM: 22.1.8-2
+  LLVM_VERSION: 23.1.5
+  MSYS2_LLVM: 23.1.5-1
   TAG: ${{ github.event.release.tag_name || 'manual' }}
 
 jobs:

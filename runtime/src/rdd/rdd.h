@@ -94,6 +94,8 @@ typedef struct xb_rdd {
   int (*go)(xb_area *a, uint32_t recno, int32_t *err);
   /* Writes the current record when it changed; with `header`, the header too when the table changed (COMMIT). */
   int (*flush)(xb_area *a, int header, int32_t *err);
+  /* Has the system write to the disk what it holds of the files the area writes (COMMIT, after flush). */
+  int (*sync)(xb_area *a, int32_t *err);
   /* Adds a blank record after the last and makes it current (its number in `recno`); shared, it is written at once
    * and locked (unless the file is). */
   int (*append)(xb_area *a, uint32_t *recno, int32_t *err);
@@ -235,8 +237,10 @@ int xb_area_append(xb_ctx *ctx, xb_area *a, int release);
  * (raised). */
 int xb_area_hot(xb_ctx *ctx, xb_area *a, int fresh);
 int xb_area_cold(xb_ctx *ctx, xb_area *a);
-/* Writes the orders' pages; closes them all (the record order is controlling then). 0 after an error (raised). */
-int xb_area_orders_flush(xb_ctx *ctx, xb_area *a);
+/* COMMIT of the orders: writes their pages and has the system write their files to the disk. 0 after an error
+ * (raised). */
+int xb_area_orders_commit(xb_ctx *ctx, xb_area *a);
+/* Closes the orders all (the record order is controlling then). 0 after an error (raised). */
 int xb_area_orders_close(xb_ctx *ctx, xb_area *a);
 /* Whether the table's production order file is open. */
 int xb_area_production_open(const xb_area *a);
@@ -305,6 +309,9 @@ void xb_area_error(xb_ctx *ctx, const xb_area *a, int32_t gencode, int32_t subco
                    int32_t oscode);
 /* "Workarea not in use" (DBCMD/2001) of the function `fn`. */
 void xb_area_unused_error(xb_ctx *ctx, const char *fn);
+/* BASE/9032 Memory low inside `operation` (INDEX, SORT: a table too large for the memory); the error block's value, if
+ * it returns, goes nowhere: the operation fails. */
+void xb_area_memory_error(xb_ctx *ctx, const char *operation);
 
 /* The number of the work area an item names (an alias as xb_area_named reads it, or a number from 1; open or not):
  * 1, or 0 after the error for a name of no area (BASE/1002, raised; the error block did not ask to try again). */

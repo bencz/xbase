@@ -175,20 +175,31 @@ int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err) {
   return a.r;
 }
 
-typedef struct os_file_close {
+typedef struct os_file_handle { /* an operation on a file that takes nothing else: close, sync */
   xb_file f;
   int32_t *err;
   int r;
-} os_file_close;
+} os_file_handle;
 
 static void run_file_close(void *p) {
-  os_file_close *a = p;
+  os_file_handle *a = p;
   a->r = xb_os_file_close(a->f, a->err);
 }
 
 int xb_platform_file_close(xb_file f, int32_t *err) {
-  os_file_close a = {f, err, 0};
+  os_file_handle a = {f, err, 0};
   xb_blocking_run(run_file_close, &a);
+  return a.r;
+}
+
+static void run_file_sync(void *p) {
+  os_file_handle *a = p;
+  a->r = xb_os_file_sync(a->f, a->err);
+}
+
+int xb_platform_file_sync(xb_file f, int32_t *err) {
+  os_file_handle a = {f, err, 0};
+  xb_blocking_run(run_file_sync, &a);
   return a.r;
 }
 

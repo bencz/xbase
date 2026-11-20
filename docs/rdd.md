@@ -288,17 +288,19 @@ set (`xb_area.relations`, `xb_relation`: the child's number, the block and its t
 
 ## Drivers
 
-A driver is a table of operations on the raw table (`xb_rdd` in `rdd.h`; an open failure names the file that failed,
-the table or a file of its own): check a structure (the types, lengths and sizes it can make; `dbCreate` checks the
-names), create, open, close, the record count, go to a record (the blank one after the last outside the table; the
-record's bytes are read when first used: `load`, which `get` and `put` do themselves), flush (the record, and on
-`COMMIT` the header), append, read and write a field, a field's bytes, the record's fields' bytes and their
-replacement at once (`record_bytes`, `put_record_bytes`: a copy between tables of the same fields), the deletion flag,
-pack, zap, and the header's sizes and date, the production-file flag of the header (`set_production`), and reading the
-current record again in shared mode before an order is placed from it (`refresh`). Operations that fail give the
-`FError()` code of the failure; the work area raises the error. A field's value is read from and written into the bytes
-a table stores by one rule for every driver (`xb_field_decode`, `xb_field_encode` in `field.c`; memos are the
-driver's). `RddSetDefault()` and `USE ... VIA` choose the driver:
+A driver is a table of operations on the raw table (`xb_rdd` in `rdd.h`; an open failure names the file that failed, the
+table or a file of its own): check a structure (the types, lengths and sizes it can make; `dbCreate` checks the names),
+create, open, close, the record count, go to a record (the blank one after the last outside the table; the record's
+bytes are read when first used: `load`, which `get` and `put` do themselves), flush (the record, and on `COMMIT` the
+header), sync (on `COMMIT`, after the flushes: the system writes to the disk what it holds of the files the area writes,
+its table, memo and index files, or its text file, as the reference does: `xb_platform_file_sync`, `fsync` or
+`FlushFileBuffers`; a table open read-only syncs nothing), append, read and write a field, a field's bytes, the record's
+fields' bytes and their replacement at once (`record_bytes`, `put_record_bytes`: a copy between tables of the same
+fields), the deletion flag, pack, zap, and the header's sizes and date, the production-file flag of the header
+(`set_production`), and reading the current record again in shared mode before an order is placed from it (`refresh`).
+Operations that fail give the `FError()` code of the failure; the work area raises the error. A field's value is read
+from and written into the bytes a table stores by one rule for every driver (`xb_field_decode`, `xb_field_encode` in
+`field.c`; memos are the driver's). `RddSetDefault()` and `USE ... VIA` choose the driver:
 
 - `DBFNTX` (the default, as in Clipper; `DBF` is the same): new tables get `DBT` memos, orders are `NTX`, shared tables
   are locked by Clipper's scheme.
@@ -572,8 +574,9 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
   value in the stored form; values are read and written only for the other fields ([Copies between
   files](#copies-between-files)).
 - The build: the keys in one array (a key that is a character field alone is copied from the record, no block run),
-  one sort, one pass of writes. Keeping orders up to date costs the keys' evaluation before and after a change, and
-  the entries only of keys that changed.
+  one sort, one pass of writes; keys that no memory holds (a table that large) are `BASE/9032 Memory low` with the
+  operation `ORDCREATE`, which the program may handle, as `SORT`'s are with `SORT`. Keeping orders up to date costs
+  the keys' evaluation before and after a change, and the entries only of keys that changed.
 - `bench/index.prg` times a build over 200,000 records, 100,000 SEEKs, a SKIP through and 20,000 appends with the
   order open. Measured against the reference on one machine, the same program (Release build, the best of three):
   220 ms against 380 (NTX; with CDX, 258 ms against 580): the build and SEEK faster, SKIP in order about three times
@@ -611,7 +614,9 @@ Offsets are bytes of the file; POSIX takes them with `fcntl` locks, Windows with
   production order file is open in the area, record r's at `0x7FFFFFFE - r`, the file lock on `0x77FFFFFF` to
   `0x7FFFFFFD`, the append lock on `0x7FFFFFFE` (programs that disagree on whether it is open lock different bytes,
   as the reference's do). A lock is released at both places, so that one taken before the production file opened or
-  closed goes too. The header's flag of a production file is written under the append lock in a shared table.
+  closed goes too. The header's flag of a production file is written under the append lock in a shared table, alone;
+  an append there writes the header's date and record count alone (bytes 1 to 7), so that the flags and the language
+  byte another program changed meanwhile stay (`tests/run/rdd_append_header`).
 - Index read and change (CDX): a read or write lock on byte `0x7FFFFFFE` of the file (waiting), then the free list's
   head and the change counter (8 bytes at offset 4) read: either changed, the pages kept are stale and the end of the
   file is found again. A change is written before the write lock goes, with the head and the counter plus one. The

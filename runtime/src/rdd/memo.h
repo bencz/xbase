@@ -15,6 +15,8 @@ typedef struct xb_memo_format {
   /* Opens it, `exclusive` or shared (the format's lock taken when it changes). */
   int (*open)(const char *path, int readonly, int exclusive, xb_memo **out, int32_t *err);
   int (*close)(xb_memo *m, int32_t *err);
+  /* Has the system write the file to the disk (COMMIT; the memo of a table open for writing). */
+  int (*sync)(xb_memo *m, int32_t *err);
   /* The memo that starts at `block` as a string in `r` (another kind of value the format holds: NIL). */
   int (*read)(xb_memo *m, uint32_t block, xb_item *r, int32_t *err);
   /* A record's memo becomes `n` bytes (0: none): the memo at `old` (0: none) is replaced, the new block in `block`. */

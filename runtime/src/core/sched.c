@@ -664,13 +664,21 @@ static void timers_wake(void) {
   xb_park_wake(&timerWake, 1);
 }
 
-/* Starts the timers' thread unless it runs (or the program ends). */
+/* Starts the timers' thread unless it runs (or the program ends). One that cannot start (the system gives no thread)
+ * is said once on standard error, and tried again by the next timer added: till then no timer fires. */
 static void timers_start(void) {
+  static int told;
   if (xb_atomic_load32(&timerRunning, XB_ACQUIRE)) return;
   xb_mutex_lock(&timerLock);
   if (!timerRunning && !xb_atomic_load32(&stopping, XB_ACQUIRE)) {
     xb_atomic_store32(&timerRunning, 1, XB_RELEASE);
-    if (!xb_program_thread_start(timer_body, NULL, XB_WORKER_STACK)) xb_atomic_store32(&timerRunning, 0, XB_RELEASE);
+    if (!xb_program_thread_start(timer_body, NULL, XB_WORKER_STACK)) {
+      xb_atomic_store32(&timerRunning, 0, XB_RELEASE);
+      if (!told) {
+        told = 1;
+        fprintf(stderr, "\nxbrt: the timers' thread cannot start: timers wait until one can\n");
+      }
+    }
   }
   xb_mutex_unlock(&timerLock);
 }

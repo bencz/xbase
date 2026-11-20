@@ -38,6 +38,9 @@
 #define DBF_PAGE 4096            /* bytes of records (whole ones, at least one) a page of the record cache holds */
 #define DBF_PAGES 1024           /* pages of records an exclusive table keeps at most, made as they come, */
 #define DBF_PAGES_BYTES (4u << 20) /* while they take less than this (pages of one wide record take more each) */
+#define DBF_UPDATED 1            /* the header's date of the last update (3 bytes), then */
+#define DBF_COUNT 4              /* its record count (4 bytes, little-endian) */
+#define DBF_STAMP_LEN 7          /* the two, what an APPEND changes */
 #define DBF_FLAGS 28             /* the header's flags byte */
 #define DBF_HAS_PRODUCTION 0x01  /* the table has a production order file (FoxPro's) */
 
@@ -193,7 +196,7 @@ static int dbf_create(const xb_rdd *rdd, const char *path, const xb_field_info *
   }
   int memo = has_memo(fields, count);
   h[0] = memo ? rdd->memo->version : DBF_VERSION;
-  put_today(h + 1);
+  put_today(h + DBF_UPDATED);
   xb_put_le16(h + 8, (uint16_t)headerLen);
   xb_put_le16(h + 10, (uint16_t)recordLen);
   h[headerLen - 2] = DBF_FIELDS_END;
@@ -232,7 +235,7 @@ static int dbf_open(xb_area *a, const char *path, int readonly, int exclusive, x
   xb_field_info *fields = NULL;
   uint32_t n = 0;
   if (!xb_file_read_at(d->f, 0, d->header, DBF_HEADER, err)) goto fail;
-  d->count = xb_get_le32(d->header + 4);
+  d->count = xb_get_le32(d->header + DBF_COUNT);
   d->headerLen = xb_get_le16(d->header + 8);
   d->recordLen = xb_get_le16(d->header + 10);
   if (d->headerLen < DBF_HEADER + 1 || d->recordLen < 1) goto corrupt;
@@ -292,10 +295,15 @@ fail:
   return 0;
 }
 
+/* Writes the header with today's date and the record count: whole in an exclusive table; in a shared one the date
+ * and the count alone (an APPEND's), so that what another program changed since the table was opened here (its flags,
+ * DBF_FLAGS, which dbf_set_production writes alone; its language byte after them) stays. */
 static int write_header(dbf *d, int32_t *err) {
-  put_today(d->header + 1);
-  xb_put_le32(d->header + 4, d->count);
-  if (!xb_platform_file_write_at(d->f, 0, d->header, DBF_HEADER, err)) return 0;
+  put_today(d->header + DBF_UPDATED);
+  xb_put_le32(d->header + DBF_COUNT, d->count);
+  int ok = d->shared ? xb_platform_file_write_at(d->f, DBF_UPDATED, d->header + DBF_UPDATED, DBF_STAMP_LEN, err)
+                     : xb_platform_file_write_at(d->f, 0, d->header, DBF_HEADER, err);
+  if (!ok) return 0;
   d->changed = 0;
   return 1;
 }
@@ -399,6 +407,12 @@ static int dbf_flush(xb_area *a, int header, int32_t *err) {
   }
   if (header && !drain(d, err)) return 0;
   return !header || !d->changed || d->shared || write_header(d, err); /* shared: only append writes it */
+}
+
+static int dbf_sync(xb_area *a, int32_t *err) {
+  dbf *d = state(a);
+  if (d->readonly) return 1;
+  return xb_platform_file_sync(xb_shared_handle(d->s), err) && (!d->hasMemo || d->memoFormat->sync(d->memo, err));
 }
 
 static int dbf_close(xb_area *a, int32_t *err) {
@@ -786,7 +800,7 @@ static uint32_t dbf_record_size(xb_area *a) { return state(a)->recordLen; }
 
 static int64_t dbf_last_update(xb_area *a) {
   const unsigned char *h = state(a)->header;
-  return xb_date_encode(1900 + h[1], h[2], h[3]);
+  return xb_date_encode(1900 + h[DBF_UPDATED], h[DBF_UPDATED + 1], h[DBF_UPDATED + 2]);
 }
 
 /* The flag is written with the header (its date and count too) in an exclusive table, alone in a shared one. */
@@ -820,6 +834,7 @@ const xb_rdd xb_rdd_dbf = {
     .lastrec = dbf_lastrec,
     .go = dbf_go,
     .flush = dbf_flush,
+    .sync = dbf_sync,
     .append = dbf_append,
     .lock = dbf_lock,
     .get = dbf_get,
@@ -852,6 +867,7 @@ const xb_rdd xb_rdd_dbfcdx = {
     .lastrec = dbf_lastrec,
     .go = dbf_go,
     .flush = dbf_flush,
+    .sync = dbf_sync,
     .append = dbf_append,
     .lock = dbf_lock,
     .get = dbf_get,

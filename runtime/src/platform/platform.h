@@ -140,6 +140,13 @@ void xb_platform_init(void);
  * own: for intervals and deadlines. Usable before xb_platform_init too. */
 int64_t xb_platform_monotonic_ns(void);
 
+/* Bytes from the system's source of randomness (/dev/urandom; rand_s on Windows) into buf, at most n: how many it
+ * gave (fewer when it cannot be read, as in a chroot without /dev). */
+size_t xb_platform_entropy(void *buf, size_t n);
+/* Fills buf with n random bytes (platform/random.c): the system's, the rest from the clock and addresses of the
+ * process's memory, which no one outside the process can predict either. */
+void xb_platform_random(void *buf, size_t n);
+
 /* Calls fn(arg) with the thread's registers saved on its stack first, so a scan of the stack from inside fn sees every
  * pointer the thread holds (the collector's scan for pinned objects). The stack grows down on every target. */
 void xb_platform_with_registers(void (*fn)(void *), void *arg);
@@ -217,6 +224,9 @@ int xb_platform_file_truncate(xb_file f, int64_t size, int32_t *err);
 
 /* Closes the file: 1 when nothing failed. */
 int xb_platform_file_close(xb_file f, int32_t *err);
+
+/* Has the system write the file's data that it holds to the disk (COMMIT): 1 when nothing failed. */
+int xb_platform_file_sync(xb_file f, int32_t *err);
 
 /* Sharing and locks of the files of tables, memos and indexes (the database layer's protocol, docs/rdd.md).
  *

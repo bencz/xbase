@@ -348,13 +348,20 @@ static int take_key(xb_ctx *ctx, xb_area *src, void *arg) {
   sorting *s = arg;
   if (src->recno > s->t->last) return 1;
   if (!xb_area_load(ctx, src) || src->closed) return -1;
-  if (s->count == s->cap) {
+  if (s->count == s->cap) { /* the keys of the scope's records: Memory low when no memory holds them */
     size_t cap = s->cap ? s->cap * 2 : 1024;
-    if (cap > UINT32_MAX || cap > SIZE_MAX / s->width || cap > SIZE_MAX / sizeof *s->recnos)
-      xb_gc_fatal("out of memory");
-    s->recnos = realloc(s->recnos, cap * sizeof *s->recnos);
-    s->keys = realloc(s->keys, cap * s->width);
-    if (!s->recnos || !s->keys) xb_gc_fatal("out of memory");
+    uint32_t *recnos = NULL;
+    unsigned char *keys = NULL;
+    if (cap <= UINT32_MAX && cap <= SIZE_MAX / s->width && cap <= SIZE_MAX / sizeof *s->recnos) {
+      recnos = realloc(s->recnos, cap * sizeof *s->recnos);
+      if (recnos) s->recnos = recnos;
+      keys = realloc(s->keys, cap * s->width);
+      if (keys) s->keys = keys;
+    }
+    if (!recnos || !keys) {
+      xb_area_memory_error(ctx, "SORT");
+      return -1;
+    }
     s->cap = cap;
   }
   unsigned char *out = s->keys + s->count * s->width;
@@ -395,7 +402,12 @@ static void sort_run(xb_ctx *ctx, transfer *t, void *arg) {
   }
   if (!xb_db_scope(ctx, src, s->argc, s->argv, 0, take_key, s) || src->closed || !s->count) return;
   uint32_t *order = malloc(s->count * sizeof *order), *tmp = malloc(s->count * sizeof *tmp);
-  if (!order || !tmp) xb_gc_fatal("out of memory");
+  if (!order || !tmp) {
+    free(order);
+    free(tmp);
+    xb_area_memory_error(ctx, "SORT");
+    return;
+  }
   for (size_t i = 0; i < s->count; ++i) order[i] = (uint32_t)i;
   merge_sort(s, order, tmp, s->count);
   for (size_t i = 0; i < s->count && !src->closed && !t->target->closed; ++i)

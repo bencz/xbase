@@ -226,7 +226,7 @@ static void sort_entries(sorting *v, uint32_t n, const sorting_by *by) {
 }
 
 /* Writes the collected entries, sorted as the file stores them (unique: the first of equal keys), as the order's tag
- * (`fresh`: in a file made anew). */
+ * (`fresh`: in a file made anew): 1, 0 after a failure of the file (in `err`), -1 when no memory holds the sort. */
 static int write_sorted(xb_area *a, xb_order *o, collected *c, int fresh, int32_t *err) {
   xb_index_info stored = o->info;
   stored.descend = o->format->stored_descending(&o->info);
@@ -236,7 +236,12 @@ static int write_sorted(xb_area *a, xb_order *o, collected *c, int fresh, int32_
   sorting *order = malloc((size_t)(c->n ? c->n : 1) * sizeof *order);
   unsigned char *keys = malloc((size_t)(c->n ? c->n : 1) * len);
   uint32_t *recnos = malloc((size_t)(c->n ? c->n : 1) * sizeof *recnos);
-  if (!order || !keys || !recnos) xb_gc_fatal("out of memory");
+  if (!order || !keys || !recnos) {
+    free(order);
+    free(keys);
+    free(recnos);
+    return -1;
+  }
   for (uint32_t i = 0; i < c->n; ++i) {
     const unsigned char *k = c->keys + (size_t)i * len;
     uint64_t p = 0;
@@ -281,7 +286,8 @@ static int key_shape(xb_ctx *ctx, xb_area *a, xb_order *o) {
   return 1;
 }
 
-/* Adds the current record's entry when it has one; 0 after an error (raised). */
+/* Adds the current record's entry when it has one; 0 after an error (raised: Memory low when no memory holds the
+ * entries, a size the table chose). */
 static int collect_record(xb_ctx *ctx, xb_area *a, xb_order *o, collected *c) {
   unsigned char key[XB_INDEX_KEY_MAX];
   int in;
@@ -290,13 +296,19 @@ static int collect_record(xb_ctx *ctx, xb_area *a, xb_order *o, collected *c) {
   if (!c->keys || c->n == c->cap) { /* room for lastrec entries at first, more when the blocks append records */
     uint32_t cap = c->cap;
     if (c->keys || !cap) cap = cap < 1024 ? 1024 : cap <= UINT32_MAX / 2 ? cap * 2 : UINT32_MAX;
-    if (c->n == cap || (uint64_t)cap * (2u * o->info.keyLen + sizeof(uint32_t) * 2 + sizeof(sorting)) > SIZE_MAX)
-      xb_gc_fatal("out of memory"); /* the keys, sorted and not, and their records: more than an address reaches */
-    unsigned char *keys = realloc(c->keys, (size_t)cap * o->info.keyLen);
-    if (keys) c->keys = keys;
-    uint32_t *recnos = realloc(c->recnos, (size_t)cap * sizeof *c->recnos);
-    if (recnos) c->recnos = recnos;
-    if (!keys || !recnos) xb_gc_fatal("out of memory");
+    unsigned char *keys = NULL;
+    uint32_t *recnos = NULL;
+    /* the keys, sorted and not, and their records: within what an address reaches */
+    if (c->n < cap && (uint64_t)cap * (2u * o->info.keyLen + sizeof(uint32_t) * 2 + sizeof(sorting)) <= SIZE_MAX) {
+      keys = realloc(c->keys, (size_t)cap * o->info.keyLen);
+      if (keys) c->keys = keys;
+      recnos = realloc(c->recnos, (size_t)cap * sizeof *c->recnos);
+      if (recnos) c->recnos = recnos;
+    }
+    if (!keys || !recnos) {
+      xb_area_memory_error(ctx, "ORDCREATE");
+      return 0;
+    }
     c->cap = cap;
   }
   memcpy(c->keys + (size_t)c->n * o->info.keyLen, key, o->info.keyLen);
@@ -371,10 +383,10 @@ static int build(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions
   xb_area_pin(a);
   int ok = collect(ctx, a, o, cond, &c) && !a->closed;
   int32_t err = 0;
-  if (ok && !write_sorted(a, o, &c, fresh, &err)) {
-    xb_error_of(ctx, a->rdd->name, EG_CREATE, 1004, "", o->bag->path, err, 0, 0, NULL, 0, NULL);
-    ok = 0;
-  }
+  int written = ok ? write_sorted(a, o, &c, fresh, &err) : 1;
+  if (written < 0) xb_area_memory_error(ctx, "ORDCREATE");
+  else if (!written) xb_error_of(ctx, a->rdd->name, EG_CREATE, 1004, "", o->bag->path, err, 0, 0, NULL, 0, NULL);
+  ok = ok && written > 0;
   xb_area_unpin(a);
   free(c.keys);
   free(c.recnos);
@@ -411,6 +423,14 @@ static int bag_release(xb_order_bag *b, int32_t *err) {
   free(b->path);
   free(b);
   return ok;
+}
+
+/* A bag no order took: its file closed (a failure to close is not the caller's to raise). */
+static void bag_drop(xb_order_bag *b) {
+  int32_t ignored = 0;
+  if (b->bag) b->format->close(b->bag, &ignored);
+  free(b->path);
+  free(b);
 }
 
 /* The key's type of an order of a file: its key's value on the current record; its key, condition and field. 0 after
@@ -480,10 +500,7 @@ uint32_t xb_order_open(xb_ctx *ctx, xb_area *a, const char *path, xb_order ***ou
   bag->bag = file;
   uint32_t n = format->tag_count(file), made = 0;
   if (!n) { /* a file of no order */
-    int32_t err = 0;
-    format->close(file, &err);
-    free(bag->path);
-    free(bag);
+    bag_drop(bag);
     return 0;
   }
   xb_order **list = malloc((n ? n : 1) * sizeof *list);
@@ -500,9 +517,11 @@ uint32_t xb_order_open(xb_ctx *ctx, xb_area *a, const char *path, xb_order ***ou
     list[made++] = o;
     ok = order_ready(ctx, a, o);
   }
-  if (!ok || a->closed) {
+  if (!ok || a->closed) { /* the last order freed closes the file; none made (the area closed meanwhile: an error
+                            * handler of the opening did it), it is closed here */
     int32_t ignored;
     for (uint32_t i = 0; i < made; ++i) order_free(list[i], &ignored);
+    if (!made) bag_drop(bag);
     free(list);
     return 0;
   }
@@ -978,11 +997,11 @@ int xb_area_cold(xb_ctx *ctx, xb_area *a) {
   return ok;
 }
 
-int xb_area_orders_flush(xb_ctx *ctx, xb_area *a) {
+int xb_area_orders_commit(xb_ctx *ctx, xb_area *a) {
   for (uint32_t k = 0; k < a->norders; ++k) {
     int32_t err = 0;
     const xb_order *o = a->orders[k];
-    if (o->bag->bag && !o->format->flush(o->bag->bag, &err)) {
+    if (o->bag->bag && (!o->format->flush(o->bag->bag, &err) || !o->format->sync(o->bag->bag, &err))) {
       order_error(ctx, a, a->orders[k], EG_WRITE, 1011, err);
       return 0;
     }

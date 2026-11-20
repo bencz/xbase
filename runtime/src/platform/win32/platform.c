@@ -1,3 +1,4 @@
+#define _CRT_RAND_S /* rand_s, from the system's source of randomness */
 #include "platform/os.h"
 
 #include <fcntl.h>
@@ -15,6 +16,16 @@
 void xb_platform_init(void) {
   _setmode(_fileno(stdout), _O_BINARY);
   _setmode(_fileno(stderr), _O_BINARY);
+}
+
+size_t xb_platform_entropy(void *buf, size_t n) {
+  unsigned char *out = buf;
+  for (size_t i = 0; i < n; ++i) {
+    unsigned int r;
+    if (rand_s(&r) != 0) return i;
+    out[i] = (unsigned char)r;
+  }
+  return n;
 }
 
 /* The counter's frequency is fixed at boot (asked each time, which costs a read of memory the system shares); whole
@@ -525,6 +536,12 @@ int xb_os_file_truncate(xb_file f, int64_t size, int32_t *err) {
 int xb_os_file_close(xb_file f, int32_t *err) {
   if (CloseHandle((HANDLE)f)) return 1;
   *err = (int32_t)GetLastError();
+  return 0;
+}
+
+int xb_os_file_sync(xb_file f, int32_t *err) {
+  if (FlushFileBuffers((HANDLE)f)) return 1;
+  *err = common_code(GetLastError());
   return 0;
 }
 

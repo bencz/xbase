@@ -1,5 +1,6 @@
 // Tests a loop makes on values it does not change, out of the loop (see LoopGuards.h).
 #include "codegen/LoopGuards.h"
+#include "codegen/Branches.h"
 
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Dominators.h>
@@ -26,7 +27,7 @@ Value *onEntry(Loop &loop, BasicBlock *pre, Value *v) {
 
 struct Guard {
   Loop *loop;
-  BranchInst *br;
+  CondBranch *br;
   unsigned leave; // the successor outside the loop
 };
 
@@ -34,8 +35,8 @@ struct Guard {
 // one side leaves the loop.
 bool guardShape(Loop &loop, Guard &g) {
   BasicBlock *header = loop.getHeader();
-  auto *br = dyn_cast<BranchInst>(header->getTerminator());
-  if (!br || !br->isConditional() || br->getSuccessor(0) == br->getSuccessor(1) ||
+  auto *br = condBranch(header->getTerminator());
+  if (!br || br->getSuccessor(0) == br->getSuccessor(1) ||
       !loop.isLoopInvariant(br->getCondition()) || &*header->getFirstNonPHIIt() != br)
     return false;
   bool in0 = loop.contains(br->getSuccessor(0)), in1 = loop.contains(br->getSuccessor(1));
@@ -58,11 +59,11 @@ void hoist(const Guard &g) {
   // The exit, entered from the preheader instead, with the entry values.
   for (PHINode &phi : exit->phis()) phi.addIncoming(onEntry(loop, pre, phi.getIncomingValueForBlock(header)), pre);
   exit->removePredecessor(header, /*KeepOneInputPHIs=*/true);
-  BranchInst *test = BranchInst::Create(g.leave == 0 ? exit : header, g.leave == 0 ? header : exit,
-                                        g.br->getCondition(), pre->getTerminator()->getIterator());
+  CondBranch *test = createCondBranch(g.br->getCondition(), g.leave == 0 ? exit : header,
+                                      g.leave == 0 ? header : exit, pre->getTerminator()->getIterator());
   test->copyMetadata(*g.br);
   pre->getTerminator()->eraseFromParent();
-  BranchInst::Create(stay, g.br->getIterator());
+  createBranch(stay, g.br->getIterator());
   g.br->eraseFromParent();
   // Uses of the header's PHIs outside the loop, past the exit: the entry value where the preheader leads.
   for (PHINode &phi : header->phis()) {

@@ -1,5 +1,6 @@
 // A function's frame set up where it is needed, not on entry (see FrameSetup.h).
 #include "codegen/FrameSetup.h"
+#include "codegen/Branches.h"
 
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Function.h>
@@ -166,8 +167,8 @@ bool sinkFrameSetup(Function &f, FunctionAnalysisManager &) {
 
   // The stack's test: the entry's branch on a comparison of the frame's address, to a block that calls the runtime
   // (xb_stack_deep) and goes on or to one that raises the error and leaves.
-  auto *test = dyn_cast<BranchInst>(entry.getTerminator());
-  if (!test || !test->isConditional()) return false;
+  auto *test = condBranch(entry.getTerminator());
+  if (!test) return false;
   // The side of the test that calls the runtime (the simplification may have turned the condition around).
   auto callsRuntime = [](const BasicBlock *b) {
     return std::any_of(b->begin(), b->end(), [](const Instruction &i) {
@@ -176,14 +177,13 @@ bool sinkFrameSetup(Function &f, FunctionAnalysisManager &) {
   };
   unsigned belowSide = callsRuntime(test->getSuccessor(0)) ? 0 : 1;
   BasicBlock *below = test->getSuccessor(belowSide), *join = test->getSuccessor(1 - belowSide);
-  auto *belowBr = dyn_cast<BranchInst>(below->getTerminator());
+  auto *belowBr = condBranch(below->getTerminator());
   if (below == join || !callsRuntime(below) || !below->getSinglePredecessor() || !belowBr ||
-      !belowBr->isConditional() || (belowBr->getSuccessor(0) != join && belowBr->getSuccessor(1) != join) ||
-      join->hasNPredecessorsOrMore(3))
+      (belowBr->getSuccessor(0) != join && belowBr->getSuccessor(1) != join) || join->hasNPredecessorsOrMore(3))
     return false;
   BasicBlock *raise = belowBr->getSuccessor(0) == join ? belowBr->getSuccessor(1) : belowBr->getSuccessor(0);
-  auto *raiseBr = dyn_cast<BranchInst>(raise->getTerminator());
-  if (raise == join || !raise->getSinglePredecessor() || !raiseBr || raiseBr->isConditional()) return false;
+  Instruction *raiseBr = raise->getTerminator();
+  if (raise == join || !raise->getSinglePredecessor() || !isUncondBranch(raiseBr)) return false;
   BasicBlock *leave = raiseBr->getSuccessor(0);
   for (PHINode &phi : leave->phis()) // the values the error's way out brings must be known everywhere
     if (auto *i = dyn_cast<Instruction>(phi.getIncomingValueForBlock(raise)); i && i->getParent() != &entry)
@@ -271,17 +271,17 @@ bool sinkFrameSetup(Function &f, FunctionAnalysisManager &) {
     BasicBlock *raiseCopy = CloneBasicBlock(raise, vmap, ".frame", &f);
     for (Instruction &i : *belowCopy) RemapInstruction(&i, vmap, RF_IgnoreMissingLocals);
     for (Instruction &i : *raiseCopy) RemapInstruction(&i, vmap, RF_IgnoreMissingLocals);
-    auto *bt = cast<BranchInst>(belowCopy->getTerminator());
+    auto *bt = cast<CondBranch>(belowCopy->getTerminator());
     for (unsigned k = 0; k < bt->getNumSuccessors(); ++k)
       bt->setSuccessor(k, bt->getSuccessor(k) == join ? rest : raiseCopy);
     for (PHINode &phi : leave->phis()) phi.addIncoming(phi.getIncomingValueForBlock(raise), raiseCopy);
-    BranchInst *check = b.CreateCondBr(vmap[test->getCondition()], belowCopy, rest);
+    CondBranch *check = b.CreateCondBr(vmap[test->getCondition()], belowCopy, rest);
     if (belowSide) check->swapSuccessors();
     check->setMetadata(LLVMContext::MD_prof, test->getMetadata(LLVMContext::MD_prof));
   }
 
   // The entry goes on without the setup or the test.
-  BranchInst::Create(join, test->getIterator());
+  createBranch(join, test->getIterator());
   below->removePredecessor(&entry);
   test->eraseFromParent();
   for (auto it = order.rbegin(); it != order.rend(); ++it) (*it)->eraseFromParent();

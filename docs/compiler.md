@@ -491,7 +491,9 @@ item values and block parameters when `--dump-xir-types` is given too ([xir.md](
 [runtime.md](runtime.md#calling-convention), which is, for a function with a direct entry (below), a thunk in front of
 it: `CodeGen.cpp` (types, runtime declarations, the module, functions and frames), `FramePlan.*` (where each item
 lives), `Instructions.cpp`, `Variables.cpp` (variable addresses, references, write barriers), `Literals.cpp`; `Emit.cpp`
-emits the object file.
+emits the object file. `Branches.h` names the branch instructions for the passes on LLVM 23 (`CondBrInst` and
+`UncondBrInst`, `BranchInst` deprecated), which the release packages are built with, and 22 (one `BranchInst`): both
+build xbc.
 
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
   from its uses back to its definition, slots are assigned by linear scan and reused once free. A dead value's slot
@@ -846,8 +848,8 @@ of loops on their arrays' forms, `unswitchFormTests`), versions the fast loops o
 (`versionInvariantColdExits`, `LoopSplit.*`, below; then the forms and the guards once more), sets frames up where they
 are needed (`FrameSetup.*`, below, whose small entries are then inlined: `AlwaysInlinerPass`), each followed by the
 function simplification pipeline on the functions it changed, and writes the object with the target's object writer
-(code generation runs on the legacy pass manager: in LLVM 22 it is the one every target implements). At `-O0` (no xIR
-passes, LLVM's `-O0` pipeline) every function first gets the passes whose time follows its size (`cleanUpFunctions`,
+(code generation runs on the legacy pass manager: in LLVM 22 and 23 it is the one every target implements). At `-O0` (no
+xIR passes, LLVM's `-O0` pipeline) every function first gets the passes whose time follows its size (`cleanUpFunctions`,
 below: SROA, early CSE, instruction combining, CFG simplification), and code generation allocates registers
 (`CodeGenOptLevel::Less`, as at `-O1`): the fast allocator of `None` gives every value a stack slot of its own, so that
 a function of inline fast paths took kilobytes of stack per call (the `recursion_deep` test's function 3.8 KB on 32-bit

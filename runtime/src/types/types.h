@@ -331,6 +331,8 @@ const char *xb_message_text(char buf[XB_MESSAGE_TEXT_SIZE], const char *cls, con
  * equals an integer is that integer (1 and 1.0 are one key); strings compare
  * by bytes, or letter case aside. */
 #define XB_HASH_IGNORECASE 0x1u
+/* Keyed hashes (types/hash.c): the table met keys chosen to collide, and hashes them with a key of the process. */
+#define XB_HASH_KEYED 0x2u
 #define XB_HASH_MAX_LEN (UINT32_C(1) << 30) /* entries; the index has twice as many slots */
 /* xb_hentry and xb_hash: xbrt.h. */
 

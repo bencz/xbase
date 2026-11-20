@@ -5,6 +5,7 @@
 // xb_bit_apply, done in place; every other case, an integer overflow and an
 // index out of bounds included, calls the runtime, which raises the errors.
 #include "codegen/CodeGen.h"
+#include "codegen/Branches.h"
 #include "codegen/LoopSplit.h"
 
 #include "common/BitFunctions.h"
@@ -750,7 +751,7 @@ void CodeGen::inlineIndex(const xir::Instruction &i, Value *base, Value *idx, Ba
   // path, LoopSplit.h).
   BasicBlock *other = newBlock("index.not.items");
   MDBuilder md(ctx_);
-  BranchInst *test = b_.CreateCondBr(isLocalItems(state), ofItems, other, md.createLikelyBranchWeights());
+  CondBranch *test = b_.CreateCondBr(isLocalItems(state), ofItems, other, md.createLikelyBranchWeights());
   test->setMetadata(kFormTest, MDNode::get(ctx_, {}));
   b_.SetInsertPoint(ofItems);
   branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), items, slow); // 1 <= idx <= len

@@ -430,7 +430,8 @@ void xbf___DBZAP(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void commit(xb_ctx *ctx, xb_area *a) {
   int32_t err = 0;
   xb_area_pin(a);
-  if (xb_area_cold(ctx, a) && !a->closed && xb_area_orders_flush(ctx, a) && !a->rdd->flush(a, 1, &err))
+  if (xb_area_cold(ctx, a) && !a->closed && xb_area_orders_commit(ctx, a) &&
+      (!a->rdd->flush(a, 1, &err) || !a->rdd->sync(a, &err)))
     xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
   xb_area_unpin(a);
 }

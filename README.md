@@ -7,7 +7,7 @@ its runtime.
 
 - CMake 3.20 or newer and a build tool (Ninja recommended)
 - A C11 and C++20 compiler: GCC or Clang (the runtime uses GCC/Clang overflow builtins)
-- LLVM development files (tested with LLVM 22), built with the targets you want to generate code for
+- LLVM development files (tested with LLVM 23), built with the targets you want to generate code for
 
 ## Build
 

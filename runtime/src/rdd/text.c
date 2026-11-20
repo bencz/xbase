@@ -437,6 +437,11 @@ static int text_flush(xb_area *a, int header, int32_t *err) {
   return !t->writing || (write_pending(t, a, err) && drain(t, err));
 }
 
+static int text_sync(xb_area *a, int32_t *err) {
+  text *t = state(a);
+  return !t->writing || xb_platform_file_sync(t->f, err);
+}
+
 static int text_append(xb_area *a, uint32_t *recno, int32_t *err) {
   text *t = state(a);
   if (!t->writing) {
@@ -533,6 +538,7 @@ static int text_set_production(xb_area *a, int on, int32_t *err) {
    .lastrec = text_lastrec,                                                                                           \
    .go = text_go,                                                                                                     \
    .flush = text_flush,                                                                                               \
+   .sync = text_sync,                                                                                                 \
    .append = text_append,                                                                                             \
    .lock = text_lock,                                                                                                 \
    .get = text_get,                                                                                                   \

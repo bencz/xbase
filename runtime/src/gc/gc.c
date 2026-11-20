@@ -1218,6 +1218,19 @@ void xb_gc_add_root(xb_item *items, size_t count) {
   xb_mutex_unlock(&heap.lock);
 }
 
+/* The C roots' room is kept while a quarter of it or more is used, or it is this small; past that it halves at each
+ * collection (the world stopped: no thread is pushing a root then), so that the peak of a deep nesting does not stay. */
+#define ROOTS_KEEP 1024u
+
+static void roots_shrink(xb_ctx *ctx) {
+  if (ctx->rootCap <= ROOTS_KEEP || ctx->rootLen > ctx->rootCap / 4) return;
+  unsigned cap = ctx->rootCap / 2;
+  xb_item **roots = realloc(ctx->roots, (size_t)cap * sizeof *roots);
+  if (!roots) return; /* the room stays as it was */
+  ctx->roots = roots;
+  ctx->rootCap = cap;
+}
+
 void xb_gc_roots_grow(xb_ctx *ctx) {
   /* Each root belongs to a C call in progress: the program's stack ends
    * the nesting long before the vector's size could overflow. */
@@ -1761,6 +1774,7 @@ static void mark_roots(void) {
     for (xb_frame *f = ctx->frames; f; f = f->prev)
       for (uint32_t i = 0; i < f->nslots; ++i) mark_item(&f->slots[i]);
     for (unsigned i = 0; i < ctx->rootLen; ++i) mark_item(ctx->roots[i]);
+    roots_shrink(ctx);
     mark_item(&ctx->break_value);
     for (xb_env *env = ctx->env; env; env = env->outer) mark_env(env);
     for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) mark_item(&ctx->macro_cache[i]);
@@ -2282,6 +2296,7 @@ static void arm_trimmer(int64_t now) {
   heap.trimArmed = 1;
   if (!heap.trimStarted) {
     heap.trimStarted = xb_thread_start(&heap.trimThread, XB_GC_TRIM_STACK, trimmer, NULL);
+    heap.trimArmed = heap.trimStarted; /* no thread: the next collection tries again */
     return;
   }
   xb_atomic_add32(&heap.trimWord, 1, XB_RELEASE);

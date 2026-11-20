@@ -441,6 +441,10 @@ static int activation_has(const xb_ctx *ctx, uint32_t id, uint32_t mark) {
 
 uint32_t xb_mv_mark(xb_ctx *ctx) { return ctx->env->privateLen; }
 
+/* The PRIVATEs' room is kept while a quarter of it or more is used, or it is this small; past that it halves, so that
+ * the peak of a deep recursion does not stay. */
+#define PRIVATES_KEEP 1024u
+
 void xb_mv_release(xb_ctx *ctx, uint32_t mark) {
   xb_env *e = ctx->env;
   while (e->privateLen > mark) {
@@ -452,6 +456,14 @@ void xb_mv_release(xb_ctx *ctx, uint32_t mark) {
       bindings_remove(e, p->id);
     }
     if (!p->permanent) xb_memvar_unhold(p->id);
+  }
+  if (e->privateCap > PRIVATES_KEEP && e->privateLen <= e->privateCap / 4) {
+    uint32_t cap = e->privateCap / 2;
+    xb_private *p = realloc(e->privates, cap * sizeof *p);
+    if (p) { /* else the room stays as it was */
+      e->privates = p;
+      e->privateCap = cap;
+    }
   }
 }
 

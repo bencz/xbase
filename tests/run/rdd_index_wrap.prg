@@ -31,12 +31,11 @@ STATIC FUNCTION Run( nChanges )
    cSeen := LTrim( Str( RecNo() ) )
    SELECT two
    GO 500
-   RLock()
    FOR i := 1 TO nChanges
+      RLock()
       REPLACE K WITH IIf( i % 2 == 1, 100000 + i, 500 + i )
-      dbCommit()
+      dbUnlock()
    NEXT
-   dbUnlock()
    SELECT one
    SEEK 500
    cSeen += " " + IIf( Found(), LTrim( Str( RecNo() ) ) + "=" + LTrim( Str( K ) ), "not found" )

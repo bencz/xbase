@@ -210,8 +210,9 @@ rest of the runtime and compiled code use.
   large enough for it, from the same recyclable blocks, then free ones; a recyclable block without one leaves the list
   until the next sweep), so no hole is given up for it and the free lines of recyclable blocks serve objects of every
   size.
-- Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest;
-  also compiled code's, while it makes a codeblock's cells) of every registered context, and global item arrays
+- Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest, and
+  halves at a collection while it is past 1024 entries and three quarters empty, so a deep nesting's peak does not
+  stay; also compiled code's, while it makes a codeblock's cells) of every registered context, and global item arrays
   registered with `xb_gc_add_root` (the modules' `STATIC`s).
 - Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young. A
   young collection marks from the roots and the remembered set, stops at old objects instead of traversing them, and
@@ -399,6 +400,15 @@ the functions that take its lock when it is shared ([Threads and synchronization
   or big endian, 32 or 64 bits, computes the same value. The compiler stores it in the `hash` field of the strings it
   emits, and the runtime caches it there for heap strings (0 means not computed). A hash that ignores case hashes the
   upper-cased letters. Numbers and dates are scrambled by `xb_hash_mix64`.
+- Flooding: those hashes are fixed, so anyone can choose keys whose hashes share their low bits (integers through the
+  inverse of `xb_hash_mix64`), and each probe would walk them all: n insertions in n^2 / 2 steps. An insertion whose
+  probe passes 128 slots, which keys that do not collide on purpose never make (the index is at most half full),
+  turns that hash keyed for good (`XB_HASH_KEYED`, `types/hash.c`): every key's hash is computed again by SipHash-1-3
+  under a key the process draws from the system's randomness when the first hash needs it (`xb_platform_random`:
+  `/dev/urandom`, `rand_s` on Windows; the clock and addresses of the process where neither can be read), and the
+  hash cached in a string is not used. Its keys then take as long as any others (50,000 integers that all hash to one
+  value: 3.4 s before, a few milliseconds keyed, `tests/run/hash_flooding`); a key costs SipHash's few nanoseconds
+  more.
 - `HCaseMatch( h, .F. )` rebuilds the index ignoring case. Keys that then become equal merge into the first of them,
   which keeps its spelling and position and takes the value of the last, so a key always names one entry.
 - Elements: `h[k]` reads the value; a missing key is `Bound error: array access` (1132), a value that cannot be a key
@@ -785,7 +795,8 @@ are in.
   environment that inherits it shares until one of them changes it (copy on write), so an asynchronous call copies
   nothing, and what an environment costs follows what it binds, never how many names the program has. The PRIVATEs
   alive, in creation order, each with the frame of the activation that created it and the binding it hid, are a stack
-  of the environment (`xb_env.privates`).
+  of the environment (`xb_env.privates`), which halves as they end while it is past 1024 entries and three quarters
+  empty (`tests/platform/shrink`).
 - PUBLICs. They are the program's, in one table every thread reads by number without a lock: chunks of items that
   never move, made when a PUBLIC first needs one, an item NIL or the variable's cell, set under the names' write lock
   (the cell made, and shared once the program's storage is, before the lock is taken; the cell stored before the

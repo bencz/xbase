@@ -46,6 +46,21 @@ int64_t xb_platform_monotonic_ns(void) {
   return (int64_t)now.tv_sec * XB_NS_PER_SEC + now.tv_nsec;
 }
 
+size_t xb_platform_entropy(void *buf, size_t n) {
+  unsigned char *out = buf;
+  size_t got = 0;
+  int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return 0;
+  while (got < n) {
+    ssize_t r = read(fd, out + got, n - got);
+    if (r > 0) got += (size_t)r;
+    else if (r < 0 && errno == EINTR) continue;
+    else break;
+  }
+  close(fd);
+  return got;
+}
+
 /* glibc gives each thread that allocates an arena of its own, up to eight per processor, each reserving 64 MB of
  * address space on a 64-bit system: with a worker per processor, and more for blocked ones, gigabytes reserved for
  * the little the runtime allocates there (its objects live in the collector's heap). A few arenas serve it. */
@@ -584,6 +599,19 @@ int xb_os_file_truncate(xb_file f, int64_t size, int32_t *err) {
 
 int xb_os_file_close(xb_file f, int32_t *err) {
   if (close((int)f) == 0 || errno == EINTR) return 1; /* after EINTR the descriptor is closed, as on Linux */
+  *err = dos_error(errno);
+  return 0;
+}
+
+int xb_os_file_sync(xb_file f, int32_t *err) {
+  int r;
+#if defined(__APPLE__) /* fsync leaves the data in the drive's cache there; a file system without it: fsync */
+  if (fcntl((int)f, F_FULLFSYNC) == 0) return 1;
+#endif
+  do {
+    r = fsync((int)f);
+  } while (r != 0 && errno == EINTR);
+  if (r == 0 || errno == EINVAL) return 1; /* EINVAL: a file that cannot be synchronized (a pipe), nothing held */
   *err = dos_error(errno);
   return 0;
 }
