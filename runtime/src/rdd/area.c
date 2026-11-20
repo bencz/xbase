@@ -123,10 +123,43 @@ int xb_area_writable(xb_ctx *ctx, xb_area *a) {
   return 0;
 }
 
-static int lock_held(const xb_area *a, uint32_t recno) {
-  for (uint32_t i = 0; i < a->nlocks; ++i)
-    if (a->locks[i] == recno) return 1;
-  return 0;
+/* The slot of record `recno` in the area's set of locked records, or of the free slot where it would go (linear
+ * probing; the set is at most half full). */
+static uint32_t lock_slot(const xb_area *a, uint32_t recno) {
+  uint32_t i = (uint32_t)((recno * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & a->lockSetMask;
+  while (a->lockSet[i] && a->lockSet[i] != recno) i = (i + 1) & a->lockSetMask;
+  return i;
+}
+
+static int lock_held(const xb_area *a, uint32_t recno) { return a->lockSet && a->lockSet[lock_slot(a, recno)]; }
+
+/* Record `recno` joins the set (twice as many slots as records, at least 16). */
+static void lock_set_add(xb_area *a, uint32_t recno) {
+  if (!a->lockSet || (a->nlocks + 1) * 2 > a->lockSetMask + 1) {
+    uint32_t n = a->lockSet ? (a->lockSetMask + 1) * 2 : 16;
+    uint32_t *old = a->lockSet, oldSlots = old ? a->lockSetMask + 1 : 0;
+    a->lockSet = calloc(n, sizeof *a->lockSet);
+    if (!a->lockSet) xb_gc_fatal("out of memory");
+    a->lockSetMask = n - 1;
+    for (uint32_t k = 0; k < oldSlots; ++k)
+      if (old[k]) a->lockSet[lock_slot(a, old[k])] = old[k];
+    free(old);
+  }
+  a->lockSet[lock_slot(a, recno)] = recno;
+}
+
+/* Record `recno` leaves the set: the records after it that probing would no longer reach move back (no tombstones). */
+static void lock_set_remove(xb_area *a, uint32_t recno) {
+  uint32_t i = lock_slot(a, recno), mask = a->lockSetMask;
+  if (!a->lockSet[i]) return;
+  for (uint32_t j = (i + 1) & mask; a->lockSet[j]; j = (j + 1) & mask) {
+    uint32_t home = (uint32_t)((a->lockSet[j] * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & mask;
+    int reachable = i <= j ? (home > i && home <= j) : (home > i || home <= j);
+    if (reachable) continue;
+    a->lockSet[i] = a->lockSet[j];
+    i = j;
+  }
+  a->lockSet[i] = 0;
 }
 
 int xb_area_record_writable(xb_ctx *ctx, xb_area *a) {
@@ -160,6 +193,7 @@ static void add_lock(xb_area *a, uint32_t recno) {
     a->locks = grown;
     a->lockCap = cap;
   }
+  lock_set_add(a, recno);
   a->locks[a->nlocks++] = recno;
 }
 
@@ -169,6 +203,7 @@ static int release(xb_ctx *ctx, xb_area *a, uint32_t i) {
   uint32_t recno = a->locks[i];
   memmove(&a->locks[i], &a->locks[i + 1], (a->nlocks - i - 1) * sizeof *a->locks);
   --a->nlocks;
+  lock_set_remove(a, recno);
   if (a->rdd->lock(a, recno, 0, &err)) return 1;
   xb_area_error(ctx, a, EG_LOCK, 1038, "", err);
   return 0;
@@ -215,11 +250,10 @@ int xb_area_unlock(xb_ctx *ctx, xb_area *a, uint32_t recno) {
   xb_area_pin(a);
   int ok = settle(ctx, a);
   if (ok && recno) {
-    for (uint32_t i = 0; i < a->nlocks; ++i)
-      if (a->locks[i] == recno) {
-        ok = release(ctx, a, i);
-        break;
-      }
+    uint32_t i = 0;
+    if (lock_held(a, recno)) /* its place in the list, searched only when the set holds it */
+      while (a->locks[i] != recno) ++i;
+    if (i < a->nlocks && a->locks[i] == recno) ok = release(ctx, a, i);
   } else if (ok) {
     ok = release_records(ctx, a, 0);
     int32_t err = 0;
@@ -271,6 +305,7 @@ static void area_free(xb_area *a) {
   free(a->alias);
   free(a->production);
   free(a->locks);
+  free(a->lockSet);
   free(a);
 }
 

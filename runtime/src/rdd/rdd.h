@@ -145,6 +145,8 @@ struct xb_area {
   int shared;               /* opened shared: writes need the record's or the file's lock */
   uint32_t *locks;          /* shared: the records this area locked, in the order it locked them (malloc'ed) */
   uint32_t nlocks, lockCap;
+  uint32_t *lockSet;        /* the same records, found by number: open addressing (0 a free slot), malloc'ed */
+  uint32_t lockSetMask;
   int flocked;              /* shared: the file lock is held */
   uint32_t pins;            /* code that runs blocks over the area (xb_area_pin) */
   int closed;               /* closed while pinned: no driver state, freed by the last unpin */

@@ -646,9 +646,10 @@ Offsets are bytes of the file; POSIX takes them with `fcntl` locks, Windows with
   index write lock.
 - `RLock()` releases the area's other record locks first, `dbRLock( n )` adds one (`dbRLock()` with no record is
   `RLock()`); a shared `READONLY` table's locks are always had (it writes nothing); `dbRUnlock( [n] )`, `dbUnlock()`,
-  `UNLOCK [ALL]`, `dbRLockList()`. `APPEND BLANK` in shared mode releases the record locks and locks the new record;
-  when the append lock cannot be had it sets `NetErr()`. `USE` that cannot have the sharing it asks for sets
-  `NetErr()` (`DBFNTX/1001` `Open error` for `dbUseArea`). `SET EXCLUSIVE` (on by default, as in Clipper) chooses
+  `UNLOCK [ALL]`, `dbRLockList()` (in the order taken; the area also keeps a hash set of them, so taking, testing and
+  giving back one costs the same with thousands held). `APPEND BLANK` in shared mode releases the record locks and locks
+  the new record; when the append lock cannot be had it sets `NetErr()`. `USE` that cannot have the sharing it asks for
+  sets `NetErr()` (`DBFNTX/1001` `Open error` for `dbUseArea`). `SET EXCLUSIVE` (on by default, as in Clipper) chooses
   when `USE` says neither `SHARED` nor `EXCLUSIVE`.
 - In exclusive mode nothing of this costs anything: no locks, the record count kept in memory, pages and records
   read ahead and written lazily, as now.
@@ -660,13 +661,14 @@ and closing any handle of a file drops every lock the process has on it. Windows
 what a program with several areas, tasks or threads needs, so the runtime arbitrates inside the process itself:
 
 - **Shared files** (`core/shared_file.c`, `xb_shared`): a process-wide registry, keyed by the file's identity (device
-  and inode; volume serial and file index on Windows, found from the path before anything is opened), so that two
-  paths of one file are one entry. Each user has its own handle. On POSIX systems a handle is never closed while the
-  file has users (closing it would drop their locks): one its user gave up is kept for the next user of the same
-  access, and all of them close with the last user; on Windows, where locks belong to a handle, a user's handle closes
-  with it. The entry knows each user's sharing (exclusive or shared): a second exclusive opening, or an exclusive one
-  while others use the file, is refused inside the process, before a handle is opened, exactly as another process
-  would be refused by the OS.
+  and inode; volume serial and file index on Windows, found from the path before anything is opened), so that two paths
+  of one file are one entry. Each user has its own handle. On POSIX systems a handle is never closed while the file has
+  users (closing it would drop their locks): one its user gave up is kept for the next user of the same access, and all
+  of them close with the last user; on Windows, where locks belong to a handle, a user's handle closes with it. The
+  entry knows each user's sharing (exclusive or shared): a second exclusive opening, or an exclusive one while others
+  use the file, is refused inside the process, before a handle is opened, exactly as another process would be refused by
+  the OS. Its users' locks: the one-byte ones (records, the append lock) in a hash table by position, the others (file
+  locks, ranges) in a short list, so a lock of one byte is checked against its position's and the ranges alone.
 - **Files opened outside the registry** (`xb_shared_plain_open`, `_create`, `_close`: `FOpen()`, `FCreate()`,
   `FClose()` and what is written over them, such as `MemoRead()`; `SAVE TO`/`RESTORE FROM` files; text files). The
   registry knows each file's users, so, on every system, an opening that would keep them from the file (`FO_EXCLUSIVE`,

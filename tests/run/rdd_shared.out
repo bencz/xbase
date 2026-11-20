@@ -54,3 +54,11 @@ ya back from the end:          6 r6  .F.
 ya goto 7:          7 r7  .F.
 ya bottom:          8 r8 
 ya all: r1 r2 r3 r4 r5 r6 r7 r8           9          8          8
+za locks:       3000       3000          1       3000 .T.       3000
+zb refused:         30          0 .F.
+za after unlocking the even ones:       1500          1          3       2999
+zb takes the even ones:       1500 refused the odd ones:       1500       1500
+za after dbUnlock:          0 .F. .T.
+zb after dbUnlock:          0 .T. .F.
+written:     -3     -4
+za locks again: .T. .T.          2 .F.

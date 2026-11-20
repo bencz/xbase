@@ -3,8 +3,8 @@
 // (empty for an exclusive table); a change is seen by the other area once written (unlock); APPEND BLANK locks the
 // new record; "Lock required", "Exclusive required" (PACK, ZAP); a sharing that the other users do not allow sets
 // NetErr() under the default error handler; SET EXCLUSIVE; an index shared by two areas, changed by one and read by
-// the other; records another area appends reached from the last record known. The files start with "rdd_shared",
-// deleted at the end.
+// the other; records another area appends reached from the last record known; thousands of record locks held at once.
+// The files start with "rdd_shared", deleted at the end.
 FIELD K, N, F1, F2
 
 PROCEDURE Main()
@@ -13,6 +13,7 @@ PROCEDURE Main()
    Index()
    Fresh()
    Appended()
+   ManyLocks()
    AEval( Directory( "rdd_shared*.*" ), {| a | FErase( a[ 1 ] ) } )
 RETURN
 
@@ -274,5 +275,58 @@ STATIC PROCEDURE Appended()
       ya->( dbSkip() )
    ENDDO
    ? "ya all:", c, ya->( RecNo() ), ya->( LastRec() ), ya->( RecCount() )
+   CLOSE ALL
+RETURN
+
+// Thousands of record locks held at once by one area, taken and given back one by one and against another area's:
+// each lock taken in constant time (the area's set of locked records, the process's table of one-byte locks).
+STATIC PROCEDURE ManyLocks()
+   LOCAL i, n := 3000, nOk := 0, nRefused := 0, aList
+   dbCreate( "rdd_shared_m", { { "N", "N", 6, 0 } } )
+   USE rdd_shared_m EXCLUSIVE NEW
+   FOR i := 1 TO n
+      APPEND BLANK
+      REPLACE N WITH i
+   NEXT
+   CLOSE
+   USE rdd_shared_m SHARED ALIAS za NEW
+   USE rdd_shared_m SHARED ALIAS zb NEW
+   FOR i := 1 TO n
+      nOk += IIf( za->( dbRLock( i ) ), 1, 0 )
+   NEXT
+   aList := za->( dbRLockList() )
+   ? "za locks:", nOk, Len( aList ), aList[ 1 ], aList[ n ], za->( dbRLock( 7 ) ), Len( za->( dbRLockList() ) )
+   FOR i := 1 TO n STEP 100
+      nRefused += IIf( zb->( dbRLock( i ) ), 0, 1 )
+   NEXT
+   ? "zb refused:", nRefused, Len( zb->( dbRLockList() ) ), zb->( FLock() )
+   FOR i := 2 TO n STEP 2
+      za->( dbRUnlock( i ) )
+   NEXT
+   za->( dbRUnlock( n + 5 ) ) // not held: the others stay
+   aList := za->( dbRLockList() )
+   ? "za after unlocking the even ones:", Len( aList ), aList[ 1 ], aList[ 2 ], ATail( aList )
+   nOk := 0
+   FOR i := 2 TO n STEP 2
+      nOk += IIf( zb->( dbRLock( i ) ), 1, 0 )
+   NEXT
+   nRefused := 0
+   FOR i := 1 TO n STEP 2
+      nRefused += IIf( zb->( dbRLock( i ) ), 0, 1 )
+   NEXT
+   ? "zb takes the even ones:", nOk, "refused the odd ones:", nRefused, Len( zb->( dbRLockList() ) )
+   za->( dbGoTo( 3 ) )
+   REPLACE za->N WITH -3
+   zb->( dbGoTo( 4 ) )
+   REPLACE zb->N WITH -4
+   za->( dbUnlock() )
+   ? "za after dbUnlock:", Len( za->( dbRLockList() ) ), za->( FLock() ), zb->( dbRLock( 1 ) )
+   zb->( dbUnlock() )
+   ? "zb after dbUnlock:", Len( zb->( dbRLockList() ) ), za->( FLock() ), zb->( dbRLock( 1 ) )
+   za->( dbUnlock() )
+   za->( dbGoTo( 3 ) )
+   zb->( dbGoTo( 4 ) )
+   ? "written:", za->N, zb->N
+   ? "za locks again:", za->( dbRLock( 5 ) ), za->( dbRLock( 6 ) ), Len( za->( dbRLockList() ) ), zb->( dbRLock( 5 ) )
    CLOSE ALL
 RETURN
