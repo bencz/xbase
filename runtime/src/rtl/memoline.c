@@ -17,6 +17,7 @@
 #define SOFT1 ((char)141)
 #define SOFT2 '\n'
 #define TAB '\t'
+#define XB_MEMOLINE_LOCAL 256 /* MemoLine() builds a line up to this wide on the stack */
 
 typedef struct scan {
   const char *s;
@@ -128,7 +129,8 @@ void xbf_MEMOLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   size_t from = m.off;
   scan_line(&m);
-  char *out = malloc(m.width ? m.width : 1);
+  char local[XB_MEMOLINE_LOCAL]; /* a line of most widths: no memory of its own */
+  char *out = m.width <= sizeof local ? local : malloc(m.width);
   if (!out) { /* BASE/9032 Memory low: a width the program chose that memory does not hold */
     xb_error_memory(ctx, ret, "MEMOLINE", argc, argv);
     return;
@@ -163,7 +165,7 @@ void xbf_MEMOLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   } else {
     xb_error_memory(ctx, ret, "MEMOLINE", argc, argv);
   }
-  free(out);
+  if (out != local) free(out);
 }
 
 /* MLCount( cText, [nWidth], [nTabSize], [lWrap] ): the number of lines. */
@@ -259,21 +261,31 @@ void xbf_MEMOTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   char hard = argc > 1 && argv[1].type == XB_T_STRING && argv[1].v.s->len ? xb_str_data(argv[1].v.s)[0] : ';';
   char soft = argc > 2 && argv[2].type == XB_T_STRING && argv[2].v.s->len ? xb_str_data(argv[2].v.s)[0] : ' ';
-  const xb_str *s = argv[0].v.s;
-  const char *p = xb_str_data(s);
-  char *out = malloc(s->len ? s->len : 1);
-  if (!out) xb_gc_fatal("out of memory");
-  size_t n = 0;
-  for (size_t i = 0; i < s->len;) {
-    int isHard = i + 1 < s->len && p[i] == '\r' && p[i + 1] == '\n';
-    int isSoft = i + 1 < s->len && p[i] == SOFT1 && p[i + 1] == SOFT2;
+  /* Each CR LF or soft break becomes one character: the result's length first, then its bytes, written in place. */
+  size_t len = argv[0].v.s->len, n = len;
+  const char *p = xb_str_data(argv[0].v.s);
+  for (size_t i = 0; i + 1 < len; ++i)
+    if ((p[i] == '\r' && p[i + 1] == '\n') || (p[i] == SOFT1 && p[i + 1] == SOFT2)) {
+      --n;
+      ++i;
+    }
+  if (n <= 1) { /* the shared strings of up to one byte */
+    char c = len == 0 ? 0 : len == 1 ? p[0] : p[0] == '\r' ? hard : soft;
+    xb_set_str(ret, xb_str_new(&c, n));
+    return;
+  }
+  xb_str *r = xb_str_alloc(n);
+  p = xb_str_data(argv[0].v.s); /* the argument's string, where the allocation's collection left it */
+  char *out = xb_str_buffer(r);
+  for (size_t i = 0, k = 0; i < len;) {
+    int isHard = i + 1 < len && p[i] == '\r' && p[i + 1] == '\n';
+    int isSoft = i + 1 < len && p[i] == SOFT1 && p[i + 1] == SOFT2;
     if (isHard || isSoft) {
-      out[n++] = isHard ? hard : soft;
+      out[k++] = isHard ? hard : soft;
       i += 2;
     } else {
-      out[n++] = p[i++];
+      out[k++] = p[i++];
     }
   }
-  xb_set_str(ret, xb_str_new(out, n));
-  free(out);
+  xb_set_str(ret, r);
 }

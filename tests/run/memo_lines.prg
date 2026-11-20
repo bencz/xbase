@@ -34,6 +34,10 @@ PROCEDURE Main()
    ? "tran:", Show( MemoTran( "a" + CRLF + "b" + SOFT + "c" ) ), ;
       Show( MemoTran( "a" + CRLF + "b" + SOFT + "c", "|", "_" ) ), Show( MemoTran( "a" + CRLF + "b", "" ) ), ;
       Show( MemoTran( NIL ) )
+   ? "tran edges:", Show( MemoTran( "" ) ), Show( MemoTran( "x" ) ), Show( MemoTran( CRLF ) ), ;
+      Show( MemoTran( SOFT ) ), Show( MemoTran( CRLF, "|" ) ), Show( MemoTran( Chr( 13 ) ) ), ;
+      Show( MemoTran( "a" + Chr( 13 ) ) ), Show( MemoTran( CRLF + CRLF ) ), Show( MemoTran( Chr( 10 ) + Chr( 13 ) ) ), ;
+      Show( MemoTran( SOFT + CRLF, "", "" ) )
 RETURN
 
 // The text with its control characters visible.

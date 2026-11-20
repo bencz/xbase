@@ -69,32 +69,51 @@ double xb_num_round(double v, int64_t d) {
   return d >= 0 ? r / p : r * p; /* not finite when the scaling overflows, like Clipper */
 }
 
-/* The fraction's first `count` decimal digits, exact: f, in [0, 1), is m / 2^s, held in 32-bit limbs (s is at most
- * 1126: a subnormal's fraction), times ten once per digit, the bits from s up being the digit. */
+/* A fraction f in [0, 1), exact: m / 2^s held in 32-bit limbs (s is at most 1126: a subnormal's fraction). Its decimal
+ * digits come out in order (fraction_digits): times 10^c, the bits from s up are the next c digits, at most 9 at a
+ * time (10^9 times a limb, plus the carry, fits 64 bits; the digits fit the 30 bits above s, in the limb at `top` and
+ * the next). */
 #define XB_FRACTION_LIMBS 37
-static void fraction_digits(double f, char *out, int count) {
-  uint32_t limb[XB_FRACTION_LIMBS] = {0};
+#define XB_FRACTION_CHUNK 9
+typedef struct fraction {
+  uint32_t limb[XB_FRACTION_LIMBS];
+  int top, bit, n;
+} fraction;
+
+static void fraction_init(fraction *fr, double f) {
+  memset(fr->limb, 0, sizeof fr->limb);
   int s = 0;
   if (f > 0.0) {
     int ex;
     uint64_t m = (uint64_t)ldexp(frexp(f, &ex), XB_DBL_EXACT_BITS);
     s = XB_DBL_EXACT_BITS - ex;
     for (; !(m & 1); m >>= 1) --s;
-    limb[0] = (uint32_t)m;
-    limb[1] = (uint32_t)(m >> 32);
+    fr->limb[0] = (uint32_t)m;
+    fr->limb[1] = (uint32_t)(m >> 32);
   }
-  int top = s / 32, bit = s % 32, n = top + 2;
-  for (int k = 0; k < count; ++k) {
+  fr->top = s / 32;
+  fr->bit = s % 32;
+  fr->n = fr->top + 2;
+}
+
+/* The fraction's next `count` decimal digits. */
+static void fraction_digits(fraction *fr, char *out, int count) {
+  static const uint32_t tens[XB_FRACTION_CHUNK + 1] = {1,      10,      100,      1000,      10000,
+                                                       100000, 1000000, 10000000, 100000000, 1000000000};
+  for (int k = 0; k < count;) {
+    int c = count - k < XB_FRACTION_CHUNK ? count - k : XB_FRACTION_CHUNK;
     uint64_t carry = 0;
-    for (int i = 0; i < n; ++i) {
-      uint64_t p = (uint64_t)limb[i] * 10 + carry;
-      limb[i] = (uint32_t)p;
+    for (int i = 0; i < fr->n; ++i) {
+      uint64_t p = (uint64_t)fr->limb[i] * tens[c] + carry;
+      fr->limb[i] = (uint32_t)p;
       carry = p >> 32;
     }
-    uint64_t high = limb[top] | (uint64_t)limb[top + 1] << 32;
-    out[k] = (char)('0' + (high >> bit));
-    limb[top] &= (uint32_t)(((uint64_t)1 << bit) - 1);
-    limb[top + 1] = 0;
+    uint64_t high = fr->limb[fr->top] | (uint64_t)fr->limb[fr->top + 1] << 32;
+    uint32_t chunk = (uint32_t)(high >> fr->bit);
+    for (int d = c; d-- > 0; chunk /= 10) out[k + d] = (char)('0' + chunk % 10);
+    k += c;
+    fr->limb[fr->top] &= (uint32_t)(((uint64_t)1 << fr->bit) - 1);
+    fr->limb[fr->top + 1] = 0;
   }
 }
 
@@ -118,14 +137,17 @@ static int clipper_digits(double a, int dec, char *intDigits, size_t *intLen, ch
     ints[i] = ints[j];
     ints[j] = c;
   }
-  /* The fraction's digits: the `dec` shown, then those the precision leaves, and one more. */
+  /* The fraction's digits: the `dec` shown and the next one, then, after a 4, those the precision leaves. */
   char digits[2 * XB_NUM_PRECISION + 1];
-  fraction_digits(f, digits, dec + XB_NUM_PRECISION + 1);
+  fraction fr;
+  fraction_init(&fr, f);
+  fraction_digits(&fr, digits, dec + 1);
   int sig = whole >= 1.0 ? len : 0;
   for (int k = 0; k < dec; ++k) sig += sig > 0 || digits[k] != '0';
   if (sig > XB_NUM_PRECISION) return 0;
   int room = sig > 0 ? XB_NUM_PRECISION - sig : 0, next = digits[dec] - '0';
   if (next == 4 && room > 0) {
+    fraction_digits(&fr, digits + dec + 1, room);
     int t = 1;
     for (; t <= room; ++t) {
       int d = digits[dec + t] - '0';

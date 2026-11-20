@@ -33,18 +33,33 @@ enum {
   P_PARENS_TIGHT = 1u << 10 /* @) */
 };
 
-/* The result being built. */
+/* The result being built: in `local` (most results fit), then in memory of its own (`p` elsewhere, freed by
+ * out_free). */
+#define XB_OUT_LOCAL 128
 typedef struct out {
   char *p;
   size_t len, cap;
+  char local[XB_OUT_LOCAL];
 } out;
+
+static void out_init(out *o) {
+  o->p = o->local;
+  o->len = 0;
+  o->cap = sizeof o->local;
+}
+
+static void out_free(out *o) {
+  if (o->p != o->local) free(o->p);
+}
 
 static void put(out *o, char c) {
   if (o->len == o->cap) {
-    o->cap = o->cap ? o->cap * 2 : 32;
-    char *grown = realloc(o->p, o->cap);
+    char *grown = malloc(o->cap * 2);
     if (!grown) xb_gc_fatal("out of memory");
+    memcpy(grown, o->p, o->len);
+    out_free(o);
     o->p = grown;
+    o->cap *= 2;
   }
   o->p[o->len++] = c;
 }
@@ -152,7 +167,8 @@ static size_t transform_number(xb_ctx *ctx, const xb_item *value, const char *pi
     else xb_set_double(&abs, -d, value->dec);
   }
   if (d != 0) *flags &= ~(unsigned)P_BLANK;
-  out str = {0};
+  out str;
+  out_init(&str);
   str_field(&abs, width, dec, &str);
   if (pointFirst) {
     --width;
@@ -208,7 +224,7 @@ static size_t transform_number(xb_ctx *ctx, const xb_item *value, const char *pi
       }
     }
   }
-  free(str.p);
+  out_free(&str);
   size_t offset = 0;
   if (d < 0) {
     size_t n = o->len;
@@ -371,7 +387,8 @@ void xbf_TRANSFORM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       }
     }
   }
-  out o = {0};
+  out o;
+  out_init(&o);
   size_t offset = 0;
   if (kind == 1) transform_string(ctx, value->v.s, pic, picLen, flags, &o);
   else if (kind == 2) offset = transform_number(ctx, value, pic, picLen, &flags, &o);
@@ -388,6 +405,6 @@ void xbf_TRANSFORM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     }
   }
   size_t n = width && o.len > width ? width : o.len;
-  xb_set_str(ret, xb_str_new(o.p ? o.p : "", n));
-  free(o.p);
+  xb_set_str(ret, xb_str_new(o.p, n));
+  out_free(&o);
 }
