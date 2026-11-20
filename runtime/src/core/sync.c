@@ -157,6 +157,22 @@ void xb_park_wait_short(const uint32_t *addr, uint32_t expected, int64_t ns) {
   xb_waiting_run(park, &a);
 }
 
+void xb_word_lock(uint32_t *w) {
+  uint32_t free_state = 0;
+  if (xb_atomic_cas32(w, &free_state, 1, XB_ACQUIRE)) return;
+  for (uint32_t spin = 0; spin < XB_LOCK_SPINS; ++spin) { /* loads until it looks free: the holder's work is short */
+    if (xb_atomic_load32(w, XB_RELAXED)) continue;
+    free_state = 0;
+    if (xb_atomic_cas32(w, &free_state, 1, XB_ACQUIRE)) return;
+  }
+  while (xb_atomic_xchg32(w, 2, XB_ACQUIRE) != 0) /* the address again after each wait */
+    xb_park_wait_short(w, 2, -1);
+}
+
+void xb_word_unlock(uint32_t *w) {
+  if (xb_atomic_xchg32(w, 0, XB_RELEASE) == 2) xb_park_wake(w, 0);
+}
+
 /* The holder's number is written only by the holder, so a caller that reads its own there holds the lock. */
 static void hold(xb_rwords w, uint64_t self) {
   xb_atomic_store64(w.owner, self, XB_RELAXED);

@@ -159,7 +159,7 @@ static void own_date_format(xb_ctx *ctx) {
 #define PARK_SHARDS 64u
 #define PARK_SCANS_YOUNG 2u
 typedef struct park_shard {
-  xb_mutex lock;
+  uint32_t lock; /* xb_word_lock: taken at every suspension and resumption, seldom waited for */
   xb_env *young, *old;
 } park_shard;
 static park_shard shards[PARK_SHARDS];
@@ -170,8 +170,6 @@ static uint32_t deaths;
 static uint32_t parkedReady; /* the locks made: a collection before any park has none to look at */
 
 static void make_parked(void) {
-  for (uint32_t k = 0; k < PARK_SHARDS; ++k)
-    if (!xb_mutex_init(&shards[k].lock)) xb_gc_fatal("cannot create the environments' lock");
   if (!xb_mutex_init(&deadLock)) xb_gc_fatal("cannot create the environments' lock");
   xb_atomic_store32(&parkedReady, 1, XB_RELEASE);
 }
@@ -207,16 +205,16 @@ void xb_env_park(xb_ctx *ctx, xb_env *env, void *task) {
   env->parkedOld = 0;
   env->parkedScans = 0;
   park_shard *s = &shards[env->parkedShard];
-  xb_mutex_lock(&s->lock); /* no safepoint until it is released: no collection meanwhile */
+  xb_word_lock(&s->lock); /* no safepoint until it is released: no collection meanwhile */
   link_parked(&s->young, env);
-  xb_mutex_unlock(&s->lock);
+  xb_word_unlock(&s->lock);
 }
 
 void xb_env_unpark(xb_ctx *ctx, xb_env *env) {
   park_shard *s = &shards[env->parkedShard];
-  xb_mutex_lock(&s->lock);
+  xb_word_lock(&s->lock);
   unlink_parked(env);
-  xb_mutex_unlock(&s->lock);
+  xb_word_unlock(&s->lock);
   env->parkedTask = NULL;
   env->outer = ctx->env;
   env->outerDecimals = ctx->set_decimals;
@@ -288,10 +286,10 @@ static void close_parked(xb_ctx *ctx, int all) {
     xb_mutex_unlock(&deadLock);
     while (!env && all && k < PARK_SHARDS) { /* the program's end: every parked one too */
       park_shard *s = &shards[k];
-      xb_mutex_lock(&s->lock);
+      xb_word_lock(&s->lock);
       env = s->young ? s->young : s->old;
       if (env) unlink_parked(env);
-      xb_mutex_unlock(&s->lock);
+      xb_word_unlock(&s->lock);
       if (!env) ++k;
     }
     if (!env) return;

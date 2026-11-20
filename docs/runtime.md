@@ -1579,7 +1579,9 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   the structure copied, the PRIVATE bindings shared until either changes them, the date format borrowed until it changes
   or the environment is parked, no work area), and between steps `xb_env_park` sets it aside (`SET DECIMALS` kept) in a
   list the collector marks, until `xb_env_unpark` puts it back in front of the thread's. The lists are 64 shards by
-  the environment's address, each with its lock (independent suspensions do not wait for one another) and two lists:
+  the environment's address, each with its lock (independent suspensions do not wait for one another; a word lock,
+  `xb_word_lock`, which a channel's short lock is too: one compare-and-swap and one exchange, 5% fewer instructions
+  for a pipeline of asynchronous generators than a system mutex) and two lists:
   the environments parked lately, which every collection scans, and those two young collections scanned already, which
   only full collections scan (a parked environment does not change, and all it reaches is old by then): a young
   collection costs what was parked lately, however many functions wait. `xb_env_parked_settle`, after each collection's

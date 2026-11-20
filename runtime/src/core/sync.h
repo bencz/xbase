@@ -85,6 +85,15 @@ void xb_park_wait_blocking_stop(const uint32_t *addr, uint32_t expected, const u
 /* The same for a short wait (xb_waiting_run): a lock of the runtime's, which its holder keeps a moment. */
 void xb_park_wait_short(const uint32_t *addr, uint32_t expected, int64_t ns);
 
+/* A lock of one 32-bit word (0 free, 1 held, 2 held and maybe waited for), for a holder's short work that reaches no
+ * safepoint: one compare-and-swap to take it, one exchange to release it, a few loads while it looks held, then a short
+ * wait on its address (xb_park_wait_short: collections go on without the waiter). Cheaper than a system mutex where
+ * it is taken often and seldom waited for. */
+/* The looks at a held lock's state before its taker sleeps (this one's, a Mutex's: no pause instruction, loads). */
+#define XB_LOCK_SPINS 128u
+void xb_word_lock(uint32_t *w);
+void xb_word_unlock(uint32_t *w);
+
 /* The lock of the standard streams: each write of the program (what one QOut() or OutStd() call shows, an error
  * report) holds it, so the outputs of threads never split one another. Taken inside a blocking operation. */
 void xb_output_lock(void);
