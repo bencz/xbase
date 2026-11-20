@@ -258,7 +258,7 @@ static int write_sorted(xb_area *a, xb_order *o, collected *c, int fresh, int32_
     recnos[n++] = c->recnos[order[i].at];
   }
   int ok = o->format->build(&o->bag->bag, o->bag->path, o->name, fresh, &o->info, keys, recnos, n,
-                            a->rdd->lastrec(a), a->readonly, !a->shared, &o->tag, err);
+                            a->rdd->lastrec(a, XB_LASTREC_FRESH), a->readonly, !a->shared, &o->tag, err);
   free(order);
   free(keys);
   free(recnos);
@@ -338,7 +338,7 @@ static uint32_t recno_of(int64_t n) { return n > 0 && n <= UINT32_MAX ? (uint32_
  * taken; in record order, the blocks moving the record do not change which records are taken. 0 after an error
  * (raised). */
 static int collect(xb_ctx *ctx, xb_area *a, xb_order *o, const xb_order_conditions *cond, collected *c) {
-  uint32_t last = c->cap = a->rdd->lastrec(a);
+  uint32_t last = c->cap = a->rdd->lastrec(a, XB_LASTREC_FRESH);
   int hasWhile = cond->whileBlock.type == XB_T_BLOCK;
   int walk = cond->record > 0 || cond->next > 0 || cond->rest || hasWhile || cond->current;
   int64_t next = cond->record > 0 ? 1 : cond->next > 0 ? cond->next : 0;

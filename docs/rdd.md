@@ -631,10 +631,12 @@ Offsets are bytes of the file; POSIX takes them with `fcntl` locks, Windows with
 - An order's cursor is placed from the current record's key as it is now (the record read again, unless it has
   changes not yet written), so `SKIP` and `ordKeyNo()` follow a key another program changed.
 
-- Records are read without locks. In shared mode the record count is the file's size (the header's may lag), and a
-  record is read from the file each time it becomes current, and again when its lock (or the file lock) is had: a
-  change is made to the record as it is then, never to what was read before (no update of another program is lost).
-  Records read ahead serve only under the file lock, and go when it does.
+- Records are read without locks. In shared mode the record count is the file's size (the header's may lag), read again
+  when a move goes past the records known (`SKIP` from the last, `GO BOTTOM`, `dbGoto()` beyond, `SKIP -1` from the end,
+  which reaches the last record the file has then) and by `LastRec()`; a move among them reads one record and nothing
+  else (`lastrec`'s `upTo`). A record is read from the file each time it becomes current, and again when its lock (or
+  the file lock) is had: a change is made to the record as it is then, never to what was read before (no update of
+  another program is lost). Records read ahead serve only under the file lock, and go when it does.
 - The shared append writes the new record with the end mark `0x1A` after it (under the append lock, so it is always
   the file's end); the reference leaves the mark out of shared tables.
 - Writing a record in shared mode needs its lock or the file lock: otherwise `DBFNTX/1022` `Lock required`. A changed

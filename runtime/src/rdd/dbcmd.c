@@ -192,7 +192,7 @@ void xbf_RECNO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 static void lastrec(xb_ctx *ctx, xb_item *ret) {
   xb_area *a = xb_area_current(ctx);
-  xb_set_int(ret, a ? a->rdd->lastrec(a) : 0);
+  xb_set_int(ret, a ? a->rdd->lastrec(a, XB_LASTREC_FRESH) : 0);
 }
 void xbf_LASTREC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
@@ -407,7 +407,7 @@ static void shrink(xb_ctx *ctx, const char *fn, int all) {
   xb_area_unpin(a);
   if (!cold) return;
   if (!(all ? a->rdd->zap(a, &err) : a->rdd->pack(a, &err))) {
-    a->recno = a->rdd->lastrec(a) + 1; /* where the driver is left */
+    a->recno = a->rdd->lastrec(a, XB_LASTREC_FRESH) + 1; /* where the driver is left */
     a->bof = a->eof = 1;
     xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
     return;

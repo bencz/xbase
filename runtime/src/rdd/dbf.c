@@ -453,10 +453,10 @@ static int count_again(dbf *d, int32_t *err) {
   return 1;
 }
 
-static uint32_t dbf_lastrec(xb_area *a) {
+static uint32_t dbf_lastrec(xb_area *a, uint32_t upTo) {
   dbf *d = state(a);
   int32_t ignored;
-  if (d->shared && !a->snapshot) count_again(d, &ignored);
+  if (d->shared && !a->snapshot && d->count < upTo) count_again(d, &ignored);
   return d->count;
 }
 

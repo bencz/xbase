@@ -46,3 +46,11 @@ skip back after the key moved:         10
 ordKeyNo after the key moved:          9
 read before the key moved: A07
 skip from a record read before:         11 .T.
+ya last:          3 r3           3
+ya skip:          4 r4  .F.
+ya skip:          5 r5  .F.
+ya past:          6 .T.          5
+ya back from the end:          6 r6  .F.
+ya goto 7:          7 r7  .F.
+ya bottom:          8 r8 
+ya all: r1 r2 r3 r4 r5 r6 r7 r8           9          8          8

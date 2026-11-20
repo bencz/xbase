@@ -442,7 +442,7 @@ void xb_areas_mark(xb_env *env, int (*mark)(xb_item *)) {
 static int go_raw(xb_ctx *ctx, xb_area *a, uint32_t recno) {
   int32_t err = 0;
   if (!xb_area_cold(ctx, a) || a->closed) return 0;
-  uint32_t last = a->rdd->lastrec(a);
+  uint32_t last = a->rdd->lastrec(a, recno ? recno : XB_LASTREC_FRESH);
   a->found = 0;
   if (!a->rdd->flush(a, 0, &err)) {
     xb_area_error(ctx, a, EG_WRITE, 1011, "", err);
@@ -477,7 +477,9 @@ int xb_area_visible(xb_ctx *ctx, xb_area *a) {
 static int step(xb_ctx *ctx, xb_area *a, int dir, uint32_t *recno) {
   xb_order *o = xb_area_order(a);
   if (o) return xb_order_step(ctx, a, o, dir, recno);
-  uint32_t last = a->rdd->lastrec(a);
+  /* the count read again only to reach past the records known: from EOF backward (the last), or forward */
+  uint32_t upTo = a->eof ? (dir < 0 ? XB_LASTREC_FRESH : 0) : dir < 0 ? a->recno - 1 : a->recno + 1;
+  uint32_t last = a->rdd->lastrec(a, upTo);
   if (a->eof) *recno = dir < 0 ? last : 0;
   else *recno = dir < 0 ? a->recno - 1 : a->recno + 1;
   return *recno >= 1 && *recno <= last;
@@ -487,7 +489,7 @@ static int step(xb_ctx *ctx, xb_area *a, int dir, uint32_t *recno) {
 static int edge(xb_ctx *ctx, xb_area *a, int dir, uint32_t *recno) {
   xb_order *o = xb_area_order(a);
   if (o) return xb_order_edge(ctx, a, o, dir, recno);
-  uint32_t last = a->rdd->lastrec(a);
+  uint32_t last = a->rdd->lastrec(a, dir > 0 ? 1 : XB_LASTREC_FRESH);
   *recno = dir > 0 ? 1 : last;
   return last > 0;
 }
@@ -655,7 +657,7 @@ int64_t xb_area_field_index(const xb_area *a, const char *name, size_t len) {
 int xb_area_load(xb_ctx *ctx, xb_area *a) {
   int32_t err = 0;
   if (a->rdd->load(a, &err)) return 1;
-  a->recno = a->rdd->lastrec(a) + 1; /* the driver is on the blank record after the last */
+  a->recno = a->rdd->lastrec(a, XB_LASTREC_FRESH) + 1; /* the driver is on the blank record after the last */
   a->bof = a->eof = 1;
   xb_area_error(ctx, a, EG_READ, 1010, "", err);
   return 0;

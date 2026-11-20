@@ -9,6 +9,7 @@
 #define XB_FIELD_NAME_SIZE 11 /* 10 characters and a NUL */
 #define XB_AREA_MAX 65535      /* work areas are numbered 1 to this */
 #define XB_DBCMD "DBCMD"       /* the subsystem of the database functions' errors */
+#define XB_LASTREC_FRESH UINT32_MAX /* xb_rdd.lastrec: the count read again whatever is known */
 
 typedef struct xb_field_info {
   char name[XB_FIELD_NAME_SIZE]; /* upper case */
@@ -89,7 +90,9 @@ typedef struct xb_rdd {
                    const xb_item *delimiter, xb_open_failure *why);
   /* Writes what is pending and frees the state. */
   int (*close)(xb_area *a, int32_t *err);
-  uint32_t (*lastrec)(xb_area *a);
+  /* The number of records. A shared table's grows with other programs' appends: it is read again from the file when
+   * the count known is below `upTo` (XB_LASTREC_FRESH: always), so a move to a record known to exist reads nothing. */
+  uint32_t (*lastrec)(xb_area *a, uint32_t upTo);
   /* Makes record `recno` current (outside 1 .. lastrec: the blank record after the last), its bytes unread. */
   int (*go)(xb_area *a, uint32_t recno, int32_t *err);
   /* Writes the current record when it changed; with `header`, the header too when the table changed (COMMIT). */

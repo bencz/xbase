@@ -448,7 +448,7 @@ void xbf_ORDKEYCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_area *a = scope_area(ctx, "ORDKEYCOUNT");
   if (!a) return;
   xb_order *o = order_at(a, order_arg(a, argc, argv, 0));
-  uint64_t n = a->rdd->lastrec(a);
+  uint64_t n = a->rdd->lastrec(a, XB_LASTREC_FRESH);
   xb_area_pin(a);
   int ok = !o || (xb_area_cold(ctx, a) && !a->closed && xb_order_count(ctx, a, o, &n));
   xb_area_unpin(a);

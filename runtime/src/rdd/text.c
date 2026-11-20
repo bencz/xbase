@@ -417,7 +417,10 @@ static int text_close(xb_area *a, int32_t *err) {
   return ok;
 }
 
-static uint32_t text_lastrec(xb_area *a) { return state(a)->count; }
+static uint32_t text_lastrec(xb_area *a, uint32_t upTo) {
+  XB_UNUSED(upTo);
+  return state(a)->count;
+}
 
 static int text_go(xb_area *a, uint32_t recno, int32_t *err) {
   text *t = state(a);

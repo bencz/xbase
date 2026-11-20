@@ -192,7 +192,7 @@ static void transfer_begin(transfer *t, xb_area *src, xb_area *dst, const xb_arr
   t->target = dst;
   t->text = src->rdd->text;
   t->deletedToo = 1;
-  t->last = src->rdd->lastrec(src);
+  t->last = src->rdd->lastrec(src, XB_LASTREC_FRESH);
   size_t cap = list ? (list->len ? list->len : 1) : (dst->nfields ? dst->nfields : 1);
   t->from = malloc(cap * sizeof *t->from);
   t->to = malloc(cap * sizeof *t->to);

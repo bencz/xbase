@@ -3,7 +3,8 @@
 // (empty for an exclusive table); a change is seen by the other area once written (unlock); APPEND BLANK locks the
 // new record; "Lock required", "Exclusive required" (PACK, ZAP); a sharing that the other users do not allow sets
 // NetErr() under the default error handler; SET EXCLUSIVE; an index shared by two areas, changed by one and read by
-// the other. The files start with "rdd_shared", deleted at the end.
+// the other; records another area appends reached from the last record known. The files start with "rdd_shared",
+// deleted at the end.
 FIELD K, N, F1, F2
 
 PROCEDURE Main()
@@ -11,6 +12,7 @@ PROCEDURE Main()
    Locks()
    Index()
    Fresh()
+   Appended()
    AEval( Directory( "rdd_shared*.*" ), {| a | FErase( a[ 1 ] ) } )
 RETURN
 
@@ -220,5 +222,57 @@ STATIC PROCEDURE Index()
    BEGIN SEQUENCE
       ib->( ordListRebuild() )
    END SEQUENCE
+   CLOSE ALL
+RETURN
+
+// Records another area (another program) appends are reached from the last record this area knew: SKIP past it, GO
+// BOTTOM, dbGoTo() of a new record, SKIP -1 from the end, LastRec(); a move among the records known reads no count.
+// SKIP -1 from the end goes to the last record the file has then, as GO BOTTOM does (the reference goes to the record
+// before the end it had left, record 5 here).
+STATIC PROCEDURE Appended()
+   LOCAL i, c := ""
+   dbCreate( "rdd_shared_a", { { "F1", "C", 3, 0 } } )
+   USE rdd_shared_a EXCLUSIVE NEW
+   FOR i := 1 TO 3
+      APPEND BLANK
+      REPLACE F1 WITH "r" + Str( i, 1 )
+   NEXT
+   CLOSE
+   USE rdd_shared_a SHARED ALIAS ya NEW
+   USE rdd_shared_a SHARED ALIAS yb NEW
+   ya->( dbGoBottom() )
+   ? "ya last:", ya->( RecNo() ), ya->F1, ya->( LastRec() )
+   FOR i := 4 TO 5
+      yb->( dbAppend() )
+      REPLACE yb->F1 WITH "r" + Str( i, 1 )
+      yb->( dbUnlock() )
+   NEXT
+   ya->( dbSkip() )
+   ? "ya skip:", ya->( RecNo() ), ya->F1, ya->( Eof() )
+   ya->( dbSkip() )
+   ? "ya skip:", ya->( RecNo() ), ya->F1, ya->( Eof() )
+   ya->( dbSkip() )
+   ? "ya past:", ya->( RecNo() ), ya->( Eof() ), ya->( LastRec() )
+   yb->( dbAppend() )
+   REPLACE yb->F1 WITH "r6"
+   yb->( dbUnlock() )
+   ya->( dbSkip( -1 ) )
+   ? "ya back from the end:", ya->( RecNo() ), ya->F1, ya->( Eof() )
+   yb->( dbAppend() )
+   REPLACE yb->F1 WITH "r7"
+   yb->( dbUnlock() )
+   ya->( dbGoTo( 7 ) )
+   ? "ya goto 7:", ya->( RecNo() ), ya->F1, ya->( Eof() )
+   yb->( dbAppend() )
+   REPLACE yb->F1 WITH "r8"
+   yb->( dbUnlock() )
+   ya->( dbGoBottom() )
+   ? "ya bottom:", ya->( RecNo() ), ya->F1
+   ya->( dbGoTop() )
+   DO WHILE ! ya->( Eof() )
+      c += ya->F1
+      ya->( dbSkip() )
+   ENDDO
+   ? "ya all:", c, ya->( RecNo() ), ya->( LastRec() ), ya->( RecCount() )
    CLOSE ALL
 RETURN
