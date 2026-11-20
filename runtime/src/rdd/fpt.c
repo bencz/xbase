@@ -37,6 +37,7 @@
 #define FPT_TRAILER 0xAF
 #define FPT_UNUSED 0xAD       /* the unused bytes of a free list page */
 #define FPT_LOCK 0            /* the byte locked while the file changes (shared) */
+#define FPT_JOINED 4096       /* a memo whose head and text fit this many bytes is written at once */
 #define FPT_FLEX 0x200        /* the FlexFile mark, then the list's page offsets and the counter */
 #define FPT_REV 0x20C
 #define FPT_DIR 0x210
@@ -409,8 +410,15 @@ static int write_memo(xb_memo *m, uint32_t old, const char *p, size_t n, uint32_
     xb_put_be32(head + 4, (uint32_t)n);
     int64_t pos = pos_of(m, at);
     static const unsigned char trailer = FPT_TRAILER;
-    if (!xb_platform_file_write_at(m->f, pos, head, sizeof head, err) ||
-        !xb_platform_file_write_at(m->f, pos + FPT_ITEM_HEAD, p, n, err) ||
+    unsigned char joined[FPT_JOINED]; /* a short memo's head and text: one write */
+    int one = n <= sizeof joined - FPT_ITEM_HEAD;
+    if (one) {
+      memcpy(joined, head, FPT_ITEM_HEAD);
+      memcpy(joined + FPT_ITEM_HEAD, p, n);
+    }
+    if ((one ? !xb_platform_file_write_at(m->f, pos, joined, FPT_ITEM_HEAD + n, err)
+             : !xb_platform_file_write_at(m->f, pos, head, sizeof head, err) ||
+                   !xb_platform_file_write_at(m->f, pos + FPT_ITEM_HEAD, p, n, err)) ||
         (m->flex && bytes % m->bs &&
          !xb_platform_file_write_at(m->f, pos_of(m, at + count) - 1, &trailer, 1, err)))
       return 0;

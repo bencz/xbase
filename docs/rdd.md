@@ -465,21 +465,22 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
   type (1: text; others, such as arrays, read as `NIL`) and length, big-endian, then its bytes, and `0xAF` in the last
   byte of its last block unless it fills it. Each write is one operation: the old memo's blocks are freed (back to the
   end of the file, or into the free list joined with their neighbours), the new memo takes the smallest free area it
-  fits, or the end; then the free list's pages (1018 bytes each, made when the list first has an area, dropped when
-  it empties at the end of the file; at most 126 areas, the smallest dropped past that), the changed free areas'
-  headers (type 1001) and the header are written, and the file is cut when it ends sooner. A memo field is 10
-  characters (the block number in digits) or, when asked for exactly 4, the number in 4 bytes (little-endian; a blank
-  record holds zeros there). PACK copies the memos kept, each at the next block, without `0xAF`, and gives the file a
-  fresh header; ZAP leaves a fresh header. Bytes 8-15 hold a writer's signature, which the reference fills with its
-  name; xbase leaves them zero. A file without the FlexFile mark (FoxPro's, its header 512 bytes) keeps no list: what
-  a write frees serves that write only; PACK and ZAP keep it so. PACK goes in the steps of DBT's, its first free block
-  on disk past every copy at each step, so that a failure leaves the copies where no new memo goes. Where xbase does
-  better than the reference: a memo whose length goes past the file is a Read error (the reference raises Corruption
-  detected, or runs out of memory for a large length); a record's memo block that is not a memo of the file (in the
-  header, past its end, a free area, a length past the end) is not freed when the field is written again, where the
-  reference frees it, so that a damaged record never hands live blocks to a new memo; areas of the free list that are
-  not areas of the file are left out of it; a FlexFile file does not grow past 4 GB, which its list's 32-bit offsets
-  reach. The memo interface (`memo.h`: create, open, read, write, zap, PACK's steps) is the same for DBT and FPT.
+  fits, or the end (its type, length and bytes in one write when they fit 4096 bytes); then the free list's pages (1018
+  bytes each, made when the list first has an area, dropped when it empties at the end of the file; at most 126 areas,
+  the smallest dropped past that), the changed free areas' headers (type 1001) and the header are written, and the file
+  is cut when it ends sooner. A memo field is 10 characters (the block number in digits) or, when asked for exactly 4,
+  the number in 4 bytes (little-endian; a blank record holds zeros there). PACK copies the memos kept, each at the next
+  block, without `0xAF`, and gives the file a fresh header; ZAP leaves a fresh header. Bytes 8-15 hold a writer's
+  signature, which the reference fills with its name; xbase leaves them zero. A file without the FlexFile mark
+  (FoxPro's, its header 512 bytes) keeps no list: what a write frees serves that write only; PACK and ZAP keep it so.
+  PACK goes in the steps of DBT's, its first free block on disk past every copy at each step, so that a failure leaves
+  the copies where no new memo goes. Where xbase does better than the reference: a memo whose length goes past the file
+  is a Read error (the reference raises Corruption detected, or runs out of memory for a large length); a record's memo
+  block that is not a memo of the file (in the header, past its end, a free area, a length past the end) is not freed
+  when the field is written again, where the reference frees it, so that a damaged record never hands live blocks to a
+  new memo; areas of the free list that are not areas of the file are left out of it; a FlexFile file does not grow past
+  4 GB, which its list's 32-bit offsets reach. The memo interface (`memo.h`: create, open, read, write, zap, PACK's
+  steps) is the same for DBT and FPT.
 - **NTX** (`ntx.c`): 1024-byte pages. Page 0 is the header: a signature (6, 7 with a condition), a counter of
   changes, the root's and the first free page's offsets, an entry's size (the key's and 8), the key's length and
   decimals, the entries a page holds (`floor(1022 / (entry + 2)) - 1`, made even) and half of that, the key's text,

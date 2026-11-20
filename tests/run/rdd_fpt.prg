@@ -3,7 +3,8 @@
 // shrunk at the end, rewritten in the middle (the old blocks freed, the smallest free area that fits taken), emptied;
 // a memo field 4 bytes wide; PACK; more free areas than the list's page holds; ZAP; two areas writing memos of one
 // shared table; an FPT table opened by DBFNTX and a DBT table by DBFCDX (the memo format comes from the table's
-// version byte); a file without the FlexFile mark. The files start with "rdd_fpt", deleted at the end.
+// version byte); a file without the FlexFile mark; memos around the length written at once. The files start with
+// "rdd_fpt", deleted at the end.
 REQUEST DBFCDX
 FIELD M, M4
 PROCEDURE Main()
@@ -103,6 +104,25 @@ PROCEDURE Main()
    FErase( "rdd_fpt_d.dbf" )
    FErase( "rdd_fpt_d.dbt" )
    Plain()
+   Joined()
+RETURN
+
+// Memos around the length written with their head at once (4088 bytes of text): one byte below, at, and above it,
+// grown and shrunk across it; the bytes are the reference's.
+STATIC PROCEDURE Joined()
+   LOCAL i, aLen := { 4087, 4088, 4089, 4100, 4088, 1, 4089, 0, 4087 }
+   dbCreate( "rdd_fpt_j", { { "M", "M", 10, 0 } } )
+   USE rdd_fpt_j EXCLUSIVE NEW
+   FOR i := 1 TO 3
+      APPEND BLANK
+   NEXT
+   FOR i := 1 TO Len( aLen )
+      Put( ( i - 1 ) % 3 + 1, Replicate( Chr( 65 + i ), aLen[ i ] ) )
+   NEXT
+   Show( "joined", "rdd_fpt_j", 3 )
+   CLOSE
+   FErase( "rdd_fpt_j.dbf" )
+   FErase( "rdd_fpt_j.fpt" )
 RETURN
 
 // A file without the FlexFile mark (FoxPro's): no free list kept, no 0xAF; PACK and ZAP keep it so, its header
