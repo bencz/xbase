@@ -261,39 +261,48 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   submission wakes a parked worker, or starts one, while fewer are active than the target and none searches. The
   counters every worker changes (active, searching, queued and ended tasks) each sit on a cache line of their own
   (`XB_CACHE_LINE`, `core/sync.h`), so that changing one does not slow the readers of another.
-- **Blocking handoff**: every operation that may block the thread (file and lock I/O, `Mutex` waits, `Wait()`, console
-  input, a foreign call marked blocking) runs through the runtime's `xb_blocking_run`. While a worker running a task
-  blocks with work waiting, another takes its place: an idle one woken, or a new one started, at once while fewer than
-  twice the target are alive, past that paced (the next one 25 ms after the last, 25 ms more for each `target` workers
-  beyond twice the target, at most 250 ms), so that tasks blocked for long cost a few threads a second, not a thread
-  each; up to the most workers (1024, or as many as have their 4 MB stacks in a quarter of the address space the process
-  may map, for a 32-bit process or one with a limit on it, so that the heap keeps the rest). `TaskWorkers()` gives `{
-  alive, target, most }`. The blocked one is active again when it returns, and a worker beyond the target that stays
-  idle 2 seconds ends. A thread that waits with no limit for a task still to start runs it itself (inline), while its
-  stack has 1 MB left above the stack error's limit (`xb_stack_room`, `core/ctx.c`): past that it waits, and a worker
-  runs the task on a stack of its own, so a chain of tasks that each wait for the next does not overflow one stack.
-  One that waits for `TaskWhenAll()` runs the tasks of it still to start the same way, the newest first, until it
-  ended: a fork-join, whose tasks each wait for the tasks they started, finishes with any number of workers, where its
-  waits would otherwise hold every worker while the tasks they wait for stay in the queues. One that waits for
-  `TaskWhenAny()` runs none: it would wait for the one it runs, when another may end first.
-  Synchronous code inside tasks therefore costs threads, up to the most workers or the threads the system lets start;
-  past that the tasks left wait in the queues until a worker comes back, which may be never when what the blocked tasks
-  wait for is one of those left (a task that would release their lock, close their channel). The asynchronous waits
-  (`LockAsync`, `WaitAsync`, `ReceiveAsync`, `AWAIT` of a task) hold no worker. When tasks wait in the queues, none
-  ended for 2 seconds and then no worker is active (each one waits or runs one task long, or none could start), the
-  program's standard error is told so once (`xbrt: ... tasks have waited ...`), until tasks end again: the program's
-  throughput is held by tasks that hold their workers (more start only slowly), which is not a deadlock. A short wait
-  for a lock of the runtime's (a stripe, a channel's lock: held a moment) runs through `xb_waiting_run` instead: the
-  worker keeps its place, so many tasks meeting on one channel never multiply the threads. A monitor sees a task that
-  runs long (20 ms) without blocking while others wait in the queues, and puts another worker beside it the same way; it
-  also starts again the workers whose threads did not start.
+- **Blocking handoff**: every operation that may block the thread runs through the runtime: one that waits (`Mutex`
+  waits, `Wait()`, a lock's pause between tries, a command run) through `xb_sleeping_run`, one that usually returns at
+  once (a file's I/O, a file lock tried, console output) through `xb_blocking_run`. While a worker running a task waits
+  with work waiting, another takes its place at once. One in an operation that usually returns at once keeps it: the
+  monitor looks at the workers every 10 ms while work waits, every 50 µs while one of them is also in such an operation,
+  and gives the place of one it finds in the same operation 50 µs or more after it first saw it there (blocked: a read
+  that waits, a pipe that is full, a file system that answers slowly) to another, as many as tasks wait; a submission or
+  a search that finds every place taken while work waits wakes the monitor. So a blocked operation holds its place for
+  50 µs to 10 ms. Handing the place over at every call instead costs a thread's wake a call, more than a short call, and
+  runs more workers than the target: 64 tasks of 40000 short reads each, with 16 workers, take 0.86 s of processor time
+  in 0.06 s, where a handoff a call takes 4.8 s in 0.33 s. With no monitor (its thread could not start), such an
+  operation gives the place at once, as one that waits. The place goes to an idle worker woken, or a new one started, at
+  once while fewer than twice the target are alive, past that paced (the next one 25 ms after the last, 25 ms more for
+  each `target` workers beyond twice the target, at most 250 ms), so that tasks blocked for long cost a few threads a
+  second, not a thread each; up to the most workers (1024, or as many as have their 4 MB stacks in a quarter of the
+  address space the process may map, for a 32-bit process or one with a limit on it, so that the heap keeps the rest).
+  `TaskWorkers()` gives `{ alive, target, most }`. The blocked one is active again when it returns, and a worker beyond
+  the target that stays idle 2 seconds ends. A thread that waits with no limit for a task still to start runs it itself
+  (inline), while its stack has 1 MB left above the stack error's limit (`xb_stack_room`, `core/ctx.c`): past that it
+  waits, and a worker runs the task on a stack of its own, so a chain of tasks that each wait for the next does not
+  overflow one stack. One that waits for `TaskWhenAll()` runs the tasks of it still to start the same way, the newest
+  first, until it ended: a fork-join, whose tasks each wait for the tasks they started, finishes with any number of
+  workers, where its waits would otherwise hold every worker while the tasks they wait for stay in the queues. One that
+  waits for `TaskWhenAny()` runs none: it would wait for the one it runs, when another may end first. Synchronous code
+  inside tasks therefore costs threads, up to the most workers or the threads the system lets start; past that the tasks
+  left wait in the queues until a worker comes back, which may be never when what the blocked tasks wait for is one of
+  those left (a task that would release their lock, close their channel). The asynchronous waits (`LockAsync`,
+  `WaitAsync`, `ReceiveAsync`, `AWAIT` of a task) hold no worker. When tasks wait in the queues, none ended for
+  2 seconds and then no worker is active (each one waits or runs one task long, or none could start), the program's
+  standard error is told so once (`xbrt: ... tasks have waited ...`), until tasks end again: the program's throughput is
+  held by tasks that hold their workers (more start only slowly), which is not a deadlock. A short wait for a lock of
+  the runtime's (a stripe, a channel's lock: held a moment) runs through `xb_waiting_run` instead: the worker keeps its
+  place, so many tasks meeting on one channel never multiply the threads. A monitor sees a task that runs long (20 ms)
+  without blocking while others wait in the queues, and puts another worker beside it the same way; it also starts again
+  the workers whose threads did not start.
 - Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): a binary heap of deadlines that one thread serves, started with
   the pool: it sleeps until the earliest deadline and fires what is due; it is also the monitor, looking every 10 ms
-  while tasks wait in the queues (with nothing queued it sleeps until its next timer, and a submission that finds every
-  worker busy wakes it). When the system gives it no thread, that is said once on standard error and the next timer
-  added tries again; till then no timer fires, so `:Wait( nMs )` on a delay gives `.F.` at its limit
-  (`tests/platform/no_threads`). *(Planned)*: a hierarchical timing wheel per worker, so that hundreds of thousands of
-  pending timeouts cost constant time each.
+  while tasks wait in the queues, every 50 µs while a worker is also in an operation that usually returns at once (with
+  nothing queued it sleeps until its next timer, and a submission that finds every worker busy wakes it). When the
+  system gives it no thread, that is said once on standard error and the next timer added tries again; till then no
+  timer fires, so `:Wait( nMs )` on a delay gives `.F.` at its limit (`tests/platform/no_threads`). *(Planned)*: a
+  hierarchical timing wheel per worker, so that hundreds of thousands of pending timeouts cost constant time each.
 - *(Planned)* A blocking pool, separate from the workers, runs work that has no asynchronous form (`getaddrinfo`, file
   I/O where the system has no asynchronous files, foreign libraries).
 

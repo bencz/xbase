@@ -143,13 +143,13 @@ static void park(void *p) {
 
 void xb_park_wait_blocking(const uint32_t *addr, uint32_t expected, int64_t ns) {
   park_args a = {addr, NULL, expected, 0, ns};
-  xb_blocking_run(park, &a);
+  xb_sleeping_run(park, &a);
 }
 
 void xb_park_wait_blocking_stop(const uint32_t *addr, uint32_t expected, const uint32_t *stop, uint32_t mask,
                                 int64_t ns) {
   park_args a = {addr, stop, expected, mask, ns};
-  xb_blocking_run(park, &a);
+  xb_sleeping_run(park, &a);
 }
 
 void xb_park_wait_short(const uint32_t *addr, uint32_t expected, int64_t ns) {

@@ -454,6 +454,6 @@ static void run_command(void *p) {
 int xb_platform_run(const char *command) {
   xb_platform_flush(stdout); /* what the program wrote comes before what the command writes */
   os_run a = {command, -1};
-  xb_blocking_run(run_command, &a);
+  xb_sleeping_run(run_command, &a);
   return a.r;
 }

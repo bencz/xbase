@@ -12,9 +12,18 @@ void xb_sched_submit(xb_object *task, int next);
 /* Whether the calling thread is a worker running a task. */
 int xb_sched_in_worker(void);
 
-/* xb_blocking_run's: a worker running a task enters (1) or leaves (0) an operation that may block it; while it is
- * blocked and work waits, another worker takes its place (blocking handoff). */
-void xb_sched_blocking(int entering);
+/* How a worker running a task enters an operation that may block it, or leaves it (xb_sched_blocking): */
+enum {
+  XB_BLOCK_LEAVE, /* the operation returned */
+  XB_BLOCK_MAY,   /* one that usually returns at once (a file's I/O): its place goes to another worker only once the
+                     monitor finds it in the same operation at two of its looks, while work waits */
+  XB_BLOCK_WAITS  /* one that waits (a park, a pause, a command): when work waits, another takes its place at once */
+};
+
+/* xb_blocking_run's and xb_sleeping_run's (blocking handoff). */
+void xb_sched_blocking(int how);
+/* The places workers handed over to others so far (blocking handoff, tasks that run long): for tests. */
+uint32_t xb_sched_handoffs(void);
 
 /* The program ends (xb_quit_all): the workers and the timers' thread stop. xb_sched_end, once they ended
  * (xb_threads_end): the timers left fire as the program ends them (xb_task_timer), the tasks that never started are

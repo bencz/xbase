@@ -75,7 +75,7 @@ void xb_rlock_unlock(xb_rlock *l);
 int xb_park_wait(const uint32_t *addr, uint32_t expected, int64_t ns);
 uint32_t xb_park_wake(const uint32_t *addr, int all);
 
-/* xb_park_wait as a blocking operation (xb_blocking_run): collections go on without the waiter, which may wait for a
+/* xb_park_wait as a blocking operation (xb_sleeping_run): collections go on without the waiter, which may wait for a
  * thread that waits for a collection. */
 void xb_park_wait_blocking(const uint32_t *addr, uint32_t expected, int64_t ns);
 /* The same, not sleeping either while the word at `stop` has a bit of `mask` (a context's pending QUIT): whoever sets

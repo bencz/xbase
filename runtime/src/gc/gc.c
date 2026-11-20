@@ -545,7 +545,7 @@ static void run_blocked(void *p) {
 
 /* The registers are saved only while other threads are attached: with this one alone, nothing collects beside it, and
  * one that attaches meanwhile moves nothing until the operation ends (stacks_known). */
-static void run_stopped(void (*fn)(void *), void *arg, int away) {
+static void run_stopped(void (*fn)(void *), void *arg, int how) {
   xb_tlh *t = tlh;
   if (!t || t->blocking) { /* not attached, or inside a blocking operation already */
     if (!t) xb_stack_give_back();
@@ -553,7 +553,7 @@ static void run_stopped(void (*fn)(void *), void *arg, int away) {
     return;
   }
   blocked_call c = {fn, arg, t};
-  if (away) xb_sched_blocking(1); /* a worker running a task: another may take its place meanwhile */
+  if (how != XB_BLOCK_LEAVE) xb_sched_blocking(how); /* a worker running a task: another may take its place */
   t->blocking = 1;
   if (xb_atomic_load32(&heap.threadCount, XB_RELAXED) > 1) {
     xb_platform_with_registers(run_blocked, &c);
@@ -563,12 +563,14 @@ static void run_stopped(void (*fn)(void *), void *arg, int away) {
     xb_atomic_store32(&t->unsaved, 0, XB_RELAXED);
   }
   t->blocking = 0;
-  if (away) xb_sched_blocking(0);
+  if (how != XB_BLOCK_LEAVE) xb_sched_blocking(XB_BLOCK_LEAVE);
 }
 
-void xb_blocking_run(void (*fn)(void *), void *arg) { run_stopped(fn, arg, 1); }
+void xb_blocking_run(void (*fn)(void *), void *arg) { run_stopped(fn, arg, XB_BLOCK_MAY); }
 
-void xb_waiting_run(void (*fn)(void *), void *arg) { run_stopped(fn, arg, 0); }
+void xb_sleeping_run(void (*fn)(void *), void *arg) { run_stopped(fn, arg, XB_BLOCK_WAITS); }
+
+void xb_waiting_run(void (*fn)(void *), void *arg) { run_stopped(fn, arg, XB_BLOCK_LEAVE); }
 
 void xb_gc_thread_attach(const void *base) {
   xb_gc_init();

@@ -21,23 +21,30 @@
  * none: more wakes cost more than the work they find, and the monitor puts a worker beside one that runs long). A thief
  * takes another worker's next task only once that worker's task has run STEAL_NEXT_NS: a task that ends soon runs the
  * task it made ready itself (a continuation, a value handed over), without a thread switch. A worker running a task
- * that enters an operation that may block counts as inactive meanwhile: when work waits, another worker takes its place
- * (blocking handoff): one started at once while fewer than twice the target are alive, past that one at a time, paced
- * (may_spawn_locked), up to the most workers (workersMax); a worker beyond the target that stays idle SURPLUS_IDLE_NS
- * ends.
+ * that waits (XB_BLOCK_WAITS: a park, a pause) counts as inactive meanwhile: when work waits, another worker takes its
+ * place (blocking handoff): one started at once while fewer than twice the target are alive, past that one at a time,
+ * paced (may_spawn_locked), up to the most workers (workersMax); a worker beyond the target that stays idle
+ * SURPLUS_IDLE_NS ends. One that enters an operation that usually returns at once (XB_BLOCK_MAY: a file's I/O) keeps
+ * its place: handing it over for each of them would wake a thread a call (most of a short call's cost, and threads
+ * past the target fighting for the processors); the monitor, which looks every CALL_LOOK_NS while such a worker and
+ * waiting work are there, hands over the place of one it finds in the same operation CALL_LOOK_NS or more after it
+ * first saw it there, as many as tasks wait. With no monitor (its thread could not start), such a worker gives its
+ * place at once, as one that waits.
  *
- * A worker's `run` word says what it does: IDLE (no task), RUNNING one, BLOCKED in an operation that may block, or
- * LONG: running one longer than LONG_TASK_NS while work waits, seen by the monitor. The last two count as away (not
- * active: another worker takes the place); the word changes with compare-and-swap (RUNNING to BLOCKED or LONG and back,
- * any to IDLE at the task's end, which repays a LONG), so that each absence is counted and repaid once. The monitor
- * hands over at most one place per look, only when no task ended since the last look, and keeps the workers away as
- * LONG to the target's number (a computation never multiplies the threads past twice the target).
+ * A worker's `run` word says what it does: IDLE (no task), RUNNING one, CALL in an operation that usually returns at
+ * once, BLOCKED in one that blocks, or LONG: running one longer than LONG_TASK_NS while work waits, seen by the
+ * monitor. The last two count as away (not active: another worker takes the place); the word changes with
+ * compare-and-swap (RUNNING to CALL, BLOCKED or LONG and back, CALL to BLOCKED by the monitor, any to IDLE at the
+ * task's end, which repays a LONG), so that each absence is counted and repaid once. Besides the places of workers in
+ * a CALL too long, the monitor hands over at most one place per look for a task that runs long, and only when no task
+ * ended since its last look, keeping the workers away as LONG to the target's number (a computation never multiplies
+ * the threads past twice the target).
  *
  * Timers: a binary heap of {deadline, target} under the timers' lock, which one program thread serves (started with the
  * pool): it sleeps until the earliest deadline, then fires what is due (xb_task_timer), one at a time, without the
  * lock. It is also the monitor: while tasks wait in the queues it looks every MONITOR_NS for workers that run one task
  * long, and puts another worker in their place; with nothing queued it sleeps until its next timer (or a new, earlier
- * one) at most, and a submission that finds every worker busy wakes it (`timerIdle`).
+ * one) at most, and a submission or a search that finds every place taken while work waits wakes it (`timerIdle`).
  *
  * The queues and the timers hold object addresses: the collector marks them (xb_sched_mark), every other thread
  * stopped. */
@@ -55,6 +62,7 @@
 #define SURPLUS_IDLE_NS ((int64_t)2000 * XB_NS_PER_MS)
 #define LONG_TASK_NS ((int64_t)20 * XB_NS_PER_MS)
 #define MONITOR_NS ((int64_t)10 * XB_NS_PER_MS)
+#define CALL_LOOK_NS ((int64_t)50 * XB_NS_PER_US) /* the monitor's looks while a worker is in a CALL */
 #define SEARCH_NS ((int64_t)50 * XB_NS_PER_US)
 #define STEAL_NEXT_NS ((int64_t)5 * XB_NS_PER_US)
 #define NEXT_SLICE_NS ((int64_t)1 * XB_NS_PER_MS)
@@ -65,7 +73,7 @@
 #define SEARCH_LOOK 64u /* looks for work between looks at the clock (and yields of the processor) */
 #define SEARCH_RETRY 16u /* looks between two searches of the queues, which found nothing that waits there */
 
-enum { RUN_IDLE, RUN_RUNNING, RUN_BLOCKED, RUN_LONG };
+enum { RUN_IDLE, RUN_RUNNING, RUN_CALL, RUN_BLOCKED, RUN_LONG };
 
 typedef struct worker {
   uint32_t head, tail; /* the ring's: the head taken with compare-and-swap by any, the tail written by its owner */
@@ -75,6 +83,7 @@ typedef struct worker {
   uint32_t alive;      /* a thread runs it (the pool's lock) */
   uint32_t run;        /* RUN_*: BLOCKED and LONG are not counted active */
   uint32_t runs;       /* tasks it started: the monitor's mark is undone when it finds another task than it saw */
+  uint32_t calls;      /* operations it entered as CALL (its owner writes it) */
   XB_ALIGN8 uint64_t runStart; /* the monotonic time its task started, or came back from blocking (the monitor's) */
   uint64_t lastStart;  /* its owner's only: when its last task started, */
   uint64_t chainStart; /* when the chain of tasks run from `next` that it belongs to began (its slice's start), */
@@ -100,6 +109,7 @@ static _Alignas(XB_CACHE_LINE) struct {
   own_line searching; /* workers searching for work before they park */
 } counts;
 static uint32_t longCount; /* workers LONG */
+static uint32_t handoffs;  /* places handed over (xb_sched_handoffs) */
 static int64_t lastSpawn;  /* when the last worker was started (the pool's lock) */
 static uint32_t target;  /* workers that run at once; 0 until the pool is made (make_pool) */
 static uint32_t stopping;
@@ -250,12 +260,12 @@ static void *runq_get(worker *w) {
   }
 }
 
-/* Whether a thief may take `v`'s next task: `v` is away (BLOCKED, LONG), or its task has run STEAL_NEXT_NS. An idle
- * `v` takes it in a moment. */
+/* Whether a thief may take `v`'s next task: `v` is away (BLOCKED, LONG), or its task has run STEAL_NEXT_NS (a CALL is
+ * part of its run). An idle `v` takes it in a moment. */
 static int next_stealable(worker *v) {
   uint32_t run = xb_atomic_load32(&v->run, XB_ACQUIRE);
   if (run == RUN_BLOCKED || run == RUN_LONG) return 1;
-  return run == RUN_RUNNING &&
+  return (run == RUN_RUNNING || run == RUN_CALL) &&
          xb_platform_monotonic_ns() - (int64_t)xb_atomic_load64(&v->runStart, XB_RELAXED) >= STEAL_NEXT_NS;
 }
 
@@ -541,28 +551,43 @@ void xb_sched_submit(xb_object *task, int next) {
   else if (xb_atomic_load32(&timerIdle, XB_SEQ_CST)) timers_wake(); /* every worker busy: the monitor looks */
 }
 
+uint32_t xb_sched_handoffs(void) { return xb_atomic_load32(&handoffs, XB_RELAXED); }
+
 int xb_sched_in_worker(void) { return me && xb_atomic_load32(&me->run, XB_RELAXED) != RUN_IDLE; }
 
 /* Another worker woken or started when work waits and fewer than `target` are active. */
 static void fill_place(void) {
-  if (xb_atomic_load32(&counts.queued.n, XB_SEQ_CST) &&
-      xb_atomic_load32(&counts.active.n, XB_SEQ_CST) < xb_atomic_load32(&target, XB_ACQUIRE))
-    wake_or_spawn();
+  if (!xb_atomic_load32(&counts.queued.n, XB_SEQ_CST)) return;
+  if (xb_atomic_load32(&counts.active.n, XB_SEQ_CST) < xb_atomic_load32(&target, XB_ACQUIRE)) wake_or_spawn();
+  else if (xb_atomic_load32(&timerIdle, XB_SEQ_CST)) timers_wake(); /* the monitor looks: a worker may be in a CALL */
 }
 
 /* A place given to another worker while its worker is away: counted inactive, then filled when work waits. */
 static void hand_over(void) {
+  xb_atomic_add32(&handoffs, 1, XB_RELAXED);
   xb_atomic_add32(&counts.active.n, (uint32_t)-1, XB_SEQ_CST);
   fill_place();
 }
 
-void xb_sched_blocking(int entering) {
+void xb_sched_blocking(int how) {
   worker *w = me;
   if (!w) return;
-  uint32_t running = RUN_RUNNING, blocked = RUN_BLOCKED;
-  if (entering) {
+  uint32_t running = RUN_RUNNING;
+  if (how == XB_BLOCK_WAITS || !xb_atomic_load32(&timerRunning, XB_ACQUIRE)) { /* no monitor: as one that waits */
     if (xb_atomic_cas32(&w->run, &running, RUN_BLOCKED, XB_ACQ_REL)) hand_over(); /* LONG: away already; IDLE: none */
-  } else if (xb_atomic_cas32(&w->run, &blocked, RUN_RUNNING, XB_ACQ_REL)) {
+    return;
+  }
+  if (how == XB_BLOCK_MAY) {
+    /* counted before the word says CALL, so that the monitor, which tells calls apart by the count, sees a new call
+     * with its own count (a call that ends and another that begins between its read of the count and its swap of the
+     * word only cost a place handed over early) */
+    xb_atomic_store32(&w->calls, xb_atomic_load32(&w->calls, XB_RELAXED) + 1, XB_RELAXED);
+    xb_atomic_cas32(&w->run, &running, RUN_CALL, XB_SEQ_CST);
+    return;
+  }
+  uint32_t call = RUN_CALL, blocked = RUN_BLOCKED;
+  if (xb_atomic_cas32(&w->run, &call, RUN_RUNNING, XB_ACQ_REL)) return; /* back before the monitor gave its place */
+  if (xb_atomic_cas32(&w->run, &blocked, RUN_RUNNING, XB_ACQ_REL)) {
     xb_atomic_store64(&w->runStart, (uint64_t)xb_platform_monotonic_ns(), XB_RELAXED);
     xb_atomic_add32(&counts.active.n, 1, XB_ACQ_REL);
   }
@@ -613,18 +638,48 @@ static void starved(int progress, int waiting) {
   xb_blocking_run(tell_starving, &s); /* a full pipe holds the write */
 }
 
+/* While work waits: the workers found in the same CALL as CALL_LOOK_NS or more before have their places given to
+ * others (fill_place), as many as tasks wait; whether a worker is in a CALL now. What the monitor saw of each worker
+ * is its own (not on the worker's line, which the worker writes). */
+static int calls_handed(int waiting) {
+  static uint32_t seen[WORKERS_MAX]; /* each worker's `calls` when the monitor first saw it in that CALL, */
+  static int64_t since[WORKERS_MAX]; /* and when */
+  int inCall = 0;
+  int64_t now = xb_platform_monotonic_ns();
+  uint32_t n = xb_atomic_load32(&slots, XB_ACQUIRE), queued = xb_atomic_load32(&counts.queued.n, XB_ACQUIRE);
+  for (uint32_t k = 0; k < n; ++k) {
+    worker *w = xb_atomic_loadptr((void *const *)&workers[k], XB_ACQUIRE);
+    if (xb_atomic_load32(&w->run, XB_SEQ_CST) != RUN_CALL) continue;
+    uint32_t calls = xb_atomic_load32(&w->calls, XB_ACQUIRE), call = RUN_CALL;
+    if (calls != seen[k] || !since[k]) {
+      seen[k] = calls;
+      since[k] = now;
+      inCall = 1;
+    } else if (!waiting || !queued || now - since[k] < CALL_LOOK_NS) {
+      inCall = 1;
+    } else if (xb_atomic_cas32(&w->run, &call, RUN_BLOCKED, XB_SEQ_CST)) {
+      hand_over(); /* the worker's return finds BLOCKED and repays it */
+      --queued;
+    }
+  }
+  return inCall;
+}
+
 /* The monitor: while tasks wait in the queues, the places that a thread which did not start left empty are filled
- * again (fill_place), and when none ended since its last look, the first worker found running one task longer than
- * LONG_TASK_NS has its place given to another, as long as fewer than `target` are LONG; tasks that starve are told. */
-static void monitor(void) {
+ * again (fill_place), workers in one CALL too long have theirs given to others (calls_handed), and when no task ended
+ * since its last look, the first worker found running one task longer than LONG_TASK_NS has its place given to
+ * another, as long as fewer than `target` are LONG; tasks that starve are told. Whether it should look again after
+ * CALL_LOOK_NS (a worker in a CALL while work waits). */
+static int monitor(void) {
   static uint32_t lastEnded;
   uint32_t now_ended = xb_atomic_load32(&counts.ended.n, XB_RELAXED), progress = now_ended != lastEnded;
   lastEnded = now_ended;
   int waiting = xb_atomic_load32(&counts.queued.n, XB_ACQUIRE) != 0;
+  int inCall = calls_handed(waiting) && waiting;
   if (waiting) fill_place();
   starved((int)progress, waiting);
   if (progress || !waiting || xb_atomic_load32(&longCount, XB_ACQUIRE) >= xb_atomic_load32(&target, XB_ACQUIRE))
-    return;
+    return inCall;
   uint64_t now = (uint64_t)xb_platform_monotonic_ns();
   uint32_t n = xb_atomic_load32(&slots, XB_ACQUIRE);
   for (uint32_t k = 0; k < n; ++k) {
@@ -645,8 +700,9 @@ static void monitor(void) {
       continue;
     }
     fill_place();
-    return;
+    return inCall;
   }
+  return inCall;
 }
 
 /* Timers. */
@@ -768,10 +824,10 @@ static void timer_body(xb_ctx *ctx, void *arg) {
       timer_fire(ctx, t, deadline, 0);
       xb_pending_clear(ctx, XB_PENDING_UNWIND & ~(uint32_t)XB_PENDING_QUIT); /* what the firing left */
     }
-    monitor();
-    /* tasks wait: the monitor looks every MONITOR_NS */
+    int inCall = monitor();
+    /* tasks wait: the monitor looks every MONITOR_NS, every CALL_LOOK_NS while a worker is in a CALL */
     int watching = xb_atomic_load32(&counts.queued.n, XB_ACQUIRE) != 0;
-    int64_t now = xb_platform_monotonic_ns(), slice = watching ? MONITOR_NS : -1;
+    int64_t now = xb_platform_monotonic_ns(), slice = watching ? inCall ? CALL_LOOK_NS : MONITOR_NS : -1;
     if (next >= 0 && (slice < 0 || next - now < slice)) slice = next - now > 0 ? next - now : 0;
     /* Not watching, it says so before it reads the count again, as a submission counts its task before it reads that:
      * one of the two sees the other, and a submission that finds every worker busy wakes it. */

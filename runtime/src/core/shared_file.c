@@ -412,7 +412,7 @@ int xb_shared_lock(xb_shared *s, uint64_t pos, uint64_t len, int kind, int wait,
     int r = try_lock(s, pos, pos + len, kind, err);
     xb_mutex_unlock(&s->e->lock);
     if (r >= 0 || !wait || *err != XB_FERR_LOCKED) return r > 0;
-    xb_blocking_run(pause_ms, &pause); /* another program holds it: again, after a pause of up to 63 ms */
+    xb_sleeping_run(pause_ms, &pause); /* another program holds it: again, after a pause of up to 63 ms */
   }
 }
 

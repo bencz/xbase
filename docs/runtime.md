@@ -351,13 +351,13 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   (any allocation in between) is followed by `xb_gc_write` or `xb_gc_write_item`. An object address in a C variable
   stays valid across a collection (the stack scan pins the object), but an address kept anywhere the scan does not see
   (in `malloc`'d memory, as a map's key) is valid only between `xb_gc_hold()` and `xb_gc_release()`, during which no
-  collection moves anything (`xb_clone_deep` keeps such a map). What may block the thread (a file's I/O, a wait, a write
-  to or flush of the standard output or error) runs through `xb_blocking_run`: it allocates nothing and changes no
-  reference, and the objects it reads or writes are rooted (`FRead()` roots the string a read fills, the console the
-  text it writes), since another thread may collect meanwhile. A runtime lock held across a safepoint or a blocking
-  operation (the registry of shared files', whose holder may park on its way back from a file operation; the lock of
-  class preparations, whose holder runs xBase code) is waited for in a blocking operation; others (the heap's, the
-  memory variable names') are never held across one.
+  collection moves anything (`xb_clone_deep` keeps such a map). What may block the thread (a file's I/O, a write to or
+  flush of the standard output or error) runs through `xb_blocking_run`, a wait through `xb_sleeping_run`: it allocates
+  nothing and changes no reference, and the objects it reads or writes are rooted (`FRead()` roots the string a read
+  fills, the console the text it writes), since another thread may collect meanwhile. A runtime lock held across a
+  safepoint or a blocking operation (the registry of shared files', whose holder may park on its way back from a file
+  operation; the lock of class preparations, whose holder runs xBase code) is waited for in a blocking operation; others
+  (the heap's, the memory variable names') are never held across one.
 - Threads: a thread that runs xBase code attaches (`xb_gc_thread_attach`, by its first function) and detaches before it
   ends; the second to attach publishes the program's storage first (`publish`: the world stopped as for a collection,
   the items of the roots outside frames, the `STATIC`s and class variables, shared with `xb_share`, every context's
@@ -1642,8 +1642,11 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   tasks, and searches the queues every 16 looks while it is not 0), and a submission wakes no worker while one searches
   (a searcher that finds work wakes another while work waits; a worker woken from its park does not: measured, those
   wakes cost more than they found); a thief takes another's next task only once that worker's task has run 5 µs (or it
-  is away). `xb_blocking_run` tells the scheduler when a worker running a task enters and leaves an operation that may
-  block (`xb_sched_blocking`): meanwhile it is not active, and when work waits another worker is woken or started; one
+  is away). `xb_blocking_run` and `xb_sleeping_run` tell the scheduler when a worker running a task enters and leaves an
+  operation that may block (`xb_sched_blocking`): one that waits (`xb_sleeping_run`, `XB_BLOCK_WAITS`) is not active
+  meanwhile, and when work waits another worker is woken or started; one that usually returns at once
+  (`xb_blocking_run`, `XB_BLOCK_MAY`: `RUN_CALL`) stays active, and the monitor gives its place away when it finds it in
+  the same operation 50 µs or more after it first saw it there ([concurrency.md](concurrency.md#scheduler)); one
   beyond the target that stays idle 2 seconds ends. `xb_waiting_run` is the same for the collector but not for the
   scheduler: a wait for a lock of the runtime's held a moment (a stripe, `xb_object_lock_short` for a channel's) keeps
   the worker's place. The queues hold object addresses, which the collector marks (`xb_sched_mark`). A task is a `Task`
