@@ -1646,17 +1646,17 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   operation that may block (`xb_sched_blocking`): one that waits (`xb_sleeping_run`, `XB_BLOCK_WAITS`) is not active
   meanwhile, and when work waits another worker is woken or started; one that usually returns at once
   (`xb_blocking_run`, `XB_BLOCK_MAY`: `RUN_CALL`) stays active, and the monitor gives its place away when it finds it in
-  the same operation 50 µs or more after it first saw it there ([concurrency.md](concurrency.md#scheduler)); one
-  beyond the target that stays idle 2 seconds ends. `xb_waiting_run` is the same for the collector but not for the
-  scheduler: a wait for a lock of the runtime's held a moment (a stripe, `xb_object_lock_short` for a channel's) keeps
-  the worker's place. The queues hold object addresses, which the collector marks (`xb_sched_mark`). A task is a `Task`
-  object, shared: a state word (created, scheduled, running, then completed, failed or canceled), the result or the
-  failure's value, the block and its arguments and the snapshot of its creator's environment until it runs, and the
-  continuations, nodes `{target, next}` pushed under the task's stripe lock (compared with the head read before, again
-  when another came first; finished combinators at the head are left out of the new node), which completing takes under
-  the same lock with the final state; then each fires, from a stack of frames `{list, antecedent, below}` (local arrays)
-  rather than by recursion, so a chain of combinators runs in constant stack: a continuation is scheduled (to run next
-  on the completing worker; on the completing thread's feeder when another thread completes it), a combinator counts
+  the same operation 50 µs or more after it first saw it there ([concurrency.md](concurrency.md#scheduler)); one beyond
+  the target that stays idle 2 seconds ends. `xb_waiting_run` is the same for the collector but not for the scheduler: a
+  wait for a lock of the runtime's held a moment (a stripe, `xb_object_lock_short` for a channel's) keeps the worker's
+  place. The queues hold object addresses, which the collector marks (`xb_sched_mark`). A task is a `Task` object,
+  shared: a state word (created, scheduled, running, then completed, failed or canceled), the result or the failure's
+  value, the block and its arguments and the snapshot of its creator's environment until it runs, and the continuations,
+  nodes `{target, next}` pushed under the task's stripe lock (compared with the head read before, again when another
+  came first; finished combinators at the head are left out of the new node), which completing takes under the same lock
+  with the final state; then each fires, from a stack of frames `{list, antecedent, below}` (local arrays) rather than
+  by recursion, so a chain of combinators runs in constant stack: a continuation is scheduled (to run next on the
+  completing worker; on the completing thread's feeder when another thread completes it), a combinator counts
   (`TaskWhenAll`) or completes once (`TaskWhenAny`) and pushes its own continuations. A combinator waits for the tasks
   of a snapshot of its array (`xb_array_snapshot`), checked as one read saw it. Running a task is claiming it (scheduled
   to running, a compare-and-swap) by a worker or by a thread that waits for it with no limit, which runs it inline: a
@@ -1692,15 +1692,20 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   task that completes when the source is canceled, whose continuations are what waits for it (a delay with that token, a
   linked source's signal, `Register`'s tasks). A list of continuations drops, at its head, the targets that need it no
   more (ended, or the signal of a disposed source), and is pruned whole once as many were pushed as it kept at its last
-  pruning. Channels (`rtl/channels.c`, their rings and the claims of their waiters in `rtl/waiters.c`, shared with
-  `Mutex` and `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a
-  runtime class's object (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext`
-  takes the next value (waiting for it) into `Current`, and whose `MoveNextAsync` waits as a receiver whose entry in the
-  ring is the pair `{task, enumerator}`: the value delivered goes into the enumerator's `Current` under the channel's
-  lock and the task completes with `.T.`; `Close` completes such tasks with `.F.` instead of failing them. The
-  enumerator keeps the token `GetEnumerator` was given and the task of its `MoveNextAsync` that waits (read and set
-  under the channel's lock: a second one while it waits raises 9035). Their error codes are xbase's own: 9016 to 9031,
-  and 9035.
+  pruning. A signal that had 64 continuations pushed gets 16 partitions, signals of its own pushed onto its list (it
+  fires them when it is canceled, as a linked source's), made at once and never changed after; from then on each thread
+  pushes into one of them (a thread-local index), so tasks on many workers that wait with one token at once (a server's
+  shutdown token) do not all take its lock: 16 consumers receiving 50000 values each with one token take 63 ms and
+  0.85 s of processor time, as with a token each (all pushing onto its own list: 300 ms and 3.5 s). Channels
+  (`rtl/channels.c`, their rings and the claims of their waiters in
+  `rtl/waiters.c`, shared with `Mutex` and `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH`
+  reaches the enumerator of a runtime class's object (`GetEnumerator` in its method table): a channel's is a
+  `ChannelEnumerator`, whose `MoveNext` takes the next value (waiting for it) into `Current`, and whose `MoveNextAsync`
+  waits as a receiver whose entry in the ring is the pair `{task, enumerator}`: the value delivered goes into the
+  enumerator's `Current` under the channel's lock and the task completes with `.T.`; `Close` completes such tasks with
+  `.F.` instead of failing them. The enumerator keeps the token `GetEnumerator` was given and the task of its
+  `MoveNextAsync` that waits (read and set under the channel's lock: a second one while it waits raises 9035). Their
+  error codes are xbase's own: 9016 to 9031, and 9035.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread and

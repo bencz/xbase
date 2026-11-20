@@ -65,7 +65,10 @@ static uint32_t state_of(const xb_item *task) { return xb_atomic_load32(xb_objec
 /* Something observes the task's outcome: it waits for it (Wait(), Result, AWAIT), continues from it (ContinueWith(), a
  * combinator, TaskTimeout(), an AWAIT that suspends), or reads its failure (Error, IsFailed). A task that fails
  * unobserved is watched (watch_failure) and reported if it is found unreachable so (task_unobserved). */
-static void observe(const xb_item *task) { xb_atomic_store32(xb_object_word(task, V_SEEN), 1, XB_RELAXED); }
+static void observe(const xb_item *task) {
+  uint32_t *seen = xb_object_word(task, V_SEEN);
+  if (!xb_atomic_load32(seen, XB_RELAXED)) xb_atomic_store32(seen, 1, XB_RELAXED); /* read first: often shared */
+}
 
 /* A task that just failed with no continuation to take its failure, and observed by nothing yet: the collector tells
  * when it is unreachable (task_unobserved, its class's destructor). */
@@ -382,7 +385,7 @@ static void yielded(xb_ctx *ctx, const xb_item *task) {
  * list are left out of the new node, and once as many were pushed as the list kept at its last pruning (and at least
  * PRUNE_AFTER), the whole list is pruned: a token or a task that lives long, linked to again and again, keeps only
  * what still waits for it. */
-static void add_continuation(xb_ctx *ctx, const xb_item *antecedent, const xb_item *target) {
+static void push_continuation(xb_ctx *ctx, const xb_item *antecedent, const xb_item *target) {
   xb_item node, head, kept, stack, links;
   xb_set_nil(&node);
   xb_set_nil(&head);
@@ -432,6 +435,75 @@ static void add_continuation(xb_ctx *ctx, const xb_item *antecedent, const xb_it
   fire(ctx, target, antecedent, &stack);
   drain(ctx, &stack);
   xb_gc_root_pop(ctx, 4);
+}
+
+/* A cancellation signal's continuations (what waits with its token, the sources linked to it, Register's work) go,
+ * once PRUNE_AFTER were pushed onto its own list, into partitions: PARTITIONS signals made at once, each pushed onto
+ * the signal's list (it fires them when it is canceled, as it fires a source linked to it). Each thread pushes into
+ * one of them, always the same, so that threads waiting with one token at once do not all take the same lock. A
+ * partition's V_TASKS is .T.; a signal's, NIL, then the array of its partitions, never written again. */
+#define PARTITIONS 16u
+
+static XB_THREAD_LOCAL uint32_t partition_index; /* this thread's partition, from 1 (0: not chosen yet) */
+static uint32_t partitions_given;
+
+/* This thread's partition of `task` (rooted) in `*part` (rooted), made with the others when the signal is busy
+ * enough; 0 when `task` is no signal to partition (another kind, a partition, a signal still quiet). */
+static int partition_of(xb_ctx *ctx, const xb_item *task, xb_item *part) {
+  if (xb_atomic_load32(xb_object_word(task, V_KIND), XB_RELAXED) != K_SIGNAL || FINAL(state_of(task)))
+    return 0; /* canceled: what it gets fires at once */
+  xb_item parts, links;
+  xb_set_nil(&parts);
+  xb_gc_root_push(ctx, &parts);
+  xb_object_get(task->v.p, V_TASKS, &parts);
+  if (parts.type == XB_T_NIL) {
+    xb_object_get(task->v.p, V_LINKS, &links);
+    uint64_t counts = (uint64_t)links.v.i;
+    if ((counts & UINT32_MAX) + (counts >> 32) < PRUNE_AFTER) {
+      xb_gc_root_pop(ctx, 1);
+      return 0;
+    }
+    xb_array *a = xb_array_alloc(PARTITIONS); /* `a`, on the stack, stays where it is */
+    xb_set_array(&parts, a);
+    for (size_t k = 0; k < PARTITIONS; ++k) {
+      task_new(part, K_SIGNAL, S_CREATED);
+      xb_set_logical(&((xb_object *)part->v.p)->vars[V_TASKS], 1);
+      xb_array_items(a)[k] = *part;
+      xb_gc_write(a);
+    }
+    xb_share(&parts);
+    xb_object *o = task->v.p;
+    xb_seq_lock(o);
+    int mine = o->vars[V_TASKS].type == XB_T_NIL;
+    if (mine) {
+      xb_seq_store(&o->vars[V_TASKS], &parts);
+      xb_gc_write(o);
+    } else {
+      parts = o->vars[V_TASKS];
+    }
+    xb_seq_unlock(o);
+    for (size_t k = 0; mine && k < PARTITIONS; ++k) { /* canceled meanwhile: each fired at once, and what it gets */
+      xb_array_get(parts.v.p, k, part);
+      push_continuation(ctx, task, part);
+    }
+  }
+  int found = parts.type == XB_T_ARRAY; /* a partition's mark is .T. */
+  if (found) {
+    if (!partition_index) partition_index = xb_atomic_add32(&partitions_given, 1, XB_RELAXED) % PARTITIONS + 1;
+    xb_array_get(parts.v.p, partition_index - 1, part);
+  }
+  xb_gc_root_pop(ctx, 1);
+  return found;
+}
+
+/* `target` fires when `antecedent` completes (push_continuation); for a busy cancellation signal, through this
+ * thread's partition of it. */
+static void add_continuation(xb_ctx *ctx, const xb_item *antecedent, const xb_item *target) {
+  xb_item part;
+  xb_set_nil(&part);
+  xb_gc_root_push(ctx, &part);
+  push_continuation(ctx, partition_of(ctx, antecedent, &part) ? &part : antecedent, target);
+  xb_gc_root_pop(ctx, 1);
 }
 
 /* A step of an asynchronous function, on the C stack while it runs (ctx->async_step): its task (NIL in the first step

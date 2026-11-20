@@ -1,0 +1,8 @@
+
+pending canceled: all 3200
+racing cancel: every wait canceled
+callbacks: each ran once
+after cancel: canceled when made
+linked: canceled with it, the disposed one not
+cancel after: all canceled
+memory: bounded

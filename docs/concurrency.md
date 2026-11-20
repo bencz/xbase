@@ -347,7 +347,9 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   of them is): `Token`, `Cancel()` (once; again does nothing), `CancelAfter( nMs )`, `IsCancellationRequested`. A
   `CancellationToken`: `IsCancellationRequested`, `Register( bWork )` (a task that runs `Eval( bWork )` on the pool
   once the token is canceled), `ThrowIfCancellationRequested()` (the error `BASE/9028` `Operation canceled`,
-  substitutable). Argument errors are `BASE/9024`.
+  substitutable). Argument errors are `BASE/9024`. Tasks on many workers may wait with one token at once (a server's
+  shutdown token) at the cost of a token each: a token that many wait with keeps what waits in partitions, each
+  thread's in its own ([runtime.md](runtime.md#threads-and-synchronization)).
 - Timers fire in order of their deadlines, never before. A delay, a timeout or a `CancelAfter` still pending when the
   program ends is ended then: the delay and the timeout canceled, the source canceled (its `Register` tasks, scheduled
   then, are canceled with the program's other tasks that never started), so an `EXIT` procedure that waits for them is
