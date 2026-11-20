@@ -339,6 +339,7 @@ static struct {
   size_t classDestLen, classDestCap;
   size_t classDestFrom[XB_GC_CLASSES_MAX], classDestTo[XB_GC_CLASSES_MAX]; /* class c's: [from, to) of classDest */
   uint64_t allocatedSinceFull;     /* bytes allocated since the last full collection (64 bits: 32-bit targets too) */
+  uint64_t allocatedEver;          /* bytes allocated since the program started, the threads' reported */
   uint32_t holds;                  /* xb_gc_hold: none moves (atomic: held and released without the lock) */
   char *copyCursor, *copyLimit;    /* where the collection copies objects: free blocks */
   xb_gc_hdr **pinned;              /* pinned by the collection in progress */
@@ -615,6 +616,7 @@ void xb_gc_thread_detach(void) {
 
 static void report_allocation(xb_tlh *t) {
   heap.allocated += t->allocated;
+  heap.allocatedEver += t->allocated;
   t->allocated = 0;
 }
 
@@ -1082,6 +1084,7 @@ static void *alloc_large(size_t size, int fallible) {
   xb_gc_safepoint();
   xb_mutex_lock(&heap.lock);
   heap.allocated += size;
+  heap.allocatedEver += size;
   int due = heap.allocated >= heap.youngBudget;
   xb_mutex_unlock(&heap.lock);
   if (due) collect(0, 1);
@@ -1109,6 +1112,7 @@ static void *alloc_large(size_t size, int fallible) {
     if (collected && fallible) {
       xb_mutex_lock(&heap.lock);
       heap.allocated = heap.allocated > size ? heap.allocated - size : 0; /* what was not allocated */
+      heap.allocatedEver -= size;
       xb_mutex_unlock(&heap.lock);
       return NULL;
     }
@@ -1813,7 +1817,7 @@ static void mark_roots(void) {
   for (const xb_root *r = heap.roots; r; r = r->next)
     for (size_t i = 0; i < r->count; ++i) mark_item(&r->items[i]);
   xb_memvar_publics_each(mark_root, NULL);
-  xb_env_parked_each(mark_env, heap.full);
+  xb_env_parked_each(heap.contexts, mark_env, heap.full);
   xb_sched_mark(mark_item);
   for (size_t i = heap.finalizedHead; i < heap.finalizedLen; ++i) mark_item(&heap.finalized[i]);
 }
@@ -2240,7 +2244,8 @@ static void collect(int full, int due) {
     find_finalized(full);
     drain();
   }
-  if (xb_env_parked_settle(live_object, full)) heap.reap = 1; /* closed soon: their tables, their locks */
+  if (xb_env_parked_settle(heap.contexts, live_object, full))
+    heap.reap = 1; /* closed soon: their tables, their locks */
   if (!full) settle_young();
   for (size_t i = 0; i < heap.pinnedLen; ++i) heap.pinned[i]->flags &= (uint16_t)~XB_GC_HDR_PINNED;
   heap.pinnedLen = 0;
@@ -2411,6 +2416,13 @@ int xb_gc_consistent(void) {
 size_t xb_gc_heap_bytes(void) {
   xb_mutex_lock(&heap.lock);
   size_t bytes = heap_bytes_locked();
+  xb_mutex_unlock(&heap.lock);
+  return bytes;
+}
+
+uint64_t xb_gc_allocated_bytes(void) {
+  xb_mutex_lock(&heap.lock);
+  uint64_t bytes = heap.allocatedEver + (tlh ? tlh->allocated : 0); /* this thread's not reported yet too */
   xb_mutex_unlock(&heap.lock);
   return bytes;
 }

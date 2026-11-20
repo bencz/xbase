@@ -78,7 +78,7 @@ void xbf_DBUSEAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, NULL, 1005, "DBUSEAREA", argc, argv);
     return;
   }
-  int shared = argc > 4 && argv[4].type == XB_T_LOGICAL ? argv[4].v.l != 0 : ctx->env->set_shared;
+  int shared = argc > 4 && argv[4].type == XB_T_LOGICAL ? argv[4].v.l != 0 : ctx->env->settings->set_shared;
   open_table(ctx, xb_db_logical_arg(argc, argv, 0), rdd, name, xb_db_str_arg(argc, argv, 3),
              xb_db_logical_arg(argc, argv, 5), !shared);
 }
@@ -356,7 +356,7 @@ void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!created) return;
   uint32_t before = ctx->env->areaCurrent;
   if (argc > 3 && argv[3].type == XB_T_LOGICAL &&
-      !open_table(ctx, argv[3].v.l, rdd, name, xb_db_str_arg(argc, argv, 4), 0, !ctx->env->set_shared))
+      !open_table(ctx, argv[3].v.l, rdd, name, xb_db_str_arg(argc, argv, 4), 0, !ctx->env->settings->set_shared))
     ctx->env->areaCurrent = before; /* unlike dbUseArea(), the area current before stays */
 }
 
@@ -689,7 +689,7 @@ void xbf_RDDSETDEFAULT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) 
   xb_set_str(ret, xb_str_new(now->name, strlen(now->name)));
   const xb_str *name = xb_db_str_arg(argc, argv, 0);
   const xb_rdd *chosen = name && name->len ? xb_rdd_find(xb_str_data(name), name->len) : NULL;
-  if (chosen) ctx->env->rddDefault = chosen;
+  if (chosen) xb_settings_own(ctx)->rddDefault = chosen;
 }
 
 void xbf_RDDNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

@@ -151,14 +151,14 @@ The context is split in two (done, [runtime.md](runtime.md#threads-and-synchroni
   task runs in an environment of its own, made from the snapshot its creator's gave it, in front of the thread's (done).
   An `ASYNC` function has an environment of its own from its call to its end (done): at the call a copy of its caller's
   (the `SET` values, `ErrorBlock()`, the language, the code page, the default driver, the PRIVATE variables visible, the
-  same variables) with no work area open; what it changes there (`SET`, `SELECT`, `USE`, `ErrorBlock()`) is its own,
-  never its caller's, also in its first step, and lasts across `AWAIT`; its tables stay open across `AWAIT` and close
-  when it ends. Between steps the environment is parked; one whose function is abandoned (what it awaits is dropped, so
-  it never resumes) is closed after the collection that finds the task unreachable (at the next pending test of the
-  context that runs destructors), its tables and locks with it: a young collection finds one parked a short while, one
-  that outlived two young collections is found by the next full collection. *(Planned)*:
-  `SET DECIMALS` moves into the environment, copied into the context when it changes, so that switching between
-  suspended tasks is a pointer store and that copy.
+  same variables; the `SET` values and the bindings shared until one of the two changes them) with no work area open;
+  what it changes there (`SET`, `SELECT`, `USE`, `ErrorBlock()`) is its own, never its caller's, also in its first step,
+  and lasts across `AWAIT`; its tables stay open across `AWAIT` and close when it ends. Between steps the environment is
+  parked; one whose function is abandoned (what it awaits is dropped, so it never resumes) is closed after the
+  collection that finds the task unreachable (at the next pending test of the context that runs destructors), its tables
+  and locks with it: a young collection finds one parked a short while, one that outlived two young collections is found
+  by the next full collection. *(Planned)*: `SET DECIMALS` moves into the environment, copied into the context when it
+  changes, so that switching between suspended tasks is a pointer store and that copy.
 
 Sequential code shares one environment and sees every `SET` as Clipper does. A new flow (`TaskRun`, `ThreadStart`, an
 `ASYNC` call) starts with a copy of its creator's environment and a table of work areas of its own, empty (done): what

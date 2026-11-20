@@ -89,7 +89,10 @@ void  xb_gc_unregister(xb_ctx *ctx);
 void  xb_gc_raise_all(const xb_ctx *except, uint32_t bits);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */
 size_t xb_gc_heap_bytes(void);
-size_t xb_gc_occupied_bytes(void);        /* xb_gc_heap_bytes without the free blocks kept for allocations */
+size_t xb_gc_occupied_bytes(void);         /* xb_gc_heap_bytes without the free blocks kept for allocations */
+/* Bytes allocated since the program started: every thread's reported ones and the calling thread's not yet reported
+ * (another thread's count at its collections, slow allocations and detaches). */
+uint64_t xb_gc_allocated_bytes(void);
 /* The program ends: the trimmer (gc.c, Memory given back) stops, waited for. */
 void xb_gc_trim_end(void);
 /* Whether the heap's books agree (tests, after a collection): every free block in use listed as free, no block given

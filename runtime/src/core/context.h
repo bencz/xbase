@@ -13,6 +13,25 @@
  * the flow it runs (docs/concurrency.md). */
 typedef struct xb_bindings xb_bindings;
 
+/* The SET values a flow inherits as they are when it starts (an ASYNC function's first step, a task's): shared by the
+ * environments that inherited them, read in place by all, and never changed while shared: an environment that changes
+ * one takes a copy of its own first (xb_settings_own), so a function suspended at a thousand places costs its caller's
+ * settings once. */
+typedef struct xb_settings {
+  uint32_t refs;            /* the environments using it (atomic: they may end on other threads) */
+  int      set_exact;
+  int      set_fixed;       /* SET FIXED: numbers shown with SET DECIMALS decimals (core/numeric.h) */
+  int32_t  epoch;           /* SET EPOCH */
+  int      century;         /* SET CENTURY */
+  const struct xb_codepage *codepage; /* SET CODEPAGE (core/codepage.h); NULL: UTF-8 */
+  int      set_deleted;
+  int      set_shared;     /* SET EXCLUSIVE OFF: USE opens shared unless told EXCLUSIVE (zero: on, Clipper's default) */
+  int      set_softseek;   /* SET SOFTSEEK: a SEEK that finds nothing stops on the next key */
+  int      set_unique;     /* SET UNIQUE: orders made keep one entry per key */
+  const struct xb_rdd *rddDefault; /* the default driver (NULL: DBFNTX) */
+  char     date_format[];   /* SET DATE FORMAT picture, NUL-terminated */
+} xb_settings;
+
 typedef struct xb_env {
   /* ErrorBlock(): a codeblock, NIL until ErrorSys() runs (a root of the collector) */
   xb_item  error_block;
@@ -23,38 +42,29 @@ typedef struct xb_env {
   uint32_t  bindHint;       /* the entry of the bindings found last: tried first */
   struct xb_private *privates;
   uint32_t  privateLen, privateCap;
-  int      set_exact;
-  int      set_fixed;       /* SET FIXED: numbers shown with SET DECIMALS decimals (core/numeric.h) */
-  /* SET DATE FORMAT picture (NUL-terminated): in `dateOwn` (malloc'ed, dateCap bytes), or borrowed from the
-   * environment that is set aside while this one runs (xb_env_inherit), until it changes or this one is parked. */
-  const char *date_format;
-  char    *dateOwn;
-  size_t   dateCap;
-  int32_t  epoch;           /* SET EPOCH */
-  int      century;         /* SET CENTURY */
+  xb_settings *settings;    /* the SET values (shared: read them, change them through xb_settings_own) */
   int32_t  file_error;      /* FError(): the code of the last file function (rtl/files.c) */
-  xb_item  language;        /* SET LANGUAGE: the current language's texts (core/language.c), a root; NIL until used */
-  const struct xb_codepage *codepage; /* SET CODEPAGE (core/codepage.h); NULL: UTF-8 */
-  /* Work areas (rdd/rdd.h): by number, NULL where no table is open; the current one's number (1 at the start); SET
-   * DELETED; the default driver (NULL: DBFNTX); NetErr(). */
+  /* SET LANGUAGE: the current language's texts (core/language.c), a root; NIL until used. A flow's own, as ErrorBlock()
+   * is (BEGIN SEQUENCE WITH sets it each time): neither would take a copy of the settings. */
+  xb_item  language;
+  /* Work areas (rdd/rdd.h): by number, NULL where no table is open; the current one's number (1 at the start);
+   * NetErr(). */
   struct xb_area **areas;
   uint32_t areaCap, areaCurrent;
-  int      set_deleted;
-  int      set_shared;     /* SET EXCLUSIVE OFF: USE opens shared unless told EXCLUSIVE (zero: on, Clipper's default) */
-  int      set_softseek;   /* SET SOFTSEEK: a SEEK that finds nothing stops on the next key */
-  int      set_unique;     /* SET UNIQUE: orders made keep one entry per key */
-  const struct xb_rdd *rddDefault;
   int      netErr;
   struct xb_env *outer;    /* the environment set aside while this one runs (xb_env_enter), NULL: none; a root too */
   int32_t  outerDecimals;  /* SET DECIMALS of the code that set it aside, back when this one ends */
-  /* While an asynchronous function that owns it is suspended (xb_env_park): its SET DECIMALS, the task (its address,
-   * which the collector updates; the environment goes when the task does), and its neighbors in the parked list. */
+  /* An asynchronous function's (xb_env_park, core/ctx.c): its SET DECIMALS while suspended, its task (its address,
+   * which the collector updates; the environment goes when the task does), its neighbors in its shard's list. */
   int32_t  parkedDecimals;
   void    *parkedTask;
   struct xb_env *parkedPrev, *parkedNext;
-  uint8_t  parkedShard;     /* its list's shard (ctx.c) */
-  uint8_t  parkedOld;       /* in the shard's old list: what it reaches is old, young collections skip it */
-  uint8_t  parkedScans;     /* young collections that scanned it since it was parked */
+  uint8_t  parkedShard;     /* its list's shard */
+  uint8_t  parkedScans;     /* young collections that scanned it since it was last parked */
+  uint8_t  listed;          /* in its shard's list: from its first suspension to its function's end */
+  uint8_t  parked;          /* suspended now (else running: its context's) */
+  uint8_t  recent;          /* in a thread's recent list (or the orphans): young collections scan it */
+  uint8_t  ended;           /* its function ended while a recent list held it: the collector frees it */
 } xb_env;
 
 /* A thread's context: what compiled code reaches (the [ABI] head), the state of the code running on the thread now
@@ -98,6 +108,8 @@ struct xb_ctx {
    * at once may answer with its result itself (xb_await_method, xb_task_answer). */
   int32_t async_fuse_method;
   xb_env  *spareEnv;        /* an environment ended, kept for the next one the thread makes (no allocation) */
+  xb_env **recent;          /* environments suspended lately on this thread (core/ctx.c): young collections scan them */
+  uint32_t recentLen, recentCap;
   /* Type() evaluating (error_trap > 0): an error runs no block, it ends the
    * evaluation (XB_PENDING_TRAP, which no BEGIN SEQUENCE catches) and sets
    * error_trapped to its generic code (never 0). */
@@ -149,6 +161,8 @@ static inline void xb_root_pop(xb_ctx *ctx, unsigned n) { ctx->rootLen -= n; }
 #endif
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len);
+/* The environment's settings, its own to change: a copy taken first when other environments share them. */
+xb_settings *xb_settings_own(xb_ctx *ctx);
 
 /* The stack of the context's thread, from the lowest address the program may use to its end (it grows down from
  * there): compiled code raises the stack error a reserve above `low` (core/ctx.c); NULL: unknown, no limit. The
@@ -189,8 +203,10 @@ void xb_env_reap_all(xb_ctx *ctx);
 /* The collector's side, every other thread stopped: `fn` on each parked environment a collection must scan (`full`:
  * all of them; else those parked lately); then `live` gives where each one's task is now, NULL when it is unreachable:
  * those are the environments to reap (1 when some are). */
-void xb_env_parked_each(void (*fn)(xb_env *env), int full);
-int  xb_env_parked_settle(void *(*live)(void *obj), int full);
+void xb_env_parked_each(xb_ctx *contexts, void (*fn)(xb_env *env), int full);
+int  xb_env_parked_settle(xb_ctx *contexts, void *(*live)(void *obj), int full);
+/* A context going: its recent list to the orphans, which the collector scans as a thread's. */
+void xb_env_recent_orphan(xb_ctx *ctx);
 
 /* Closes the work areas of `ctx`'s environment whatever ended its flow: the requests pending (and a BREAK's value) set
  * aside meanwhile and back after; what closing raised dropped, but a QUIT (also one another thread raised). */

@@ -62,7 +62,7 @@ static inline void xb_num_field(const xb_item *it, int *width, int *dec) {
  * ON SET DECIMALS decimals, unless its width is 1 (as Clipper, which then keeps the number's). */
 static inline void xb_num_shown_field(const xb_ctx *ctx, const xb_item *it, int *width, int *dec) {
   xb_num_field(it, width, dec);
-  if (ctx->env->set_fixed && *width > 1) *dec = xb_decimals(ctx);
+  if (ctx->env->settings->set_fixed && *width > 1) *dec = xb_decimals(ctx);
 }
 
 /* With SET FIXED ON, an integer that Transform() shows by its own field is that many columns wider, with no

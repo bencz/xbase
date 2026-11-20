@@ -8,10 +8,39 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Settings of `from`'s values (NULL: Clipper's: SET EPOCH 1900, the rest off, no codepage or driver chosen) with the
+ * date format `fmt` (`len` bytes), used by one environment. */
+static xb_settings *settings_new(const xb_settings *from, const char *fmt, size_t len) {
+  xb_settings *s = malloc(sizeof *s + len + 1);
+  if (!s) xb_gc_fatal("out of memory");
+  if (from) {
+    memcpy(s, from, sizeof *s);
+  } else {
+    memset(s, 0, sizeof *s);
+    s->epoch = 1900;
+  }
+  s->refs = 1;
+  memcpy(s->date_format, fmt, len); /* `fmt` may be `from`'s own: copied before `from` may go */
+  s->date_format[len] = '\0';
+  return s;
+}
+
+static void settings_release(xb_settings *s) {
+  if (s && xb_atomic_add32(&s->refs, (uint32_t)-1, XB_ACQ_REL) == 1) free(s);
+}
+
+xb_settings *xb_settings_own(xb_ctx *ctx) {
+  xb_settings *s = ctx->env->settings;
+  if (xb_atomic_load32(&s->refs, XB_ACQUIRE) == 1) return s;
+  xb_settings *mine = settings_new(s, s->date_format, strlen(s->date_format));
+  ctx->env->settings = mine;
+  settings_release(s);
+  return mine;
+}
+
 /* The environment a program starts with: Clipper's SET values (SET DECIMALS is the thread context's), no ErrorBlock()
  * until ErrorSys() sets one (xb_program_run), work area 1 current. */
-/* The thread's spare environment, or a new one (zeroed): its fields are the caller's to set, but its date format's
- * buffer (dateOwn, dateCap). */
+/* The thread's spare environment, or a new one (zeroed): its fields are the caller's to set. */
 static xb_env *env_take(xb_ctx *ctx) {
   xb_env *env = ctx ? ctx->spareEnv : NULL;
   if (env) {
@@ -25,17 +54,15 @@ static xb_env *env_take(xb_ctx *ctx) {
 
 static xb_env *env_new(xb_ctx *ctx) {
   xb_env *env = env_take(ctx);
-  char *fmt = env->dateOwn;
-  size_t cap = env->dateCap;
   memset(env, 0, sizeof *env);
-  env->dateOwn = fmt;
-  env->dateCap = cap;
   xb_set_nil(&env->error_block);
   xb_set_nil(&env->language);
-  env->epoch = 1900;
+  env->settings = settings_new(NULL, "mm/dd/yy", 8);
   env->areaCurrent = 1;
   return env;
 }
+
+static void unlist(xb_env *env);
 
 static void env_free(xb_ctx *ctx, xb_env *env) {
   xb_memvar_bindings_free(env);
@@ -46,11 +73,22 @@ static void env_free(xb_ctx *ctx, xb_env *env) {
   if (env->areas) free(env->areas);
   env->privates = NULL;
   env->areas = NULL;
+  settings_release(env->settings);
+  env->settings = NULL;
+  unlist(env);
+  /* the last this thread listed (a function that suspended and ended on the same thread): spare again */
+  if (env->recent && ctx && ctx->recentLen && ctx->recent[ctx->recentLen - 1] == env) {
+    --ctx->recentLen;
+    env->recent = 0;
+  }
+  if (env->recent) { /* a thread's recent list holds it: the collector frees it */
+    env->ended = 1;
+    return;
+  }
   if (ctx && !ctx->spareEnv) {
     ctx->spareEnv = env;
     return;
   }
-  free(env->dateOwn);
   free(env);
 }
 
@@ -66,14 +104,16 @@ enum { SNAP_SETS, SNAP_DATE_FORMAT, SNAP_ERROR_BLOCK, SNAP_LANGUAGE, SNAP_MEMVAR
 
 void xb_env_capture(xb_ctx *ctx, xb_item *r) {
   const xb_env *env = ctx->env;
+  const xb_settings *st = env->settings;
   xb_array *a = xb_array_alloc(SNAP_COUNT_); /* `a`, on the stack, stays where it is */
   xb_set_array(r, a);
-  env_sets sets = {ctx->set_decimals, env->epoch,       env->set_exact,    env->set_fixed, env->century,
-                   env->set_deleted,  env->set_shared,  env->set_softseek, env->set_unique, env->codepage,
-                   env->rddDefault};
+  env_sets sets = {ctx->set_decimals, st->epoch,       st->set_exact,    st->set_fixed, st->century,
+                   st->set_deleted,  st->set_shared,  st->set_softseek, st->set_unique, st->codepage,
+                   st->rddDefault};
   xb_set_str(&xb_array_items(a)[SNAP_SETS], xb_str_new((const char *)&sets, sizeof sets));
   xb_gc_write(a);
-  xb_set_str(&xb_array_items(a)[SNAP_DATE_FORMAT], xb_str_new(env->date_format, strlen(env->date_format)));
+  st = ctx->env->settings; /* an allocation may have collected: the settings stay (no collection frees them) */
+  xb_set_str(&xb_array_items(a)[SNAP_DATE_FORMAT], xb_str_new(st->date_format, strlen(st->date_format)));
   xb_gc_write(a);
   xb_array_items(a)[SNAP_ERROR_BLOCK] = env->error_block;
   xb_array_items(a)[SNAP_LANGUAGE] = env->language;
@@ -94,18 +134,19 @@ void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
   xb_array_get(snapshot->v.p, SNAP_SETS, &it);
   memcpy(&sets, xb_str_data(it.v.s), sizeof sets);
   ctx->set_decimals = sets.decimals;
-  env->epoch = sets.epoch;
-  env->set_exact = sets.exact;
-  env->set_fixed = sets.fixed;
-  env->century = sets.century;
-  env->set_deleted = sets.deleted;
-  env->set_shared = sets.shared;
-  env->set_softseek = sets.softseek;
-  env->set_unique = sets.unique;
-  env->codepage = sets.codepage;
-  env->rddDefault = sets.rddDefault;
   xb_array_get(snapshot->v.p, SNAP_DATE_FORMAT, &it);
-  xb_ctx_set_date_format(ctx, xb_str_data(it.v.s), it.v.s->len);
+  xb_ctx_set_date_format(ctx, xb_str_data(it.v.s), it.v.s->len); /* settings of the environment's own */
+  xb_settings *st = env->settings;
+  st->epoch = sets.epoch;
+  st->set_exact = sets.exact;
+  st->set_fixed = sets.fixed;
+  st->century = sets.century;
+  st->set_deleted = sets.deleted;
+  st->set_shared = sets.shared;
+  st->set_softseek = sets.softseek;
+  st->set_unique = sets.unique;
+  st->codepage = sets.codepage;
+  st->rddDefault = sets.rddDefault;
   xb_array_get(snapshot->v.p, SNAP_ERROR_BLOCK, &env->error_block);
   xb_array_get(snapshot->v.p, SNAP_LANGUAGE, &env->language);
   xb_array_get(snapshot->v.p, SNAP_MEMVARS, &it);
@@ -122,11 +163,8 @@ void xb_env_enter(xb_ctx *ctx, const xb_item *snapshot) {
 
 xb_env *xb_env_inherit(xb_ctx *ctx) {
   xb_env *from = ctx->env, *env = env_take(ctx);
-  char *fmt = env->dateOwn;
-  size_t cap = env->dateCap;
-  *env = *from; /* the SET values, ErrorBlock(), the language, the code page, the default driver; the rest below */
-  env->dateOwn = fmt;
-  env->dateCap = cap;
+  *env = *from; /* the settings (shared), ErrorBlock(), the language; the rest below */
+  xb_atomic_add32(&env->settings->refs, 1, XB_RELAXED);
   env->bindings = NULL;
   env->privates = NULL;
   env->privateLen = env->privateCap = 0;
@@ -137,6 +175,8 @@ xb_env *xb_env_inherit(xb_ctx *ctx) {
   env->netErr = 0;
   env->parkedTask = NULL;
   env->parkedPrev = env->parkedNext = NULL;
+  env->listed = env->recent = env->parked = env->ended = 0;
+  env->parkedScans = 0;
   xb_memvar_inherit(env, from);
   env->outer = from;
   env->outerDecimals = ctx->set_decimals;
@@ -144,29 +184,28 @@ xb_env *xb_env_inherit(xb_ctx *ctx) {
   return env;
 }
 
-/* A borrowed date format becomes the environment's own: it outlives the one it was borrowed from. */
-static void own_date_format(xb_ctx *ctx) {
-  if (ctx->env->date_format != ctx->env->dateOwn)
-    xb_ctx_set_date_format(ctx, ctx->env->date_format, strlen(ctx->env->date_format));
-}
-
-/* The parked environments, in PARK_SHARDS shards by the environment's address, each a lock and two lists: so that
- * the suspensions and resumptions of independent functions do not wait for one another. A shard's young list holds the
- * environments parked lately, which every collection scans; one that young collections scanned twice moves to the old
- * list (all it reaches is old by then, and a parked environment does not change), which only full collections scan:
- * a young collection costs what was parked lately, whatever waits for long. Those whose tasks died wait in `dead`
- * (under deadLock; `deaths` tells a thread there are some without the lock) until they are closed. */
+/* The environments of suspended asynchronous functions, in PARK_SHARDS shards by the environment's address (a list
+ * and a lock each): an environment joins its shard's list when its function first suspends, and leaves it when the
+ * function ends (or its task dies), so a suspension and a resumption take no lock. The collector scans what a parked
+ * environment holds: every one at a full collection; at a young one, those parked lately, which each thread lists at
+ * a suspension without a lock (`ctx->recent`, an environment once until the collector takes it off; the list of a
+ * thread that ended goes to `orphans`), scanned by the next PARK_SCANS_YOUNG young collections (all it reaches is old
+ * by then, and a parked environment does not change). An environment that ends while some thread's list holds it is
+ * left for the collector to free (`ended`). Those whose tasks died wait in `dead` (under deadLock; `deaths` tells a
+ * thread there are some without the lock) until they are closed. */
 #define PARK_SHARDS 64u
 #define PARK_SCANS_YOUNG 2u
 typedef struct park_shard {
-  uint32_t lock; /* xb_word_lock: taken at every suspension and resumption, seldom waited for */
-  xb_env *young, *old;
+  uint32_t lock; /* xb_word_lock: taken when a function first suspends and when it ends */
+  xb_env *list;
 } park_shard;
 static park_shard shards[PARK_SHARDS];
-static xb_mutex deadLock;
+static xb_mutex deadLock; /* `dead`, and `orphans` */
 static xb_once_flag parkedMade = XB_ONCE_INIT;
 static xb_env *dead;
 static uint32_t deaths;
+static xb_env **orphans;
+static uint32_t orphanLen, orphanCap;
 static uint32_t parkedReady; /* the locks made: a collection before any park has none to look at */
 
 static void make_parked(void) {
@@ -174,14 +213,9 @@ static void make_parked(void) {
   xb_atomic_store32(&parkedReady, 1, XB_RELEASE);
 }
 
-static xb_env **list_of(xb_env *env) {
-  park_shard *s = &shards[env->parkedShard];
-  return env->parkedOld ? &s->old : &s->young;
-}
-
 static void unlink_parked(xb_env *env) {
   if (env->parkedPrev) env->parkedPrev->parkedNext = env->parkedNext;
-  else *list_of(env) = env->parkedNext;
+  else shards[env->parkedShard].list = env->parkedNext;
   if (env->parkedNext) env->parkedNext->parkedPrev = env->parkedPrev;
   env->parkedPrev = env->parkedNext = NULL;
 }
@@ -193,83 +227,134 @@ static void link_parked(xb_env **list, xb_env *env) {
   *list = env;
 }
 
+/* Appends `env` to a list of environments (a thread's `recent`, the orphans). */
+static void push_env(xb_env ***list, uint32_t *len, uint32_t *cap, xb_env *env) {
+  if (*len == *cap) {
+    uint32_t n = *cap ? *cap * 2 : 64;
+    xb_env **grown = realloc(*list, n * sizeof *grown);
+    if (!grown) xb_gc_fatal("out of memory");
+    *list = grown;
+    *cap = n;
+  }
+  (*list)[(*len)++] = env;
+}
+
 void xb_env_park(xb_ctx *ctx, xb_env *env, void *task) {
-  xb_once(&parkedMade, make_parked);
-  own_date_format(ctx);
   env->parkedDecimals = ctx->set_decimals;
   ctx->env = env->outer;
   ctx->set_decimals = env->outerDecimals;
   env->outer = NULL;
   env->parkedTask = task;
-  env->parkedShard = (uint8_t)(((uintptr_t)env >> 6) % PARK_SHARDS);
-  env->parkedOld = 0;
+  env->parked = 1;
   env->parkedScans = 0;
-  park_shard *s = &shards[env->parkedShard];
-  xb_word_lock(&s->lock); /* no safepoint until it is released: no collection meanwhile */
-  link_parked(&s->young, env);
-  xb_word_unlock(&s->lock);
+  if (!env->listed) { /* its first suspension */
+    xb_once(&parkedMade, make_parked);
+    env->parkedShard = (uint8_t)(((uintptr_t)env >> 6) % PARK_SHARDS);
+    park_shard *s = &shards[env->parkedShard];
+    xb_word_lock(&s->lock); /* no safepoint until it is released: no collection meanwhile */
+    link_parked(&s->list, env);
+    xb_word_unlock(&s->lock);
+    env->listed = 1;
+  }
+  if (!env->recent) {
+    push_env(&ctx->recent, &ctx->recentLen, &ctx->recentCap, env);
+    env->recent = 1;
+  }
 }
 
 void xb_env_unpark(xb_ctx *ctx, xb_env *env) {
-  park_shard *s = &shards[env->parkedShard];
-  xb_word_lock(&s->lock);
-  unlink_parked(env);
-  xb_word_unlock(&s->lock);
-  env->parkedTask = NULL;
+  env->parked = 0;
   env->outer = ctx->env;
   env->outerDecimals = ctx->set_decimals;
   ctx->env = env;
   ctx->set_decimals = env->parkedDecimals;
 }
 
-void xb_env_parked_each(void (*fn)(xb_env *env), int full) {
-  if (!xb_atomic_load32(&parkedReady, XB_ACQUIRE)) return; /* none parked yet */
-  for (uint32_t k = 0; k < PARK_SHARDS; ++k) {
-    for (xb_env *env = shards[k].young; env; env = env->parkedNext) fn(env);
-    if (full)
-      for (xb_env *env = shards[k].old; env; env = env->parkedNext) fn(env);
+/* Out of its shard's list, if it is in it: its function ended. */
+static void unlist(xb_env *env) {
+  if (!env->listed) return;
+  park_shard *s = &shards[env->parkedShard];
+  xb_word_lock(&s->lock);
+  unlink_parked(env);
+  xb_word_unlock(&s->lock);
+  env->listed = 0;
+}
+
+void xb_env_recent_orphan(xb_ctx *ctx) {
+  if (ctx->recentLen) {
+    xb_once(&parkedMade, make_parked);
+    xb_mutex_lock(&deadLock);
+    for (uint32_t i = 0; i < ctx->recentLen; ++i) push_env(&orphans, &orphanLen, &orphanCap, ctx->recent[i]);
+    xb_mutex_unlock(&deadLock);
   }
+  free(ctx->recent); /* a collection may still run before the context leaves the collector's list: none left */
+  ctx->recent = NULL;
+  ctx->recentLen = ctx->recentCap = 0;
+}
+
+void xb_env_parked_each(xb_ctx *contexts, void (*fn)(xb_env *env), int full) {
+  if (!xb_atomic_load32(&parkedReady, XB_ACQUIRE)) return; /* none parked yet */
+  if (full)
+    for (uint32_t k = 0; k < PARK_SHARDS; ++k)
+      for (xb_env *env = shards[k].list; env; env = env->parkedNext)
+        if (env->parked) fn(env); /* one running is its context's */
+  for (xb_ctx *ctx = contexts; ctx; ctx = ctx->gcNext)
+    for (uint32_t i = 0; i < ctx->recentLen; ++i)
+      if (!ctx->recent[i]->ended && ctx->recent[i]->parked) fn(ctx->recent[i]);
+  for (uint32_t i = 0; i < orphanLen; ++i)
+    if (!orphans[i]->ended && orphans[i]->parked) fn(orphans[i]);
   for (xb_env *env = dead; env; env = env->parkedNext) fn(env);
 }
 
-/* An environment of a shard's list (`old`) after a collection's marking: dead to `dead`; a young one scanned twice
- * to the old list. */
-static int settle_one(xb_env *env, void *(*live)(void *obj), int old) {
+/* A listed environment after a collection's marking: its task's address now; to `dead` when that died (1). */
+static int settle_one(xb_env *env, void *(*live)(void *obj)) {
   env->parkedTask = live(env->parkedTask);
-  if (!env->parkedTask) {
-    unlink_parked(env);
-    env->parkedNext = dead;
-    if (dead) dead->parkedPrev = env;
-    dead = env;
-    return 1;
-  }
-  if (!old && ++env->parkedScans >= PARK_SCANS_YOUNG) {
-    unlink_parked(env);
-    env->parkedOld = 1;
-    link_parked(&shards[env->parkedShard].old, env);
-  }
-  return 0;
+  if (env->parkedTask) return 0;
+  unlink_parked(env); /* every other thread stopped: no lock needed, none held at a safepoint */
+  env->listed = 0;
+  env->parkedNext = dead;
+  if (dead) dead->parkedPrev = env;
+  dead = env;
+  return 1;
 }
 
-int xb_env_parked_settle(void *(*live)(void *obj), int full) {
+/* A thread's recent list after a collection's marking: the environments that ended freed, those scanned enough (or
+ * dead) taken off; the rest kept for the next young collection. */
+static int settle_recent(xb_env **list, uint32_t *len, void *(*live)(void *obj), int full) {
+  int died = 0;
+  uint32_t kept = 0;
+  for (uint32_t i = 0; i < *len; ++i) {
+    xb_env *env = list[i];
+    if (env->ended) {
+      free(env);
+      continue;
+    }
+    if (!full && env->listed && env->parked) died |= settle_one(env, live);
+    if (env->listed && env->parked && ++env->parkedScans < PARK_SCANS_YOUNG) list[kept++] = env;
+    else env->recent = 0;
+  }
+  *len = kept;
+  return died;
+}
+
+int xb_env_parked_settle(xb_ctx *contexts, void *(*live)(void *obj), int full) {
   if (!xb_atomic_load32(&parkedReady, XB_ACQUIRE)) return 0;
   int died = 0;
-  for (uint32_t k = 0; k < PARK_SHARDS; ++k) {
-    for (xb_env *env = shards[k].young, *next; env; env = next) {
-      next = env->parkedNext;
-      died |= settle_one(env, live, 0);
-    }
-    if (full)
-      for (xb_env *env = shards[k].old, *next; env; env = next) {
+  if (full)
+    for (uint32_t k = 0; k < PARK_SHARDS; ++k)
+      for (xb_env *env = shards[k].list, *next; env; env = next) {
         next = env->parkedNext;
-        died |= settle_one(env, live, 1);
+        if (env->parked) died |= settle_one(env, live);
+        else env->parkedTask = live(env->parkedTask); /* running: its task is reachable */
       }
-  }
+  for (xb_ctx *ctx = contexts; ctx; ctx = ctx->gcNext) died |= settle_recent(ctx->recent, &ctx->recentLen, live, full);
+  died |= settle_recent(orphans, &orphanLen, live, full);
   if (died) xb_atomic_store32(&deaths, 1, XB_RELEASE);
   return died;
 }
 
-/* Closes the environments of `list`, one at a time `ctx`'s (its work areas closed as a flow's at its end). */
+/* Closes the environments whose tasks died, one at a time `ctx`'s (its work areas closed as a flow's at its end);
+ * `all`: every parked one too (the program's end). */
 static void close_parked(xb_ctx *ctx, int all) {
   if (!all && !xb_atomic_load32(&deaths, XB_ACQUIRE)) return;
   xb_once(&parkedMade, make_parked);
@@ -284,15 +369,18 @@ static void close_parked(xb_ctx *ctx, int all) {
       xb_atomic_store32(&deaths, 0, XB_RELAXED);
     }
     xb_mutex_unlock(&deadLock);
-    while (!env && all && k < PARK_SHARDS) { /* the program's end: every parked one too */
+    while (!env && all && k < PARK_SHARDS) {
       park_shard *s = &shards[k];
       xb_word_lock(&s->lock);
-      env = s->young ? s->young : s->old;
+      for (env = s->list; env && !env->parked; env = env->parkedNext) {
+      }
       if (env) unlink_parked(env);
       xb_word_unlock(&s->lock);
-      if (!env) ++k;
+      if (env) env->listed = 0;
+      else ++k;
     }
     if (!env) return;
+    env->parked = 0;
     env->parkedTask = NULL;
     env->outer = ctx->env;
     env->outerDecimals = ctx->set_decimals;
@@ -345,7 +433,6 @@ xb_ctx *xb_ctx_new(void) {
   if (!ctx) xb_gc_fatal("out of memory");
   ctx->env = env_new(NULL);
   ctx->set_decimals = 2;
-  xb_ctx_set_date_format(ctx, "mm/dd/yy", 8);
   xb_set_nil(&ctx->break_value);
   for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) xb_set_nil(&ctx->macro_cache[i]);
   for (uint32_t i = 0; i < XB_NAME_CACHE; ++i) ctx->nameIds[i] = UINT32_MAX;
@@ -359,6 +446,7 @@ static XB_THREAD_LOCAL xb_ctx *stackOwner;
 void xb_ctx_free(xb_ctx *ctx) {
   if (!ctx) return;
   if (stackOwner == ctx) stackOwner = NULL; /* freed by its own thread */
+  xb_env_recent_orphan(ctx); /* before the collector stops seeing the context */
   xb_gc_unregister(ctx);
   for (uint32_t i = 0; i < XB_NAME_CACHE; ++i)
     if (ctx->nameIds[i] != UINT32_MAX) xb_memvar_unhold(ctx->nameIds[i]);
@@ -443,17 +531,9 @@ int32_t xb_exit_code(void) { return (int32_t)xb_atomic_load32((uint32_t *)&exitC
 void xb_exit_code_set(int32_t code) { xb_atomic_store32((uint32_t *)&exitCode, (uint32_t)code, XB_RELAXED); }
 
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len) {
-  xb_env *env = ctx->env;
-  if (len + 1 > env->dateCap) { /* `s` is not in the buffer then: the buffer holds no text that long */
-    char *fmt = malloc(len + 1);
-    if (!fmt) xb_gc_fatal("out of memory");
-    free(env->dateOwn);
-    env->dateOwn = fmt;
-    env->dateCap = len + 1;
-  }
-  memmove(env->dateOwn, s, len);
-  env->dateOwn[len] = '\0';
-  env->date_format = env->dateOwn;
+  xb_settings *old = ctx->env->settings;
+  ctx->env->settings = settings_new(old, s, len); /* `s` may be the old picture: copied first */
+  settings_release(old);
 }
 
 /* Slow paths of the pending test (xbrt.h). xb_pending never collects and never parks the thread for another's

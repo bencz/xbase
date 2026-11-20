@@ -68,7 +68,7 @@ static void put(out *o, char c) {
 static size_t date_template(const xb_ctx *ctx, char c, char out_[XB_DATE_TEXT_SIZE]) {
   char digits[8];
   memset(digits, c, sizeof digits);
-  return xb_date_format_digits(digits, ctx->env->date_format, out_);
+  return xb_date_format_digits(digits, ctx->env->settings->date_format, out_);
 }
 
 static int string_placeholder(char c) { return strchr("!#9aAlLnNxXyY", c) != NULL && c; }
@@ -153,8 +153,8 @@ static size_t transform_number(xb_ctx *ctx, const xb_item *value, const char *pi
   int pointFirst = 0; /* ".99": the field is "0.99" without its zero */
   if (width == 0) { /* the number's own field */
     xb_num_field(value, &width, &dec);
-    if (ctx->env->set_fixed && value->type == XB_T_INT) width += xb_num_fixed_int_extra(ctx);
-    else if (ctx->env->set_fixed) dec = xb_decimals(ctx);
+    if (ctx->env->settings->set_fixed && value->type == XB_T_INT) width += xb_num_fixed_int_extra(ctx);
+    else if (ctx->env->settings->set_fixed) dec = xb_decimals(ctx);
     if (dec) width += dec + 1;
   } else if (dec > 0 && width - dec == 1) {
     pointFirst = 1;
@@ -267,8 +267,8 @@ static size_t transform_number(xb_ctx *ctx, const xb_item *value, const char *pi
  * day, month, year (DDMMYYYY with SET CENTURY, DDMMYY without), its other
  * characters kept. */
 static void british_format(const xb_ctx *ctx, char fmt[XB_DATE_TEXT_SIZE]) {
-  const char *order = ctx->env->century ? "DDMMYYYY" : "DDMMYY";
-  const char *f = ctx->env->date_format;
+  const char *order = ctx->env->settings->century ? "DDMMYYYY" : "DDMMYY";
+  const char *f = ctx->env->settings->date_format;
   char last = 'x';
   size_t n = 0;
   while (n < XB_DATE_TEXT_SIZE - 1) {
@@ -293,9 +293,9 @@ static void transform_date(xb_ctx *ctx, const xb_item *value, unsigned flags, ou
   if (flags & P_BRITISH) {
     british_format(ctx, fmt);
   } else { /* the picture's first 10 characters, all a date's text takes */
-    size_t n = strlen(ctx->env->date_format);
+    size_t n = strlen(ctx->env->settings->date_format);
     if (n > sizeof fmt - 1) n = sizeof fmt - 1;
-    memcpy(fmt, ctx->env->date_format, n);
+    memcpy(fmt, ctx->env->settings->date_format, n);
     fmt[n] = '\0';
   }
   size_t n = xb_date_format(value->v.i, fmt, text);
@@ -346,7 +346,7 @@ void xbf_TRANSFORM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (picture->type == XB_T_NIL || picture->v.s->len == 0) { /* no picture: the value's plain text */
     if (kind == 1) *ret = *value;
     else if (kind == 4) xb_set_str(ret, xb_str_new(value->v.l ? "T" : "F", 1));
-    else if (value->type == XB_T_INT && ctx->env->set_fixed) {
+    else if (value->type == XB_T_INT && ctx->env->settings->set_fixed) {
       int width, dec;
       xb_num_field(value, &width, &dec);
       xb_set_str(ret, xb_num_to_str(value, width + xb_num_fixed_int_extra(ctx), 0));

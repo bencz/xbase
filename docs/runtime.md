@@ -398,7 +398,9 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
 found unreachable ([Classes](#classes)), and returns the number of live objects the last full collection found (tests
 use it). `__GcMemory()` returns `{ live objects, the heap's memory in bytes (blocks in use, large objects' units and
 mappings: what was given back is not counted), the process's resident bytes (0 where the system does not tell), the
-heap's memory without the free blocks it keeps for the next allocations }`.
+heap's memory without the free blocks it keeps for the next allocations, the bytes allocated since the program started
+(`xb_gc_allocated_bytes`: what an operation costs in allocation, the same on every run; another thread's bytes count
+once it reports them, at a collection, a slow allocation or its detach) }`.
 
 Finalization: an object registered with `xb_gc_finalizable` (an object whose compiled class has a destructor, or of a
 runtime class that has one, `xb_class.destructor`: a failed task nothing observed) that a collection does not reach
@@ -1576,21 +1578,28 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   environment of its own, made from its snapshot, that `xb_env_enter` puts in front of the thread's (the one set aside
   is `xb_env.outer`, marked by the collector too) and `xb_env_leave` closes and takes away. An asynchronous function's
   environment is its own from its call to its end: `xb_env_inherit` makes it from its caller's directly (no snapshot:
-  the structure copied, the PRIVATE bindings shared until either changes them, the date format borrowed until it changes
-  or the environment is parked, no work area), and between steps `xb_env_park` sets it aside (`SET DECIMALS` kept) in a
-  list the collector marks, until `xb_env_unpark` puts it back in front of the thread's. The lists are 64 shards by
-  the environment's address, each with its lock (independent suspensions do not wait for one another; a word lock,
-  `xb_word_lock`, which a channel's short lock is too: one compare-and-swap and one exchange, 5% fewer instructions
-  for a pipeline of asynchronous generators than a system mutex) and two lists:
-  the environments parked lately, which every collection scans, and those two young collections scanned already, which
-  only full collections scan (a parked environment does not change, and all it reaches is old by then): a young
-  collection costs what was parked lately, however many functions wait. `xb_env_parked_settle`, after each collection's
-  marking, moves the environments whose tasks it found unreachable to a list that `xb_env_reap` closes (their work
-  areas, then the rest): the collection raises `XB_PENDING_FINALIZE` on the context that runs destructors, whose next
-  pending test closes them (and so does the next step any thread runs), and `xb_env_reap_all` closes every one left at
-  the program's end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): an
-  asynchronous call allocates no environment; one that creates PRIVATEs copies the bindings it shares (once) and grows
-  its own stack of PRIVATEs. The program's exit code is the process's.
+  the structure copied, the PRIVATE bindings shared until either changes them, no work area), and between steps
+  `xb_env_park` sets it aside (`SET DECIMALS` kept) until `xb_env_unpark` puts it back in front of the thread's. The SET
+  values that only `SET` changes (`EXACT`, `FIXED`, the date format, `EPOCH`, `CENTURY`, the codepage, `DELETED`,
+  `EXCLUSIVE`, `SOFTSEEK`, `UNIQUE`, the default driver) are an `xb_settings` the environments share, counted (atomic):
+  an environment that changes one takes a copy of its own first (`xb_settings_own`), so its caller and the functions it
+  started keep theirs, and a suspended function costs its environment (152 bytes) but no settings; `ErrorBlock()` and
+  the language's texts, which `BEGIN SEQUENCE WITH` and a first use change, are each environment's own. An environment
+  joins a list when its function first suspends and leaves it when the function ends (64 shards by its address, each
+  with a word lock, `xb_word_lock`: one compare-and-swap and one exchange), so a suspension and a resumption take no
+  lock: a suspension adds the environment to its thread's list of recent ones (`xb_ctx.recent`, once, no lock; a thread
+  that ends gives its list to the orphans), which the next two young collections scan (a parked environment does not
+  change, and all it reaches is old by then), and a full collection scans every listed one: a young collection costs
+  what was parked lately, however many functions wait. An environment that ends while a recent list holds it is freed by
+  the collector (`ended`). An asynchronous generator's pipeline of three takes 10% fewer instructions and 14% fewer
+  cycles than with a lock at every suspension and resumption. `xb_env_parked_settle`, after each collection's marking,
+  moves the environments whose tasks it found unreachable to a list that `xb_env_reap` closes (their work areas, then
+  the rest): the collection raises `XB_PENDING_FINALIZE` on the context that runs destructors, whose next pending test
+  closes them (and so does the next step any thread runs), and `xb_env_reap_all` closes every one left suspended at the
+  program's end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): an
+  asynchronous call that does not suspend allocates no environment, nor one that ends on the thread whose recent list has
+  it last (it leaves the list then); one that ends while another place lists it is freed by the next
+  collection. One that creates PRIVATEs copies the bindings it shares (once) and grows its own stack of PRIVATEs. The program's exit code is the process's.
 - Program threads (`rtl/threads.c`): `xb_program_thread_start` starts a thread with the stack it is given (reserved,
   committed as used): 16 MB for `ThreadStart`'s (`XB_PROGRAM_THREAD_STACK`), 4 MB for the scheduler's workers and its
   timers' thread (`XB_WORKER_STACK`: most of it for the program's calls, above the stack error's reserve,

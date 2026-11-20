@@ -44,12 +44,12 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
   switch (which) {
     case _SET_EXACT:
-      xb_set_logical(ret, ctx->env->set_exact);
-      if (value) ctx->env->set_exact = set_logical(value, ctx->env->set_exact);
+      xb_set_logical(ret, ctx->env->settings->set_exact);
+      if (value) xb_settings_own(ctx)->set_exact = set_logical(value, ctx->env->settings->set_exact);
       break;
     case _SET_FIXED:
-      xb_set_logical(ret, ctx->env->set_fixed);
-      if (value) ctx->env->set_fixed = set_logical(value, ctx->env->set_fixed);
+      xb_set_logical(ret, ctx->env->settings->set_fixed);
+      if (value) xb_settings_own(ctx)->set_fixed = set_logical(value, ctx->env->settings->set_fixed);
       break;
     case _SET_DECIMALS:
       xb_set_int(ret, ctx->set_decimals);
@@ -62,36 +62,36 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       }
       break;
     case _SET_DATEFORMAT:
-      xb_set_str(ret, xb_str_new(ctx->env->date_format, strlen(ctx->env->date_format)));
+      xb_set_str(ret, xb_str_new(ctx->env->settings->date_format, strlen(ctx->env->settings->date_format)));
       if (value && value->type == XB_T_STRING) {
         xb_ctx_set_date_format(ctx, xb_str_data(value->v.s), value->v.s->len);
         size_t start;
-        ctx->env->century = year_run(ctx->env->date_format, &start) >= 4;
+        ctx->env->settings->century = year_run(ctx->env->settings->date_format, &start) >= 4; /* its own now */
       }
       break;
     case _SET_EPOCH:
-      xb_set_int(ret, ctx->env->epoch);
+      xb_set_int(ret, ctx->env->settings->epoch);
       if (value && xb_is_number(value)) {
         int64_t n = xb_num_to_i64(value);
         if (n < 0) xb_error_in(ctx, "SET", NULL, EG_ARG, 2020, "SET", 0, argc, argv);
-        else ctx->env->epoch = n > INT32_MAX ? INT32_MAX : (int32_t)n;
+        else xb_settings_own(ctx)->epoch = n > INT32_MAX ? INT32_MAX : (int32_t)n;
       }
       break;
     case _SET_DELETED:
-      xb_set_logical(ret, ctx->env->set_deleted);
-      if (value) ctx->env->set_deleted = set_logical(value, ctx->env->set_deleted);
+      xb_set_logical(ret, ctx->env->settings->set_deleted);
+      if (value) xb_settings_own(ctx)->set_deleted = set_logical(value, ctx->env->settings->set_deleted);
       break;
     case _SET_EXCLUSIVE:
-      xb_set_logical(ret, !ctx->env->set_shared);
-      if (value) ctx->env->set_shared = !set_logical(value, !ctx->env->set_shared);
+      xb_set_logical(ret, !ctx->env->settings->set_shared);
+      if (value) xb_settings_own(ctx)->set_shared = !set_logical(value, !ctx->env->settings->set_shared);
       break;
     case _SET_SOFTSEEK:
-      xb_set_logical(ret, ctx->env->set_softseek);
-      if (value) ctx->env->set_softseek = set_logical(value, ctx->env->set_softseek);
+      xb_set_logical(ret, ctx->env->settings->set_softseek);
+      if (value) xb_settings_own(ctx)->set_softseek = set_logical(value, ctx->env->settings->set_softseek);
       break;
     case _SET_UNIQUE:
-      xb_set_logical(ret, ctx->env->set_unique);
-      if (value) ctx->env->set_unique = set_logical(value, ctx->env->set_unique);
+      xb_set_logical(ret, ctx->env->settings->set_unique);
+      if (value) xb_settings_own(ctx)->set_unique = set_logical(value, ctx->env->settings->set_unique);
       break;
     case _SET_LANGUAGE: { /* a name the runtime has no language for leaves it as it is */
       const xb_array *texts = xb_language(ctx);
@@ -104,7 +104,7 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       xb_set_str(ret, xb_str_new(cp->name, strlen(cp->name)));
       if (value && value->type == XB_T_STRING) {
         const xb_codepage *chosen = xb_codepage_find(xb_str_data(value->v.s), value->v.s->len);
-        if (chosen) ctx->env->codepage = chosen;
+        if (chosen) xb_settings_own(ctx)->codepage = chosen;
       }
       break;
     }
@@ -117,13 +117,13 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * rewrites the first run of Ys of the date format as YYYY or YY, or puts
  * one in front when there is none, and the format in upper case. */
 void xbf___SETCENTURY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  int old = ctx->env->century;
+  int old = ctx->env->settings->century;
   xb_set_logical(ret, old);
   if (argc < 1) return;
   int now = set_logical(&argv[0], old);
   if (now == old) return;
-  ctx->env->century = now;
-  const char *old_fmt = ctx->env->date_format;
+  xb_settings_own(ctx)->century = now; /* the new picture's settings copy it */
+  const char *old_fmt = ctx->env->settings->date_format;
   const char *year = now ? "YYYY" : "YY";
   size_t start;
   size_t run = year_run(old_fmt, &start);

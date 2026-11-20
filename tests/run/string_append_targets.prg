@@ -1,12 +1,12 @@
 // x := x + y on what is not a plain LOCAL appends in amortized constant time: an array element, a hash value, an
 // object's variable, a PRIVATE, a PUBLIC, a STATIC and a LOCAL a codeblock sees grow by views of a buffer (an append
-// whose left operand ends at its buffer's tip writes there), written x += y or x := x + y. For each target, the time
-// of 80,000 one-byte appends against that of 20,000 (each the best of five rounds of four strings): linear growth
-// takes about 4 times as long, quadratic growth (every append copying the string) 16 times, and over a second; the
-// check allows 10 times the small one's, or 100 ms (a loaded machine stretches a few milliseconds). Then copies taken
-// between appends keep their values: a copy of an element, two appends to one view, an append to a view that is no
-// longer at its buffer's tip, a `+` that is no append, a view appended to itself, a LOCAL that holds a view, `-`, an
-// empty operand, and appends written out.
+// whose left operand ends at its buffer's tip writes there), written x += y or x := x + y. For each target, the bytes
+// allocated by 80,000 one-byte appends against those of 20,000 (counted by the collector: the same on every run,
+// however loaded the machine): linear growth allocates about 3.5 times as much, under 100 bytes an append; quadratic
+// growth (every append copying the string) 16 times, gigabytes. Then copies taken between appends keep their values:
+// a copy of an element, two appends to one view, an append to a view that is no longer at its buffer's tip, a `+`
+// that is no append, a view appended to itself, a LOCAL that holds a view, `-`, an empty operand, and appends written
+// out.
 #define SMALL 20000
 #define LARGE 80000
 
@@ -26,28 +26,20 @@ PROCEDURE Main()
    LOCAL aT, nSmall, nLarge
    PUBLIC m_cPublic
    FOR EACH aT IN aTargets
-      nSmall := Best( aT[ 2 ], SMALL )
-      nLarge := Best( aT[ 2 ], LARGE )
+      nSmall := Allocated( aT[ 2 ], SMALL )
+      nLarge := Allocated( aT[ 2 ], LARGE )
       ? aT[ 1 ], Eval( aT[ 2 ], LARGE ), Eval( aT[ 2 ], SMALL ), ;
-         IIf( nLarge < 10 * Max( nSmall, 10 ), "linear", "NOT LINEAR " + Str( nSmall ) + Str( nLarge ) )
+         IIf( nLarge < 6 * nSmall .AND. nLarge < 100 * LARGE, "linear", ;
+            "NOT LINEAR " + Str( nSmall ) + Str( nLarge ) )
    NEXT
    Aliasing()
 RETURN
 
-// The best of five rounds, each building four strings of n bytes: milliseconds.
-STATIC FUNCTION Best( bBuild, n )
-   LOCAL nBest := -1, nRound, nAt, k
-   FOR nRound := 1 TO 5
-      nAt := ElapsedMs()
-      FOR k := 1 TO 4
-         Eval( bBuild, n )
-      NEXT
-      nAt := ElapsedMs() - nAt
-      IF nBest < 0 .OR. nAt < nBest
-         nBest := nAt
-      ENDIF
-   NEXT
-RETURN nBest
+// The bytes building a string of n bytes allocates (the collector counts them whatever the machine does meanwhile).
+STATIC FUNCTION Allocated( bBuild, n )
+   LOCAL nBefore := __GcMemory()[ 5 ]
+   Eval( bBuild, n )
+RETURN __GcMemory()[ 5 ] - nBefore
 
 // Each builds a string of n bytes by n appends of one byte, checks every byte, and returns its length.
 STATIC FUNCTION ToElement( n )

@@ -31,7 +31,10 @@ const xb_rdd *xb_rdd_find(const char *name, size_t len) {
   return NULL;
 }
 
-const xb_rdd *xb_rdd_default(xb_ctx *ctx) { return ctx->env->rddDefault ? ctx->env->rddDefault : &xb_rdd_dbf; }
+const xb_rdd *xb_rdd_default(xb_ctx *ctx) {
+  const xb_rdd *rdd = ctx->env->settings->rddDefault;
+  return rdd ? rdd : &xb_rdd_dbf;
+}
 
 xb_area *xb_area_at(xb_ctx *ctx, uint32_t n) {
   return n >= 1 && n <= ctx->env->areaCap ? ctx->env->areas[n - 1] : NULL;
@@ -493,8 +496,8 @@ static int go_raw(xb_ctx *ctx, xb_area *a, uint32_t recno) {
 }
 
 int xb_area_visible(xb_ctx *ctx, xb_area *a) {
-  if (ctx->env->set_deleted && (!xb_area_load(ctx, a) || a->closed)) return -1;
-  if (ctx->env->set_deleted && a->rdd->deleted(a)) return 0;
+  if (ctx->env->settings->set_deleted && (!xb_area_load(ctx, a) || a->closed)) return -1;
+  if (ctx->env->settings->set_deleted && a->rdd->deleted(a)) return 0;
   if (a->filter.type != XB_T_BLOCK) return 1;
   xb_item r, block = a->filter;
   xb_set_nil(&r);

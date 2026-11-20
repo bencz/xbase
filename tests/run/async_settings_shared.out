@@ -1,0 +1,5 @@
+
+inherited, then the caller's change: each kept its own; caller: OFF YY/MM/DD 2000 ON
+ended while recent: .T.
+suspended by a thread that ended: .T.
+threads ending while another collects: .T.
