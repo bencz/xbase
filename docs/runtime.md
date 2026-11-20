@@ -1692,32 +1692,33 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   fewer when their stacks would take more than a quarter of the address space the process may map,
   `xb_platform_address_space`). When no task ended for 2 seconds while tasks wait, and then no worker is active (each
   waits or runs long, or none could start), it tells the standard error once (`starved`, until tasks end again).
-  `TaskWorkers()` gives `{ alive, target, most }` (`xb_sched_workers`). Timers are a binary heap of `{deadline, target}`
-  under the timers' lock, which one program thread serves (started with the pool; with nothing queued it sleeps until
-  its next timer, or with no limit when there is none, and a submission that finds every worker busy wakes it, whatever
-  timers wait): it fires each due target without the lock (`xb_task_timer`: a delay completes, a cancellation source's
-  signal is set, a timeout fails with `Task timed out`, an Error object made with `xb_error_object`), and is the
-  monitor. The heap drops the timers whose targets need them no more (`xb_task_timer_dead`: settled, or replaced by a
-  later `CancelAfter`, whose deadline the signal keeps) once it doubled, or once the timers whose targets ended before
-  their deadlines (`xb_timer_dropped`, told by the target's end: the deadline is in its `V_TIMER`) are half of it,
-  looked at every 64 such ends; at the program's end the timers left fire as ending (a delay and a timeout canceled, a
-  source canceled). Cancellation: a source and its token share a signal, a task that completes when the source is
-  canceled, whose continuations are what waits for it (a delay with that token, a linked source's signal, `Register`'s
-  tasks). A list of continuations drops, at its head, the targets that need it no more (ended, or the signal of a
-  disposed source), and is pruned whole once as many were pushed as it kept at its last pruning. A signal that had
-  64 continuations pushed gets 16 partitions, signals of its own pushed onto its list (it fires them when it is
-  canceled, as a linked source's), made at once and never changed after; from then on each thread pushes into one of
-  them (a thread-local index), so tasks on many workers that wait with one token at once (a server's shutdown token) do
-  not all take its lock: 16 consumers receiving 50000 values each with one token take 63 ms and 0.85 s of processor
-  time, as with a token each (all pushing onto its own list: 300 ms and 3.5 s). Channels (`rtl/channels.c`, their rings
-  and the claims of their waiters in `rtl/waiters.c`, shared with `Mutex` and `Semaphore`): see
-  [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a runtime class's object
-  (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext` takes the next value
-  (waiting for it) into `Current`, and whose `MoveNextAsync` waits as a receiver whose entry in the ring is the pair
-  `{task, enumerator}`: the value delivered goes into the enumerator's `Current` under the channel's lock and the task
-  completes with `.T.`; `Close` completes such tasks with `.F.` instead of failing them. The enumerator keeps the token
-  `GetEnumerator` was given and the task of its `MoveNextAsync` that waits (read and set under the channel's lock: a
-  second one while it waits raises 9035). Their error codes are xbase's own: 9016 to 9031, and 9035.
+  `TaskWorkers()` gives `{ alive, target, most }` (`xb_sched_workers`). Timers are binary heaps of `{deadline, target}`,
+  16 shards each under a word lock (a thread adds to its own: `timerShardOf`), each publishing its earliest deadline
+  (`top`), which one program thread serves (the earliest of all first) (started with the pool; with nothing queued it
+  sleeps until its next timer, or with no limit when there is none, and a submission that finds every worker busy wakes
+  it, whatever timers wait): it fires each due target without the lock (`xb_task_timer`: a delay completes, a
+  cancellation source's signal is set, a timeout fails with `Task timed out`, an Error object made with
+  `xb_error_object`), and is the monitor. The heap drops the timers whose targets need them no more
+  (`xb_task_timer_dead`: settled, or replaced by a later `CancelAfter`, whose deadline the signal keeps) once it
+  doubled, or once the timers whose targets ended before their deadlines (`xb_timer_dropped`, told by the target's end:
+  the deadline is in its `V_TIMER`) are half of it, looked at every 64 such ends; at the program's end the timers left
+  fire as ending (a delay and a timeout canceled, a source canceled). Cancellation: a source and its token share a
+  signal, a task that completes when the source is canceled, whose continuations are what waits for it (a delay with
+  that token, a linked source's signal, `Register`'s tasks). A list of continuations drops, at its head, the targets
+  that need it no more (ended, or the signal of a disposed source), and is pruned whole once as many were pushed as it
+  kept at its last pruning. A signal that had 64 continuations pushed gets 16 partitions, signals of its own pushed onto
+  its list (it fires them when it is canceled, as a linked source's), made at once and never changed after; from then on
+  each thread pushes into one of them (a thread-local index), so tasks on many workers that wait with one token at once
+  (a server's shutdown token) do not all take its lock: 16 consumers receiving 50000 values each with one token take
+  63 ms and 0.85 s of processor time, as with a token each (all pushing onto its own list: 300 ms and 3.5 s). Channels
+  (`rtl/channels.c`, their rings and the claims of their waiters in `rtl/waiters.c`, shared with `Mutex` and
+  `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a runtime class's
+  object (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext` takes the next
+  value (waiting for it) into `Current`, and whose `MoveNextAsync` waits as a receiver whose entry in the ring is the
+  pair `{task, enumerator}`: the value delivered goes into the enumerator's `Current` under the channel's lock and the
+  task completes with `.T.`; `Close` completes such tasks with `.F.` instead of failing them. The enumerator keeps the
+  token `GetEnumerator` was given and the task of its `MoveNextAsync` that waits (read and set under the channel's lock:
+  a second one while it waits raises 9035). Their error codes are xbase's own: 9016 to 9031, and 9035.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread and

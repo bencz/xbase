@@ -296,8 +296,11 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   place, so many tasks meeting on one channel never multiply the threads. A monitor sees a task that runs long (20 ms)
   without blocking while others wait in the queues, and puts another worker beside it the same way; it also starts again
   the workers whose threads did not start.
-- Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): a binary heap of deadlines that one thread serves, started with
-  the pool: it sleeps until the earliest deadline and fires what is due; it is also the monitor, looking every 10 ms
+- Timers (`TaskDelay`, `TaskTimeout`, `CancelAfter`): binary heaps of deadlines, 16 of them, each with its lock (a
+  thread adds to one, always the same, so threads adding timers at once do not wait for one another), which one
+  thread serves, started with the pool: it sleeps until the earliest deadline of all and fires what is due, in the
+  order of the deadlines (each heap publishes its earliest; 16 tasks each making and canceling 50000 delays with
+  tokens take 86 ms with 16 workers, 159 ms with one); it is also the monitor, looking every 10 ms
   while tasks wait in the queues, every 50 µs while a worker is also in an operation that usually returns at once (with
   nothing queued it sleeps until its next timer, and a submission that finds every worker busy wakes it). When the
   system gives it no thread, that is said once on standard error and the next timer added tries again; till then no

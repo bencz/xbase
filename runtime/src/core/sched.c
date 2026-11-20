@@ -40,11 +40,12 @@
  * ended since its last look, keeping the workers away as LONG to the target's number (a computation never multiplies
  * the threads past twice the target).
  *
- * Timers: a binary heap of {deadline, target} under the timers' lock, which one program thread serves (started with the
- * pool): it sleeps until the earliest deadline, then fires what is due (xb_task_timer), one at a time, without the
- * lock. It is also the monitor: while tasks wait in the queues it looks every MONITOR_NS for workers that run one task
- * long, and puts another worker in their place; with nothing queued it sleeps until its next timer (or a new, earlier
- * one) at most, and a submission or a search that finds every place taken while work waits wakes it (`timerIdle`).
+ * Timers: binary heaps of {deadline, target}, TIMER_SHARDS of them, each under its lock (a thread adds to one of them),
+ * which one program thread serves (started with the pool): it sleeps until the earliest deadline of all, then fires
+ * what is due (xb_task_timer), one at a time, in the order of their deadlines, without the locks. It is also the
+ * monitor: while tasks wait in the queues it looks every MONITOR_NS for workers that run one task long, and puts
+ * another worker in their place; with nothing queued it sleeps until its next timer (or a new, earlier one) at most,
+ * and a submission or a search that finds every place taken while work waits wakes it (`timerIdle`).
  *
  * The queues and the timers hold object addresses: the collector marks them (xb_sched_mark), every other thread
  * stopped. */
@@ -139,19 +140,33 @@ typedef struct timer {
   void *target;
 } timer;
 
-static xb_mutex timerLock;
-static timer *timers; /* a binary heap, the earliest deadline first */
-static size_t timerLen, timerCap;
+/* The timers: TIMER_SHARDS binary heaps (the earliest deadline first), each under a lock of its own; each thread adds
+ * to one of them, always the same, so that threads adding timers at once do not all take one lock;
+ * each publishes its earliest deadline (`top`, INT64_MAX when empty), from which the timers' thread takes the
+ * earliest of all. On its own cache line: threads take different shards' locks at once. */
+#define TIMER_SHARDS 16u
+typedef struct timer_shard {
+  _Alignas(XB_CACHE_LINE) uint32_t lock; /* xb_word_lock: a holder only changes its heap */
+  timer *heap;
+  size_t len, cap;
+  size_t compactAt;      /* the heap's size that has it compacted (timers_compact) */
+  XB_ALIGN8 int64_t top; /* heap[0].deadline, INT64_MAX when empty: written under the lock, read without */
+} timer_shard;
+static timer_shard timerShards[TIMER_SHARDS];
+static XB_THREAD_LOCAL uint32_t timerShardOf; /* this thread's shard, from 1 (0: not chosen yet) */
+static uint32_t timerShardsGiven;
+static XB_ALIGN8 uint64_t timersHeld; /* the timers in the heaps, all shards */
+static uint32_t timersDropped;        /* timers whose targets ended before their deadlines since the last compaction */
+#define TIMERS_DROPPED_LOOK 64u        /* drops between looks at whether they reach half of the timers */
+
+static xb_mutex timerLock;    /* the start and the end of the timers' thread */
 static uint32_t timerWake;    /* changed to wake the timers' thread: an earlier deadline, the program's end */
 static uint32_t timerRunning; /* its thread exists (the timers' lock) */
 static uint32_t timerIdle;    /* its thread sleeps without watching the workers (nothing was queued), up to its next
                                  timer at most */
-static size_t timerCompactAt = 1024; /* the heap's size that has it compacted (timers_compact) */
-static uint32_t timersDropped;       /* timers whose targets ended before their deadlines since the last compaction */
-#define TIMERS_DROPPED_LOOK 64u       /* drops between looks at whether they reach half of the heap */
 
 static void timers_wake(void);
-static void timers_compact(void);
+static void timers_compact(timer_shard *t);
 
 /* The most workers: WORKERS_MAX, or as many as have their stacks in a quarter of the address space the process may map
  * when that is fewer (a 32-bit process, a limit set on the process): the rest is the heap's, which the collector
@@ -162,6 +177,10 @@ static uint32_t workersMax = WORKERS_MAX;
 
 static void make_pool(void) {
   if (!xb_mutex_init(&poolLock) || !xb_mutex_init(&timerLock)) xb_gc_fatal("cannot create the scheduler's locks");
+  for (uint32_t k = 0; k < TIMER_SHARDS; ++k) {
+    timerShards[k].compactAt = 1024;
+    timerShards[k].top = INT64_MAX;
+  }
   uint64_t space = xb_platform_address_space();
   if (space > USER_SPACE) space = USER_SPACE;
   uint64_t room = space / 4 / XB_WORKER_STACK;
@@ -709,29 +728,36 @@ static int monitor(void) {
 
 /* Timers. */
 
-static void timer_swap(size_t a, size_t b) {
-  timer t = timers[a];
-  timers[a] = timers[b];
-  timers[b] = t;
+static void timer_swap(timer *heap, size_t a, size_t b) {
+  timer t = heap[a];
+  heap[a] = heap[b];
+  heap[b] = t;
 }
 
-static void timer_up(size_t k) {
-  while (k && timers[(k - 1) / 2].deadline > timers[k].deadline) {
-    timer_swap(k, (k - 1) / 2);
+static void timer_up(timer *heap, size_t k) {
+  while (k && heap[(k - 1) / 2].deadline > heap[k].deadline) {
+    timer_swap(heap, k, (k - 1) / 2);
     k = (k - 1) / 2;
   }
 }
 
-static void timer_down(size_t k) {
+static void timer_down(timer *heap, size_t len, size_t k) {
   for (;;) {
     size_t l = 2 * k + 1, r = l + 1, least = k;
-    if (l < timerLen && timers[l].deadline < timers[least].deadline) least = l;
-    if (r < timerLen && timers[r].deadline < timers[least].deadline) least = r;
+    if (l < len && heap[l].deadline < heap[least].deadline) least = l;
+    if (r < len && heap[r].deadline < heap[least].deadline) least = r;
     if (least == k) return;
-    timer_swap(k, least);
+    timer_swap(heap, k, least);
     k = least;
   }
 }
+
+/* The shard's earliest deadline published (its lock held). */
+static void timer_top(timer_shard *t) {
+  xb_atomic_store64((uint64_t *)&t->top, (uint64_t)(t->len ? t->heap[0].deadline : INT64_MAX), XB_RELEASE);
+}
+
+static int64_t timer_top_of(timer_shard *t) { return (int64_t)xb_atomic_load64((uint64_t *)&t->top, XB_ACQUIRE); }
 
 static void timer_body(xb_ctx *ctx, void *arg);
 
@@ -761,59 +787,89 @@ static void timers_start(void) {
 
 void xb_timer_add(xb_object *object, int64_t deadline) {
   xb_once(&poolMade, make_pool);
-  xb_mutex_lock(&timerLock);
-  if (timerLen == timerCap) {
-    size_t cap = timerCap ? timerCap * 2 : 64;
-    timer *grown = realloc(timers, cap * sizeof *grown);
+  if (!timerShardOf) timerShardOf = xb_atomic_add32(&timerShardsGiven, 1, XB_RELAXED) % TIMER_SHARDS + 1;
+  timer_shard *t = &timerShards[timerShardOf - 1];
+  xb_word_lock(&t->lock);
+  if (t->len == t->cap) {
+    size_t cap = t->cap ? t->cap * 2 : 64;
+    timer *grown = realloc(t->heap, cap * sizeof *grown);
     if (!grown) xb_gc_fatal("out of memory");
-    timers = grown;
-    timerCap = cap;
+    t->heap = grown;
+    t->cap = cap;
   }
-  if (timerLen >= timerCompactAt) timers_compact();
-  timers[timerLen] = (timer){deadline, object};
-  timer_up(timerLen++);
-  int earliest = timers[0].target == object && timers[0].deadline == deadline;
-  xb_mutex_unlock(&timerLock);
+  if (t->len >= t->compactAt) timers_compact(t);
+  t->heap[t->len] = (timer){deadline, object};
+  timer_up(t->heap, t->len++);
+  xb_atomic_add64(&timersHeld, 1, XB_RELAXED);
+  int earliest = t->heap[0].target == object && t->heap[0].deadline == deadline; /* of its shard: maybe of all */
+  timer_top(t);
+  xb_word_unlock(&t->lock);
   timers_start();
   if (earliest) timers_wake();
 }
 
 void xb_timer_dropped(void) {
   uint32_t n = xb_atomic_add32(&timersDropped, 1, XB_RELAXED) + 1;
-  if (n % TIMERS_DROPPED_LOOK) return; /* the lock once every TIMERS_DROPPED_LOOK drops */
-  xb_mutex_lock(&timerLock);
-  if ((size_t)n * 2 >= timerLen) timers_compact();
-  xb_mutex_unlock(&timerLock);
-}
-
-/* The earliest timer due by `now` (all of them when `now` is INT64_MAX), taken off the heap: NULL for none; its
- * deadline in `*deadline`, the earliest left in `*next` (-1: none). */
-static void *timer_due(int64_t now, int64_t *deadline, int64_t *next) {
-  void *t = NULL;
-  xb_mutex_lock(&timerLock);
-  if (timerLen && timers[0].deadline <= now) {
-    t = timers[0].target;
-    *deadline = timers[0].deadline;
-    timers[0] = timers[--timerLen];
-    timer_down(0);
-  }
-  *next = timerLen ? timers[0].deadline : -1;
-  xb_mutex_unlock(&timerLock);
-  return t;
-}
-
-/* The timers whose targets need them no more (xb_task_timer_dead: settled, or a later CancelAfter replaced them) are
- * dropped once the heap doubled since the last time, or once those whose targets ended before their deadlines
- * (xb_timer_dropped) are half of it (under the timers' lock), so a timeout settled long before its deadline does not
- * keep its task. */
-static void timers_compact(void) {
+  if (n % TIMERS_DROPPED_LOOK || (uint64_t)n * 2 < xb_atomic_load64(&timersHeld, XB_RELAXED)) return;
   xb_atomic_store32(&timersDropped, 0, XB_RELAXED);
+  for (uint32_t k = 0; k < TIMER_SHARDS; ++k) { /* each under its lock, one at a time */
+    timer_shard *t = &timerShards[k];
+    xb_word_lock(&t->lock);
+    if (t->len) timers_compact(t);
+    xb_word_unlock(&t->lock);
+  }
+}
+
+/* The earliest timer of all due by `now` (all of them when `now` is INT64_MAX), taken off its heap: NULL for none; its
+ * deadline in `*deadline`, the earliest left in `*next` (-1: none). The shards' published earliest deadlines choose
+ * the shard; a timer added to another meanwhile, earlier still, is taken at the next call. */
+static void *timer_due(int64_t now, int64_t *deadline, int64_t *next) {
+  void *due = NULL;
+  for (;;) {
+    timer_shard *best = NULL;
+    int64_t earliest = INT64_MAX;
+    for (uint32_t k = 0; k < TIMER_SHARDS; ++k) {
+      int64_t top = timer_top_of(&timerShards[k]);
+      if (top < earliest) {
+        earliest = top;
+        best = &timerShards[k];
+      }
+    }
+    if (!best || earliest > now) break;
+    xb_word_lock(&best->lock);
+    if (best->len && best->heap[0].deadline <= now) {
+      due = best->heap[0].target;
+      *deadline = best->heap[0].deadline;
+      best->heap[0] = best->heap[--best->len];
+      timer_down(best->heap, best->len, 0);
+      xb_atomic_add64(&timersHeld, (uint64_t)-1, XB_RELAXED);
+    }
+    timer_top(best);
+    xb_word_unlock(&best->lock);
+    if (due) break; /* else its earliest changed meanwhile: the shards again */
+  }
+  int64_t earliest = INT64_MAX;
+  for (uint32_t k = 0; k < TIMER_SHARDS; ++k) {
+    int64_t top = timer_top_of(&timerShards[k]);
+    if (top < earliest) earliest = top;
+  }
+  *next = earliest == INT64_MAX ? -1 : earliest;
+  return due;
+}
+
+/* The timers of shard `t` whose targets need them no more (xb_task_timer_dead: settled, or a later CancelAfter
+ * replaced them) dropped (its lock held): once its heap doubled since the last time, or once the timers whose targets
+ * ended before their deadlines (xb_timer_dropped) are half of all, so a timeout settled long before its deadline does
+ * not keep its task. */
+static void timers_compact(timer_shard *t) {
   size_t kept = 0;
-  for (size_t k = 0; k < timerLen; ++k)
-    if (!xb_task_timer_dead(timers[k].target, timers[k].deadline)) timers[kept++] = timers[k];
-  timerLen = kept;
-  for (size_t k = timerLen / 2; k-- > 0;) timer_down(k);
-  timerCompactAt = 2 * timerLen > 1024 ? 2 * timerLen : 1024;
+  for (size_t k = 0; k < t->len; ++k)
+    if (!xb_task_timer_dead(t->heap[k].target, t->heap[k].deadline)) t->heap[kept++] = t->heap[k];
+  xb_atomic_add64(&timersHeld, (uint64_t)0 - (uint64_t)(t->len - kept), XB_RELAXED);
+  t->len = kept;
+  for (size_t k = t->len / 2; k-- > 0;) timer_down(t->heap, t->len, k);
+  t->compactAt = 2 * t->len > 1024 ? 2 * t->len : 1024;
+  timer_top(t);
 }
 
 /* Fires one timer taken off the heap (its target rooted meanwhile): at its time, or at the program's end. */
@@ -909,5 +965,6 @@ void xb_sched_mark(int (*mark)(xb_item *)) {
     for (uint32_t i = w->head; i != w->tail; ++i) mark_slot(&w->ring[i % RUNQ], mark);
   }
   for (size_t k = 0; k < gLen; ++k) mark_slot(&global[(gHead + k) % gCap], mark);
-  for (size_t k = 0; k < timerLen; ++k) mark_slot(&timers[k].target, mark);
+  for (uint32_t sh = 0; sh < TIMER_SHARDS; ++sh)
+    for (size_t k = 0; k < timerShards[sh].len; ++k) mark_slot(&timerShards[sh].heap[k].target, mark);
 }
