@@ -78,8 +78,9 @@ public:
   // an element: the runtime copies it).
   uint32_t shadowSlot(const xir::Instruction *load) const { return shadowSlot_.at(load); }
   // The slots an inline.leave sets to NIL: those of the values of its inlined body that are dead there, as the
-  // callee's frame would be gone after its return (no other value holds them then).
-  const std::vector<uint32_t> &clearsAt(const xir::Instruction *leave) const;
+  // callee's frame would be gone after its return (no other value holds them then); those a frame.release sets to
+  // NIL: those of every value dead there (defined before it, not live after) that no live value holds.
+  const std::vector<uint32_t> &clearsAt(const xir::Instruction *at) const;
   // The slots set to NIL where a block starts: those of the values of a loop it leaves that are dead there. A dead
   // value's slot otherwise keeps what it held until another value takes the slot, and what only it holds would not be
   // collected (nor its destructor run).
@@ -109,6 +110,7 @@ private:
   void findBodyUnits();
   void placeClears();
   void placeLoopClears();
+  void holdSlots(std::unordered_set<uint32_t> &held, uint32_t u) const; // the slots of unit u, into `held`
   void addClears(std::vector<uint32_t> &slots, const std::unordered_set<uint32_t> &units, uint32_t at) const;
   uint32_t unitOf(const xir::Value *v);
 
@@ -132,7 +134,9 @@ private:
   std::unordered_map<const xir::Instruction *, uint32_t> shadowSlot_;
   std::vector<Unit> units_;
   std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> bodyUnits_; // inline.leave -> units
-  std::unordered_map<const xir::Instruction *, std::vector<uint32_t>> clears_;           // inline.leave -> slots
+  // frame.release -> the units of the values live there (a use after it, in its block or past it, on some path)
+  std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> liveAtRelease_;
+  std::unordered_map<const xir::Instruction *, std::vector<uint32_t>> clears_; // inline.leave, frame.release -> slots
   std::unordered_map<const xir::BasicBlock *, std::vector<uint32_t>> blockClears_;       // loop exit -> slots
   std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<uint32_t>> edgeClears_;
 };

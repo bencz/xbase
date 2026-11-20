@@ -92,6 +92,7 @@ constexpr OpInfo kOps[] = {
     {Op::AwaitFused, "await.fused", ReadsState | WritesState},
     {Op::InlineEnter, "inline.enter", WritesState},
     {Op::InlineLeave, "inline.leave", WritesState},
+    {Op::FrameRelease, "frame.release", WritesState},
     {Op::Br, "br", Terminator},
     {Op::CondBr, "cond_br", Terminator},
     {Op::GenYield, "gen.yield", Terminator | ReadsVar | WritesHeap | WritesState | Allocates},

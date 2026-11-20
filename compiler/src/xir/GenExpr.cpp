@@ -319,6 +319,8 @@ Value *Generator::genAssign(const AssignExpr &a) {
     if (appendsTo(target, *a.value)) markGrows(value);
   }
   store(target, value);
+  // `x := NIL` lets go of what x held: values dead now must not keep it in their frame slots
+  if (!a.compound && a.value->kind == ExprKind::Nil && target.where == VarWhere::Frame) cur_.b->frameRelease();
   return value;
 }
 

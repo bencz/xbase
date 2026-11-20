@@ -698,6 +698,9 @@ void CodeGen::emit(const xir::Instruction &i) {
     inlineOpen_.push_back(i.blockFn);
     break;
   }
+  case Op::FrameRelease:
+    for (uint32_t s : plan_->clearsAt(&i)) setNil(slot(s));
+    break;
   case Op::InlineLeave: {
     for (uint32_t s : plan_->clearsAt(&i)) setNil(slot(s));
     inlineOpen_.pop_back();

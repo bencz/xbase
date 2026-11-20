@@ -254,7 +254,9 @@ private:
         if (!ok) fail("params.ref tests something other than a parameter of this function");
       }
       break;
-    case Op::SeqCatch: case Op::SeqValue: case Op::SeqSuspend: case Op::InlineLeave: expect(i, 0, {}); break;
+    case Op::SeqCatch: case Op::SeqValue: case Op::SeqSuspend: case Op::InlineLeave: case Op::FrameRelease:
+      expect(i, 0, {});
+      break;
     case Op::InlineEnter:
       if (!i.blockFn || i.blockFn->kind == Function::Kind::ModuleInit) {
         fail("inline.enter without the function it shows");

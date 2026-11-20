@@ -108,6 +108,10 @@ enum class Op : uint8_t {
   // inline.enter's operands, when `blockFn` reads the arguments it received, are those arguments (the frame's argv).
   InlineEnter,
   InlineLeave,
+  // Right after `x := NIL` to a local or a parameter (the program lets go of what it held): sets to NIL the frame slots
+  // of the values dead there that no live value holds, so that what only they held can be collected (a dead value's
+  // slot otherwise keeps it until another value takes the slot).
+  FrameRelease,
   // terminators
   Br,             // target(args)
   CondBr,         // Bool; then(args), else(args)

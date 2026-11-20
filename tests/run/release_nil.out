@@ -1,0 +1,12 @@
+
+straight: .T.
+filled: .T.
+in a loop: .T.
+tasks waited for: .T.
+destructor: .T.
+mid-expression:        306        323
+nested loops:       6026
+recover: kept released
+inlined with PCount():         25         10
+async:         42
+generator: xyz

@@ -83,6 +83,7 @@ public:
   Instruction *asyncYield(Var *task, Value *value, BasicBlock *resume, uint32_t point);
   Instruction *inlineEnter(Function *shown, const std::vector<Value *> &args = {});
   Instruction *inlineLeave();
+  Instruction *frameRelease();
   Instruction *seqWith(Value *handler);
   Instruction *seqRestore(Value *old);
   Instruction *seqSuspend();

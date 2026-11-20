@@ -501,7 +501,14 @@ build xbc.
   slots of the loop's values that are dead there and that no live value holds (`clearsAtStart`; see `inline.leave`
   below for an inlined body): what only they held can be collected, and its destructor run. When other blocks reach
   that block too (the header of a loop that follows, say), the loop's branches to it clear them on their edge instead
-  (`clearsOnEdge`), so the clears run once per exit, not on every pass of the next loop. The parameters take
+  (`clearsOnEdge`), so the clears run once per exit, not on every pass of the next loop. `x := NIL` to a local or a
+  parameter (the program lets go of what x held: an array, an object whose destructor should run) is followed by a
+  `frame.release` (`Generator::genAssign`), which sets to `NIL` the slots of every value written before it and dead
+  there, by precise liveness (`liveAtRelease_`: a use after it in its block, or the value live into a successor), not
+  by the intervals, which span the blocks laid out between a definition and its last use; a slot an argument group
+  holds is kept while that group's call is being made, or while its inlined body is open (`walkBodies`), not along
+  the body's copies laid out later (`FramePlan::clearsAt`). What a caller passed stays held by its argument until the
+  call returns. The parameters take
   slots 0 to n-1 (the prologue copies them there), but in a typed copy with a direct entry and no loop a parameter of
   types without heap references that nothing writes (`FramePlan::inRegisters`): it has an item of its own outside the
   frame, as a `Local` value (the words its caller passed, in registers), since nothing reads a typed copy's parameters

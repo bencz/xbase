@@ -419,8 +419,10 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps
   the check right after its operation and the value first in the block only the check leads to), and for parameter
   versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the
-  function's own arguments, as received), and `inline.enter` (naming a function or block function) and `inline.leave`,
-  around an inlined body: the call stack shows that function in between.
+  function's own arguments, as received), `inline.enter` (naming a function or block function) and `inline.leave`,
+  around an inlined body: the call stack shows that function in between, and `frame.release`, right after `x := NIL`
+  to a local or a parameter: the frame slots of the values dead there are set to `NIL` (the store itself may go as a
+  dead store, but the program let go of what x held).
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `async.suspend`, `ret`.

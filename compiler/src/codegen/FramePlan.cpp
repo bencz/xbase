@@ -271,6 +271,10 @@ void FramePlan::computeLiveness() {
   std::vector<uint32_t> liveIn(order.size(), 0); // stamp: the value whose walk marked the block
   uint32_t stamp = 0;
   std::vector<const BasicBlock *> work;
+  std::vector<const Instruction *> releases;
+  for (const BasicBlock *b : order)
+    for (auto &i : b->insts)
+      if (i->op == Op::FrameRelease) releases.push_back(i.get());
   for (auto &[v, u] : unit_) {
     ++stamp;
     const BasicBlock *def = definingBlock(v);
@@ -299,6 +303,17 @@ void FramePlan::computeLiveness() {
     Unit &unit = units_[u];
     unit.start = std::min(unit.start, start);
     unit.end = std::max(unit.end, end);
+    // Live at a frame.release: not defined after it in its block, and used after it there or live into a successor.
+    for (const Instruction *r : releases) {
+      const BasicBlock *b = r->parent;
+      uint32_t at = pos_.at(r);
+      if (def == b && start > at) continue;
+      bool live = false;
+      for (const Instruction *user : v->users()) live |= user->parent == b && pos_.at(user) > at;
+      for (size_t k = 0; !live && k < b->numSuccessors(); ++k) // a block with a use is live-in (but the def's)
+        live = liveIn[blockIndex_.at(b->successor(k))] == stamp;
+      if (live) liveAtRelease_[r].insert(u);
+    }
   }
   for (auto &[user, u] : groupUnit_) {
     uint32_t p = pos_.at(user);
@@ -434,13 +449,16 @@ void FramePlan::findBodyUnits() {
   });
 }
 
+void FramePlan::holdSlots(std::unordered_set<uint32_t> &held, uint32_t u) const {
+  for (uint32_t s = 0; s < units_[u].size; ++s) held.insert(units_[u].slot + s);
+}
+
 // Adds to `slots` (kept sorted, without repeats) those of `units` that no unit live at position `at` holds. Live
 // intervals cover every point where their value is live, so a slot a live value holds is never among them.
 void FramePlan::addClears(std::vector<uint32_t> &slots, const std::unordered_set<uint32_t> &units, uint32_t at) const {
   std::unordered_set<uint32_t> held(slots.begin(), slots.end());
-  for (const Unit &u : units_)
-    if (u.start <= at && at <= u.end)
-      for (uint32_t s = 0; s < u.size; ++s) held.insert(u.slot + s);
+  for (uint32_t u = 0; u < units_.size(); ++u)
+    if (units_[u].start <= at && at <= units_[u].end) holdSlots(held, u);
   for (uint32_t k : units)
     for (uint32_t s = 0; s < units_[k].size; ++s)
       if (held.insert(units_[k].slot + s).second) slots.push_back(units_[k].slot + s);
@@ -449,6 +467,54 @@ void FramePlan::addClears(std::vector<uint32_t> &slots, const std::unordered_set
 
 void FramePlan::placeClears() {
   for (auto &[leave, units] : bodyUnits_) addClears(clears_[leave], units, pos_.at(leave));
+  // The inline.enters whose bodies are open at each frame.release: their argument groups are live there.
+  std::unordered_map<const Instruction *, std::unordered_set<const Instruction *>> openAt;
+  xir::walkBodies<const Instruction *>(cfg_, [&](const BasicBlock &b, auto &open) {
+    bool changed = false;
+    for (auto &i : b.insts) {
+      if (i->op == Op::InlineEnter) open.push_back({i.get()});
+      else if (i->op == Op::InlineLeave) open.pop_back();
+      else if (i->op == Op::FrameRelease)
+        for (auto &enters : open)
+          for (const Instruction *e : enters) changed |= openAt[i.get()].insert(e).second;
+    }
+    return changed;
+  });
+  for (const BasicBlock *b : cfg_.order()) {
+    std::vector<uint32_t> nilNow; // the slots NIL since the block's last release (while no unit started), and where
+    uint32_t beforeAt = 0;
+    bool before = false;
+    for (auto &i : b->insts) {
+      if (i->op != Op::FrameRelease) continue;
+      // Every slot of a value written before it and dead there, unless a live value (or an argument group being
+      // filled around it, or an open inlined body's) holds the slot: precise liveness, not the intervals, which span
+      // the blocks laid out between a value's definition and its last use (an inlined body's arguments: its copies).
+      uint32_t at = pos_.at(i.get());
+      const std::unordered_set<uint32_t> &live = liveAtRelease_[i.get()];
+      const std::unordered_set<const Instruction *> &open = openAt[i.get()];
+      std::unordered_set<uint32_t> held;
+      for (uint32_t u : live) holdSlots(held, u);
+      for (auto &[user, u] : groupUnit_)
+        if (user->op == Op::InlineEnter ? open.count(user) != 0 : units_[u].start <= at && at <= units_[u].end)
+          holdSlots(held, u);
+      // A release right after another (`a := NIL`, `b := NIL`, ...), with no unit started in between, finds the slots
+      // that one cleared still NIL: only the slots of the values that died since are left to clear.
+      bool started = false;
+      for (uint32_t u = 0; before && u < units_.size(); ++u)
+        started |= beforeAt < units_[u].start && units_[u].start < at;
+      if (!before || started) nilNow.clear();
+      held.insert(nilNow.begin(), nilNow.end());
+      std::vector<uint32_t> &slots = clears_[i.get()];
+      for (uint32_t u = 0; u < units_.size(); ++u)
+        if (units_[u].start < at)
+          for (uint32_t s = 0; s < units_[u].size; ++s)
+            if (held.insert(units_[u].slot + s).second) slots.push_back(units_[u].slot + s);
+      std::sort(slots.begin(), slots.end());
+      nilNow.insert(nilNow.end(), slots.begin(), slots.end());
+      before = true;
+      beforeAt = at;
+    }
+  }
 }
 
 // The units of each loop (values and argument groups of its blocks), cleared where it exits.
@@ -495,9 +561,9 @@ const std::vector<uint32_t> &FramePlan::clearsAtStart(const BasicBlock *b) const
   return c == blockClears_.end() ? none : c->second;
 }
 
-const std::vector<uint32_t> &FramePlan::clearsAt(const Instruction *leave) const {
+const std::vector<uint32_t> &FramePlan::clearsAt(const Instruction *at) const {
   static const std::vector<uint32_t> none;
-  auto c = clears_.find(leave);
+  auto c = clears_.find(at);
   return c == clears_.end() ? none : c->second;
 }
 

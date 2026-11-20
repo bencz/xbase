@@ -189,6 +189,7 @@ Instruction *Builder::inlineEnter(Function *shown, const std::vector<Value *> &a
 }
 
 Instruction *Builder::inlineLeave() { return make(Op::InlineLeave, Type::Void); }
+Instruction *Builder::frameRelease() { return make(Op::FrameRelease, Type::Void); }
 
 Instruction *Builder::makeBlock(Function *blockFn, std::vector<Var *> captures) {
   Instruction *i = make(Op::MakeBlock, Type::Item);
