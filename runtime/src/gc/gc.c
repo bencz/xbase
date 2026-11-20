@@ -339,7 +339,7 @@ static struct {
   size_t classDestLen, classDestCap;
   size_t classDestFrom[XB_GC_CLASSES_MAX], classDestTo[XB_GC_CLASSES_MAX]; /* class c's: [from, to) of classDest */
   uint64_t allocatedSinceFull;     /* bytes allocated since the last full collection (64 bits: 32-bit targets too) */
-  unsigned holds;                  /* xb_gc_hold: none moves */
+  uint32_t holds;                  /* xb_gc_hold: none moves (atomic: held and released without the lock) */
   char *copyCursor, *copyLimit;    /* where the collection copies objects: free blocks */
   xb_gc_hdr **pinned;              /* pinned by the collection in progress */
   size_t pinnedLen, pinnedCap;
@@ -713,8 +713,8 @@ static int defrag_candidate(const xb_hblock *b) {
  * collect over and over), and the collection able to move objects. A full collection that defragments comes first then.
  * Under the lock. */
 static int fragmented(void) {
-  if (heap.freshBlocks || heap.allocatedSinceFull + heap.allocated < heap.youngBudget || heap.holds ||
-      !stacks_known())
+  if (heap.freshBlocks || heap.allocatedSinceFull + heap.allocated < heap.youngBudget ||
+      xb_atomic_load32(&heap.holds, XB_RELAXED) || !stacks_known())
     return 0;
   return heap.candidateFree * 4 > heap.blockCount * XB_GC_BLOCK_SIZE;
 }
@@ -2216,7 +2216,7 @@ static void collect(int full, int due) {
   next_epoch();
   heap.markedBytes = 0;
   heap.markedObjects = 0;
-  heap.evacuating = full && !heap.holds && tlh && stacks_known() && pick_defrag();
+  heap.evacuating = full && !xb_atomic_load32(&heap.holds, XB_RELAXED) && tlh && stacks_known() && pick_defrag();
   if (full) /* counted anew as the collection reaches the objects (push) */
     for (size_t k = 0; k < heap.blockCount; ++k) heap.blocks[k]->liveBytes = 0;
   if (heap.evacuating) { /* pins first: what the stacks point to, and the objects C roots sit in */
@@ -2284,17 +2284,13 @@ static void collect(int full, int due) {
   if (!full && fullNext) collect(1, 0);
 }
 
-void xb_gc_hold(void) {
-  xb_mutex_lock(&heap.lock);
-  ++heap.holds;
-  xb_mutex_unlock(&heap.lock);
-}
+/* No lock: a collection reads the count with every other thread stopped, at a safepoint, which no hold or release
+ * straddles (a holder may collect: no object moves then). */
+void xb_gc_hold(void) { xb_atomic_add32(&heap.holds, 1, XB_RELAXED); }
 
 void xb_gc_release(void) {
-  xb_mutex_lock(&heap.lock);
-  if (!heap.holds) xb_gc_fatal("the collector released more often than held");
-  --heap.holds;
-  xb_mutex_unlock(&heap.lock);
+  if (xb_atomic_add32(&heap.holds, (uint32_t)-1, XB_RELAXED) == 0)
+    xb_gc_fatal("the collector released more often than held");
 }
 
 /* The memory the heap holds from the system (xb_gc_heap_bytes), under the lock. */
