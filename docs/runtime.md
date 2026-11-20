@@ -1301,7 +1301,7 @@ Conventions:
   in front when the picture has no `Y`) and the picture in upper case. `_SET_LANGUAGE` takes a language's name
   ([Languages](#languages)), `_SET_CODEPAGE` a codepage's ([Codepages](#codepages)). Other values change nothing.
 - `__GcCollect( [lYoung] )`, `__GcMemory()`: see [Garbage collector](#garbage-collector). `__MemNamesInUse( [lLetGo] )`:
-  see [Memory variables](#memory-variables).
+  see [Memory variables](#memory-variables). `__dbPageCache( [nBudget] )`: see [rdd.md](rdd.md#performance).
 - `AScan( a, xSearch, [nStart], [nCount] )` returns the position of the first element of the range equal to `xSearch`
   (values of one comparable kind, compared like the operators, strings with SET EXACT; two `NIL`s; arrays and blocks
   never), or for which a block `xSearch( element, position )` returns `.T.`, else 0 (also for anything but an array, and

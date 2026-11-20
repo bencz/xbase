@@ -338,6 +338,7 @@ EXTERN FUNCTION __dbDelim( lExport, cFile, [xDelimiter], [aFields], [bFor], [bWh
 EXTERN FUNCTION __dbJoin( cAlias, cFile, [aFields], [bFor], [cDriver] ) NATIVE
 EXTERN FUNCTION __dbLocate( [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE
 EXTERN FUNCTION __dbPack() NATIVE
+EXTERN FUNCTION __dbPageCache( [nBudget] ) NATIVE
 EXTERN FUNCTION __dbSDF( lExport, cFile, [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cCodePage] ) NATIVE
 EXTERN FUNCTION __dbSort( cFile, [aKeys], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cDriver] ) NATIVE
 EXTERN FUNCTION __dbSortTo( cFile, [cDriver], [aKeys], [bFor], [bWhile], [nNext], [nRecord], [lRest] ) NATIVE

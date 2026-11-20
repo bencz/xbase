@@ -1,0 +1,8 @@
+
+at start:          0 .T.
+NTX default: .T. closed:          0
+set to 1 MB, before: .T.
+NTX 1 MB: .T. .T. closed:          0
+CDX default: .T. closed:          0
+CDX none: .T. .T. closed:          0
+ignored:      12345      12345      12345      12345

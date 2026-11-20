@@ -553,6 +553,12 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
   checked first), and kept in the order of their last use (a list, updated in constant time), so a page read takes a
   free slot, else a new one, else the one used longest ago (NTX: that no operation holds; CDX: the pages an operation
   works on are its latest); pages changed are written on `COMMIT`, at closing, or when the cache needs their slot.
+- The pages every table and index file keep in memory count in one total for the process (a CDX page's key buffer
+  too). Past its minimum (an NTX file's first 256 pages, a CDX file's first 512, a table's pages while they take less
+  than 64 KB), a cache makes a slot only while the total stays within a budget, 256 MB at start, else it reuses its own
+  oldest page; a cache never gives back the slots it made, and a file's pages leave the total when it is closed.
+  `__dbPageCache( [nBudget] )` returns `{ the bytes the pages take, the budget before the call }` and sets the budget
+  from a number of 0 or more (0: the caches opened after keep their minimum).
 - A page is searched by halves over its offsets; a key compares with `memcmp`.
 - Counting (`ordKeyCount()`, `ordKeyNo()`) and `ordKeyGoto()` read the pages' entry counts, never one entry at a time:
   the pages where the bounds fall (`ordKeyNo()`: the current entry's path) are searched, the subtrees between them
@@ -565,12 +571,12 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
   `xb_platform_file_read_at`), the last record with the end mark after it in one write. Records read in order come
   64 KB at a time (a shared table's under the file lock, or while a copy reads it: `snapshot`).
 - An exclusive table keeps records read out of order (an order's navigation, `GO`) in pages of whole records, about
-  4 KB each (one record when a record is longer), up to 1024 of them while they take less than 4 MB (`pages.c`, keyed
-  by the page's number): a record read is taken from its page when the page holds it, else its page is read (the
-  record alone when the page cannot be read whole: a file shorter than its header says). A page holds the records the
-  file had when it was read (a record appended after reads the page again); a record written changes its page's copy
-  too, and `PACK`, `ZAP` and a failed write of the records kept behind drop them. A shared table reads each record
-  from the file (other programs change it).
+  4 KB each (one record when a record is longer), up to 1024 of them while they take less than 4 MB and the process's
+  budget allows (`pages.c`, keyed by the page's number): a record read is taken from its page when the page holds it,
+  else its page is read (the record alone when the page cannot be read whole: a file shorter than its header says). A
+  page holds the records the file had when it was read (a record appended after reads the page again); a record
+  written changes its page's copy too, and `PACK`, `ZAP` and a failed write of the records kept behind drop them. A
+  shared table reads each record from the file (other programs change it).
 - An exclusive table keeps the records written at its end behind (`behind`, up to 64 KB of them) and writes them in
   one call when the chunk is full, before the file is read where they are or past them, and on `COMMIT`, `PACK`,
   `ZAP` and closing; reading one of them takes it from there. Appending costs a write a chunk instead of one a record;
@@ -729,8 +735,9 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
   each area serializes its operations; a new flow (`TaskRun`, `ThreadStart`) starts with none open. Handing an area
   from one flow to another is explicit (a function of xbase's own, the area closed in the first and open in the second
   with its position and locks).
-- What the runtime shares between threads is only the shared-file registry and the files' lock tables (one mutex) and,
-  when they come, the shared page caches (reader-writer locks); no other global state in the database code.
+- What the runtime shares between threads is only the shared-file registry and the files' lock tables (one mutex), the
+  page caches' total and budget (atomic words) and, when they come, the shared page caches (reader-writer locks); no
+  other global state in the database code.
 - The synchronous operations stay as they are and block only their thread (the scheduler gives its place to another).
   Awaitable forms (`dbSkipAsync()`, `dbSeekAsync()`, `RLockAsync( [nRecord], [nTimeout], [oToken] )`, cursors as
   asynchronous enumerators, `AWAIT` forms of the commands) run first on the blocking pool, then from the shared page

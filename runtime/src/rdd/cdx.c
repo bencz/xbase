@@ -134,7 +134,6 @@ struct xb_bag {
   uint32_t ndead;
   xb_pages pages;
   node *cache[CDX_CACHE];    /* each slot's page, by its number - 1: the first pages.count made, as pages came */
-  size_t cacheBytes;         /* what the cache's nodes take, their key buffers with them */
   uint32_t changes;          /* changes of any of its tags: cursors placed before are placed again */
   uint32_t held;
   int heldOk;
@@ -167,7 +166,7 @@ static void keys_room(node *p, uint32_t n) {
   while (cap < need) cap *= 2;
   unsigned char *k = realloc(p->keys, cap);
   if (!k) xb_gc_fatal("out of memory");
-  if (p->self) p->tag->bag->cacheBytes += cap - p->cap; /* a node of the cache (not one being built) */
+  if (p->self) xb_pages_grew(&p->tag->bag->pages, cap - p->cap); /* a node of the cache (not one being built) */
   p->keys = k;
   p->cap = cap;
 }
@@ -305,19 +304,20 @@ static void bytes_now(node *p) {
   encode(p);
 }
 
-/* The cache slot for page `offset`: the one holding it, else a free one, else a new one while the budget allows
- * (CDX_CACHE_MIN, CDX_CACHE_BYTES, CDX_CACHE), else the one used longest ago (written first when it changed; the pages
- * an operation works on are its latest, never taken). NULL after an error. */
+/* The cache slot for page `offset`: the one holding it, else a free one, else a new one while the budgets allow
+ * (CDX_CACHE_MIN, CDX_CACHE_BYTES, CDX_CACHE, the process's: rdd/pages.h), else the one used longest ago (written first
+ * when it changed; the pages an operation works on are its latest, never taken). NULL after an error. */
 static node *slot(xb_bag *b, uint32_t offset, int32_t *err) {
   node *victim = offset ? kept(b, offset) : NULL;
   if (victim) return victim;
-  uint16_t s = xb_pages_spare(&b->pages, b->pages.count < CDX_CACHE_MIN || b->cacheBytes < CDX_CACHE_BYTES);
+  int grow = b->pages.count < CDX_CACHE_MIN ? XB_PAGES_NEED
+             : b->pages.bytes < CDX_CACHE_BYTES ? XB_PAGES_GROW : XB_PAGES_KEEP;
+  uint16_t s = xb_pages_spare(&b->pages, grow, sizeof *victim);
   if (s && !b->cache[s - 1]) {
     victim = calloc(1, sizeof *victim);
     if (!victim) xb_gc_fatal("out of memory");
     victim->self = s;
     b->cache[s - 1] = victim;
-    b->cacheBytes += sizeof *victim;
     return victim;
   }
   victim = b->cache[(s ? s : xb_pages_oldest(&b->pages)) - 1];

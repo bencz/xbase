@@ -38,6 +38,7 @@
 #define DBF_PAGE 4096            /* bytes of records (whole ones, at least one) a page of the record cache holds */
 #define DBF_PAGES 1024           /* pages of records an exclusive table keeps at most, made as they come, */
 #define DBF_PAGES_BYTES (4u << 20) /* while they take less than this (pages of one wide record take more each) */
+#define DBF_PAGES_MIN 65536      /* bytes of them a table keeps whatever the process's budget (rdd/pages.h) */
 #define DBF_UPDATED 1            /* the header's date of the last update (3 bytes), then */
 #define DBF_COUNT 4              /* its record count (4 bytes, little-endian) */
 #define DBF_STAMP_LEN 7          /* the two, what an APPEND changes */
@@ -336,7 +337,11 @@ static int read_page(dbf *d, uint32_t recno, int32_t *err) {
   uint32_t n = d->count - first + 1 < d->perPage ? d->count - first + 1 : d->perPage;
   size_t bytes = (size_t)d->perPage * d->recordLen;
   uint16_t s = xb_pages_find(&d->pages, key); /* one read before the records appended since */
-  if (!s) s = xb_pages_spare(&d->pages, (uint64_t)d->pages.count * bytes < DBF_PAGES_BYTES);
+  if (!s) {
+    int grow = d->pages.bytes < DBF_PAGES_MIN ? XB_PAGES_NEED
+               : d->pages.bytes < DBF_PAGES_BYTES ? XB_PAGES_GROW : XB_PAGES_KEEP;
+    s = xb_pages_spare(&d->pages, grow, bytes);
+  }
   if (!s) s = xb_pages_oldest(&d->pages); /* pages are copies: any one goes */
   struct dbf_page *p = &d->page[s - 1];
   if (!p->bytes && !(p->bytes = malloc(bytes))) xb_gc_fatal("out of memory");
