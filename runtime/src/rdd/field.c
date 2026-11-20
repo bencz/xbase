@@ -72,56 +72,77 @@ int xb_field_encode(const xb_field_info *fi, char *p, const xb_item *v) {
   }
 }
 
-/* The number of the work area an alias names: the item `area` (a name as xb_area_named reads it, or a number from
- * 1; either names its area open or not), else the C string `alias` (NULL: the current area). 0 when it names none;
- * `what` gets the alias's text for the error. */
-static uint32_t area_number(xb_ctx *ctx, const xb_item *area, const char *alias, char what[32]) {
+/* A field reference's cache (xb_field_cache): one word, read and written atomically (a thread finds either its
+ * table's entry whole or another one): the generation of the work area it found the field in (xb_area.generation: one
+ * opening of a table), the area's number and the field's index; none past 2^32 openings. */
+#define CACHE_GENERATION_SHIFT 32
+#define CACHE_AREA_SHIFT 16
+#define CACHE_PART 0xFFFFu
+
+/* The text of an alias for its error ("Alias does not exist"). */
+static void alias_text(const xb_item *area, const char *alias, char what[32]) {
   what[0] = '\0';
-  if (area && area->type == XB_T_STRING) {
+  if (area && area->type == XB_T_STRING)
     snprintf(what, 32, "%.*s", (int)(area->v.s->len < 31 ? area->v.s->len : 31), xb_str_data(area->v.s));
-    return xb_area_number(xb_area_named(ctx, xb_str_data(area->v.s), area->v.s->len));
-  }
-  if (area && xb_is_number(area)) {
-    int64_t n = xb_num_to_i64(area);
-    snprintf(what, 32, "%lld", (long long)n);
-    return xb_area_number(n);
-  }
-  if (alias) {
+  else if (area && xb_is_number(area))
+    snprintf(what, 32, "%lld", (long long)xb_num_to_i64(area));
+  else if (alias)
     snprintf(what, 32, "%s", alias);
-    return xb_area_number(xb_area_named(ctx, alias, strlen(alias)));
-  }
-  if (area) return 0;
-  return ctx->env->areaCurrent;
 }
 
-/* The position of field `name` in `a`, through the reference's cache; -1 when the table has none. The cache is one
- * word, read and written atomically: a thread finds either its table's entry whole or another one. */
-static int64_t field_of(xb_area *a, const char *name, xb_field_cache *cache) {
-  const uint64_t index = ((uint64_t)1 << XB_FIELD_CACHE_INDEX_BITS) - 1;
+/* The number of the work area an alias names: the item `area` (a name as xb_area_named reads it, or a number from
+ * 1; either names its area open or not), else the C string `alias` (NULL: the current area), whose area the cache
+ * gives while that opening of the table lasts (no search by name; an alias in an item may name another area each
+ * time). 0 when it names none. */
+static uint32_t area_number(xb_ctx *ctx, const xb_item *area, const char *alias, const xb_field_cache *cache) {
+  if (area && area->type == XB_T_STRING)
+    return xb_area_number(xb_area_named(ctx, xb_str_data(area->v.s), area->v.s->len));
+  if (area && xb_is_number(area)) return xb_area_number(xb_num_to_i64(area));
+  if (area) return 0;
+  if (!alias) return ctx->env->areaCurrent;
   uint64_t key = xb_atomic_load64(&cache->key, XB_RELAXED);
-  if (key >> XB_FIELD_CACHE_INDEX_BITS == a->generation && (key & index) < a->nfields) return (int64_t)(key & index);
+  uint32_t n = (uint32_t)(key >> CACHE_AREA_SHIFT) & CACHE_PART;
+  const xb_area *a = key ? xb_area_at(ctx, n) : NULL;
+  if (a && a->generation == key >> CACHE_GENERATION_SHIFT) return n;
+  return xb_area_number(xb_area_named(ctx, alias, strlen(alias)));
+}
+
+/* The position of field `name` in `a`, through the reference's cache; -1 when the table has none. */
+static int64_t field_of(xb_area *a, const char *name, xb_field_cache *cache) {
+  uint64_t key = xb_atomic_load64(&cache->key, XB_RELAXED);
+  if (key && key >> CACHE_GENERATION_SHIFT == a->generation && (key & CACHE_PART) < a->nfields)
+    return (int64_t)(key & CACHE_PART);
   int64_t k = xb_area_field_index(a, name, strlen(name));
-  if (k >= 0 && (uint64_t)k <= index && !(a->generation >> (64 - XB_FIELD_CACHE_INDEX_BITS))) /* a key holds both */
-    xb_atomic_store64(&cache->key, a->generation << XB_FIELD_CACHE_INDEX_BITS | (uint64_t)k, XB_RELAXED);
+  if (k >= 0 && k <= CACHE_PART && a->number <= CACHE_PART && !(a->generation >> (64 - CACHE_GENERATION_SHIFT)))
+    xb_atomic_store64(&cache->key,
+                      a->generation << CACHE_GENERATION_SHIFT | (uint64_t)a->number << CACHE_AREA_SHIFT | (uint64_t)k,
+                      XB_RELAXED);
   return k;
+}
+
+/* No area for the alias (`n` 0), or no field of the name: the error, raised; 1 when its block asks to try again. Out
+ * of line: the found path stays short. */
+static XB_NOINLINE int missing(xb_ctx *ctx, const xb_item *area, const char *alias, const char *name, uint32_t n,
+                               uint16_t tries) {
+  char what[32];
+  alias_text(area, alias, what);
+  int noAlias = n == 0;
+  return xb_error_of(ctx, NULL, noAlias ? EG_NOALIAS : EG_NOVAR, noAlias ? 1002 : 1003, noAlias ? what : name, NULL,
+                     0, XB_ERR_RETRY, 0, NULL, tries, NULL) == 2;
 }
 
 /* Finds the work area and the field: 1, or 0 after the error (raised; the block did not ask to try again). */
 static int find(xb_ctx *ctx, const xb_item *area, const char *alias, const char *name, xb_field_cache *cache,
                 xb_area **a, uint32_t *field) {
   for (uint16_t tries = 1;; ++tries) {
-    char what[32];
-    uint32_t n = area_number(ctx, area, alias, what);
+    uint32_t n = area_number(ctx, area, alias, cache);
     *a = xb_area_settled(ctx, n);
     int64_t k = *a ? field_of(*a, name, cache) : -1;
     if (k >= 0) {
       *field = (uint32_t)k;
       return 1;
     }
-    int noAlias = n == 0;
-    int r = xb_error_of(ctx, NULL, noAlias ? EG_NOALIAS : EG_NOVAR, noAlias ? 1002 : 1003, noAlias ? what : name,
-                        NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL);
-    if (r != 2) return 0;
+    if (!missing(ctx, area, alias, name, n, tries)) return 0;
   }
 }
 
@@ -157,8 +178,9 @@ void xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache *ca
 
 int xb_area_lookup(xb_ctx *ctx, const xb_item *area, uint32_t *n) {
   for (uint16_t tries = 1;; ++tries) {
+    if ((*n = area_number(ctx, area, NULL, NULL)) != 0) return 1; /* no alias text: no cache */
     char what[32];
-    if ((*n = area_number(ctx, area, NULL, what)) != 0) return 1;
+    alias_text(area, NULL, what);
     if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, what, NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2) return 0;
   }
 }

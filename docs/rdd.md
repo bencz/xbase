@@ -117,14 +117,14 @@ The compiler resolves names; the runtime finds fields by name when the code runs
   the whole file, or in a function; the names are then fields of the alias's area (the current one without `IN`).
 - An undeclared name (no `LOCAL`, `STATIC`, parameter, `MEMVAR` or `FIELD`) is read as a field of the current work
   area when it has one, else as a memory variable (Clipper's rule); assigning it assigns the memory variable.
-- A reference that finds no field is `BASE/1003` `Variable does not exist` (the field's name), one whose alias names
-  no area `BASE/1002` (the alias); both may be retried. A field written while the area is at its end (`Eof()`) is
-  ignored.
-
-Compiled code calls `xb_field_get`, `xb_field_set` and `xb_mv_field` ([runtime.md](runtime.md#work-areas)), each
-reference with a cache of its own (`xb_field_cache`, one 64-bit word): the field's position in the table it found
-it in, which a table opened later (each one has a different `generation`) makes it look up again. The macro compiler
-reads the same forms ([runtime.md](runtime.md#macro-operator)).
+- A reference that finds no field is `BASE/1003` `Variable does not exist` (the field's name), one whose alias names no
+  area `BASE/1002` (the alias); both may be retried. A field written while the area is at its end (`Eof()`) is ignored.
+  Compiled code calls `xb_field_get`, `xb_field_set` and `xb_mv_field` ([runtime.md](runtime.md#work-areas)), each
+  reference with a cache of its own (`xb_field_cache`, one 64-bit word): the work area it found the field in, by number,
+  and the field's position, which a table opened later (each one has a different `generation`) makes it look up again.
+  So `alias->name` finds its area without searching the aliases while that opening lasts (an alias in a variable, `(
+  cAlias )->name`, is looked up each time). The macro compiler reads the same forms
+  ([runtime.md](runtime.md#macro-operator)).
 
 ## Orders
 

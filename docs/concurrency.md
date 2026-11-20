@@ -495,10 +495,10 @@ environments, and the variables made in them, come with `ThreadStart`) and the f
   memory variables are shared storage once a second thread exists (ABI 45). (2e, done) `ThreadStart`, `Mutex`,
   `AtomicInt`, the program-wide `PUBLIC` table and line-atomic console output; then `Condition`, `Semaphore`, `USING`
   and `SYNCHRONIZED` ([Threads](#threads)).
-- **Runtime caches and tables** filled at run time (done, [runtime.md](runtime.md#threads-and-synchronization)): a
-  send cache is a sequence lock, a field cache one 64-bit word (generation, index) from an atomic counter, the memory
-  variable names are found under a reader-writer lock and read by number from chunks that never move, and classes
-  are prepared under one recursive lock, a ready class published atomically.
+- **Runtime caches and tables** filled at run time (done, [runtime.md](runtime.md#threads-and-synchronization)): a send
+  cache is a sequence lock, a field cache one 64-bit word (generation, area, index) from an atomic counter, the memory
+  variable names are found under a reader-writer lock and read by number from chunks that never move, and classes are
+  prepared under one recursive lock, a ready class published atomically.
 
 ## Garbage collector
 

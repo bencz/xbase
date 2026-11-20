@@ -1531,12 +1531,13 @@ variables](#memory-variables)) use this layer too.
 ## Work areas
 
 The work areas, their tables and the database functions are in `runtime/src/rdd/` ([rdd.md](rdd.md)). Each environment
-has its own (`xb_env.areas`, `areaCurrent`, `set_deleted`, `rddDefault`, `netErr`). Compiled code reaches fields
-through three entry points of `xbrt.h`, each call with a cache of its own (`xb_field_cache`, a zeroed static of the
-reference: the `generation` of the table it found the field in, from a process-wide atomic 64-bit counter, and the
-field's position, in one 64-bit word read and written atomically, so threads find either their table's entry whole or
-another one; the word keeps 48 bits of the generation and 16 of the position, and a table past either is looked up
-each time):
+has its own (`xb_env.areas`, `areaCurrent`, `set_deleted`, `rddDefault`, `netErr`). Compiled code reaches fields through
+three entry points of `xbrt.h`, each call with a cache of its own (`xb_field_cache`, a zeroed static of the reference:
+the `generation` of the table it found the field in, from a process-wide atomic 64-bit counter, and the field's
+position, in one 64-bit word read and written atomically, so threads find either their table's entry whole or another
+one; the word keeps 32 bits of the generation, 16 of the area's number and 16 of the position, and a table past any of
+them is looked up each time; an alias written in the code is found through the area's number while its generation
+lasts):
 
 - `xb_field_get( ctx, r, area, alias, name, cache )` reads field `name` (upper case) of the work area that the item
   `area` names (an alias or a number, for `( expr )->name`), else the C string `alias`, else the current one (both

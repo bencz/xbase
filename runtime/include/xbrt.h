@@ -624,9 +624,8 @@ void     xb_program_run(xb_ctx *ctx, xb_func start, uint32_t argc, xb_item *argv
 #define XB_ALIGN8 _Alignas(8)
 #endif
 typedef struct xb_field_cache {
-  XB_ALIGN8 uint64_t key; /* generation << XB_FIELD_CACHE_INDEX_BITS | index; 0: none */
+  XB_ALIGN8 uint64_t key; /* the runtime's (rdd/field.c); compiled code only makes it, zero */
 } xb_field_cache;
-#define XB_FIELD_CACHE_INDEX_BITS 16
 void     xb_field_get(xb_ctx *ctx, xb_item *r, const xb_item *area, const char *alias, const char *name,
                       xb_field_cache *cache);
 void     xb_field_set(xb_ctx *ctx, const xb_item *area, const char *alias, const char *name, xb_field_cache *cache,

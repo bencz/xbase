@@ -79,6 +79,7 @@ PROCEDURE Main()
    CLOSE ALL
    FErase( "rdd_commands.dbf" )
    Aliased()
+   AliasCache()
 RETURN
 
 // REPLACE puts _FIELD-> before each target: an alias of the target's own decides, as in Clipper (FIELD->, _FIELD->,
@@ -98,3 +99,55 @@ STATIC PROCEDURE Aliased()
    CLOSE
    FErase( "rdd_commands_a.dbf" )
 RETURN
+
+// alias->field remembers the area it found the alias in while that opening of the table lasts (one reference,
+// RddCommandsAxV(), called by name across openings): the same alias then opened in another area, on another table, is
+// found there, where another alias now holds the area it was in; a closed alias is the error again; an alias in a
+// variable names a different area each time.
+STATIC PROCEDURE AliasCache()
+   LOCAL i, c := "", cAlias, e
+   dbCreate( "rdd_commands_x", { { "V", "C", 3, 0 } } )
+   dbCreate( "rdd_commands_y", { { "V", "C", 3, 0 } } )
+   USE rdd_commands_x ALIAS AX SHARED NEW
+   APPEND BLANK
+   REPLACE V WITH "x1"
+   USE rdd_commands_y ALIAS AY SHARED NEW
+   APPEND BLANK
+   REPLACE V WITH "y1"
+   dbUnlock() // written: other areas see it
+   FOR i := 1 TO 3
+      c += Do( "RddCommandsAxV" ) + ","
+   NEXT
+   SELECT AX
+   CLOSE
+   USE rdd_commands_x ALIAS AD SHARED NEW // area 1 again, another alias
+   USE rdd_commands_y ALIAS AX SHARED NEW // the alias again, another table, area 3
+   c += Do( "RddCommandsAxV" ) + "," + LTrim( Str( Select( "AX" ) ) ) + ","
+   SELECT AX
+   CLOSE
+   SELECT AD
+   CLOSE
+   USE rdd_commands_x ALIAS AX SHARED NEW // and back in area 1
+   c += Do( "RddCommandsAxV" ) + "," + LTrim( Str( Select( "AX" ) ) )
+   ? "alias cache:", c
+   CLOSE ALL
+   BEGIN SEQUENCE WITH {| oErr | Break( oErr ) }
+      c := Do( "RddCommandsAxV" )
+   RECOVER USING e
+      ? "closed alias:", e:subCode, e:operation
+   END SEQUENCE
+   USE rdd_commands_x ALIAS AX SHARED NEW
+   USE rdd_commands_y ALIAS AY SHARED NEW
+   c := ""
+   FOR EACH cAlias IN { "AX", "AY", "AX" }
+      c += ( cAlias )->V + " "
+   NEXT
+   ? "alias in a variable:", c
+   CLOSE ALL
+   FErase( "rdd_commands_x.dbf" )
+   FErase( "rdd_commands_y.dbf" )
+RETURN
+
+// One reference to AX->V (one cache), read across the openings: called by name, so no caller has a copy of its own.
+FUNCTION RddCommandsAxV()
+RETURN AX->V

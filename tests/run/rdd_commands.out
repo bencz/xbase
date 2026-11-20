@@ -27,3 +27,6 @@ zap:          0 .T.
 replace aliased:     8 ab   
 replace m->:          5     8
 field->field->:     9     9     9
+alias cache: x1 ,x1 ,x1 ,y1 ,3,x1 ,1
+closed alias:       1002 AX
+alias in a variable: x1  y1  x1  
