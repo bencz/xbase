@@ -55,17 +55,7 @@ void xb_frame_store_slow(xb_ctx *ctx, const xb_item *holder, uint32_t k, const x
   /* Grown first: an allocation, a safepoint where the program's storage may become shared (publication,
    * docs/concurrency.md), and the holder with it. */
   if (frame->len < nslots) xb_array_resize_any(ctx, frame, nslots);
-  if (!xb_is_shared(o)) { /* its frame too (only it reaches the frame): in place, as items built in locals and then
-                            * copied would stall the copies' loads */
-    xb_frame_copy(xb_array_items(frame), slots, nslots);
-    xb_gc_write_items(frame, 1, nslots);
-    return;
-  }
-  for (uint32_t s = 1; s < nslots; ++s) xb_share(&slots[s]); /* before another thread can reach them */
-  xb_seq_lock(frame);
-  for (uint32_t s = 1; s < nslots; ++s) xb_seq_store(&xb_array_items(frame)[s], &slots[s]);
-  xb_gc_write_items(frame, 1, nslots);
-  xb_seq_unlock(frame);
+  xb_frame_store(ctx, holder, k, slots, nslots); /* large enough now */
 }
 
 int32_t xb_gen_restore(xb_ctx *ctx, const xb_item *gen, xb_item *slots, uint32_t nslots) {

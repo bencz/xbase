@@ -175,7 +175,7 @@ static void visit(walk *w, const xb_item *it) {
   w->objs[w->len++] = obj;
 }
 
-void xb_share(const xb_item *it) {
+void xb_share_walk(const xb_item *it) {
   walk w = {NULL, 0, 0};
   visit(&w, it);
   while (w.len) {

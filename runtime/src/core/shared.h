@@ -19,7 +19,11 @@ static inline int xb_is_shared(const void *obj) {
 /* Shares what an item refers to, and all it reaches, by the thread that can reach it alone (the object stays local
  * until this marks it): every object gets the bit once, what is shared already stops the walk, and a string loses its
  * room to grow in place (xb_str_share). It allocates nothing. */
-void xb_share(const xb_item *it);
+void xb_share_walk(const xb_item *it);
+static inline void xb_share(const xb_item *it) { /* most items need no walk: no heap object, or shared already */
+  if (!xb_type_is_heap(it->type) || (it->type == XB_T_STRING && (it->v.s->flags & XB_STR_STATIC))) return;
+  if (!xb_is_shared(it->v.p)) xb_share_walk(it);
+}
 
 /* Reading: `seq` = xb_seq_read_begin(obj), the items copied with xb_seq_load, then xb_seq_read_valid(obj,
  * seq): when false, a writer came between and the reads start again. */

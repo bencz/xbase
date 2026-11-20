@@ -297,8 +297,9 @@ static inline void xb_frame_copy(xb_item *to, const xb_item *from, uint32_t n) {
 /* The frame of a resumable function (a generator's, an asynchronous function's) between its steps: an array whose
  * items 1 .. are its slots (slot 0 is its holder, the step's argument). xb_frame_load copies them back into `slots`
  * (as many as both have); xb_frame_store saves `slots` into the array of the holder's variable `k` (made at the first
- * save, grown as needed: allocations), in place for a local holder, shared first for a shared one. One thread at a
- * time runs a step. */
+ * save, grown as needed: allocations), in place, what they hold shared first when the holder is shared (a shared
+ * object holds shared ones). One thread at a time runs a step, and the next one runs after the handoff that
+ * publishes it (a scheduling, a claim): no other thread reads the frame meanwhile, so neither side takes its lock. */
 static inline void xb_frame_load(const xb_array *frame, xb_item *slots, uint32_t nslots) {
   uint32_t n = nslots < frame->len ? nslots : (uint32_t)frame->len;
   xb_frame_copy(slots, xb_array_items(frame), n); /* one thread at a time runs a step */
@@ -306,17 +307,16 @@ static inline void xb_frame_load(const xb_array *frame, xb_item *slots, uint32_t
 void       xb_frame_store_slow(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots, uint32_t nslots);
 static inline void xb_frame_store(xb_ctx *ctx, const xb_item *holder, uint32_t k, const xb_item *slots,
                                   uint32_t nslots) {
-  xb_object *o = holder->v.p;
-  if (o->vars[k].type == XB_T_ARRAY && !xb_is_shared(o)) { /* its frame too (only it reaches the frame): in place, as
-                                                            * items built in locals and then copied would stall */
-    xb_array *frame = o->vars[k].v.p;
-    if (frame->len >= nslots) {
-      xb_frame_copy(xb_array_items(frame), slots, nslots);
-      xb_gc_write_items(frame, 1, nslots);
-      return;
-    }
+  xb_object *o = holder->v.p; /* only the step's flow writes its frame variable */
+  if (o->vars[k].type == XB_T_ARRAY && ((const xb_array *)o->vars[k].v.p)->len >= nslots) {
+    if (xb_is_shared(o))
+      for (uint32_t s = 1; s < nslots; ++s) xb_share(&slots[s]);
+    xb_array *frame = o->vars[k].v.p; /* in place: items built in locals and then copied would stall the loads */
+    xb_frame_copy(xb_array_items(frame), slots, nslots);
+    xb_gc_write_items(frame, 1, nslots);
+    return;
   }
-  xb_frame_store_slow(ctx, holder, k, slots, nslots); /* the first save, a growth, or a shared holder */
+  xb_frame_store_slow(ctx, holder, k, slots, nslots); /* the first save, or a growth */
 }
 /* What every value answers (ClassName), else the error of a message no
  * class has: BASE/1004, or BASE/1005 for an assignment. */
