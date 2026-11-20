@@ -24,7 +24,8 @@ static void zero_divisor(xb_ctx *ctx, xb_item *r, int32_t code, const char *op, 
   xb_error(ctx, r, EG_ZERODIV, code, op, XB_ERR_SUBSTITUTE, 2, args);
 }
 
-void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
+/* a + b; `grows`: the result goes back where `a` came from (xb_op_add_grow), so a string result is made to grow. */
+static void add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b, int grows) {
   if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_ADD, a, b, NULL)) return;
   if (a->type == XB_T_INT && b->type == XB_T_INT) {
     int64_t v;
@@ -33,7 +34,7 @@ void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   } else if (xb_is_number(a) && xb_is_number(b)) {
     xb_set_double(r, xb_num_value(a) + xb_num_value(b), max16(num_dec(a), num_dec(b)));
   } else if (a->type == XB_T_STRING && b->type == XB_T_STRING) {
-    xb_set_str(r, xb_str_concat(a->v.s, b->v.s));
+    xb_set_str(r, grows ? xb_str_add(ctx, a->v.s, b->v.s) : xb_str_concat(a->v.s, b->v.s));
   } else if (a->type == XB_T_DATE && xb_is_number(b)) { /* the number is truncated to whole days */
     xb_set_date(r, xb_add_days(a->v.i, xb_num_to_i64(b)));
   } else if (xb_is_number(a) && b->type == XB_T_DATE) {
@@ -44,6 +45,10 @@ void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
     arg_error2(ctx, r, 1081, "+", a, b);
   }
 }
+
+void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { add(ctx, r, a, b, 0); }
+
+void xb_op_add_grow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { add(ctx, r, a, b, 1); }
 
 void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
   if (var->type != XB_T_STRING || b->type != XB_T_STRING) {

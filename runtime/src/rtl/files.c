@@ -10,11 +10,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* A string argument as a path, or NULL: not a string, or one holding a NUL (no file has that name). */
-static const char *path_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
+/* A string argument as a path (NUL-terminated, xb_item_cstr), or NULL: not a string, or one holding a NUL (no file has
+ * that name). */
+static const char *path_arg(uint32_t argc, xb_item *argv, uint32_t k) {
   if (argc <= k || argv[k].type != XB_T_STRING) return NULL;
   const xb_str *s = argv[k].v.s;
-  return memchr(xb_str_data(s), '\0', s->len) ? NULL : xb_str_data(s);
+  return memchr(xb_str_data(s), '\0', s->len) ? NULL : xb_item_cstr(&argv[k]);
 }
 
 /* A handle argument: one closed and kept by the registry of shared files is not open for the program. */

@@ -260,17 +260,18 @@ void xbf_MEMOTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   char hard = argc > 1 && argv[1].type == XB_T_STRING && argv[1].v.s->len ? xb_str_data(argv[1].v.s)[0] : ';';
   char soft = argc > 2 && argv[2].type == XB_T_STRING && argv[2].v.s->len ? xb_str_data(argv[2].v.s)[0] : ' ';
   const xb_str *s = argv[0].v.s;
+  const char *p = xb_str_data(s);
   char *out = malloc(s->len ? s->len : 1);
   if (!out) xb_gc_fatal("out of memory");
   size_t n = 0;
   for (size_t i = 0; i < s->len;) {
-    int isHard = i + 1 < s->len && xb_str_data(s)[i] == '\r' && xb_str_data(s)[i + 1] == '\n';
-    int isSoft = i + 1 < s->len && xb_str_data(s)[i] == SOFT1 && xb_str_data(s)[i + 1] == SOFT2;
+    int isHard = i + 1 < s->len && p[i] == '\r' && p[i + 1] == '\n';
+    int isSoft = i + 1 < s->len && p[i] == SOFT1 && p[i + 1] == SOFT2;
     if (isHard || isSoft) {
       out[n++] = isHard ? hard : soft;
       i += 2;
     } else {
-      out[n++] = xb_str_data(s)[i++];
+      out[n++] = p[i++];
     }
   }
   xb_set_str(ret, xb_str_new(out, n));

@@ -188,7 +188,7 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
     return;
   }
   if (arith == Intrinsic::not_intrinsic && !compare) {
-    callItemOp(rtBin_.at(i.binop), d, {a, bv});
+    callItemOp(binaryOp(i), d, {a, bv});
     checkPending(unwind_);
     return;
   }
@@ -232,7 +232,8 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
     b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(strLength(sa), one), b_.CreateICmpEQ(strLength(sb), one)), strBB,
                     slow);
     b_.SetInsertPoint(strBB);
-    Value *same = b_.CreateICmpEQ(strByte(sa, ConstantInt::get(i64_, 0)), strByte(sb, ConstantInt::get(i64_, 0)));
+    Value *zero = ConstantInt::get(i64_, 0);
+    Value *same = b_.CreateICmpEQ(strByte(sa, zero, false), strByte(sb, zero, false)); // one byte: never views
     Value *r = i.binop == BinOp::NotEq ? b_.CreateNot(same) : same;
     if (!fused) storeLogical(d, r);
     bools.push_back({r, b_.GetInsertBlock()});
@@ -287,7 +288,7 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
 
   b_.SetInsertPoint(slow);
   if (i.byOne) callItemOp(i.binop == BinOp::Add ? rtInc_ : rtDec_, d, {a}); // ++ or --: their own error
-  else callItemOp(rtBin_.at(i.binop), d, {a, bv});
+  else callItemOp(binaryOp(i), d, {a, bv});
   checkPending(unwind_);
   if (fused) { // a logical, unless an error's handler substituted something else
     Value *r = testTruth(d, unwind_, itemType(d));
@@ -396,7 +397,7 @@ void CodeGen::emitBitOperator(const xir::Instruction &i, const xb_bit_function &
   Value *bv = binary ? addr(i.operand(1)) : nullptr;
   Value *d = dest(i);
   emitBitOp(f.op, a, typeOf(i.operand(0), a), bv, binary ? typeOf(i.operand(1), bv) : nullptr, d, [&] {
-    if (binary) callItemOp(rtBin_.at(i.binop), d, {a, bv});
+    if (binary) callItemOp(binaryOp(i), d, {a, bv});
     else callItemOp(rtBitNot_, d, {a});
   });
 }
@@ -662,7 +663,7 @@ void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *
   }
   finish(r, fy);
   b_.SetInsertPoint(slow);
-  callItemOp(rtBin_.at(i.binop), d, {a, bv});
+  callItemOp(binaryOp(i), d, {a, bv});
   checkPending(unwind_);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);

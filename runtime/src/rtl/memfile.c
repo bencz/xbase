@@ -130,7 +130,8 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   *grow(&out, 1) = MEM_END;
-  char *path = xb_file_path_with_ext(xb_str_data(argv[0].v.s), strlen(xb_str_data(argv[0].v.s)), ".mem");
+  const char *file = xb_item_cstr(&argv[0]); /* a NUL in it ends the name */
+  char *path = xb_file_path_with_ext(file, strlen(file), ".mem");
   for (uint16_t tries = 1;; ++tries) {
     xb_file f;
     int32_t err = 0;
@@ -143,7 +144,7 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       if (written) err = closeErr;
       gencode = EG_WRITE;
     }
-    if (xb_error_file(ctx, "__MEMSAVE", gencode, 2006, xb_str_data(argv[0].v.s), err, tries) != 2) break;
+    if (xb_error_file(ctx, "__MEMSAVE", gencode, 2006, file, err, tries) != 2) break;
   }
   free(path);
   free(out.p);
@@ -212,13 +213,14 @@ void xbf___MEMRESTORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   int additive = argc > 1 && argv[1].type == XB_T_LOGICAL && argv[1].v.l;
-  char *path = xb_file_path_with_ext(xb_str_data(argv[0].v.s), strlen(xb_str_data(argv[0].v.s)), ".mem");
+  const char *file = xb_item_cstr(&argv[0]); /* a NUL in it ends the name */
+  char *path = xb_file_path_with_ext(file, strlen(file), ".mem");
   xb_file f;
   int opened = 0;
   for (uint16_t tries = 1; !opened; ++tries) {
     int32_t err = 0;
     opened = xb_shared_plain_open(path, FO_READ, &f, &err);
-    if (!opened && xb_error_file(ctx, "__MEMRESTORE", EG_OPEN, 2005, xb_str_data(argv[0].v.s), err, tries) != 2) break;
+    if (!opened && xb_error_file(ctx, "__MEMRESTORE", EG_OPEN, 2005, file, err, tries) != 2) break;
   }
   free(path);
   if (!opened) return;

@@ -130,10 +130,30 @@ Value *CodeGen::strLength(Value *str) {
   return b_.CreateZExtOrTrunc(loadFrom(intPtrTy_, b_.CreateStructGEP(ty, str, StrLen), Mem::String, "len"), i64_);
 }
 
-// The byte at 0-based `pos` (i64) of a string, as an i64 from 0 to 255.
-Value *CodeGen::strByte(Value *str, Value *pos) {
+// The bytes of a string, as xb_str_data reads them: after the header, or for
+// a view (XB_STR_VIEW) in its buffer, whose address is where the bytes would be.
+Value *CodeGen::strData(Value *str) {
   StructType *ty = strType(ArrayType::get(i8_, 0));
-  Value *data = b_.CreateStructGEP(ty, str, StrBytes);
+  Value *own = b_.CreateStructGEP(ty, str, StrBytes);
+  Value *flags = loadFrom(i32_, b_.CreateStructGEP(ty, str, StrFlags), Mem::String, "flags");
+  Value *isView = b_.CreateICmpNE(b_.CreateAnd(flags, ConstantInt::get(i32_, XB_STR_VIEW)), ConstantInt::get(i32_, 0));
+  BasicBlock *plain = b_.GetInsertBlock(), *view = newBlock("str.view"), *done = newBlock("str.bytes");
+  branchLikely(b_.CreateNot(isView), done, view);
+  b_.SetInsertPoint(view);
+  Value *buf = loadFrom(ptrTy_, own, Mem::String, "buf");
+  Value *shared = b_.CreateStructGEP(strBufType(), buf, StrBufBytes);
+  b_.CreateBr(done);
+  b_.SetInsertPoint(done);
+  PHINode *bytes = b_.CreatePHI(ptrTy_, 2, "bytes");
+  bytes->addIncoming(own, plain);
+  bytes->addIncoming(shared, view);
+  return bytes;
+}
+
+// The byte at 0-based `pos` (i64) of a string, as an i64 from 0 to 255; `mayBeView` false for one too short to be a
+// view (XB_STR_VIEW_MIN in types/types.h), whose bytes follow its header.
+Value *CodeGen::strByte(Value *str, Value *pos, bool mayBeView) {
+  Value *data = mayBeView ? strData(str) : b_.CreateStructGEP(strType(ArrayType::get(i8_, 0)), str, StrBytes);
   Value *at = b_.CreateInBoundsGEP(i8_, data, b_.CreateZExtOrTrunc(pos, intPtrTy_));
   return b_.CreateZExt(loadFrom(i8_, at, Mem::String, "byte"), i64_);
 }
@@ -192,7 +212,7 @@ void CodeGen::emitAppend(const xir::Instruction &i) {
   b_.SetInsertPoint(fits);
   Value *data = b_.CreateStructGEP(ty, s, StrBytes);
   Value *tail = b_.CreateInBoundsGEP(i8_, data, b_.CreateZExtOrTrunc(len, intPtrTy_));
-  Value *from = b_.CreateStructGEP(ty, t, StrBytes);
+  Value *from = strData(t); // the variable's own string grows (never a view); the operand may be one
   b_.CreateCondBr(b_.CreateICmpEQ(more, ConstantInt::get(i64_, 1)), one, many);
   b_.SetInsertPoint(one);
   tag(b_.CreateStore(loadFrom(i8_, from, Mem::String, "byte"), tail), Mem::String);

@@ -26,7 +26,7 @@ for.test.2:
   %16 = for.test %6, %8, 1:w0
   cond_br %16, for.body, seq.exit
 for.body.2:
-  %18 = binary add %7, %12
+  %18 = binary add.grow %7, %12
   %19 = binary add.one %6, 1:w0
   %20 = subst.check guard 4 %19
   cond_br %20, for.body.2.subst, for.test(%19, %18)
@@ -40,7 +40,7 @@ for.test.2.any(%26: item, %27: item, %28: item, %29: item):
   %30 = for.test %26, %29, 1:w0
   cond_br %30, for.body.any, seq.exit.any
 for.body.2.any(%32: item, %33: item, %34: item, %35: item):
-  %36 = binary add %33, %35
+  %36 = binary add.grow %33, %35
   %37 = binary add.one %32, 1:w0
   br for.body.2.any.2(%34, %36, %37)
 for.body.2.any.2(%39: item, %40: item, %41: item):
@@ -78,7 +78,7 @@ for.test.2:
   %13 = for.test %1, %4, 1:w0
   cond_br %13, for.body, seq.exit
 for.body.2:
-  %15 = binary add %2, %9
+  %15 = binary add.grow %2, %9
   %16 = binary add.one %1, 1:w0
   %17 = subst.check guard 4 %16
   cond_br %17, for.body.2.subst, for.test(%16, %15)
@@ -97,7 +97,7 @@ for.test.2.any(%29: item, %30: item, %31: item):
   %32 = for.test %29, %31, 1:w0
   cond_br %32, for.body.any, seq.exit.any
 for.body.2.any(%34: item, %35: item, %36: item):
-  %37 = binary add %35, %36
+  %37 = binary add.grow %35, %36
   %38 = binary add.one %34, 1:w0
   br for.test.any(%38, %37)
 for.test.subst:

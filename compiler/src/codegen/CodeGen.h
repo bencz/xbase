@@ -63,13 +63,14 @@ private:
   enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 5 };           // xb_hash
   enum HEntryField : unsigned { HEntryKey = 0, HEntryValue = 1 };                     // xb_hentry
   enum StrField : unsigned { StrFlags = 0, StrHash = 1, StrLen = 2, StrBytes = 3 }; // xb_str
+  enum StrBufField : unsigned { StrBufBytes = 2 };                                    // xb_strbuf
   // Classes of memory compiled code reaches, which never overlap (TBAA):
   // items outside the heap (frames, Local and scratch items, STATIC storage,
   // literals), items in the heap (elements, cells, reference targets), array
   // headers, codeblocks' cell pointers, the context's head, frame links, the
-  // collector's state bytes, strings (compiled code reads them, and
-  // writes the strings an `append` grows: bytes, length, flags, room), and
-  // objects' class pointers.
+  // collector's state bytes, strings and views' buffers (compiled code reads
+  // them, and writes the strings an `append` grows: bytes, length, flags,
+  // room), and objects' class pointers.
   // Unknown memory is not tagged.
   enum class Mem : uint8_t {
     Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, String, ObjectHeader, Count_
@@ -134,6 +135,7 @@ private:
 
   // Literals.cpp
   llvm::StructType *strType(llvm::Type *data);
+  llvm::StructType *strBufType();
   llvm::Constant *literalItem(uint32_t type, uint16_t width, uint16_t dec, llvm::Constant *payload);
   llvm::Constant *funcRef(const xir::Callee &c);
   llvm::Constant *constantPayloadWord(llvm::Constant *payload);
@@ -224,7 +226,8 @@ private:
   void findFusedSends(const xir::BasicBlock &b);
   bool emitInlineCall(const xir::Instruction &i);
   llvm::Value *strLength(llvm::Value *str);
-  llvm::Value *strByte(llvm::Value *str, llvm::Value *pos);
+  llvm::Value *strData(llvm::Value *str);
+  llvm::Value *strByte(llvm::Value *str, llvm::Value *pos, bool mayBeView = true);
   llvm::Value *byteString(llvm::Value *c);
   void shareString(llvm::Value *item);
   llvm::Value *isGrowing(llvm::Value *flags);
@@ -260,6 +263,7 @@ private:
   CallResult callResult(llvm::Value *item, unsigned k);
   void callDone(const CallResult &r);
   void callItemOp(llvm::FunctionCallee fn, llvm::Value *result, std::initializer_list<llvm::Value *> operands);
+  llvm::FunctionCallee binaryOp(const xir::Instruction &i);
   llvm::Value *dest(const xir::Instruction &i);
   llvm::Value *value(const xir::Value *v);
   llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind, llvm::Value *type);
@@ -328,6 +332,7 @@ private:
   llvm::FunctionCallee rtMacroGet_, rtMacroSet_, rtMacroCall_, rtMacroSend_, rtMacroRef_, rtMacroPrivate_;
   llvm::FunctionCallee rtMacroPublic_, rtMacroText_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
+  llvm::FunctionCallee rtAddGrow_; // xb_op_add_grow: a Binary add that `grows`
 
   // state of the object (every module added)
   std::unordered_map<const xir::Function *, llvm::Function *> functions_;

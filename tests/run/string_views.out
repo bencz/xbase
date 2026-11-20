@@ -1,0 +1,22 @@
+
+len:        534 substr: Hello left: --- right: [World  ]
+at:        528        520 .T. .F.
+compare: .T. .T. .T. .T. .F. .F. .T.
+case and trim: HELLO, WORLD   [ World] [ World]
+strtran: Hello, There           14
+val:       1234.5         77
+hash keys:          1          2 .T.          2          2
+ascan:          2          3
+asort: apple figs pear
+macro: abcd          3
+str appended: n=  3.25     3,25   20261120 qout:
+qq! .T.
+dbf:        250 .T.        563 mend M
+dbf 2: second        524 .T.
+file: .T. .T. .F. .T.
+erased: .T. .F.
+mem file: .T. .T. .T.
+do:       1001 .T.
+alias error:       1002 .T.
+trimmed:     600001 gh     600003 ghzy .T.
+collections: kept       2000 SSSSSSSSSS YYYYYYYYYY

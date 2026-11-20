@@ -60,12 +60,13 @@ static int string_placeholder(char c) { return strchr("!#9aAlLnNxXyY", c) != NUL
 
 static void transform_string(xb_ctx *ctx, const xb_str *s, const char *pic, size_t picLen, unsigned flags, out *o) {
   char datePic[XB_DATE_TEXT_SIZE];
+  const char *text = xb_str_data(s);
   if (flags & (P_DATE | P_BRITISH)) {
     picLen = date_template(ctx, 'X', datePic);
     pic = datePic;
   }
   if (!picLen) {
-    for (size_t i = 0; i < s->len; ++i) put(o, flags & P_UPPER ? xb_ascii_upper(xb_str_data(s)[i]) : xb_str_data(s)[i]);
+    for (size_t i = 0; i < s->len; ++i) put(o, flags & P_UPPER ? xb_ascii_upper(text[i]) : text[i]);
   } else {
     size_t at = 0; /* the next character of the value */
     for (size_t i = 0; i < picLen; ++i) {
@@ -75,7 +76,7 @@ static void transform_string(xb_ctx *ctx, const xb_str *s, const char *pic, size
         put(o, string_placeholder(p) ? ' ' : p);
         continue;
       }
-      char c = xb_str_data(s)[at++];
+      char c = text[at++];
       if (p == '!') {
         put(o, xb_ascii_upper(c));
       } else if (p == 'y' || p == 'Y') {
@@ -89,7 +90,7 @@ static void transform_string(xb_ctx *ctx, const xb_str *s, const char *pic, size
     }
     if ((flags & P_REMAIN) && at == 0) /* nothing was placed: the value follows whole */
       for (size_t i = 0; i < s->len; ++i) {
-        char c = xb_str_data(s)[i];
+        char c = text[i];
         put(o, flags & P_UPPER ? xb_ascii_upper(c) : c);
       }
   }
@@ -109,7 +110,8 @@ static int number_placeholder(char c) { return c == '9' || c == '#' || c == '$' 
 static void str_field(const xb_item *v, int width, int dec, out *o) {
   int intWidth = width - (dec ? dec + 1 : 0);
   xb_str *t = xb_num_to_str(v, intWidth > 0 ? intWidth : 0, dec); /* nothing allocates while it is read */
-  for (size_t i = 0; i < t->len; ++i) put(o, xb_str_data(t)[i]);
+  const char *text = xb_str_data(t);
+  for (size_t i = 0; i < t->len; ++i) put(o, text[i]);
 }
 
 /* Returns the offset where @B starts trimming (past a parenthesis). */

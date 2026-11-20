@@ -87,6 +87,11 @@ Constant *CodeGen::literal(const xir::Constant &c) {
 // xb_str: { flags, hash, len, bytes[] } with the bytes typed as `data`.
 StructType *CodeGen::strType(Type *data) { return StructType::get(ctx_, {i32_, i32_, intPtrTy_, data}); }
 
+// xb_strbuf, the bytes views share: { cap, used, bytes[] }.
+StructType *CodeGen::strBufType() {
+  return StructType::get(ctx_, {intPtrTy_, intPtrTy_, ArrayType::get(i8_, 0)});
+}
+
 Constant *CodeGen::stringLiteral(const std::string &s) {
   Constant *&c = strLits_[s];
   if (c) return c;

@@ -9,6 +9,24 @@
 xb_str *xb_str_alloc(uint64_t len); /* 64-bit: checked before it is narrowed to size_t (32-bit hosts) */
 /* The same for a length the program chose: NULL when there is no memory for it (xb_gc_try_alloc). */
 xb_str *xb_str_try_alloc(uint64_t len);
+/* An appending `+` (xb_op_add_grow) whose result is shorter than this gives a plain string, copied whole: up to this
+ * length a copy costs no more time than a view (a second object, a buffer with its header) and takes less memory than
+ * a view and its buffer's room, measured on strings built by appends of a few bytes. From this length on the result
+ * is a view of a buffer with as much room again, which the next append fills in place: appending n times to an
+ * element, a member, a memory variable or a STATIC copies O(n) bytes in all, not O(n^2) (a LOCAL grows in place
+ * without views, xb_op_append). */
+#define XB_STR_VIEW_MIN 512u
+/* `a + b` of strings for xb_op_add_grow (an append): an empty operand gives the other one; a view of the
+ * buffer of `a` when `a` is a view that ends at its buffer's tip with room for `b` (the bytes of `b` written there);
+ * else, from XB_STR_VIEW_MIN bytes, a view of a new buffer with room to grow; else a plain string, as
+ * xb_str_concat makes. `a` and `b` are reachable (an operand's item is a root): the new view's buffer is kept alive
+ * through `a` while the view is made. */
+xb_str *xb_str_add(xb_ctx *ctx, const xb_str *a, const xb_str *b);
+/* The bytes of the string item `it` followed by a NUL, for C code that reads up to one (a path, a name the system
+ * reads, a C string function): a plain string's own bytes; a view's are not followed by one, so the item takes a
+ * plain copy of the same text first. That allocates: `it` is a root (an argument), and what the caller held of its
+ * string before (an xb_str pointer) is read from the item again. */
+const char *xb_item_cstr(xb_item *it);
 /* -1, 0 or 1 as the comparison operators order two values (strings follow SET
  * EXACT), XB_ORDER_UNORDERED for a NaN (xb_order_is in xbrt.h), or 2 when they
  * cannot be compared (core/ops.c). */

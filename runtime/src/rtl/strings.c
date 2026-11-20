@@ -107,18 +107,20 @@ static void change_case(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv,
     return;
   }
   xb_str *r = xb_str_alloc(s->len);
+  const char *p = xb_str_data(s);
+  char *out = xb_str_buffer(r);
   size_t i = 0;
   uint64_t high = 0; /* bytes above 0x7F: characters the codepage reads */
   for (; i + 8 <= s->len; i += 8) {
     uint64_t w;
-    memcpy(&w, xb_str_data(s) + i, 8);
+    memcpy(&w, p + i, 8);
     high |= w;
     w = change_case8(w, upper);
-    memcpy(xb_str_buffer(r) + i, &w, 8);
+    memcpy(out + i, &w, 8);
   }
   for (; i < s->len; ++i) {
-    high |= (unsigned char)xb_str_data(s)[i];
-    xb_str_buffer(r)[i] = upper ? xb_ascii_upper(xb_str_data(s)[i]) : xb_ascii_lower(xb_str_data(s)[i]);
+    high |= (unsigned char)p[i];
+    out[i] = upper ? xb_ascii_upper(p[i]) : xb_ascii_lower(p[i]);
   }
   if (high & UINT64_C(0x8080808080808080)) xb_cp_change_case(xb_codepage_of(ctx), xb_str_buffer(r), r->len, upper);
   xb_set_str(ret, r);
@@ -482,8 +484,9 @@ void xbf_SOUNDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *s = str_arg(argv, argc, 0);
   size_t at = 0;
   char prev = '0';
+  const char *p = s ? xb_str_data(s) : NULL;
   for (size_t i = 0; s && i < s->len && at < sizeof code; ++i) {
-    char c = xb_ascii_upper(xb_str_data(s)[i]);
+    char c = xb_ascii_upper(p[i]);
     if (c < 'A' || c > 'Z') continue;
     char d = digits[c - 'A'];
     if (at == 0) code[at++] = c;
@@ -534,13 +537,14 @@ void xbf_CHARAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int64_t chars = 1;
   xb_set_int(ret, 0);
   if (needle->len == 0) return;
+  const char *h = xb_str_data(hay), *find = xb_str_data(needle);
   for (size_t i = 0; i + needle->len <= hay->len; ++chars) { /* a match starts where a character does */
-    if (memcmp(xb_str_data(hay) + i, xb_str_data(needle), needle->len) == 0) {
+    if (memcmp(h + i, find, needle->len) == 0) {
       xb_set_int(ret, chars);
       return;
     }
     size_t n;
-    xb_cp_decode(cp, xb_str_data(hay), hay->len, i, &n);
+    xb_cp_decode(cp, h, hay->len, i, &n);
     i += n;
   }
 }

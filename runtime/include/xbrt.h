@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 54u
+#define XB_ABI_VERSION 55u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -72,16 +72,22 @@ static inline int xb_type_is_heap(uint32_t type) {
 }
 
 /* [ABI] string header. Strings are immutable: they can be shared freely
- * between items and threads. The bytes are always NUL terminated (len excludes
- * the terminator) so they can be handed to C without copying. */
+ * between items and threads. A plain string's bytes follow its header and are
+ * NUL terminated (len excludes the terminator), so they can be handed to C
+ * without copying; a view's (XB_STR_VIEW) are the first `len` bytes of a
+ * buffer, which a longer view of it may go on past, so C code that reads up
+ * to a NUL takes them through xb_item_cstr (types/types.h). */
 #define XB_STR_STATIC 0x1u   /* not a heap object, never freed: literals, the empty and one-byte strings */
 #define XB_STR_APPEND 0x2u   /* made by xb_op_append and seen only by its variable: may grow in place;
                                 `hash` then holds the bytes it has room for (its length at least) */
+#define XB_STR_VIEW   0x4u   /* a view of a buffer (xb_strbuf): where the bytes would be, the buffer's
+                                address; never empty, never XB_STR_APPEND nor XB_STR_STATIC */
 
 typedef struct xb_str xb_str;
+typedef struct xb_strbuf xb_strbuf;
 #ifndef __cplusplus
-/* The compiler mirrors this layout as an LLVM type and never uses the C++ view
- * of it (a flexible array member is not standard C++). */
+/* The compiler mirrors these layouts as LLVM types and never uses the C++ view
+ * of them (a flexible array member is not standard C++). */
 struct xb_str {
   uint32_t flags;
   uint32_t hash;
@@ -89,10 +95,33 @@ struct xb_str {
   char     bytes[];
 };
 
-/* The bytes of a string. They follow the header (`bytes`), but every read
- * goes through xb_str_data, never through the member: a string may later be a
- * view (a flag; planned) whose bytes live elsewhere. */
-static inline const char *xb_str_data(const xb_str *s) { return s->bytes; }
+/* [ABI] The bytes that views share, a heap object of its own: `cap` bytes of
+ * room, the first `used` written (the tip), followed by a NUL. An appending
+ * `+` (xb_op_add_grow) whose left operand is a view ending at the tip writes
+ * the right operand's bytes there and moves the tip (xb_str_add): views of one
+ * buffer are each a prefix of what was written, and bytes below the tip never
+ * change. */
+struct xb_strbuf {
+  size_t cap;  /* room for the bytes and the NUL that follows the tip */
+  size_t used; /* changed only by an atomic compare-and-swap: two threads may append to one view */
+  char   bytes[];
+};
+
+/* The buffer of a view. */
+static inline xb_strbuf *xb_str_view_buffer(const xb_str *s) {
+  xb_strbuf *b;
+  memcpy(&b, s->bytes, sizeof b);
+  return b;
+}
+
+/* Sets the buffer of a view: one being made, or moved by the collector. */
+static inline void xb_str_view_set_buffer(xb_str *s, xb_strbuf *b) { memcpy(s->bytes, &b, sizeof b); }
+
+/* The bytes of a string: those after the header, or a view's in its buffer.
+ * Every read goes through here, never through the member. */
+static inline const char *xb_str_data(const xb_str *s) {
+  return s->flags & XB_STR_VIEW ? xb_str_view_buffer(s)->bytes : s->bytes;
+}
 
 /* The writable bytes of a string being built: one the caller has just
  * allocated and not yet shared, or an XB_STR_APPEND string that only its
@@ -323,11 +352,12 @@ int32_t  xb_pending_gc(xb_ctx *ctx);
 /* The layout the module was compiled for: offsets of xb_str.bytes,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
  * xb_ctx.stack_limit, xb_array.data (after len and cap), xb_ref.value (after coll and index),
- * xb_hash.entries (after its five counts) and xb_object.vars (after cls and nvars). */
+ * xb_hash.entries (after its five counts), xb_object.vars (after cls and nvars)
+ * and xb_strbuf.bytes (after cap and used). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
                       uint32_t ctx_stack_limit_offset, uint32_t array_data_offset, uint32_t ref_value_offset,
-                      uint32_t hash_entries_offset, uint32_t object_vars_offset);
+                      uint32_t hash_entries_offset, uint32_t object_vars_offset, uint32_t strbuf_bytes_offset);
 /* A frame (its address) below the context's stack_limit: xb_stack_deep gives
  * 1 when that limit was only the mark of a deep stack (core/ctx.c), whose
  * pages go back to the system once it is shallow again, and the frame lies
@@ -339,6 +369,11 @@ int32_t  xb_stack_deep(xb_ctx *ctx, uintptr_t frame);
 void     xb_stack_overflow(xb_ctx *ctx);
 
 void     xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+/* a + b whose result goes back where `a` came from: `x += b` or `x := x + b + ...` on an element, a hash value, an
+ * instance variable, a memory variable, a STATIC or a captured LOCAL (the compiler marks it). The same as xb_op_add,
+ * except that a long string result is a view with room to grow (xb_str_add, types/types.h): such appends copy O(n)
+ * bytes in all, not O(n^2). xb_op_add gives a string of the exact size. */
+void     xb_op_add_grow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 void     xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 /* ++ and -- (also the step of a FOR without STEP): a + 1 and a - 1 for a
  * number or a date; anything else is their own argument error (1086, 1087),

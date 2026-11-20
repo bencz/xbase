@@ -29,14 +29,41 @@ typedef struct xb_item {
   zero.
 - The heap types (`STRING` to `HASH`) are one range of tags (`XB_T_HEAP_FIRST`, `XB_T_HEAP_LAST`, `xb_type_is_heap`):
   an item of another type refers to no object, so the collector need not see it.
-- Strings (`xb_str`: flags, hash, length, bytes) are immutable and NUL-terminated, so they can be shared between items
-  and threads and passed to C. The bytes follow the header (the member `bytes`), but C code never names the member: it
-  reads a string's bytes through `xb_str_data` and writes those of a string it has just allocated and not yet shared,
-  or of one only its variable sees (`XB_STR_APPEND`, below), through `xb_str_buffer` (both in `xbrt.h`), so that a
-  string whose bytes live elsewhere (a view; planned) needs no change at the call sites. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects, nor are
-  the empty string and the 256 strings of one byte (`xb_str_bytes` in `xbrt.h`): `xb_str_new` and `xb_str_concat` return
-  those for results of up to one byte (`Chr()`, `SubStr( c, n, 1 )`, ...), so making one allocates nothing, and compiled
-  code takes them from the table too. One exception to immutability is invisible to programs: `xb_op_append( ctx, var, b
+- Strings (`xb_str`: flags, hash, length, bytes) are immutable, so they can be shared between items and threads. A
+  plain string's bytes follow its header (the member `bytes`) and are NUL-terminated. A view (the flag `XB_STR_VIEW`)
+  holds there instead the address of a buffer (`xb_strbuf` in `xbrt.h`: its room `cap`, its tip `used`, its bytes), a
+  heap object of its own: the view's bytes are the buffer's first `len` ones, which a longer view of the same buffer may
+  go on past, so they are not NUL-terminated. C code never names the member: it reads a string's bytes through
+  `xb_str_data` (a test of the flag, then the header's bytes or the buffer's) and writes those of a string it has just
+  allocated and not yet shared, or of one only its variable sees (`XB_STR_APPEND`, below), through `xb_str_buffer`
+  (both in `xbrt.h`); code that hands them to something that reads up to a NUL (a path for the system, `GetEnv()`'s
+  name, `RUN`'s command line, `Do()`'s function name, a name in an error's text, `strlen`) takes them through
+  `xb_item_cstr` (`types/types.h`), which first replaces a view in the item, a root, with a plain copy of the same
+  text. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects, nor are the empty string and
+  the 256 strings of one byte (`xb_str_bytes` in `xbrt.h`): `xb_str_new` and `xb_str_concat` return those for results
+  of up to one byte (`Chr()`, `SubStr( c, n, 1 )`, ...), so making one allocates nothing, and compiled code takes them
+  from the table too.
+- A string `+` gives a plain string of the exact size (`xb_str_concat`), unless it appends: its result goes back where
+  its left operand came from, `x += y` or `x := x + y + ...` written out on the same variable, element (an index that is
+  the same variable or literal) or instance variable, which the compiler marks (`grows` in
+  [xir.md](xir.md#phase-1-in-detail)) and calls `xb_op_add_grow` for. An append (`xb_str_add` in `types/string.c`) gives
+  a plain string when the result is shorter than 512 bytes (`XB_STR_VIEW_MIN`: up to there a copy costs no more time
+  than a view and takes less memory than a view and its buffer's room). From 512 bytes on it gives a view: when the left
+  operand is a view that ends at its buffer's tip (its length is `used`) and the buffer has room for the right operand's
+  bytes and a NUL, they are written there, the tip moves past them and the result is a new view of the same buffer; else
+  both operands' bytes go into a new buffer with room for twice the result (made after the view, which a root holds
+  meanwhile). A view never changes (its length and its buffer are set as it is made) and bytes below a tip never change,
+  so every copy taken before an append keeps its value; an append to a view that is no longer at the tip (another append
+  from it came first) copies. Two threads may append to one shared view at once: each claims the bytes past the tip with
+  an atomic compare-and-swap of `used` from the view's length, and the one that loses copies. So `x := x + y` on an
+  array element, a hash value, an object's variable, a memory variable, a `STATIC` or a `LOCAL` a codeblock sees costs
+  amortized constant time, as it does for a plain `LOCAL` (below): 80,000 one-byte appends to an element take about 1 ms
+  where copying the string at each one took 95, and doubling their number doubles the time instead of quadrupling it. A
+  view is never shorter than 512 bytes (never empty: compiled `Asc()` reads its first byte) and never has
+  `XB_STR_APPEND` or `XB_STR_STATIC`; its `hash` caches its hash as a plain string's does. Its buffer stays alive while
+  any view of it does, with its spare room; a large buffer gives that room back once its tip stops moving ([Garbage
+  collector](#garbage-collector)).
+- One exception to immutability is invisible to programs: `xb_op_append( ctx, var, b
   )`, which compiled code calls for `x := x + y` on a `LOCAL` only its function sees (`append-in-place` in
   [xir.md](xir.md#passes)), makes a string result with room to grow (twice its length, at least 32 bytes;
   `xb_str_growing`) with the flag `XB_STR_APPEND` and the room in its `hash` field (at most 4 GB; a string past that has
@@ -166,9 +193,11 @@ through the reference when one was passed, and returns it.
 
 `runtime/src/gc/gc.c` is a precise, generational mark-region collector with an Immix heap layout, which moves objects
 out of fragmented blocks in full collections (evacuation). Strings,
-arrays, array item storage, hashes, hash entry stores, codeblocks, cells, reference targets and objects (instances of
-classes) are its objects; an 8-byte header (size, kind, state, flags) precedes each one, so object pointers are what the
-rest of the runtime and compiled code use.
+string views and their buffers, arrays, array item storage, hashes, hash entry stores, codeblocks, cells, reference
+targets and objects (instances of classes) are its objects (a view refers to its buffer, which refers to nothing; a
+buffer's bytes past its tip change as views of it are appended to, never while a collection runs); an 8-byte header
+(size, kind, state, flags) precedes each one, so object pointers are what the rest of the runtime and compiled code use.
+The compiler's mirror of the layouts, a buffer's among them, is checked as the program starts (`xb_abi_check`).
 
 - Heap: objects up to 256 bytes (header included) live in blocks of 32 KB, aligned to their size and divided into
   lines of 128 bytes. A block's first lines hold its metadata: per line, the epoch of the last collection that reached
@@ -190,7 +219,9 @@ rest of the runtime and compiled code use.
   list, so a young collection sweeps the young list only. A dead one's units are free at once (its mapping unmapped).
   One that uses only its first bytes now gives the rest back in place (`xb_gc_trim`: its last units free, or its
   mapping's last pages unmapped): a string that no longer grows in place (no `XB_STR_APPEND`: its room given up once
-  it was read) at the sweep that finds it alive, an array that `ASize` cut down at once.
+  it was read) at the sweep that finds it alive, a string buffer whose tip has not moved since the last sweep that
+  found it alive (its `cap` lowered to the room left: a later append to its tip that does not fit copies), an array
+  that `ASize` cut down at once.
 - Memory given back: after a collection, the free blocks beyond those the next allocations need (the young budget and an
   eighth of the blocks in use, at least 1 MB, and half as much again before any goes, so a heap near the line does not
   give blocks back and take them again at each collection) go back to the system (`xb_platform_pages_decommit`): the
@@ -1059,7 +1090,7 @@ goes to that block again, as in the reference, until the limit of nested handler
 | `/` | always a double with `SET DECIMALS` (2) decimals; zero divisor is an error |
 | `%` | always a double with `SET DECIMALS` decimals (remainder of the integers, or `fmod`); zero divisor is an error |
 | `^` | double with `SET DECIMALS` decimals |
-| `+` on strings | concatenation |
+| `+` on strings | concatenation; an append (`x += y`) from 512 bytes a view, grown at its buffer's tip ([Values](#values)) |
 | `-` on strings | concatenation moving the left operand's trailing blanks to the end |
 | `=` on strings | with `SET EXACT OFF`, compares only the right operand's length (`"abc" = "ab"` is true) |
 | `==` | exact comparison; on strings byte-for-byte |

@@ -63,10 +63,98 @@ xb_str *xb_str_new(const char *p, size_t len) {
   return s;
 }
 
+/* The bytes of a string shorter than XB_STR_VIEW_MIN, which is never a view: xb_str_data without its test. */
+static const char *short_data(const xb_str *s) { return s->bytes; }
+
+/* a + b, `len` bytes, shorter than XB_STR_VIEW_MIN (most `+`): a plain string, the shared one for up to one byte. */
+static xb_str *concat_short(const xb_str *a, const xb_str *b, size_t len) {
+  if (len <= 1) return xb_str_new(a->len ? short_data(a) : short_data(b), len);
+  xb_str *s = xb_str_alloc(len);
+  memcpy(xb_str_buffer(s), short_data(a), a->len);
+  memcpy(xb_str_buffer(s) + a->len, short_data(b), b->len);
+  return s;
+}
+
+/* A view's object: the header, then its buffer's address where a plain string's bytes are. */
+#define XB_STR_VIEW_SIZE (offsetof(xb_str, bytes) + sizeof(xb_strbuf *))
+_Static_assert(offsetof(xb_str, bytes) % _Alignof(xb_strbuf *) == 0, "a view's buffer address is aligned");
+
+/* A new view of `len` bytes, of no buffer yet: the caller sets it before anything else allocates. */
+static xb_str *view_new(size_t len) {
+  xb_str *v = xb_gc_alloc(XB_GC_VIEW, XB_STR_VIEW_SIZE);
+  v->flags = XB_STR_VIEW;
+  v->hash = 0;
+  v->len = len;
+  xb_str_view_set_buffer(v, NULL);
+  return v;
+}
+
+/* a + b, `len` bytes, as a view of a new buffer with room for as much again; NULL when no memory holds that buffer.
+ * The view is made first and rooted while the buffer is allocated: a buffer only a C variable holds would not survive
+ * a collection. */
+static xb_str *view_with_room(xb_ctx *ctx, const xb_str *a, const xb_str *b, size_t len) {
+  size_t cap = len <= (XB_STR_MAX_LEN - 1) / 2 ? 2 * len + 1 : len + 1;
+  xb_item held;
+  xb_set_str(&held, view_new(0));
+  xb_gc_root_push(ctx, &held);
+  xb_strbuf *buf = xb_gc_try_alloc(XB_GC_STRBUF, offsetof(xb_strbuf, bytes) + cap);
+  xb_gc_root_pop(ctx, 1);
+  if (!buf) return NULL;
+  xb_str *v = held.v.s; /* where the collection left it */
+  buf->cap = cap;
+  buf->used = len;
+  memcpy(buf->bytes, xb_str_data(a), a->len);
+  memcpy(buf->bytes + a->len, xb_str_data(b), b->len);
+  buf->bytes[len] = '\0';
+  v->len = len;
+  xb_str_view_set_buffer(v, buf);
+  xb_gc_write(v); /* a full collection in the buffer's allocation made the view old */
+  return v;
+}
+
+/* xb_str_add for a result of XB_STR_VIEW_MIN bytes or more (every append to a view). */
+XB_NOINLINE static xb_str *add_long(xb_ctx *ctx, const xb_str *a, const xb_str *b) {
+  size_t n = b->len;
+  if (!n || !a->len) return (xb_str *)(n ? b : a); /* nothing to copy: strings are immutable */
+  if (a->flags & XB_STR_VIEW) {
+    xb_strbuf *buf = xb_str_view_buffer(a);
+    size_t tip = a->len;
+    /* b's bytes claimed at the tip; another thread that appends to the same view meanwhile copies instead */
+    if (n < buf->cap - tip && xb_atomic_cassz(&buf->used, &tip, tip + n, XB_RELAXED)) {
+      memcpy(buf->bytes + tip, xb_str_data(b), n);
+      buf->bytes[tip + n] = '\0';
+      xb_str *v = view_new(tip + n); /* `a`, an operand's (a root), keeps the buffer meanwhile */
+      xb_str_view_set_buffer(v, xb_str_view_buffer(a));
+      return v;
+    }
+  }
+  uint64_t len = (uint64_t)a->len + n;
+  if (len <= XB_STR_MAX_LEN) {
+    xb_str *v = view_with_room(ctx, a, b, (size_t)len);
+    if (v) return v;
+  }
+  return xb_str_concat(a, b);
+}
+
+const char *xb_item_cstr(xb_item *it) {
+  if (!(it->v.s->flags & XB_STR_VIEW)) return xb_str_data(it->v.s);
+  xb_str *copy = xb_str_alloc(it->v.s->len);
+  const xb_str *s = it->v.s; /* where the allocation's collection left it */
+  memcpy(xb_str_buffer(copy), xb_str_data(s), s->len);
+  xb_put(it, xb_header_word(XB_T_STRING, it->width, 0), xb_pointer_word(copy));
+  return xb_str_data(copy);
+}
+
 xb_str *xb_str_concat(const xb_str *a, const xb_str *b) {
-  if (a->len + b->len <= 1) return xb_str_new(a->len ? xb_str_data(a) : xb_str_data(b), a->len + b->len);
-  xb_str *s = xb_str_alloc(a->len + b->len);
+  size_t len = a->len + b->len;
+  if (len < XB_STR_VIEW_MIN) return concat_short(a, b, len);
+  xb_str *s = xb_str_alloc(len);
   memcpy(xb_str_buffer(s), xb_str_data(a), a->len);
   memcpy(xb_str_buffer(s) + a->len, xb_str_data(b), b->len);
   return s;
+}
+
+xb_str *xb_str_add(xb_ctx *ctx, const xb_str *a, const xb_str *b) {
+  size_t len = a->len + b->len; /* two lengths of strings never wrap (XB_STR_MAX_LEN) */
+  return len < XB_STR_VIEW_MIN ? concat_short(a, b, len) : add_long(ctx, a, b);
 }

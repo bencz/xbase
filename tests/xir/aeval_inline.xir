@@ -32,7 +32,7 @@ for.body.inline:
 endif.4.inline:
   %25 = index %0, %18
   inline.enter MAIN.block1
-  %27 = binary add %19, %25
+  %27 = binary add.grow %19, %25
   %28 = subst.check %27
   cond_br %28, endif.4.inline.subst, endif.4.inline.3
 seq.exit.5.inline:
@@ -73,7 +73,7 @@ for.body.inline.any:
 endif.4.inline.any:
   %61 = index %70, %68
   inline.enter MAIN.block1
-  %63 = binary add %69, %61
+  %63 = binary add.grow %69, %61
   br endif.4.inline.3.any(%68, %70, %71, %63)
 seq.exit.5.inline.any(%65: item):
   inline.leave
@@ -111,7 +111,7 @@ block MAIN.block1 internal params 1 {
 entry:
   %0 = load $c0 maybe_ref
   %1 = load $f0 maybe_ref
-  %2 = binary add %0, %1
+  %2 = binary add.grow %0, %1
   store $c0 maybe_ref, %2
   barrier $c0 maybe_ref
   ret %2

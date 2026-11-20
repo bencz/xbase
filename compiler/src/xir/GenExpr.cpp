@@ -5,6 +5,58 @@
 
 namespace xb::xir {
 
+namespace {
+
+// Whether two lvalues written in the source name the same place: one variable (not a field: its width is fixed), an
+// element of one place at an index that is the same variable or literal, or an instance variable of one place. It
+// decides a hint alone: a `+` that grows computes what any `+` does.
+bool samePlace(const Expr &a, const Expr &b) {
+  if (a.kind != b.kind) return false;
+  switch (a.kind) {
+  case ExprKind::Var: {
+    auto &x = static_cast<const VarExpr &>(a), &y = static_cast<const VarExpr &>(b);
+    return x.where != VarWhere::Field && x.where == y.where && x.slot == y.slot && x.name == y.name &&
+           x.memvarAlias == y.memvarAlias;
+  }
+  case ExprKind::Number: {
+    auto &x = static_cast<const NumberExpr &>(a), &y = static_cast<const NumberExpr &>(b);
+    return x.isInt && y.isInt && x.ival == y.ival;
+  }
+  case ExprKind::String: return static_cast<const StringExpr &>(a).value == static_cast<const StringExpr &>(b).value;
+  case ExprKind::Index: {
+    auto &x = static_cast<const IndexExpr &>(a), &y = static_cast<const IndexExpr &>(b);
+    return samePlace(*x.base, *y.base) && samePlace(*x.index, *y.index);
+  }
+  case ExprKind::Send: {
+    auto &x = static_cast<const SendExpr &>(a), &y = static_cast<const SendExpr &>(b);
+    return !x.withArgs && !y.withArgs && !x.messageText && !y.messageText && !x.super && !y.super &&
+           x.message == y.message && samePlace(*x.object, *y.object);
+  }
+  default: return false;
+  }
+}
+
+// `target := value` puts back a string that grows: the value is a chain of `+` that starts with the target.
+bool appendsTo(const Expr &target, const Expr &value) {
+  const Expr *e = &value;
+  if (e->kind != ExprKind::Binary || static_cast<const BinaryExpr *>(e)->op != BinOp::Add) return false;
+  while (e->kind == ExprKind::Binary && static_cast<const BinaryExpr *>(e)->op == BinOp::Add)
+    e = static_cast<const BinaryExpr *>(e)->lhs.get();
+  return samePlace(target, *e);
+}
+
+// Marks the adds of the chain whose result is `v` (v, then its left operand while that is an add) as growing.
+void markGrows(Value *v) {
+  while (v->kind() == Value::Kind::Instruction) {
+    auto *i = static_cast<Instruction *>(v);
+    if (i->op != Op::Binary || i->binop != BinOp::Add || i->byOne) return;
+    i->grows = true;
+    v = i->operand(0);
+  }
+}
+
+} // namespace
+
 Value *Generator::genExpr(const Expr &e) {
   Builder &b = *cur_.b;
   switch (e.kind) {
@@ -261,8 +313,10 @@ Value *Generator::genAssign(const AssignExpr &a) {
     Value *l = load(target);
     Value *r = genExpr(*a.value);
     value = cur_.b->binary(a.op, l, r);
+    if (target.where != VarWhere::Field) markGrows(value);
   } else {
     value = genExpr(*a.value);
+    if (appendsTo(target, *a.value)) markGrows(value);
   }
   store(target, value);
   return value;
@@ -287,6 +341,7 @@ Value *Generator::genIndexAssign(const IndexExpr &target, const AssignExpr *assi
   Builder &b = *cur_.b;
   if (assign && !assign->compound) {
     Value *value = genExpr(*assign->value);
+    if (appendsTo(target, *assign->value)) markGrows(value);
     Value *base = genExpr(*target.base);
     Value *idx = genExpr(*target.index);
     b.indexSet(base, idx, value);
@@ -296,6 +351,7 @@ Value *Generator::genIndexAssign(const IndexExpr &target, const AssignExpr *assi
   Value *idx = genExpr(*target.index);
   Value *elem = b.index(base, idx);
   Value *now = assign ? b.binary(assign->op, elem, genExpr(*assign->value)) : b.stepByOne(incdec->increment, elem);
+  if (assign) markGrows(now);
   b.indexSet(base, idx, now);
   return incdec && !incdec->prefix ? elem : now;
 }
@@ -312,12 +368,14 @@ Value *Generator::genSendAssign(const SendExpr &target, const AssignExpr *assign
   Value *object = genExpr(*target.object);
   if (assign && !assign->compound) {
     Value *value = genExpr(*assign->value);
+    if (appendsTo(target, *assign->value)) markGrows(value);
     b.setLoc(target.loc);
     return sendFrom(target, text, true, object, {value});
   }
   b.setLoc(target.loc);
   Value *old = sendFrom(target, text, false, object, {});
   Value *now = assign ? b.binary(assign->op, old, genExpr(*assign->value)) : b.stepByOne(incdec->increment, old);
+  if (assign) markGrows(now);
   b.setLoc(target.loc);
   Value *result = sendFrom(target, text, true, object, {now});
   return incdec && !incdec->prefix ? old : result;
@@ -339,6 +397,7 @@ Value *Generator::genMacroAssign(const MacroExpr &target, const AssignExpr *assi
   b.setLoc(target.loc);
   Value *old = b.macro(Op::MacroGet, text);
   Value *now = assign ? b.binary(assign->op, old, genExpr(*assign->value)) : b.stepByOne(incdec->increment, old);
+  if (assign) markGrows(now);
   b.setLoc(target.loc);
   b.macro(Op::MacroSet, text, {now});
   return incdec && !incdec->prefix ? old : now;

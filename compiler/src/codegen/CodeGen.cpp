@@ -80,7 +80,8 @@ void CodeGen::initTypes() {
   nilItem_->setAlignment(itemAlign_);
   rtCondError_ = rt("xb_cond_error", i32_, {ptrTy_, ptrTy_});
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
-  rtAbiCheck_ = rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
+  rtAbiCheck_ =
+      rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
   rtStackOverflow_ = rt("xb_stack_overflow", voidTy, {ptrTy_});
   rtStackDeep_ = rt("xb_stack_deep", i32_, {ptrTy_, intPtrTy_});
   if (auto *f = dyn_cast<Function>(rtStackDeep_.getCallee())) { // it reads and writes the context alone (core/ctx.c)
@@ -198,6 +199,7 @@ void CodeGen::initTypes() {
       {BinOp::Shr, "xb_op_shr"},
   };
   for (auto &[op, name] : bins) rtBin_[op] = rt(name, voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
+  rtAddGrow_ = rt("xb_op_add_grow", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
 }
 
 // Some ABIs (s390x, PowerPC 64, RISC-V, LoongArch, ...) require 32-bit
@@ -732,13 +734,14 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t refValue = dl_.getStructLayout(refTy_)->getElementOffset(RefValue);
   uint64_t hashEntries = dl_.getStructLayout(hashTy_)->getElementOffset(HashEntries);
   uint64_t objectVars = dl_.getStructLayout(objectTy_)->getElementOffset(ObjectVars);
+  uint64_t strBufBytes = dl_.getStructLayout(strBufType())->getElementOffset(StrBufBytes);
   b_.CreateCall(rtAbiCheck_, {ConstantInt::get(i32_, XB_ABI_VERSION), ConstantInt::get(i32_, itemSize_),
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
                               ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
                               ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, ctxStackLimit),
                               ConstantInt::get(i32_, arrayData),
                               ConstantInt::get(i32_, refValue), ConstantInt::get(i32_, hashEntries),
-                              ConstantInt::get(i32_, objectVars)});
+                              ConstantInt::get(i32_, objectVars), ConstantInt::get(i32_, strBufBytes)});
   b_.CreateCall(rtProgramRun_, {ctx, functions_.at(&start), fn->getArg(1), fn->getArg(2)});
   b_.CreateRetVoid();
 }

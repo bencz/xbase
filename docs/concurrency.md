@@ -402,12 +402,12 @@ sent and not received yet (without it, or 0: any number; a capacity below 0, pas
   once a quarter of it is used: a burst's room is given back.
 - The channel's state is its own object's, under its lock (a word: one compare-and-swap to take it, one exchange to
   release it, loads before a waiter sleeps on it, a short wait during which collections go on): rings over arrays for
-  the values, the receivers waiting and the senders waiting, read and written in place by the lock's holder. The lock
-  is held for the rings alone: a waiter's task is made before it is taken; a waiter the other side serves is claimed
-  under it (`xb_task_claim`: its token cancels it no more; a cancellation asked meanwhile is kept, so that a sender that
-  gives its claim back to wait in line is canceled instead) and completed, with its wake and continuations, once it is
-  released, as are the waiters that `Close()` fails. A send that waits for nothing returns one task completed with `.T.` that all such sends share, so it
-  allocates nothing.
+  the values, the receivers waiting and the senders waiting, read and written in place by the lock's holder. The lock is
+  held for the rings alone: a waiter's task is made before it is taken; a waiter the other side serves is claimed under
+  it (`xb_task_claim`: its token cancels it no more; a cancellation asked meanwhile is kept, so that a sender that gives
+  its claim back to wait in line is canceled instead) and completed, with its wake and continuations, once it is
+  released, as are the waiters that `Close()` fails. A send that waits for nothing returns one task completed with `.T.`
+  that all such sends share, so it allocates nothing.
 
 ### I/O reactor
 
@@ -458,8 +458,10 @@ environments, and the variables made in them, come with `ThreadStart`) and the f
   logicals and integers, [runtime.md](runtime.md#values)) turns into items in place as it is shared, before another flow
   can reach it (the arrays of the program's storage at its publication, while the other threads are stopped), so only
   the flow that reaches a local array changes its form while that flow runs. Strings are immutable; a shared string
-  never grows in place (its append flag is cleared when it is shared). Read-only operations that reorganize a hash
-  (compaction, the position tree) run under the lock when it is shared.
+  never grows in place (its append flag is cleared when it is shared). Flows may append to one shared view at once: each
+  claims the bytes past its buffer's tip with an atomic compare-and-swap, and one that loses copies
+  ([runtime.md](runtime.md#values)). Read-only operations that reorganize a hash (compaction, the position tree) run
+  under the lock when it is shared.
 - **Lifetime.** A collection happens only at safepoints, and no code holds the address of a shared object's storage
   across one: a read under the sequence counter has no safepoint inside, compiled code tests the header bit at each
   access and reads the storage's address again after every call, and the runtime's loops that run code between accesses

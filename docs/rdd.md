@@ -428,11 +428,11 @@ from a file whole, so every host, little- or big-endian, 32- or 64-bit, writes t
   fields past the record's length) is an `Open error` with code 31 (general failure). Field types: Clipper's `C` (up to
   64 KB, a length past 255 with its high byte in the decimals), `N` (read and written as `Val()` and `Str()` do,
   `xb_num_parse` and `xb_num_to_field_buf`; stars when the number is too wide), `D` (`YYYYMMDD`, blanks for the empty
-  date), `L` (`T` or `F`; `T`, `t`, `Y`, `y` read as true) and `M` (10 bytes: the number of the memo's first block in the
-  `.dbt`, right-aligned; blanks for none). A table with memo fields has version `0x83` and a `.dbt` of the same name.
-  The record is written when another becomes current or the table closes, the header (record count, date) on `COMMIT`
-  and at closing when the table changed. *(Planned)*: the common extended types (`I`, `B`, `Y`, `T`, `@`, `+`, `V`, `Q`)
-  as the reference reads them.
+  date), `L` (`T` or `F`; `T`, `t`, `Y`, `y` read as true) and `M` (10 bytes: the number of the memo's first block in
+  the `.dbt`, right-aligned; blanks for none). A table with memo fields has version `0x83` and a `.dbt` of the same
+  name. The record is written when another becomes current or the table closes, the header (record count, date) on
+  `COMMIT` and at closing when the table changed. *(Planned)*: the common extended types (`I`, `B`, `Y`, `T`, `@`, `+`,
+  `V`, `Q`) as the reference reads them.
 - **DBT** (`dbt.c`, dBASE III memos): 512-byte blocks; block 0 is the header, the number of the first free block in its
   first 4 bytes and zeros after; each memo starts a block, its text followed by two `0x1A` (reading stops at the first
   `0x1A`, so a memo cannot hold one), and the file ends after the last memo (the next one starts at the next block,

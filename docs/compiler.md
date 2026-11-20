@@ -534,11 +534,12 @@ build xbc.
   classes that never overlap (`CodeGen::Mem`): items outside the heap (an `alloca` or a global of the module: frames,
   `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements, cells,
   reference targets), array headers, codeblocks' cell pointers, the context's head, frame links, the collector's state
-  bytes, strings (lengths and bytes, which compiled code reads, and the flags, where it clears `XB_STR_APPEND`) and
-  objects' class pointers (`xb_object.cls`, which a send's in-place path reads). An
-  address that may be either kind (a variable reached through a possible reference, an argument such as `argv` or the
-  result pointer) is not tagged. LLVM then knows that a store into an element changes no frame slot and no array header;
-  by itself this changes little in the code today, and it is the ground for moving array headers out of fast loops.
+  bytes, strings and their buffers (lengths, flags and bytes, which compiled code reads, a view's through its buffer's
+  address, and the flags, where it clears `XB_STR_APPEND`) and objects' class pointers (`xb_object.cls`, which a send's
+  in-place path reads). An address that may be either kind (a variable reached through a possible reference, an argument
+  such as `argv` or the result pointer) is not tagged. LLVM then knows that a store into an element changes no frame
+  slot and no array header; by itself this changes little in the code today, and it is the ground for moving array
+  headers out of fast loops.
 - Items are stored and copied as two 8-byte words, the header (type, width, decimals; `headerWord`, in the target's byte
   order, as `xb_header_word` in `xbrt.h`) and the value, and fields are read out of the header word (their bit positions
   come from the target's layout, `headerShift`): a load is served by the store that wrote it (store forwarding) only
@@ -594,46 +595,47 @@ build xbc.
   does a few runtime functions in place when their arguments allow it, with their rules: `Len()` of a string or a local
   array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n, 1 )` with `n` within `c` (the last two give the shared
   one-byte string, `xb_str_bytes`), and an `Asc()` whose argument is the `SubStr()` right before it, used nowhere else,
-  reads the byte itself; `Int()` of an integer is it, of a double its conversion when it lies in [-2^63, 2^63)
-  (truncated, as `xb_dbl_fits_i64` of its truncation would allow), with the double's width, its own or else the default
-  one (`xb_num_dbl_width`'s rule, from the constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`,
-  `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too) calls the runtime; `Int( x / y )`, whose division is right before
-  it and used nowhere else, is lowered as one (`emitIntOfQuotient`): two integers in [-2^52, 2^52), `y` not 0, give
-  their truncated integer quotient (`sdiv`, which the double quotient truncated equals) with the width `Int()` would
-  give that double, unless the quotient is `XB_NUM_FITS_MAX` or `XB_NUM_FITS_MIN`, where the double may lie past the
-  bound; anything else is the division (`emitDivMod`) and then `Int()` as above; `Abs()` of an integer not below 0 is
-  it, of a negative one (not INT64_MIN) its negation, of a double its magnitude with its decimals; `Max()` and `Min()`
-  of two numbers (compared as doubles) or two dates copy the first when it wins or ties, else the second; `Round( n, d
-  )` with an integer `d` within 22 places is `xbf_ROUND`'s formula (a table of the exact powers of ten, `fma`,
-  `XB_DBL_INTEGRAL`; the truncation `truncDouble`, through an integer below 2^52, since `llvm.trunc` is a call of the C
-  library where the target lacks the instruction, as x86-64 without SSE4.1 does, and so is `doubleRemainder`'s test of
-  integral operands); `Sqrt()` of a number is `llvm.sqrt` (IEEE's, the same everywhere), `Exp()` and `Log()` call the
-  runtime's `xb_exp` and `xb_log` (`xbmath.h`, the same on every system, not the C library's `llvm.exp` and `llvm.log`;
-  declared without memory access, so that LLVM still folds repeated calls), each with Clipper's results outside the
-  reals and SET DECIMALS decimals; `Mod()` of two numbers and a base other than 0 is `doubleRemainder` moved to the
-  base's sign; outside an inlined body, `PCount()` is the function's own `argc` (less `Self` in a method), and `PValue(
-  n )` with an integer `n` copies the parameter's slot or the argument as passed (`NIL` outside 1 .. `argc`);
-  `ValType()` of a value is the shared one-byte string of its tag's letter (`XB_TYPE_LETTERS`, the runtime's table too;
-  a memo field's value, `XB_STR_MEMO`, calls the function); anything else calls the function, which raises the errors,
-  and so does a `PValue()` of an argument that is a reference. A call whose only argument is `...`, to a function that
-  takes references, in a function with no other `...` and no `PCount()`/`PValue()`, passes the arguments where they are
-  instead of copying them (`forwardInPlace_`). `append` copies a string's bytes into the room of the variable's growing
-  string in place (one store for one byte) when they fit, and calls `xb_op_append` otherwise. A `load` that an `append`
-  of its variable reaches with no other load in between ends the growth before the value goes on (`shareString`), unless
-  only `Len()` and `Asc()` read its value, in place; a forward data flow finds them (`findSharingLoads`), where a block
-  entered by unwinding (a `BEGIN SEQUENCE` handler, a `FOR EACH` cleanup) starts with every such variable growing, and a
-  block reached growing along some edges only, from which every path ends the growth before any append (a loop that
-  reads what a loop before it built), ends it on those edges instead, so the loop does not test it again; the edge of a
-  `gen.yield` ends it before the frame is saved, since the next step enters through the dispatch. The bit operators and
-  functions take two integers in two instructions and convert doubles on a path of their own, and the fast paths of
-  calls read their operands in place: the argument group is built only for the call. Calls set the result slot to `NIL`,
-  then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or
-  `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module to its
-  direct entry when it has one (below), else to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC`
-  function, a codeblock and a module initialization are internal, under names nothing looks up, so modules sharing the
-  object never clash. A call, a send or an array literal with `...` (`withRest`) passes the count and the items of a
-  frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions
-  leave such calls alone.
+  reads the byte itself (a view's in its buffer: `strData` tests `XB_STR_VIEW` as `xb_str_data` does); `Int()` of an
+  integer is it, of a double its conversion when it lies in [-2^63, 2^63) (truncated, as `xb_dbl_fits_i64` of its
+  truncation would allow), with the double's width, its own or else the default one (`xb_num_dbl_width`'s rule, from the
+  constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`, `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too)
+  calls the runtime; `Int( x / y )`, whose division is right before it and used nowhere else, is lowered as one
+  (`emitIntOfQuotient`): two integers in [-2^52, 2^52), `y` not 0, give their truncated integer quotient (`sdiv`, which
+  the double quotient truncated equals) with the width `Int()` would give that double, unless the quotient is
+  `XB_NUM_FITS_MAX` or `XB_NUM_FITS_MIN`, where the double may lie past the bound; anything else is the division
+  (`emitDivMod`) and then `Int()` as above; `Abs()` of an integer not below 0 is it, of a negative one (not INT64_MIN)
+  its negation, of a double its magnitude with its decimals; `Max()` and `Min()` of two numbers (compared as doubles) or
+  two dates copy the first when it wins or ties, else the second; `Round( n, d )` with an integer `d` within 22 places
+  is `xbf_ROUND`'s formula (a table of the exact powers of ten, `fma`, `XB_DBL_INTEGRAL`; the truncation `truncDouble`,
+  through an integer below 2^52, since `llvm.trunc` is a call of the C library where the target lacks the instruction,
+  as x86-64 without SSE4.1 does, and so is `doubleRemainder`'s test of integral operands); `Sqrt()` of a number is
+  `llvm.sqrt` (IEEE's, the same everywhere), `Exp()` and `Log()` call the runtime's `xb_exp` and `xb_log` (`xbmath.h`,
+  the same on every system, not the C library's `llvm.exp` and `llvm.log`; declared without memory access, so that LLVM
+  still folds repeated calls), each with Clipper's results outside the reals and SET DECIMALS decimals; `Mod()` of two
+  numbers and a base other than 0 is `doubleRemainder` moved to the base's sign; outside an inlined body, `PCount()` is
+  the function's own `argc` (less `Self` in a method), and `PValue( n )` with an integer `n` copies the parameter's slot
+  or the argument as passed (`NIL` outside 1 .. `argc`); `ValType()` of a value is the shared one-byte string of its
+  tag's letter (`XB_TYPE_LETTERS`, the runtime's table too; a memo field's value, `XB_STR_MEMO`, calls the function);
+  anything else calls the function, which raises the errors, and so does a `PValue()` of an argument that is a
+  reference. A call whose only argument is `...`, to a function that takes references, in a function with no other `...`
+  and no `PCount()`/`PValue()`, passes the arguments where they are instead of copying them (`forwardInPlace_`).
+  `append` copies a string's bytes (a view's from its buffer; the variable's growing string is never a view) into the
+  room of the variable's growing string in place (one store for one byte) when they fit, and calls `xb_op_append`
+  otherwise. A `load` that an `append` of its variable reaches with no other load in between ends the growth before the
+  value goes on (`shareString`), unless only `Len()` and `Asc()` read its value, in place; a forward data flow finds
+  them (`findSharingLoads`), where a block entered by unwinding (a `BEGIN SEQUENCE` handler, a `FOR EACH` cleanup)
+  starts with every such variable growing, and a block reached growing along some edges only, from which every path ends
+  the growth before any append (a loop that reads what a loop before it built), ends it on those edges instead, so the
+  loop does not test it again; the edge of a `gen.yield` ends it before the frame is saved, since the next step enters
+  through the dispatch. The bit operators and functions take two integers in two instructions and convert doubles on a
+  path of their own, and the fast paths of calls read their operands in place: the argument group is built only for the
+  call. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at the argument slots; a call to an
+  `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`,
+  one to a function of the module to its direct entry when it has one (below), else to it. A public function is
+  `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are internal, under
+  names nothing looks up, so modules sharing the object never clash. A call, a send or an array literal with `...`
+  (`withRest`) passes the count and the items of a frame built for it on the stack
+  ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions leave such calls alone.
 - Direct entries (`directEntries`, `xir::hasDirectEntry`): a function of the program that does not read its arguments as
   received (its frame keeps none, `readsArgs`, and it has no `...`, `usesRest`) and is not the body versioned for
   references (`byRefBody`) gets its body in an internal function, `xb.direct.NAME`, taking the context, the result slot,

@@ -8,7 +8,7 @@ for.test(%2: item, %3: item):
   %4 = for.test %3, 1:w10, -2:w10
   cond_br %4, for.body, for.end
 for.body:
-  %6 = binary add %2, %3
+  %6 = binary add.grow %2, %3
   %7 = subst.check guard 4 %6
   cond_br %7, for.body.subst, for.body.2
 for.end:
@@ -33,7 +33,7 @@ for.body.2:
   %24 = binary add %3, -2:w10
   br for.test(%6, %24)
 for.body.any:
-  %26 = binary add %44, %45
+  %26 = binary add.grow %44, %45
   br for.body.2.any(%45, %26)
 for.end.any:
   %28 = index %0, 1:w10

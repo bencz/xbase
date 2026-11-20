@@ -88,6 +88,9 @@ void CodeGen::callItemOp(FunctionCallee fn, Value *result, std::initializer_list
   callDone(r);
 }
 
+// The runtime's operator for a Binary instruction.
+FunctionCallee CodeGen::binaryOp(const xir::Instruction &i) { return i.grows ? rtAddGrow_ : rtBin_.at(i.binop); }
+
 // Where an instruction's item result goes: its home, or for a value computed
 // into a variable, the variable's item (reached now, before the operation).
 Value *CodeGen::dest(const xir::Instruction &i) {

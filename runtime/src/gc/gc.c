@@ -195,6 +195,7 @@ typedef struct xb_large {
   struct xb_large *next;
   size_t bytes;
   size_t mapped; /* the size of its own mapping (0: units of a chunk of large objects), unmapped whole when it dies */
+  size_t tip;    /* a string buffer's tip when a sweep last found it alive (0 before) */
   /* At a multiple of 16: the object 8 bytes past one, so the 16-byte items after a 24-byte array header (64-bit
    * targets) start on a 64-byte line and never straddle two (an array's stores run at half speed otherwise). */
   _Alignas(16) xb_gc_hdr hdr;
@@ -1077,6 +1078,7 @@ static void *alloc_large(size_t size, int fallible) {
       if (bytes >= XB_GC_LARGE_MAP) heap.largeMapped += bytes;
       l->bytes = bytes;
       l->mapped = bytes >= XB_GC_LARGE_MAP ? bytes : 0;
+      l->tip = 0;
       l->next = heap.largeYoung;
       heap.largeYoung = l;
     }
@@ -1609,7 +1611,16 @@ static int trace(xb_gc_hdr *h) {
       for (uint32_t i = 0; i < o->nvars; ++i) young |= mark_item(&o->vars[i]);
       break;
     }
-    default:
+    case XB_GC_VIEW: {
+      xb_strbuf *buf = xb_str_view_buffer(obj);
+      if (buf) { /* NULL until its maker sets it */
+        REACH(buf, &young);
+        xb_str_view_set_buffer(obj, buf);
+      }
+      break;
+    }
+    default: /* nothing of its own to trace: strings, buffers (their bytes change, never their references: none), and
+                the items and stores their owners trace */
       break;
   }
   return young;
@@ -1911,6 +1922,19 @@ static int sweep_class(xb_hblock *b, int full) {
   return 1;
 }
 
+/* A large string buffer whose tip has not moved since the last sweep that found it alive (no view of it was appended
+ * to since, so none may be) keeps its bytes and the NUL alone: its room goes back, and a later append to its tip,
+ * finding none, copies. The world is stopped: no append is between its look at the room and its claim. */
+static void buffer_trim(xb_large *l) {
+  xb_strbuf *buf = (xb_strbuf *)(&l->hdr + 1);
+  if (buf->used == l->tip) {
+    large_trim(l, offsetof(xb_strbuf, bytes) + buf->used + 1);
+    size_t room = l->bytes - LARGE_HEAD - offsetof(xb_strbuf, bytes);
+    if (room < buf->cap) buf->cap = room;
+  }
+  l->tip = buf->used;
+}
+
 /* The large objects after a collection (the old ones too after a full one): the dead ones' memory back, the old ones
  * in the old list, the aged ones in the young list still. */
 static void sweep_large(int full) {
@@ -1922,6 +1946,8 @@ static void sweep_large(int full) {
       if ((l->hdr.state & (XB_GC_MARKED | XB_GC_AGED)) && l->hdr.kind == XB_GC_STRING) {
         const xb_str *str = (const xb_str *)(&l->hdr + 1); /* one no longer grown in place keeps its text alone */
         if (!(str->flags & XB_STR_APPEND)) large_trim(l, offsetof(xb_str, bytes) + str->len + 1);
+      } else if ((l->hdr.state & (XB_GC_MARKED | XB_GC_AGED)) && l->hdr.kind == XB_GC_STRBUF) {
+        buffer_trim(l);
       }
       if (l->hdr.state & XB_GC_MARKED) {
         l->next = old;

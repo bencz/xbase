@@ -104,9 +104,11 @@ void xbf_DBSELECTAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   const xb_str *alias = xb_db_str_arg(argc, argv, 0);
   int64_t n = xb_db_num_arg(argc, argv, 0, -1);
-  for (uint16_t tries = 1; alias && (n = xb_area_named(ctx, xb_str_data(alias), alias->len)) < 0; ++tries)
-    if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, xb_str_data(alias), NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2)
-      return;
+  for (uint16_t tries = 1; alias && (n = xb_area_named(ctx, xb_str_data(alias), alias->len)) < 0; ++tries) {
+    const char *name = xb_item_cstr(&argv[0]); /* the error's operation */
+    if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, name, NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2) return;
+    alias = argv[0].v.s; /* the item's string now (xb_item_cstr) */
+  }
   if (n == 0) ctx->env->areaCurrent = xb_area_free(ctx);
   else if (xb_area_number(n)) ctx->env->areaCurrent = xb_area_number(n);
 }

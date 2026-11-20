@@ -17,7 +17,7 @@ body:
   br seq.body
 seq.body unwind seq.unwind:
   %9 = load $f1
-  %10 = binary add %9, 1:w10
+  %10 = binary add.grow %9, 1:w10
   store $f1, %10
   seq.restore %7
   br seq.join
@@ -60,7 +60,7 @@ entry:
   br seq.body
 seq.body unwind seq.unwind:
   %3 = load $f0 maybe_ref
-  %4 = binary add %3, 1:w10
+  %4 = binary add.grow %3, 1:w10
   store $f0 maybe_ref, %4
   barrier $f0 maybe_ref
   seq.restore %1

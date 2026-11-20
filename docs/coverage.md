@@ -22,10 +22,10 @@ operator and **AWAIT FOR EACH** (xbase's own), **DECLARE**, **EXTERNAL** (Clippe
 
 Grouped by their leading words; each group covers every variant of the command.
 
-**!**, **?**, **??**, *@*, *ACCEPT*, **APPEND**, **APPEND BLANK**, **AVERAGE**, *CALL*, **CANCEL**, *CLEAR*, *CLEAR ALL*,
-*CLEAR GETS*, **CLEAR MEMORY**, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, **CLOSE**, **CLOSE ALL**, *CLOSE ALTERNATE*, **CLOSE
-DATABASES**, *CLOSE FORMAT*, **CLOSE INDEXES**, *CLOSE PROCEDURE*, *CLS*, **COMMIT**, **CONTINUE**, **COPY**, *COPY
-FILE*, **COUNT**, **CREATE**, **DELETE**, *DELETE FILE*, **DELETE TAG**, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**,
+**!**, **?**, **??**, *@*, *ACCEPT*, **APPEND**, **APPEND BLANK**, **AVERAGE**, *CALL*, **CANCEL**, *CLEAR*, *CLEAR
+ALL*, *CLEAR GETS*, **CLEAR MEMORY**, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, **CLOSE**, **CLOSE ALL**, *CLOSE ALTERNATE*,
+**CLOSE DATABASES**, *CLOSE FORMAT*, **CLOSE INDEXES**, *CLOSE PROCEDURE*, *CLS*, **COMMIT**, **CONTINUE**, **COPY**,
+*COPY FILE*, **COUNT**, **CREATE**, **DELETE**, *DELETE FILE*, **DELETE TAG**, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**,
 **ENDCASE**, **ENDDO**, **ENDFOR**, **ENDIF**, **ENDSEQUENCE**, *ERASE*, **FIND**, **GO**, **GOTO**, **INDEX ON**,
 *INPUT*, **JOIN**, *KEYBOARD*, *LABEL FORM*, *LIST*, **LOCATE**, *MENU*, **NEXT**, **PACK**, **QUIT**, *READ*, *READ
 SAVE*, **RECALL**, **REINDEX**, **RELEASE**, **RELEASE ALL**, *RENAME*, **REPLACE**, *REPORT FORM*, **REQUEST**,
@@ -40,8 +40,8 @@ MEMOBLOCK*, *SET MENU*, *SET MESSAGE*, *SET MFILEEXT*, *SET OPTIMIZE*, **SET ORD
 PROCEDURE*, **SET RELATION**, *SET SAFETY*, **SET SCOPE**, **SET SCOPEBOTTOM**, **SET SCOPETOP**, *SET SCOREBOARD*,
 **SET SOFTSEEK**, *SET STATUS*, *SET STEP*, *SET STRICTREAD*, *SET TALK*, *SET TIME*, *SET TYPEAHEAD*, **SET UNIQUE**,
 *SET VIDEOMODE*, *SET WRAP*, **SKIP**, **SORT**, **STORE**, **SUM**, **TEXT** (but `TO FILE`, `TO PRINTER`),
-*TEXTBLOCK*, **TOTAL**, *TYPE*, **UNLOCK**, **UPDATE**, **USE**, *WAIT*, **ZAP**; xbase's own: **SYNCHRONIZED**,
-**AWAIT SYNCHRONIZED** ([concurrency.md](concurrency.md#threads))
+*TEXTBLOCK*, **TOTAL**, *TYPE*, **UNLOCK**, **UPDATE**, **USE**, *WAIT*, **ZAP**; xbase's own: **SYNCHRONIZED**, **AWAIT
+SYNCHRONIZED** ([concurrency.md](concurrency.md#threads))
 
 Other standard headers, each to be provided with the matching runtime support: `common.ch` (provided: the logical
 constants, the `IS...()` type tests through `ValType()`, `DEFAULT ... TO`, `UPDATE ... IF ... TO`), `inkey.ch`, `set.ch`

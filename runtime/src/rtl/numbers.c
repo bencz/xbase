@@ -75,13 +75,14 @@ void xbf_STRZERO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_str *s = str_of(argc, argv, &overflow);
   if (!str_made(ctx, ret, "STRZERO", s, overflow, argc, argv)) return;
   xb_set_str(ret, s);
+  char *digits = xb_str_buffer(s); /* made here: not shared yet */
   size_t i = 0;
   int neg = 0;
-  while (i < s->len && (xb_str_data(s)[i] == ' ' || xb_str_data(s)[i] == '-')) {
-    neg |= xb_str_data(s)[i] == '-';
-    xb_str_buffer(s)[i++] = '0';
+  while (i < s->len && (digits[i] == ' ' || digits[i] == '-')) {
+    neg |= digits[i] == '-';
+    digits[i++] = '0';
   }
-  if (neg && s->len) xb_str_buffer(s)[0] = '-';
+  if (neg && s->len) digits[0] = '-';
 }
 
 /* Val( c ): leading blanks, a sign, digits and a dot. The display width

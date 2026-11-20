@@ -27,7 +27,7 @@ each.body:
   each.move $f1, false, %15
   %17 = load $f2 maybe_ref
   %18 = load $f1 ref
-  %19 = binary add %17, %18
+  %19 = binary add.grow %17, %18
   store $f2 maybe_ref, %19
   barrier $f2 maybe_ref
   %22 = i.add %10, i64 1
@@ -64,7 +64,7 @@ each.body:
   each.move $f1, false, %11
   %13 = load $f2 maybe_ref
   %14 = load $f1 ref
-  %15 = binary add %13, %14
+  %15 = binary add.grow %13, %14
   store $f2 maybe_ref, %15
   barrier $f2 maybe_ref
   %18 = i.add %6, i64 1

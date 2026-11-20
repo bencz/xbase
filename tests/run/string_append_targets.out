@@ -1,0 +1,19 @@
+
+array element      80000      20000 linear
+element, written out      80000      20000 linear
+hash value      80000      20000 linear
+object variable      80000      20000 linear
+private      80000      20000 linear
+public      80000      20000 linear
+static      80000      20000 linear
+captured local      80000      20000 linear
+copy of an element:        521 ab        522 aby
+two appends to one view: by1 by2 aby        523        523        522
+then each grows: by1+ by2- aby .T. .T.
+older view: aby byO yNP        522        523        524
+not an append: NPZ NPW        525        525
+appended to itself:       1050 .T. NPW
+locals: WLM NPW       1050 .T.
+minus: PWQ        526 WR          528 NPW
+empty operands: .T. .T.        526        525 NPW
+written out: .T.        900 9-+0-+
