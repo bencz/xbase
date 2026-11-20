@@ -668,7 +668,7 @@ static int dbf_put(xb_area *a, uint32_t field, const xb_item *v, int32_t *err) {
   } else { /* the memo file is written at once; an empty memo is none */
     if (v->type != XB_T_STRING) return XB_PUT_TYPE;
     uint32_t block = 0;
-    if (!d->memoFormat->write(d->memo, memo_block(p, fi->len), v->v.s->data, v->v.s->len, &block, err))
+    if (!d->memoFormat->write(d->memo, memo_block(p, fi->len), xb_str_data(v->v.s), v->v.s->len, &block, err))
       return XB_PUT_FAILED;
     put_memo_block(p, fi->len, block);
   }

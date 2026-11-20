@@ -62,7 +62,7 @@ private:
   enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
   enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 5 };           // xb_hash
   enum HEntryField : unsigned { HEntryKey = 0, HEntryValue = 1 };                     // xb_hentry
-  enum StrField : unsigned { StrFlags = 0, StrHash = 1, StrLen = 2, StrData = 3 }; // xb_str
+  enum StrField : unsigned { StrFlags = 0, StrHash = 1, StrLen = 2, StrBytes = 3 }; // xb_str
   // Classes of memory compiled code reaches, which never overlap (TBAA):
   // items outside the heap (frames, Local and scratch items, STATIC storage,
   // literals), items in the heap (elements, cells, reference targets), array

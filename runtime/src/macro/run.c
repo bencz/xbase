@@ -33,14 +33,14 @@ static int memvar_at(xb_ctx *ctx, const xb_array *fa, uint32_t w, int assign, xb
   }
   const xb_str *name = xb_array_items(fa)[w & ~XB_MACRO_NAMED].v.s; /* NUL-terminated, upper case */
   for (uint16_t tries = 1;; ++tries) {
-    uint32_t id = xb_memvar_use(ctx, name->data, name->len, assign, slot);
+    uint32_t id = xb_memvar_use(ctx, xb_str_data(name), name->len, assign, slot);
     if (id != UINT32_MAX) {
       *m = memvar_of(id);
       return 1;
     }
     char upper[64]; /* the error's operation: the name (no collection may move the constant while it is copied) */
     size_t n = name->len < sizeof upper - 1 ? name->len : sizeof upper - 1;
-    memcpy(upper, name->data, n);
+    memcpy(upper, xb_str_data(name), n);
     upper[n] = 0;
     if (!xb_error_retry(ctx, EG_NOVAR, 1003, upper, tries)) return 0;
     name = xb_array_items(fa)[w & ~XB_MACRO_NAMED].v.s; /* the block ran: the constant may have moved */
@@ -87,7 +87,7 @@ static const xb_proc block_proc = XB_RUNTIME_PROC("&", XB_PROC_HIDDEN | XB_PROC_
  * collector sees every item. */
 static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, xb_item *argv, xb_block *self) {
   const xb_array *fa = code->v.p;
-  const unsigned char *pc = (const unsigned char *)xb_array_items(fa)[0].v.s->data;
+  const unsigned char *pc = (const unsigned char *)xb_str_data(xb_array_items(fa)[0].v.s);
   uint32_t nparams = word(&pc), nslots = word(&pc);
   const unsigned char *ops = pc;
   union {
@@ -159,7 +159,8 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       uint32_t w = word(&pc), slot;
       xb_field_cache cache = {0};
       xb_set_nil(r);
-      const char *field = w & XB_MACRO_NAMED ? xb_array_items(fa)[w & ~XB_MACRO_NAMED].v.s->data : memvar_of(w).name;
+      const char *field =
+          w & XB_MACRO_NAMED ? xb_str_data(xb_array_items(fa)[w & ~XB_MACRO_NAMED].v.s) : memvar_of(w).name;
       if (!xb_field_try(ctx, r, field, &cache)) {
         xb_memvar m;
         if (memvar_at(ctx, fa, w, 0, &m, &slot)) {
@@ -174,10 +175,10 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     case MO_FIELD:
     case MO_FIELD_SET: {
       uint32_t alias = word(&pc);
-      const char *name = xb_array_items(fa)[word(&pc)].v.s->data;
+      const char *name = xb_str_data(xb_array_items(fa)[word(&pc)].v.s);
       xb_field_cache cache = {0};
       int onStack = alias == XB_MACRO_STACK_ALIAS;
-      const char *aliasName = alias >= XB_MACRO_STACK_ALIAS ? NULL : xb_array_items(fa)[alias].v.s->data;
+      const char *aliasName = alias >= XB_MACRO_STACK_ALIAS ? NULL : xb_str_data(xb_array_items(fa)[alias].v.s);
       if (op == MO_FIELD) {
         xb_set_nil(r);
         xb_field_get(ctx, r, onStack ? &s[sp] : NULL, aliasName, name, &cache);
@@ -328,7 +329,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       break;
     }
     case MO_NO_FUNC: {
-      const char *name = xb_array_items(fa)[word(&pc)].v.s->data;
+      const char *name = xb_str_data(xb_array_items(fa)[word(&pc)].v.s);
       size_t base = sp + 1 - word(&pc);
       xb_set_nil(r);
       if (!xb_error(ctx, r, EG_NOFUNC, 1001, name, XB_ERR_SUBSTITUTE, 0, NULL)) goto out;
@@ -337,7 +338,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       break;
     }
     case MO_SEND: {
-      const char *message = xb_array_items(fa)[word(&pc)].v.s->data;
+      const char *message = xb_str_data(xb_array_items(fa)[word(&pc)].v.s);
       size_t base = sp + 1 - word(&pc);
       xb_set_nil(r);
       xb_op_send(ctx, r, message, (uint32_t)(sp + 1 - base), &s[base]);
@@ -433,9 +434,9 @@ static void put_reversed(xb_buffer *rest, const char *p, size_t n) {
  * What is left to scan is kept reversed (its last byte is the next one), so
  * an insertion is an append. */
 static xb_str *substitute(xb_ctx *ctx, xb_str *s) {
-  if (!memchr(s->data, '&', s->len)) return s;
+  if (!memchr(xb_str_data(s), '&', s->len)) return s;
   xb_buffer out = {0}, rest = {0}, name = {0};
-  put_reversed(&rest, s->data, s->len);
+  put_reversed(&rest, xb_str_data(s), s->len);
   unsigned idle = 0;
   int changed = 0;
   while (rest.len > 0) {
@@ -463,7 +464,7 @@ static xb_str *substitute(xb_ctx *ctx, xb_str *s) {
     }
     rest.len -= 1 + k;
     if (rest.len > 0 && rest.p[rest.len - 1] == '.') --rest.len; /* the dot ends the name */
-    put_reversed(&rest, v->v.s->data, v->v.s->len);
+    put_reversed(&rest, xb_str_data(v->v.s), v->v.s->len);
     ++idle;
     changed = 1;
   }
@@ -510,13 +511,13 @@ static int compile(xb_ctx *ctx, xb_item *code, xb_item *result, const xb_item *t
   xb_macro_text(ctx, &substituted, text);
   xb_gc_root_push(ctx, &substituted);
   const xb_str *s = substituted.v.s;
-  uint32_t slot = (xb_hash_bytes(s->data, s->len) + (uint32_t)goal) % XB_MACRO_CACHE;
+  uint32_t slot = (xb_hash_bytes(xb_str_data(s), s->len) + (uint32_t)goal) % XB_MACRO_CACHE;
   xb_item *key = &ctx->macro_cache[2 * slot], *cached = key + 1;
   int ok = 1;
   if (key->type == XB_T_STRING && ctx->macro_cache_goal[slot] == goal && key->v.s->len == s->len &&
-      memcmp(key->v.s->data, s->data, s->len) == 0) {
+      memcmp(xb_str_data(key->v.s), xb_str_data(s), s->len) == 0) {
     *code = *cached;
-  } else if (xb_macro_compile(ctx, code, s->data, s->len, goal) & XB_MACRO_SYNTAX) {
+  } else if (xb_macro_compile(ctx, code, xb_str_data(s), s->len, goal) & XB_MACRO_SYNTAX) {
     syntax_error(ctx, result, text);
     ok = 0;
   } else {
@@ -560,7 +561,7 @@ void xb_macro_set(xb_ctx *ctx, const xb_item *text, const xb_item *value) {
 static int name_of(xb_ctx *ctx, xb_item *result, const xb_item *text, const char **name, size_t *len) {
   const xb_str *s = text_of(ctx, result, text);
   if (!s) return 0;
-  const char *p = s->data, *end = s->data + s->len;
+  const char *p = xb_str_data(s), *end = xb_str_data(s) + s->len;
   while (p < end && (*p == ' ' || *p == '\t')) ++p;
   while (end > p && (end[-1] == ' ' || end[-1] == '\t')) --end;
   int ok = p < end && (xb_ascii_upper(*p) >= 'A' && xb_ascii_upper(*p) <= 'Z' ? 1 : *p == '_');
@@ -644,7 +645,7 @@ void xbf_TYPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_macro_text(ctx, &work[0], &argv[0]);
   const char *type;
   char letter[2] = {0, 0};
-  uint32_t flags = xb_macro_compile(ctx, &work[1], work[0].v.s->data, work[0].v.s->len, MG_VALUE);
+  uint32_t flags = xb_macro_compile(ctx, &work[1], xb_str_data(work[0].v.s), work[0].v.s->len, MG_VALUE);
   if (flags & XB_MACRO_SYNTAX) {
     type = "UE";
   } else if (flags & XB_MACRO_BLOCK) {

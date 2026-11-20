@@ -64,7 +64,7 @@ static void put_record(bytes *out, const char *name, size_t len, const xb_item *
     size_t n = v->v.s->len < MEM_STRING_MAX ? v->v.s->len : MEM_STRING_MAX;
     h = put_header(out, name, len, 'C', n + 1);
     xb_put_le16(h + 16, (uint16_t)(n + 1));
-    memcpy(h + MEM_HEADER, v->v.s->data, n);
+    memcpy(h + MEM_HEADER, xb_str_data(v->v.s), n);
     h[MEM_HEADER + n] = 0;
     break;
   }
@@ -130,7 +130,7 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   *grow(&out, 1) = MEM_END;
-  char *path = xb_file_path_with_ext(argv[0].v.s->data, strlen(argv[0].v.s->data), ".mem");
+  char *path = xb_file_path_with_ext(xb_str_data(argv[0].v.s), strlen(xb_str_data(argv[0].v.s)), ".mem");
   for (uint16_t tries = 1;; ++tries) {
     xb_file f;
     int32_t err = 0;
@@ -143,7 +143,7 @@ void xbf___MEMSAVE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       if (written) err = closeErr;
       gencode = EG_WRITE;
     }
-    if (xb_error_file(ctx, "__MEMSAVE", gencode, 2006, argv[0].v.s->data, err, tries) != 2) break;
+    if (xb_error_file(ctx, "__MEMSAVE", gencode, 2006, xb_str_data(argv[0].v.s), err, tries) != 2) break;
   }
   free(path);
   free(out.p);
@@ -212,13 +212,13 @@ void xbf___MEMRESTORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   int additive = argc > 1 && argv[1].type == XB_T_LOGICAL && argv[1].v.l;
-  char *path = xb_file_path_with_ext(argv[0].v.s->data, strlen(argv[0].v.s->data), ".mem");
+  char *path = xb_file_path_with_ext(xb_str_data(argv[0].v.s), strlen(xb_str_data(argv[0].v.s)), ".mem");
   xb_file f;
   int opened = 0;
   for (uint16_t tries = 1; !opened; ++tries) {
     int32_t err = 0;
     opened = xb_shared_plain_open(path, FO_READ, &f, &err);
-    if (!opened && xb_error_file(ctx, "__MEMRESTORE", EG_OPEN, 2005, argv[0].v.s->data, err, tries) != 2) break;
+    if (!opened && xb_error_file(ctx, "__MEMRESTORE", EG_OPEN, 2005, xb_str_data(argv[0].v.s), err, tries) != 2) break;
   }
   free(path);
   if (!opened) return;

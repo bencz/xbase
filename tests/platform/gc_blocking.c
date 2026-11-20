@@ -29,10 +29,10 @@ static void reader(void *arg) {
     }
     xb_str *buf = xb_str_alloc(SIZE); /* rooted while the read fills it: another thread collects meanwhile */
     xb_set_str(&held, buf);
-    int64_t got = xb_platform_file_read_at(xb_shared_handle(s), 0, buf->data, SIZE, &err);
+    int64_t got = xb_platform_file_read_at(xb_shared_handle(s), 0, xb_str_buffer(buf), SIZE, &err);
     if (got != SIZE) xb_atomic_add32(&bad, 1, XB_RELAXED);
     for (uint32_t k = 0; k < SIZE; ++k)
-      if (buf->data[k] != (char)('a' + k % 26)) {
+      if (xb_str_data(buf)[k] != (char)('a' + k % 26)) {
         xb_atomic_add32(&bad, 1, XB_RELAXED);
         break;
       }

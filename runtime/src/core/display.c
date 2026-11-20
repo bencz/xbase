@@ -23,9 +23,9 @@ xb_str *xb_item_display(const xb_ctx *ctx, const xb_item *it) {
       const char *name = ((const xb_funcref *)it->v.p)->name;
       size_t n = strlen(name);
       xb_str *s = xb_str_alloc(n + 3);
-      s->data[0] = '@';
-      memcpy(s->data + 1, name, n);
-      memcpy(s->data + 1 + n, "()", 2);
+      xb_str_buffer(s)[0] = '@';
+      memcpy(xb_str_buffer(s) + 1, name, n);
+      memcpy(xb_str_buffer(s) + 1 + n, "()", 2);
       return s;
     }
     case XB_T_ARRAY:

@@ -84,7 +84,7 @@ Constant *CodeGen::literal(const xir::Constant &c) {
 
 // Strings are emitted as static xb_str objects (header + bytes + NUL), so a
 // literal costs nothing at run time and is never touched by the GC.
-// xb_str: { flags, hash, len, data[] } with the bytes typed as `data`.
+// xb_str: { flags, hash, len, bytes[] } with the bytes typed as `data`.
 StructType *CodeGen::strType(Type *data) { return StructType::get(ctx_, {i32_, i32_, intPtrTy_, data}); }
 
 Constant *CodeGen::stringLiteral(const std::string &s) {

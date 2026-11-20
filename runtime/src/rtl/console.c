@@ -28,7 +28,7 @@ static void write_list(xb_ctx *ctx, FILE *out, int newLine, uint32_t argc, const
   for (uint32_t k = 0; k < argc; ++k) {
     if (k) xb_buffer_put(&text, " ", 1);
     const xb_str *s = xb_item_display(ctx, &argv[k]);
-    xb_buffer_put(&text, s->data, s->len);
+    xb_buffer_put(&text, xb_str_data(s), s->len);
   }
   if (text.len) {
     text_write w = {&text, out};

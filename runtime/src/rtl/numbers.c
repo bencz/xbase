@@ -39,7 +39,7 @@ static xb_str *str_of(uint32_t argc, const xb_item *argv, int *overflow) {
   }
   if (!hasWidth) return xb_num_to_str(&argv[0], width, dec);
   xb_str *s = xb_str_try_alloc((size_t)width);
-  if (s) xb_num_to_field_buf(&argv[0], width, dec, s->data);
+  if (s) xb_num_to_field_buf(&argv[0], width, dec, xb_str_buffer(s));
   return s;
 }
 
@@ -77,11 +77,11 @@ void xbf_STRZERO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_str(ret, s);
   size_t i = 0;
   int neg = 0;
-  while (i < s->len && (s->data[i] == ' ' || s->data[i] == '-')) {
-    neg |= s->data[i] == '-';
-    s->data[i++] = '0';
+  while (i < s->len && (xb_str_data(s)[i] == ' ' || xb_str_data(s)[i] == '-')) {
+    neg |= xb_str_data(s)[i] == '-';
+    xb_str_buffer(s)[i++] = '0';
   }
-  if (neg && s->len) s->data[0] = '-';
+  if (neg && s->len) xb_str_buffer(s)[0] = '-';
 }
 
 /* Val( c ): leading blanks, a sign, digits and a dot. The display width
@@ -92,7 +92,7 @@ void xbf_VAL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1098, "VAL", argc, argv);
     return;
   }
-  xb_num_parse(argv[0].v.s->data, argv[0].v.s->len, ret);
+  xb_num_parse(xb_str_data(argv[0].v.s), argv[0].v.s->len, ret);
 }
 
 /* Int( n ): the integer part, with n's display width (a field's integer columns, a computed number's own). */
@@ -349,7 +349,9 @@ void xbf_DESCEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_item *v = &argv[0];
   if (v->type == XB_T_STRING) {
     xb_str *r = xb_str_alloc(v->v.s->len);
-    for (size_t i = 0; i < r->len; ++i) r->data[i] = (char)(unsigned char)(256 - (unsigned char)v->v.s->data[i]);
+    char *out = xb_str_buffer(r);
+    const char *in = xb_str_data(v->v.s);
+    for (size_t i = 0; i < r->len; ++i) out[i] = (char)(unsigned char)(256 - (unsigned char)in[i]);
     xb_set_str(ret, r);
   } else if (v->type == XB_T_DATE) {
     xb_set_int(ret, 5231808 - v->v.i); /* Clipper's constant: a day number counted down */
@@ -364,7 +366,7 @@ void xbf_DESCEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void binary_arg(uint32_t argc, const xb_item *argv, unsigned char *out, size_t n) {
   memset(out, 0, n);
   if (argc && argv[0].type == XB_T_STRING)
-    memcpy(out, argv[0].v.s->data, argv[0].v.s->len < n ? argv[0].v.s->len : n);
+    memcpy(out, xb_str_data(argv[0].v.s), argv[0].v.s->len < n ? argv[0].v.s->len : n);
 }
 
 /* Bin2I( c ), Bin2W( c ), Bin2L( c ): the number in a string's first bytes,

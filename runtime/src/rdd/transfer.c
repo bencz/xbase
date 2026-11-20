@@ -15,7 +15,7 @@
 void xbf___DBUSED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *op = xb_db_str_arg(argc, argv, 0);
   char name[32];
-  snprintf(name, sizeof name, "%.*s", op ? (int)(op->len < 31 ? op->len : 31) : 0, op ? op->data : "");
+  snprintf(name, sizeof name, "%.*s", op ? (int)(op->len < 31 ? op->len : 31) : 0, op ? xb_str_data(op) : "");
   xb_set_logical(ret, xb_db_used(ctx, name) != NULL);
 }
 
@@ -24,7 +24,7 @@ void xbf___DBUSED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * shared and read-only, or a text file read with the fields. Its number, 0 after an error (raised). */
 static uint32_t open_other(xb_ctx *ctx, const xb_str *name, const xb_rdd *rdd, int create, xb_field_info *fields,
                            uint32_t count, const xb_item *delimiter) {
-  char *path = xb_file_path_with_ext(name->data, name->len, rdd->ext);
+  char *path = xb_file_path_with_ext(xb_str_data(name), name->len, rdd->ext);
   uint32_t n = xb_area_free(ctx), before = ctx->env->areaCurrent;
   xb_text_open text = {fields, count, create, delimiter};
   int ok;
@@ -207,8 +207,8 @@ static void transfer_begin(transfer *t, xb_area *src, xb_area *dst, const xb_arr
       const xb_array *row = it->type == XB_T_ARRAY ? it->v.p : NULL;
       if (row && row->len > 0) it = &xb_array_items(row)[0];
       if (it->type != XB_T_STRING) continue;
-      from = xb_area_field_index(src, it->v.s->data, it->v.s->len);
-      to = xb_area_field_index(dst, it->v.s->data, it->v.s->len);
+      from = xb_area_field_index(src, xb_str_data(it->v.s), it->v.s->len);
+      to = xb_area_field_index(dst, xb_str_data(it->v.s), it->v.s->len);
     } else {
       to = (int64_t)k;
       from = xb_area_field_index(src, dst->fields[k].name, strlen(dst->fields[k].name));
@@ -557,7 +557,7 @@ void xbf___DBTOTALTO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int ok = name && sums;
   for (size_t k = 0; ok && k < sums->len; ++k) {
     const xb_item *it = &xb_array_items(sums)[k];
-    int64_t from = it->type == XB_T_STRING ? xb_area_field_index(src, it->v.s->data, it->v.s->len) : -1;
+    int64_t from = it->type == XB_T_STRING ? xb_area_field_index(src, xb_str_data(it->v.s), it->v.s->len) : -1;
     ok = from >= 0 && strchr("NF", src->fields[from].type);
     if (!ok) {
       xb_error_of(ctx, XB_DBCMD, EG_ARG, 1015, "TOTAL", NULL, 0, 0, 1, (xb_item *)it, 0, NULL);

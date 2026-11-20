@@ -65,8 +65,8 @@ static void tag(xb_item *it, uint32_t me, uint32_t j) {
   xb_set_str(it, xb_str_new(buf, (size_t)n));
 }
 static int64_t untag(const xb_item *it) {
-  if (it->type != XB_T_STRING || it->v.s->len < 2 || it->v.s->data[0] != 'n') return -1;
-  return strtol(it->v.s->data + 1, NULL, 10);
+  if (it->type != XB_T_STRING || it->v.s->len < 2 || xb_str_data(it->v.s)[0] != 'n') return -1;
+  return strtol(xb_str_data(it->v.s) + 1, NULL, 10);
 }
 
 static void appender(void *arg) {

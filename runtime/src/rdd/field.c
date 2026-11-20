@@ -50,7 +50,7 @@ int xb_field_encode(const xb_field_info *fi, char *p, const xb_item *v) {
   case 'C': {
     if (v->type != XB_T_STRING) return XB_PUT_TYPE;
     size_t n = v->v.s->len < fi->len ? v->v.s->len : fi->len;
-    memcpy(p, v->v.s->data, n);
+    memcpy(p, xb_str_data(v->v.s), n);
     memset(p + n, ' ', fi->len - n);
     return XB_PUT_OK;
   }
@@ -78,8 +78,8 @@ int xb_field_encode(const xb_field_info *fi, char *p, const xb_item *v) {
 static uint32_t area_number(xb_ctx *ctx, const xb_item *area, const char *alias, char what[32]) {
   what[0] = '\0';
   if (area && area->type == XB_T_STRING) {
-    snprintf(what, 32, "%.*s", (int)(area->v.s->len < 31 ? area->v.s->len : 31), area->v.s->data);
-    return xb_area_number(xb_area_named(ctx, area->v.s->data, area->v.s->len));
+    snprintf(what, 32, "%.*s", (int)(area->v.s->len < 31 ? area->v.s->len : 31), xb_str_data(area->v.s));
+    return xb_area_number(xb_area_named(ctx, xb_str_data(area->v.s), area->v.s->len));
   }
   if (area && xb_is_number(area)) {
     int64_t n = xb_num_to_i64(area);

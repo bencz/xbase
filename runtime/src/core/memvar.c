@@ -641,10 +641,10 @@ static void private_to_nil(xb_ctx *ctx, uint32_t i) {
 int xb_memvar_like(const xb_str *skel, const char *name, size_t len) {
   size_t s = 0, n = 0, star = SIZE_MAX, resume = 0;
   while (n < len) {
-    if (s < skel->len && skel->data[s] == '*') {
+    if (s < skel->len && xb_str_data(skel)[s] == '*') {
       star = ++s;
       resume = n;
-    } else if (s < skel->len && (skel->data[s] == '?' || xb_ascii_upper(skel->data[s]) == name[n])) {
+    } else if (s < skel->len && (xb_str_data(skel)[s] == '?' || xb_ascii_upper(xb_str_data(skel)[s]) == name[n])) {
       ++s;
       ++n;
     } else if (star != SIZE_MAX) {
@@ -654,7 +654,7 @@ int xb_memvar_like(const xb_str *skel, const char *name, size_t len) {
       return 0;
     }
   }
-  while (s < skel->len && skel->data[s] == '*') ++s;
+  while (s < skel->len && xb_str_data(skel)[s] == '*') ++s;
   return s == skel->len;
 }
 
@@ -676,7 +676,7 @@ void xbf___MEMRELEASE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   for (uint32_t k = 0; k < argc && !(xb_pending_get(ctx) & XB_PENDING_UNWIND); ++k) {
     uint32_t id;
-    if (argv[k].type != XB_T_STRING || !xb_memvar_find_hold(argv[k].v.s->data, argv[k].v.s->len, &id)) continue;
+    if (argv[k].type != XB_T_STRING || !xb_memvar_find_hold(xb_str_data(argv[k].v.s), argv[k].v.s->len, &id)) continue;
     const bslot *b = bindings_find(ctx->env->bindings, id);
     if (!b || b->cell.type != XB_T_CELL) {
       public_release(id);
@@ -719,7 +719,7 @@ void xbf___MEMCLEAR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 static void memvar_block(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self) {
   const xb_item *named = &self->cells[0]->value;
   uint32_t slot = NO_ID, id = (uint32_t)named->v.i;
-  if (named->type == XB_T_STRING) id = xb_memvar_use(ctx, named->v.s->data, named->v.s->len, 1, &slot);
+  if (named->type == XB_T_STRING) id = xb_memvar_use(ctx, xb_str_data(named->v.s), named->v.s->len, 1, &slot);
   size_t len;
   xb_memvar m = {xb_memvar_name(id, &len), id};
   if (argc && argv[0].type != XB_T_NIL) {
@@ -735,9 +735,10 @@ static void memvar_block(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv
  * letter case) and, called with a value, assigns it; NIL when no variable of
  * that name is visible. */
 void xbf_MEMVARBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  if (!argc || argv[0].type != XB_T_STRING || !xb_memvar_exists_named(ctx, argv[0].v.s->data, argv[0].v.s->len)) return;
+  if (!argc || argv[0].type != XB_T_STRING) return;
+  if (!xb_memvar_exists_named(ctx, xb_str_data(argv[0].v.s), argv[0].v.s->len)) return;
   uint32_t id;
-  int permanent = xb_memvar_permanent(argv[0].v.s->data, argv[0].v.s->len, &id);
+  int permanent = xb_memvar_permanent(xb_str_data(argv[0].v.s), argv[0].v.s->len, &id);
   xb_block *b = xb_block_new(ctx, ret, memvar_block, 1);
   xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell)); /* the block is rooted in `ret` */
   xb_set_nil(&c->value);
@@ -746,7 +747,7 @@ void xbf_MEMVARBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (permanent) {
     xb_set_int(&c->value, id);
   } else {
-    char *upper = upper_copy(argv[0].v.s->data, argv[0].v.s->len);
+    char *upper = upper_copy(xb_str_data(argv[0].v.s), argv[0].v.s->len);
     xb_set_str(&c->value, xb_str_new(upper, argv[0].v.s->len));
     xb_gc_write(c);
     free(upper);
@@ -805,7 +806,7 @@ void xb_memvar_restore(xb_ctx *ctx, const xb_item *pairs) {
   for (size_t k = 0; k + 1 < n; k += 2) {
     xb_item name;
     xb_array_get(pairs->v.p, k, &name);
-    uint32_t id = name.type == XB_T_STRING ? xb_memvar_hold(name.v.s->data, name.v.s->len) : (uint32_t)name.v.i;
+    uint32_t id = name.type == XB_T_STRING ? xb_memvar_hold(xb_str_data(name.v.s), name.v.s->len) : (uint32_t)name.v.i;
     xb_array_get(pairs->v.p, k + 1, bindings_put(ctx->env, id));
     if (name.type == XB_T_STRING) xb_memvar_unhold(id);
   }

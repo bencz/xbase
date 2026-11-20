@@ -14,7 +14,7 @@
 static const char *path_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
   if (argc <= k || argv[k].type != XB_T_STRING) return NULL;
   const xb_str *s = argv[k].v.s;
-  return memchr(s->data, '\0', s->len) ? NULL : s->data;
+  return memchr(xb_str_data(s), '\0', s->len) ? NULL : xb_str_data(s);
 }
 
 /* A handle argument: one closed and kept by the registry of shared files is not open for the program. */
@@ -103,8 +103,9 @@ void xbf_FREAD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       set_error(ctx, ok, err);
     } else {
       xb_set_str(&buffer[1], xb_str_alloc(len));
-      memcpy(buffer[1].v.s->data, buffer[0].v.s->data, len);
-      got = xb_file_read_up_to(f, buffer[1].v.s->data, (size_t)n, &err); /* another thread may collect meanwhile */
+      char *into = xb_str_buffer(buffer[1].v.s);
+      memcpy(into, xb_str_data(buffer[0].v.s), len);
+      got = xb_file_read_up_to(f, into, (size_t)n, &err); /* another thread may collect meanwhile */
       set_error(ctx, got >= 0, err);
       if (got > 0) xb_ref_set(ctx, &argv[1], &buffer[1]);
       if (xb_pending_get(ctx) & XB_PENDING_UNWIND) got = 0; /* the variable was not written */
@@ -124,7 +125,7 @@ void xbf_FWRITE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int64_t n = num_or(argc, argv, 2, (int64_t)s->len);
   if (n < 0 || (uint64_t)n > s->len) n = (int64_t)s->len;
   int32_t err = 0;
-  int ok = n == 0 || xb_platform_file_write(f, s->data, (size_t)n, &err);
+  int ok = n == 0 || xb_platform_file_write(f, xb_str_data(s), (size_t)n, &err);
   set_error(ctx, ok, err);
   if (ok) xb_set_int(ret, n);
 }

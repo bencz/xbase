@@ -17,7 +17,7 @@ static uint32_t order_arg(const xb_area *a, uint32_t argc, const xb_item *argv, 
     return n >= 1 && n <= a->norders ? (uint32_t)n : 0;
   }
   if (argv[k].type != XB_T_STRING) return 0;
-  return xb_area_order_named(a, argv[k].v.s->data, argv[k].v.s->len, NULL);
+  return xb_area_order_named(a, xb_str_data(argv[k].v.s), argv[k].v.s->len, NULL);
 }
 
 static xb_order *order_at(xb_area *a, uint32_t n) { return n ? a->orders[n - 1] : NULL; }
@@ -33,7 +33,7 @@ static void set_text(xb_item *ret, const char *s) { xb_set_str(ret, xb_str_new(s
 
 /* A bag's path: its name with the driver's extension (".ntx") when it has none (malloc'ed). */
 static char *bag_path(const xb_area *a, const xb_str *name) {
-  return xb_file_path_with_ext(name->data, name->len, a->rdd->index->ext);
+  return xb_file_path_with_ext(xb_str_data(name), name->len, a->rdd->index->ext);
 }
 
 /* The area's first order of bag `path`, 0 for none. */
@@ -121,7 +121,7 @@ static void create_order(xb_ctx *ctx, const char *fn, const xb_str *bag, const x
   if (tagged && named) {
     name = malloc(tag->len + 1);
     if (!name) xb_gc_fatal("out of memory");
-    memcpy(name, tag->data, tag->len);
+    memcpy(name, xb_str_data(tag), tag->len);
     name[tag->len] = '\0';
   }
   int fresh = !name;
@@ -185,7 +185,7 @@ void xbf_ORDDESTROY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_area_pin(a);
   uint32_t n = 0;
   if (xb_area_cold(ctx, a) && !a->closed) /* the order found once the change is written: its handler may close it */
-    n = path && argv[0].type == XB_T_STRING ? xb_area_order_named(a, argv[0].v.s->data, argv[0].v.s->len, path)
+    n = path && argv[0].type == XB_T_STRING ? xb_area_order_named(a, xb_str_data(argv[0].v.s), argv[0].v.s->len, path)
                                              : order_arg(a, argc, argv, 0);
   free(path);
   if (n) {

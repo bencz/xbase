@@ -33,9 +33,9 @@ static int whole(const xb_str *s, uint32_t thread, uint32_t round, uint32_t slot
   char head[64];
   int n = snprintf(head, sizeof head, "%u:%u:%u|", thread, round, slot);
   size_t len = 20 + (round * 7 + slot * 13) % 280;
-  if (s->len != len || memcmp(s->data, head, (size_t)n) != 0) return 0;
+  if (s->len != len || memcmp(xb_str_data(s), head, (size_t)n) != 0) return 0;
   for (size_t k = (size_t)n; k < len; ++k)
-    if (s->data[k] != 'a' + (int)(slot % 26)) return 0;
+    if (xb_str_data(s)[k] != 'a' + (int)(slot % 26)) return 0;
   return 1;
 }
 

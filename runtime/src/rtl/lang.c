@@ -200,7 +200,7 @@ static void do_frame_push(xb_ctx *ctx, xb_frame *frame, uint32_t argc, xb_item *
 void xbf_DO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_frame frame;
   if (argc && argv[0].type == XB_T_STRING) {
-    const char *name = argv[0].v.s->data;
+    const char *name = xb_str_data(argv[0].v.s);
     const xb_symbol_entry *e = xb_symbol_find(name, strlen(name));
     if (!e) {
       xb_error_in(ctx, "DO", NULL, EG_NOFUNC, 1001, name, 0, argc, argv);

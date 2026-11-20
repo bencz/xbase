@@ -30,7 +30,10 @@ typedef struct xb_item {
 - The heap types (`STRING` to `HASH`) are one range of tags (`XB_T_HEAP_FIRST`, `XB_T_HEAP_LAST`, `xb_type_is_heap`):
   an item of another type refers to no object, so the collector need not see it.
 - Strings (`xb_str`: flags, hash, length, bytes) are immutable and NUL-terminated, so they can be shared between items
-  and threads and passed to C. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects, nor are
+  and threads and passed to C. The bytes follow the header (the member `bytes`), but C code never names the member: it
+  reads a string's bytes through `xb_str_data` and writes those of a string it has just allocated and not yet shared,
+  or of one only its variable sees (`XB_STR_APPEND`, below), through `xb_str_buffer` (both in `xbrt.h`), so that a
+  string whose bytes live elsewhere (a view; planned) needs no change at the call sites. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects, nor are
   the empty string and the 256 strings of one byte (`xb_str_bytes` in `xbrt.h`): `xb_str_new` and `xb_str_concat` return
   those for results of up to one byte (`Chr()`, `SubStr( c, n, 1 )`, ...), so making one allocates nothing, and compiled
   code takes them from the table too. One exception to immutability is invisible to programs: `xb_op_append( ctx, var, b

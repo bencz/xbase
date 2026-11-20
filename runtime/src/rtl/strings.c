@@ -19,7 +19,7 @@ static void ret_str(xb_item *ret, const char *p, size_t n) { xb_set_str(ret, xb_
 /* Returns `s` itself when the result is the whole string. */
 static void ret_part(xb_item *ret, const xb_item *whole, size_t from, size_t n) {
   if (from == 0 && n == whole->v.s->len) *ret = *whole;
-  else ret_str(ret, whole->v.s->data + from, n);
+  else ret_str(ret, xb_str_data(whole->v.s) + from, n);
 }
 
 /* SubStr( c, nStart [, nCount] ) of `len` units (bytes or characters): xb_substr_range. */
@@ -35,8 +35,8 @@ static void substr(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int 
     return;
   }
   const xb_codepage *cp = xb_codepage_of(ctx);
-  int64_t first, n = substr_range(chars ? (int64_t)xb_cp_count(cp, s->data, s->len) : (int64_t)s->len, argc, argv,
-                                   &first);
+  int64_t first, n = substr_range(chars ? (int64_t)xb_cp_count(cp, xb_str_data(s), s->len) : (int64_t)s->len, argc,
+                                   argv, &first);
   if (n == 0) {
     ret_str(ret, "", 0);
     return;
@@ -45,8 +45,8 @@ static void substr(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int 
     ret_part(ret, &argv[0], (size_t)first, (size_t)n);
     return;
   }
-  size_t from = xb_cp_offset(cp, s->data, s->len, (size_t)first);
-  ret_part(ret, &argv[0], from, xb_cp_offset(cp, s->data + from, s->len - from, (size_t)n));
+  size_t from = xb_cp_offset(cp, xb_str_data(s), s->len, (size_t)first);
+  ret_part(ret, &argv[0], from, xb_cp_offset(cp, xb_str_data(s) + from, s->len - from, (size_t)n));
 }
 
 void xbf_SUBSTR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -69,14 +69,14 @@ static void left_right(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, 
     return;
   }
   const xb_codepage *cp = xb_codepage_of(ctx);
-  size_t units = chars ? xb_cp_count(cp, s->data, s->len) : s->len;
+  size_t units = chars ? xb_cp_count(cp, xb_str_data(s), s->len) : s->len;
   size_t take = xb_take_count(n, units);
   if (!chars) {
     ret_part(ret, &argv[0], right ? s->len - take : 0, take);
     return;
   }
-  size_t from = right ? xb_cp_offset(cp, s->data, s->len, units - take) : 0;
-  ret_part(ret, &argv[0], from, right ? s->len - from : xb_cp_offset(cp, s->data, s->len, take));
+  size_t from = right ? xb_cp_offset(cp, xb_str_data(s), s->len, units - take) : 0;
+  ret_part(ret, &argv[0], from, right ? s->len - from : xb_cp_offset(cp, xb_str_data(s), s->len, take));
 }
 
 void xbf_LEFT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -111,16 +111,16 @@ static void change_case(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv,
   uint64_t high = 0; /* bytes above 0x7F: characters the codepage reads */
   for (; i + 8 <= s->len; i += 8) {
     uint64_t w;
-    memcpy(&w, s->data + i, 8);
+    memcpy(&w, xb_str_data(s) + i, 8);
     high |= w;
     w = change_case8(w, upper);
-    memcpy(r->data + i, &w, 8);
+    memcpy(xb_str_buffer(r) + i, &w, 8);
   }
   for (; i < s->len; ++i) {
-    high |= (unsigned char)s->data[i];
-    r->data[i] = upper ? xb_ascii_upper(s->data[i]) : xb_ascii_lower(s->data[i]);
+    high |= (unsigned char)xb_str_data(s)[i];
+    xb_str_buffer(r)[i] = upper ? xb_ascii_upper(xb_str_data(s)[i]) : xb_ascii_lower(xb_str_data(s)[i]);
   }
-  if (high & UINT64_C(0x8080808080808080)) xb_cp_change_case(xb_codepage_of(ctx), r->data, r->len, upper);
+  if (high & UINT64_C(0x8080808080808080)) xb_cp_change_case(xb_codepage_of(ctx), xb_str_buffer(r), r->len, upper);
   xb_set_str(ret, r);
 }
 
@@ -138,7 +138,7 @@ static void trim(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int wh
     xb_fn_arg_error(ctx, ret, code, fn, argc, argv);
     return;
   }
-  size_t from, n = xb_trim_range(s->data, s->len, which, &from);
+  size_t from, n = xb_trim_range(xb_str_data(s), s->len, which, &from);
   ret_part(ret, &argv[0], from, n);
 }
 
@@ -181,7 +181,7 @@ void xbf_SPACE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   xb_str *r = result_alloc(ctx, ret, argc, argv, xb_count_arg(xb_num_to_i64(&argv[0])), "SPACE");
   if (!r) return;
-  memset(r->data, ' ', r->len);
+  memset(xb_str_buffer(r), ' ', r->len);
   xb_set_str(ret, r);
 }
 
@@ -196,11 +196,11 @@ void xbf_REPLICATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!r) return;
   size_t total = r->len;
   if (s->len == 1) {
-    memset(r->data, s->data[0], total);
+    memset(xb_str_buffer(r), xb_str_data(s)[0], total);
   } else if (total) { /* the text once, then what is written so far copied after itself: log2(count) copies */
-    memcpy(r->data, s->data, s->len);
+    memcpy(xb_str_buffer(r), xb_str_data(s), s->len);
     for (size_t done = s->len; done < total; done *= 2)
-      memcpy(r->data + done, r->data, done < total - done ? done : total - done);
+      memcpy(xb_str_buffer(r) + done, xb_str_buffer(r), done < total - done ? done : total - done);
   }
   xb_set_str(ret, r);
 }
@@ -212,13 +212,15 @@ void xbf_AT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1108, "AT", argc, argv);
     return;
   }
-  xb_set_int(ret, (int64_t)xb_bytes_find(needle->data, needle->len, hay->data, hay->len, 0));
+  xb_set_int(ret, (int64_t)xb_bytes_find(xb_str_data(needle), needle->len, xb_str_data(hay), hay->len, 0));
 }
 
 void xbf_RAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *needle = str_arg(argv, argc, 0), *hay = str_arg(argv, argc, 1);
   XB_UNUSED(ctx);
-  xb_set_int(ret, needle && hay ? (int64_t)xb_bytes_find(needle->data, needle->len, hay->data, hay->len, 1) : 0);
+  xb_set_int(ret, needle && hay
+                      ? (int64_t)xb_bytes_find(xb_str_data(needle), needle->len, xb_str_data(hay), hay->len, 1)
+                      : 0);
 }
 
 void xbf_CHR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -236,7 +238,7 @@ void xbf_ASC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1107, "ASC", argc, argv);
     return;
   }
-  xb_set_int(ret, xb_asc_code(s->data, s->len));
+  xb_set_int(ret, xb_asc_code(xb_str_data(s), s->len));
 }
 
 /* StrTran( c, cSearch [, cReplace] [, nStart] [, nCount] ): nStart is the
@@ -248,7 +250,7 @@ void xbf_STRTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   const xb_str *repl = str_arg(argv, argc, 2);
-  const char *rp = repl ? repl->data : "";
+  const char *rp = repl ? xb_str_data(repl) : "";
   size_t rlen = repl ? repl->len : 0;
   int64_t start = num_arg(argv, argc, 3, 1);
   int64_t count = num_arg(argv, argc, 4, -1);
@@ -264,7 +266,8 @@ void xbf_STRTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
    * linear whatever the texts). */
   size_t hits = 0, n = search->len;
   int64_t found = 0;
-  for (size_t i = 0, at; (at = xb_bytes_find(search->data, n, s->data + i, s->len - i, 0)) != 0; i += at - 1 + n) {
+  for (size_t i = 0, at; (at = xb_bytes_find(xb_str_data(search), n, xb_str_data(s) + i, s->len - i, 0)) != 0;
+       i += at - 1 + n) {
     ++found;
     if (found >= start && (count < 0 || (int64_t)hits < count)) ++hits;
   }
@@ -278,18 +281,19 @@ void xbf_STRTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!r) return;
   size_t o = 0, done = 0, i = 0;
   found = 0;
-  for (size_t at; done < hits && (at = xb_bytes_find(search->data, n, s->data + i, s->len - i, 0)) != 0;) {
+  for (size_t at;
+       done < hits && (at = xb_bytes_find(xb_str_data(search), n, xb_str_data(s) + i, s->len - i, 0)) != 0;) {
     size_t run = at - 1; /* the bytes before the match, copied whole */
-    memcpy(r->data + o, s->data + i, run);
+    memcpy(xb_str_buffer(r) + o, xb_str_data(s) + i, run);
     o += run;
     i += run;
     int replaced = ++found >= start;
-    memcpy(r->data + o, replaced ? rp : s->data + i, replaced ? rlen : n);
+    memcpy(xb_str_buffer(r) + o, replaced ? rp : xb_str_data(s) + i, replaced ? rlen : n);
     o += replaced ? rlen : n;
     done += (size_t)replaced;
     i += n;
   }
-  memcpy(r->data + o, s->data + i, s->len - i); /* the rest */
+  memcpy(xb_str_buffer(r) + o, xb_str_data(s) + i, s->len - i); /* the rest */
   xb_set_str(ret, r);
 }
 
@@ -303,7 +307,7 @@ void xbf___AFFIX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   xb_set_logical(ret, part->len <= s->len &&
-                          memcmp(s->data + (end ? s->len - part->len : 0), part->data, part->len) == 0);
+                          memcmp(xb_str_data(s) + (end ? s->len - part->len : 0), xb_str_data(part), part->len) == 0);
 }
 
 /* __Split( cText, cSeparator ): the pieces of cText between the separators (a separator of one byte or more), an
@@ -315,13 +319,14 @@ void xbf___SPLIT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   size_t pieces = 1, n = sep->len;
-  for (size_t i = 0, at; (at = xb_bytes_find(sep->data, n, s->data + i, s->len - i, 0)) != 0; i += at - 1 + n) ++pieces;
+  const char *by = xb_str_data(sep);
+  for (size_t i = 0, at; (at = xb_bytes_find(by, n, xb_str_data(s) + i, s->len - i, 0)) != 0; i += at - 1 + n) ++pieces;
   xb_array *a = xb_array_alloc(pieces); /* rooted in `ret`; `s` and `sep`, pinned by the stack, stay where they are */
   xb_set_array(ret, a);
   size_t i = 0;
   for (size_t k = 0; k < pieces; ++k) {
-    size_t at = k + 1 < pieces ? xb_bytes_find(sep->data, n, s->data + i, s->len - i, 0) : s->len - i + 1;
-    xb_str *piece = xb_str_new(s->data + i, at - 1);
+    size_t at = k + 1 < pieces ? xb_bytes_find(xb_str_data(sep), n, xb_str_data(s) + i, s->len - i, 0) : s->len - i + 1;
+    xb_str *piece = xb_str_new(xb_str_data(s) + i, at - 1);
     a = ret->v.p; /* the array may have moved */
     xb_set_str(&xb_array_items(a)[k], piece);
     xb_gc_write_item(a, k);
@@ -345,9 +350,10 @@ void xbf_STUFF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (del < 0 || (uint64_t)del > len - (size_t)(start - 1)) del = (int64_t)(len - (size_t)(start - 1));
   size_t ilen = ins->len;
   xb_str *r = xb_str_alloc(len - (size_t)del + ilen);
-  memcpy(r->data, s->data, (size_t)(start - 1));
-  if (ilen) memcpy(r->data + start - 1, ins->data, ilen);
-  memcpy(r->data + (size_t)(start - 1) + ilen, s->data + (size_t)(start - 1 + del), len - (size_t)(start - 1 + del));
+  memcpy(xb_str_buffer(r), xb_str_data(s), (size_t)(start - 1));
+  if (ilen) memcpy(xb_str_buffer(r) + start - 1, xb_str_data(ins), ilen);
+  size_t rest = (size_t)(start - 1 + del); /* the first byte kept after the deleted ones */
+  memcpy(xb_str_buffer(r) + (size_t)(start - 1) + ilen, xb_str_data(s) + rest, len - rest);
   xb_set_str(ret, r);
 }
 
@@ -355,10 +361,10 @@ void xbf_STUFF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * byte above 0x7F as the codepage says (digits are ASCII). */
 static void char_class(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int which) {
   const xb_str *s = str_arg(argv, argc, 0);
-  char c = s && s->len ? s->data[0] : 0;
+  char c = s && s->len ? xb_str_data(s)[0] : 0;
   int r = 0;
   if ((unsigned char)c >= 0x80) {
-    int kind = xb_cp_kind(xb_codepage_of(ctx), s->data, s->len);
+    int kind = xb_cp_kind(xb_codepage_of(ctx), xb_str_data(s), s->len);
     r = which == 0 ? kind != XB_CP_NONE : which == 2 ? kind == XB_CP_UPPER : which == 3 && kind == XB_CP_LOWER;
   } else if (which == 0) {
     r = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -398,7 +404,7 @@ void xbf_EMPTY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
       case XB_T_DOUBLE: empty = it->v.d == 0.0; break;
       case XB_T_STRING: {
         size_t from;
-        empty = xb_trim_range(it->v.s->data, it->v.s->len, XB_TRIM_LEADING, &from) == 0;
+        empty = xb_trim_range(xb_str_data(it->v.s), it->v.s->len, XB_TRIM_LEADING, &from) == 0;
         break;
       }
       case XB_T_ARRAY: empty = xb_array_length(it->v.p) == 0; break;
@@ -421,7 +427,7 @@ typedef enum pad_side { PAD_RIGHT, PAD_LEFT, PAD_CENTER } pad_side;
 static void pad(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, pad_side side) {
   int64_t n = argc > 1 && xb_is_number(&argv[1]) ? xb_num_to_i64(&argv[1]) : 0;
   const xb_str *fill = str_arg(argv, argc, 2);
-  char with = fill && fill->len ? fill->data[0] : ' ';
+  char with = fill && fill->len ? xb_str_data(fill)[0] : ' ';
   if (!argc || !(argv[0].type == XB_T_STRING || xb_is_number(&argv[0]) || argv[0].type == XB_T_DATE)) {
     xb_set_str(ret, xb_str_empty());
     return;
@@ -433,7 +439,7 @@ static void pad(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, pad_sid
   xb_item text; /* the value's text, rooted while the result is made */
   xb_set_str(&text, xb_item_display(ctx, &argv[0]));
   xb_gc_root_push(ctx, &text);
-  const char *p = text.v.s->data;
+  const char *p = xb_str_data(text.v.s);
   size_t len = text.v.s->len;
   if (xb_is_number(&argv[0])) {
     while (len && *p == ' ') {
@@ -449,11 +455,11 @@ static void pad(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, pad_sid
     return;
   }
   if (len >= width) {
-    memcpy(r->data, p, width);
+    memcpy(xb_str_buffer(r), p, width);
   } else {
     size_t extra = width - len, before = side == PAD_LEFT ? extra : side == PAD_CENTER ? extra / 2 : 0;
-    memset(r->data, with, width);
-    memcpy(r->data + before, p, len);
+    memset(xb_str_buffer(r), with, width);
+    memcpy(xb_str_buffer(r) + before, p, len);
   }
   xb_gc_root_pop(ctx, 1);
   xb_set_str(ret, r);
@@ -477,7 +483,7 @@ void xbf_SOUNDEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   size_t at = 0;
   char prev = '0';
   for (size_t i = 0; s && i < s->len && at < sizeof code; ++i) {
-    char c = xb_ascii_upper(s->data[i]);
+    char c = xb_ascii_upper(xb_str_data(s)[i]);
     if (c < 'A' || c > 'Z') continue;
     char d = digits[c - 'A'];
     if (at == 0) code[at++] = c;
@@ -500,7 +506,7 @@ void xbf_CHARLEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, CODE_CHARLEN, "CHARLEN", argc, argv);
     return;
   }
-  xb_set_int(ret, (int64_t)xb_cp_count(xb_codepage_of(ctx), s->data, s->len));
+  xb_set_int(ret, (int64_t)xb_cp_count(xb_codepage_of(ctx), xb_str_data(s), s->len));
 }
 
 /* CharSubStr( cString, nStart, [nCount] ). */
@@ -529,12 +535,12 @@ void xbf_CHARAT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_int(ret, 0);
   if (needle->len == 0) return;
   for (size_t i = 0; i + needle->len <= hay->len; ++chars) { /* a match starts where a character does */
-    if (memcmp(hay->data + i, needle->data, needle->len) == 0) {
+    if (memcmp(xb_str_data(hay) + i, xb_str_data(needle), needle->len) == 0) {
       xb_set_int(ret, chars);
       return;
     }
     size_t n;
-    xb_cp_decode(cp, hay->data, hay->len, i, &n);
+    xb_cp_decode(cp, xb_str_data(hay), hay->len, i, &n);
     i += n;
   }
 }
@@ -547,7 +553,7 @@ void xbf_CHARASC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   size_t n;
-  xb_set_int(ret, s->len ? (int64_t)xb_cp_decode(xb_codepage_of(ctx), s->data, s->len, 0, &n) : 0);
+  xb_set_int(ret, s->len ? (int64_t)xb_cp_decode(xb_codepage_of(ctx), xb_str_data(s), s->len, 0, &n) : 0);
 }
 
 /* CharChr( nCode ): the character of a code point, "" when the codepage has none (or it is none). */
@@ -567,8 +573,8 @@ void xbf_CHARCHR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * argument error. */
 void xbf_CPCONVERT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *s = str_arg(argv, argc, 0), *fromName = str_arg(argv, argc, 1), *toName = str_arg(argv, argc, 2);
-  const xb_codepage *from = fromName ? xb_codepage_find(fromName->data, fromName->len) : NULL;
-  const xb_codepage *to = toName ? xb_codepage_find(toName->data, toName->len) : NULL;
+  const xb_codepage *from = fromName ? xb_codepage_find(xb_str_data(fromName), fromName->len) : NULL;
+  const xb_codepage *to = toName ? xb_codepage_find(xb_str_data(toName), toName->len) : NULL;
   if (!s || !from || !to) {
     xb_fn_arg_error(ctx, ret, CODE_CPCONVERT, "CPCONVERT", argc, argv);
     return;
@@ -584,12 +590,12 @@ void xbf_CPCONVERT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     for (size_t i = 0; i < s->len;) {
       size_t n;
       char put[4];
-      size_t m = xb_cp_encode(to, xb_cp_decode(from, s->data, s->len, i, &n), put);
+      size_t m = xb_cp_encode(to, xb_cp_decode(from, xb_str_data(s), s->len, i, &n), put);
       if (!m) {
         put[0] = '?';
         m = 1;
       }
-      if (r) memcpy(r->data + (size_t)at, put, m);
+      if (r) memcpy(xb_str_buffer(r) + (size_t)at, put, m);
       at += m;
       i += n;
     }

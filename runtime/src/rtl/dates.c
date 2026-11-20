@@ -60,7 +60,7 @@ void xbf_CTOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_fn_arg_error(ctx, ret, 1119, "CTOD", argc, argv);
     return;
   }
-  xb_set_date(ret, xb_date_parse(argv[0].v.s->data, argv[0].v.s->len, ctx->env->date_format, ctx->env->epoch));
+  xb_set_date(ret, xb_date_parse(xb_str_data(argv[0].v.s), argv[0].v.s->len, ctx->env->date_format, ctx->env->epoch));
 }
 
 void xbf_DTOC(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -85,7 +85,7 @@ void xbf_DTOS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_STOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   int ok = argc >= 1 && argv[0].type == XB_T_STRING && argv[0].v.s->len >= XB_DATE_DIGITS_SIZE - 1;
-  xb_set_date(ret, ok ? xb_date_from_digits(argv[0].v.s->data) : 0);
+  xb_set_date(ret, ok ? xb_date_from_digits(xb_str_data(argv[0].v.s)) : 0);
 }
 
 static void date_part(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, const char *fn, int part) {

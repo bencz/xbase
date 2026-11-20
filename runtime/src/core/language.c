@@ -11,7 +11,7 @@ void xbf___LANGUAGETEXTS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv
 static int make_texts(xb_ctx *ctx, const char *id, size_t len, xb_item *texts) {
   xb_item arg;
   xb_str *upper = xb_str_alloc(len);
-  for (size_t i = 0; i < len; ++i) upper->data[i] = xb_ascii_upper(id[i]);
+  for (size_t i = 0; i < len; ++i) xb_str_buffer(upper)[i] = xb_ascii_upper(id[i]);
   xb_set_str(&arg, upper);
   xb_set_nil(texts);
   xb_gc_root_push(ctx, &arg);

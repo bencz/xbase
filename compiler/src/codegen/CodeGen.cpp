@@ -722,7 +722,7 @@ void CodeGen::genEntry(const xir::Function &start) {
   addAbiAttributes(fn);
   b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", fn));
   Value *ctx = fn->getArg(0);
-  uint64_t strHdr = dl_.getStructLayout(strType(ArrayType::get(i8_, 0)))->getElementOffset(StrData);
+  uint64_t strHdr = dl_.getStructLayout(strType(ArrayType::get(i8_, 0)))->getElementOffset(StrBytes);
   uint64_t blockCells = dl_.getStructLayout(blockTy_)->getElementOffset(2);
   uint64_t frameSlots = dl_.getStructLayout(frameType(0))->getElementOffset(FrameSlots);
   uint64_t ctxFrames = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxFrames);

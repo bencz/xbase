@@ -40,9 +40,9 @@ typedef struct static_text {
   uint32_t flags;
   uint32_t hash;
   size_t len;
-  char data[5];
+  char bytes[5];
 } static_text;
-_Static_assert(offsetof(static_text, data) == offsetof(xb_str, data), "a static text has the layout of xb_str");
+_Static_assert(offsetof(static_text, bytes) == offsetof(xb_str, bytes), "a static text has the layout of xb_str");
 static const static_text base_subsystem = {XB_STR_STATIC, 0, 4, "BASE"};
 
 typedef struct report {
@@ -285,20 +285,20 @@ void xb_error_add_calls(xb_ctx *ctx, const xb_item *error, const xb_item *calls)
   for (;;) { /* another task that fails with the same error may add its lines meanwhile: then again, after them */
     xb_object_get(error->v.p, ERR_CALLS, &before);
     size_t had = before.type == XB_T_STRING ? before.v.s->len : 0;
-    size_t kept = had ? lines_of(before.v.s->data, had) : 0;
+    size_t kept = had ? lines_of(xb_str_data(before.v.s), had) : 0;
     if (kept >= XB_CALLS_SHOWN) break; /* that many lines at most, the last one the note that more were left out */
     size_t take = 0, lines = 0; /* the first lines of `calls` that fit before the note */
     while (take < calls->v.s->len && kept + lines + 1 < XB_CALLS_SHOWN) {
       size_t end = take + 1;
-      while (end < calls->v.s->len && calls->v.s->data[end] != '\n') ++end;
+      while (end < calls->v.s->len && xb_str_data(calls->v.s)[end] != '\n') ++end;
       take = end;
       ++lines;
     }
     int cut = take < calls->v.s->len;
     xb_str *s = xb_str_alloc(had + take + (cut ? sizeof more - 1 : 0)); /* a safepoint: the items rooted */
-    if (had) memcpy(s->data, before.v.s->data, had);
-    memcpy(s->data + had, calls->v.s->data, take);
-    if (cut) memcpy(s->data + had + take, more, sizeof more - 1);
+    if (had) memcpy(xb_str_buffer(s), xb_str_data(before.v.s), had);
+    memcpy(xb_str_buffer(s) + had, xb_str_data(calls->v.s), take);
+    if (cut) memcpy(xb_str_buffer(s) + had + take, more, sizeof more - 1);
     xb_set_str(&now, s);
     if (xb_object_replace(error->v.p, ERR_CALLS, &before, &now)) break;
   }

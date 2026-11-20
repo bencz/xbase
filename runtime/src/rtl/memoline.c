@@ -45,7 +45,7 @@ static int scan_init(scan *m, uint32_t argc, const xb_item *argv, uint32_t at) {
   memset(m, 0, sizeof *m);
   int64_t width = num_or(argc, argv, 1, 79);
   if (!argc || argv[0].type != XB_T_STRING || width <= 0) return 0;
-  m->s = argv[0].v.s->data;
+  m->s = xb_str_data(argv[0].v.s);
   m->len = argv[0].v.s->len;
   m->width = xb_size_sat((uint64_t)width);
   int64_t tab = num_or(argc, argv, at, 4);
@@ -158,7 +158,7 @@ void xbf_MEMOLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   xb_str *r = xb_str_try_alloc(n);
   if (r) {
-    memcpy(r->data, out, n);
+    memcpy(xb_str_buffer(r), out, n);
     xb_set_str(ret, r);
   } else {
     xb_error_memory(ctx, ret, "MEMOLINE", argc, argv);
@@ -237,14 +237,14 @@ void xbf_HARDCR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   const xb_str *s = argv[0].v.s;
-  if (!memchr(s->data, SOFT1, s->len)) {
+  if (!memchr(xb_str_data(s), SOFT1, s->len)) {
     xb_set_str(ret, argv[0].v.s); /* a new value, as when it changes something: a memo's is a plain string */
     return;
   }
   xb_str *r = xb_str_alloc(s->len);
-  memcpy(r->data, s->data, s->len);
+  memcpy(xb_str_buffer(r), xb_str_data(s), s->len);
   for (size_t i = 0; i + 1 < r->len; ++i)
-    if (r->data[i] == SOFT1 && r->data[i + 1] == SOFT2) r->data[i] = '\r';
+    if (xb_str_buffer(r)[i] == SOFT1 && xb_str_buffer(r)[i + 1] == SOFT2) xb_str_buffer(r)[i] = '\r';
   xb_set_str(ret, r);
 }
 
@@ -257,20 +257,20 @@ void xbf_MEMOTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_set_str(ret, xb_str_empty());
     return;
   }
-  char hard = argc > 1 && argv[1].type == XB_T_STRING && argv[1].v.s->len ? argv[1].v.s->data[0] : ';';
-  char soft = argc > 2 && argv[2].type == XB_T_STRING && argv[2].v.s->len ? argv[2].v.s->data[0] : ' ';
+  char hard = argc > 1 && argv[1].type == XB_T_STRING && argv[1].v.s->len ? xb_str_data(argv[1].v.s)[0] : ';';
+  char soft = argc > 2 && argv[2].type == XB_T_STRING && argv[2].v.s->len ? xb_str_data(argv[2].v.s)[0] : ' ';
   const xb_str *s = argv[0].v.s;
   char *out = malloc(s->len ? s->len : 1);
   if (!out) xb_gc_fatal("out of memory");
   size_t n = 0;
   for (size_t i = 0; i < s->len;) {
-    int isHard = i + 1 < s->len && s->data[i] == '\r' && s->data[i + 1] == '\n';
-    int isSoft = i + 1 < s->len && s->data[i] == SOFT1 && s->data[i + 1] == SOFT2;
+    int isHard = i + 1 < s->len && xb_str_data(s)[i] == '\r' && xb_str_data(s)[i + 1] == '\n';
+    int isSoft = i + 1 < s->len && xb_str_data(s)[i] == SOFT1 && xb_str_data(s)[i + 1] == SOFT2;
     if (isHard || isSoft) {
       out[n++] = isHard ? hard : soft;
       i += 2;
     } else {
-      out[n++] = s->data[i++];
+      out[n++] = xb_str_data(s)[i++];
     }
   }
   xb_set_str(ret, xb_str_new(out, n));

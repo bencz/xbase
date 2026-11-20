@@ -35,15 +35,15 @@ xb_area *xb_db_record(xb_ctx *ctx, const char *fn) {
 /* The alias a table gets by default: its file name without directories and extension. */
 static void default_alias(const xb_str *name, const char **p, size_t *len) {
   size_t start, ext;
-  xb_file_name_parts(name->data, name->len, &start, &ext);
-  *p = name->data + start;
+  xb_file_name_parts(xb_str_data(name), name->len, &start, &ext);
+  *p = xb_str_data(name) + start;
   *len = ext - start;
 }
 
 const xb_rdd *xb_db_driver_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv, uint32_t k) {
   const xb_str *name = xb_db_str_arg(argc, argv, k);
   if (!name || name->len == 0) return xb_rdd_default(ctx);
-  return xb_rdd_find(name->data, name->len);
+  return xb_rdd_find(xb_str_data(name), name->len);
 }
 
 /* Opens table `name` (the driver's extension added when it has none) in the lowest free area (`newArea`, which becomes
@@ -55,12 +55,12 @@ static int open_table(xb_ctx *ctx, int newArea, const xb_rdd *rdd, const xb_str 
   const char *aliasText;
   size_t aliasLen;
   if (alias && alias->len) {
-    aliasText = alias->data;
+    aliasText = xb_str_data(alias);
     aliasLen = alias->len;
   } else {
     default_alias(name, &aliasText, &aliasLen);
   }
-  char *path = xb_file_path_with_ext(name->data, name->len, rdd->ext);
+  char *path = xb_file_path_with_ext(xb_str_data(name), name->len, rdd->ext);
   int ok = xb_area_open(ctx, ctx->env->areaCurrent, rdd, path, aliasText, aliasLen, readonly, exclusive);
   free(path);
   return ok;
@@ -104,8 +104,8 @@ void xbf_DBSELECTAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   const xb_str *alias = xb_db_str_arg(argc, argv, 0);
   int64_t n = xb_db_num_arg(argc, argv, 0, -1);
-  for (uint16_t tries = 1; alias && (n = xb_area_named(ctx, alias->data, alias->len)) < 0; ++tries)
-    if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, alias->data, NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2)
+  for (uint16_t tries = 1; alias && (n = xb_area_named(ctx, xb_str_data(alias), alias->len)) < 0; ++tries)
+    if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, xb_str_data(alias), NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2)
       return;
   if (n == 0) ctx->env->areaCurrent = xb_area_free(ctx);
   else if (xb_area_number(n)) ctx->env->areaCurrent = xb_area_number(n);
@@ -114,7 +114,7 @@ void xbf_DBSELECTAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* Select( [cAlias] ): the current area's number, or the one a name gives as xb_area_named reads it (0 for none). */
 void xbf_SELECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *alias = xb_db_str_arg(argc, argv, 0);
-  int64_t n = alias ? xb_area_named(ctx, alias->data, alias->len) : ctx->env->areaCurrent;
+  int64_t n = alias ? xb_area_named(ctx, xb_str_data(alias), alias->len) : ctx->env->areaCurrent;
   xb_set_int(ret, n > 0 ? n : 0);
 }
 
@@ -233,7 +233,7 @@ void xbf_FIELDPUT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_FIELDPOS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_area *a = xb_area_current(ctx);
   const xb_str *name = xb_db_str_arg(argc, argv, 0);
-  xb_set_int(ret, a && name ? xb_area_field_index(a, name->data, name->len) + 1 : 0);
+  xb_set_int(ret, a && name ? xb_area_field_index(a, xb_str_data(name), name->len) + 1 : 0);
 }
 
 void xbf_FIELDNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -245,7 +245,7 @@ void xbf_FIELDNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 /* The field a number or a name designates in the current area, or NULL. */
 static const xb_field_info *field_named(const xb_area *a, uint32_t argc, const xb_item *argv) {
   const xb_str *name = argc && argv[0].type == XB_T_STRING ? argv[0].v.s : NULL;
-  int64_t f = name ? (a ? xb_area_field_index(a, name->data, name->len) : -1) : field_arg(a, argc, argv, 0);
+  int64_t f = name ? (a ? xb_area_field_index(a, xb_str_data(name), name->len) : -1) : field_arg(a, argc, argv, 0);
   return f >= 0 ? &a->fields[f] : NULL;
 }
 
@@ -304,8 +304,9 @@ int xb_db_struct(const xb_item *spec, xb_field_info **out, uint32_t *count) {
     if (!ok) break;
     xb_field_info *fi = &fields[k];
     const xb_str *fname = cols[0].v.s;
-    for (size_t i = 0; i < fname->len && i < XB_FIELD_NAME_SIZE - 1; ++i) fi->name[i] = xb_ascii_upper(fname->data[i]);
-    fi->type = xb_ascii_upper(cols[1].v.s->data[0]);
+    const char *name = xb_str_data(fname);
+    for (size_t i = 0; i < fname->len && i < XB_FIELD_NAME_SIZE - 1; ++i) fi->name[i] = xb_ascii_upper(name[i]);
+    fi->type = xb_ascii_upper(xb_str_data(cols[1].v.s)[0]);
     int64_t len = xb_num_to_i64(&cols[2]);
     int64_t dec = row->len > 3 && xb_is_number(&cols[3]) ? xb_num_to_i64(&cols[3]) : 0;
     ok = fi->name[0] && len >= 0 && len <= UINT32_MAX && dec >= 0 && dec <= UINT32_MAX;
@@ -346,7 +347,7 @@ void xbf_DBCREATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     xb_error_of(ctx, XB_DBCMD, EG_ARG, 1014, "DBCREATE", NULL, 0, 0, argc, argv, 0, NULL);
     return;
   }
-  char *path = xb_file_path_with_ext(name->data, name->len, rdd->ext);
+  char *path = xb_file_path_with_ext(xb_str_data(name), name->len, rdd->ext);
   int created = xb_db_create(ctx, rdd, path, fields, n);
   free(path);
   free(fields);
@@ -685,7 +686,7 @@ void xbf_RDDSETDEFAULT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) 
   const xb_rdd *now = xb_rdd_default(ctx);
   xb_set_str(ret, xb_str_new(now->name, strlen(now->name)));
   const xb_str *name = xb_db_str_arg(argc, argv, 0);
-  const xb_rdd *chosen = name && name->len ? xb_rdd_find(name->data, name->len) : NULL;
+  const xb_rdd *chosen = name && name->len ? xb_rdd_find(xb_str_data(name), name->len) : NULL;
   if (chosen) ctx->env->rddDefault = chosen;
 }
 

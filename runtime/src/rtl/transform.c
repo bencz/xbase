@@ -65,7 +65,7 @@ static void transform_string(xb_ctx *ctx, const xb_str *s, const char *pic, size
     pic = datePic;
   }
   if (!picLen) {
-    for (size_t i = 0; i < s->len; ++i) put(o, flags & P_UPPER ? xb_ascii_upper(s->data[i]) : s->data[i]);
+    for (size_t i = 0; i < s->len; ++i) put(o, flags & P_UPPER ? xb_ascii_upper(xb_str_data(s)[i]) : xb_str_data(s)[i]);
   } else {
     size_t at = 0; /* the next character of the value */
     for (size_t i = 0; i < picLen; ++i) {
@@ -75,7 +75,7 @@ static void transform_string(xb_ctx *ctx, const xb_str *s, const char *pic, size
         put(o, string_placeholder(p) ? ' ' : p);
         continue;
       }
-      char c = s->data[at++];
+      char c = xb_str_data(s)[at++];
       if (p == '!') {
         put(o, xb_ascii_upper(c));
       } else if (p == 'y' || p == 'Y') {
@@ -88,7 +88,10 @@ static void transform_string(xb_ctx *ctx, const xb_str *s, const char *pic, size
       }
     }
     if ((flags & P_REMAIN) && at == 0) /* nothing was placed: the value follows whole */
-      for (size_t i = 0; i < s->len; ++i) put(o, flags & P_UPPER ? xb_ascii_upper(s->data[i]) : s->data[i]);
+      for (size_t i = 0; i < s->len; ++i) {
+        char c = xb_str_data(s)[i];
+        put(o, flags & P_UPPER ? xb_ascii_upper(c) : c);
+      }
   }
   if ((flags & P_BRITISH) && o->len >= 5) { /* Clipper's: characters 1-2 and 4-5 trade places */
     char a = o->p[0], b = o->p[1];
@@ -106,7 +109,7 @@ static int number_placeholder(char c) { return c == '9' || c == '#' || c == '$' 
 static void str_field(const xb_item *v, int width, int dec, out *o) {
   int intWidth = width - (dec ? dec + 1 : 0);
   xb_str *t = xb_num_to_str(v, intWidth > 0 ? intWidth : 0, dec); /* nothing allocates while it is read */
-  for (size_t i = 0; i < t->len; ++i) put(o, t->data[i]);
+  for (size_t i = 0; i < t->len; ++i) put(o, xb_str_data(t)[i]);
 }
 
 /* Returns the offset where @B starts trimming (past a parenthesis). */
@@ -332,7 +335,7 @@ void xbf_TRANSFORM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     } else xb_set_str(ret, xb_item_display(ctx, value));
     return;
   }
-  const char *pic = picture->v.s->data;
+  const char *pic = xb_str_data(picture->v.s);
   size_t picLen = picture->v.s->len;
   unsigned flags = 0;
   size_t width = 0; /* @S */

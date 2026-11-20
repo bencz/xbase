@@ -59,9 +59,9 @@ void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
   xb_str *s = var->v.s;
   const xb_str *t = b->v.s;
   if ((s->flags & XB_STR_APPEND) && t->len <= s->hash - s->len) { /* also done in place by compiled code */
-    memcpy(s->data + s->len, t->data, t->len);
+    memcpy(xb_str_buffer(s) + s->len, xb_str_data(t), t->len);
     s->len += t->len;
-    s->data[s->len] = '\0';
+    xb_str_buffer(s)[s->len] = '\0';
     return;
   }
   uint64_t len = (uint64_t)s->len + t->len;
@@ -70,8 +70,8 @@ void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
     return;
   }
   xb_str *r = xb_str_growing(len, len < 16 ? 32 : 2 * len); /* doubling: appends cost O(1) amortized */
-  memcpy(r->data, s->data, s->len);
-  memcpy(r->data + s->len, t->data, t->len);
+  memcpy(xb_str_buffer(r), xb_str_data(s), s->len);
+  memcpy(xb_str_buffer(r) + s->len, xb_str_data(t), t->len);
   xb_set_str(var, r);
 }
 
@@ -86,7 +86,7 @@ void xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   } else if (a->type == XB_T_STRING && b->type == XB_T_STRING) {
     const xb_str *sa = a->v.s, *sb = b->v.s;
     xb_str *s = xb_str_alloc(sa->len + sb->len);
-    xb_str_minus(s->data, sa->data, sa->len, sb->data, sb->len);
+    xb_str_minus(xb_str_buffer(s), xb_str_data(sa), sa->len, xb_str_data(sb), sb->len);
     xb_set_str(r, s);
   } else if (a->type == XB_T_DATE && b->type == XB_T_DATE) {
     int64_t v;
@@ -201,17 +201,17 @@ void xb_op_bitnot(xb_ctx *ctx, xb_item *r, const xb_item *a) { bit_op(ctx, r, XB
 static int str_cmp(const xb_str *a, const xb_str *b, int exact) {
   size_t la = a->len, lb = b->len;
   if (!exact && lb <= la) {
-    int c = memcmp(a->data, b->data, lb);
+    int c = memcmp(xb_str_data(a), xb_str_data(b), lb);
     return c < 0 ? -1 : c > 0;
   }
   size_t n = la < lb ? la : lb;
-  int c = memcmp(a->data, b->data, n);
+  int c = memcmp(xb_str_data(a), xb_str_data(b), n);
   if (c) return c < 0 ? -1 : 1;
   if (la == lb) return 0;
   if (exact) { /* SET EXACT ON ignores trailing blanks */
     const xb_str *lng = la > lb ? a : b;
     size_t i = n;
-    while (i < lng->len && lng->data[i] == ' ') ++i;
+    while (i < lng->len && xb_str_data(lng)[i] == ' ') ++i;
     if (i == lng->len) return 0;
   }
   return la < lb ? -1 : 1;
@@ -274,7 +274,7 @@ void xb_op_exacteq(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) 
   }
   if (a->type == XB_T_STRING && b->type == XB_T_STRING) {
     const xb_str *x = a->v.s, *y = b->v.s;
-    xb_set_logical(r, x->len == y->len && memcmp(x->data, y->data, x->len) == 0);
+    xb_set_logical(r, x->len == y->len && memcmp(xb_str_data(x), xb_str_data(y), x->len) == 0);
     return;
   }
   if (a->type == XB_T_NIL || b->type == XB_T_NIL) { nil_test(r, XB_FOLD_EQ, a, b); return; }
@@ -303,7 +303,7 @@ XB_REL_OP(xb_op_ge, 1076, XB_OPERATOR_GE, 0, 1, 1)
 static int same_value(const xb_ctx *ctx, const xb_item *x, const xb_item *y) {
   if (x->type == XB_T_STRING && y->type == XB_T_STRING) {
     const xb_str *p = x->v.s, *q = y->v.s;
-    return p->len == q->len && memcmp(p->data, q->data, p->len) == 0;
+    return p->len == q->len && memcmp(xb_str_data(p), xb_str_data(q), p->len) == 0;
   }
   if (xb_type_is_heap(x->type) || xb_type_is_heap(y->type)) return x->type == y->type && x->v.p == y->v.p;
   if (x->type == XB_T_NIL || y->type == XB_T_NIL) return x->type == y->type;
@@ -333,7 +333,7 @@ void xb_op_in(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
   }
   if (a->type != XB_T_STRING || b->type != XB_T_STRING) { arg_error2(ctx, r, 1109, "$", a, b); return; }
   /* Clipper: "" $ "abc" is .F. */
-  xb_set_logical(r, xb_bytes_find(a->v.s->data, a->v.s->len, b->v.s->data, b->v.s->len, 0) != 0);
+  xb_set_logical(r, xb_bytes_find(xb_str_data(a->v.s), a->v.s->len, xb_str_data(b->v.s), b->v.s->len, 0) != 0);
 }
 
 int32_t xb_cond_error(xb_ctx *ctx, const xb_item *a) {

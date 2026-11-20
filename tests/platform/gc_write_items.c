@@ -42,7 +42,7 @@ static void check_range(xb_ctx *ctx, size_t n, int carded, size_t first, size_t 
   a = keep.v.p;
   const xb_item *it = &xb_array_items(a)[at];
   CHECK(it->type == XB_T_STRING);
-  CHECK(it->v.s->len == strlen(TEXT) && memcmp(it->v.s->data, TEXT, strlen(TEXT)) == 0);
+  CHECK(it->v.s->len == strlen(TEXT) && memcmp(xb_str_data(it->v.s), TEXT, strlen(TEXT)) == 0);
   xb_gc_root_pop(ctx, 2);
 }
 

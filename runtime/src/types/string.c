@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-_Static_assert(offsetof(xb_str1, data) == offsetof(xb_str, data), "xb_str1 has the layout of xb_str (xbrt.h)");
+_Static_assert(offsetof(xb_str1, bytes) == offsetof(xb_str, bytes), "xb_str1 has the layout of xb_str (xbrt.h)");
 
 static const xb_str1 empty_string = {XB_STR_STATIC, 0, 0, {0, 0}};
 
@@ -24,12 +24,12 @@ static xb_str *str_alloc(uint64_t newLen, int fallible) {
     xb_gc_fatal("out of memory");
   }
   size_t len = (size_t)newLen;
-  xb_str *s = (fallible ? xb_gc_try_alloc : xb_gc_alloc)(XB_GC_STRING, offsetof(xb_str, data) + len + 1);
+  xb_str *s = (fallible ? xb_gc_try_alloc : xb_gc_alloc)(XB_GC_STRING, offsetof(xb_str, bytes) + len + 1);
   if (!s) return NULL;
   s->flags = 0;
   s->hash = 0;
   s->len = len;
-  s->data[len] = '\0';
+  xb_str_buffer(s)[len] = '\0';
   return s;
 }
 
@@ -42,7 +42,7 @@ xb_str *xb_str_growing(uint64_t len, uint64_t room) {
   if (room > XB_STR_MAX_LEN) room = len;
   xb_str *s = xb_str_alloc(room > len ? room : len);
   s->len = (size_t)len;
-  s->data[len] = '\0';
+  xb_str_buffer(s)[len] = '\0';
   if (room > len) { /* without room to grow (a string past 4 GB), an ordinary string */
     s->flags = XB_STR_APPEND;
     s->hash = (uint32_t)room;
@@ -59,14 +59,14 @@ void xb_str_share(xb_str *s) {
 xb_str *xb_str_new(const char *p, size_t len) {
   if (len <= 1) return len ? xb_str_byte((unsigned char)p[0]) : xb_str_empty();
   xb_str *s = xb_str_alloc(len);
-  if (len) memcpy(s->data, p, len);
+  if (len) memcpy(xb_str_buffer(s), p, len);
   return s;
 }
 
 xb_str *xb_str_concat(const xb_str *a, const xb_str *b) {
-  if (a->len + b->len <= 1) return xb_str_new(a->len ? a->data : b->data, a->len + b->len);
+  if (a->len + b->len <= 1) return xb_str_new(a->len ? xb_str_data(a) : xb_str_data(b), a->len + b->len);
   xb_str *s = xb_str_alloc(a->len + b->len);
-  memcpy(s->data, a->data, a->len);
-  memcpy(s->data + a->len, b->data, b->len);
+  memcpy(xb_str_buffer(s), xb_str_data(a), a->len);
+  memcpy(xb_str_buffer(s) + a->len, xb_str_data(b), b->len);
   return s;
 }

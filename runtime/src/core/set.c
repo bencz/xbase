@@ -15,9 +15,9 @@ static int set_logical(const xb_item *v, int old) {
   if (v->type == XB_T_LOGICAL) return v->v.l != 0;
   if (v->type == XB_T_STRING) {
     const xb_str *s = v->v.s;
-    char c0 = s->len > 0 ? xb_ascii_lower(s->data[0]) : 0;
-    char c1 = s->len > 1 ? xb_ascii_lower(s->data[1]) : 0;
-    char c2 = s->len > 2 ? xb_ascii_lower(s->data[2]) : 0;
+    char c0 = s->len > 0 ? xb_ascii_lower(xb_str_data(s)[0]) : 0;
+    char c1 = s->len > 1 ? xb_ascii_lower(xb_str_data(s)[1]) : 0;
+    char c2 = s->len > 2 ? xb_ascii_lower(xb_str_data(s)[2]) : 0;
     if (c0 == 'o' && c1 == 'n') return 1;
     if (c0 == 'o' && c1 == 'f' && c2 == 'f') return 0;
   }
@@ -64,7 +64,7 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     case _SET_DATEFORMAT:
       xb_set_str(ret, xb_str_new(ctx->env->date_format, strlen(ctx->env->date_format)));
       if (value && value->type == XB_T_STRING) {
-        xb_ctx_set_date_format(ctx, value->v.s->data, value->v.s->len);
+        xb_ctx_set_date_format(ctx, xb_str_data(value->v.s), value->v.s->len);
         size_t start;
         ctx->env->century = year_run(ctx->env->date_format, &start) >= 4;
       }
@@ -96,14 +96,14 @@ void xbf_SET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     case _SET_LANGUAGE: { /* a name the runtime has no language for leaves it as it is */
       const xb_array *texts = xb_language(ctx);
       if (texts && texts->len >= LANG_ID) *ret = xb_array_items(texts)[LANG_ID - 1];
-      if (value && value->type == XB_T_STRING) xb_language_select(ctx, value->v.s->data, value->v.s->len);
+      if (value && value->type == XB_T_STRING) xb_language_select(ctx, xb_str_data(value->v.s), value->v.s->len);
       break;
     }
     case _SET_CODEPAGE: { /* a name the runtime has no codepage for leaves it as it is */
       const xb_codepage *cp = xb_codepage_of(ctx);
       xb_set_str(ret, xb_str_new(cp->name, strlen(cp->name)));
       if (value && value->type == XB_T_STRING) {
-        const xb_codepage *chosen = xb_codepage_find(value->v.s->data, value->v.s->len);
+        const xb_codepage *chosen = xb_codepage_find(xb_str_data(value->v.s), value->v.s->len);
         if (chosen) ctx->env->codepage = chosen;
       }
       break;

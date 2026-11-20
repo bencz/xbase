@@ -133,7 +133,7 @@ Value *CodeGen::strLength(Value *str) {
 // The byte at 0-based `pos` (i64) of a string, as an i64 from 0 to 255.
 Value *CodeGen::strByte(Value *str, Value *pos) {
   StructType *ty = strType(ArrayType::get(i8_, 0));
-  Value *data = b_.CreateStructGEP(ty, str, StrData);
+  Value *data = b_.CreateStructGEP(ty, str, StrBytes);
   Value *at = b_.CreateInBoundsGEP(i8_, data, b_.CreateZExtOrTrunc(pos, intPtrTy_));
   return b_.CreateZExt(loadFrom(i8_, at, Mem::String, "byte"), i64_);
 }
@@ -190,9 +190,9 @@ void CodeGen::emitAppend(const xir::Instruction &i) {
   Value *len = strLength(s), *more = strLength(t);
   branchLikely(b_.CreateAnd(isGrowing(flags), b_.CreateICmpULE(more, b_.CreateSub(room, len))), fits, slow);
   b_.SetInsertPoint(fits);
-  Value *data = b_.CreateStructGEP(ty, s, StrData);
+  Value *data = b_.CreateStructGEP(ty, s, StrBytes);
   Value *tail = b_.CreateInBoundsGEP(i8_, data, b_.CreateZExtOrTrunc(len, intPtrTy_));
-  Value *from = b_.CreateStructGEP(ty, t, StrData);
+  Value *from = b_.CreateStructGEP(ty, t, StrBytes);
   b_.CreateCondBr(b_.CreateICmpEQ(more, ConstantInt::get(i64_, 1)), one, many);
   b_.SetInsertPoint(one);
   tag(b_.CreateStore(loadFrom(i8_, from, Mem::String, "byte"), tail), Mem::String);

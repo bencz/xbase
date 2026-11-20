@@ -108,7 +108,9 @@ static uint32_t fold(uint64_t x) {
  * and a byte that tells which (little-endian whatever the target). */
 static uint32_t keyed_hash(const xb_hash *h, const xb_item *k) {
   const uint64_t *key = keyed_key();
-  if (k->type == XB_T_STRING) return sip_hash(key, k->v.s->data, k->v.s->len, (h->flags & XB_HASH_IGNORECASE) != 0);
+  if (k->type == XB_T_STRING) {
+    return sip_hash(key, xb_str_data(k->v.s), k->v.s->len, (h->flags & XB_HASH_IGNORECASE) != 0);
+  }
   int64_t i;
   uint64_t bits;
   char kind = 'D';
@@ -131,13 +133,13 @@ static uint32_t key_hash(const xb_hash *h, const xb_item *k) {
   if (h->flags & XB_HASH_KEYED) return keyed_hash(h, k);
   if (k->type == XB_T_STRING) {
     xb_str *s = k->v.s;
-    if (h->flags & XB_HASH_IGNORECASE) return xb_hash_bytes_as(s->data, s->len, 1);
+    if (h->flags & XB_HASH_IGNORECASE) return xb_hash_bytes_as(xb_str_data(s), s->len, 1);
     /* a string an append grows keeps its room in `hash` (only its variable sees it, so it never gets here) */
     int growing = (s->flags & XB_STR_APPEND) != 0;
     /* Threads may compute it at once: each stores the same value, atomically. */
     uint32_t known = growing ? 0 : xb_atomic_load32(&s->hash, XB_RELAXED);
     if (known) return known; /* literals carry theirs */
-    uint32_t v = xb_hash_bytes(s->data, s->len);
+    uint32_t v = xb_hash_bytes(xb_str_data(s), s->len);
     if (!growing && !(s->flags & XB_STR_STATIC)) xb_atomic_store32(&s->hash, v, XB_RELAXED); /* strings are immutable */
     return v;
   }
@@ -154,9 +156,9 @@ static int key_equal(const xb_hash *h, const xb_item *a, const xb_item *b) {
     if (a->type != b->type) return 0;
     const xb_str *x = a->v.s, *y = b->v.s;
     if (x->len != y->len) return 0;
-    if (!(h->flags & XB_HASH_IGNORECASE)) return memcmp(x->data, y->data, x->len) == 0;
+    if (!(h->flags & XB_HASH_IGNORECASE)) return memcmp(xb_str_data(x), xb_str_data(y), x->len) == 0;
     for (size_t i = 0; i < x->len; ++i)
-      if (xb_ascii_upper(x->data[i]) != xb_ascii_upper(y->data[i])) return 0;
+      if (xb_ascii_upper(xb_str_data(x)[i]) != xb_ascii_upper(xb_str_data(y)[i])) return 0;
     return 1;
   }
   if (a->type == XB_T_DATE || b->type == XB_T_DATE) return a->type == b->type && a->v.i == b->v.i;
@@ -179,7 +181,7 @@ int xb_hash_key_order(const xb_hash *h, const xb_item *a, const xb_item *b) {
   const xb_str *x = a->v.s, *y = b->v.s;
   size_t n = x->len < y->len ? x->len : y->len;
   for (size_t i = 0; i < n; ++i) {
-    unsigned char p = (unsigned char)x->data[i], q = (unsigned char)y->data[i];
+    unsigned char p = (unsigned char)xb_str_data(x)[i], q = (unsigned char)xb_str_data(y)[i];
     if (h->flags & XB_HASH_IGNORECASE) {
       p = (unsigned char)xb_ascii_upper((char)p);
       q = (unsigned char)xb_ascii_upper((char)q);

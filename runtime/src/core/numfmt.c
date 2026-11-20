@@ -221,7 +221,7 @@ static void format(char *s, const xb_item *it, int width, int dec) {
 xb_str *xb_num_to_str(const xb_item *it, int width, int dec) {
   if (dec < 0) dec = 0;
   xb_str *s = xb_str_alloc(field_len(width, dec));
-  format(s->data, it, width, dec);
+  format(xb_str_buffer(s), it, width, dec);
   return s;
 }
 

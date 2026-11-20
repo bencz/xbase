@@ -189,7 +189,7 @@ static void move_to(xb_ctx *ctx, const xb_item *r, int64_t idx) {
     const xb_str *s = ref->coll.v.s;
     if (idx >= 1 && (uint64_t)idx <= s->len) {
       xb_item ch;
-      xb_set_str(&ch, xb_str_new(s->data + idx - 1, 1)); /* one byte: static, nothing allocated */
+      xb_set_str(&ch, xb_str_new(xb_str_data(s) + idx - 1, 1)); /* one byte: static, nothing allocated */
       xb_ref_own_put(ref, &ch);
     }
   } else {
@@ -235,7 +235,7 @@ int32_t xb_switch_match(const xb_item *value, const xb_item *c) {
   if (value->type != c->type) return 0;
   if (value->type == XB_T_INT) return value->v.i == c->v.i;
   const xb_str *a = value->v.s, *b = c->v.s;
-  return a->len == b->len && memcmp(a->data, b->data, a->len) == 0;
+  return a->len == b->len && memcmp(xb_str_data(a), xb_str_data(b), a->len) == 0;
 }
 
 int32_t xb_args_rest(xb_ctx *ctx, xb_item *dst, xb_item *rest, uint32_t n, uint32_t at, uint32_t refs) {
@@ -283,7 +283,7 @@ static void await_each_move_next_async(xb_ctx *ctx, xb_item *r, uint32_t argc, x
     got = xb_hash_entry(src.v.p, pos, &key, &element);
   } else if (src.type == XB_T_STRING) {
     got = (uint64_t)pos <= src.v.s->len;
-    if (got) xb_set_str(&element, xb_str_new(src.v.s->data + pos - 1, 1)); /* one byte: static */
+    if (got) xb_set_str(&element, xb_str_new(xb_str_data(src.v.s) + pos - 1, 1)); /* one byte: static */
   } else {
     got = move_next(ctx, &src) && current(ctx, &element, &src);
   }

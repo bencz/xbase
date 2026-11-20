@@ -1921,7 +1921,7 @@ static void sweep_large(int full) {
       xb_large *next = l->next;
       if ((l->hdr.state & (XB_GC_MARKED | XB_GC_AGED)) && l->hdr.kind == XB_GC_STRING) {
         const xb_str *str = (const xb_str *)(&l->hdr + 1); /* one no longer grown in place keeps its text alone */
-        if (!(str->flags & XB_STR_APPEND)) large_trim(l, offsetof(xb_str, data) + str->len + 1);
+        if (!(str->flags & XB_STR_APPEND)) large_trim(l, offsetof(xb_str, bytes) + str->len + 1);
       }
       if (l->hdr.state & XB_GC_MARKED) {
         l->next = old;

@@ -325,19 +325,19 @@ static void delimiters(text *t, const xb_item *v) {
     const xb_str *s = v->v.s;
     for (size_t k = 0; k < sizeof words / sizeof words[0]; ++k) {
       size_t i = 0;
-      while (i < s->len && words[k].word[i] && xb_ascii_upper(s->data[i]) == words[k].word[i]) ++i;
+      while (i < s->len && words[k].word[i] && xb_ascii_upper(xb_str_data(s)[i]) == words[k].word[i]) ++i;
       if (i == s->len && words[k].word[i] == '\0') {
         t->delim = 0;
         t->sep = words[k].sep;
         return;
       }
     }
-    t->delim = s->len ? s->data[0] : 0;
+    t->delim = s->len ? xb_str_data(s)[0] : 0;
   } else if (v->type == XB_T_ARRAY) {
     const xb_array *arr = v->v.p;
     const xb_item *parts = xb_array_items(arr);
-    if (arr->len > 0 && parts[0].type == XB_T_STRING) t->delim = parts[0].v.s->len ? parts[0].v.s->data[0] : 0;
-    if (arr->len > 1 && parts[1].type == XB_T_STRING && parts[1].v.s->len) t->sep = parts[1].v.s->data[0];
+    if (arr->len > 0 && parts[0].type == XB_T_STRING) t->delim = parts[0].v.s->len ? xb_str_data(parts[0].v.s)[0] : 0;
+    if (arr->len > 1 && parts[1].type == XB_T_STRING && parts[1].v.s->len) t->sep = xb_str_data(parts[1].v.s)[0];
   }
 }
 

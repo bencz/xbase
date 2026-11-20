@@ -463,14 +463,14 @@ xb_order *xb_order_create(xb_ctx *ctx, xb_area *a, const char *path, const char 
   ++bag->orders;
   xb_order *o = order_new(bag, name ? order_name(name, strlen(name)) : file_order_name(path));
   size_t n = keyText->len < XB_INDEX_KEY_MAX ? keyText->len : XB_INDEX_KEY_MAX;
-  memcpy(o->info.key, keyText->data, n);
+  memcpy(o->info.key, xb_str_data(keyText), n);
   o->info.unique = unique;
   o->info.descend = a->pending.descend;
   if (a->pending.cond.type == XB_T_BLOCK) {
     o->cond = a->pending.cond;
     const xb_str *t = a->pending.condText.type == XB_T_STRING ? a->pending.condText.v.s : NULL;
     size_t m = t ? (t->len < XB_INDEX_KEY_MAX ? t->len : XB_INDEX_KEY_MAX) : 0;
-    if (t) memcpy(o->info.cond, t->data, m);
+    if (t) memcpy(o->info.cond, xb_str_data(t), m);
   }
   if (keyBlock && keyBlock->type == XB_T_BLOCK) o->key = *keyBlock;
   else block_of(ctx, o->info.key, &o->key);

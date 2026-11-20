@@ -12,7 +12,7 @@
  * releases when it is longer; NULL when the argument is not a string. */
 #define NAME_SIZE 128
 static char *upper_name(const xb_item *it, char buf[NAME_SIZE]) {
-  return it->type == XB_T_STRING ? xb_name_upper("", it->v.s->data, it->v.s->len, buf, NAME_SIZE) : NULL;
+  return it->type == XB_T_STRING ? xb_name_upper("", xb_str_data(it->v.s), it->v.s->len, buf, NAME_SIZE) : NULL;
 }
 
 static const xb_object *object_arg(uint32_t argc, const xb_item *argv) {

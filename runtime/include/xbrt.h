@@ -72,8 +72,8 @@ static inline int xb_type_is_heap(uint32_t type) {
 }
 
 /* [ABI] string header. Strings are immutable: they can be shared freely
- * between items and threads. `data` is always NUL terminated (len excludes
- * the terminator) so it can be handed to C without copying. */
+ * between items and threads. The bytes are always NUL terminated (len excludes
+ * the terminator) so they can be handed to C without copying. */
 #define XB_STR_STATIC 0x1u   /* not a heap object, never freed: literals, the empty and one-byte strings */
 #define XB_STR_APPEND 0x2u   /* made by xb_op_append and seen only by its variable: may grow in place;
                                 `hash` then holds the bytes it has room for (its length at least) */
@@ -86,8 +86,18 @@ struct xb_str {
   uint32_t flags;
   uint32_t hash;
   size_t   len;
-  char     data[];
+  char     bytes[];
 };
+
+/* The bytes of a string. They follow the header (`bytes`), but every read
+ * goes through xb_str_data, never through the member: a string may later be a
+ * view (a flag; planned) whose bytes live elsewhere. */
+static inline const char *xb_str_data(const xb_str *s) { return s->bytes; }
+
+/* The writable bytes of a string being built: one the caller has just
+ * allocated and not yet shared, or an XB_STR_APPEND string that only its
+ * variable sees. Such a string is never a view. */
+static inline char *xb_str_buffer(xb_str *s) { return s->bytes; }
 #endif
 
 /* [ABI] the dynamic value. Copying an item is a plain memcpy: memory is
@@ -310,7 +320,7 @@ struct xb_block {
 int32_t  xb_pending(xb_ctx *ctx);
 int32_t  xb_pending_gc(xb_ctx *ctx);
 
-/* The layout the module was compiled for: offsets of xb_str.data,
+/* The layout the module was compiled for: offsets of xb_str.bytes,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
  * xb_ctx.stack_limit, xb_array.data (after len and cap), xb_ref.value (after coll and index),
  * xb_hash.entries (after its five counts) and xb_object.vars (after cls and nvars). */
@@ -876,7 +886,7 @@ typedef struct xb_str1 {
   uint32_t flags;
   uint32_t hash;
   size_t   len;
-  char     data[2];
+  char     bytes[2];
 } xb_str1;
 extern const xb_str1 xb_str_bytes[256];
 

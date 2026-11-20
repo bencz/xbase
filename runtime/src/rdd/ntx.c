@@ -1347,7 +1347,7 @@ static int ntx_value_key(const xb_index_info *info, const xb_item *v, unsigned c
   case 'C': {
     if (v->type != XB_T_STRING) return 0;
     size_t n = v->v.s->len < len ? v->v.s->len : len;
-    memcpy(out, v->v.s->data, n);
+    memcpy(out, xb_str_data(v->v.s), n);
     memset(out + n, ' ', len - n);
     *used = n;
     return 1;

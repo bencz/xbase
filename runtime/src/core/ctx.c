@@ -92,7 +92,7 @@ void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
   xb_item it;
   env_sets sets;
   xb_array_get(snapshot->v.p, SNAP_SETS, &it);
-  memcpy(&sets, it.v.s->data, sizeof sets);
+  memcpy(&sets, xb_str_data(it.v.s), sizeof sets);
   ctx->set_decimals = sets.decimals;
   env->epoch = sets.epoch;
   env->set_exact = sets.exact;
@@ -105,7 +105,7 @@ void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
   env->codepage = sets.codepage;
   env->rddDefault = sets.rddDefault;
   xb_array_get(snapshot->v.p, SNAP_DATE_FORMAT, &it);
-  xb_ctx_set_date_format(ctx, it.v.s->data, it.v.s->len);
+  xb_ctx_set_date_format(ctx, xb_str_data(it.v.s), it.v.s->len);
   xb_array_get(snapshot->v.p, SNAP_ERROR_BLOCK, &env->error_block);
   xb_array_get(snapshot->v.p, SNAP_LANGUAGE, &env->language);
   xb_array_get(snapshot->v.p, SNAP_MEMVARS, &it);
@@ -484,7 +484,7 @@ void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, u
                   uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
                   uint32_t ctx_stack_limit_offset, uint32_t array_data_offset, uint32_t ref_value_offset,
                   uint32_t hash_entries_offset, uint32_t object_vars_offset) {
-  if (version != XB_ABI_VERSION || item_size != sizeof(xb_item) || str_hdr_size != offsetof(xb_str, data) ||
+  if (version != XB_ABI_VERSION || item_size != sizeof(xb_item) || str_hdr_size != offsetof(xb_str, bytes) ||
       block_cells_offset != offsetof(xb_block, cells) || frame_slots_offset != offsetof(xb_frame, slots) ||
       ctx_frames_offset != offsetof(xb_ctx, frames) || ctx_decimals_offset != offsetof(xb_ctx, set_decimals) ||
       ctx_stack_limit_offset != offsetof(xb_ctx, stack_limit) ||
@@ -497,7 +497,7 @@ void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, u
              version, item_size, str_hdr_size, block_cells_offset, frame_slots_offset, ctx_frames_offset,
              ctx_decimals_offset, ctx_stack_limit_offset, array_data_offset, ref_value_offset, hash_entries_offset,
              object_vars_offset,
-             XB_ABI_VERSION, (unsigned)sizeof(xb_item), (unsigned)offsetof(xb_str, data),
+             XB_ABI_VERSION, (unsigned)sizeof(xb_item), (unsigned)offsetof(xb_str, bytes),
              (unsigned)offsetof(xb_block, cells), (unsigned)offsetof(xb_frame, slots),
              (unsigned)offsetof(xb_ctx, frames), (unsigned)offsetof(xb_ctx, set_decimals),
              (unsigned)offsetof(xb_ctx, stack_limit), (unsigned)offsetof(xb_array, data),
