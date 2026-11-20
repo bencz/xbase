@@ -13,7 +13,10 @@
  * `ranges`, few. A lock asked for one byte looks at its position's chain and at the ranges, so a program that holds
  * thousands of record locks takes and releases each in constant time.
  *
- * Waiting locks are retried with a growing pause, the registry's mutex released meanwhile. */
+ * The registry's mutex guards the list of files, their users and kept handles (opening, closing); each file's own mutex
+ * guards its locks, so that threads locking records of different files never wait for each other. A thread that holds
+ * both took the registry's first. Waiting locks are retried with a growing pause, the file's mutex released
+ * meanwhile. */
 #include "core/shared_file.h"
 #include "core/sync.h"
 
@@ -30,6 +33,7 @@ typedef struct lock_rec {
 } lock_rec;
 
 typedef struct entry {
+  xb_mutex lock;    /* its locks' (points, ranges, buckets) */
   xb_file_id id;
   struct entry *next;
   uint32_t users;
@@ -95,6 +99,11 @@ static void take_registry(void *unused) {
  * waiting for the lock is a blocking operation too: the collection never waits for a thread that waits for it. */
 static void registry_lock(void) { xb_blocking_run(take_registry, NULL); }
 
+static void take_entry(void *e) { xb_mutex_lock(&((entry *)e)->lock); }
+
+/* A file's lock, the same way. */
+static void entry_lock(entry *e) { xb_blocking_run(take_entry, e); }
+
 static void pause_ms(void *ms) { xb_platform_sleep_ms(*(const uint32_t *)ms); }
 
 static void *grow(void *p, uint32_t *cap, size_t size) {
@@ -125,6 +134,7 @@ static void entry_free(entry *e) {
   free(e->points);
   free(e->ranges);
   free(e->buckets);
+  xb_mutex_destroy(&e->lock);
   free(e);
 }
 
@@ -200,6 +210,7 @@ int xb_shared_open(const char *path, int readonly, int exclusive, int create, xb
   if (!e) {
     e = calloc(1, sizeof *e);
     if (!e) xb_gc_fatal("out of memory");
+    if (!xb_mutex_init(&e->lock)) xb_gc_fatal("cannot create a shared file's lock");
     e->id = id;
     e->next = registry.files;
     registry.files = e;
@@ -397,9 +408,9 @@ static int try_lock(xb_shared *s, uint64_t pos, uint64_t end, int kind, int32_t 
 int xb_shared_lock(xb_shared *s, uint64_t pos, uint64_t len, int kind, int wait, int32_t *err) {
   if (s->exclusive) return 1;
   for (uint32_t pause = 0;; pause = pause < 32 ? pause * 2 + 1 : 63) {
-    registry_lock();
+    entry_lock(s->e);
     int r = try_lock(s, pos, pos + len, kind, err);
-    xb_mutex_unlock(&registry.lock);
+    xb_mutex_unlock(&s->e->lock);
     if (r >= 0 || !wait || *err != XB_FERR_LOCKED) return r > 0;
     xb_blocking_run(pause_ms, &pause); /* another program holds it: again, after a pause of up to 63 ms */
   }
@@ -420,7 +431,7 @@ static int drop(entry *e, xb_shared *s, int point, uint32_t i, int32_t *err) {
 int xb_shared_unlock(xb_shared *s, uint64_t pos, uint64_t len, int32_t *err) {
   if (s->exclusive) return 1;
   entry *e = s->e;
-  registry_lock();
+  entry_lock(e);
   int ok = 1, point;
   uint32_t i;
   lock_walk w = {0, 0};
@@ -429,13 +440,14 @@ int xb_shared_unlock(xb_shared *s, uint64_t pos, uint64_t len, int32_t *err) {
       ok = drop(e, s, point, i, err);
       break;
     }
-  xb_mutex_unlock(&registry.lock);
+  xb_mutex_unlock(&e->lock);
   return ok;
 }
 
 int xb_shared_close(xb_shared *s, int32_t *err) {
   entry *e = s->e;
   registry_lock();
+  entry_lock(e);
   int ok = 1;
   for (uint32_t i = 0; i < e->npoints;) {
     if (e->points[i].owner == s) ok = drop(e, s, 1, i, err) && ok;
@@ -445,6 +457,7 @@ int xb_shared_close(xb_shared *s, int32_t *err) {
     if (e->ranges[i].owner == s) ok = drop(e, s, 0, i, err) && ok;
     else ++i;
   }
+  xb_mutex_unlock(&e->lock); /* what is left is the registry's */
   xb_shared **link = &e->userList;
   while (*link != s) link = &(*link)->next;
   *link = s->next;

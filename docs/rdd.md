@@ -697,10 +697,12 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
   OS only for bytes the process does not hold yet; a release gives back to the OS only the bytes no other user still
   holds (a write lock still held by another user under a released read lock stays a write lock). So areas, tasks and
   threads lock each other out with the same results as programs do, and closing one area never drops another's locks.
-  On Windows each user's locks are its handle's, taken as they are asked.
+  On Windows each user's locks are its handle's, taken as they are asked. A file's locks are under a mutex of its own
+  (the registry's guards only the files, their users and kept handles: opening and closing), so threads that lock
+  records of different files never wait for each other (`tests/platform/shared_locks.c`).
 - **Waiting**: record and file locks never wait (Clipper's `RLock()` and `FLock()` answer at once). The transient locks
   (append, memo, index) wait for another process: the OS lock is tried again after pauses growing to 63 ms, the
-  registry's mutex released in between, so a wait never blocks the process's other users. With one thread, a transient
+  file's mutex released in between, so a wait never blocks the process's other users. With one thread, a transient
   lock held inside the process can only be the caller's own, which the rule below rules out: such a conflict is an
   error, never a wait.
   *(With threads)*: a holder inside the process is waited for on a condition of the shared file; a thread that waits
@@ -735,9 +737,9 @@ what a program with several areas, tasks or threads needs, so the runtime arbitr
   each area serializes its operations; a new flow (`TaskRun`, `ThreadStart`) starts with none open. Handing an area
   from one flow to another is explicit (a function of xbase's own, the area closed in the first and open in the second
   with its position and locks).
-- What the runtime shares between threads is only the shared-file registry and the files' lock tables (one mutex), the
-  page caches' total and budget (atomic words) and, when they come, the shared page caches (reader-writer locks); no
-  other global state in the database code.
+- What the runtime shares between threads is only the shared-file registry and the files' lock tables (a mutex each),
+  the page caches' total and budget (atomic words) and, when they come, the shared page caches (reader-writer locks);
+  no other global state in the database code.
 - The synchronous operations stay as they are and block only their thread (the scheduler gives its place to another).
   Awaitable forms (`dbSkipAsync()`, `dbSeekAsync()`, `RLockAsync( [nRecord], [nTimeout], [oToken] )`, cursors as
   asynchronous enumerators, `AWAIT` forms of the commands) run first on the blocking pool, then from the shared page
