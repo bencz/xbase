@@ -366,6 +366,7 @@ EXTERN FUNCTION FRename( cOld, cNew ) NATIVE
 EXTERN FUNCTION FSeek( nHandle, nOffset, [nOrigin] ) NATIVE
 EXTERN FUNCTION FWrite( nHandle, cBuffer, [nBytes] ) NATIVE
 EXTERN FUNCTION GetEnv( [cName] ) NATIVE
+EXTERN FUNCTION __Run( [cCommand] ) NATIVE
 EXTERN FUNCTION MemoRead( cFile ) NATIVE
 EXTERN FUNCTION MemoWrit( cFile, cText ) NATIVE
 

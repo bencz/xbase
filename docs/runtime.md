@@ -1454,24 +1454,25 @@ variables](#memory-variables)) use this layer too.
 - `include/fileio.ch` (`FO_*` modes, `FS_*` origins, `FC_*` attributes, `F_ERROR`) is included by the runtime's C as
   well, as `set.ch` is; `include/directry.ch` names the positions of a `Directory()` entry.
 - `rtl/files.c`: `FOpen`, `FCreate`, `FRead`, `FWrite`, `FSeek`, `FClose`, `FError`, `FErase`, `FRename`, `CurDir`,
-  `DirChange`, `DiskSpace`, `GetEnv` and `__DirScan`. A handle is the system's handle as a number; `FOpen`, `FCreate`
-  and `FClose` go through the registry of shared files, so closing a table's file keeps the areas' locks, and neither
-  empties a table nor keeps its areas from it ([rdd.md](rdd.md#inside-the-process)). Each function stores the code of
-  its outcome for `FError()` (`xb_env.file_error`, 0 after a success); an argument of the wrong type gives
-  the function's failure value and leaves `FError()` alone, but a name that is not a string is `FOpen()`'s `BASE/2021`,
-  and an access of 3 is 5. `FRead( nHandle, @cBuffer, nBytes )` replaces the first bytes of the buffer, which keeps its
-  length; without the buffer passed by reference, or with `nBytes` below 1 or past its length, it reads nothing (a bad
-  handle is still `FError()` 6).
+  `DirChange`, `DiskSpace`, `GetEnv`, `__DirScan` and `__Run` (the `RUN` and `!` commands: the command line through the
+  system's shell, `sh -c` or `cmd.exe`, after the program's output is flushed, waited for; `ErrorLevel()` stays). A
+  handle is the system's handle as a number; `FOpen`, `FCreate` and `FClose` go through the registry of shared files, so
+  closing a table's file keeps the areas' locks, and neither empties a table nor keeps its areas from it
+  ([rdd.md](rdd.md#inside-the-process)). Each function stores the code of its outcome for `FError()`
+  (`xb_env.file_error`, 0 after a success); an argument of the wrong type gives the function's failure value and leaves
+  `FError()` alone, but a name that is not a string is `FOpen()`'s `BASE/2021`, and an access of 3 is 5. `FRead(
+  nHandle, @cBuffer, nBytes )` replaces the first bytes of the buffer, which keeps its length; without the buffer passed
+  by reference, or with `nBytes` below 1 or past its length, it reads nothing (a bad handle is still `FError()` 6).
   `FWrite` writes the whole buffer for a count past its length or below 0, and writes nothing, successfully, for a count
   of 0. A seek before the start is 25 from any origin (an unknown origin is the start) and leaves the position, which
   `FSeek` returns. `CurDir()` gives the current drive's directory without its drive and leading separators (its argument
-  is not used); `DiskSpace( [nDrive] )` counts the drive on Windows only. `__DirScan( cSpec )` gives
-  `{ cName, nSize, dDate, cTime, cAttributes }` for each entry, of any attributes (letters in the order `RHSDA`), whose
-  name matches the mask of `cSpec` (`*` and `?`; a mask ending in `.*` also takes a name without a dot, so `*.*` takes
-  every name, as in DOS; letter case counts where the file system tells it, and is folded for ASCII letters only); a
-  mask without wildcards names one entry, and none (a directory's name with its separator) every entry of the directory.
-  A link that leads nowhere is listed as the link itself. On POSIX systems a name starting with a dot (but `.` and `..`)
-  is hidden (`H`); on Windows the attribute is the file system's.
+  is not used); `DiskSpace( [nDrive] )` counts the drive on Windows only. `__DirScan( cSpec )` gives `{ cName, nSize,
+  dDate, cTime, cAttributes }` for each entry, of any attributes (letters in the order `RHSDA`), whose name matches the
+  mask of `cSpec` (`*` and `?`; a mask ending in `.*` also takes a name without a dot, so `*.*` takes every name, as in
+  DOS; letter case counts where the file system tells it, and is folded for ASCII letters only); a mask without
+  wildcards names one entry, and none (a directory's name with its separator) every entry of the directory. A link that
+  leads nowhere is listed as the link itself. On POSIX systems a name starting with a dot (but `.` and `..`) is hidden
+  (`H`); on Windows the attribute is the file system's.
 - `rtl/files.prg`: `Directory( [cSpec], [cAttributes] )` lists the files without the attributes D, H and S, and those
   whose such attributes `cAttributes` all names (`V`, the volume label, gives none); `ADir` fills its arrays from it
   (directories, hidden and system files too when the attributes' array is given; 0 without `cSpec`); `File()` is whether

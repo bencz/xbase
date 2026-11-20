@@ -31,6 +31,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #if defined(__APPLE__)
@@ -773,6 +774,12 @@ int xb_os_disk_free(int drive, int64_t *bytes, int32_t *err) {
   }
   *bytes = (int64_t)fs.f_bavail * (int64_t)fs.f_frsize;
   return 1;
+}
+
+int xb_os_run(const char *command) {
+  int status = system(command);
+  if (status == -1) return -1;
+  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
 char *xb_platform_getenv(const char *name) {

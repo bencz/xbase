@@ -309,4 +309,8 @@ int xb_platform_disk_free(int drive, int64_t *bytes, int32_t *err);
  * itself. */
 char *xb_platform_getenv(const char *name);
 
+/* Runs a command line through the system's shell (sh -c; cmd.exe on Windows), its output on the program's, and waits
+ * for it to end: its exit status, -1 when it could not start. For RUN, a language feature. */
+int xb_platform_run(const char *command);
+
 #endif

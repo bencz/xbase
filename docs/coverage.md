@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 216 of 551 done. Commands (`std.ch` families): 74 of 157 done.
+Functions: 216 of 551 done. Commands (`std.ch` families): 76 of 157 done.
 
 ## Statements (grammar)
 
@@ -22,14 +22,14 @@ operator and **AWAIT FOR EACH** (xbase's own), **DECLARE**, **EXTERNAL** (Clippe
 
 Grouped by their leading words; each group covers every variant of the command.
 
-*!*, **?**, **??**, *@*, *ACCEPT*, **APPEND**, **APPEND BLANK**, **AVERAGE**, *CALL*, **CANCEL**, *CLEAR*, *CLEAR ALL*,
+**!**, **?**, **??**, *@*, *ACCEPT*, **APPEND**, **APPEND BLANK**, **AVERAGE**, *CALL*, **CANCEL**, *CLEAR*, *CLEAR ALL*,
 *CLEAR GETS*, **CLEAR MEMORY**, *CLEAR SCREEN*, *CLEAR TYPEAHEAD*, **CLOSE**, **CLOSE ALL**, *CLOSE ALTERNATE*, **CLOSE
 DATABASES**, *CLOSE FORMAT*, **CLOSE INDEXES**, *CLOSE PROCEDURE*, *CLS*, **COMMIT**, **CONTINUE**, **COPY**, *COPY
 FILE*, **COUNT**, **CREATE**, **DELETE**, *DELETE FILE*, **DELETE TAG**, *DIR*, *DISPLAY*, *DO*, *EJECT*, **END**,
 **ENDCASE**, **ENDDO**, **ENDFOR**, **ENDIF**, **ENDSEQUENCE**, *ERASE*, **FIND**, **GO**, **GOTO**, **INDEX ON**,
 *INPUT*, **JOIN**, *KEYBOARD*, *LABEL FORM*, *LIST*, **LOCATE**, *MENU*, **NEXT**, **PACK**, **QUIT**, *READ*, *READ
 SAVE*, **RECALL**, **REINDEX**, **RELEASE**, **RELEASE ALL**, *RENAME*, **REPLACE**, *REPORT FORM*, **REQUEST**,
-**RESTORE**, *RESTORE SCREEN*, *RUN*, **SAVE**, **SAVE ALL**, *SAVE SCREEN*, **SAVE TO**, **SEEK**, **SELECT**, *SET
+**RESTORE**, *RESTORE SCREEN*, **RUN**, **SAVE**, **SAVE ALL**, *SAVE SCREEN*, **SAVE TO**, **SEEK**, **SELECT**, *SET
 ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET CENTURY**, **SET CODEPAGE** (an xbase
 command), *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*,
 **SET DECIMALS**, *SET DEFAULT*, **SET DELETED**, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET

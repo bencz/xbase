@@ -440,3 +440,20 @@ int xb_platform_disk_free(int drive, int64_t *bytes, int32_t *err) {
 static void run_flush(void *stream) { fflush(stream); }
 
 void xb_platform_flush(FILE *stream) { xb_blocking_run(run_flush, stream); }
+
+typedef struct os_run {
+  const char *command;
+  int r;
+} os_run;
+
+static void run_command(void *p) {
+  os_run *a = p;
+  a->r = xb_os_run(a->command);
+}
+
+int xb_platform_run(const char *command) {
+  xb_platform_flush(stdout); /* what the program wrote comes before what the command writes */
+  os_run a = {command, -1};
+  xb_blocking_run(run_command, &a);
+  return a.r;
+}

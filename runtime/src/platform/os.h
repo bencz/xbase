@@ -21,6 +21,7 @@ int xb_os_file_lock(xb_file f, uint64_t pos, uint64_t len, int kind, int32_t *er
 int xb_os_file_id(xb_file f, xb_file_id *id, int32_t *err);
 int xb_os_path_id(const char *path, xb_file_id *id, int32_t *err);
 int xb_os_file_erase(const char *path, int32_t *err);
+int xb_os_run(const char *command);
 int xb_os_file_rename(const char *from, const char *to, int32_t *err);
 int xb_os_file_info(const char *path, const char *name, xb_dir_entry *e, int32_t *err);
 int xb_os_dir_open(const char *path, xb_dir *d, int32_t *err);

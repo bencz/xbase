@@ -240,6 +240,12 @@
 #command QUIT                          => __Quit()
 #command CANCEL                        => __Quit()
 
+#command RUN <*cmd*>                   => __Run( #<cmd> )
+#command RUN ( <cmd> )                 => __Run( <cmd> )
+#command ! <*cmd*>                     => RUN <cmd>
+#command RUN = <xpr>                   => ( run := <xpr> )
+#command RUN := <xpr>                  => ( run := <xpr> )
+
 #command BREAK [<x>]                   => __Break( <x> )
 
 #endif /* _STD_CH */

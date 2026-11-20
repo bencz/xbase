@@ -702,6 +702,15 @@ int xb_os_disk_free(int drive, int64_t *bytes, int32_t *err) {
   return 1;
 }
 
+int xb_os_run(const char *command) {
+  int32_t err;
+  wchar_t *w = wide_path(command, &err);
+  if (!w) return -1;
+  int status = _wsystem(w);
+  free(w);
+  return status;
+}
+
 char *xb_platform_getenv(const char *name) {
   int32_t err;
   wchar_t *w = wide_path(name, &err);

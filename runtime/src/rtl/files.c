@@ -211,6 +211,15 @@ void xbf_GETENV(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   free(value);
 }
 
+/* __Run( cCommand ): RUN, the command line through the system's shell, its output on the program's; nothing back. A
+ * missing or non-character argument runs nothing. */
+void xbf___RUN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  xb_set_nil(ret);
+  const char *command = path_arg(argc, argv, 0);
+  if (command && command[0]) xb_platform_run(command);
+}
+
 static int same_char(char a, char b, int fold) { return fold ? xb_ascii_upper(a) == xb_ascii_upper(b) : a == b; }
 
 /* Whether `name` matches `mask` (`*` any run of characters, `?` one character), letter case aside with `fold`. */
