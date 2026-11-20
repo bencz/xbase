@@ -147,6 +147,8 @@ static uint32_t timerRunning; /* its thread exists (the timers' lock) */
 static uint32_t timerIdle;    /* its thread sleeps without watching the workers (nothing was queued), up to its next
                                  timer at most */
 static size_t timerCompactAt = 1024; /* the heap's size that has it compacted (timers_compact) */
+static uint32_t timersDropped;       /* timers whose targets ended before their deadlines since the last compaction */
+#define TIMERS_DROPPED_LOOK 64u       /* drops between looks at whether they reach half of the heap */
 
 static void timers_wake(void);
 static void timers_compact(void);
@@ -776,6 +778,14 @@ void xb_timer_add(xb_object *object, int64_t deadline) {
   if (earliest) timers_wake();
 }
 
+void xb_timer_dropped(void) {
+  uint32_t n = xb_atomic_add32(&timersDropped, 1, XB_RELAXED) + 1;
+  if (n % TIMERS_DROPPED_LOOK) return; /* the lock once every TIMERS_DROPPED_LOOK drops */
+  xb_mutex_lock(&timerLock);
+  if ((size_t)n * 2 >= timerLen) timers_compact();
+  xb_mutex_unlock(&timerLock);
+}
+
 /* The earliest timer due by `now` (all of them when `now` is INT64_MAX), taken off the heap: NULL for none; its
  * deadline in `*deadline`, the earliest left in `*next` (-1: none). */
 static void *timer_due(int64_t now, int64_t *deadline, int64_t *next) {
@@ -793,9 +803,11 @@ static void *timer_due(int64_t now, int64_t *deadline, int64_t *next) {
 }
 
 /* The timers whose targets need them no more (xb_task_timer_dead: settled, or a later CancelAfter replaced them) are
- * dropped once the heap doubled since the last time (under the timers' lock), so a timeout settled long before its
- * deadline does not keep its task. */
+ * dropped once the heap doubled since the last time, or once those whose targets ended before their deadlines
+ * (xb_timer_dropped) are half of it (under the timers' lock), so a timeout settled long before its deadline does not
+ * keep its task. */
 static void timers_compact(void) {
+  xb_atomic_store32(&timersDropped, 0, XB_RELAXED);
   size_t kept = 0;
   for (size_t k = 0; k < timerLen; ++k)
     if (!xb_task_timer_dead(timers[k].target, timers[k].deadline)) timers[kept++] = timers[k];

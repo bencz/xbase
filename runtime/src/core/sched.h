@@ -34,6 +34,9 @@ void xb_sched_end(xb_ctx *ctx);
 /* A timer: at the monotonic time `deadline`, the timers' thread fires `target` (an object of the Task class:
  * xb_task_timer). */
 void xb_timer_add(xb_object *target, int64_t deadline);
+/* A timer's target ended before the timer's deadline: the timer is dead, dropped once enough are (xb_timer_add's
+ * heap compacted when they reach half of it), so tasks that end long before their deadlines are not kept. */
+void xb_timer_dropped(void);
 
 /* A thread that is no worker ends: its feeder (the queue its submissions went to) serves another thread. */
 void xb_sched_thread_end(void);

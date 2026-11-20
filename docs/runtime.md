@@ -1663,55 +1663,59 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   with the final state; then each fires, from a stack of frames `{list, antecedent, below}` (local arrays) rather than
   by recursion, so a chain of combinators runs in constant stack: a continuation is scheduled (to run next on the
   completing worker; on the completing thread's feeder when another thread completes it), a combinator counts
-  (`TaskWhenAll`) or completes once (`TaskWhenAny`) and pushes its own continuations. A combinator waits for the tasks
-  of a snapshot of its array (`xb_array_snapshot`), checked as one read saw it. Running a task is claiming it (scheduled
-  to running, a compare-and-swap) by a worker or by a thread that waits for it with no limit, which runs it inline: a
-  queue may hold a task that runs or ran, which a worker then skips. The task (a block's: an asynchronous function's
-  steps are below) runs in an environment made from its snapshot, without the `Type()` trap of a waiter that runs it
-  inline, with `ctx->task_depth` counting (`__TaskFail()`, which the default error handler calls: in a task it fails it
-  with the error, through `XB_PENDING_FAIL`, instead of ending the program, and an Error object keeps the lines of where
-  it was raised, a hidden variable that `__ErrorCalls()` reads for the report of whoever it reaches at last: the default
-  handler shows them, then its own calls from `Waited for in`); a `BREAK` that leaves its block fails it with the
-  `BREAK`'s value; a `QUIT` ends the program and leaves it canceled. The task's tables are closed as its environment
-  goes (`xb_env_close_areas`, which sets the requests and the `BREAK` value aside meanwhile and keeps a `QUIT` that
-  comes); a `ThreadStart` thread's when it ends, the program's at its end. A failure that carries an Error object is
-  raised again for whoever takes the result, through its error block (`xb_error_raise`); another value as `Break( value
-  )`. At the program's end the workers stop with the other threads, and the tasks that never started are canceled
-  (`xb_sched_end`). A worker's `run` word (idle, running, blocked, long; changed with compare-and-swap so that each
-  absence counts and is repaid once) tells whether it counts as active: not while it blocks or, seen by the monitor,
-  runs one task longer than 20 ms while work waits. The monitor hands over at most one place per look, only when no task
-  ended since its last look, and keeps no more workers long than the target; while work waits it fills again the places
-  that a thread which did not start left empty (`fill_place`). A new worker starts at once while fewer than twice the
-  target are alive, else when `may_spawn_locked` allows it (paced: `SPAWN_STEP_NS` more for each `target` workers past
-  twice the target, at most `SPAWN_MAX_NS`; the monitor tries again at each look while work waits), up to the most
-  workers (`workersMax`: 1024, fewer when their stacks would take more than a quarter of the address space the process
-  may map, `xb_platform_address_space`). When no task ended for 2 seconds while tasks wait, and then no worker is active
-  (each waits or runs long, or none could start), it tells the standard error once (`starved`, until tasks end again).
+  (`TaskWhenAll`) or completes once (`TaskWhenAny`) and pushes its own continuations. A delay, a promise, a timeout, a
+  waiter and a yield are smaller objects of the same class's name and methods (`task_small_class`: 8 variables, without
+  the block, the environment, the frame, the tasks waited for and an asynchronous function's resume point, which they
+  never have; 14 for the others). A combinator waits for the tasks of a snapshot of its array (`xb_array_snapshot`),
+  checked as one read saw it. Running a task is claiming it (scheduled to running, a compare-and-swap) by a worker or by
+  a thread that waits for it with no limit, which runs it inline: a queue may hold a task that runs or ran, which a
+  worker then skips. The task (a block's: an asynchronous function's steps are below) runs in an environment made from
+  its snapshot, without the `Type()` trap of a waiter that runs it inline, with `ctx->task_depth` counting
+  (`__TaskFail()`, which the default error handler calls: in a task it fails it with the error, through
+  `XB_PENDING_FAIL`, instead of ending the program, and an Error object keeps the lines of where it was raised, a hidden
+  variable that `__ErrorCalls()` reads for the report of whoever it reaches at last: the default handler shows them,
+  then its own calls from `Waited for in`); a `BREAK` that leaves its block fails it with the `BREAK`'s value; a `QUIT`
+  ends the program and leaves it canceled. The task's tables are closed as its environment goes (`xb_env_close_areas`,
+  which sets the requests and the `BREAK` value aside meanwhile and keeps a `QUIT` that comes); a `ThreadStart` thread's
+  when it ends, the program's at its end. A failure that carries an Error object is raised again for whoever takes the
+  result, through its error block (`xb_error_raise`); another value as `Break( value )`. At the program's end the
+  workers stop with the other threads, and the tasks that never started are canceled (`xb_sched_end`). A worker's `run`
+  word (idle, running, blocked, long; changed with compare-and-swap so that each absence counts and is repaid once)
+  tells whether it counts as active: not while it blocks or, seen by the monitor, runs one task longer than 20 ms while
+  work waits. The monitor hands over at most one place per look, only when no task ended since its last look, and keeps
+  no more workers long than the target; while work waits it fills again the places that a thread which did not start
+  left empty (`fill_place`). A new worker starts at once while fewer than twice the target are alive, else when
+  `may_spawn_locked` allows it (paced: `SPAWN_STEP_NS` more for each `target` workers past twice the target, at most
+  `SPAWN_MAX_NS`; the monitor tries again at each look while work waits), up to the most workers (`workersMax`: 1024,
+  fewer when their stacks would take more than a quarter of the address space the process may map,
+  `xb_platform_address_space`). When no task ended for 2 seconds while tasks wait, and then no worker is active (each
+  waits or runs long, or none could start), it tells the standard error once (`starved`, until tasks end again).
   `TaskWorkers()` gives `{ alive, target, most }` (`xb_sched_workers`). Timers are a binary heap of `{deadline, target}`
   under the timers' lock, which one program thread serves (started with the pool; with nothing queued it sleeps until
   its next timer, or with no limit when there is none, and a submission that finds every worker busy wakes it, whatever
   timers wait): it fires each due target without the lock (`xb_task_timer`: a delay completes, a cancellation source's
   signal is set, a timeout fails with `Task timed out`, an Error object made with `xb_error_object`), and is the
   monitor. The heap drops the timers whose targets need them no more (`xb_task_timer_dead`: settled, or replaced by a
-  later `CancelAfter`, whose deadline the signal keeps) once it doubled; at the program's end the timers left fire as
-  ending (a delay and a timeout canceled, a source canceled). Cancellation: a source and its token share a signal, a
-  task that completes when the source is canceled, whose continuations are what waits for it (a delay with that token, a
-  linked source's signal, `Register`'s tasks). A list of continuations drops, at its head, the targets that need it no
-  more (ended, or the signal of a disposed source), and is pruned whole once as many were pushed as it kept at its last
-  pruning. A signal that had 64 continuations pushed gets 16 partitions, signals of its own pushed onto its list (it
-  fires them when it is canceled, as a linked source's), made at once and never changed after; from then on each thread
-  pushes into one of them (a thread-local index), so tasks on many workers that wait with one token at once (a server's
-  shutdown token) do not all take its lock: 16 consumers receiving 50000 values each with one token take 63 ms and
-  0.85 s of processor time, as with a token each (all pushing onto its own list: 300 ms and 3.5 s). Channels
-  (`rtl/channels.c`, their rings and the claims of their waiters in
-  `rtl/waiters.c`, shared with `Mutex` and `Semaphore`): see [concurrency.md](concurrency.md#channels); `FOR EACH`
-  reaches the enumerator of a runtime class's object (`GetEnumerator` in its method table): a channel's is a
-  `ChannelEnumerator`, whose `MoveNext` takes the next value (waiting for it) into `Current`, and whose `MoveNextAsync`
-  waits as a receiver whose entry in the ring is the pair `{task, enumerator}`: the value delivered goes into the
-  enumerator's `Current` under the channel's lock and the task completes with `.T.`; `Close` completes such tasks with
-  `.F.` instead of failing them. The enumerator keeps the token `GetEnumerator` was given and the task of its
-  `MoveNextAsync` that waits (read and set under the channel's lock: a second one while it waits raises 9035). Their
-  error codes are xbase's own: 9016 to 9031, and 9035.
+  later `CancelAfter`, whose deadline the signal keeps) once it doubled, or once the timers whose targets ended before
+  their deadlines (`xb_timer_dropped`, told by the target's end: the deadline is in its `V_TIMER`) are half of it,
+  looked at every 64 such ends; at the program's end the timers left fire as ending (a delay and a timeout canceled, a
+  source canceled). Cancellation: a source and its token share a signal, a task that completes when the source is
+  canceled, whose continuations are what waits for it (a delay with that token, a linked source's signal, `Register`'s
+  tasks). A list of continuations drops, at its head, the targets that need it no more (ended, or the signal of a
+  disposed source), and is pruned whole once as many were pushed as it kept at its last pruning. A signal that had
+  64 continuations pushed gets 16 partitions, signals of its own pushed onto its list (it fires them when it is
+  canceled, as a linked source's), made at once and never changed after; from then on each thread pushes into one of
+  them (a thread-local index), so tasks on many workers that wait with one token at once (a server's shutdown token) do
+  not all take its lock: 16 consumers receiving 50000 values each with one token take 63 ms and 0.85 s of processor
+  time, as with a token each (all pushing onto its own list: 300 ms and 3.5 s). Channels (`rtl/channels.c`, their rings
+  and the claims of their waiters in `rtl/waiters.c`, shared with `Mutex` and `Semaphore`): see
+  [concurrency.md](concurrency.md#channels); `FOR EACH` reaches the enumerator of a runtime class's object
+  (`GetEnumerator` in its method table): a channel's is a `ChannelEnumerator`, whose `MoveNext` takes the next value
+  (waiting for it) into `Current`, and whose `MoveNextAsync` waits as a receiver whose entry in the ring is the pair
+  `{task, enumerator}`: the value delivered goes into the enumerator's `Current` under the channel's lock and the task
+  completes with `.T.`; `Close` completes such tasks with `.F.` instead of failing them. The enumerator keeps the token
+  `GetEnumerator` was given and the task of its `MoveNextAsync` that waits (read and set under the channel's lock: a
+  second one while it waits raises 9035). Their error codes are xbase's own: 9016 to 9031, and 9035.
 
 - Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread and

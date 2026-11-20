@@ -355,8 +355,9 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   then, are canceled with the program's other tasks that never started), so an `EXIT` procedure that waits for them is
   not held. A later `CancelAfter` replaces the time an earlier one set. `oSource:Dispose()` lets go
   of what the source is linked to and of its timer (`USING`): a long-lived token linked to again and again, as by
-  each request of a server, keeps only the sources not disposed; a timeout settled before its deadline keeps nothing
-  either (its timer is dropped once the heap grows).
+  each request of a server, keeps only the sources not disposed; a delay, a timeout or a wait settled before its
+  deadline keeps nothing either: its timer, dead, is dropped once such timers are half of the heap (or the heap
+  doubled), not kept to its time.
 - A task that fails while nothing has observed it (nothing waited for it: `Wait()`, `Result`, `AWAIT`; continued from
   it: `ContinueWith()`, `TaskWhenAll()`, `TaskWhenAny()`, `TaskTimeout()`, an `AWAIT` that suspends; read its failure:
   `Error`, `IsFailed`; `IsCompleted` and `IsCanceled` do not count; an asynchronous generator's body counts as observed:

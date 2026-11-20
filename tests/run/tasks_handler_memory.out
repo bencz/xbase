@@ -1,0 +1,6 @@
+
+per handler within budget: .T. 
+all ended canceled: .T.
+handlers' objects gone: yes
+timeouts ended in time: .T.
+timeouts' objects gone: yes

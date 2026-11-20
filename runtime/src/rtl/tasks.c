@@ -34,30 +34,39 @@ enum { S_CREATED, S_SCHEDULED, S_RUNNING, S_CLAIMED, S_CLAIMED_CANCELED, S_COMPL
  * made with, V_RESULT, unless code claimed it first). */
 enum { K_RUN, K_PROMISE, K_WHEN_ALL, K_WHEN_ANY, K_DELAY, K_SIGNAL, K_TIMEOUT, K_ASYNC, K_YIELD, K_WAIT };
 
-/* The variables: the state and the kind (words), the result (or the failure's value), the block and its arguments and
- * the environment's snapshot (until it runs), the continuations, a word (a combinator's count, when all: the tasks
- * still to complete; when any: whether one did; a cancellation signal's: whether its source was disposed), the tasks a
- * combinator waits for (an asynchronous generator's body: its enumerator, rtl/agen.c), a signal's deadline (its latest
- * CancelAfter: the only timer of it that counts), and the continuations pushed since the list was last pruned whole
- * (low 32 bits) with the ones that list kept (high); an asynchronous function's resume function (its address), the
- * point to resume at and its flow's number (the owner of the locks it holds, xb_flow_self), which only its steps read,
- * one at a time, each published to the next by the continuation that schedules it (its frame is the work's place,
- * V_WORK); and a word, whether its outcome was observed (`observe`). */
+/* The variables: the state and the kind (words), the result (or the failure's value), the continuations, a word (a
+ * combinator's count, when all: the tasks still to complete; when any: whether one did; a cancellation signal's:
+ * whether its source was disposed), a deadline (a delay's, a timeout's, a waiter's; a signal's: its latest
+ * CancelAfter, the only timer of it that counts), the continuations pushed since the list was last pruned whole (low
+ * 32 bits) with the ones that list kept (high), and a word, whether its outcome was observed (`observe`): all a small
+ * task has (task_small_class: a promise, a delay, a timeout, a yield, a waiter). The others' have more: the block and
+ * its arguments and the environment's snapshot (until it runs), the tasks a combinator waits for (an asynchronous
+ * generator's body: its enumerator, rtl/agen.c; a signal's partitions), an asynchronous function's resume function
+ * (its address), the point to resume at and its flow's number (the owner of the locks it holds, xb_flow_self), which
+ * only its steps read, one at a time, each published to the next by the continuation that schedules it (its frame is
+ * the work's place, V_WORK). */
 enum {
-  V_STATE, V_KIND, V_RESULT, V_WORK, V_ENV, V_NEXT, V_COUNT, V_TASKS, V_TIMER, V_LINKS, V_RESUME, V_POINT, V_FLOW,
-  V_SEEN, V_COUNT_
+  V_STATE, V_KIND, V_RESULT, V_NEXT, V_COUNT, V_TIMER, V_LINKS, V_SEEN, V_SMALL_,
+  V_WORK = V_SMALL_, V_ENV, V_TASKS, V_RESUME, V_POINT, V_FLOW, V_COUNT_
 };
 static const xb_class_var task_vars[] = {
-  {"(STATE)", XB_VAR_ANY},  {"(KIND)", XB_VAR_ANY},  {"(RESULT)", XB_VAR_ANY}, {"(WORK)", XB_VAR_ANY},
-  {"(ENV)", XB_VAR_ANY},    {"(NEXT)", XB_VAR_ANY},  {"(COUNT)", XB_VAR_ANY},  {"(TASKS)", XB_VAR_ANY},
-  {"(TIMER)", XB_VAR_ANY},  {"(LINKS)", XB_VAR_ANY}, {"(RESUME)", XB_VAR_ANY}, {"(POINT)", XB_VAR_ANY},
-  {"(FLOW)", XB_VAR_ANY},   {"(SEEN)", XB_VAR_ANY}};
+  {"(STATE)", XB_VAR_ANY},  {"(KIND)", XB_VAR_ANY},  {"(RESULT)", XB_VAR_ANY}, {"(NEXT)", XB_VAR_ANY},
+  {"(COUNT)", XB_VAR_ANY},  {"(TIMER)", XB_VAR_ANY}, {"(LINKS)", XB_VAR_ANY},  {"(SEEN)", XB_VAR_ANY},
+  {"(WORK)", XB_VAR_ANY},   {"(ENV)", XB_VAR_ANY},   {"(TASKS)", XB_VAR_ANY},  {"(RESUME)", XB_VAR_ANY},
+  {"(POINT)", XB_VAR_ANY},  {"(FLOW)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(task_vars) == V_COUNT_, "one V_ index per Task variable");
 
-static const xb_class task_class;
+static const xb_class task_class, task_small_class;
 
 static int is_task(const xb_item *it) {
-  return it->type == XB_T_OBJECT && ((const xb_object *)it->v.p)->cls == &task_class;
+  if (it->type != XB_T_OBJECT) return 0;
+  const xb_class *c = ((const xb_object *)it->v.p)->cls;
+  return c == &task_class || c == &task_small_class;
+}
+
+/* Whether a task of `kind` has only the variables up to V_SMALL_. */
+static int small_kind(uint32_t kind) {
+  return kind == K_PROMISE || kind == K_DELAY || kind == K_TIMEOUT || kind == K_YIELD || kind == K_WAIT;
 }
 
 static uint32_t state_of(const xb_item *task) { return xb_atomic_load32(xb_object_word(task, V_STATE), XB_ACQUIRE); }
@@ -79,20 +88,31 @@ static void watch_failure(const xb_item *task, uint32_t state, const xb_item *ne
 
 /* A new task in `*r` (rooted), local until it is shared, of `kind`, in `state`. */
 static xb_object *task_new(xb_item *r, uint32_t kind, uint32_t state) {
-  xb_object *t = xb_object_new(&task_class);
+  int small = small_kind(kind);
+  xb_object *t = xb_object_new(small ? &task_small_class : &task_class);
   xb_set_object(r, t);
   xb_set_logical(&t->vars[V_STATE], 0);
   xb_set_logical(&t->vars[V_KIND], 0);
   xb_set_logical(&t->vars[V_COUNT], 0);
   xb_set_int(&t->vars[V_TIMER], 0);
   xb_set_int(&t->vars[V_LINKS], 0);
-  xb_set_int(&t->vars[V_RESUME], 0);
-  xb_set_int(&t->vars[V_POINT], 0);
-  xb_set_int(&t->vars[V_FLOW], 0);
   xb_set_logical(&t->vars[V_SEEN], 0);
+  if (!small) {
+    xb_set_int(&t->vars[V_RESUME], 0);
+    xb_set_int(&t->vars[V_POINT], 0);
+    xb_set_int(&t->vars[V_FLOW], 0);
+  }
   t->vars[V_STATE].v.l = (int32_t)state;
   t->vars[V_KIND].v.l = (int32_t)kind;
   return t;
+}
+
+/* A task with a timer (its deadline in V_TIMER: a delay's, a timeout's, a waiter's, a signal's latest CancelAfter)
+ * ended: before the deadline, the timer is dead (xb_timer_dropped); at it, the timer ended it. */
+static void timer_ended(xb_object *o) {
+  xb_item deadline;
+  xb_object_get(o, V_TIMER, &deadline);
+  if (deadline.v.i > 0 && xb_platform_monotonic_ns() < deadline.v.i) xb_timer_dropped();
 }
 
 /* The task's final state and result, set once: 1, with the continuations it had in `*next` (rooted by the caller);
@@ -108,10 +128,13 @@ static int finish_as(const xb_item *task, uint32_t state, const xb_item *value, 
     *next = o->vars[V_NEXT];
     o->vars[V_RESULT] = *value;
     o->vars[V_NEXT] = nil;
-    o->vars[V_WORK] = nil;
-    o->vars[V_ENV] = nil;
+    if (o->cls == &task_class) {
+      o->vars[V_WORK] = nil;
+      o->vars[V_ENV] = nil;
+    }
     xb_gc_write(o);
     xb_atomic_store32(xb_object_word(task, V_STATE), state, XB_RELEASE);
+    timer_ended(o);
     watch_failure(task, state, next);
     return 1;
   }
@@ -130,12 +153,15 @@ static int finish_as(const xb_item *task, uint32_t state, const xb_item *value, 
   *next = o->vars[V_NEXT]; /* the writers hold the lock */
   xb_seq_store(&o->vars[V_RESULT], value);
   xb_seq_store(&o->vars[V_NEXT], &nil);
-  xb_seq_store(&o->vars[V_WORK], &nil);
-  xb_seq_store(&o->vars[V_ENV], &nil);
+  if (o->cls == &task_class) {
+    xb_seq_store(&o->vars[V_WORK], &nil);
+    xb_seq_store(&o->vars[V_ENV], &nil);
+  }
   xb_gc_write(o);
   xb_atomic_store32(xb_object_word(task, V_STATE), state, XB_RELEASE);
   xb_seq_unlock(o);
   xb_park_wake(xb_object_word(task, V_STATE), 1);
+  timer_ended(o);
   watch_failure(task, state, next);
   return 1;
 }
@@ -860,6 +886,8 @@ static const xb_class_method task_methods[] = {
   {"CONTINUEWITH", task_continue_with}};
 static const xb_class task_class = {"TASK", V_COUNT_, task_vars, NULL, XB_TABLE_SIZE(task_methods), task_methods,
                                     task_unobserved};
+static const xb_class task_small_class = {"TASK", V_SMALL_, task_vars, NULL, XB_TABLE_SIZE(task_methods),
+                                          task_methods, task_unobserved};
 
 /* TaskRun( bWork, [xArgs...] ): a task running Eval( bWork, xArgs... ) on the scheduler's workers. */
 void xbf_TASKRUN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -1040,9 +1068,11 @@ int xb_task_timer_dead(void *target, int64_t deadline) {
 static int delay_new(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   int64_t ms;
   if (!xb_integer_arg(ctx, "TASKDELAY", XB_CODE_TASK, 0, argc, argv, &ms)) return 0;
-  task_new(r, K_DELAY, ms <= 0 ? S_COMPLETED : S_CREATED);
+  xb_object *t = task_new(r, K_DELAY, ms <= 0 ? S_COMPLETED : S_CREATED);
+  int64_t due = ms > 0 ? xb_deadline_after_ms(ms) : 0;
+  xb_set_int(&t->vars[V_TIMER], due); /* local, new: no barrier */
   xb_share(r);
-  if (ms > 0) xb_timer_add(r->v.p, xb_deadline_after_ms(ms));
+  if (due) xb_timer_add(r->v.p, due);
   return 1;
 }
 
@@ -1219,6 +1249,7 @@ int xb_task_waiter(xb_ctx *ctx, xb_item *r, const xb_item *token, int64_t deadli
   }
   xb_object *t = task_new(r, K_WAIT, S_CREATED);
   t->vars[V_RESULT] = *timed_out; /* local, new: no barrier */
+  if (deadline >= 0) xb_set_int(&t->vars[V_TIMER], deadline);
   xb_share(r);
   if (signal.type != XB_T_NIL) {
     xb_gc_root_push(ctx, &signal);
@@ -1335,10 +1366,12 @@ void xbf_TASKTIMEOUT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   }
   int64_t ms;
   if (!xb_integer_arg(ctx, "TASKTIMEOUT", XB_CODE_TASK, 1, argc, argv, &ms)) return;
-  task_new(ret, K_TIMEOUT, S_CREATED);
+  xb_object *t = task_new(ret, K_TIMEOUT, S_CREATED);
+  int64_t due = xb_deadline_after_ms(ms);
+  xb_set_int(&t->vars[V_TIMER], due); /* local, new: no barrier */
   xb_share(ret);
   add_continuation(ctx, &argv[0], ret); /* first: a task ended already settles it before any timer could */
-  if (!FINAL(state_of(ret))) xb_timer_add(ret->v.p, xb_deadline_after_ms(ms));
+  if (!FINAL(state_of(ret))) xb_timer_add(ret->v.p, due);
 }
 
 /* Asynchronous functions (xbrt.h). */
