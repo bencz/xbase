@@ -81,13 +81,15 @@
  * Evacuation. Objects of up to several lines need holes of as many free
  * lines, so dead objects spread over many blocks leave memory the heap cannot
  * use (it would grow instead). A full collection defragments when it can: it
- * picks the emptiest blocks of lines (at most half their lines live), as many
+ * picks the emptiest blocks of lines (at most three quarters of their bytes
+ * live, as the last full collection counted them: an object covers the lines
+ * it straddles, so the lines in use overstate what lives), as many
  * as the free blocks and a reserve of new ones can take, and moves every
  * object it reaches there into free blocks, its old place forwarding to the
  * copy; every reference it sees is set to the copy (roots, fields, an array's
  * own items, a hash's tables in its store, a codeblock's cells), and the
  * blocks it emptied are free. When the heap is to grow while a quarter of it
- * is free lines of blocks it may empty, such a full collection runs first.
+ * is free bytes of blocks it may empty, such a full collection runs first.
  * A size class's sparsest blocks are emptied into its fuller ones the same
  * way (pick_class_defrag). Large objects and those too small for the copy's
  * address never move. It runs when every attached thread's stack is
@@ -157,6 +159,9 @@
 #define XB_GC_TRIM_STACK ((size_t)256 << 10)     /* the trimmer's stack: the collection's stacks are vectors */
 #define XB_GC_ALIGN 8u
 #define XB_GC_DEFRAG_RESERVE 16u                 /* new blocks a defragmentation may take: the heap's blocks / this */
+#define XB_GC_DEFRAG_LIVE_NUM 3u                 /* a block a full collection may empty: at most 3/4 of its bytes live */
+#define XB_GC_DEFRAG_LIVE_DEN 4u
+#define XB_GC_LIVE_UNKNOWN UINT32_MAX            /* xb_hblock.liveBytes of a block allocated in since a full collection */
 #define XB_GC_CLASS_DEFRAG_MIN 16u               /* size classes' blocks worth emptying (a move costs a stack scan) */
 #define XB_GC_STOP_LOOK_NS (XB_NS_PER_MS)        /* a collector waiting for threads to stop looks again after this */
 
@@ -169,6 +174,8 @@ typedef struct xb_hblock {
   xb_gc_hdr *freeSlot;              /* a size class's: the first free slot (each free slot links the next) */
   uint8_t young;                    /* received objects, or holds aged ones, since its last sweep */
   uint8_t defrag;                   /* the full collection in progress moves its objects out (Evacuation above) */
+  uint32_t liveBytes;               /* a block of lines: the bytes of the objects the last full collection reached in it
+                                       (XB_GC_LIVE_UNKNOWN once objects are allocated in it after that) */
   uint8_t lineMark[XB_GC_LINES];    /* the epoch of the last collection that reached an object in the line */
   uint8_t lineOld[XB_GC_LINES];     /* an old object covers the line */
   uint16_t starts[XB_GC_LINES];     /* bit k of a line: an object starts at its byte 8k */
@@ -297,7 +304,7 @@ static struct {
   size_t stackLen, stackCap;
   xb_slice *slices;                /* long arrays traced a slice at a time */
   size_t slicesLen, slicesCap;
-  size_t candidateLines;           /* free lines of the blocks a full collection may empty, as the last sweep found */
+  size_t candidateFree;            /* free bytes of the blocks a full collection may empty (live_estimate) */
   xb_gc_hdr **remembered;          /* old objects that received stores */
   size_t rememberedLen, rememberedCap;
   int full;                        /* the collection in progress is a full one */
@@ -685,22 +692,31 @@ static uint32_t block_bit(const xb_chunk *c, const void *b) {
   return 1u << (((uintptr_t)b - (uintptr_t)c->start) / XB_GC_BLOCK_SIZE);
 }
 
-/* Whether a full collection may empty block `b` (Evacuation above): a block of lines, partly used, at most half of
- * its lines live (as its last sweep found them). */
+/* The bytes the objects of a block of lines take: those the last full collection reached there, or, for a block
+ * allocated in since, its lines in use (as its last sweep found them), which count the lines an object straddles
+ * whole. */
+static size_t live_estimate(const xb_hblock *b) {
+  if (b->liveBytes != XB_GC_LIVE_UNKNOWN) return b->liveBytes;
+  return (XB_GC_DATA_LINES - b->freeLines) * XB_GC_LINE_SIZE;
+}
+
+/* Whether a full collection may empty block `b` (Evacuation above): a block of lines, partly used, at most
+ * XB_GC_DEFRAG_LIVE_NUM / XB_GC_DEFRAG_LIVE_DEN of its bytes live. */
 static int defrag_candidate(const xb_hblock *b) {
-  return !b->cls && b->freeLines * 2 >= XB_GC_DATA_LINES && b->freeLines != XB_GC_DATA_LINES;
+  return !b->cls && b->freeLines != XB_GC_DATA_LINES &&
+         live_estimate(b) * XB_GC_DEFRAG_LIVE_DEN <= XB_GC_DATA_BYTES * XB_GC_DEFRAG_LIVE_NUM;
 }
 
 /* Whether the heap, which is to grow (no free or recyclable block, no block a chunk never handed out: taking one back
- * from the system would be growing too), is fragmented: a quarter of it free lines of blocks a full collection may
- * empty, which objects of several lines may not fit, a young budget allocated since the last full collection (not to
+ * from the system would be growing too), is fragmented: a quarter of it free bytes of blocks a full collection may
+ * empty (live_estimate), which objects may not fit, a young budget allocated since the last full collection (not to
  * collect over and over), and the collection able to move objects. A full collection that defragments comes first then.
  * Under the lock. */
 static int fragmented(void) {
   if (heap.freshBlocks || heap.allocatedSinceFull + heap.allocated < heap.youngBudget || heap.holds ||
       !stacks_known())
     return 0;
-  return heap.candidateLines * XB_GC_LINE_SIZE * 4 > heap.blockCount * XB_GC_BLOCK_SIZE;
+  return heap.candidateFree * 4 > heap.blockCount * XB_GC_BLOCK_SIZE;
 }
 
 /* A block with every line free: a free one, else the first spare block of the lowest chunk that has one (made usable
@@ -817,6 +833,7 @@ static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
       if (b) heap.recyclable = b->next;
       else b = block_new();
     } while (b && !take_hole(b, XB_GC_FIRST_LINE, total, cursor, limit));
+    if (b) b->liveBytes = XB_GC_LIVE_UNKNOWN;
     *block = b;
     xb_mutex_unlock(&heap.lock);
     if (!b) out_of_blocks(&collected);
@@ -1272,6 +1289,7 @@ static void push(xb_gc_hdr *h) {
     if (h->state & XB_GC_MARKED) return;
     h->state |= XB_GC_MARKED; /* old now (an aged object is settled at the end) */
     mark_lines(h, 1);
+    if (heap.full && !(h->flags & XB_GC_HDR_LARGE)) block_of(h)->liveBytes += (uint32_t)object_total(h->size);
   } else {
     if (h->state & (XB_GC_MARKED | XB_GC_SEEN)) return;
     h->state |= XB_GC_SEEN;
@@ -1972,7 +1990,7 @@ static void sweep_large(int full) {
 static void sweep_blocks(int full) {
   heap.freeBlocks = NULL;
   heap.recyclable = NULL;
-  heap.candidateLines = 0;
+  heap.candidateFree = 0;
   memset(heap.classBlocks, 0, sizeof heap.classBlocks);
   const uint32_t lines = (uint32_t)XB_GC_DATA_LINES;
   for (size_t k = heap.blockCount; k-- > 0;) {
@@ -1988,7 +2006,7 @@ static void sweep_blocks(int full) {
       b->freeLines = freeLines;
       b->young = aged;
     }
-    if (defrag_candidate(b)) heap.candidateLines += b->freeLines;
+    if (defrag_candidate(b)) heap.candidateFree += XB_GC_DATA_BYTES - live_estimate(b);
     if (b->freeLines == lines) {
       b->next = heap.freeBlocks;
       heap.freeBlocks = b;
@@ -2090,8 +2108,8 @@ static void next_epoch(void) {
 }
 
 static int fewer_live(const void *a, const void *b) {
-  uint32_t x = (*(xb_hblock *const *)a)->freeLines, y = (*(xb_hblock *const *)b)->freeLines;
-  return x > y ? -1 : x < y; /* more free lines first */
+  size_t x = live_estimate(*(xb_hblock *const *)a), y = live_estimate(*(xb_hblock *const *)b);
+  return x < y ? -1 : x > y; /* fewer live bytes first */
 }
 
 static int more_used(const void *a, const void *b) {
@@ -2147,13 +2165,12 @@ static size_t pick_class_defrag(void) {
   return emptied;
 }
 
-/* The blocks the full collection in progress empties: the emptiest of those partly used (at most half their lines
- * live), as long as the free blocks and a reserve of new ones (a sixteenth of the heap, which the emptied blocks give
- * back) can take what lives there. True when there are some. */
+/* The blocks the full collection in progress empties: the emptiest of those partly used (defrag_candidate), as long
+ * as the free blocks and a reserve of new ones (a sixteenth of the heap, which the emptied blocks give back) can take
+ * what lives there (live_estimate: the copies are packed). True when there are some. */
 static int pick_defrag(void) {
-  const uint32_t lines = (uint32_t)XB_GC_DATA_LINES;
-  size_t space = heap.blockCount / XB_GC_DEFRAG_RESERVE * lines;
-  for (const xb_hblock *b = heap.freeBlocks; b; b = b->next) space += lines;
+  size_t space = heap.blockCount / XB_GC_DEFRAG_RESERVE * XB_GC_DATA_BYTES;
+  for (const xb_hblock *b = heap.freeBlocks; b; b = b->next) space += XB_GC_DATA_BYTES;
   heap.defragLen = 0;
   for (size_t i = 0; i < heap.blockCount; ++i) { /* the lists lose blocks allocation found no hole in: all of them */
     xb_hblock *b = heap.blocks[i];
@@ -2169,8 +2186,8 @@ static int pick_defrag(void) {
   }
   if (heap.defragLen) qsort(heap.defrag, heap.defragLen, sizeof *heap.defrag, fewer_live);
   size_t k = 0;
-  for (; k < heap.defragLen && lines - heap.defrag[k]->freeLines <= space; ++k) {
-    space -= lines - heap.defrag[k]->freeLines;
+  for (; k < heap.defragLen && live_estimate(heap.defrag[k]) <= space; ++k) {
+    space -= live_estimate(heap.defrag[k]);
     heap.defrag[k]->defrag = 1;
   }
   heap.defragLen = k;
@@ -2200,6 +2217,8 @@ static void collect(int full, int due) {
   heap.markedBytes = 0;
   heap.markedObjects = 0;
   heap.evacuating = full && !heap.holds && tlh && stacks_known() && pick_defrag();
+  if (full) /* counted anew as the collection reaches the objects (push) */
+    for (size_t k = 0; k < heap.blockCount; ++k) heap.blocks[k]->liveBytes = 0;
   if (heap.evacuating) { /* pins first: what the stacks point to, and the objects C roots sit in */
     xb_platform_with_registers(pin_stacks, tlh);
     for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
@@ -2394,6 +2413,14 @@ int xb_gc_consistent(void) {
 size_t xb_gc_heap_bytes(void) {
   xb_mutex_lock(&heap.lock);
   size_t bytes = heap_bytes_locked();
+  xb_mutex_unlock(&heap.lock);
+  return bytes;
+}
+
+size_t xb_gc_occupied_bytes(void) {
+  xb_mutex_lock(&heap.lock);
+  size_t bytes = heap_bytes_locked();
+  for (const xb_hblock *b = heap.freeBlocks; b; b = b->next) bytes -= XB_GC_BLOCK_SIZE;
   xb_mutex_unlock(&heap.lock);
   return bytes;
 }

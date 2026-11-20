@@ -302,21 +302,25 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   collection first (once for that allocation), and ends the program only when it still has none, or, for a size the
   program chose, raises `BASE/9032 Memory low` (see the rules below).
 - Evacuation: dead objects spread over many blocks leave holes that objects of several lines may not fit, and the heap
-  would grow instead. A full collection defragments when it can: it picks the emptiest blocks of lines (at most half
-  their lines live), as many as the free blocks and a reserve of new ones (a sixteenth of the heap's blocks) can take,
-  and moves every object it reaches in them into free blocks. The old place keeps the address of the copy
-  (`XB_GC_HDR_MOVED`; the address is stored past a string's flags, which stay readable, since a string is tested for
-  `XB_STR_STATIC` before its header: a literal has none), every reference the collection sees is set to the copy (roots,
-  fields, an array's own elements, a hash's tables inside its entry store, a codeblock's cells, the collector's own
-  lists), and the emptied blocks become free. When the heap is about to grow (no free or recyclable block left, no block
-  a chunk never handed out: taking a given-back block from the system again is growing too), at least a young budget was
-  allocated since the last full collection, and a quarter of the heap is free lines of blocks such a collection may
-  empty, it runs first instead, on a thread that may move objects. A size class's blocks are compacted too: for each
-  class, its blocks by how full they are, the sparsest ones (at most half their slots taken) whose objects all fit the
-  free slots of the fuller ones are emptied into them (no new memory, and only when at least 16 blocks are emptied:
-  fewer would not pay for the move's stack scan), so a class whose objects died but one in many gives its blocks back.
-  Large objects and objects too small to hold the copy's address (on 32-bit targets, a codeblock without cells or an
-  object without variables) never move.
+  would grow instead. A full collection defragments when it can: it picks the emptiest blocks of lines (at most three
+  quarters of their bytes live), as many as the free blocks and a reserve of new ones (a sixteenth of the heap's blocks)
+  can take, and moves every object it reaches in them into free blocks, where the copies are packed. A block's live
+  bytes are those the last full collection reached in it (each full collection counts them as it marks); a block
+  allocated in since then counts its lines in use instead. Lines alone would overstate what lives: an object covers
+  every line it straddles, so 128-byte strings left at random offsets among dead ones keep about one and a half lines
+  each, and a block whose lines are nearly all in use may hold little more than half its bytes alive. The old place
+  keeps the address of the copy (`XB_GC_HDR_MOVED`; the address is stored past a string's flags, which stay readable,
+  since a string is tested for `XB_STR_STATIC` before its header: a literal has none), every reference the collection
+  sees is set to the copy (roots, fields, an array's own elements, a hash's tables inside its entry store, a codeblock's
+  cells, the collector's own lists), and the emptied blocks become free. When the heap is about to grow (no free or
+  recyclable block left, no block a chunk never handed out: taking a given-back block from the system again is growing
+  too), at least a young budget was allocated since the last full collection, and a quarter of the heap is free bytes of
+  blocks such a collection may empty, it runs first instead, on a thread that may move objects. A size class's blocks
+  are compacted too: for each class, its blocks by how full they are, the sparsest ones (at most half their slots taken)
+  whose objects all fit the free slots of the fuller ones are emptied into them (no new memory, and only when at least
+  16 blocks are emptied: fewer would not pay for the move's stack scan), so a class whose objects died but one in many
+  gives its blocks back. Large objects and objects too small to hold the copy's address (on 32-bit targets, a codeblock
+  without cells or an object without variables) never move.
 - Pinning: compiled code and C code keep object addresses in registers and on the machine stack, where the collector
   cannot update them. Before moving anything, the collector saves its registers on its stack
   (`xb_platform_with_registers`) and scans every thread's stack up to its end (the system's bounds of the stack,
@@ -392,7 +396,8 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
 `__GcCollect( [lYoung] )` runs a full collection (a young one with `.T.`), then the destructors of the objects it
 found unreachable ([Classes](#classes)), and returns the number of live objects the last full collection found (tests
 use it). `__GcMemory()` returns `{ live objects, the heap's memory in bytes (blocks in use, large objects' units and
-mappings: what was given back is not counted), the process's resident bytes (0 where the system does not tell) }`.
+mappings: what was given back is not counted), the process's resident bytes (0 where the system does not tell), the
+heap's memory without the free blocks it keeps for the next allocations }`.
 
 Finalization: an object registered with `xb_gc_finalizable` (an object whose class has a destructor) that a
 collection does not reach moves, after marking, to a queue of finalized objects, and is marked with what it refers to

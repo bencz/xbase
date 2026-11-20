@@ -71,10 +71,11 @@ void xbf___GCMEMORY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   XB_UNUSED(argc);
   XB_UNUSED(argv);
-  xb_array *a = xb_array_alloc(3);
+  xb_array *a = xb_array_alloc(4);
   xb_set_int(&xb_array_items(a)[0], (int64_t)xb_gc_live_objects());
   xb_set_int(&xb_array_items(a)[1], (int64_t)xb_gc_heap_bytes());
   xb_set_int(&xb_array_items(a)[2], (int64_t)xb_platform_resident_bytes());
+  xb_set_int(&xb_array_items(a)[3], (int64_t)xb_gc_occupied_bytes());
   xb_set_array(ret, a);
 }
 
