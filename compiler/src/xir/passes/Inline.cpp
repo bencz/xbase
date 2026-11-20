@@ -67,6 +67,16 @@ bool inlinableCall(const Instruction &call) {
   return call.op == Op::Call && !call.hasRest() && !call.parent->unwind;
 }
 
+// The arguments an inlined body holds while it runs, as the callee's parameters would hold them, in their positions (a
+// release of a parameter's LOCAL lets go of its own): a codeblock literal, which folding may leave unmade, is NIL
+// there; constants hold nothing (none at the end).
+std::vector<Value *> held(Builder &builder, const std::vector<Value *> &args) {
+  std::vector<Value *> out;
+  for (Value *a : args) out.push_back(asInstruction(a, Op::MakeBlock) ? builder.nil() : a);
+  while (!out.empty() && asConstant(out.back())) out.pop_back();
+  return out;
+}
+
 // A frame variable with no cell and no reference passed in: read and written directly.
 bool plain(const Var *v) { return v && v->kind == Var::Kind::Frame && !mayBeInCell(*v); }
 
@@ -174,7 +184,7 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   at->takeTerminator();
   builder.setBlock(at);
   builder.setLoc(call->loc);
-  builder.inlineEnter(in.callee, callee.readsArgs ? args : std::vector<Value *>{});
+  builder.inlineEnter(in.callee, callee.readsArgs ? args : held(builder, args));
   for (auto &v : callee.vars) {
     if (v->kind != Var::Kind::Frame) continue;
     bool given = v->param && v->index < callee.numParams && v->index < args.size();
@@ -185,11 +195,11 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   eraseInstruction(call);
 }
 
-// What the folding left of the inlined bodies. Arguments a body no longer reads (the call of an ARGS function that
-// did, gone with a branch never taken) stop being passed: the values they were stay free to go (a codeblock literal
-// no longer made, say). A body in which nothing can see the call stack (no call, nothing that can fail or run code,
-// no loop, whose back edge polls and may run destructors, no body inlined in it) needs no frame: its inline.enter and
-// inline.leave go. A leave that several bodies reach keeps them all.
+// What the folding left of the inlined bodies. A body that no longer reads its arguments as received (the call of an
+// ARGS function that did, gone with a branch never taken) keeps only those it holds (`held`). A body in which nothing
+// can see the call stack (no call, nothing that can fail or run code, no loop, whose back edge polls and may run
+// destructors, no body inlined in it) needs no frame: its inline.enter and inline.leave go (nothing can collect there:
+// its arguments need no holding). A leave that several bodies reach keeps them all.
 bool trimInlinedBodies(Function &f) {
   CFG cfg(f);
   std::unordered_map<const BasicBlock *, size_t> rpo;
@@ -224,12 +234,16 @@ bool trimInlinedBodies(Function &f) {
     return changed;
   });
   bool changed = false;
+  Builder builder(&f);
   for (auto &b : f.blocks) {
-    for (auto &i : b->insts)
-      if (i->op == Op::InlineEnter && !i->operands().empty() && !read.count(i.get())) {
-        i->dropOperands();
-        changed = true;
-      }
+    for (auto &i : b->insts) {
+      if (i->op != Op::InlineEnter || read.count(i.get())) continue;
+      std::vector<Value *> ops(i->operands().begin(), i->operands().end()), keep = held(builder, ops);
+      if (keep == ops) continue;
+      i->dropOperands();
+      for (Value *v : keep) i->addOperand(v);
+      changed = true;
+    }
     changed |= std::erase_if(b->insts, [&](const std::unique_ptr<Instruction> &i) {
                  if (i->op == Op::InlineEnter) return enters.count(i.get()) && !seen.count(i.get());
                  if (i->op != Op::InlineLeave) return false;

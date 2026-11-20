@@ -120,11 +120,14 @@ Value *CodeGen::operandGroup(const xir::Instruction &i) {
   const auto &ops = i.operands();
   if (ops.empty()) return ConstantPointerNull::get(ptrTy_);
   uint32_t base = plan_->groupBase(&i);
+  std::vector<uint32_t> moved; // slots of values the group uses last: let go once all are copied (one may come twice)
   for (size_t k = 0; k < ops.size(); ++k)
     if (ops[k]->type() == xir::Type::Item && !plan_->inGroup(&i, k)) { // args.rest: filled by withRest
       Value *src = addr(ops[k]);
       copyItem(slot(base + (uint32_t)k), src);
+      if (std::optional<uint32_t> s = plan_->lastUse(ops[k], &i)) moved.push_back(*s);
     }
+  for (uint32_t s : moved) setNil(slot(s));
   return slot(base);
 }
 
@@ -205,6 +208,10 @@ void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
     args.push_back(loadHeader(item));        // the cached header when there is one
     args.push_back(loadWords(item).payload); // a pointer is read where it is
   }
+  // An argument this call uses last: its slot let go (the callee copies it into its own before anything can collect),
+  // so a callee that sets its parameter to NIL frees what only it then holds.
+  for (size_t k = 0; k < i.operands().size() && k < callee.numParams; ++k)
+    if (std::optional<uint32_t> s = plan_->lastUse(i.operand(k), &i)) setNil(slot(*s));
   Value *result = b_.CreateCall(direct_.at(&callee), args);
   if (words) storeWords(d, b_.CreateExtractValue(result, 0), b_.CreateExtractValue(result, 1));
   checkPending(unwind_);
@@ -414,8 +421,14 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     setNil(d); // the caller clears the result, so callees that return nothing need not
     auto call = [&](Value *n, Value *items) { b_.CreateCall(xbFuncTy_, callee, {fnCtx_, d, n, items}); };
-    if (i.hasRest()) withRest(i, argv, call);
-    else call(ConstantInt::get(i32_, ops.size()), argv);
+    if (i.hasRest()) {
+      withRest(i, argv, call);
+    } else {
+      bool lent = lends(i, 0);
+      if (lent) lend(argv);
+      call(ConstantInt::get(i32_, ops.size()), argv);
+      if (lent) endLend();
+    }
     checkPending(unwind_);
     break;
   }
@@ -440,9 +453,16 @@ void CodeGen::emit(const xir::Instruction &i) {
       if (cache) b_.CreateCall(rtSendFrom_, {fnCtx_, d, messageName(i.message), from, super, cache, n, items});
       else b_.CreateCall(rtMacroSend_, {fnCtx_, d, from, super, ConstantInt::get(i32_, i.index), n, items});
     };
-    if (i.hasRest()) withRest(i, argv, send);
-    else if (cache) sendInPlace(i, argv, d, cache, [&] { send(ConstantInt::get(i32_, ops.size()), argv); });
-    else send(ConstantInt::get(i32_, ops.size()), argv);
+    if (i.hasRest()) {
+      withRest(i, argv, send);
+    } else {
+      bool macro = i.op == xir::Op::SendMacro; // the text, then the object: the method receives them past the text
+      bool lent = lends(i, macro ? 2 : 1);
+      if (lent) lend(macro ? b_.CreateConstInBoundsGEP1_32(itemTy_, argv, 1) : argv);
+      if (cache) sendInPlace(i, argv, d, cache, [&] { send(ConstantInt::get(i32_, ops.size()), argv); });
+      else send(ConstantInt::get(i32_, ops.size()), argv);
+      if (lent) endLend();
+    }
     checkPending(unwind_);
     break;
   }

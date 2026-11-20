@@ -56,7 +56,7 @@ private:
     FrameArgc = 5,
     FrameSlots = 6
   };
-  enum CtxField : unsigned { CtxPending = 0, CtxDecimals = 1, CtxFrames = 2, CtxStackLimit = 3 };
+  enum CtxField : unsigned { CtxPending = 0, CtxDecimals = 1, CtxFrames = 2, CtxStackLimit = 3, CtxLent = 4 };
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayData = 2 };
   enum ObjectField : unsigned { ObjectCls = 0, ObjectVars = 2 }; // xb_object
   enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
@@ -84,6 +84,10 @@ private:
                  bool keepArgs);
   void directEntries(const xir::Module &m);
   void genThunk(const xir::Function &f);
+  void takeLent(const xir::Function &f, llvm::Function *thunk, llvm::Value *argc, llvm::Value *argv);
+  bool lends(const xir::Instruction &i, size_t first) const;
+  void lend(llvm::Value *argv);
+  void endLend();
   void cacheWords(const xir::Value *v);
   llvm::Value *argItem(llvm::Value *argc, llvm::Value *argv, uint32_t k);
   llvm::Constant *procOf(const xir::Function &f);
@@ -296,7 +300,7 @@ private:
   llvm::StructType *refTy_ = nullptr;       // xb_ref: { coll, index, value, key, loop }
   llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, entries, hashes, index, tree }
   llvm::StructType *hentryTy_ = nullptr;    // xb_hentry: { key, value }
-  llvm::StructType *ctxHeadTy_ = nullptr;   // the first fields of xb_ctx: { pending, decimals, frames, stack limit }
+  llvm::StructType *ctxHeadTy_ = nullptr; // the first fields of xb_ctx: pending, decimals, frames, stack limit, lent
   llvm::GlobalVariable *nilItem_ = nullptr; // a NIL item: missing arguments
   llvm::GlobalVariable *strBytes_ = nullptr; // xb_str_bytes, declared when first used
   llvm::GlobalVariable *generatorClass_ = nullptr; // xb_generator_class, declared when first used

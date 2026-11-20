@@ -264,7 +264,6 @@ private:
       }
       for (const Value *a : i.operands())
         if (a->type() != Type::Item) fail("inline.enter has an argument that is not an item");
-      if (!i.operands().empty() && !i.blockFn->readsArgs) fail("inline.enter passes arguments nothing reads");
       break;
     case Op::SeqWith: case Op::SeqRestore: expect(i, 1, {Type::Item}); break;
     case Op::BoxI64: expect(i, 1, {Type::I64}); break;

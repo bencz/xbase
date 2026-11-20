@@ -195,6 +195,9 @@ private:
       break;
     case Op::ClassNew: out_ += " " + std::to_string(i.classIndex); break;
     case Op::ObjectGet: case Op::ObjectSet: out_ += " " + std::to_string(i.index); break;
+    case Op::FrameRelease:
+      if (i.index) out_ += " param " + std::to_string(i.index - 1) + " of " + i.blockFn->name;
+      break;
     case Op::MvParam: out_ += " " + i.message + " " + std::to_string(i.index); break;
     case Op::MakeBlock: case Op::InlineEnter:
       out_ += " " + i.blockFn->name;
@@ -210,7 +213,7 @@ private:
     default:
       break;
     }
-    if (i.var) out_ += " " + varName(*i.var) + accessName(i.access);
+    if (i.var) out_ += " " + varName(*i.var) + accessName(i.access) + (i.moves ? " move" : "");
     const auto &ops = i.operands();
     for (size_t k = 0; k < ops.size(); ++k) out_ += (k || i.var ? ", " : " ") + value(ops[k]);
     if (i.op == Op::Br) out_ += " " + target(i.targets[0]);

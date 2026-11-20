@@ -16,7 +16,7 @@ bool isItemResult(const Value *v) { return v->kind() == Value::Kind::Instruction
 bool isGroupUser(const Instruction &i) {
   return (i.op == Op::Call && !isDirectCall(i)) || i.op == Op::Send || i.op == Op::SendMacro || i.op == Op::ArrayLit ||
          i.op == Op::HashLit || i.op == Op::MacroCall || i.op == Op::GenNew || i.op == Op::AgenNew ||
-         i.op == Op::AsyncNew || i.op == Op::InlineEnter;
+         i.op == Op::AsyncNew || (i.op == Op::InlineEnter && i.blockFn->readsArgs); // else it holds them in place
 }
 
 } // namespace
@@ -32,6 +32,7 @@ FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {
   placeVariables();
   number();
   chooseHomes();
+  pinMovedParams();
   computeLiveness();
   extendArgumentGroups();
   findBodyUnits();
@@ -50,8 +51,12 @@ void FramePlan::findRegisterParams() {
     if (isParameter(v.get()) && v->index < f_.numParams) params_[v->index] = v.get();
   if (f_.paramTypes.empty() || !hasDirectEntry(f_) || !Loops(cfg_).all().empty()) return;
   for (const Var *v : params_)
-    if (v && v->index < f_.paramTypes.size() && (f_.paramTypes[v->index] & kHeapTypes) == 0 && unwritten_.count(v))
-      registerParams_.insert(v);
+    if (v && !mayHoldHeap(*v) && unwritten_.count(v)) registerParams_.insert(v);
+}
+
+// A parameter of a typed copy whose types have no heap reference cannot hold one; any other may.
+bool FramePlan::mayHoldHeap(const Var &param) const {
+  return param.index >= f_.paramTypes.size() || (f_.paramTypes[param.index] & kHeapTypes) != 0;
 }
 
 // Parameters keep their slots, in order (but those in registers); the other frame variables something still loads,
@@ -112,7 +117,7 @@ void FramePlan::elideLoads(const BasicBlock &b) {
   uint32_t lastIndirect = 0;
   for (auto &ip : b.insts) {
     const Instruction &u = *ip;
-    if (!isGroupUser(u) && u.op != Op::Br && u.op != Op::CondBr) {
+    if (!isGroupUser(u) && u.op != Op::Br && u.op != Op::CondBr && u.op != Op::InlineEnter) { // held: own slots
       for (const Value *v : u.operands()) {
         if (v->kind() != Value::Kind::Instruction || !v->hasOneUse()) continue;
         auto &load = static_cast<const Instruction &>(*v);
@@ -229,6 +234,12 @@ void FramePlan::chooseHomes() {
       if (u->parent == b && pos_.at(u) > pos_.at(v)) return true;
     return false;
   };
+  // A value an inlined body holds (an inline.enter's operand, the argument of a parameter) keeps a slot of its own: a
+  // block parameter sharing it would take it over while the body runs.
+  std::unordered_set<const Value *> heldValues;
+  for (BasicBlock *b : cfg_.order())
+    for (auto &i : b->insts)
+      if (i->op == Op::InlineEnter && !isGroupUser(*i)) heldValues.insert(i->operands().begin(), i->operands().end());
   for (BasicBlock *b : cfg_.order()) {
     const Instruction *t = b->terminator();
     for (const Target &tg : t->targets) {
@@ -238,7 +249,7 @@ void FramePlan::chooseHomes() {
         const Value *v = tg.args[k];
         const BlockParam *p = tg.block->params[k].get();
         if (p->type() != Type::Item || homes_.count(p) || !isItemResult(v) || !v->hasOneUse() || homes_.count(v) ||
-            unit_.count(v))
+            unit_.count(v) || heldValues.count(p) || heldValues.count(v))
           continue;
         if (static_cast<const Instruction *>(v)->parent != b) continue;
         if (cfg_.dominates(tg.block, b) && (t->op != Op::Br || groupMember_.count(p) || readAfter(p, v, b))) continue;
@@ -336,11 +347,13 @@ void FramePlan::allocate() {
     if (v->kind() == Value::Kind::Instruction && shadowed_.count(static_cast<const Instruction *>(v)))
       shadowUnits.insert(u);
   std::vector<uint32_t> temps, shadows;
-  for (uint32_t k = 0; k < units_.size(); ++k) (shadowUnits.count(k) ? shadows : temps).push_back(k);
+  for (uint32_t k = 0; k < units_.size(); ++k)
+    if (!units_[k].pinned) (shadowUnits.count(k) ? shadows : temps).push_back(k);
   savedSize_ = numVarSlots_ + scan(temps, numVarSlots_);
   frameSize_ = savedSize_ + scan(shadows, savedSize_);
   for (auto &[user, u] : groupUnit_) groupBase_[user] = units_[u].slot;
   for (auto &[v, u] : unit_) {
+    if (units_[u].pinned) continue; // served by its parameter's slot (a Place)
     if (shadowUnits.count(u)) {
       shadowSlot_[static_cast<const Instruction *>(v)] = units_[u].slot;
       continue;
@@ -385,9 +398,22 @@ uint32_t FramePlan::scan(std::vector<uint32_t> order, uint32_t base) {
   return top;
 }
 
-// The arguments an inline.enter passes stay in their slots, the frame's argv, while its body runs: their group lives
-// to the body's last instruction (on every path, through the copies of the body).
+// The arguments an inline.enter passes stay in their slots while its body runs, as the callee's parameters would hold
+// them: the group, the frame's argv, of a body that reads them as received; else each argument's own unit (`heldArgs_`,
+// a value in a slot of its own). Either lives to the body's last instruction (on every path, through the copies of the
+// body).
 void FramePlan::extendArgumentGroups() {
+  for (const BasicBlock *b : cfg_.order())
+    for (auto &i : b->insts)
+      if (i->op == Op::InlineEnter && !groupUnit_.count(i.get()))
+        for (uint32_t k = 0; k < i->operands().size(); ++k) {
+          const Value *v = i->operand(k);
+          auto u = unit_.find(v);
+          auto h = homes_.find(v); // served in place: its variable holds it (a parameter: its pinned unit)
+          bool place = h != homes_.end() && h->second.kind == Home::Kind::Place;
+          if (u != unit_.end() && (!place || units_[u->second].pinned))
+            heldArgs_[i.get()].push_back({k, u->second});
+        }
   xir::walkBodies<const Instruction *>(cfg_, [&](const BasicBlock &b, auto &open) {
     bool changed = false;
     for (auto &i : b.insts) {
@@ -401,11 +427,20 @@ void FramePlan::extendArgumentGroups() {
       }
       uint32_t p = pos_.at(i.get());
       for (auto &enters : open)
-        for (const Instruction *e : enters)
+        for (const Instruction *e : enters) {
           if (auto g = groupUnit_.find(e); g != groupUnit_.end() && units_[g->second].end < p) {
             units_[g->second].end = p;
             changed = true;
           }
+          if (auto h = heldArgs_.find(e); h != heldArgs_.end())
+            for (auto [k, u] : h->second) {
+              changed |= heldIn_[i.get()].insert(u).second;
+              if (units_[u].end < p) {
+                units_[u].end = p;
+                changed = true;
+              }
+            }
+        }
     }
     return changed;
   });
@@ -422,6 +457,8 @@ void FramePlan::findBodyUnits() {
     };
     auto addGroup = [&](const Instruction *i) {
       if (auto g = groupUnit_.find(i); g != groupUnit_.end() && !open.empty()) open.back().insert(g->second);
+      if (auto h = heldArgs_.find(i); h != heldArgs_.end() && !open.empty())
+        for (auto [k, u] : h->second) open.back().insert(u);
     };
     for (auto &p : b.params) add(p.get());
     for (auto &i : b.insts) {
@@ -460,15 +497,16 @@ void FramePlan::addClears(std::vector<uint32_t> &slots, const std::unordered_set
   for (uint32_t u = 0; u < units_.size(); ++u)
     if (units_[u].start <= at && at <= units_[u].end) holdSlots(held, u);
   for (uint32_t k : units)
-    for (uint32_t s = 0; s < units_[k].size; ++s)
+    for (uint32_t s = 0; !units_[k].pinned && s < units_[k].size; ++s) // a parameter's: its own release alone
       if (held.insert(units_[k].slot + s).second) slots.push_back(units_[k].slot + s);
   std::sort(slots.begin(), slots.end());
 }
 
 void FramePlan::placeClears() {
   for (auto &[leave, units] : bodyUnits_) addClears(clears_[leave], units, pos_.at(leave));
-  // The inline.enters whose bodies are open at each frame.release: their argument groups are live there.
-  std::unordered_map<const Instruction *, std::unordered_set<const Instruction *>> openAt;
+  // The inline.enters whose bodies are open at each frame.release (their arguments are held there), and those of the
+  // innermost body, the one the release is in.
+  std::unordered_map<const Instruction *, std::unordered_set<const Instruction *>> openAt, innerAt;
   xir::walkBodies<const Instruction *>(cfg_, [&](const BasicBlock &b, auto &open) {
     bool changed = false;
     for (auto &i : b.insts) {
@@ -476,10 +514,31 @@ void FramePlan::placeClears() {
       else if (i->op == Op::InlineLeave) open.pop_back();
       else if (i->op == Op::FrameRelease)
         for (auto &enters : open)
-          for (const Instruction *e : enters) changed |= openAt[i.get()].insert(e).second;
+          for (const Instruction *e : enters) {
+            changed |= openAt[i.get()].insert(e).second;
+            if (&enters == &open.back()) changed |= innerAt[i.get()].insert(e).second;
+          }
     }
     return changed;
   });
+  // Whether release `i` lets go of parameter k of `fn` (in the body of `e`, inlined; null: the function's own): it is
+  // that parameter's release, or one is on every path to it (a copy of the value still live there kept it: once dead,
+  // nothing else would let go of it).
+  std::vector<const Instruction *> paramReleases;
+  for (const BasicBlock *b : cfg_.order())
+    for (auto &i : b->insts)
+      if (i->op == Op::FrameRelease && i->index) paramReleases.push_back(i.get());
+  auto releases = [&](const Instruction *r, const Function *fn, uint32_t k, const Instruction *e) {
+    return r->index == k + 1 && r->blockFn == fn && (e ? innerAt[r].count(e) != 0 : openAt[r].empty());
+  };
+  auto letsGo = [&](const Instruction *i, const Function *fn, uint32_t k, const Instruction *e) {
+    if (releases(i, fn, k, e)) return true;
+    for (const Instruction *r : paramReleases)
+      if (r != i && releases(r, fn, k, e) &&
+          (r->parent == i->parent ? pos_.at(r) < pos_.at(i) : cfg_.dominates(r->parent, i->parent)))
+        return true;
+    return false;
+  };
   for (const BasicBlock *b : cfg_.order()) {
     std::vector<uint32_t> nilNow; // the slots NIL since the block's last release (while no unit started), and where
     uint32_t beforeAt = 0;
@@ -497,16 +556,30 @@ void FramePlan::placeClears() {
       for (auto &[user, u] : groupUnit_)
         if (user->op == Op::InlineEnter ? open.count(user) != 0 : units_[u].start <= at && at <= units_[u].end)
           holdSlots(held, u);
+      // The arguments open bodies hold, but those this release lets go of (its parameter's, in the body it is in, or
+      // one let go of before): another parameter holding it too, of that body or of an outer one, or a later use, keeps
+      // it.
+      for (const Instruction *e : open)
+        if (auto h = heldArgs_.find(e); h != heldArgs_.end())
+          for (auto [k, u] : h->second)
+            if (!letsGo(i.get(), e->blockFn, k, e)) holdSlots(held, u);
       // A release right after another (`a := NIL`, `b := NIL`, ...), with no unit started in between, finds the slots
       // that one cleared still NIL: only the slots of the values that died since are left to clear.
       bool started = false;
       for (uint32_t u = 0; before && u < units_.size(); ++u)
         started |= beforeAt < units_[u].start && units_[u].start < at;
       if (!before || started) nilNow.clear();
-      held.insert(nilNow.begin(), nilNow.end());
+      // The release of this function's parameter's LOCAL: the parameter's slot, its pinned unit's (or, when no load of
+      // it is left, its own: nothing reads it). An argument group (a body that reads its arguments as received) keeps
+      // them as received, as the function called would.
+      bool own = i->index && i->blockFn == &f_;
       std::vector<uint32_t> &slots = clears_[i.get()];
+      held.insert(nilNow.begin(), nilNow.end());
+      const Var *param = own && i->index <= params_.size() ? params_[i->index - 1] : nullptr;
+      if (param && varSlot_.count(param) && !loadedParams_.count(param))
+        if (uint32_t s = varSlot_.at(param); held.insert(s).second) slots.push_back(s);
       for (uint32_t u = 0; u < units_.size(); ++u)
-        if (units_[u].start < at)
+        if (units_[u].start < at && (!units_[u].pinned || letsGo(i.get(), &f_, units_[u].param, nullptr)))
           for (uint32_t s = 0; s < units_[u].size; ++s)
             if (held.insert(units_[u].slot + s).second) slots.push_back(units_[u].slot + s);
       std::sort(slots.begin(), slots.end());
@@ -523,7 +596,7 @@ void FramePlan::placeLoopClears() {
   for (auto &loop : loops.all()) {
     std::unordered_set<uint32_t> units;
     auto add = [&](const Value *v) {
-      if (auto u = unit_.find(v); u != unit_.end()) units.insert(u->second);
+      if (auto u = unit_.find(v); u != unit_.end() && !units_[u->second].pinned) units.insert(u->second);
     };
     for (const BasicBlock *b : loop->blocks) {
       for (auto &p : b->params) add(p.get());
@@ -565,6 +638,35 @@ const std::vector<uint32_t> &FramePlan::clearsAt(const Instruction *at) const {
   static const std::vector<uint32_t> none;
   auto c = clears_.find(at);
   return c == clears_.end() ? none : c->second;
+}
+
+bool FramePlan::movesOut(const Instruction &load) const {
+  const Var *v = load.var;
+  return load.moves && load.access == Access::Direct && isParameter(v) && !registerParams_.count(v) && mayHoldHeap(*v);
+}
+
+void FramePlan::pinMovedParams() {
+  for (BasicBlock *b : cfg_.order())
+    for (auto &i : b->insts) {
+      if (i->op == Op::Load && isParameter(i->var)) loadedParams_.insert(i->var);
+      auto h = homes_.find(i.get());
+      if (i->op != Op::Load || !movesOut(*i) || h == homes_.end() || h->second.kind != Home::Kind::Place) continue;
+      uint32_t u = unitOf(i.get());
+      units_[u].pinned = true;
+      units_[u].slot = varSlot_.at(i->var);
+      units_[u].param = i->var->index;
+    }
+}
+
+std::optional<uint32_t> FramePlan::lastUse(const Value *v, const Instruction *user) const {
+  auto u = unit_.find(v);
+  if (u == unit_.end() || types_.noHeap(v)) return std::nullopt; // nothing to let go
+  if (auto h = heldIn_.find(user); h != heldIn_.end() && h->second.count(u->second)) return std::nullopt; // a body's
+  const Unit &unit = units_[u->second];
+  if (unit.end != pos_.at(user) || unit.start >= pos_.at(user)) return std::nullopt;
+  const Home &h = homes_.at(v); // a load served in place has a unit for its shadow slot: the variable is not the call's
+  if (h.kind != Home::Kind::Slot) return std::nullopt;
+  return h.slot;
 }
 
 const Home &FramePlan::home(const Value *v) const {

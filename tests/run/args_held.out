@@ -1,0 +1,12 @@
+
+passed on last: kept
+unread, typed: freed 3 method: freed
+outer holds: kept
+passed twice: kept
+a STATIC: kept
+carried by a loop: .F. .T.
+PCount(): 3kept
+shown
+after an inlined body: destroyed number kept: 5 1234567 8 910112468***16182022369****24273033
+copied, both dropped: keptO then destroyed keptO then destroyedxxx
+parameter dropped, its copy passed on: kept

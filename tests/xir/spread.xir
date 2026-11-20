@@ -9,7 +9,7 @@ byref:
   %2 = call.forward PASS.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   %5 = args.rest
   %6 = call OTHER extern %4, 1:w10, %5
   ret %6

@@ -91,10 +91,10 @@ Function *Generator::declare(const FuncDecl &f) {
 // passed one: one that is never shared (not captured, never passed on by
 // reference) cannot become one. A function with such parameters is generated
 // twice. Its own body starts by testing them (params.ref): when none holds a
-// reference, each is copied once into a LOCAL that stands for it, which
-// mem2reg can make an SSA value; otherwise the call goes, with its arguments
-// as received, to the other body (NAME.byref), which reaches the parameters
-// through their references as written.
+// reference, each is moved once into a LOCAL that stands for it (nothing reads
+// the parameter after), which mem2reg can make an SSA value; otherwise the call
+// goes, with its arguments as received, to the other body (NAME.byref), which
+// reaches the parameters through their references as written.
 void Generator::genFunction(const FuncDecl &f, Function *fn) {
   if (f.resumable()) {
     genResumable(f, fn);
@@ -194,7 +194,9 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
     for (size_t k = 0; k < plain.size(); ++k) {
       Var *param = params[k];
       Var *local = fn->addVar(Var::Kind::Frame, f.numLocals + (uint32_t)k, param->name);
-      b.store(local, Access::Direct, b.load(param, Access::Direct)); // no reference: its own item
+      Instruction *moved = b.load(param, Access::Direct); // no reference: its own item
+      moved->moves = true; // the LOCAL alone holds the value: x := NIL lets it go
+      b.store(local, Access::Direct, moved);
       cur_.paramLocals[plain[k]] = local;
     }
   }

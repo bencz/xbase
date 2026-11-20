@@ -7,7 +7,7 @@ entry:
   %1 = class.new 0
   inline.leave
   %3 = send NEW %1
-  inline.enter TFOO:GET
+  inline.enter TFOO:GET %3
   store $f0, %3
   %6 = block TFOO:GET.block1 $f0
   %7 = load $f0 maybe_ref

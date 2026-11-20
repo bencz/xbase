@@ -76,14 +76,15 @@ void CodeGen::initTypes() {
     tbaa_[(size_t)m] = md.createTBAAStructTagNode(type, type, 0);
   }
   mod_.getOrInsertNamedMetadata(kItemTagName)->addOperand(tbaa_[(size_t)Mem::Item]); // TagItemMemsets
-  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, ptrTy_}, "xb_ctx_head"); // the [ABI] fields of xb_ctx
+  // the [ABI] fields of xb_ctx
+  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, ptrTy_, ptrTy_}, "xb_ctx_head");
   nilItem_ = new GlobalVariable(mod_, itemTy_, true, GlobalValue::InternalLinkage, Constant::getNullValue(itemTy_),
                                 "xb.nil");
   nilItem_->setAlignment(itemAlign_);
   rtCondError_ = rt("xb_cond_error", i32_, {ptrTy_, ptrTy_});
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
-  rtAbiCheck_ =
-      rt("xb_abi_check", voidTy, {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
+  rtAbiCheck_ = rt("xb_abi_check", voidTy,
+                   {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
   rtStackOverflow_ = rt("xb_stack_overflow", voidTy, {ptrTy_});
   rtStackDeep_ = rt("xb_stack_deep", i32_, {ptrTy_, intPtrTy_});
   if (auto *f = dyn_cast<Function>(rtStackDeep_.getCallee())) { // it reads and writes the context alone (core/ctx.c)
@@ -429,10 +430,57 @@ void CodeGen::genThunk(const xir::Function &f) {
     Words w = loadWords(argItem(argc, argv, k));
     args.insert(args.end(), {w.header, w.payload});
   }
+  takeLent(f, thunk, argc, argv);
   CallInst *result = b_.CreateCall(body, args);
   if (words) storeWords(thunk->getArg(1), b_.CreateExtractValue(result, 0), b_.CreateExtractValue(result, 1));
   else result->setTailCall();
   b_.CreateRetVoid();
+}
+
+// Arguments the caller lent (xb_ctx.lent is argv), once their words are read: the loan ends, and those the function
+// has parameters for are set to NIL, so that the function alone holds what only they held (nothing can collect before
+// its body stores the words into its frame).
+void CodeGen::takeLent(const xir::Function &f, Function *thunk, Value *argc, Value *argv) {
+  if (f.numParams == 0) return;
+  Value *at = b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxLent);
+  auto block = [&](const char *name) { return BasicBlock::Create(ctx_, name, thunk); };
+  BasicBlock *take = block("args.take"), *all = block("args.all"), *some = block("args.some"), *call = block("call");
+  b_.CreateCondBr(b_.CreateICmpEQ(loadFrom(ptrTy_, at, Mem::Ctx, "lent"), argv), take, call);
+  b_.SetInsertPoint(take);
+  tag(b_.CreateStore(ConstantPointerNull::get(ptrTy_), at), Mem::Ctx);
+  b_.CreateCondBr(b_.CreateICmpUGE(argc, ConstantInt::get(i32_, f.numParams)), all, some);
+  b_.SetInsertPoint(all);
+  for (uint32_t k = 0; k < f.numParams; ++k) setNil(b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k));
+  b_.CreateBr(call);
+  b_.SetInsertPoint(some); // fewer arguments than parameters: those given
+  for (uint32_t k = 0; k < f.numParams; ++k) {
+    BasicBlock *one = block("args.one"), *next = block("args.next");
+    b_.CreateCondBr(b_.CreateICmpULT(ConstantInt::get(i32_, k), argc), one, call);
+    b_.SetInsertPoint(one);
+    setNil(b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k));
+    b_.CreateBr(next);
+    b_.SetInsertPoint(next);
+  }
+  b_.CreateBr(call);
+  b_.SetInsertPoint(call);
+}
+
+// Whether a call through the dynamic entry lends its arguments: when one from operand `first` may refer to a heap
+// object (a send's object alone is no reason: its method holds it, Self, until it returns, as its caller would).
+bool CodeGen::lends(const xir::Instruction &i, size_t first) const {
+  for (size_t k = first; k < i.operands().size(); ++k)
+    if (!plan_->types().noHeap(i.operand(k))) return true;
+  return false;
+}
+
+// A call through the dynamic entry whose arguments are the caller's temporaries (nothing reads them after it): the
+// callee may take them (xb_ctx.lent; takeLent), until the call returns.
+void CodeGen::lend(Value *argv) {
+  tag(b_.CreateStore(argv, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxLent)), Mem::Ctx);
+}
+
+void CodeGen::endLend() {
+  tag(b_.CreateStore(ConstantPointerNull::get(ptrTy_), b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxLent)), Mem::Ctx);
 }
 
 // Prologue: the item frame (sized by the frame plan), the parameters copied
@@ -504,6 +552,9 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnSelf_->setName("self");
   }
   pushFrame(plan.frameSize(), f.numParams, argc, argv, procOf(f), f.readsArgs && argc);
+  // A function without the direct entry keeps its arguments (it reads them as received, forwards them, or is the
+  // other body of one that does): a loan of them ends here, so that no call it makes with them takes them.
+  if (f.kind == xir::Function::Kind::Program && !fnDirect_) endLend();
   // An activation that may create PRIVATEs ends them on its way out, also when it unwinds.
   bool privates = f.callsPrivates;
   for (auto &b : f.blocks)
@@ -802,6 +853,7 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t ctxFrames = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxFrames);
   uint64_t ctxDecimals = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxDecimals);
   uint64_t ctxStackLimit = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxStackLimit);
+  uint64_t ctxLent = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxLent);
   uint64_t arrayData = dl_.getStructLayout(arrayTy_)->getElementOffset(ArrayData);
   uint64_t refValue = dl_.getStructLayout(refTy_)->getElementOffset(RefValue);
   uint64_t hashEntries = dl_.getStructLayout(hashTy_)->getElementOffset(HashEntries);
@@ -811,6 +863,7 @@ void CodeGen::genEntry(const xir::Function &start) {
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
                               ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
                               ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, ctxStackLimit),
+                              ConstantInt::get(i32_, ctxLent),
                               ConstantInt::get(i32_, arrayData),
                               ConstantInt::get(i32_, refValue), ConstantInt::get(i32_, hashEntries),
                               ConstantInt::get(i32_, objectVars), ConstantInt::get(i32_, strBufBytes)});

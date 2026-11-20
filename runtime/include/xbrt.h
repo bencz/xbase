@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 55u
+#define XB_ABI_VERSION 56u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -277,7 +277,13 @@ struct xb_frame {
  * `xb_frame *frames` (the innermost frame of the chain), `const char
  * *stack_limit` (a function whose frame lies below it calls xb_stack_deep
  * and, unless that lets it go on, xb_stack_overflow before its body runs,
- * then returns unwinding; NULL: no limit). */
+ * then returns unwinding; NULL: no limit), `xb_item *lent` (the arguments a
+ * compiled caller lends for the call it makes, NULL after it: a compiled
+ * function with a direct entry called with them as its argv reads the items it
+ * has parameters for, sets them to NIL and `lent` to NULL, so that it alone
+ * holds what only they held; one without a direct entry ends the loan. Runtime
+ * code may pass the argv it received on whole only if it reads none of it after
+ * the call, as a send does; otherwise it sets `lent` to NULL first). */
 typedef struct xb_ctx xb_ctx;
 
 /* [ABI] dynamic calling convention used by every xBase-callable function:
@@ -353,13 +359,14 @@ int32_t  xb_pending_gc(xb_ctx *ctx);
 
 /* The layout the module was compiled for: offsets of xb_str.bytes,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
- * xb_ctx.stack_limit, xb_array.data (after len and cap), xb_ref.value (after coll and index),
+ * xb_ctx.stack_limit, xb_ctx.lent, xb_array.data (after len and cap), xb_ref.value (after coll and index),
  * xb_hash.entries (after its five counts), xb_object.vars (after cls and nvars)
  * and xb_strbuf.bytes (after cap and used). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
-                      uint32_t ctx_stack_limit_offset, uint32_t array_data_offset, uint32_t ref_value_offset,
-                      uint32_t hash_entries_offset, uint32_t object_vars_offset, uint32_t strbuf_bytes_offset);
+                      uint32_t ctx_stack_limit_offset, uint32_t ctx_lent_offset, uint32_t array_data_offset,
+                      uint32_t ref_value_offset, uint32_t hash_entries_offset, uint32_t object_vars_offset,
+                      uint32_t strbuf_bytes_offset);
 /* A frame (its address) below the context's stack_limit: xb_stack_deep gives
  * 1 when that limit was only the mark of a deep stack (core/ctx.c), whose
  * pages go back to the system once it is shallow again, and the frame lies

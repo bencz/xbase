@@ -9,7 +9,7 @@ byref:
   %2 = call.forward MAIN.byref {any}
   ret %2
 body:
-  %4 = load $f0 {any}
+  %4 = load $f0 move {any}
   inline.enter ACK.typed3
   %6 = call ACK.typed3 2:w10, 2:w0 {int,double}
   %7 = call ACK.typed4 1:w0, %6 {int,double}
@@ -36,8 +36,8 @@ function ACK.typed1 internal params 2 {
   $f0 = frame 0 "M"
   $f1 = frame 1 "N"
 entry:
-  %0 = load $f0 {any}
-  %1 = load $f1 {int}
+  %0 = load $f0 move {any}
+  %1 = load $f1 move {int}
   %2 = binary exacteq %0, 0:w10 {any}
   %3 = truth %2
   cond_br %3, then, else
@@ -64,8 +64,8 @@ function ACK.typed2 internal params 2 {
   $f0 = frame 0 "M"
   $f1 = frame 1 "N"
 entry:
-  %0 = load $f0 {any}
-  %1 = load $f1 {int,double}
+  %0 = load $f0 move {any}
+  %1 = load $f1 move {int,double}
   %2 = binary exacteq %0, 0:w10 {any}
   %3 = truth %2
   cond_br %3, then, else
@@ -92,8 +92,8 @@ function ACK.typed3 internal params 2 {
   $f0 = frame 0 "M"
   $f1 = frame 1 "N"
 entry:
-  %0 = load $f0 {int}
-  %1 = load $f1 {int}
+  %0 = load $f0 move {int}
+  %1 = load $f1 move {int}
   %2 = binary exacteq %0, 0:w10 {logical}
   %3 = truth %2
   cond_br %3, then, else
@@ -120,8 +120,8 @@ function ACK.typed4 internal params 2 {
   $f0 = frame 0 "M"
   $f1 = frame 1 "N"
 entry:
-  %0 = load $f0 {int}
-  %1 = load $f1 {int,double}
+  %0 = load $f0 move {int}
+  %1 = load $f1 move {int,double}
   %2 = binary exacteq %0, 0:w10 {logical}
   %3 = truth %2
   cond_br %3, then, else
@@ -148,8 +148,8 @@ function ACK.typed6 internal params 2 {
   $f0 = frame 0 "M"
   $f1 = frame 1 "N"
 entry:
-  %0 = load $f0 {int,double}
-  %1 = load $f1 {int}
+  %0 = load $f0 move {int,double}
+  %1 = load $f1 move {int}
   %2 = binary exacteq %0, 0:w10 {logical}
   %3 = truth %2
   cond_br %3, then, else
@@ -176,8 +176,8 @@ function ACK.typed7 internal params 2 {
   $f0 = frame 0 "M"
   $f1 = frame 1 "N"
 entry:
-  %0 = load $f0 {int,double}
-  %1 = load $f1 {int,double}
+  %0 = load $f0 move {int,double}
+  %1 = load $f1 move {int,double}
   %2 = binary exacteq %0, 0:w10 {logical}
   %3 = truth %2
   cond_br %3, then, else

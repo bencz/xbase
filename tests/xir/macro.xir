@@ -34,7 +34,7 @@ byref:
   %2 = call.forward NOMACRO.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   %5 = binary add %4, "a & b"
   ret %5
 }

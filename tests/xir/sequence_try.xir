@@ -10,7 +10,7 @@ byref:
   %2 = call.forward MAIN.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   store $f1, %4
   %6 = block MAIN.block2
   %7 = seq.with %6

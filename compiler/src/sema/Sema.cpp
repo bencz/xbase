@@ -522,9 +522,18 @@ void Sema::stmt(Stmt &st, Scope &s) {
 }
 
 // The function or codeblock being checked keeps the arguments it received in its frame: something it runs reads them.
-void Sema::keepsArgs() {
-  if (Frame &f = frames_.back(); f.block) f.block->readsArgs = true;
-  else if (f.boxed) curFunc_->readsArgs = true;
+// With `params`, it also reads and writes its parameters there, which then stay there as written (a codeblock's own
+// parameters always do).
+void Sema::keepsArgs(bool params) {
+  if (Frame &f = frames_.back(); f.block) {
+    f.block->readsArgs = true;
+    f.block->readsParams |= params;
+  } else if (f.boxed) {
+    curFunc_->readsArgs = true;
+    curFunc_->readsParams |= params;
+    if (params)
+      for (uint32_t k = 0; k < curFunc_->params.size(); ++k) markBoxed(f, k);
+  }
 }
 
 void Sema::expr(Expr &e, Scope &s) {
@@ -585,16 +594,7 @@ void Sema::expr(Expr &e, Scope &s) {
       else if (curFunc_) curFunc_->callsPrivates = true;
     }
     if (!c.callee || !c.callee->args) break;
-    // The callee reads the arguments this function or codeblock received, in its frame; one whose parameters it
-    // also reads and writes keeps them there, as written (a codeblock's own parameters always stay there).
-    keepsArgs();
-    if (Frame &f = frames_.back(); f.block) {
-      f.block->readsParams |= c.callee->params;
-    } else if (f.boxed) {
-      curFunc_->readsParams |= c.callee->params;
-      if (c.callee->params)
-        for (uint32_t k = 0; k < curFunc_->params.size(); ++k) markBoxed(f, k);
-    }
+    keepsArgs(c.callee->params);
     break;
   }
   case ExprKind::Send: {
@@ -669,12 +669,12 @@ void Sema::expr(Expr &e, Scope &s) {
     break;
   case ExprKind::Macro: // the text is evaluated here; what it names, when it runs (never this function's LOCALs)
     expr(*static_cast<MacroExpr &>(e).text, s);
-    keepsArgs(); // the text may call PCount(), __ArgError(): the arguments this function or codeblock received
+    keepsArgs(true); // the text may call PCount(), PValue(): the arguments and parameters of this function or block
     break;
   case ExprKind::MacroCall: {
     auto &m = static_cast<MacroCallExpr &>(e);
     expr(*m.text, s);
-    keepsArgs();
+    keepsArgs(true);
     for (auto &a : m.args) expr(*a, s);
     break;
   }

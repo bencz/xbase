@@ -87,6 +87,7 @@ void Instruction::copyData(const Instruction &from) {
   binop = from.binop;
   byOne = from.byOne;
   grows = from.grows;
+  moves = from.moves;
   pred = from.pred;
   imm = from.imm;
   var = from.var;

@@ -320,7 +320,12 @@ Value *Generator::genAssign(const AssignExpr &a) {
   }
   store(target, value);
   // `x := NIL` lets go of what x held: values dead now must not keep it in their frame slots
-  if (!a.compound && a.value->kind == ExprKind::Nil && target.where == VarWhere::Frame) cur_.b->frameRelease();
+  if (!a.compound && a.value->kind == ExprKind::Nil && target.where == VarWhere::Frame) {
+    uint32_t param = 0; // the LOCAL standing for a parameter: the parameter's slot lets go too
+    for (auto &[slot, local] : cur_.paramLocals)
+      if (local == varOf(target)) param = slot + 1;
+    cur_.b->frameRelease(param, cur_.fn);
+  }
   return value;
 }
 

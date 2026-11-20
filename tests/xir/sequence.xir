@@ -11,7 +11,7 @@ byref:
   %2 = call.forward MAIN.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   store $f2, %4
   store $f1, 1:w10
   br seq.body

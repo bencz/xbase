@@ -3,7 +3,7 @@ module AEVAL_INLINE
 function MAIN params 0 {
 entry:
   %0 = array 1:w10, 2:w10, 3:w10
-  inline.enter AEVAL
+  inline.enter AEVAL %0
   %2 = call LEN native %0
   %3 = call __RANGESTART native %2, nil
   %4 = subst.check guard 12 %3
@@ -31,7 +31,7 @@ for.body.inline:
   cond_br %23, for.body.inline.subst, for.body.inline.2
 endif.4.inline:
   %25 = index %0, %18
-  inline.enter MAIN.block1
+  inline.enter MAIN.block1 %25, %18
   %27 = binary add.grow %19, %25
   %28 = subst.check %27
   cond_br %28, endif.4.inline.subst, endif.4.inline.3
@@ -72,7 +72,7 @@ for.body.inline.any:
   br for.body.inline.2.any(%53, %54, %55, %56, %59)
 endif.4.inline.any:
   %61 = index %70, %68
-  inline.enter MAIN.block1
+  inline.enter MAIN.block1 %61, %68
   %63 = binary add.grow %69, %61
   br endif.4.inline.3.any(%68, %70, %71, %63)
 seq.exit.5.inline.any(%65: item):

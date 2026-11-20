@@ -12,11 +12,11 @@ byref:
   %2 = call.forward MAIN.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   store $f1 maybe_ref, 0:w10
   barrier $f1 maybe_ref
   %7 = ref $f1
-  inline.enter MAIN.block5
+  inline.enter MAIN.block5 %7
   store $f6, %7
   %10 = load $f6 maybe_ref
   %11 = binary add.one %10, 1:w0
@@ -36,7 +36,7 @@ each.body:
   %24 = i.add %19, i64 1
   each.move $f3, false, %24
   %26 = load $f3 ref
-  inline.enter MAIN.block6
+  inline.enter MAIN.block6 %26
   %28 = binary mul %26, 2:w10
   inline.leave
   store $f3 ref, %28
@@ -59,7 +59,7 @@ entry:
   store $f1 maybe_ref, 0:w10
   barrier $f1 maybe_ref
   %2 = ref $f1
-  inline.enter MAIN.block2
+  inline.enter MAIN.block2 %2
   store $f5, %2
   %5 = load $f5 maybe_ref
   %6 = binary add.one %5, 1:w0
@@ -80,7 +80,7 @@ each.body:
   %20 = i.add %15, i64 1
   each.move $f3, false, %20
   %22 = load $f3 ref
-  inline.enter MAIN.block3
+  inline.enter MAIN.block3 %22
   %24 = binary mul %22, 2:w10
   inline.leave
   store $f3 ref, %24

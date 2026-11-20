@@ -4,7 +4,10 @@ filled: .T.
 in a loop: .T.
 tasks waited for: .T.
 destructor: .T.
+parameter: .T. .T.
 mid-expression:        306        323
+passed, read after:        322
+kept while the call runs: kept kept
 nested loops:       6026
 recover: kept released
 inlined with PCount():         25         10

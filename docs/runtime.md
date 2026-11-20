@@ -1016,7 +1016,12 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 ## Errors and pending requests
 
 `xb_ctx` starts with the fields compiled code uses (`xbrt.h`): `uint32_t pending`, `int32_t set_decimals` (SET DECIMALS,
-which inline `/` and `%` read), `xb_frame *frames` and `const char *stack_limit` ([Frames](#frames)). `pending` holds
+which inline `/` and `%` read), `xb_frame *frames`, `const char *stack_limit` ([Frames](#frames)) and `xb_item *lent`
+(the arguments a compiled caller lends for the call it makes, `NULL` after it: a compiled function with a direct entry
+whose `argv` they are reads the items it has parameters for, Self included, sets them to `NIL` and the field to `NULL`,
+so that it alone holds what only they held; one without a direct entry ends the loan in its prologue). Runtime code
+passes the `argv` it received on whole only where it reads none of it after the call (a send's dispatch, `Dispose`, an
+enumerable message of a generator); code that would read it sets the field to `NULL` first. `pending` holds
 requests. The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`,
 `XB_PENDING_FINALIZE` when there are objects to destroy, `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro
 operator](#macro-operator), and `XB_PENDING_FAIL` when a task fails: an error the default handler gave up on in a task,
@@ -1597,9 +1602,10 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   the rest): the collection raises `XB_PENDING_FINALIZE` on the context that runs destructors, whose next pending test
   closes them (and so does the next step any thread runs), and `xb_env_reap_all` closes every one left suspended at the
   program's end. Each thread context keeps the last environment that ended for the next one (`spareEnv`): an
-  asynchronous call that does not suspend allocates no environment, nor one that ends on the thread whose recent list has
-  it last (it leaves the list then); one that ends while another place lists it is freed by the next
-  collection. One that creates PRIVATEs copies the bindings it shares (once) and grows its own stack of PRIVATEs. The program's exit code is the process's.
+  asynchronous call that does not suspend allocates no environment, nor one that ends on the thread whose recent list
+  has it last (it leaves the list then); one that ends while another place lists it is freed by the next collection. One
+  that creates PRIVATEs copies the bindings it shares (once) and grows its own stack of PRIVATEs. The program's exit
+  code is the process's.
 - Program threads (`rtl/threads.c`): `xb_program_thread_start` starts a thread with the stack it is given (reserved,
   committed as used): 16 MB for `ThreadStart`'s (`XB_PROGRAM_THREAD_STACK`), 4 MB for the scheduler's workers and its
   timers' thread (`XB_WORKER_STACK`: most of it for the program's calls, above the stack error's reserve,

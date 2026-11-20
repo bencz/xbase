@@ -21,6 +21,6 @@ for.end:
 function ID internal params 1 {
   $f0 = frame 0 "X"
 entry:
-  %0 = load $f0
+  %0 = load $f0 move
   ret %0
 }

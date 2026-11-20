@@ -14,8 +14,8 @@ function MUL internal params 2 {
   $f0 = frame 0 "A"
   $f1 = frame 1 "B"
 entry:
-  %0 = load $f0
-  %1 = load $f1
+  %0 = load $f0 move
+  %1 = load $f1 move
   %2 = binary mul %0, %1
   ret %2
 }

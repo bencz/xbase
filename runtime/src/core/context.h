@@ -71,10 +71,11 @@ typedef struct xb_env {
  * (its frames, C roots, a BREAK on its way, the error blocks running), caches of the thread's own, and the
  * environment of the flow it runs. */
 struct xb_ctx {
-  uint32_t  pending;        /* [ABI] the first four fields, in this order (see xbrt.h) */
+  uint32_t  pending;        /* [ABI] the first five fields, in this order (see xbrt.h) */
   int32_t   set_decimals;   /* SET DECIMALS: compiled code reads it for / and % (the thread's until tasks switch) */
   xb_frame *frames;         /* innermost frame of compiled code; frames are GC roots */
   const char *stack_limit;  /* below it compiled code calls xb_stack_deep, then raises the stack error (core/ctx.c) */
+  xb_item  *lent;           /* the arguments a compiled caller lends for its call (xbrt.h) */
   xb_env   *env;
   const char *stack_low;    /* the lowest address of the thread's stack the program may use (NULL: unknown) */
   const char *stack_mark;   /* where a deep stack starts (xb_stack_deep), NULL: no mark on this stack */

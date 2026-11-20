@@ -207,6 +207,9 @@ public:
   // Binary add whose result goes back where its left operand came from (`x += y`, `x := x + y + ...`): a string result
   // is made to grow (xb_op_add_grow).
   bool grows = false;
+  // Load of a parameter into the LOCAL that stands for it (parameter versioning): nothing reads the parameter after,
+  // so its slot keeps the value until that LOCAL is set to NIL (FramePlan::pinMovedParams).
+  bool moves = false;
   IntPred pred = IntPred::Eq;
   double imm = 0.0;                   // NumDefaultDec; SubstCheck: the types a guard expects (0: none)
   Var *var = nullptr;                 // Load, Store, Barrier, Each*, RefVar
@@ -216,12 +219,14 @@ public:
                                       // Field*: the field's name
   std::string alias;                  // Field* without an area operand: the work area's alias ("" the current one)
   uint32_t index = 0; // MvParam: the argument, from 0; GenYield: the state it resumes in; SendMacro: 1 to assign;
-                      // ObjectGet, ObjectSet: the instance variable's slot
+                      // ObjectGet, ObjectSet: the instance variable's slot; FrameRelease: 1 + the parameter of
+                      // blockFn whose LOCAL (parameter versioning) was set to NIL, 0 for any other variable
   // Send from a method: the index of its class in Module::classes (what the send may reach), -1 elsewhere, and
   // whether it is Super:message; ClassNew: the class.
   int32_t classIndex = -1;
   bool superSend = false;
-  Function *blockFn = nullptr;        // MakeBlock; AsyncNew: the entry it runs in (its own, inlined or not)
+  // MakeBlock; AsyncNew: the entry it runs in (its own, inlined or not); FrameRelease with a parameter: its function
+  Function *blockFn = nullptr;
   std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
   std::vector<Target> targets;        // Br: one; CondBr: then, else (operand 0 is the condition)
 

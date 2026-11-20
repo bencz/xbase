@@ -185,6 +185,7 @@ Function *makeCopy(Module &m, const Function &g, const std::vector<TypeSet> &typ
     };
     if (i->var) i->var = varOf(i->var);
     for (Var *&v : i->captures) v = varOf(v);
+    if (i->op == Op::FrameRelease && i->blockFn == &g) i->blockFn = &c; // a parameter of the copy's own
     if (origins && i->op == Op::Call) (*origins)[i] = static_cast<const Instruction *>(orig);
   }
   dropReferenceTest(c); // its calls pass no reference

@@ -9,7 +9,7 @@ byref:
   %2 = call.forward COUNT.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   %5 = call PCOUNT native
   %6 = binary add %5, %4
   ret %6

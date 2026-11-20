@@ -9,7 +9,7 @@ byref:
   %2 = call.forward SUM.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   br for.test(1:w10, 0:w10)
 for.test(%6: item, %7: item):
   %8 = call LEN native %4

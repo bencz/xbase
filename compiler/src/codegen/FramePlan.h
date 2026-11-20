@@ -5,6 +5,7 @@
 #include "xir/Types.h"
 
 #include <map>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -37,7 +38,8 @@ struct Home {
 // The frame of a function: the parameters in slots 0 .. numParams-1 (the
 // prologue copies them there; in a typed copy with a direct entry and no loop,
 // a parameter of types without heap references that nothing writes stays out
-// of the frame, in an item of its own: `inRegisters`), then the other frame variables still
+// of the frame, in an item of its own: `inRegisters`; a value moved out of a parameter is served by its slot, a unit
+// pinned there: pinMovedParams), then the other frame variables still
 // in memory (those mem2reg did not make values), then temporaries. Every live
 // item value that needs storage gets a slot; slots are assigned by linear scan
 // over live intervals and reused once free.
@@ -87,6 +89,10 @@ public:
   // A loop exit that other blocks reach too (the header of the loop after it, say) clears them on the loop's edges to
   // it instead, which run once per exit: clearsOnEdge.
   const std::vector<uint32_t> &clearsAtStart(const xir::BasicBlock *b) const;
+  // The slot of `v` when `user` is its last use and the slot is its own (no later position uses its unit, and no loop
+  // carries it): a direct call clears the slot once it read the value, which the callee then holds alone, and a group
+  // (a call's arguments, an array's elements) once it copied the value.
+  std::optional<uint32_t> lastUse(const xir::Value *v, const xir::Instruction *user) const;
   const std::vector<uint32_t> &clearsOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to) const;
 
 private:
@@ -94,9 +100,18 @@ private:
     uint32_t start = UINT32_MAX, end = 0;
     uint32_t size = 1;           // slots (a group has one per operand)
     uint32_t slot = 0;
+    bool pinned = false;         // a parameter's slot, where a value moved out of it is read (pinMovedParams)
+    uint32_t param = 0;          // pinned: the parameter
   };
 
   void findRegisterParams();
+  // Loads that move a value out of a parameter (Instruction::moves) that may hold a heap reference, in a slot. Nothing
+  // writes the parameter, so the slot serves the value: the value's unit is that slot (pinned). The parameter keeps
+  // it while the function runs, as its caller's argument did (an object is not destroyed while its method or a
+  // function it was passed to still runs): only a frame.release of the LOCAL standing for it clears it, where dead.
+  void pinMovedParams();
+  bool movesOut(const xir::Instruction &load) const;
+  bool mayHoldHeap(const xir::Var &param) const;
   void placeVariables();
   void number();
   void chooseHomes();
@@ -129,6 +144,11 @@ private:
   std::unordered_map<const xir::Value *, uint32_t> unit_;          // values in slots -> their unit
   std::unordered_map<const xir::Value *, uint32_t> groupMember_;   // value -> operand index in its group
   std::unordered_map<const xir::Instruction *, uint32_t> groupUnit_, groupBase_;
+  // inline.enter -> the units of the arguments it holds in place (operand index, unit)
+  std::unordered_map<const xir::Instruction *, std::vector<std::pair<uint32_t, uint32_t>>> heldArgs_;
+  // instruction in inlined bodies -> the units of the arguments their open enters hold there
+  std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> heldIn_;
+  std::unordered_set<const xir::Var *> loadedParams_; // parameters a load still reads (pinned or not)
   std::unordered_set<const xir::Instruction *> forwardedStores_;
   std::unordered_set<const xir::Instruction *> shadowed_;               // elided loads that need a shadow slot
   std::unordered_map<const xir::Instruction *, uint32_t> shadowSlot_;

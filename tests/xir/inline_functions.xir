@@ -5,11 +5,11 @@ function MAIN params 1 {
   $f3 = frame 3 "X"
 entry:
   %0 = load $f0 maybe_ref
-  inline.enter SQ
+  inline.enter SQ %0
   %2 = binary mul %0, %0
   inline.leave
   %4 = ref $f0
-  inline.enter BUMP.byref
+  inline.enter BUMP.byref %4
   store $f3, %4
   %7 = load $f3 maybe_ref
   %8 = binary add.one %7, 1:w0
@@ -27,7 +27,7 @@ entry:
 function SQ internal params 1 {
   $f0 = frame 0 "X"
 entry:
-  %0 = load $f0
+  %0 = load $f0 move
   %1 = binary mul %0, %0
   ret %1
 }
@@ -41,7 +41,7 @@ byref:
   %2 = call.forward BUMP.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   %5 = binary add.one %4, 1:w0
   ret
 }
@@ -59,7 +59,7 @@ entry:
 function FACT.typed1 internal params 1 {
   $f0 = frame 0 "K"
 entry:
-  %0 = load $f0
+  %0 = load $f0 move
   %1 = binary le %0, 1:w10
   %2 = truth %1
   cond_br %2, iif.end(1:w10), iif.else

@@ -9,7 +9,7 @@ byref:
   %2 = call.forward MAIN.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   inline.enter TPAIR
   %6 = class.new 1
   inline.leave
@@ -17,13 +17,13 @@ body:
   %9 = array %8
   %10 = object.set 0 %8, 1:w10
   %11 = object.get 0 %8
-  inline.enter TBASIS:DOUBLED
+  inline.enter TBASIS:DOUBLED %8
   %13 = object.get 3 %8
   %14 = binary mul %13, 2:w10
   inline.leave
   %16 = binary add %11, %14
   %17 = object.set 1 %8, %16
-  inline.enter TPAIR:TOTAL
+  inline.enter TPAIR:TOTAL %8
   %19 = object.get 0 %8
   %20 = object.get 1 %8
   %21 = binary add %19, %20
@@ -33,7 +33,7 @@ body:
   %25 = truth %24
   cond_br %25, endif.inline(100:w10), endif.inline(%23)
 endif.inline(%27: item):
-  inline.enter TBASIS:DOUBLED
+  inline.enter TBASIS:DOUBLED %8
   %29 = object.get 3 %8
   %30 = binary mul %29, 2:w10
   inline.leave
@@ -63,7 +63,7 @@ byref:
   %2 = call.forward TPAIR:TOTAL.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   %5 = send FIRST from 1 %4
   %6 = send LAST from 1 %4
   %7 = binary add %5, %6
@@ -89,7 +89,7 @@ byref:
   %2 = call.forward TBASIS:DOUBLED.byref
   ret %2
 body:
-  %4 = load $f0
+  %4 = load $f0 move
   %5 = send BASE from 0 %4
   %6 = binary mul %5, 2:w10
   ret %6
@@ -129,13 +129,13 @@ entry:
   %4 = array %3
   %5 = object.set 0 %3, 1:w10
   %6 = object.get 0 %3
-  inline.enter TBASIS:DOUBLED
+  inline.enter TBASIS:DOUBLED %3
   %8 = object.get 3 %3
   %9 = binary mul %8, 2:w10
   inline.leave
   %11 = binary add %6, %9
   %12 = object.set 1 %3, %11
-  inline.enter TPAIR:TOTAL
+  inline.enter TPAIR:TOTAL %3
   %14 = object.get 0 %3
   %15 = object.get 1 %3
   %16 = binary add %14, %15
@@ -145,7 +145,7 @@ entry:
   %20 = truth %19
   cond_br %20, endif.inline(100:w10), endif.inline(%18)
 endif.inline(%22: item):
-  inline.enter TBASIS:DOUBLED
+  inline.enter TBASIS:DOUBLED %3
   %24 = object.get 3 %3
   %25 = binary mul %24, 2:w10
   inline.leave

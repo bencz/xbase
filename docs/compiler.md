@@ -297,7 +297,7 @@ function always receives the reference, so `@` in a declaration without `NATIVE`
 | `FOLD` | calls with constant arguments are evaluated at compile time (see [Constant folding](#constant-folding)) |
 | `RESULT letters` | the types a call that raises no error returns, as `ValType()` letters (`N`, `C`, `L`, `D`, ...; `ExternDecl::resultTypes`, `xir::Callee::resultTypes`): type inference counts them; since an error block may substitute a value of any type for a failed call, the result has those types only past a `subst.check` ([xir.md](xir.md#types)) |
 | `ARGS` | the function reads the arguments the function calling it received (`PCount()`): that function (or codeblock) keeps them in its frame (`FuncDecl::readsArgs`, `BlockExpr::readsArgs`, `xir::Function::readsArgs`; `args` in the xIR listing), as does one that runs a macro (`Sema::keepsArgs`) |
-| `PARAMS` | `ARGS`, and the function reads and writes the parameters of the function calling it (`PValue()`): that function keeps them in its frame slots, as written (no parameter versioning, no SSA values; `FuncDecl::readsParams`, `BlockExpr::readsParams`, `xir::Function::readsParams`) |
+| `PARAMS` | `ARGS`, and the function reads and writes the parameters of the function calling it (`PValue()`): that function keeps them in its frame slots, as written (no parameter versioning, no SSA values; `FuncDecl::readsParams`, `BlockExpr::readsParams`, `xir::Function::readsParams`); a function or codeblock that runs a macro is taken as calling one (the text may call `PValue()`) |
 | `PRIVATES` | the function creates PRIVATEs of the function calling it (`RESTORE`): that function (or codeblock) takes a PRIVATE mark and ends them when it returns (`FuncDecl::callsPrivates`, `BlockExpr::callsPrivates`, `xir::Function::callsPrivates`; `privates` in the xIR listing) |
 
 `sema/Calls.*` resolves every call before the other passes. A function the module defines comes first (a name that is
@@ -396,10 +396,15 @@ item values and block parameters when `--dump-xir-types` is given too ([xir.md](
   `LOCAL`s never hold one. An argument `@x` is `ref` (the variable's cell), `@a[i]` is `ref.index`. A store into a
   variable that may live in the heap (a cell, an element through a reference) is followed by `barrier`.
 - Parameter versioning: a parameter may hold a reference only if its caller passed one, and one that is never shared
-  cannot become one. A function with such parameters is generated twice: its own body starts with `params.ref`,
-  which tests them; when none holds a reference, each is copied once into a `LOCAL` standing for it (which mem2reg
-  makes an SSA value), and otherwise `call.forward` passes the arguments as received to the other body, `NAME.byref`
-  (internal), which reaches the parameters through their references. Codeblocks inside are generated with each body.
+  cannot become one. A function with such parameters is generated twice: its own body starts with `params.ref`, which
+  tests them; when none holds a reference, each is moved once into a `LOCAL` standing for it (which mem2reg makes an SSA
+  value; the load is a `move`: the parameter's slot, which nothing writes, serves the value and holds it while the
+  function runs, as its caller's argument did, so that an object is not destroyed while a function it was passed to, or
+  its method, runs; `x := NIL` to the parameter lets go of it there, or, when a copy of the value is still live there,
+  at a later release where it is dead (one that release is on every path to; where it is not, the parameter holds the
+  value until the function returns): `frame.release param k`, `FramePlan::pinMovedParams`), and otherwise `call.forward`
+  passes the arguments as received to the other body, `NAME.byref` (internal), which reaches the parameters through
+  their references. Codeblocks inside are generated with each body.
 - `.AND.`, `.OR.` and `IIF` branch; their results are block parameters. Conditions are `truth` tests of items. The
   left side of `.AND.`/`.OR.` must be logical; when it does not settle the result, the right side's value is the
   result as it is, whatever its type (`.T. .AND. 5` is 5, as in Clipper), and only a condition tests it.
@@ -498,24 +503,34 @@ build xbc.
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
   from its uses back to its definition, slots are assigned by linear scan and reused once free. A dead value's slot
   keeps what it held until another value takes it, so where a loop exits, the block it goes to first sets to `NIL` the
-  slots of the loop's values that are dead there and that no live value holds (`clearsAtStart`; see `inline.leave`
-  below for an inlined body): what only they held can be collected, and its destructor run. When other blocks reach
-  that block too (the header of a loop that follows, say), the loop's branches to it clear them on their edge instead
+  slots of the loop's values that are dead there and that no live value holds (`clearsAtStart`; see `inline.leave` below
+  for an inlined body): what only they held can be collected, and its destructor run. When other blocks reach that block
+  too (the header of a loop that follows, say), the loop's branches to it clear them on their edge instead
   (`clearsOnEdge`), so the clears run once per exit, not on every pass of the next loop. `x := NIL` to a local or a
   parameter (the program lets go of what x held: an array, an object whose destructor should run) is followed by a
   `frame.release` (`Generator::genAssign`), which sets to `NIL` the slots of every value written before it and dead
-  there, by precise liveness (`liveAtRelease_`: a use after it in its block, or the value live into a successor), not
-  by the intervals, which span the blocks laid out between a definition and its last use; a slot an argument group
-  holds is kept while that group's call is being made, or while its inlined body is open (`walkBodies`), not along
-  the body's copies laid out later (`FramePlan::clearsAt`). What a caller passed stays held by its argument until the
-  call returns. The parameters take
-  slots 0 to n-1 (the prologue copies them there), but in a typed copy with a direct entry and no loop a parameter of
-  types without heap references that nothing writes (`FramePlan::inRegisters`): it has an item of its own outside the
-  frame, as a `Local` value (the words its caller passed, in registers), since nothing reads a typed copy's parameters
-  in its frame (it reads no arguments as received and forwards none); a function with a loop writes them, since there
-  a value held through the loop keeps a register from it (out of the frame, `fib`'s parameter saves 1% of its
-  instructions; `fasta`'s, held through its loops, cost 1%); then the frame variables still in memory (those mem2reg did
-  not make values), then temporaries. The arguments of a call and the elements of an array literal take consecutive
+  there, by precise liveness (`liveAtRelease_`: a use after it in its block, or the value live into a successor), not by
+  the intervals, which span the blocks laid out between a definition and its last use; a slot an argument group holds is
+  kept while that group's call is being made, or while its inlined body is open (`walkBodies`), not along the body's
+  copies laid out later (`FramePlan::clearsAt`). A direct call (`CodeGen::emitDirectCall`) sets to `NIL` the slot of
+  each argument it uses last (`FramePlan::lastUse`) once it has read the argument's words, so the callee alone holds
+  what only the argument held, and a group (a call's arguments, an array literal's elements) does so once it has copied
+  them all (`CodeGen::operandGroup`). A call or send through the dynamic entry (`argv`: a method, a function of another
+  module, the runtime's library) lends its group to the callee for the call (`xb_ctx.lent`, `CodeGen::lend`): when one
+  of the arguments past a send's object may refer to a heap object (`CodeGen::lends`), the entry of a function with a
+  direct one (`CodeGen::takeLent`) reads the words of its parameters' arguments (Self included), sets those items to
+  `NIL` and ends the loan, its parameters then holding them until it returns; a function without one (it reads its
+  arguments as received, passes `...` on, or is a `NAME.byref` body) ends it in its prologue and keeps them, as natives
+  and codeblocks do (a codeblock's arguments are its caller's: `Eval()` passes them on). At -O0 a caller's `LOCAL` is a
+  frame variable and keeps what it holds while the function runs; at -O1 and above one that mem2reg made a value is let
+  go once it is dead, as any value (a destructor may then run earlier than at -O0, inside the callee that drops it). The
+  parameters take slots 0 to n-1 (the prologue copies them there), but in a typed copy with a direct entry and no loop a
+  parameter of types without heap references that nothing writes (`FramePlan::inRegisters`): it has an item of its own
+  outside the frame, as a `Local` value (the words its caller passed, in registers), since nothing reads a typed copy's
+  parameters in its frame (it reads no arguments as received and forwards none); a function with a loop writes them,
+  since there a value held through the loop keeps a register from it (out of the frame, `fib`'s parameter saves 1% of
+  its instructions; `fasta`'s, held through its loops, cost 1%); then the frame variables still in memory (those mem2reg
+  did not make values), then temporaries. The arguments of a call and the elements of an array literal take consecutive
   slots, and a value used only there (a block parameter too) is computed straight into its slot; a branch argument used
   only there shares the slot of its block parameter (on a loop's back edge, when the jump is the block's only way out
   and nothing after the argument reads the parameter); a `load` whose single use follows with nothing in between that
@@ -531,17 +546,16 @@ build xbc.
   caller's result slot (not in a direct entry that returns its result's words in registers, below: it has no such slot).
   A call's result is computed straight only into a plain frame variable (the callee must not see a `STATIC` cleared),
   and an operation that can fail is not computed in place in a block that unwinds (the handler may read the variable,
-  and a call may clear its result first). Two edges from
-  one block to the same block do not share their arguments' slots. A value that never refers to a heap object
-  (`xir::TypeInfo`, [xir.md](xir.md#types)) and is not computed in a slot as above is `Local`: an item of its own
-  outside the frame (an `alloca` reached only by loads and stores, which LLVM keeps in registers). Block parameters are
-  chosen first, other values after the groups and the parameter slots. Runtime calls never receive a `Local`'s address:
-  an operand goes through a scratch item, and a result is written there and copied back (`callArg`, `callResult`). When
-  type inference finds a single possible type for an operand (`typeOf`), the fast paths take its tag as a constant, and
-  LLVM removes the tests and the paths of other types: arithmetic on values known to be doubles is plain floating-point
-  code. A fast path the operands' types exclude is not emitted at all (`emitBinary`: two integers, two doubles, an
-  integer with a double, two one-byte strings for an equality): an operation on strings, or on a function's result of
-  known types, is its runtime call alone.
+  and a call may clear its result first). Two edges from one block to the same block do not share their arguments'
+  slots. A value that never refers to a heap object (`xir::TypeInfo`, [xir.md](xir.md#types)) and is not computed in a
+  slot as above is `Local`: an item of its own outside the frame (an `alloca` reached only by loads and stores, which
+  LLVM keeps in registers). Block parameters are chosen first, other values after the groups and the parameter slots.
+  Runtime calls never receive a `Local`'s address: an operand goes through a scratch item, and a result is written there
+  and copied back (`callArg`, `callResult`). When type inference finds a single possible type for an operand (`typeOf`),
+  the fast paths take its tag as a constant, and LLVM removes the tests and the paths of other types: arithmetic on
+  values known to be doubles is plain floating-point code. A fast path the operands' types exclude is not emitted at all
+  (`emitBinary`: two integers, two doubles, an integer with a double, two one-byte strings for an equality): an
+  operation on strings, or on a function's result of known types, is its runtime call alone.
 - Alias information (TBAA): every load and store of generated code whose memory is known is tagged with its class,
   classes that never overlap (`CodeGen::Mem`): items outside the heap (an `alloca` or a global of the module: frames,
   `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements, cells,
@@ -725,30 +739,38 @@ build xbc.
   when it is hidden, `XB_PROC_METHOD` for a method (`xir::Function::method`, `method` in the xIR listing), and its
   source file name without directories, one string per module, none for a function of the runtime: `Function::runtime`,
   of a module of the runtime or a carried source) in the frame. While an xIR instruction is lowered, every call the
-  builder creates is marked with the instruction's source line
-  (`IRBuilderCallbackInserter`, metadata `xb.line`); once the function is complete, `placeLines` stores that line in the
-  frame right before each marked call that can see the call stack (any call but intrinsics and the runtime entry points
-  that never raise an error or run code, `quietCalls_`), once until another line is needed: a forward data flow over the
-  function's blocks finds where every way in stored the same line into the same frame last, and a block that starts
-  so stores none for its calls of that line (`Fib( n - 1 ) + Fib( n - 2 )` stores its line once; only the function's
-  own code writes its frames' lines, and a frame's link, which writes line 0, counts as a store); not in the frame of a
-  function of the runtime, which shows line 0 (`showsLines`: the innermost frame's function). The fast paths of
-  operations thus store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for
-  references clears its own `proc`: the other body shows instead. `inline.enter` links a frame without slots that shows
-  the inlined function (an `alloca` of the entry block, one per nesting depth: bodies open at once are at different
-  depths, and the copies of a body share it), after storing the line of the call it replaces in the frame below (unless
-  that frame is a function of the runtime's); until the matching `inline.leave`, which links the frame below again,
-  calls take it as the caller's frame and their lines are stored in it. A body that reads the arguments it received gets
-  them in consecutive slots of the frame (a group, as a call's: `inline.enter`'s operands, kept until the body's last
-  instruction, `FramePlan::extendArgumentGroups`), which the inlined frame's `argv` and `argc` give; `PCount()` and
-  `PValue()` inside an inlined body call the runtime, which reads that frame. The bodies open where each block starts
-  are those of the `inline.enter`s on the way to it (`openInlineBodies` in `xir/Analysis`: an inlined body is entered
-  at its start and left at its end). That store of the line counts as one `placeLines` made. `inline.leave` first sets
-  to `NIL` the slots of the body's values that are dead there and that no live value holds (`FramePlan::clearsAt`: the
-  units of each body's values, argument lists and received arguments, found by a forward walk with one set per open
-  body, `walkBodies`): as when a callee returns, an object only they held can be collected (and its destructor run).
-  A body left without a frame (nothing in it can see the call stack) has no `inline.leave` and clears nothing there:
-  its values are like the function's own.
+  builder creates is marked with the instruction's source line (`IRBuilderCallbackInserter`, metadata `xb.line`); once
+  the function is complete, `placeLines` stores that line in the frame right before each marked call that can see the
+  call stack (any call but intrinsics and the runtime entry points that never raise an error or run code,
+  `quietCalls_`), once until another line is needed: a forward data flow over the function's blocks finds where every
+  way in stored the same line into the same frame last, and a block that starts so stores none for its calls of that
+  line (`Fib( n - 1 ) + Fib( n - 2 )` stores its line once; only the function's own code writes its frames' lines, and a
+  frame's link, which writes line 0, counts as a store); not in the frame of a function of the runtime, which shows line
+  0 (`showsLines`: the innermost frame's function). The fast paths of operations thus store nothing; their slow paths
+  and calls do. Before `call.forward`, the function versioned for references clears its own `proc`: the other body shows
+  instead. `inline.enter` links a frame without slots that shows the inlined function (an `alloca` of the entry block,
+  one per nesting depth: bodies open at once are at different depths, and the copies of a body share it), after storing
+  the line of the call it replaces in the frame below (unless that frame is a function of the runtime's); until the
+  matching `inline.leave`, which links the frame below again, calls take it as the caller's frame and their lines are
+  stored in it. A body that reads the arguments it received gets them in consecutive slots of the frame (a group, as a
+  call's: `inline.enter`'s operands, kept until the body's last instruction, `FramePlan::extendArgumentGroups`), which
+  the inlined frame's `argv` and `argc` give; `PCount()` and `PValue()` inside an inlined body call the runtime, which
+  reads that frame. Any other body holds its arguments in place: each argument's value that has a slot of its own lives
+  to the body's last instruction (`FramePlan::heldArgs_`, extended with the groups), as the callee's parameters would
+  hold it until it returns; a `frame.release` of a parameter's `LOCAL` in the body lets go of that argument there unless
+  the caller still uses it or another parameter, of that body or of an outer one, holds it too (a value so held keeps a
+  slot of its own: no block parameter shares it, no direct call or group it is passed to while the body runs lets go of
+  it, and a load of it is not served by its variable, which the body may write); a codeblock literal is passed as `NIL`
+  (folding may leave it unmade). Once that release is on every path, later ones let go of the argument where it is dead
+  (a copy kept it). A body that reads its arguments as received keeps them as received, as the function called would. A
+  `frame.release` of the function's own parameter that no load reads any more (its `move` gone) clears the parameter's
+  slot. The bodies open where each block starts are those of the `inline.enter`s on the way to it (`openInlineBodies` in
+  `xir/Analysis`: an inlined body is entered at its start and left at its end). That store of the line counts as one
+  `placeLines` made. `inline.leave` first sets to `NIL` the slots of the body's values that are dead there and that no
+  live value holds (`FramePlan::clearsAt`: the units of each body's values, argument lists and received arguments, found
+  by a forward walk with one set per open body, `walkBodies`): as when a callee returns, an object only they held can be
+  collected (and its destructor run). A body left without a frame (nothing in it can see the call stack) has no
+  `inline.leave` and clears nothing there: its values are like the function's own.
 - After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
   `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
   load stays in a loop without calls instead of leaving it; the loads carry the metadata `xb.poll`, on a back edge, or

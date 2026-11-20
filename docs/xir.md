@@ -177,18 +177,19 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   store having replaced the cell an earlier entry left. A codeblock's captures are the variables it captured; the
   module's `STATIC`s stay. When an argument is a reference (`@x`, `@a[i]`), the variables of its parameters are marked
   `param` (they keep reading and writing through what they hold), and so do the callee's variables marked so already
-  (the parameters of a body inlined in it before). A callee that reads the arguments it received (`readsArgs`:
-  `PCount()`) gets them as `inline.enter`'s operands, the inlined frame's arguments, until no call of an `ARGS` function
-  in its body is left (`Callee::readsCallerArgs`; a branch folded away may take the last one): then they are no longer
-  passed. A body in which nothing can see the call stack any more (no call, nothing that can fail or run code, no loop,
-  whose back edge polls and may run destructors, no body inlined in it: what folding leaves of `Mul( 2, 3 )`) needs no
-  frame: its `inline.enter` and `inline.leave` go (`trimInlinedBodies`, at the start of `inline-functions`; a leave
-  several bodies reach keeps them all). A body is inlined only at a call without `...` in a block that unwinds to the
-  function's exit, and only when the callee reads no parameters in its frame slots (`readsParams`: `PValue()`; the
-  inlined frame has none), creates no `PRIVATE` (nor calls a function that creates its caller's: it would be the
-  function's, released later), and has no unwind block, no `...` and no `YIELD`; nothing is inlined into a generator,
-  nor into a function that has grown past 3000 instructions. The body is copied with `copyBlocks`, its constants made
-  anew in the function.
+  (the parameters of a body inlined in it before). The arguments are `inline.enter`'s operands, which hold them while
+  the body runs, as the callee's parameters would until it returns (a `frame.release` of a parameter's `LOCAL` in the
+  body lets go of its argument there unless the caller still uses it; a codeblock literal, which folding may leave
+  unmade, is passed as `NIL`), and the inlined frame's arguments for a callee that reads them as received (`readsArgs`:
+  `PCount()`), all of them until no call of an `ARGS` function in its body is left (`Callee::readsCallerArgs`). A body
+  in which nothing can see the call stack any more (no call, nothing that can fail or run code, no loop, whose back edge
+  polls and may run destructors, no body inlined in it: what folding leaves of `Mul( 2, 3 )`) needs no frame: its
+  `inline.enter` and `inline.leave` go (`trimInlinedBodies`, at the start of `inline-functions`; a leave several bodies
+  reach keeps them all). A body is inlined only at a call without `...` in a block that unwinds to the function's exit,
+  and only when the callee reads no parameters in its frame slots (`readsParams`: `PValue()`; the inlined frame has
+  none), creates no `PRIVATE` (nor calls a function that creates its caller's: it would be the function's, released
+  later), and has no unwind block, no `...` and no `YIELD`; nothing is inlined into a generator, nor into a function
+  that has grown past 3000 instructions. The body is copied with `copyBlocks`, its constants made anew in the function.
   - `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
     (`Module::library`, below; a method too, which `resolve-sends` made a call of), not an `INIT` or `EXIT` procedure,
     a generator, nor one that calls itself, of
@@ -392,7 +393,9 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   reads one into a value, `store` writes one, and `barrier` follows a store into a variable that may live in the
   heap. A `FOR EACH` variable is accessed through its reference; a `STATIC`, a shared or captured variable or a
   parameter is tested for a cell or reference at run time. `ref` and `ref.index` make the reference an argument `@x`
-  or `@a[i]` passes.
+  or `@a[i]` passes. `load ... move` is the load of a parameter into the `LOCAL` that stands for it (parameter
+  versioning): nothing reads the parameter after; its slot keeps the value until the function returns or that
+  `LOCAL` is set to `NIL`.
 - Operations mirror the runtime: unary and binary operators (`++`, `--` and the step of a `FOR` without `STEP` are a
   `binary add` or `sub` of 1 marked `byOne`, printed `add.one`: the same fast paths, and an error that is theirs,
   `xb_op_inc`/`xb_op_dec`; the adds of `x += y`, and of `x := x + y + ...` written out on the same variable, element or
@@ -423,7 +426,9 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   function's own arguments, as received), `inline.enter` (naming a function or block function) and `inline.leave`,
   around an inlined body: the call stack shows that function in between, and `frame.release`, right after `x := NIL`
   to a local or a parameter: the frame slots of the values dead there are set to `NIL` (the store itself may go as a
-  dead store, but the program let go of what x held).
+  dead store, but the program let go of what x held); after the `LOCAL` standing for a parameter (`frame.release param
+  k of NAME`), also the parameter's own slot, or in the body of NAME inlined, the argument its `inline.enter` holds,
+  which nothing else lets go of before the function returns.
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `async.suspend`, `ret`.

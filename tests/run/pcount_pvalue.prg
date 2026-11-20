@@ -2,7 +2,9 @@
 // function calling PValue() keeps them in its frame) and the arguments past them as passed; PValue( n, x ) writes one,
 // through the reference when one was passed, and the caller's own values stay as they were. Main receives the
 // command-line arguments (pcount_pvalue.args), as an INIT procedure does before it. Through a macro: an expression's
-// PCount() is the function's running it, a codeblock's its own.
+// PCount() is the function's running it, a codeblock's its own; its PValue() reads and writes the parameters as the
+// function has them (after a direct call that passed one on, after a release of another variable, after an assignment)
+// and the function then reads what it wrote.
 INIT PROCEDURE Setup()
    ? "init", PCount(), PValue( 1 ), PValue( 1, "changed" ), PValue( 2, "too" ), PValue( 1 )
 RETURN
@@ -24,6 +26,8 @@ PROCEDURE Main( cFirst )
    ? "nested", Outer( "o1", "o2" )
    ? "promoted", Promoted( 10 )
    ? "abbreviated", PCou()
+   ? "macro PValue:", MacroAfterCall( { 1 } ), MacroAfterRelease( { 1 } ), MacroWrites( "orig" ), ;
+      MacroReads( "orig" )
    ? "macro", ThroughMacro( 1, 2, 3 ), Eval( &( "{| x | PCount() }" ) ), Eval( &( "{| x | PCount() }" ), 9, 8 ), ;
       Eval( &( "{|| PValue( 2 ) }" ), "a", "b" )
    ? "hmerge", Merged()
@@ -80,3 +84,30 @@ RETURN s + PCount()
 
 STATIC FUNCTION ThroughMacro( a, b, c )
 RETURN &( "PCount()" )
+
+STATIC FUNCTION MacroAfterCall( a )
+   LOCAL c := "PValue( 1 )"
+   Passed( a )
+RETURN ValType( &c )
+
+STATIC FUNCTION MacroAfterRelease( a )
+   LOCAL c := "PValue( 1 )", b := { 1 }
+   Passed( a )
+   b := NIL
+RETURN ValType( &c ) + Str( Len( b := { 1, 2 } ), 2 )
+
+STATIC FUNCTION MacroWrites( a )
+   &( "PValue( 1, 'new' )" )
+RETURN a
+
+STATIC FUNCTION MacroReads( a )
+   a := "new"
+RETURN &( "PValue( 1 )" )
+
+// Called directly (BEGIN SEQUENCE: never inlined).
+STATIC FUNCTION Passed( x )
+   LOCAL n := 0
+   BEGIN SEQUENCE
+      n := Len( x )
+   END SEQUENCE
+RETURN n
