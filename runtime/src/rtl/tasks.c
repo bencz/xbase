@@ -1251,6 +1251,21 @@ static void root_done_true(void) {
   xb_gc_add_root(&done_true, 1);
 }
 
+int xb_await_method(xb_ctx *ctx) {
+  int fused = ctx->async_fuse_method;
+  ctx->async_fuse_method = 0;
+  return fused;
+}
+
+void xb_task_answer(xb_ctx *ctx, xb_item *r, const xb_item *value, int fused) {
+  if (!fused) {
+    xb_task_completed(ctx, r, value);
+    return;
+  }
+  *r = *value;
+  ctx->async_done = 1; /* xb_await_fused: the call's value is the result */
+}
+
 void xb_task_completed(xb_ctx *ctx, xb_item *r, const xb_item *value) {
   XB_UNUSED(ctx);
   int shared = value->type == XB_T_LOGICAL && value->v.l;

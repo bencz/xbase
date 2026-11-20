@@ -608,8 +608,8 @@ instructions); `tests/run/async_frames_threads.prg` checks frames handed between
 
 `rtl/tasks.c` ([concurrency.md](concurrency.md#asynchronous-functions)). A step runs from a record on the C stack
 (`struct xb_async_step`, `ctx->async_step` while it runs, its items rooted): the task (NIL in the first step until a
-suspension makes it), the task it suspends for, the resume function, the environment, and at the first step the
-caller's arguments. `xb_async_new` (the function's entry) runs the first step at once: an environment of its own
+suspension makes it), the task it suspends for, the resume function, the environment, and at the first step the caller's
+arguments. `xb_async_new` (the function's entry) runs the first step at once: an environment of its own
 (`xb_env_inherit`), the resume function with NIL as its argument, `xb_async_restore` copying the arguments into frame
 slots 1 .. n. `xb_async_suspend` makes the task at the first suspension (kind `K_ASYNC`, running; the resume function,
 the environment's address), saves the frame into it (`V_WORK`) with the point (`V_POINT`, an integer only the next step
@@ -622,12 +622,15 @@ ended, for a first step that made none) or fails or cancels it as a block's task
 ended), `xb_await_result` gives the value (`outcome`, as `Result`), `xb_await_wait` waits first (outside an `ASYNC`
 function). A fused `AWAIT` (`xb_await_fuse` before the call, `xb_await_fused` after it) names the entry and the frame
 that calls it in the context (`async_fuse`, `async_fuse_frame`; for a message, `async_fuse_send`, which the dispatch
-turns into the compiled method it reaches when that runs right from the frame, `xb_fuse_target`, and ends for a
-method of a runtime class, or code a message to a value runs, `xb_object_message`); `xb_async_new` answers when it is
-that entry, its frame right above that one: a first step that ends gives its result itself (`async_done`), no task
-made. A request ends at an error (`raise`), where an unwinding stops (`xb_seq_catch`) and before a task's step, so
-none outlives the `AWAIT` that made it. A step runs as its function's flow (`xb_flow_enter`; the number in the task,
-`V_FLOW`), so a lock it holds goes with it across `AWAIT`.
+turns into the compiled method it reaches when that runs right from the frame, `xb_fuse_target`, and ends for code a
+message to a value runs, `xb_object_message`); `xb_async_new` answers when it is that entry, its frame right above that
+one: a first step that ends gives its result itself (`async_done`), no task made. A method of a runtime class reached
+right from that frame is told so while it runs (`async_fuse_method`, set by `xb_runtime_perform`, taken by the method
+first thing with `xb_await_method`, so that what it runs after sees none): `Channel:ReceiveAsync` with a value there
+answers with the value itself (`xb_task_answer`), no task made (a `TrySend` and an `AWAIT ch:ReceiveAsync()` of its
+value: 860 instructions, 1650 with a task completed already). A request ends at an error (`raise`), where an unwinding
+stops (`xb_seq_catch`) and before a task's step, so none outlives the `AWAIT` that made it. A step runs as its
+function's flow (`xb_flow_enter`; the number in the task, `V_FLOW`), so a lock it holds goes with it across `AWAIT`.
 
 ### Asynchronous generators
 

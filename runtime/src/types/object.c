@@ -150,10 +150,13 @@ void xb_runtime_perform(xb_ctx *ctx, xb_item *r, size_t member, uint32_t argc, x
       assign_var(ctx, r, &argv[0], k, argc > 1 ? &argv[1] : &nil);
       return;
     }
-    default:
-      xb_fuse_target(ctx, NULL);
+    default: {
+      int outer = ctx->async_fuse_method; /* a method up the stack that has not taken its own yet */
+      ctx->async_fuse_method = xb_fuse_target(ctx, NULL);
       cls->methods[k].fn(ctx, r, argc, argv);
+      ctx->async_fuse_method = outer;
       return;
+    }
   }
 }
 

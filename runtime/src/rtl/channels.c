@@ -219,6 +219,7 @@ static int take_next(const xb_item *ch, xb_item *out, xb_claims *c) {
  * sender gives one (the token cancels the wait). On a closed channel with no value left, failed with the error
  * "Channel closed". The waiting task is made before the lock is taken again. */
 static void channel_receive_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  int fused = xb_await_method(ctx); /* AWAIT of this call: a value there now is its result, with no task */
   xb_item token, value;
   xb_set_nil(r);
   xb_set_nil(&value);
@@ -244,7 +245,7 @@ static void channel_receive_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_ite
       unlock(&argv[0]);
       xb_claims_settle(ctx, &c);
       if (waiting) xb_task_settle_claimed(ctx, r, 1, &value); /* the task made needs no wait now */
-      else xb_task_completed(ctx, r, &value);
+      else xb_task_answer(ctx, r, &value, fused);
       xb_gc_root_pop(ctx, 3);
       return;
     }

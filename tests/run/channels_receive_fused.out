@@ -1,0 +1,11 @@
+
+outside:         15
+inside:   5050 O
+later: late
+closed: .T.
+token: v canceled
+not awaited: O .T.          7
+tested: .T.
+in a fused method: O 9
+in a generator step: O 11
+in a block: O

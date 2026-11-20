@@ -155,6 +155,11 @@ int xb_task_unclaim(const xb_item *task);
 void xb_task_cancel_claimed(xb_ctx *ctx, const xb_item *task);
 void xb_task_settle_claimed(xb_ctx *ctx, const xb_item *task, int ok, const xb_item *value);
 void xb_task_completed(xb_ctx *ctx, xb_item *r, const xb_item *value);
+/* Whether the runtime method running is the target of an AWAIT that fused its send, taken first thing (what it runs
+ * after, a block, sees none): such a method that ends at once answers xb_task_answer( fused ): the value itself, which
+ * that AWAIT takes as its result, instead of a task completed already (xb_task_completed). */
+int xb_await_method(xb_ctx *ctx);
+void xb_task_answer(xb_ctx *ctx, xb_item *r, const xb_item *value, int fused);
 /* Waits for a task to end (no limit): 1 with its result in `*out` when it completed; 0 when it failed, was canceled,
  * or a QUIT ended the wait. */
 int xb_task_wait_result(xb_ctx *ctx, const xb_item *task, xb_item *out);

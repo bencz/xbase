@@ -94,6 +94,9 @@ struct xb_ctx {
   const xb_frame *async_fuse_frame;
   int32_t async_fuse_send;
   int32_t async_done;
+  /* The method of a runtime class running now is the target of that AWAIT's send (xb_runtime_perform): one that ends
+   * at once may answer with its result itself (xb_await_method, xb_task_answer). */
+  int32_t async_fuse_method;
   xb_env  *spareEnv;        /* an environment ended, kept for the next one the thread makes (no allocation) */
   /* Type() evaluating (error_trap > 0): an error runs no block, it ends the
    * evaluation (XB_PENDING_TRAP, which no BEGIN SEQUENCE catches) and sets
@@ -113,11 +116,14 @@ struct xb_ctx {
 };
 
 /* A send that an AWAIT fused (xb_await_fuse) reaches the method `fn` (NULL: a runtime class's): a compiled method run
- * right from the frame of that AWAIT becomes the entry it asks for; any other ends the request. */
-static inline void xb_fuse_target(xb_ctx *ctx, xb_func fn) {
-  if (!ctx->async_fuse_send) return;
+ * right from the frame of that AWAIT becomes the entry it asks for; any other ends the request. Whether the method
+ * is that AWAIT's, called right from its frame. */
+static inline int xb_fuse_target(xb_ctx *ctx, xb_func fn) {
+  if (!ctx->async_fuse_send) return 0;
   ctx->async_fuse_send = 0;
-  if (fn && ctx->async_fuse_frame == ctx->frames) ctx->async_fuse = fn;
+  int here = ctx->async_fuse_frame == ctx->frames;
+  if (fn && here) ctx->async_fuse = fn;
+  return here;
 }
 
 /* ctx->pending: other threads set requests there (a collection's safepoint, objects to finalize, the program's QUIT),
