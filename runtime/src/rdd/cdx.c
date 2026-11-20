@@ -113,6 +113,9 @@ struct xb_tag {
   uint32_t leaf, at, recno;
   unsigned char key[CDX_KEY_MAX];
   uint32_t placed;           /* the bag's changes when the cursor got there */
+  uint64_t total;            /* the entries, as a count with no bounds found them while the bag's changes were
+                                totalAt - 1 */
+  uint32_t totalAt;          /* 0: none counted */
 };
 
 struct xb_bag {
@@ -1029,9 +1032,21 @@ static int cdx_find(xb_tag *t, const unsigned char *key, uint32_t recno, uint32_
   return finish(t->bag, r >= 0, err) ? r : -1;
 }
 
+/* A count with no bounds is kept while the bag does not change (no change of any of its tags here, none of another
+ * program's found by begin): the format holds no counts, and counting reads every leaf. */
 static int cdx_count(xb_tag *t, const xb_index_bound *lo, const xb_index_bound *hi, uint64_t *n, int32_t *err) {
   if (!begin(t->bag, XB_LOCK_READ, err)) return 0;
-  return finish(t->bag, tag_count(t, lo, hi, n, err), err);
+  int whole = !lo && !hi;
+  if (whole && t->totalAt == t->bag->changes + 1) {
+    *n = t->total;
+    return finish(t->bag, 1, err);
+  }
+  int ok = tag_count(t, lo, hi, n, err);
+  if (ok && whole) {
+    t->total = *n;
+    t->totalAt = t->bag->changes + 1;
+  }
+  return finish(t->bag, ok, err);
 }
 
 static int cdx_count_before(xb_tag *t, const xb_index_bound *lo, uint64_t *n, int32_t *err) {

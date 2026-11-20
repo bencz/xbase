@@ -62,3 +62,5 @@ za after dbUnlock:          0 .F. .T.
 zb after dbUnlock:          0 .T. .F.
 written:     -3     -4
 za locks again: .T. .T.          2 .F.
+counts DBFNTX: 6/4 6/4 7/5 7/4 8/5 8/5 5 8/5 
+counts DBFCDX: 6/4 6/4 7/5 7/4 8/5 8/5 5 8/5 

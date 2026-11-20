@@ -554,11 +554,13 @@ the files are the same bytes (but the date of the last update). `tests/run/rdd_f
   free slot, else a new one, else the one used longest ago (NTX: that no operation holds; CDX: the pages an operation
   works on are its latest); pages changed are written on `COMMIT`, at closing, or when the cache needs their slot.
 - A page is searched by halves over its offsets; a key compares with `memcmp`.
-- Counting (`ordKeyCount()`, `ordKeyNo()`) and `ordKeyGoto()` read the pages' entry counts, never one entry at a
-  time: the pages where the bounds fall (`ordKeyNo()`: the current entry's path) are searched, the subtrees between
-  them counted whole (`count`, `count_before`, `select` of the format). An NTX page does not keep the size of
-  the tree under it, so the cost is the pages between the bounds (`ordKeyGoto( n )`: those before entry n), each read
-  once; a count that would read more pages than the file has is a broken file (a loop), `DBFNTX/1010`.
+- Counting (`ordKeyCount()`, `ordKeyNo()`) and `ordKeyGoto()` read the pages' entry counts, never one entry at a time:
+  the pages where the bounds fall (`ordKeyNo()`: the current entry's path) are searched, the subtrees between them
+  counted whole (`count`, `count_before`, `select` of the format). An NTX page does not keep the size of the tree under
+  it, so the cost is the pages between the bounds (`ordKeyGoto( n )`: those before entry n), each read once; a count
+  that would read more pages than the file has is a broken file (a loop), `DBFNTX/1010`. The count of a whole order (no
+  scope) is kept with the index's change count (an NTX tag's, a CDX bag's), which every entry added or removed and every
+  change of another program found at the lock moves: `ordKeyCount()` asked again reads nothing.
 - Files are read and written at a position in one call (`pread`/`pwrite`, `ReadFile`/`WriteFile` with an offset;
   `xb_platform_file_read_at`), the last record with the end mark after it in one write. Records read in order come
   64 KB at a time (a shared table's under the file lock, or while a copy reads it: `snapshot`).

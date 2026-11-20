@@ -89,6 +89,8 @@ struct xb_tag {
   int heldOk, heldWrote;
   uint32_t changes, placed; /* changes made, and their number when the cursor was placed */
   uint32_t visits;          /* pages a count may still read: a broken file's loop ends as an error */
+  uint64_t total;           /* the entries, as a count with no bounds found them while `changes` was totalAt - 1 */
+  uint32_t totalAt;         /* 0: none counted */
 };
 
 /* An entry of a page buffer. */
@@ -1218,9 +1220,21 @@ static int ntx_find(xb_tag *x, const unsigned char *key, uint32_t recno, uint32_
   return finish(x, r >= 0, 0, err) ? r : -1;
 }
 
+/* A count with no bounds is kept while the index does not change (no entry added or removed here, no other program's
+ * change found by begin): the format holds no counts, and counting reads every page. */
 static int ntx_count(xb_tag *x, const xb_index_bound *lo, const xb_index_bound *hi, uint64_t *n, int32_t *err) {
   if (!begin(x, XB_LOCK_READ, err)) return 0;
-  return finish(x, count_range(x, lo, hi, n, err), 0, err);
+  int whole = !lo && !hi;
+  if (whole && x->totalAt == x->changes + 1) {
+    *n = x->total;
+    return finish(x, 1, 0, err);
+  }
+  int ok = count_range(x, lo, hi, n, err);
+  if (ok && whole) {
+    x->total = *n;
+    x->totalAt = x->changes + 1;
+  }
+  return finish(x, ok, 0, err);
 }
 
 static int ntx_count_before(xb_tag *x, const xb_index_bound *lo, uint64_t *n, int32_t *err) {

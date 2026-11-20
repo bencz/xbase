@@ -3,8 +3,9 @@
 // (empty for an exclusive table); a change is seen by the other area once written (unlock); APPEND BLANK locks the
 // new record; "Lock required", "Exclusive required" (PACK, ZAP); a sharing that the other users do not allow sets
 // NetErr() under the default error handler; SET EXCLUSIVE; an index shared by two areas, changed by one and read by
-// the other; records another area appends reached from the last record known; thousands of record locks held at once.
-// The files start with "rdd_shared", deleted at the end.
+// the other; records another area appends reached from the last record known; thousands of record locks held at once;
+// ordKeyCount() asked again and again while the index changes. The files start with "rdd_shared", deleted at the end.
+REQUEST DBFCDX
 FIELD K, N, F1, F2
 
 PROCEDURE Main()
@@ -14,6 +15,8 @@ PROCEDURE Main()
    Fresh()
    Appended()
    ManyLocks()
+   Counts( "DBFNTX" )
+   Counts( "DBFCDX" )
    AEval( Directory( "rdd_shared*.*" ), {| a | FErase( a[ 1 ] ) } )
 RETURN
 
@@ -330,3 +333,53 @@ STATIC PROCEDURE ManyLocks()
    ? "za locks again:", za->( dbRLock( 5 ) ), za->( dbRLock( 6 ) ), Len( za->( dbRLockList() ) ), zb->( dbRLock( 5 ) )
    CLOSE ALL
 RETURN
+
+// ordKeyCount() of the whole order is kept until the index changes: asked again it is the same; it follows this
+// area's appends, a key that a UNIQUE order no longer holds, another area's appends and changes, and a scope.
+STATIC PROCEDURE Counts( cRdd )
+   LOCAL i, c := ""
+   dbCreate( "rdd_shared_c", { { "K", "C", 4, 0 } }, cRdd )
+   USE rdd_shared_c VIA cRdd EXCLUSIVE NEW
+   FOR i := 1 TO 6
+      APPEND BLANK
+      REPLACE K WITH Str( i % 4, 4 )
+   NEXT
+   INDEX ON K TO rdd_shared_ca
+   INDEX ON K TO rdd_shared_cu UNIQUE
+   CLOSE
+   USE rdd_shared_c VIA cRdd SHARED ALIAS ca NEW
+   SET INDEX TO rdd_shared_ca, rdd_shared_cu
+   USE rdd_shared_c VIA cRdd SHARED ALIAS cb NEW
+   SET INDEX TO rdd_shared_ca, rdd_shared_cu
+   SELECT ca
+   c += Counted() + Counted()
+   APPEND BLANK
+   REPLACE K WITH "   9"
+   dbUnlock()
+   c += Counted()
+   dbGoTo( 7 )
+   RLock()
+   REPLACE K WITH "   1" // the unique order loses "9", holds "1" already
+   dbUnlock()
+   c += Counted()
+   cb->( dbAppend() )
+   REPLACE cb->K WITH "   7"
+   cb->( dbUnlock() )
+   c += Counted()
+   cb->( dbGoTo( 1 ) )
+   cb->( RLock() )
+   REPLACE cb->K WITH "   8" // record 1 held "1", which records 5 and 7 still hold
+   cb->( dbUnlock() )
+   c += Counted()
+   ordSetFocus( 1 )
+   ordScope( 0, "   2" )
+   c += LTrim( Str( ordKeyCount() ) ) + " "
+   ordScope( 0, NIL )
+   c += Counted()
+   ? "counts " + cRdd + ":", c
+   CLOSE ALL
+RETURN
+
+// The current area's counts of both orders, "all/unique ".
+STATIC FUNCTION Counted()
+RETURN LTrim( Str( ordKeyCount( 1 ) ) ) + "/" + LTrim( Str( ordKeyCount( 2 ) ) ) + " "
