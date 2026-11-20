@@ -223,6 +223,7 @@ EXTERN FUNCTION TaskDelay( nMs, [oToken] ) NATIVE CHECKED
 EXTERN FUNCTION TaskFromResult( [xValue] ) NATIVE CHECKED
 EXTERN FUNCTION TaskRun( bWork, ... ) NATIVE CHECKED
 EXTERN FUNCTION TaskTimeout( oTask, nMs ) NATIVE CHECKED
+EXTERN FUNCTION TaskUnobservedBlock( [bNew] ) NATIVE
 EXTERN FUNCTION TaskWhenAll( aTasks ) NATIVE CHECKED
 EXTERN FUNCTION TaskWhenAny( aTasks ) NATIVE CHECKED
 EXTERN FUNCTION TaskWorkers() NATIVE CHECKED
@@ -408,4 +409,5 @@ EXTERN FUNCTION __ValueMatches( xValue, xSearch ) NATIVE
 EXTERN FUNCTION __SetCentury( [lOn] ) NATIVE
 EXTERN FUNCTION __StdWrite( nHandle, ... ) NATIVE
 EXTERN FUNCTION __TaskFail( [xValue], [cCalls] ) NATIVE
+EXTERN FUNCTION __TaskUnobserved( xFailure, oTask ) NATIVE
 EXTERN FUNCTION __ErrorCalls( oError ) NATIVE

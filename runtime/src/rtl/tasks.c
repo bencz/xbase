@@ -42,16 +42,16 @@ enum { K_RUN, K_PROMISE, K_WHEN_ALL, K_WHEN_ANY, K_DELAY, K_SIGNAL, K_TIMEOUT, K
  * (low 32 bits) with the ones that list kept (high); an asynchronous function's resume function (its address), the
  * point to resume at and its flow's number (the owner of the locks it holds, xb_flow_self), which only its steps read,
  * one at a time, each published to the next by the continuation that schedules it (its frame is the work's place,
- * V_WORK). */
+ * V_WORK); and a word, whether its outcome was observed (`observe`). */
 enum {
   V_STATE, V_KIND, V_RESULT, V_WORK, V_ENV, V_NEXT, V_COUNT, V_TASKS, V_TIMER, V_LINKS, V_RESUME, V_POINT, V_FLOW,
-  V_COUNT_
+  V_SEEN, V_COUNT_
 };
 static const xb_class_var task_vars[] = {
   {"(STATE)", XB_VAR_ANY},  {"(KIND)", XB_VAR_ANY},  {"(RESULT)", XB_VAR_ANY}, {"(WORK)", XB_VAR_ANY},
   {"(ENV)", XB_VAR_ANY},    {"(NEXT)", XB_VAR_ANY},  {"(COUNT)", XB_VAR_ANY},  {"(TASKS)", XB_VAR_ANY},
   {"(TIMER)", XB_VAR_ANY},  {"(LINKS)", XB_VAR_ANY}, {"(RESUME)", XB_VAR_ANY}, {"(POINT)", XB_VAR_ANY},
-  {"(FLOW)", XB_VAR_ANY}};
+  {"(FLOW)", XB_VAR_ANY},   {"(SEEN)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(task_vars) == V_COUNT_, "one V_ index per Task variable");
 
 static const xb_class task_class;
@@ -61,6 +61,18 @@ static int is_task(const xb_item *it) {
 }
 
 static uint32_t state_of(const xb_item *task) { return xb_atomic_load32(xb_object_word(task, V_STATE), XB_ACQUIRE); }
+
+/* Something observes the task's outcome: it waits for it (Wait(), Result, AWAIT), continues from it (ContinueWith(), a
+ * combinator, TaskTimeout(), an AWAIT that suspends), or reads its failure (Error, IsFailed). A task that fails
+ * unobserved is watched (watch_failure) and reported if it is found unreachable so (task_unobserved). */
+static void observe(const xb_item *task) { xb_atomic_store32(xb_object_word(task, V_SEEN), 1, XB_RELAXED); }
+
+/* A task that just failed with no continuation to take its failure, and observed by nothing yet: the collector tells
+ * when it is unreachable (task_unobserved, its class's destructor). */
+static void watch_failure(const xb_item *task, uint32_t state, const xb_item *next) {
+  if (state == S_FAILED && next->type != XB_T_ARRAY && !xb_atomic_load32(xb_object_word(task, V_SEEN), XB_RELAXED))
+    xb_gc_finalizable(task->v.p);
+}
 
 /* A new task in `*r` (rooted), local until it is shared, of `kind`, in `state`. */
 static xb_object *task_new(xb_item *r, uint32_t kind, uint32_t state) {
@@ -74,6 +86,7 @@ static xb_object *task_new(xb_item *r, uint32_t kind, uint32_t state) {
   xb_set_int(&t->vars[V_RESUME], 0);
   xb_set_int(&t->vars[V_POINT], 0);
   xb_set_int(&t->vars[V_FLOW], 0);
+  xb_set_logical(&t->vars[V_SEEN], 0);
   t->vars[V_STATE].v.l = (int32_t)state;
   t->vars[V_KIND].v.l = (int32_t)kind;
   return t;
@@ -96,6 +109,7 @@ static int finish_as(const xb_item *task, uint32_t state, const xb_item *value, 
     o->vars[V_ENV] = nil;
     xb_gc_write(o);
     xb_atomic_store32(xb_object_word(task, V_STATE), state, XB_RELEASE);
+    watch_failure(task, state, next);
     return 1;
   }
   xb_share(value);
@@ -119,6 +133,7 @@ static int finish_as(const xb_item *task, uint32_t state, const xb_item *value, 
   xb_atomic_store32(xb_object_word(task, V_STATE), state, XB_RELEASE);
   xb_seq_unlock(o);
   xb_park_wake(xb_object_word(task, V_STATE), 1);
+  watch_failure(task, state, next);
   return 1;
 }
 
@@ -377,6 +392,7 @@ static void add_continuation(xb_ctx *ctx, const xb_item *antecedent, const xb_it
   xb_gc_root_push(ctx, &head); /* kept alive: its address is what the push compares, and must stay its own */
   xb_gc_root_push(ctx, &kept);
   xb_gc_root_push(ctx, &stack);
+  observe(antecedent);
   yielded(ctx, antecedent);
   for (;;) {
     xb_object_get(antecedent->v.p, V_NEXT, &head);
@@ -632,6 +648,7 @@ static void run_inline(xb_ctx *ctx, const xb_item *task) {
 /* Waits for the task to end; with no limit, running it or its inputs inline first (run_inline). The outcome of the
  * wait (XB_WAIT_*). */
 static int wait_task(xb_ctx *ctx, const xb_item *task, int64_t deadline) {
+  observe(task);
   yielded(ctx, task);
   if (deadline < 0) run_inline(ctx, task);
   for (uint32_t spin = 0; spin < WAIT_SPINS && !FINAL(state_of(task)); ++spin) { /* another side may be about to */
@@ -662,6 +679,7 @@ static void task_wait(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
  * raised again, through the waiter's error block (whose result `r` takes); one that carries another value as
  * Break( value ); a cancellation as the error "Task canceled". */
 static void outcome(xb_ctx *ctx, xb_item *r, const xb_item *task, const char *operation) {
+  observe(task);
   uint32_t s = state_of(task);
   xb_item value;
   xb_object_get(task->v.p, V_RESULT, &value);
@@ -698,6 +716,7 @@ static void task_is_completed(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *a
 static void task_is_failed(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   XB_UNUSED(argc);
+  observe(&argv[0]);
   xb_set_logical(r, state_of(&argv[0]) == S_FAILED);
 }
 
@@ -712,7 +731,24 @@ static void task_error(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);
   XB_UNUSED(argc);
   xb_set_nil(r);
+  observe(&argv[0]);
   if (state_of(&argv[0]) == S_FAILED) xb_object_get(argv[0].v.p, V_RESULT, r);
+}
+
+void xbf___TASKUNOBSERVED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
+
+/* The Task class's destructor: a task that failed and that nothing observed, now unreachable, goes to
+ * __TaskUnobserved( xFailure, oTask ) (rtl/errorsys.prg). */
+static void task_unobserved(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  if (state_of(&argv[0]) != S_FAILED || xb_atomic_load32(xb_object_word(&argv[0], V_SEEN), XB_RELAXED)) return;
+  xb_item args[2];
+  xb_object_get(argv[0].v.p, V_RESULT, &args[0]);
+  args[1] = argv[0];
+  xb_gc_root_push(ctx, &args[0]);
+  xb_gc_root_push(ctx, &args[1]);
+  xbf___TASKUNOBSERVED(ctx, r, 2, args);
+  xb_gc_root_pop(ctx, 2);
 }
 
 /* A task of `kind` (a block's: K_RUN) in `*ret`, with the work array of argv[0 .. argc - 1] (the block first) and the
@@ -750,7 +786,8 @@ static const xb_class_method task_methods[] = {
   {"RESULT", task_result},       {"WAIT", task_wait},   {"ISCOMPLETED", task_is_completed},
   {"ISFAILED", task_is_failed},  {"ISCANCELED", task_is_canceled}, {"ERROR", task_error},
   {"CONTINUEWITH", task_continue_with}};
-static const xb_class task_class = {"TASK", V_COUNT_, task_vars, NULL, XB_TABLE_SIZE(task_methods), task_methods};
+static const xb_class task_class = {"TASK", V_COUNT_, task_vars, NULL, XB_TABLE_SIZE(task_methods), task_methods,
+                                    task_unobserved};
 
 /* TaskRun( bWork, [xArgs...] ): a task running Eval( bWork, xArgs... ) on the scheduler's workers. */
 void xbf_TASKRUN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -878,7 +915,7 @@ static const xb_class_method source_methods[] = {
   {"TRYSETERROR", source_try_set_error},
   {"TRYSETCANCELED", source_try_set_canceled}};
 static const xb_class source_class = {
-  "TASKCOMPLETIONSOURCE", P_COUNT_, source_vars, NULL, XB_TABLE_SIZE(source_methods), source_methods};
+  "TASKCOMPLETIONSOURCE", P_COUNT_, source_vars, NULL, XB_TABLE_SIZE(source_methods), source_methods, NULL};
 
 /* TaskCompletionSource(): a source whose task (:Task) its Set...() methods complete. */
 void xbf_TASKCOMPLETIONSOURCE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -1015,7 +1052,7 @@ static const xb_class_method cancel_source_methods[] = {
   {"ISCANCELLATIONREQUESTED", cancel_is_requested},
   {"DISPOSE", source_dispose}};
 static const xb_class cancel_source_class = {"CANCELLATIONTOKENSOURCE", C_COUNT_, cancel_vars, NULL,
-                                             XB_TABLE_SIZE(cancel_source_methods), cancel_source_methods};
+                                             XB_TABLE_SIZE(cancel_source_methods), cancel_source_methods, NULL};
 
 /* oToken:Register( bWork ): a task that runs Eval( bWork ) on the pool once the token is canceled. */
 static void token_register(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
@@ -1047,7 +1084,7 @@ static const xb_class_method token_methods[] = {
   {"REGISTER", token_register},
   {"THROWIFCANCELLATIONREQUESTED", token_throw_if}};
 static const xb_class token_class = {
-  "CANCELLATIONTOKEN", XB_TABLE_SIZE(token_vars), token_vars, NULL, XB_TABLE_SIZE(token_methods), token_methods};
+  "CANCELLATIONTOKEN", XB_TABLE_SIZE(token_vars), token_vars, NULL, XB_TABLE_SIZE(token_methods), token_methods, NULL};
 
 /* CancellationTokenSource( [oToken...] ): a source of cancellation; linked to the tokens given, it is canceled when one
  * of them is (anything but a token is the argument error). */
@@ -1306,6 +1343,7 @@ void xb_async_suspend(xb_ctx *ctx, const xb_item *slots, uint32_t nslots, uint32
     xb_set_int(&t->vars[V_RESUME], (int64_t)(uintptr_t)st->resume);
     xb_set_int(&t->vars[V_ENV], (int64_t)(uintptr_t)st->env);
     t->vars[V_TASKS] = st->gen; /* an asynchronous generator's enumerator (NIL else): local, new, no barrier */
+    t->vars[V_SEEN].v.l = st->gen.type != XB_T_NIL; /* a generator's body: its enumerator takes its outcome */
   }
   xb_frame_store(ctx, &st->task, V_WORK, slots, nslots);
   xb_object *t = st->task.v.p;

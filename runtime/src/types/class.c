@@ -708,9 +708,10 @@ void xb_classes_finalize(xb_ctx *ctx) {
   xb_gc_root_push(ctx, &breakValue);
   int quit = 0;
   while (!quit && xb_gc_next_finalized(&obj)) {
-    const cls *c = ((const xb_object *)obj.v.p)->cls->compiled;
-    for (uint32_t k = 0; k < c->nline && !quit; ++k) {
-      xb_func destructor = c->line[k]->destructor;
+    const xb_class *of = ((const xb_object *)obj.v.p)->cls;
+    const cls *c = of->compiled;
+    for (uint32_t k = 0; k < (c ? c->nline : 1) && !quit; ++k) {
+      xb_func destructor = c ? c->line[k]->destructor : of->destructor;
       if (!destructor) continue;
       uint32_t before = xb_pending_get(ctx) & XB_PENDING_UNWIND; /* the requests pending wait, with their BREAK value */
       breakValue = ctx->break_value;

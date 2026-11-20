@@ -130,7 +130,7 @@ static void thread_is_alive(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *arg
 
 static const xb_class_method thread_methods[] = {{"JOIN", thread_join}, {"ISALIVE", thread_is_alive}};
 static const xb_class thread_class = {
-  "THREAD", T_COUNT_, thread_vars, NULL, XB_TABLE_SIZE(thread_methods), thread_methods};
+  "THREAD", T_COUNT_, thread_vars, NULL, XB_TABLE_SIZE(thread_methods), thread_methods, NULL};
 
 /* Program threads: each runs `body` attached to the collector, with a context of its own, counted in `running`. */
 typedef struct program_thread {
@@ -545,7 +545,7 @@ static void holder_dispose(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv
 
 static const xb_class_method holder_methods[] = {{"DISPOSE", holder_dispose}};
 static const xb_class holder_class = {
-  "MUTEXHOLDER", H_COUNT_, holder_vars, NULL, XB_TABLE_SIZE(holder_methods), holder_methods};
+  "MUTEXHOLDER", H_COUNT_, holder_vars, NULL, XB_TABLE_SIZE(holder_methods), holder_methods, NULL};
 
 /* oMutex:Hold(): takes the lock as Lock() does and returns a holder whose Dispose() releases it (NIL when a QUIT ended
  * the wait). */
@@ -602,7 +602,8 @@ static void mutex_hold_async(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *ar
 static const xb_class_method mutex_methods[] = {
   {"LOCK", mutex_lock},           {"TRYLOCK", mutex_try_lock}, {"UNLOCK", mutex_unlock}, {"HOLD", mutex_hold},
   {"LOCKASYNC", mutex_lock_async}, {"HOLDASYNC", mutex_hold_async}};
-static const xb_class mutex_class = {"MUTEX", M_COUNT_, mutex_vars, NULL, XB_TABLE_SIZE(mutex_methods), mutex_methods};
+static const xb_class mutex_class = {
+  "MUTEX", M_COUNT_, mutex_vars, NULL, XB_TABLE_SIZE(mutex_methods), mutex_methods, NULL};
 
 static int is_mutex(const xb_item *it) {
   return it->type == XB_T_OBJECT && ((const xb_object *)it->v.p)->cls == &mutex_class;
@@ -747,7 +748,7 @@ static void condition_notify_all(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item
 static const xb_class_method condition_methods[] = {
   {"WAIT", condition_wait}, {"NOTIFY", condition_notify}, {"NOTIFYALL", condition_notify_all}};
 static const xb_class condition_class = {
-  "CONDITION", C_COUNT_, condition_vars, NULL, XB_TABLE_SIZE(condition_methods), condition_methods};
+  "CONDITION", C_COUNT_, condition_vars, NULL, XB_TABLE_SIZE(condition_methods), condition_methods, NULL};
 
 /* Condition(): a condition variable, which threads wait on holding a Mutex. */
 void xbf_CONDITION(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -868,7 +869,7 @@ static const xb_class_method semaphore_methods[] = {{"WAIT", semaphore_wait},
                                                     {"COUNT", semaphore_count},
                                                     {"WAITASYNC", semaphore_wait_async}};
 static const xb_class semaphore_class = {
-  "SEMAPHORE", S_COUNT_, semaphore_vars, NULL, XB_TABLE_SIZE(semaphore_methods), semaphore_methods};
+  "SEMAPHORE", S_COUNT_, semaphore_vars, NULL, XB_TABLE_SIZE(semaphore_methods), semaphore_methods, NULL};
 
 /* Semaphore( nInitial, [nMaximum] ): a semaphore with nInitial places free of nMaximum (without it: 2^31 - 1); a count
  * outside 0 .. 2^31 - 1, a maximum below 1 or below nInitial is an argument error. */
@@ -968,7 +969,7 @@ static void atomic_compare_exchange(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_i
 static const xb_class_method atomic_methods[] = {
   {"VALUE", atomic_value}, {"_VALUE", atomic_set}, {"ADD", atomic_add}, {"COMPAREEXCHANGE", atomic_compare_exchange}};
 static const xb_class atomic_class = {
-  "ATOMICINT", A_COUNT_, atomic_vars, NULL, XB_TABLE_SIZE(atomic_methods), atomic_methods};
+  "ATOMICINT", A_COUNT_, atomic_vars, NULL, XB_TABLE_SIZE(atomic_methods), atomic_methods, NULL};
 
 /* AtomicInt( [nValue] ): an atomic integer holding nValue (0 without it). */
 void xbf_ATOMICINT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {

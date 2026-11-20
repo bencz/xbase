@@ -301,7 +301,7 @@ static void await_each_move_next_async(xb_ctx *ctx, xb_item *r, uint32_t argc, x
 
 static const xb_class_method await_each_methods[] = {{"MOVENEXTASYNC", await_each_move_next_async}};
 static const xb_class await_each_class = {"AWAITEACH", AE_COUNT_, await_each_vars, NULL,
-                                          XB_TABLE_SIZE(await_each_methods), await_each_methods};
+                                          XB_TABLE_SIZE(await_each_methods), await_each_methods, NULL};
 
 void xbf___AWAITEACH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_item src;

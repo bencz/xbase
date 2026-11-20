@@ -2,6 +2,8 @@
 // before the INIT procedures: a program that defines its own ErrorSys() replaces this one.
 #include "error.ch"
 
+STATIC s_bUnobserved // the block TaskUnobservedBlock() set, NIL before
+
 // ErrorSys(): makes DefError() the error block.
 PROCEDURE ErrorSys()
    ErrorBlock( {| oError | DefError( oError ) } )
@@ -53,3 +55,27 @@ STATIC FUNCTION ErrorMessage( oError )
       cMessage += " (DOS Error " + LTrim( Str( oError:osCode ) ) + ")"
    ENDIF
 RETURN cMessage
+
+// TaskUnobservedBlock( [bNew] ): the block that gets the failures of tasks nothing observed (__TaskUnobserved), NIL
+// before one is set; a block replaces it, as ErrorBlock()'s argument does, for every thread and task.
+FUNCTION TaskUnobservedBlock( bNew )
+   LOCAL bOld := s_bUnobserved
+   IF ValType( bNew ) == "B"
+      s_bUnobserved := bNew
+   ENDIF
+RETURN bOld
+
+// __TaskUnobserved( xFailure, oTask ): a task failed with xFailure, nothing observed it (nothing waited for it,
+// continued from it, read its failure or asked whether it failed), and the collector found it unreachable (the Task
+// class's destructor calls this). The block TaskUnobservedBlock() set gets both; without one, it is reported to the
+// standard error: an Error object as the default handler reports one, with the lines of the calls where it was
+// raised, another value by its type. The program goes on.
+PROCEDURE __TaskUnobserved( xFailure, oTask )
+   IF ValType( s_bUnobserved ) == "B"
+      Eval( s_bUnobserved, xFailure, oTask )
+   ELSEIF ValType( xFailure ) == "O" .AND. xFailure:ClassName() == "ERROR"
+      OutErr( Chr( 10 ) + "Unobserved task failure: " + ErrorMessage( xFailure ) + __ErrorCalls( xFailure ) )
+   ELSE
+      OutErr( Chr( 10 ) + "Unobserved task failure: a value of type " + ValType( xFailure ) )
+   ENDIF
+RETURN

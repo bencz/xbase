@@ -1,0 +1,22 @@
+
+handler before: U
+previous: U now: B
+still a block: B
+unobserved:          2 [Argument error + failed] [C broken failed]
+kept:          0
+kept failed: .T.
+observed by IsFailed:          0
+after Error:          0
+after IsFailed:          0
+after Wait:          0
+after Result:          0
+after ContinueWith:          0
+after WhenAll:          0
+after WhenAny:          0
+after Timeout:          0
+after Await:          0
+after IsCompleted:          1 [Argument error + failed]
+after IsCanceled:          1 [Argument error + failed]
+completed and canceled:          0
+async function:          1 [Argument error + failed]
+async generator:          0

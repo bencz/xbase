@@ -148,7 +148,8 @@ static void gen_move_next(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv)
 }
 
 static const xb_class_method gen_methods[] = {{"MOVENEXT", gen_move_next}};
-const xb_class xb_generator_class = {"GENERATOR", XB_GEN_VARS, gen_vars, NULL, XB_TABLE_SIZE(gen_methods), gen_methods};
+const xb_class xb_generator_class = {
+  "GENERATOR", XB_GEN_VARS, gen_vars, NULL, XB_TABLE_SIZE(gen_methods), gen_methods, NULL};
 
 /* The runtime's Enumerable() (runtime/src/rtl/collections.prg): a program's class of that name is another. */
 void xbf_ENUMERABLE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);

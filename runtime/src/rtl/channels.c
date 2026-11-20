@@ -508,7 +508,7 @@ static void enumerator_move_next_async(xb_ctx *ctx, xb_item *r, uint32_t argc, x
 static const xb_class_method enumerator_methods[] = {{"MOVENEXT", enumerator_move_next},
                                                      {"MOVENEXTASYNC", enumerator_move_next_async}};
 static const xb_class enumerator_class = {"CHANNELENUMERATOR", E_COUNT_, enumerator_vars, NULL,
-                                          XB_TABLE_SIZE(enumerator_methods), enumerator_methods};
+                                          XB_TABLE_SIZE(enumerator_methods), enumerator_methods, NULL};
 
 /* oChannel:GetEnumerator( [oToken] ): an enumerator of the values as they come, until the channel is closed and empty
  * (FOR EACH waits for each, AWAIT FOR EACH awaits each); the token cancels the waits of its MoveNextAsync() calls
@@ -532,7 +532,7 @@ static const xb_class_method channel_methods[] = {
   {"CLOSE", channel_close},                {"COUNT", channel_count},
   {"ISCLOSED", channel_is_closed},         {"GETENUMERATOR", channel_get_enumerator}};
 static const xb_class channel_class = {
-  "CHANNEL", H_COUNT_, channel_vars, NULL, XB_TABLE_SIZE(channel_methods), channel_methods};
+  "CHANNEL", H_COUNT_, channel_vars, NULL, XB_TABLE_SIZE(channel_methods), channel_methods, NULL};
 
 /* Channel( [nCapacity] ): a channel that keeps up to nCapacity values not received yet (without it, or 0: any
  * number); a capacity that is no number, below 0 or past 2^31 - 1, is the argument error. */

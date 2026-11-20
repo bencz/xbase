@@ -216,6 +216,9 @@ typedef struct xb_class {
   struct cls *compiled;         /* NULL for the runtime's own classes */
   uint32_t nmethods;            /* a runtime class's methods (none: 0, NULL) */
   const xb_class_method *methods;
+  /* A runtime class's destructor (argv[0] the object), or NULL: runs for an object registered with xb_gc_finalizable
+   * once the collector finds it unreachable (xb_classes_finalize). */
+  xb_func destructor;
 } xb_class;
 
 /* The method of runtime class `cls` named `name` (upper-cased), or NULL. */
@@ -259,7 +262,7 @@ int        xb_class_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
                          uint32_t argc, xb_item *argv);
 /* Runs the destructors of the objects the collector found unreachable
  * (xb_gc_next_finalized), each class of the object's line that has one, the
- * object's class first; they may collect. The requests pending before (and
+ * object's class first (a runtime class's own destructor alone); they may collect. The requests pending before (and
  * the BREAK value) wait meanwhile; an error, BREAK or TRAP in a destructor
  * ends it alone, and a QUIT stays and leaves the other objects queued. */
 void       xb_classes_finalize(xb_ctx *ctx);

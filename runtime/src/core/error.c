@@ -22,7 +22,7 @@ enum {
 };
 _Static_assert(XB_TABLE_SIZE(error_vars) == ERR_COUNT_, "one ERR_ index per Error variable");
 
-static const xb_class error_class = {"ERROR", ERR_COUNT_, error_vars, NULL, 0, NULL};
+static const xb_class error_class = {"ERROR", ERR_COUNT_, error_vars, NULL, 0, NULL, NULL};
 
 void xbf_ERRORNEW(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ctx);

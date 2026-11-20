@@ -99,9 +99,8 @@ NEXT
   USING oErr` under an error block that breaks), another value as `Break( value )` (done). The default handler reports
   an error that crossed tasks with where it happened, then each place it was waited for (`Called from INNER(29)`, then
   `Waited for in MIDDLE(24)`, `Waited for in MAIN(11)`, tests/run/async_errors; the task's own calls only, also for a
-  step that ran inline: tests/run/async_errors_early: done). *(Planned)*: a failed task nobody awaits is reported (on
-  standard error, and to a handler the program may set) when the collector finds it unreachable. `QUIT` in any task ends
-  the program.
+  step that ran inline: tests/run/async_errors_early: done). A failed task that nothing observed is reported when the
+  collector finds it unreachable ([Tasks](#tasks), done). `QUIT` in any task ends the program.
 - Restrictions: no `AWAIT` in a codeblock, no `...`, `PCount()`, `PValue()` or `PARAMETERS` in an `ASYNC` function
   (done). Its `PRIVATE` variables (a `PRIVATE` statement, or an assignment to a name no variable has) belong to its
   own environment: visible to what it calls, they last across `AWAIT` until it ends (done). *(Planned)*: asynchronous
@@ -343,6 +342,16 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   of what the source is linked to and of its timer (`USING`): a long-lived token linked to again and again, as by
   each request of a server, keeps only the sources not disposed; a timeout settled before its deadline keeps nothing
   either (its timer is dropped once the heap grows).
+- A task that fails while nothing has observed it (nothing waited for it: `Wait()`, `Result`, `AWAIT`; continued from
+  it: `ContinueWith()`, `TaskWhenAll()`, `TaskWhenAny()`, `TaskTimeout()`, an `AWAIT` that suspends; read its failure:
+  `Error`, `IsFailed`; `IsCompleted` and `IsCanceled` do not count; an asynchronous generator's body counts as observed:
+  its enumerator takes its failure) is registered with the collector (rtl/tasks.c, the Task class's destructor). If it
+  is still unobserved when the collector finds it unreachable, its failure goes to `__TaskUnobserved( xFailure, oTask )`
+  (rtl/errorsys.prg): to the block `TaskUnobservedBlock( [bNew] )` set (a block replaces it, anything else is ignored,
+  as `ErrorBlock()` does; one for the whole program), else to the standard error, an Error object as `Unobserved task
+  failure: ` and the message and call lines the default handler would show, another value by its type. The program goes
+  on. A task still reachable, completed or canceled is never reported; a fire-and-forget `ASYNC` call whose error fails
+  it is (tests/run/task_unobserved).
 - `TaskCompletionSource()`: `Task` is a task that its methods complete: `SetResult( x )`, `SetError( x )` (failed with
   x), `SetCanceled()`, each `.T.`, and `BASE/9025` `Task already completed` when it was; `TrySetResult`, `TrySetError`,
   `TrySetCanceled` tell whether they did.

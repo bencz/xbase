@@ -215,4 +215,4 @@ void xb_agen_step_ended(xb_ctx *ctx, const xb_item *gen, int outcome, const xb_i
 
 static const xb_class_method agen_methods[] = {{"MOVENEXT", agen_move_next}, {"MOVENEXTASYNC", agen_move_next_async}};
 static const xb_class agen_class = {"ASYNCGENERATOR", G_COUNT_, agen_vars, NULL, XB_TABLE_SIZE(agen_methods),
-                                    agen_methods};
+                                    agen_methods, NULL};

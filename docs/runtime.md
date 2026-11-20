@@ -399,14 +399,15 @@ use it). `__GcMemory()` returns `{ live objects, the heap's memory in bytes (blo
 mappings: what was given back is not counted), the process's resident bytes (0 where the system does not tell), the
 heap's memory without the free blocks it keeps for the next allocations }`.
 
-Finalization: an object registered with `xb_gc_finalizable` (an object whose class has a destructor) that a
-collection does not reach moves, after marking, to a queue of finalized objects, and is marked with what it refers to
-(the queue is a root until `xb_gc_next_finalized` hands it out); the collection then raises `XB_PENDING_FINALIZE` in
-the context that runs the destructors: the program's (the first one registered, then another when it goes), or,
-while its thread is in a blocking operation (a `Join()`, a wait, where it would test nothing for as long), the
-collecting thread's, the one whose allocation found them. One context runs destructors at a time
-(`xb_gc_finalizing`); objects queued while it ends its turn make it run again at its next test. The objects with
-destructors are listed young and old: a young collection looks at the young ones only.
+Finalization: an object registered with `xb_gc_finalizable` (an object whose compiled class has a destructor, or of a
+runtime class that has one, `xb_class.destructor`: a failed task nothing observed) that a collection does not reach
+moves, after marking, to a queue of finalized objects, and is marked with what it refers to (the queue is a root until
+`xb_gc_next_finalized` hands it out); the collection then raises `XB_PENDING_FINALIZE` in the context that runs the
+destructors: the program's (the first one registered, then another when it goes), or, while its thread is in a blocking
+operation (a `Join()`, a wait, where it would test nothing for as long), the collecting thread's, the one whose
+allocation found them. One context runs destructors at a time (`xb_gc_finalizing`); objects queued while it ends its
+turn make it run again at its next test. The objects with destructors are listed young and old: a young collection looks
+at the young ones only.
 
 ## Hashes
 
