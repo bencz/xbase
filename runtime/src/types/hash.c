@@ -498,9 +498,10 @@ void xb_hash_reindex(xb_hash *h) {
   if (h->cap) index_entries(h);
 }
 
-/* Shared hashes (core/shared.h): every operation runs under the hash's lock, reads too (one may reorganize it: the
- * position tree, a compaction), so nothing is read under its sequence counter; values and keys come out copied. A
- * store a key needs is allocated before the lock is taken (rooted meanwhile) and taken under it when still needed. */
+/* Shared hashes (core/shared.h): every operation that changes one runs under the hash's lock, and so do the reads of
+ * positions (the position tree); a lookup by key and the length are read under its sequence counter instead
+ * (lookup_shared), with no write. Values and keys come out copied. A store a key needs is allocated before the lock is
+ * taken (rooted meanwhile) and taken under it when still needed. */
 static int lock_if_shared(const xb_hash *h) {
   int shared = xb_is_shared(h);
   if (shared) xb_seq_lock(h);
@@ -512,20 +513,75 @@ static void unlock_if(const xb_hash *h, int shared) {
 }
 
 uint32_t xb_hash_length(const xb_hash *h) {
-  int shared = lock_if_shared(h);
-  uint32_t n = h->len;
-  unlock_if(h, shared);
-  return n;
+  if (!xb_is_shared(h)) return h->len;
+  for (;;) {
+    uint32_t seq = xb_seq_read_begin(h);
+    uint32_t n = xb_atomic_load32(&h->len, XB_ACQUIRE);
+    if (xb_seq_read_valid(h, seq)) return n;
+  }
 }
 
 int xb_hash_get(xb_hash *h, const xb_item *key, xb_item *value) { return xb_hash_lookup(h, key, NULL, value); }
 
+/* xb_hash_lookup of a shared hash, under its sequence counter: the store's addresses and the index as one read sees
+ * them, then the probe, which copies each key it compares and checks the read before it looks into the key (a writer
+ * that came between may have left a key half written); its slots bounded (a probe over an index a writer is changing
+ * may find no empty slot). A writer that came between, at any point, makes the reads start again; after LOOKUP_TRIES
+ * of them the lookup is made under the lock, which hands itself over to a reader writers keep overtaking. The stores a
+ * writer replaces stay in memory meanwhile: no collection runs while this reads (no safepoint). */
+#define LOOKUP_TRIES 8
+static XB_NOINLINE int lookup_shared(const xb_hash *h, const xb_item *key, xb_item *stored, xb_item *value) {
+  for (unsigned tries = 0;; ++tries) {
+    if (tries == LOOKUP_TRIES) {
+      xb_seq_lock(h);
+      int64_t e = xb_hash_find(h, key);
+      if (e >= 0 && stored) *stored = h->entries[e].key;
+      if (e >= 0 && value) *value = h->entries[e].value;
+      xb_seq_unlock(h);
+      return e >= 0;
+    }
+    uint32_t seq = xb_seq_read_begin(h);
+    uint32_t len = xb_atomic_load32(&h->len, XB_ACQUIRE), cap = xb_atomic_load32(&h->cap, XB_ACQUIRE);
+    uint32_t imask = xb_atomic_load32(&h->imask, XB_ACQUIRE);
+    xb_hentry *entries = xb_atomic_loadptr((void *const *)&h->entries, XB_ACQUIRE);
+    const uint32_t *hashes = xb_atomic_loadptr((void *const *)&h->hashes, XB_ACQUIRE);
+    const uint32_t *index = xb_atomic_loadptr((void *const *)&h->index, XB_ACQUIRE);
+    if (!xb_seq_read_valid(h, seq)) continue;
+    if (!len || !entries) return 0;
+    uint32_t hv = key_hash(h, key);
+    int found = 0, torn = 0;
+    xb_item k, v;
+    for (uint32_t i = hv & imask, n = 0; n <= imask; i = (i + 1) & imask, ++n) {
+      uint32_t e = xb_atomic_load32(&index[i], XB_ACQUIRE);
+      if (!e) break;
+      if (e > cap) { /* an index a writer is changing */
+        torn = 1;
+        break;
+      }
+      if (xb_atomic_load32(&hashes[e - 1], XB_ACQUIRE) != hv) continue;
+      xb_seq_load(&k, &entries[e - 1].key);
+      if (!xb_seq_read_valid(h, seq)) {
+        torn = 1;
+        break;
+      }
+      if (key_equal(h, &k, key)) {
+        xb_seq_load(&v, &entries[e - 1].value);
+        found = 1;
+        break;
+      }
+    }
+    if (torn || !xb_seq_read_valid(h, seq)) continue;
+    if (found && stored) *stored = k;
+    if (found && value) *value = v;
+    return found;
+  }
+}
+
 int xb_hash_lookup(xb_hash *h, const xb_item *key, xb_item *stored, xb_item *value) {
-  int shared = lock_if_shared(h);
+  if (xb_is_shared(h)) return lookup_shared(h, key, stored, value);
   int64_t e = xb_hash_find(h, key);
   if (e >= 0 && stored) *stored = h->entries[e].key;
   if (e >= 0 && value) *value = h->entries[e].value;
-  unlock_if(h, shared);
   return e >= 0;
 }
 

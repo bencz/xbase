@@ -414,7 +414,8 @@ at the young ones only.
 `types/hash.c` holds the hash itself, `rtl/hashes.c` the `H*` functions (`HEval`, `HScan` and `HMerge` are in
 `rtl/arrays.prg`), and `rtl/collections.c` what they share with the array functions: argument ranges, block calls
 from C, the order of values, the stable merge sort and deep copies. A hash other threads may reach is used through
-the functions that take its lock when it is shared ([Threads and synchronization](#threads-and-synchronization)).
+the functions that take its lock when it is shared, but for a lookup by key and its length, read under its sequence
+counter ([Threads and synchronization](#threads-and-synchronization)).
 
 - Keys are strings, numbers and dates; values are anything. A number that equals an integer is that integer as a key,
   so `1`, `1.0` and `-0.0` against `0` are each one key, also in a literal (`{ 1 => "a", 1.0 => "b" }` has one entry,

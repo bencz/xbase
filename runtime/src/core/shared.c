@@ -131,7 +131,10 @@ void xb_seq_lock(const void *obj) {
     }
     if (spins == SPINS) lock_slow(s);
   }
-  xb_atomic_add32(&s->seq, 1, XB_RELAXED); /* odd: readers wait or read again (before the writes: release stores) */
+  xb_atomic_add32(&s->seq, 1, XB_RELAXED); /* odd: readers wait or read again */
+  /* The odd count is seen before any write that follows, plain stores too (a hash's words, xb_seq_read_valid's
+   * readers on weak memory: ARM, POWER): a reader that sees a write sees the count changed. */
+  xb_atomic_fence(XB_RELEASE);
 }
 
 void xb_seq_unlock(const void *obj) {

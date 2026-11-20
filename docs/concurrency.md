@@ -469,8 +469,14 @@ environments, and the variables made in them, come with `ThreadStart`) and the f
   the flow that reaches a local array changes its form while that flow runs. Strings are immutable; a shared string
   never grows in place (its append flag is cleared when it is shared). Flows may append to one shared view at once: each
   claims the bytes past its buffer's tip with an atomic compare-and-swap, and one that loses copies
-  ([runtime.md](runtime.md#values)). Read-only operations that reorganize a hash (compaction, the position tree) run
-  under the lock when it is shared.
+  ([runtime.md](runtime.md#values)). A shared hash is looked up by key, and its length read, under its sequence counter:
+  the store's addresses and the index as one read sees them, then a probe that copies each key it compares and checks
+  the read before it looks into the key, with a bounded number of slots; a writer that came between makes it read again,
+  and after eight reads it looks up under the lock, which hands itself over to a waiter writers keep overtaking (a
+  lookup never misses a key the hash held throughout: tests/platform/shared_hashes). A writer's count goes odd before
+  anything it writes, plain stores too (a release fence after it, for weak-memory targets). Four threads that look one
+  shared hash up take a sixth of the cycles they took under its lock. Read-only operations that reorganize a hash
+  (positions, through the position tree) run under the lock when it is shared.
 - **Lifetime.** A collection happens only at safepoints, and no code holds the address of a shared object's storage
   across one: a read under the sequence counter has no safepoint inside, compiled code tests the header bit at each
   access and reads the storage's address again after every call, and the runtime's loops that run code between accesses

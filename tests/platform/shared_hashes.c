@@ -1,7 +1,8 @@
 /* The runtime's hash operations on a shared hash (types/hash.c, rtl/hashes.c), threads at once, collections (full
  * ones, which move objects, too) running meanwhile. First putters HSet() keys of their own (strings, shared as they
- * are stored; the hash's store grows many times) while readers look keys up and take HKeys(): in the end every key is
- * there with its value. Then writers set values (alternating integers and doubles), HDel(), remove by position,
+ * are stored; the hash's store grows many times) while readers look keys up and take HKeys(): the keys the hash held
+ * before are found at every lookup (a lookup under the sequence counter that a growth overlaps reads again, never
+ * misses), and in the end every key is there with its value. Then writers set values (alternating integers and doubles), HDel(), remove by position,
  * HSort(), HFill(), HCopy() into it, HAllocate(), HCaseMatch(), HValueAt() and test pairs ($) while readers look
  * keys up and take entries by position: a reader never sees an integer of a double's bits or a tiny double (an item
  * read torn), nor a value of another type, and in the end each key is there once, at its position. Last, one thread
@@ -29,6 +30,7 @@ void xbf_HCASEMATCH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 #define MIXERS 2
 #define MIXES 20000u
 #define KEYS 64u
+#define BASE_KEYS 32u /* in the hash before the putters start: every lookup finds them */
 
 static xb_item shared;
 static uint32_t bad, busy;
@@ -99,6 +101,10 @@ static void reader(void *arg) {
       uint32_t k = n % (PUTTERS * PUTS);
       key(&w.args[1], "k", k);
       if (xb_hash_get(shared.v.p, &w.args[1], &w.ret) && !(w.ret.type == XB_T_INT && w.ret.v.i == (int64_t)k))
+        xb_atomic_add32(&bad, 1, XB_RELAXED);
+      key(&w.args[1], "b", n % BASE_KEYS);
+      if (!xb_hash_get(shared.v.p, &w.args[1], &w.ret) || w.ret.type != XB_T_INT ||
+          w.ret.v.i != (int64_t)(n % BASE_KEYS))
         xb_atomic_add32(&bad, 1, XB_RELAXED);
       if (n % 509u == 0) {
         xbf_HKEYS(w.ctx, &w.ret, 1, w.args);
@@ -264,17 +270,30 @@ int main(void) {
   xb_gc_thread_attach(&base);
   xb_set_hash(&shared, xb_hash_alloc());
   xb_gc_add_root(&shared, 1);
-  xb_share(&shared);
-  xb_gc_thread_detach();
-  run(putter, PUTTERS, 0);
-  xb_gc_thread_attach(&base);
   xb_ctx *ctx = xb_ctx_new();
   xb_item k, v;
   xb_set_nil(&k);
   xb_set_nil(&v);
   xb_gc_root_push(ctx, &k);
   xb_gc_root_push(ctx, &v);
-  CHECK(xb_hash_length(shared.v.p) == PUTTERS * PUTS);
+  for (uint32_t n = 0; n < BASE_KEYS; ++n) {
+    key(&k, "b", n);
+    xb_set_int(&v, (int64_t)n);
+    xb_hash_set(shared.v.p, &k, &v);
+  }
+  xb_share(&shared);
+  xb_gc_root_pop(ctx, 2);
+  xb_ctx_free(ctx);
+  xb_gc_thread_detach();
+  run(putter, PUTTERS, 0);
+  CHECK(bad == 0);
+  xb_gc_thread_attach(&base);
+  ctx = xb_ctx_new();
+  xb_set_nil(&k); /* what they held may have moved meanwhile */
+  xb_set_nil(&v);
+  xb_gc_root_push(ctx, &k);
+  xb_gc_root_push(ctx, &v);
+  CHECK(xb_hash_length(shared.v.p) == BASE_KEYS + PUTTERS * PUTS);
   for (uint32_t n = 0; n < PUTTERS * PUTS; ++n) {
     key(&k, "k", n);
     CHECK(xb_hash_get(shared.v.p, &k, &v) && v.type == XB_T_INT && v.v.i == (int64_t)n);
