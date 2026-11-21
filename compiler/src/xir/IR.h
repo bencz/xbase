@@ -227,6 +227,7 @@ public:
   // whether it is Super:message; ClassNew: the class.
   int32_t classIndex = -1;
   bool superSend = false;
+  bool dispatched = false; // a send kept for the runtime to dispatch where a version calls the method (ScalarSends)
   // MakeBlock; AsyncNew: the entry it runs in (its own, inlined or not); FrameRelease with a parameter: its function
   Function *blockFn = nullptr;
   std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
@@ -312,6 +313,9 @@ public:
   bool method = false;            // a method: its first parameter is Self, which PCount() and PValue() skip
   bool byRefBody = false;         // the body versioned for references (NAME.byref), reached by call.forward
   bool usesRest = false;          // has an args.rest (`...`)
+  // Of a carried runtime source's module (Module::library): compiled in the runtime, where a program reaches it by its
+  // library symbol (XB_LIBRARY_FUNC_PREFIX), through its xBase-callable entry (its direct one is the runtime's own).
+  bool carried = false;
   // An ASYNC function's resume function: the PRIVATEs it creates are its environment's (its own, from its call to its
   // end: concurrency.md), which none of its steps ends.
   bool ownsPrivates = false;

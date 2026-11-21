@@ -96,7 +96,9 @@ bool resumableBody(const Function &r, Body &out) {
       if (seen.insert(s).second) work.push_back(s);
     }
   }
-  return !out.yields.empty() && instructionCount(out.blocks) <= kMaxGenerator;
+  // A generator of a carried runtime source runs in place only on what the runtime exports of its module.
+  return !out.yields.empty() && instructionCount(out.blocks) <= kMaxGenerator &&
+         (!r.carried || selfContained(out.blocks));
 }
 
 // The FOR EACH loop a use of variable `v` at position `k` of block `b` belongs to: the nearest each.enter or each.leave
@@ -125,8 +127,14 @@ struct EachLoop {
 
 bool fusibleLoop(const Function &f, const Loops &loops, Instruction *make, EachLoop &l) {
   l.make = make;
-  if (!make->hasOneUse()) return false;
-  l.source = make->users().front();
+  // Its one use the loop's each.source; a body inlined around it that it was passed to only holds it (its
+  // inline.enter, of a body that does not read its arguments as received), and is given NIL instead.
+  for (Instruction *u : make->users()) {
+    if (u->op == Op::InlineEnter && !u->blockFn->readsArgs) continue;
+    if (l.source) return false;
+    l.source = u;
+  }
+  if (!l.source) return false;
   const Constant *descend = l.source->op == Op::EachSource ? asBool(l.source->operand(1)) : nullptr;
   if (!descend || descend->logical || l.source->operand(0) != make) return false;
   for (Instruction *u : l.source->users()) {
@@ -366,6 +374,8 @@ void fuse(Function &f, const EachLoop &l, Function &r, const Body &body) {
   removeTrivialParams(placed, preds);
   removeUnreachableBlocks(f); // the header, with the test and the length
   eraseInstruction(l.source);
+  Builder nils(&f);
+  for (Instruction *u : std::vector<Instruction *>(l.make->users())) u->replaceUses(l.make, nils.nil());
   eraseInstruction(l.make);
 }
 

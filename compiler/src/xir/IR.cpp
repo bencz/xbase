@@ -36,7 +36,7 @@ const Function *firstProgramFunction(const Module &m) {
 }
 
 bool hasDirectEntry(const Function &f) {
-  return f.kind == Function::Kind::Program && !f.readsArgs && !f.byRefBody && !f.usesRest;
+  return f.kind == Function::Kind::Program && !f.readsArgs && !f.byRefBody && !f.usesRest && !f.carried;
 }
 
 bool isEvalCall(const Instruction &i) {
@@ -102,6 +102,7 @@ void Instruction::copyData(const Instruction &from) {
   index = from.index;
   classIndex = from.classIndex;
   superSend = from.superSend;
+  dispatched = from.dispatched;
   blockFn = from.blockFn;
   captures = from.captures;
   alias = from.alias;

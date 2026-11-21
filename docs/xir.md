@@ -154,11 +154,12 @@ block parameter.
 ## Passes
 
 The syntax tree is folded first (`opt/Fold`, [compiler.md](compiler.md#constant-folding)). From `-O1` on, the pass
-manager (`PassManager.*`, `optimize`) runs a table of passes on every function, in order, repeating the pipeline
-while something changes (at most four rounds), each function after those it calls, makes or forwards to (post-order of
-the call graph: a body is inlined optimized, its own calls inlined already), then the final passes on every function
-(so that a body inlined elsewhere is copied before them), and verifies the function after every pass that changed
-it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the result. Implemented (`xir/passes/`):
+manager (`PassManager.*`, `optimize`) runs a table of passes on every function, in order, repeating the pipeline while
+something changes (at most eight rounds: a chain of `Enumerable`'s methods takes one a level), each function after those
+it calls, makes or forwards to (post-order of the call graph: a body is inlined optimized, its own calls inlined
+already), then the final passes on every function (so that a body inlined elsewhere is copied before them), and verifies
+the function after every pass that changed it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the
+result. Implemented (`xir/passes/`):
 
 - `drop-reference-bodies` (`Versioning.cpp`), once on the module before the others: a `STATIC FUNCTION` (not a method,
   not `INIT` or `EXIT`) is reached only from the module (no macro, no other module, no message reaches it); when it
@@ -203,24 +204,26 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
     `params.ref` test (which they pass); otherwise its other body (`NAME.byref`).
   - `fuse-generators`, after it (which shows the enumerator a generator's function makes: `gen.new`): a `FOR EACH` over
     an enumerator made in the function by `gen.new` of a generator of the module, used only by that loop's `each.source`
-    (ascending, one collection, no key), whose source goes only to its `each.enter`, `enum.len` and `each.move`, entered
-    as often as its enumerator is made (every loop around its `each.enter` goes round its `gen.new` too: an enumerator
-    made once and gone through again goes on where it was), whose variable is the frame's alone (not shared, not a
-    parameter) with no loop on it inside this one, and whose generator's body (the resume function's blocks a step runs,
-    of at most 300 instructions) has no unwind block, keeps no handler across `YIELD`, reads no parameter in its frame
-    and creates no `PRIVATE`, runs the generator in place (`FuseGenerators.cpp`). The body is copied between
-    `inline.enter` and `inline.leave` of the resume function (the call stack shows it as its steps would), its variables
-    new ones of the function (its parameters given the arguments, the rest NIL: `bodyVars`, `enterBody` in `Transform`,
-    which inlining uses too), started where a first step would, the caller's line shown the loop's; each `gen.yield`
-    assigns the loop variable and enters the loop's body, the body's way back goes on after that `YIELD` (the state,
-    when there are several, in a variable of its own), and `gen.done` leaves the loop, its variables set to NIL as the
-    end drops its frame (`leaveBody`). In a sequence, the body unwinds through a block that leaves its frame
-    (`unwindBody`), and each way out to the loop is a block that unwinds where the loop does. The variable is then an
-    ordinary one in the loop (over an enumerator, assigning it changes nothing else: its reads and writes become
-    direct), saved before and restored after it. The values the loop's header carried are joined again through the
-    generator's blocks (`SSAUpdater`; an edge that passes a parameter back to itself defines nothing new). A generator
-    fed by another (`FOR EACH x IN Evens( Range( 1, n ) )`) fuses in turn once `promote-variables` shows the inner
-    enumerator's `gen.new` to the copied loop. The `generator` benchmark runs in 2 ms (59 through the enumerators).
+    (and held by the `inline.enter` of a body it was passed to that does not read its arguments as received: given `NIL`
+    once fused) (ascending, one collection, no key), whose source goes only to its `each.enter`, `enum.len` and
+    `each.move`, entered as often as its enumerator is made (every loop around its `each.enter` goes round its `gen.new`
+    too: an enumerator made once and gone through again goes on where it was), whose variable is the frame's alone (not
+    shared, not a parameter) with no loop on it inside this one, and whose generator's body (the resume function's
+    blocks a step runs, of at most 300 instructions) has no unwind block, keeps no handler across `YIELD`, reads no
+    parameter in its frame and creates no `PRIVATE`, runs the generator in place (`FuseGenerators.cpp`). The body is
+    copied between `inline.enter` and `inline.leave` of the resume function (the call stack shows it as its steps
+    would), its variables new ones of the function (its parameters given the arguments, the rest NIL: `bodyVars`,
+    `enterBody` in `Transform`, which inlining uses too), started where a first step would, the caller's line shown the
+    loop's; each `gen.yield` assigns the loop variable and enters the loop's body, the body's way back goes on after
+    that `YIELD` (the state, when there are several, in a variable of its own), and `gen.done` leaves the loop, its
+    variables set to NIL as the end drops its frame (`leaveBody`). In a sequence, the body unwinds through a block that
+    leaves its frame (`unwindBody`), and each way out to the loop is a block that unwinds where the loop does. The
+    variable is then an ordinary one in the loop (over an enumerator, assigning it changes nothing else: its reads and
+    writes become direct), saved before and restored after it. The values the loop's header carried are joined again
+    through the generator's blocks (`SSAUpdater`; an edge that passes a parameter back to itself defines nothing new). A
+    generator fed by another (`FOR EACH x IN Evens( Range( 1, n ) )`) fuses in turn once `promote-variables` shows the
+    inner enumerator's `gen.new` to the copied loop. The `generator` benchmark runs in 2 ms (59 through the
+    enumerators).
   - `inline-blocks`, after it (which may pass a block literal to an `Eval`): `Eval( {| p | body }, args )` of a
     codeblock literal of the function (`Eval` of the native runtime function), of at most 200 instructions, not the
     function itself (a block a call inlined in it runs), none of whose captured variables is bound anew by an inlined
@@ -230,13 +233,17 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
     once none is left. Afterwards, `unshare-variables` runs.
 
   The driver compiles the runtime's carried sources (`driver/RuntimeLibrary.h`: the `.prg` files `XB_INLINE_PRG` in
-  `compiler/CMakeLists.txt` lists, held in `xbc` as bytes with their public functions' names) as modules of the
-  runtime, through the pipeline's rounds only, once a module calls one of their functions (at `-O1` and above, not
-  with `--runtime`, and only when `std.ch` is found in the include directories: else nothing of them is inlined);
-  each module gets them as `Module::library`. A body from one is inlined only when it needs nothing of its module
-  (`selfContained`: no `STATIC` of it, none of its classes, no function of it called or codeblock made; its own
-  `STATIC` functions and codeblocks run in place in it already): it calls the runtime only. Their functions are
-  marked `runtime` (`Function::runtime`): their frames show no source file and no lines, as the runtime's do.
+  `compiler/CMakeLists.txt` lists, held in `xbc` as bytes with their public functions' names and the messages their
+  classes declare: `arrays.prg` and `collections.prg`, with `Enumerable` and the classes of the built-in types) as
+  modules of the runtime, through the pipeline's rounds only, once a module calls one of their functions or sends one of
+  those messages (at `-O1` and above, not with `--runtime`, and only when `std.ch` is found in the include directories:
+  else nothing of them is inlined); each module gets them as `Module::library`. Their functions are `carried`
+  (`Function::carried`): compiled in the runtime, which exports them by their library symbols
+  (`XB_LIBRARY_FUNC_PREFIX`), a program reaches them there, through their xBase-callable entry (`hasDirectEntry` is
+  false for them). A body from one is inlined, and a generator of one fused, only when it needs nothing of its module
+  but its functions (`selfContained`: no `STATIC` of it, none of its classes, no codeblock of it made, no typed copy of
+  it called, which the runtime need not have made alike). Their functions are marked `runtime` (`Function::runtime`):
+  their frames show no source file and no lines, as the runtime's do.
 
   The verifier checks that `inline.enter` and `inline.leave` nest (`openInlineBodies` in `Analysis`: the functions of
   the bodies open where each block starts, the same on every path into it, also through the copies
@@ -312,26 +319,41 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   variable, a cast, `New` or `Init` without a method, a message no member answers, a member whose scope the sender
   reaches only as a friend (the runtime checks friends), a line not known. The classes' methods are optimized before
   the other functions (`calleesFirst`), so that a call a send became inlines an optimized body.
+- `resolve-scalar-sends`, after `resolve-sends` (`ScalarSends.cpp`): a send to a value whose types (as the type
+  inference knows them) include built-in types whose class of the runtime (a `SCALAR CLASS` of a carried source:
+  `ARRAY`, `CHARACTER`, `HASH`, ... and `Enumerable` they inherit) answers it with one method (the most such types;
+  arrays first) becomes a call of that method, and so does each next send of a chain to the enumerator the method
+  before made (a generator: its messages are `Enumerable`'s), behind one test: `scalar.plain`, the value of one of
+  those types (a mask) and no class of the program answering them before the runtime's (`xb_scalar_replaced`: a
+  `SCALAR CLASS` of the program, `ClassAssociate()` while it runs). The chain's instructions (its sends, the arguments
+  computed between them) are copied into the version that calls, the sends kept in the other (`dispatched`: not
+  resolved again), and the values they make joined after them (`joinDefinitions`). A value `ClassInfo` knows is an
+  object of a class of the module is left alone, and one that may be an object only for a chain or a send of a
+  codeblock literal (`Enumerable`'s way of use). The rounds then inline the methods, fuse their generators
+  (`fuse-generators`: an `inline.enter` of a body that only holds the enumerator it was passed gets `NIL` instead)
+  and run the codeblocks in place: `a:Where( {| v | ... } ):Select( {| v | ... } ):Sum()` becomes one loop
+  (`bench/primitives/iteration.prg`: 25 to 6 ns an element), and `s:ForEach( {| c, i | ... } )` a loop written in
+  place.
 - `specialize-calls`, on each function after its pipeline (then the pipeline again when it changed it): a call of a
-  function of the module (a `FUNCTION`, `PROCEDURE` or method with parameters, not an `INIT` or `EXIT` procedure, a body
-  versioned for references, one that reads its arguments as received (`PCount()`, `PValue()`, `...`), a generator, an
-  `ASYNC` function, nor one that makes codeblocks or has unwind blocks; at most 2000 instructions, and past 300 only
-  when a value its parameters give, through what is computed from it and the variables and block parameters it goes to,
-  is used in a loop: elsewhere knowing their types pays little and the copy doubles the code generator's work,
-  `paramsReachLoops`) that passes no reference nor `...` and whose arguments the type inference finds all integers, else
-  all numbers, all logicals or all dates for some parameter (an argument with no type at all, the result of a call that
-  never returns, takes the integers: no value of it reaches the call), or objects of one class `ClassInfo` knows, goes
-  to a copy of the function typed for them (`NAME.typedN`, shown on the call stack as the function: `stackName`). A
-  function has at most 4 copies of each kind (`kMaxCopies`: those that know every parameter, its types or its object's
-  class, and those that leave some parameter of any type); past that, a call goes to the copy made already whose
-  parameters take its arguments with the fewest types (the first made of those), else to the function itself. The copy's
-  parameters have those types and classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes
-  keeps any type and class; a method's copy, its Self of a known class, resolves the sends to Self), its versioning test
-  is false (no call of it passes a reference) and its body versioned for references goes. The copy is made once per
-  function and parameter types, optimized at once (its own calls with such arguments go to it, so a recursive function
-  calls its copy), and its return types are the least fixed point of what its `RETURN`s give with its calls of itself
-  giving the types found so far, from none (`settleReturnTypes`). `Fib( n - 1 ) + Fib( n - 2 )` then computes with
-  numbers in registers.
+  function of the module (a `FUNCTION`, `PROCEDURE` or method with parameters, not of a carried runtime source (whose
+  classes and `STATIC`s are its module's), not an `INIT` or `EXIT` procedure, a body versioned for references, one that
+  reads its arguments as received (`PCount()`, `PValue()`, `...`), a generator, an `ASYNC` function, nor one that makes
+  codeblocks or has unwind blocks; at most 2000 instructions, and past 300 only when a value its parameters give,
+  through what is computed from it and the variables and block parameters it goes to, is used in a loop: elsewhere
+  knowing their types pays little and the copy doubles the code generator's work, `paramsReachLoops`) that passes no
+  reference nor `...` and whose arguments the type inference finds all integers, else all numbers, all logicals or all
+  dates for some parameter (an argument with no type at all, the result of a call that never returns, takes the
+  integers: no value of it reaches the call), or objects of one class `ClassInfo` knows, goes to a copy of the function
+  typed for them (`NAME.typedN`, shown on the call stack as the function: `stackName`). A function has at most 4 copies
+  of each kind (`kMaxCopies`: those that know every parameter, its types or its object's class, and those that leave
+  some parameter of any type); past that, a call goes to the copy made already whose parameters take its arguments with
+  the fewest types (the first made of those), else to the function itself. The copy's parameters have those types and
+  classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes keeps any type and class; a
+  method's copy, its Self of a known class, resolves the sends to Self), its versioning test is false (no call of it
+  passes a reference) and its body versioned for references goes. The copy is made once per function and parameter
+  types, optimized at once (its own calls with such arguments go to it, so a recursive function calls its copy), and its
+  return types are the least fixed point of what its `RETURN`s give with its calls of itself giving the types found so
+  far, from none (`settleReturnTypes`). `Fib( n - 1 ) + Fib( n - 2 )` then computes with numbers in registers.
 
   Settled one at a time, a copy that calls another copy sees its result of any type while that one is being optimized,
   and a result passed to a call, `Ack( m - 1, Ack( m, n - 1 ) )`, then goes to the function itself, whose result is of
@@ -465,10 +487,11 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   `BEGIN SEQUENCE`, the generator operations (`gen.new`, `gen.restore`, `gen.done`, the terminator `gen.yield`, and
   `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), the asynchronous operations
   (`async.new`, `async.restore`, `await.ready`, `await.value`, `await.wait`, `await.fuse`, `await.fused`, the terminator
-  `async.suspend`), `append` (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed
-  continuations (the verifier keeps the check right after its operation and the value first in the block only the check
-  leads to), and for parameter versioning `params.ref` (whether parameters hold references their caller passed) and
-  `call.forward` (a call with the function's own arguments, as received), `inline.enter` (naming a function or block
+  `async.suspend`), `append` (`var := var + value`, `xb_op_append`), `scalar.plain` (a value of one of the types of a
+  mask whose classes of the runtime answer its messages: `resolve-scalar-sends`), `subst.check` and `subst.value` for
+  typed continuations (the verifier keeps the check right after its operation and the value first in the block only the
+  check leads to), and for parameter versioning `params.ref` (whether parameters hold references their caller passed)
+  and `call.forward` (a call with the function's own arguments, as received), `inline.enter` (naming a function or block
   function) and `inline.leave`, around an inlined body: the call stack shows that function in between, and
   `frame.release`, right after `x := NIL` to a local or a parameter: the frame slots of the values dead there are set to
   `NIL` (the store itself may go as a dead store, but the program let go of what x held); after the `LOCAL` standing for

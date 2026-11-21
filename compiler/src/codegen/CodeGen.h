@@ -35,6 +35,7 @@ public:
   // Modules of the runtime (xbc --runtime): public functions are runtime functions (xbf_NAME, in the runtime's
   // symbol table already, so not registered), and their frames keep line 0, as the runtime's C functions show.
   void setRuntimeLibrary(bool on) { runtimeLibrary_ = on; }
+  static std::string librarySymbol(const std::string &module, const std::string &name);
   // Adds one module of the program to the LLVM module; several modules may
   // share it (one object for several sources), each adding its own functions,
   // STATICs and registration.
@@ -103,6 +104,7 @@ private:
   void unlinkFrame(llvm::Value *frame, llvm::Value *prev = nullptr);
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
   void addAbiAttributes(llvm::Function *f);
+  llvm::Function *functionOf(const xir::Function *f);
   llvm::Function *declare(const xir::Function &f);
   llvm::Function *externFunction(const xir::Callee &c);
   void genFunction(const xir::Function &f);
@@ -356,6 +358,7 @@ private:
   std::unordered_map<const xir::Function *, llvm::Function *> direct_;
 
   llvm::GlobalVariable *statics_ = nullptr;   // the STATICs of the module being added
+  llvm::Constant *scalarReplaced_ = nullptr; // xb_scalar_replaced (xbrt.h)
   llvm::Constant *storageShared_ = nullptr;  // xb_storage_shared (xbrt.h)
   llvm::Constant *file_ = nullptr;            // its source file name (xb_proc.file), or null
   // Its memory variables: the table of their xb_memvar (numbered by the runtime when the module registers), and the
@@ -417,6 +420,8 @@ private:
   std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
   llvm::AllocaInst *blockTemp_ = nullptr;  // a codeblock while its cells are made (a C root then)
+  std::string moduleName_;                                                  // the module's (librarySymbol)
+  std::unordered_map<const xir::Function *, std::string> carriedModule_;   // carried function -> its module
   std::unordered_set<const xir::Instruction *> sharingLoads_;              // loads that end an `append`'s growth
   std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<const xir::Var *>>
       shareOnEdge_; // and the edges (from, to) that do it instead of the loads after them

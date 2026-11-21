@@ -87,11 +87,12 @@ bool paramsReachLoops(const Function &g) {
   return false;
 }
 
-// A function whose copy behaves as it does: a FUNCTION, PROCEDURE or method of the program, not one that reads
-// its arguments as received (PCount(), PValue(), `...`), nor a generator or an ASYNC function (made by a resume
-// function), nor one that makes codeblocks (which would share their function with the copy) or recovers from errors.
+// A function whose copy behaves as it does: a FUNCTION, PROCEDURE or method of the program (not of a carried runtime
+// source: its classes and STATICs are its module's), not one that reads its arguments as received (PCount(),
+// PValue(), `...`), nor a generator or an ASYNC function (made by a resume function), nor one that makes codeblocks
+// (which would share their function with the copy) or recovers from errors.
 bool copyable(const Function &g) {
-  if (g.kind != Function::Kind::Program || g.startup || g.byRefBody || g.readsArgs || g.readsParams ||
+  if (g.carried || g.kind != Function::Kind::Program || g.startup || g.byRefBody || g.readsArgs || g.readsParams ||
       g.usesRest || g.ownsPrivates || g.numParams == 0 || instructionCount(g) > kMaxInstructions)
     return false;
   for (auto &b : g.blocks) {

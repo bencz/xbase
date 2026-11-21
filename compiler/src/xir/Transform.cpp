@@ -152,6 +152,17 @@ void removeTrivialParams(std::vector<BlockParam *> &placed, const Predecessors &
   }
 }
 
+bool selfContained(const std::vector<BasicBlock *> &body) {
+  auto isStatic = [](const Var *v) { return v && v->kind == Var::Kind::Static; };
+  for (const BasicBlock *b : body)
+    for (auto &i : b->insts)
+      if (isStatic(i->var) || std::any_of(i->captures.begin(), i->captures.end(), isStatic) ||
+          i->op == Op::ClassNew || i->classIndex >= 0 || i->op == Op::MakeBlock ||
+          (i->callee.function && (!i->callee.function->carried || !i->callee.function->paramTypes.empty())))
+        return false;
+  return true;
+}
+
 void eraseInstruction(Instruction *i) {
   BasicBlock *b = i->parent;
   b->insts.erase(std::find_if(b->insts.begin(), b->insts.end(), [&](auto &p) { return p.get() == i; }));

@@ -236,6 +236,11 @@ FunctionCallee CodeGen::rt(const char *name, Type *ret, std::initializer_list<Ty
 // internal, with names no other module looks up.
 Function *CodeGen::declare(const xir::Function &f) {
   bool program = f.kind == xir::Function::Kind::Program;
+  if (program && f.internal && runtimeLibrary_) { // reached by programs that run a body of the runtime's in place
+    Function *fn = Function::Create(xbFuncTy_, GlobalValue::ExternalLinkage, librarySymbol(moduleName_, f.name), mod_);
+    addAbiAttributes(fn);
+    return fn;
+  }
   if (program && !f.internal) {
     std::string sym = (runtimeLibrary_ ? XB_RUNTIME_FUNC_PREFIX : XB_PROGRAM_FUNC_PREFIX) + f.name;
     if (Function *fn = mod_.getFunction(sym)) {
@@ -250,6 +255,27 @@ Function *CodeGen::declare(const xir::Function &f) {
   Function *fn = Function::Create(ty, GlobalValue::InternalLinkage, "xb." + f.name, mod_);
   addAbiAttributes(fn);
   return fn;
+}
+
+// The symbol of a function of a runtime module written in xBase (XB_LIBRARY_FUNC_PREFIX in xbrt.h).
+std::string CodeGen::librarySymbol(const std::string &module, const std::string &name) {
+  std::string sym = XB_LIBRARY_FUNC_PREFIX + module + "$" + name;
+  for (char &c : sym)
+    if (c == ':' || c == '.') c = '$';
+  return sym;
+}
+
+// The LLVM function of a function of the module, or of a carried runtime source's (declared by its library symbol).
+Function *CodeGen::functionOf(const xir::Function *f) {
+  if (auto it = functions_.find(f); it != functions_.end()) return it->second;
+  auto lib = carriedModule_.find(f);
+  if (!f->carried || lib == carriedModule_.end()) {
+    diag_.error({}, "internal compiler error: function " + f->name + " of no module");
+    return functions_[f] = declare(*f);
+  }
+  Function *fn = Function::Create(xbFuncTy_, GlobalValue::ExternalLinkage, librarySymbol(lib->second, f->name), mod_);
+  addAbiAttributes(fn);
+  return functions_[f] = fn;
 }
 
 // A function of the runtime (NATIVE) or of another module of the program.
@@ -276,6 +302,9 @@ void CodeGen::run(const xir::Module &m) {
     statics_ = gv;
   }
   collectMemvars(m);
+  moduleName_ = m.name;
+  for (const xir::Module *l : m.library)
+    for (auto &f : l->functions) carriedModule_[f.get()] = l->name;
   for (auto &f : m.functions) functions_[f.get()] = declare(*f);
   genClasses(m);
   directEntries(m);

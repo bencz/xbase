@@ -222,6 +222,12 @@ Instruction *Builder::seqResume(Value *requests, Value *value) {
 Instruction *Builder::substCheck(Value *checked) { return make(Op::SubstCheck, Type::Bool, {checked}); }
 Instruction *Builder::substValue(Value *checked) { return make(Op::SubstValue, Type::Item, {checked}); }
 
+Instruction *Builder::scalarPlain(Value *v, uint32_t types) {
+  Instruction *i = make(Op::ScalarPlain, Type::Bool, {v});
+  i->index = types;
+  return i;
+}
+
 Instruction *Builder::funcRef(Callee callee) {
   Instruction *i = make(Op::FuncRef, Type::Item);
   i->callee = std::move(callee);

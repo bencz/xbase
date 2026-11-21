@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 57u
+#define XB_ABI_VERSION 58u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -298,6 +298,16 @@ typedef void (*xb_func)(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv)
  * time. */
 #define XB_RUNTIME_FUNC_PREFIX "xbf_"
 #define XB_PROGRAM_FUNC_PREFIX "xbp_"
+/* [ABI] The other functions of a module of the runtime written in xBase (its methods, generators' resume functions,
+ * STATIC functions), which a program reaches once the compiler ran a body of the runtime's in place (a method of a
+ * runtime class, docs/xir.md): this prefix, the module's name, '$', and the function's name with ':' and '.' as '$'. */
+#define XB_LIBRARY_FUNC_PREFIX "xbl_"
+
+/* [ABI] Whether a class of the program answers the messages to values of type t before the runtime's own class of the
+ * type (a SCALAR CLASS of the program, or a class ClassAssociate() associated with the type): 0 while the runtime's
+ * alone does. Compiled code that calls a method of the runtime's class of a type directly (its Enumerable methods, say)
+ * tests it first: a byte each, set once and never cleared, read unordered. */
+extern uint8_t xb_scalar_replaced[XB_T_COUNT_];
 
 /* [ABI] A variable captured by a codeblock lives in a cell (value at offset 0)
  * shared by the function and its blocks. */

@@ -111,7 +111,7 @@ Constant *CodeGen::stringLiteral(const std::string &s) {
 // The constant item of a function reference (@name(), XB_T_SYMBOL): one per function, pointing at its xb_funcref
 // { name, entry, native, byref }.
 Constant *CodeGen::funcRef(const xir::Callee &c) {
-  Function *fn = c.function ? functions_.at(c.function) : externFunction(c);
+  Function *fn = c.function ? functionOf(c.function) : externFunction(c);
   Constant *&item = funcRefs_[fn];
   if (item) return item;
   const std::string &name = c.function ? c.function->name : c.name;

@@ -500,7 +500,11 @@ it: `CodeGen.cpp` (types, runtime declarations, the module, functions and frames
 lives), `Instructions.cpp`, `Variables.cpp` (variable addresses, references, write barriers), `Literals.cpp`; `Emit.cpp`
 emits the object file. `Branches.h` names the branch instructions for the passes on LLVM 23 (`CondBrInst` and
 `UncondBrInst`, `BranchInst` deprecated), which the release packages are built with, and 22 (one `BranchInst`): both
-build xbc.
+build xbc. A function of a carried runtime source (`Function::carried`) is no function of the module: it is declared by
+its library symbol (`functionOf`, `librarySymbol`: `XB_LIBRARY_FUNC_PREFIX`, the module's name and its own), which a
+module of the runtime defines with external linkage for each of its other `FUNCTION`s, `PROCEDURE`s and methods (its
+codeblocks stay its own); `scalar.plain` reads `xb_scalar_replaced` at the value's type, unordered, and tests the type
+against its mask.
 
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
   from its uses back to its definition, slots are assigned by linear scan and reused once free. A dead value's slot

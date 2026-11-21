@@ -194,7 +194,7 @@ private:
       out_ += " " + (i.alias.empty() ? std::string() : i.alias + "->") + i.message;
       break;
     case Op::ClassNew: out_ += " " + std::to_string(i.classIndex); break;
-    case Op::ObjectGet: case Op::ObjectSet: out_ += " " + std::to_string(i.index); break;
+    case Op::ObjectGet: case Op::ObjectSet: case Op::ScalarPlain: out_ += " " + std::to_string(i.index); break;
     case Op::FrameRelease:
       if (i.index) out_ += " param " + std::to_string(i.index - 1) + " of " + i.blockFn->name;
       break;

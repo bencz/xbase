@@ -418,7 +418,7 @@ void CodeGen::emit(const xir::Instruction &i) {
       break;
     }
     Value *argv = operandGroup(i);
-    Function *callee = i.callee.function ? functions_.at(i.callee.function) : externFunction(i.callee);
+    Function *callee = i.callee.function ? functionOf(i.callee.function) : externFunction(i.callee);
     Value *d = dest(i);
     setNil(d); // the caller clears the result, so callees that return nothing need not
     auto call = [&](Value *n, Value *items) { b_.CreateCall(xbFuncTy_, callee, {fnCtx_, d, n, items}); };
@@ -526,7 +526,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     // (neither body reads them: they read no arguments as received).
     Value *argc = fnDirect_ ? static_cast<Value *>(ConstantInt::get(i32_, fnParams_)) : fn_->getArg(2);
     Value *argv = fnDirect_ ? fnBase_ : fn_->getArg(3);
-    b_.CreateCall(xbFuncTy_, functions_.at(i.callee.function), {fnCtx_, d, argc, argv});
+    b_.CreateCall(xbFuncTy_, functionOf(i.callee.function), {fnCtx_, d, argc, argv});
     checkPending(unwind_);
     break;
   }
@@ -684,6 +684,19 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::SubstValue: copyItem(dest(i), addr(ops[0])); break;
+  case Op::ScalarPlain: { // the value's type in the mask, and xb_scalar_replaced[type] == 0 (set once, never cleared)
+    auto *table = ArrayType::get(i8_, XB_T_COUNT_);
+    if (!scalarReplaced_) scalarReplaced_ = mod_.getOrInsertGlobal("xb_scalar_replaced", table);
+    Value *type = typeOf(ops[0], addr(ops[0]));
+    Value *inMask = b_.CreateICmpNE(b_.CreateAnd(b_.CreateShl(ConstantInt::get(i32_, 1), type),
+                                                 ConstantInt::get(i32_, i.index)),
+                                    ConstantInt::get(i32_, 0));
+    Value *at = b_.CreateInBoundsGEP(table, scalarReplaced_, {ConstantInt::get(i32_, 0), type});
+    auto *flag = cast<LoadInst>(loadFrom(i8_, at, Mem::Unknown, "scalar.replaced"));
+    flag->setAtomic(AtomicOrdering::Unordered);
+    values_[&i] = b_.CreateAnd(inMask, b_.CreateICmpEQ(flag, ConstantInt::get(i8_, 0)));
+    break;
+  }
   case Op::SwitchCheck:
     callItemOp(rtSwitchCheck_, dest(i), {addr(ops[0])});
     checkPending(unwind_);
@@ -708,7 +721,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     setNil(d);
     b_.CreateCall(i.op == Op::GenNew ? rtGenNew_ : rtAgenNew_,
-                  {fnCtx_, d, functions_.at(i.callee.function), ConstantInt::get(i32_, ops.size()), argv});
+                  {fnCtx_, d, functionOf(i.callee.function), ConstantInt::get(i32_, ops.size()), argv});
     break;
   }
   case Op::GenRestore: emitGenRestore(i); break;
@@ -717,7 +730,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *argv = operandGroup(i);
     Value *d = dest(i);
     setNil(d);
-    b_.CreateCall(rtAsyncNew_, {fnCtx_, d, functions_.at(i.blockFn), functions_.at(i.callee.function),
+    b_.CreateCall(rtAsyncNew_, {fnCtx_, d, functions_.at(i.blockFn), functionOf(i.callee.function),
                                 ConstantInt::get(i32_, ops.size()), argv});
     checkPending(unwind_);
     break;
@@ -727,7 +740,7 @@ void CodeGen::emit(const xir::Instruction &i) {
         b_.CreateCall(rtAsyncRestore_, {fnCtx_, fnBase_, ConstantInt::get(i32_, plan_->savedSize())}), i64_);
     break;
   case Op::AwaitFuse: { // no entry: a send's method
-    Value *entry = i.callee.function ? static_cast<Value *>(functions_.at(i.callee.function))
+    Value *entry = i.callee.function ? static_cast<Value *>(functionOf(i.callee.function))
                                      : ConstantPointerNull::get(ptrTy_);
     b_.CreateCall(rtAwaitFuse_, {fnCtx_, entry});
     break;

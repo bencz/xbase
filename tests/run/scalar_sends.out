@@ -1,0 +1,12 @@
+
+chain:          3 count:          3          3 len:          3
+chain:          3 count:          3          0 len:          3
+chain:          2 count:          2          2 len:          2
+number:          2.6 BASE/1004 No exported method WHERE
+nil: BASE/1004 No exported method WHERE
+terminals: 108 4 42 T T 8 8 42 6
+terminals of a string: 5 h o T T e e o 4
+not a generator first:          3 C
+foreach: A1l2e3x4a5n6d7r8e9 45 101202 3
+before:          3          3
+after:          4          3         -9

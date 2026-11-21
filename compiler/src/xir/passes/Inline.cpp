@@ -85,19 +85,6 @@ struct Inlined {
   std::vector<Var *> captures;
 };
 
-// Whether `body`, of a function of a carried runtime source, needs nothing of its module in another one: no
-// STATIC of it, none of its classes, no function of it called or made (its STATIC functions and codeblocks run in place
-// there already, once its own calls are inlined); it calls the runtime only.
-bool selfContained(const std::vector<BasicBlock *> &body) {
-  auto isStatic = [](const Var *v) { return v && v->kind == Var::Kind::Static; };
-  for (const BasicBlock *b : body)
-    for (auto &i : b->insts)
-      if (isStatic(i->var) || std::any_of(i->captures.begin(), i->captures.end(), isStatic) ||
-          i->op == Op::ClassNew || i->classIndex >= 0 || i->op == Op::MakeBlock || i->callee.function)
-        return false;
-  return true;
-}
-
 // The public function `name` of a carried runtime source, and its module; null when none has one.
 std::pair<Function *, const Module *> libraryFunction(const Module &m, const std::string &name) {
   for (const Module *l : m.library)
@@ -299,7 +286,7 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
   bool passesBlock = std::any_of(call.operands().begin(), call.operands().end(),
                                  [](const Value *v) { return asInstruction(v, Op::MakeBlock); });
   if (!inlinable(*callee, body, passesBlock ? kMaxFunctionWithBlockInstructions : kMaxFunctionInstructions) ||
-      (from && !selfContained(body)))
+      ((from || callee->carried) && !selfContained(body)))
     return std::nullopt;
   return Inlined{callee, std::move(body), start, 0, {}};
 }

@@ -84,6 +84,7 @@ static uint32_t capById;
  * order of the modules' constructors, so the two are kept apart. */
 static xb_class_def *typeClasses[XB_T_COUNT_];
 static xb_class_def *runtimeTypeClasses[XB_T_COUNT_];
+uint8_t xb_scalar_replaced[XB_T_COUNT_];
 
 void xb_classes_register(xb_class_def *defs, uint32_t n) {
   for (uint32_t k = 0; k < n; ++k) {
@@ -92,7 +93,9 @@ void xb_classes_register(xb_class_def *defs, uint32_t n) {
       xb_class_def **of = defs[k].flags & XB_CLASS_RUNTIME ? runtimeTypeClasses : typeClasses;
       for (uint32_t t = 0; t < XB_T_COUNT_; ++t) {
         const char *name = xb_type_class_name(t);
-        if (name && !of[t] && strcmp(name, defs[k].name) == 0) of[t] = &defs[k];
+        if (!name || strcmp(name, defs[k].name) != 0) continue;
+        if (!of[t]) of[t] = &defs[k];
+        if (!(defs[k].flags & XB_CLASS_RUNTIME)) xb_atomic_store8(&xb_scalar_replaced[t], 1, XB_RELEASE);
       }
     }
     uint32_t before = names.count, id = xb_names_add(&names, defs[k].name, strlen(defs[k].name));
@@ -618,6 +621,7 @@ int xb_class_associate(const xb_object *o, const char *type) {
     const char *name = xb_type_class_name(t);
     if (name && strcmp(name, type) == 0) {
       xb_atomic_storeptr((void **)&scalars[t], c, XB_RELEASE);
+      xb_atomic_store8(&xb_scalar_replaced[t], 1, XB_RELEASE);
       found = 1;
     }
   }

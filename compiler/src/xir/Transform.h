@@ -66,6 +66,11 @@ private:
 // that value; removing one may make others so. Removed ones become null in `placed`.
 void removeTrivialParams(std::vector<BlockParam *> &placed, const Predecessors &preds);
 
+// Whether `body`, of a function of a carried runtime source, needs nothing of its module in another one but its
+// functions (which the runtime exports: XB_LIBRARY_FUNC_PREFIX; not a typed copy, which the runtime need not have
+// made alike): no STATIC of it, none of its classes, no codeblock of it made.
+bool selfContained(const std::vector<BasicBlock *> &body);
+
 // Removes instruction `i` from its block, its uses undone.
 void eraseInstruction(Instruction *i);
 

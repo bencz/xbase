@@ -31,15 +31,16 @@ constexpr Pass kPipeline[] = {
     {"promote-variables", onFunction<promoteVariables>},
     {"fold-constants", onFunction<foldConstants>},
     {"resolve-sends", resolveSends},                   // after promote-variables: the objects' classes flow
+    {"resolve-scalar-sends", resolveScalarSends},     // after promote-variables: the values' types flow
     {"simplify-cfg", onFunction<simplifyCFG>},
     {"remove-dead-code", onFunction<removeDeadCode>},
     {"unshare-variables", onFunction<unshareVariables>}, // after remove-dead-code: captures gone with dead code
 };
 
-// Each round can expose work for the others (a folded branch leaves a block
-// unreachable, a merged block a constant operand); the pipeline repeats while
-// something changes, at most this many times.
-constexpr unsigned kMaxRounds = 4;
+// Each round can expose work for the others (a folded branch leaves a block unreachable, a merged block a constant
+// operand, a resolved send a call to inline, an inlined body a generator to fuse); the pipeline repeats while something
+// changes, at most this many times (a chain of Enumerable's methods takes one round a level).
+constexpr unsigned kMaxRounds = 8;
 
 // Once the pipeline is done on every function, on the code it settled (a body
 // inlined elsewhere is copied before): typed continuations copy the function,

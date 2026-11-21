@@ -208,14 +208,19 @@ std::unique_ptr<xb::Module> analyze(std::vector<xb::Token> tokens, const std::st
   return ast;
 }
 
-// Whether the module calls a function of the carried runtime sources (by name, as a function of the runtime).
+// Whether the module calls a function of the carried runtime sources (by name, as a function of the runtime) or sends
+// a message one of their classes declares.
 bool callsRuntimeLibrary(const xb::xir::Module &m) {
+  auto in = [](const std::vector<std::string> &names, const std::string &name) {
+    return std::find(names.begin(), names.end(), name) != names.end();
+  };
   for (auto &f : m.functions)
     for (auto &b : f->blocks)
       for (auto &i : b->insts)
-        if (i->op == xb::xir::Op::Call && i->callee.native)
-          for (const xb::EmbeddedSource &s : xb::runtimeLibrarySources())
-            if (std::find(s.functions.begin(), s.functions.end(), i->callee.name) != s.functions.end()) return true;
+        for (const xb::EmbeddedSource &s : xb::runtimeLibrarySources())
+          if ((i->op == xb::xir::Op::Call && i->callee.native && in(s.functions, i->callee.name)) ||
+              (i->op == xb::xir::Op::Send && in(s.messages, i->message)))
+            return true;
   return false;
 }
 
@@ -253,6 +258,7 @@ std::vector<std::unique_ptr<xb::xir::Module>> loadRuntimeLibrary(const std::vect
       failed = true;
       return {};
     }
+    for (auto &f : m->functions) f->carried = true;
     out.push_back(std::move(m));
   }
   return out;

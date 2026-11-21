@@ -730,7 +730,9 @@ first time it is used (its class function, or a subclass):
   reaches what that class answers (its methods, its variables in their areas), `ClassName()` is that class's name, a
   method receives the object itself as `Self`, and a cast kept in a variable stays one. A cast is the object: `==` gives
   `.T.` (the reference makes a new object, so `.F.`).
-- A method's frame is marked `XB_PROC_METHOD`: `PCount()` and `PValue()` count the arguments after `Self`.
+- A method's frame is marked `XB_PROC_METHOD`: `PCount()` and `PValue()` count the arguments after `Self`, in an
+  `INLINE` method as in any other (deliberately: the reference counts `Self` in an `INLINE` method, whose body it runs
+  as a codeblock given `Self` first, and not in the others).
 - Reflection (`rtl/objects.c`, names in any letter case): `ObjIsKindOf( o, cClass )` (the class or one it inherits
   from), `ObjHasVar( o, cName )` and `ObjHasMethod( o, cName )` (any scope; ACCESS and ASSIGN are methods),
   `ObjVars( o )` and `ObjMethods( o )` (the EXPORTED ones, upper-cased, in table order; anything but an object is
@@ -997,9 +999,14 @@ Every xBase-callable function, compiled or written in C, has the dynamic convent
 void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 ```
 
-- `NAME` is the upper-cased xBase name. Runtime functions are `xbf_NAME` (`XB_RUNTIME_FUNC_PREFIX`) and the
-  program's are `xbp_NAME` (`XB_PROGRAM_FUNC_PREFIX`), so a program may define a function named like a runtime one
-  that is not `RESERVED` without a clash at link time.
+- `NAME` is the upper-cased xBase name. Runtime functions are `xbf_NAME` (`XB_RUNTIME_FUNC_PREFIX`) and the program's
+  are `xbp_NAME` (`XB_PROGRAM_FUNC_PREFIX`), so a program may define a function named like a runtime one that is not
+  `RESERVED` without a clash at link time. The other functions of a runtime module written in xBase (its methods,
+  generators' resume functions, `STATIC` functions) are `xbl_MODULE$NAME` (`XB_LIBRARY_FUNC_PREFIX`, `:` and `.` of the
+  name as `$`): a program reaches them once the compiler ran a body of the runtime's in place ([xir.md](xir.md),
+  `resolve-scalar-sends`), and `xb_scalar_replaced` (a byte for each type, set once a class of the program answers the
+  type's messages before the runtime's own class: a `SCALAR CLASS` of the program, `ClassAssociate()`) tells compiled
+  code when it may call a method of that class directly.
 - Every runtime function is declared in `include/rtl.ch` (`EXTERN FUNCTION`, see [compiler.md](compiler.md#calls));
   the `runtime.declarations` test checks that the declarations and the `xbf_` definitions match.
 - This is the convention of every function's symbol: the runtime, `Do()`, codeblocks and other modules call through

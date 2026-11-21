@@ -39,6 +39,11 @@ bool unshareVariables(Function &f);
 // runtime would do: a call of the method it reaches, or an object.get or object.set of the variable (ResolveSends.cpp).
 bool resolveSends(Module &m, Function &f);
 
+// Sends to values of a built-in type whose class of the runtime answers them, and chains of Enumerable's methods on
+// what they make, become calls of those methods behind a test that no class of the program answers first
+// (ScalarSends.cpp).
+bool resolveScalarSends(Module &m, Function &f);
+
 // `x := x + y` on a LOCAL only the function sees and that holds strings
 // becomes one `append`, whose string grows in place (AppendInPlace.cpp).
 bool appendInPlace(Function &f);
