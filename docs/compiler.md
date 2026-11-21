@@ -586,12 +586,15 @@ from a table the linker must resolve (`keepReferences`, as `EXTERNAL`'s requests
 - Items are stored and copied as two 8-byte words, the header (type, width, decimals; `headerWord`, in the target's byte
   order, as `xb_header_word` in `xbrt.h`) and the value, and fields are read out of the header word (their bit positions
   come from the target's layout, `headerShift`): a load is served by the store that wrote it (store forwarding) only
-  when that store covers it. Between items in memory the value word is read by an unordered atomic load (a plain load on
-  every target), which code generation does not merge with the header's into one 16-byte access spanning the two stores
-  that wrote the item. A copy of a literal item stores its two words as constants (`literalWords_`; a string literal's
-  only on targets where its pointer fills the value word, a narrower one being widened by an instruction): a choice
-  between two literals (`iif( l, "T", "F" )`) is then one between constants, where loads would become branches in code
-  generation. An integer literal whose display width is the one a computed integer of its value shows
+  when that store covers it. Between items in memory the value word is read by an unordered atomic load where 64 bits
+  are a native integer of the target (`DataLayout::isLegalInteger`; a plain load there), which code generation does not
+  merge with the header's into one 16-byte access spanning the two stores that wrote the item, as it merges two plain
+  loads (`qsort`: 4.5 million blocked forwards); on a 32-bit target it is a plain load (two 32-bit ones), where an
+  atomic one would call the atomics library (on x86, whose items are 4-byte aligned, a call that locks a mutex) or take
+  an exclusive access (ARM). A copy of a literal item stores its two words as constants (`literalWords_`; a string
+  literal's only on targets where its pointer fills the value word, a narrower one being widened by an instruction): a
+  choice between two literals (`iif( l, "T", "F" )`) is then one between constants, where loads would become branches in
+  code generation. An integer literal whose display width is the one a computed integer of its value shows
   (`xb_num_int_width`: 10 from -999999999 to 999999999, 20 below) is stored with width 0, as computed integers are (the
   runtime reads both alike): a loop's variable that starts as `0` and is then computed keeps one header word, whose type
   LLVM then knows.
@@ -734,10 +737,9 @@ from a table the linker must resolve (`keepReferences`, as `EXTERNAL`'s requests
   designates). `object.get` and `object.set` (a send resolved for the object's known class) read and write a local
   object's variable in place (`emitObjectAccess`: the state byte read once for sharing and the barrier, the write
   followed by the barrier), and call `xb_op_object_get` and `xb_op_object_set` for a shared one. Object variables are
-  read as `copyItem` copies an item (the value word by an unordered atomic load, which code generation does not merge
-  with the header's into one 16-byte load) and written with two 8-byte stores, so that a read after an assignment is
-  forwarded from its stores. `send.macro` calls `xb_macro_send` the same way, without a cache. `class.new` calls
-  `xb_class_instance`.
+  read as `copyItem` copies an item (its value word not merged with the header's into one 16-byte load) and written with
+  two 8-byte stores, so that a read after an assignment is forwarded from its stores. `send.macro` calls `xb_macro_send`
+  the same way, without a cache. `class.new` calls `xb_class_instance`.
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
   call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,

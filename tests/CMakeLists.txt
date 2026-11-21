@@ -149,14 +149,14 @@ add_test(NAME pp.sources_pattern
     -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pp)
 
-# Code generation checks on cross targets: the IR xbc emits for <triple> must
-# match a regular expression (tests/codegen_test.cmake). The source is
+# Code generation checks on cross targets: the IR xbc emits for <triple> must match a regular expression
+# (xb_add_codegen_test), or must not (xb_add_codegen_absence_test; tests/codegen_test.cmake). The source is
 # tests/run/funcs.prg, or the run test named by an optional fourth argument (a path from tests/ when it holds a /,
 # without .prg).
-function(xb_add_codegen_test name triple regex)
+function(xb_codegen_test name triple regex absent)
   set(source run/funcs)
-  if(ARGC GREATER 3)
-    set(source ${ARGV3})
+  if(ARGC GREATER 4)
+    set(source ${ARGV4})
     if(NOT source MATCHES "/")
       set(source run/${source})
     endif()
@@ -169,7 +169,14 @@ function(xb_add_codegen_test name triple regex)
       -DTRIPLE=${triple}
       -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}
       "-DREGEX=${regex}"
+      -DABSENT=${absent}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/codegen_test.cmake)
+endfunction()
+function(xb_add_codegen_test name triple regex)
+  xb_codegen_test(${name} ${triple} "${regex}" OFF ${ARGN})
+endfunction()
+function(xb_add_codegen_absence_test name triple regex)
+  xb_codegen_test(${name} ${triple} "${regex}" ON ${ARGN})
 endfunction()
 
 # 32-bit runtime arguments are extended as the target ABI requires.
@@ -183,19 +190,26 @@ xb_add_codegen_test(tbaa_heap_items x86_64-linux-gnu "store [^\n]*!tbaa .*!\"hea
 # target (the runtime computes it alike for other strings), in the header laid
 # out for the target.
 xb_add_codegen_test(x86_64_string_hash x86_64-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
-# A program that runs bodies of the runtime's carried sources requires the stamps of their texts, which only a runtime
-# built from the same texts defines (a mismatch fails to link).
 # Calls, function references and REQUESTs of an xbase library's functions reach its symbols, on a 32-bit and a
 # big-endian target.
 xb_add_codegen_test(library_call_i686 i686-pc-linux-gnu "call void @\"xbx_GREET\\$TWICE\"" codegen/library_call)
 xb_add_codegen_test(library_call_ppc64 powerpc64-unknown-linux-gnu
                     "@xb.module.requests = private constant \\[1 x ptr\\] \\[ptr @\"xbx_GREET\\$DECORATE\"\\]"
                     codegen/library_call)
+# A program that runs bodies of the runtime's carried sources requires the stamps of their texts, which only a runtime
+# built from the same texts defines (a mismatch fails to link).
 set(stamps "@xb.source.stamps = private constant \\[2 x ptr\\] ")
 string(APPEND stamps "\\[ptr @\"xbl_ARRAYS\\$source\\$[0-9a-f]+\", ptr @\"xbl_COLLECTIONS\\$source\\$[0-9a-f]+\"\\]")
 xb_add_codegen_test(carried_source_stamps powerpc64-unknown-linux-gnu "${stamps}" carried_methods)
 xb_add_codegen_test(s390x_string_hash s390x-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
 xb_add_codegen_test(ppc32_string_hash powerpc-linux-gnu "i32 239963683, i32 7, \\[8 x i8\\] c\"cliente" hashes)
+# An item copy reads the value word by an unordered atomic load where 64 bits are a native integer (big-endian ppc64
+# too) and by a plain one on 32-bit targets, where an atomic one calls the atomics library (on x86, whose items are
+# 4-byte aligned, a call that locks a mutex).
+xb_add_codegen_test(item_word_x86_64 x86_64-linux-gnu "= load atomic i64, ptr [^\n]* unordered, align 8")
+xb_add_codegen_test(item_word_ppc64 powerpc64-unknown-linux-gnu "= load atomic i64, ptr [^\n]* unordered, align 8")
+xb_add_codegen_absence_test(item_word_ppc32 powerpc-linux-gnu "load atomic (i64|double)")
+xb_add_codegen_absence_test(item_word_i686 i686-pc-linux-gnu "load atomic (i64|double)")
 
 # A loop without calls polls the pending requests on its back edge (an atomic load marked xb.poll; SUM's entry is the
 # function of the symbol: its direct one, called by nothing else once MAIN inlines SUM, is inlined into it).

@@ -1,4 +1,4 @@
-# Compiles SOURCE for TRIPLE and checks the emitted LLVM IR against REGEX.
+# Compiles SOURCE for TRIPLE and checks that the emitted LLVM IR matches REGEX (or, with ABSENT, that it does not).
 set(ir ${WORKDIR}/codegen_${NAME}.ll)
 execute_process(
   COMMAND ${XBC} --target=${TRIPLE} ${SOURCE} -o ${WORKDIR}/codegen_${NAME}.o --dump-ir=${ir}
@@ -7,6 +7,8 @@ if(NOT rc EQUAL 0)
   message(FATAL_ERROR "xbc failed for ${TRIPLE}:\n${err}")
 endif()
 file(READ ${ir} text)
-if(NOT text MATCHES "${REGEX}")
+if(ABSENT AND text MATCHES "${REGEX}")
+  message(FATAL_ERROR "IR for ${TRIPLE} has: ${CMAKE_MATCH_0}")
+elseif(NOT ABSENT AND NOT text MATCHES "${REGEX}")
   message(FATAL_ERROR "IR for ${TRIPLE} does not match: ${REGEX}")
 endif()

@@ -537,9 +537,8 @@ void CodeGen::storeObjectVariable(Value *obj, Value *var, Value *state, const Wo
   recordIfOld(obj, state);
 }
 
-// Copies a local object's variable into `d` as copyItem copies an item, word by word (the value word as two 32-bit
-// integers, which code generation does not merge with the header): an assignment's two 8-byte stores are then
-// forwarded to the loads, which a 16-byte copy would wait for.
+// Copies a local object's variable into `d` as copyItem copies an item, word by word: an assignment's two 8-byte
+// stores are then forwarded to the loads, which a 16-byte copy would wait for.
 void CodeGen::copyObjectVariable(Value *d, Value *var) { copyItem(d, var); }
 
 // object.get and object.set (a send resolved for the object's known class): a local object's variable in place, a
