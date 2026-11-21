@@ -185,11 +185,16 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   in which nothing can see the call stack any more (no call, nothing that can fail or run code, no loop, whose back edge
   polls and may run destructors, no body inlined in it: what folding leaves of `Mul( 2, 3 )`) needs no frame: its
   `inline.enter` and `inline.leave` go (`trimInlinedBodies`, at the start of `inline-functions`; a leave several bodies
-  reach keeps them all). A body is inlined only at a call without `...` in a block that unwinds to the function's exit,
-  and only when the callee reads no parameters in its frame slots (`readsParams`: `PValue()`; the inlined frame has
-  none), creates no `PRIVATE` (nor calls a function that creates its caller's: it would be the function's, released
-  later), and has no unwind block, no `...` and no `YIELD`; nothing is inlined into a generator, nor into a function
-  that has grown past 3000 instructions. The body is copied with `copyBlocks`, its constants made anew in the function.
+  reach keeps them all). A body is inlined only at a call without `...`, and only when the callee reads no parameters in
+  its frame slots (`readsParams`: `PValue()`; the inlined frame has none), creates no `PRIVATE` (nor calls a function
+  that creates its caller's: it would be the function's, released later), and has no unwind block, no `...` and no
+  `YIELD`; nothing is inlined into a generator, nor into a function that has grown past 3000 instructions. The body is
+  copied with `copyBlocks`, its constants made anew in the function. At a call in a `BEGIN SEQUENCE` (or a `FOR EACH`
+  with a cleanup), the body's blocks unwind to a block that leaves its frame (`inline.leave`) and goes on to the
+  handler, as the call would return with the error (`unwindBody` in `Transform`: one such block for each set of bodies a
+  copied block ends with open, the callee's own inlined bodies first); the block that enters the body unwinds there too
+  and the one that leaves it to the handler, so that each unwind block starts with the bodies the end of every block
+  reaching it has open.
   - `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
     (`Module::library`, below; a method too, which `resolve-sends` made a call of), not an `INIT` or `EXIT` procedure,
     a generator, nor one that calls itself, of
@@ -200,27 +205,29 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
     an enumerator made in the function by `gen.new` of a generator of the module, used only by that loop's `each.source`
     (ascending, one collection, no key), whose source goes only to its `each.enter`, `enum.len` and `each.move`, entered
     as often as its enumerator is made (every loop around its `each.enter` goes round its `gen.new` too: an enumerator
-    made once and gone through again goes on where it was), whose header unwinds to the function's exit, whose variable
-    is the frame's alone (not shared, not a parameter) with no loop on it inside this one, and whose generator's body
-    (the resume function's blocks a step runs, of at most 300 instructions) has no unwind block, keeps no handler across
-    `YIELD`, reads no parameter in its frame and creates no `PRIVATE`, runs the generator in place
-    (`FuseGenerators.cpp`). The body is copied between `inline.enter` and `inline.leave` of the resume function (the
-    call stack shows it as its steps would), its variables new ones of the function (its parameters given the arguments,
-    the rest NIL: `bodyVars`, `enterBody` in `Transform`, which inlining uses too), started where a first step would,
-    the caller's line shown the loop's; each `gen.yield` assigns the loop variable and enters the loop's body, the
-    body's way back goes on after that `YIELD` (the state, when there are several, in a variable of its own), and
-    `gen.done` leaves the loop, its variables set to NIL as the end drops its frame (`leaveBody`). The variable is then
-    an ordinary one in the loop (over an enumerator, assigning it changes nothing else: its reads and writes become
+    made once and gone through again goes on where it was), whose variable is the frame's alone (not shared, not a
+    parameter) with no loop on it inside this one, and whose generator's body (the resume function's blocks a step runs,
+    of at most 300 instructions) has no unwind block, keeps no handler across `YIELD`, reads no parameter in its frame
+    and creates no `PRIVATE`, runs the generator in place (`FuseGenerators.cpp`). The body is copied between
+    `inline.enter` and `inline.leave` of the resume function (the call stack shows it as its steps would), its variables
+    new ones of the function (its parameters given the arguments, the rest NIL: `bodyVars`, `enterBody` in `Transform`,
+    which inlining uses too), started where a first step would, the caller's line shown the loop's; each `gen.yield`
+    assigns the loop variable and enters the loop's body, the body's way back goes on after that `YIELD` (the state,
+    when there are several, in a variable of its own), and `gen.done` leaves the loop, its variables set to NIL as the
+    end drops its frame (`leaveBody`). In a sequence, the body unwinds through a block that leaves its frame
+    (`unwindBody`), and each way out to the loop is a block that unwinds where the loop does. The variable is then an
+    ordinary one in the loop (over an enumerator, assigning it changes nothing else: its reads and writes become
     direct), saved before and restored after it. The values the loop's header carried are joined again through the
     generator's blocks (`SSAUpdater`; an edge that passes a parameter back to itself defines nothing new). A generator
     fed by another (`FOR EACH x IN Evens( Range( 1, n ) )`) fuses in turn once `promote-variables` shows the inner
     enumerator's `gen.new` to the copied loop. The `generator` benchmark runs in 2 ms (59 through the enumerators).
   - `inline-blocks`, after it (which may pass a block literal to an `Eval`): `Eval( {| p | body }, args )` of a
     codeblock literal of the function (`Eval` of the native runtime function), of at most 200 instructions, not the
-    function itself (a block a call inlined in it runs), none of whose captured variables an inlined body binds anew
-    (a direct store of a shared variable: the block holds the cell of when it was made). The block is immutable and
-    its body reaches its cells through the same variables, so other uses may keep it; it is no longer made once none
-    is left. Afterwards, `unshare-variables` runs.
+    function itself (a block a call inlined in it runs), none of whose captured variables is bound anew by an inlined
+    body (a direct store of a shared variable: the block holds the cell of when it was made) or by a `FOR EACH` (a block
+    made while the variable holds a loop's reference holds a cell of its own with the element of then). The block is
+    immutable and its body reaches its cells through the same variables, so other uses may keep it; it is no longer made
+    once none is left. Afterwards, `unshare-variables` runs.
 
   The driver compiles the runtime's carried sources (`driver/RuntimeLibrary.h`: the `.prg` files `XB_INLINE_PRG` in
   `compiler/CMakeLists.txt` lists, held in `xbc` as bytes with their public functions' names) as modules of the

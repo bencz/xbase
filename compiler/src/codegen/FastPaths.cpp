@@ -922,6 +922,24 @@ Value *CodeGen::genFrame(Value *gen, BasicBlock *slow, Value *&state) {
   return frame;
 }
 
+// Slots 1 .. n - 1 of the step and of a local enumerator's frame, copied into the step (`restore`) or into the frame:
+// item by item, in place, for a few (no call of the C library's copy), else as one block.
+void CodeGen::copyFrame(Value *frame, uint32_t n, bool restore) {
+  constexpr uint32_t kItemByItem = 16;
+  if (n <= 1) return;
+  if (n - 1 > kItemByItem) {
+    Value *saved = arrayElement(frame, ConstantInt::get(i64_, 1));
+    Value *dst = restore ? slot(1) : saved, *src = restore ? saved : slot(1);
+    b_.CreateMemCpy(dst, MaybeAlign(itemAlign_), src, MaybeAlign(itemAlign_), (uint64_t)(n - 1) * itemSize_);
+    return;
+  }
+  for (uint32_t k = 1; k < n; ++k) {
+    Value *saved = arrayElement(frame, ConstantInt::get(i64_, k));
+    if (restore) copyItem(slot(k), saved);
+    else copyItem(saved, slot(k));
+  }
+}
+
 // gen.restore: a local enumerator's frame copied into the step's slots after its own (slot 0), and the state to resume
 // in, the state then XB_GEN_ENDED until the step yields, as xb_gen_restore does; the rest (a frame shorter than the
 // slots, a shared enumerator) through it.
@@ -932,9 +950,7 @@ void CodeGen::emitGenRestore(const xir::Instruction &i) {
   BasicBlock *slow = newBlock("gen.restore"), *join = newBlock("gen.restored");
   Value *state;
   Value *frame = genFrame(gen, slow, state);
-  if (n > 1)
-    b_.CreateMemCpy(slot(1), MaybeAlign(itemAlign_), arrayElement(frame, ConstantInt::get(i64_, 1)),
-                    MaybeAlign(itemAlign_), (uint64_t)(n - 1) * itemSize_);
+  copyFrame(frame, n, true);
   Value *stateVar = b_.CreateInBoundsGEP(itemTy_, b_.CreateStructGEP(objectTy_, gen, ObjectVars),
                                          ConstantInt::get(i64_, XB_GEN_STATE), "gen.state");
   Value *fast = b_.CreateSExt(b_.CreateTrunc(intValue(stateVar), i32_), i64_);
@@ -964,8 +980,7 @@ void CodeGen::emitGenYield(const xir::Instruction &i) {
   Value *state;
   Value *frame = genFrame(gen, slow, state);
   if (n > 1) {
-    b_.CreateMemCpy(arrayElement(frame, ConstantInt::get(i64_, 1)), MaybeAlign(itemAlign_), slot(1),
-                    MaybeAlign(itemAlign_), (uint64_t)(n - 1) * itemSize_);
+    copyFrame(frame, n, false);
     Value *bits = b_.CreateAnd(stateByte(frame, AtomicOrdering::Monotonic),
                                ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
     BasicBlock *done = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gen.frame.old");

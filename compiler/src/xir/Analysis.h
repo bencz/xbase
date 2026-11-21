@@ -76,6 +76,10 @@ private:
 // only the function sees, through its own loads and stores.
 std::vector<Var *> directLocals(const Function &f);
 
+// A resumable function (a generator's or an ASYNC function's resume function): one of its blocks ends in a
+// suspension (gen.yield, async.suspend, async.yield). Its values live in its frame between steps (Resumable.cpp).
+bool isResumable(const Function &f);
+
 // Removes the blocks the entry cannot reach (code after RETURN, EXIT, LOOP).
 bool removeUnreachableBlocks(Function &f); // true when it removed some
 

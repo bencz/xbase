@@ -66,7 +66,7 @@ public:
   const xir::CFG &cfg() const { return cfg_; }
   const xir::TypeInfo &types() const { return types_; }
   uint32_t frameSize() const { return frameSize_; }
-  uint32_t savedSize() const { return savedSize_; } // the slots a resumable function's step keeps: all but shadows
+  uint32_t savedSize() const { return savedSize_; } // the slots a resumable function's step keeps (allocate)
   uint32_t slotOf(const xir::Var &v) const { return varSlot_.at(&v); } // a frame variable
   // A parameter kept out of the frame: its item is the function's own, which the collector need not see.
   bool inRegisters(const xir::Var &v) const { return registerParams_.count(&v) != 0; }

@@ -56,11 +56,9 @@ bool inlinable(const Function &callee, const std::vector<BasicBlock *> &body, si
   return true;
 }
 
-// A call that can be inlined: without `...`, in a block that unwinds to the function's exit (an unwind block would
-// leave the inlined frame shown).
-bool inlinableCall(const Instruction &call) {
-  return call.op == Op::Call && !call.hasRest() && !call.parent->unwind;
-}
+// A call that can be inlined: without `...`. In a BEGIN SEQUENCE, its body unwinds through a block that leaves its
+// frame (unwindBody).
+bool inlinableCall(const Instruction &call) { return call.op == Op::Call && !call.hasRest(); }
 
 // The arguments an inlined body holds while it runs, as the callee's parameters would hold them, in their positions (a
 // release of a parameter's LOCAL lets go of its own): a codeblock literal, which folding may leave unmade, is NIL
@@ -131,6 +129,7 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
     return c ? copyConstant(f, *c) : v;
   });
   useBodyVars(body, vars);
+  BasicBlock *handler = at->unwind, *pad = unwindBody(f, callee, body, handler);
   Builder builder(&f);
   for (auto [orig, copy] : body.pairs) {
     auto *ni = copy->kind() == Value::Kind::Instruction ? static_cast<Instruction *>(copy) : nullptr;
@@ -141,6 +140,12 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
     nb->takeTerminator();
     builder.setBlock(nb);
     builder.setLoc(loc);
+    if (handler) { // the way out in a block that unwinds where the call's does
+      BasicBlock *out = f.addBlock(nb->name + ".leave");
+      out->unwind = handler;
+      builder.br(out);
+      builder.setBlock(out);
+    }
     leaveBody(builder, callee, vars);
     builder.inlineLeave();
     builder.br(tail, {value ? value : builder.nil()});
@@ -150,6 +155,12 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   at->takeTerminator();
   builder.setBlock(at);
   builder.setLoc(call->loc);
+  if (handler) { // the way in in a block that unwinds where the body's do
+    BasicBlock *enter = f.addBlock("inline.enter");
+    enter->unwind = pad;
+    builder.br(enter);
+    builder.setBlock(enter);
+  }
   builder.inlineEnter(in.callee, callee.readsArgs ? args : held(builder, args));
   enterBody(builder, callee, vars, args);
   builder.br(body.blocks.at(in.start));
@@ -227,20 +238,16 @@ bool recursive(const Function &f) {
   return false;
 }
 
-bool isResumable(const Function &f) {
-  for (auto &b : f.blocks)
-    if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return true;
-  return false;
-}
-
-// The variables an inlined body binds anew, at its entry and before it ends (direct stores of shared variables, which
-// the code generated from the source writes through their cells): a block made while one was bound holds the cell of
-// that time, not what the variable holds later.
+// The variables bound anew: by an inlined body, at its entry and before it ends (direct stores of shared variables,
+// which the code generated from the source writes through their cells), and by a FOR EACH (each.enter): a block made
+// while one was bound holds the cell of that time (or, for a loop variable, a cell of its own with the element of
+// that time), not what the variable holds later.
 std::unordered_set<const Var *> reboundVars(const Function &f) {
   std::unordered_set<const Var *> out;
   for (auto &b : f.blocks)
     for (auto &i : b->insts)
-      if (i->op == Op::Store && i->access == Access::Direct && i->var->shared) out.insert(i->var);
+      if ((i->op == Op::Store && i->access == Access::Direct && i->var->shared) || i->op == Op::EachEnter)
+        out.insert(i->var);
   return out;
 }
 
@@ -249,9 +256,7 @@ std::unordered_set<const Var *> reboundVars(const Function &f) {
 // captured through the same variables, so its other uses (another Eval, a call it is passed to) may keep it.
 std::optional<Inlined> blockOf(const Function &f, const Instruction &call,
                                const std::unordered_set<const Var *> &rebound) {
-  if (!inlinableCall(call) || call.callee.function || !call.callee.native || call.callee.name != "EVAL" ||
-      call.operands().empty())
-    return std::nullopt;
+  if (!isEvalCall(call)) return std::nullopt;
   const Instruction *mk = asInstruction(call.operand(0), Op::MakeBlock);
   if (!mk) return std::nullopt;
   for (const Var *c : mk->captures)

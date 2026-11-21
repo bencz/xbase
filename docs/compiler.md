@@ -456,21 +456,22 @@ item values and block parameters when `--dump-xir-types` is given too ([xir.md](
   returned) whose target is where state k goes on, and `RETURN` and the end are `gen.done` and `.F.`. Code generation
   (`FastPaths.cpp`) does `gen.restore` and `gen.yield` in place for a local enumerator whose frame holds every saved
   slot (its length at least the saved slots: every step after the first `YIELD`, and a first step whose arguments fill
-  them): the slots copied with a constant length, the state read and set, the element stored, with the barriers
-  (`xb_gc_write_items` for an old frame not recorded, the enumerator's state byte); a shared enumerator or a shorter
-  frame calls `xb_gen_restore` and `xb_gen_yield`. `enum.len` of a local generator's enumerator that has not ended calls
-  its resume function itself (`emitEnumLen`, as `xb_gen_move_next` does: a step that fails ends it with `xb_gen_done`),
-  and `each.move` of a local loop reference over one copies its `Current` into the reference's own item; a string's
-  length and a local array's or hash's are read in place; other collections and enumerators take `xb_enum_len` and
-  `xb_each_move`. Inside a sequence `WITH` a handler (also `TRY`), the error block it replaced lives in a frame variable
-  of its own (`Cleanup::oldBlockVar`, `Generator::hiddenVar`): before `gen.yield` each such handler, innermost first, is
-  read (`seq.with` of NIL) and the replaced block put back; after it, outermost first, `seq.with` puts the handler back
-  and stores the caller's block of the moment as the one to put back in the end. Then `makeResumable`
-  (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that lives across a
-  `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a `Bool` or `I64`
-  boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone. The dispatch goes
-  only to the points a step can stop at: those of code nothing reaches (a copy of `ALWAYS` code after a `RETURN`) are
-  left out with it.
+  them): the saved slots (a resumable function's variables: its temporaries are dead across a suspension) copied item by
+  item, inline, up to 16 of them, and with a constant length past that, the state read and set, the element stored, with
+  the barriers (`xb_gc_write_items` for an old frame not recorded, the enumerator's state byte); a shared enumerator or
+  a shorter frame calls `xb_gen_restore` and `xb_gen_yield`. `enum.len` of a local generator's enumerator that has not
+  ended calls its resume function itself (`emitEnumLen`, as `xb_gen_move_next` does: a step that fails ends it with
+  `xb_gen_done`), and `each.move` of a local loop reference over one copies its `Current` into the reference's own item;
+  a string's length and a local array's or hash's are read in place; other collections and enumerators take
+  `xb_enum_len` and `xb_each_move`. Inside a sequence `WITH` a handler (also `TRY`), the error block it replaced lives
+  in a frame variable of its own (`Cleanup::oldBlockVar`, `Generator::hiddenVar`): before `gen.yield` each such handler,
+  innermost first, is read (`seq.with` of NIL) and the replaced block put back; after it, outermost first, `seq.with`
+  puts the handler back and stores the caller's block of the moment as the one to put back in the end. Then
+  `makeResumable` (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that
+  lives across a `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a
+  `Bool` or `I64` boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone.
+  The dispatch goes only to the points a step can stop at: those of code nothing reaches (a copy of `ALWAYS` code after
+  a `RETURN`) are left out with it.
 - An `ASYNC` function is generated the same way (`Generator::genResumable`, `FuncDecl::async`, the task as parameter
   0): its entry returns `async.new` of its resume function with its arguments, its entry named (`Instruction::blockFn`,
   kept when the entry is inlined); the resume function starts with `async.restore` and the same dispatch, `RETURN`
@@ -539,8 +540,9 @@ build xbc.
   block ran) uses the variable's own item (no copy), or through a cell or a reference what is in place (a local cell's
   value, a loop variable's element of a local collection or its reference's own item), else a shadow slot of its own
   into which the runtime copies the value (`FramePlan::shadowSlot`: the shadows come after the other slots, and since
-  none is live across a call or a yield, a generator's step keeps only the slots before them, `savedSize`), and so does
-  every load of a frame variable nothing writes once the function runs (`FramePlan::findUnwritten`: a parameter the body
+  none is live across a call or a yield; a resumable function's step keeps only its variables' slots, `savedSize`, since
+  the values that live across a suspension are in its variables and its temporaries are dead there), and so does every
+  load of a frame variable nothing writes once the function runs (`FramePlan::findUnwritten`: a parameter the body
   versioned for references leaves to the other body, a `LOCAL` never assigned); a value used only by the `store` right
   after it is computed into the variable when the store writes the variable's own item (a store through a cell or a
   reference may find a shared cell or an element, which the runtime writes whole), and one used only by `ret` into the
@@ -623,55 +625,57 @@ build xbc.
   0..63), a double taken as an integer by `llvm.fptosi.sat` (truncated, saturated, NaN 0, as `xb_dbl_to_i64`); other
   operands call the runtime operator or function, which raises the error. `=`, `==` and `!=` of two one-character
   strings compare their bytes in place (so `ValType( x ) == "C"` calls nothing). Unary `-` of an integer other than
-  INT64_MIN or of a double is done in place too. `InlineCalls.cpp` does a few runtime functions in place when their
-  arguments allow it, with their rules: `Len()` of a string or a local array, `Asc()` of a string, `Chr()` of a number,
-  `SubStr( c, n, 1 )` with `n` within `c` (the position and the count any numbers, as `xb_num_to_i64` takes them: those
-  `%` and `/` make are doubles) (the last two give the shared one-byte string, `xb_str_bytes`), the other `SubStr()`,
-  `Left()` and `Right()` of a plain string (not a memo field's value, whose item the function keeps for a result of all
-  of it) and numbers through their typed entries (`xb_str_sub`, `xb_str_left`, `xb_str_right`: no arguments' group, no
-  checks, no error to test for), and an `Asc()` whose argument is the `SubStr()` right before it, used nowhere else,
-  reads the byte itself (a view's in its buffer: `strData` tests `XB_STR_VIEW` as `xb_str_data` does); `Int()` of an
-  integer is it, of a double its conversion when it lies in [-2^63, 2^63) (truncated, as `xb_dbl_fits_i64` of its
-  truncation would allow), with the double's width, its own or else the default one (`xb_num_dbl_width`'s rule, from the
-  constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`, `XB_NUM_WIDTH`, `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too)
-  calls the runtime; `Int( x / y )`, whose division is right before it and used nowhere else, is lowered as one
-  (`emitIntOfQuotient`): two integers in [-2^52, 2^52), `y` not 0, give their truncated integer quotient (`sdiv`, which
-  the double quotient truncated equals) with the width `Int()` would give that double, unless the quotient is
-  `XB_NUM_FITS_MAX` or `XB_NUM_FITS_MIN`, where the double may lie past the bound; anything else is the division
-  (`emitDivMod`) and then `Int()` as above; `Abs()` of an integer not below 0 is it, of a negative one (not INT64_MIN)
-  its negation, of a double its magnitude with its decimals; `Max()` and `Min()` of two numbers (compared as doubles) or
-  two dates copy the first when it wins or ties, else the second; `Round( n, d )` with an integer `d` within 22 places
-  is `xbf_ROUND`'s formula (a table of the exact powers of ten, `fma`, `XB_DBL_INTEGRAL`; the truncation `truncDouble`,
-  through an integer below 2^52, since `llvm.trunc` is a call of the C library where the target lacks the instruction,
-  as x86-64 without SSE4.1 does, and so is `doubleRemainder`'s test of integral operands); `Sqrt()` of a number is
-  `llvm.sqrt` (IEEE's, the same everywhere), `Exp()` and `Log()` call the runtime's `xb_exp` and `xb_log` (`xbmath.h`,
-  the same on every system, not the C library's `llvm.exp` and `llvm.log`; declared without memory access, so that LLVM
-  still folds repeated calls), each with Clipper's results outside the reals and SET DECIMALS decimals; `Mod()` of two
-  numbers and a base other than 0 is `doubleRemainder` moved to the base's sign; outside an inlined body, `PCount()` is
-  the function's own `argc` (less `Self` in a method), and `PValue( n )` with an integer `n` copies the parameter's slot
-  or the argument as passed (`NIL` outside 1 .. `argc`); `ValType()` of a value is the shared one-byte string of its
-  tag's letter (`XB_TYPE_LETTERS`, the runtime's table too; a memo field's value, `XB_STR_MEMO`, calls the function);
-  anything else calls the function, which raises the errors, and so does a `PValue()` of an argument that is a
-  reference. A call whose only argument is `...`, to a function that takes references, in a function with no other `...`
-  and no `PCount()`/`PValue()`, passes the arguments where they are instead of copying them (`forwardInPlace_`).
-  `append` copies a string's bytes (a view's from its buffer; the variable's growing string is never a view) into the
-  room of the variable's growing string in place (one store for one byte; up to 16 bytes two loads and two stores of 8,
-  4, 2 or 1 bytes overlapping in the middle, `copyBytes`, with no call; more through `memcpy`) when they fit, and calls
-  `xb_op_append` otherwise. A `load` that an `append` of its variable reaches with no other load in between ends the
-  growth before the value goes on (`shareString`), unless only `Len()` and `Asc()` read its value, in place; a forward
-  data flow finds them (`findSharingLoads`), where a block entered by unwinding (a `BEGIN SEQUENCE` handler, a `FOR
-  EACH` cleanup) starts with every such variable growing, and a block reached growing along some edges only, from which
-  every path ends the growth before any append (a loop that reads what a loop before it built), ends it on those edges
-  instead, so the loop does not test it again; the edge of a `gen.yield` ends it before the frame is saved, since the
-  next step enters through the dispatch. The bit operators and functions take two integers in two instructions and
-  convert doubles on a path of their own, and the fast paths of calls read their operands in place: the argument group
-  is built only for the call. Calls set the result slot to `NIL`, then pass `(argc, argv)` pointing at the argument
-  slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one to another module's
-  function to `xbp_NAME`, one to a function of the module to its direct entry when it has one (below), else to it. A
-  public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a module initialization are
-  internal, under names nothing looks up, so modules sharing the object never clash. A call, a send or an array literal
-  with `...` (`withRest`) passes the count and the items of a frame built for it on the stack
-  ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions leave such calls alone.
+  INT64_MIN or of a double is done in place too. `Eval( x, ... )` of a value that may be a codeblock calls the block's
+  function itself, as `xb_block_call` does (with no test when it surely is one; another value calls `Eval()`).
+  `InlineCalls.cpp` does a few runtime functions in place when their arguments allow it, with their rules: `Len()` of a
+  string or a local array, `Asc()` of a string, `Chr()` of a number, `SubStr( c, n, 1 )` with `n` within `c` (the
+  position and the count any numbers, as `xb_num_to_i64` takes them: those `%` and `/` make are doubles) (the last two
+  give the shared one-byte string, `xb_str_bytes`), the other `SubStr()`, `Left()` and `Right()` of a plain string (not
+  a memo field's value, whose item the function keeps for a result of all of it) and numbers through their typed entries
+  (`xb_str_sub`, `xb_str_left`, `xb_str_right`: no arguments' group, no checks, no error to test for), and an `Asc()`
+  whose argument is the `SubStr()` right before it, used nowhere else, reads the byte itself (a view's in its buffer:
+  `strData` tests `XB_STR_VIEW` as `xb_str_data` does); `Int()` of an integer is it, of a double its conversion when it
+  lies in [-2^63, 2^63) (truncated, as `xb_dbl_fits_i64` of its truncation would allow), with the double's width, its
+  own or else the default one (`xb_num_dbl_width`'s rule, from the constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`,
+  `XB_NUM_WIDTH`, `XB_NUM_WIDE_WIDTH` of `xbrt.h`); the rest (NaN too) calls the runtime; `Int( x / y )`, whose division
+  is right before it and used nowhere else, is lowered as one (`emitIntOfQuotient`): two integers in [-2^52, 2^52), `y`
+  not 0, give their truncated integer quotient (`sdiv`, which the double quotient truncated equals) with the width
+  `Int()` would give that double, unless the quotient is `XB_NUM_FITS_MAX` or `XB_NUM_FITS_MIN`, where the double may
+  lie past the bound; anything else is the division (`emitDivMod`) and then `Int()` as above; `Abs()` of an integer not
+  below 0 is it, of a negative one (not INT64_MIN) its negation, of a double its magnitude with its decimals; `Max()`
+  and `Min()` of two numbers (compared as doubles) or two dates copy the first when it wins or ties, else the second;
+  `Round( n, d )` with an integer `d` within 22 places is `xbf_ROUND`'s formula (a table of the exact powers of ten,
+  `fma`, `XB_DBL_INTEGRAL`; the truncation `truncDouble`, through an integer below 2^52, since `llvm.trunc` is a call of
+  the C library where the target lacks the instruction, as x86-64 without SSE4.1 does, and so is `doubleRemainder`'s
+  test of integral operands); `Sqrt()` of a number is `llvm.sqrt` (IEEE's, the same everywhere), `Exp()` and `Log()`
+  call the runtime's `xb_exp` and `xb_log` (`xbmath.h`, the same on every system, not the C library's `llvm.exp` and
+  `llvm.log`; declared without memory access, so that LLVM still folds repeated calls), each with Clipper's results
+  outside the reals and SET DECIMALS decimals; `Mod()` of two numbers and a base other than 0 is `doubleRemainder` moved
+  to the base's sign; outside an inlined body, `PCount()` is the function's own `argc` (less `Self` in a method), and
+  `PValue( n )` with an integer `n` copies the parameter's slot or the argument as passed (`NIL` outside 1 .. `argc`);
+  `ValType()` of a value is the shared one-byte string of its tag's letter (`XB_TYPE_LETTERS`, the runtime's table too;
+  a memo field's value, `XB_STR_MEMO`, calls the function); anything else calls the function, which raises the errors,
+  and so does a `PValue()` of an argument that is a reference. A call whose only argument is `...`, to a function that
+  takes references, in a function with no other `...` and no `PCount()`/`PValue()`, passes the arguments where they are
+  instead of copying them (`forwardInPlace_`). `append` copies a string's bytes (a view's from its buffer; the
+  variable's growing string is never a view) into the room of the variable's growing string in place (one store for one
+  byte; up to 16 bytes two loads and two stores of 8, 4, 2 or 1 bytes overlapping in the middle, `copyBytes`, with no
+  call; more through `memcpy`) when they fit, and calls `xb_op_append` otherwise. A `load` that an `append` of its
+  variable reaches with no other load in between ends the growth before the value goes on (`shareString`), unless only
+  `Len()` and `Asc()` read its value, in place; a forward data flow finds them (`findSharingLoads`), where a block
+  entered by unwinding (a `BEGIN SEQUENCE` handler, a `FOR EACH` cleanup) starts with every such variable growing, and a
+  block reached growing along some edges only, from which every path ends the growth before any append (a loop that
+  reads what a loop before it built), ends it on those edges instead, so the loop does not test it again; the edge of a
+  `gen.yield` ends it before the frame is saved, since the next step enters through the dispatch. The bit operators and
+  functions take two integers in two instructions and convert doubles on a path of their own, and the fast paths of
+  calls read their operands in place: the argument group is built only for the call. Calls set the result slot to `NIL`,
+  then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or
+  `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module to its
+  direct entry when it has one (below), else to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC`
+  function, a codeblock and a module initialization are internal, under names nothing looks up, so modules sharing the
+  object never clash. A call, a send or an array literal with `...` (`withRest`) passes the count and the items of a
+  frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions
+  leave such calls alone.
 - Direct entries (`directEntries`, `xir::hasDirectEntry`): a function of the program that does not read its arguments as
   received (its frame keeps none, `readsArgs`, and it has no `...`, `usesRest`) and is not the body versioned for
   references (`byRefBody`) gets its body in an internal function, `xb.direct.NAME`, taking the context, the result slot,
@@ -814,18 +818,20 @@ build xbc.
   cell); `ref.index` calls `xb_ref_elem`. `each.enter` and `each.leave` call `xb_each_enter` and `xb_each_leave`;
   `each.move` stores the position in the loop's reference (a local one: another goes to the runtime), taking the
   collection's type from the loop's source (its operand, whose type a loop that `version-each` versioned knows: then
-  only that type's path is emitted), and calls `xb_each_move` only when the element is not one `inlineRefTarget` finds
-  in place (an element of a local array within it, the entry at a position of a local hash without holes; a string's
-  byte goes into the reference's own item as the shared one-byte string, nothing past its end; not an enumerator's
-  element, a shared collection, the bound error), or when the variable is in a shared cell (whose reference only the
-  runtime moves); `each.key` stores the position for anything but a hash, reads the key of a local hash without holes in
-  place, and calls `xb_each_key` for the rest. A read of a `FOR EACH` variable of the frame alone (not shared, not a
-  parameter), whose last change on every path to it is the loop's `each.move` (`FramePlan::findEachLoads`, a forward
-  dataflow of each such variable's last change: no assignment between on any path, nor an inner loop's restore, and none
-  known where an unwinding enters; the plan keeps the source live at those reads and at their uses in their block),
-  takes its element from the loop's source at the step's position when the source's type is known (`loadEachElement`): a
-  string's byte as the shared one-byte string, a local array's element within it, the value of the entry at the position
-  of a local hash without holes; anything else through the reference. `Asc()` of such a read, and its comparison with a
+  only that type's path is emitted), and calls `xb_each_move` only when the element is not one it finds in place (an
+  element of a local array of any form within its length, the entry at a position of a local hash without holes; a
+  string's byte goes into the reference's own item as the shared one-byte string, nothing past its end; not an
+  enumerator's element, a shared collection, the bound error), or when the variable is in a shared cell (whose reference
+  only the runtime moves); `each.key` stores the position for anything but a hash, reads the key of a local hash without
+  holes in place, and calls `xb_each_key` for the rest. A read of a `FOR EACH` variable of the frame alone (not shared,
+  not a parameter), whose last change on every path to it is the loop's `each.move` (`FramePlan::findEachLoads`, a
+  forward dataflow of each such variable's last change: no assignment between on any path, nor an inner loop's restore,
+  and none known where an unwinding enters; the plan keeps the source live at those reads and at their uses in their
+  block), takes its element from the loop's source at the step's position (`loadEachElement`), by the source's type
+  (known in a loop `version-each` versioned; tested there in a resumable function, which it leaves alone): a string's
+  byte as the shared one-byte string, a local array's element within it (an item in place; an integer or a logical of a
+  compact form into the read's item, a `NIL` of one through the reference), the value of the entry at the position of a
+  local hash without holes; anything else through the reference. `Asc()` of such a read, and its comparison with a
   one-character literal (`=`, `==`, `!=`), in the read's own block read the byte from the string (`elementByte`). Over a
   string whose every read is such (`FramePlan::readsInPlace`), `each.move` does nothing: no one reads the reference's
   item.

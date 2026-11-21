@@ -1,0 +1,11 @@
+
+value:          8
+inlined error: Argument error TWICE         87 MAIN  in MAIN
+nested inlined error: TWICE OUTER MAIN
+break from inlined:          7 MAIN
+always: 2 recovered always
+try: 4 caught Argument error finally
+generator error: 12 Argument error in FAULTY(100) from MAIN x: kept
+body error:  Argument error x: kept
+break out: 12 broke 300 x: kept
+sequence inside: 1e3e x: kept MAIN .T.

@@ -88,6 +88,12 @@ void useBodyVars(const BlockCopy &copy, const VarMap &vars);
 void enterBody(Builder &b, const Function &callee, const VarMap &vars, const std::vector<Value *> &args,
                uint32_t firstVar = 0);
 void leaveBody(Builder &b, const Function &callee, const VarMap &vars);
+// Where the blocks of a body run in place unwind when the code around it unwinds to `handler` (a BEGIN SEQUENCE's, a
+// FOR EACH's cleanup), as its call would return with the error: a block that leaves the body's frame (inline.leave)
+// and goes on to `handler` (returned: the one the block entering the body unwinds to), and for a copied block that
+// ends with bodies the callee inlined open, one that leaves those first. Each block's unwind block so starts with the
+// bodies its end has open (openInlineBodies). Nothing when `handler` is null (the function's exit): null.
+BasicBlock *unwindBody(Function &f, const Function &callee, const BlockCopy &copy, BasicBlock *handler);
 
 // SSA form again for values that copies of blocks define once more: each entry lists one value's definitions with
 // their blocks, the original first. Its reachable uses outside the blocks in `inside` (the original and copied blocks)

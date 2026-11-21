@@ -4,6 +4,8 @@
 #include "xir/Builder.h"
 
 #include <algorithm>
+#include <functional>
+#include <map>
 
 namespace xb::xir {
 
@@ -204,6 +206,40 @@ void leaveBody(Builder &b, const Function &callee, const VarMap &vars) {
   for (auto &v : callee.vars)
     if (auto it = vars.find(v.get()); v->kind == Var::Kind::Frame && it != vars.end())
       b.store(it->second, Access::Direct, b.nil());
+}
+
+BasicBlock *unwindBody(Function &f, const Function &callee, const BlockCopy &copy, BasicBlock *handler) {
+  if (!handler) return nullptr;
+  Builder builder(&f);
+  std::map<std::vector<const Function *>, BasicBlock *> pads; // the callee's bodies open -> the block leaving them
+  std::function<BasicBlock *(std::vector<const Function *>)> padFor = [&](std::vector<const Function *> open) {
+    if (auto it = pads.find(open); it != pads.end()) return it->second;
+    BasicBlock *pad = f.addBlock("inline.unwind");
+    pads[open] = pad;
+    builder.setBlock(pad);
+    builder.inlineLeave();
+    if (open.empty()) {
+      builder.br(handler);
+    } else {
+      open.pop_back();
+      BasicBlock *next = padFor(open);
+      builder.setBlock(pad);
+      builder.br(next);
+    }
+    return pad;
+  };
+  CFG cfg(callee);
+  InlineBodies at;
+  openInlineBodies(cfg, at);
+  for (auto [orig, dup] : copy.blocks) {
+    std::vector<const Function *> open = at.count(orig) ? at.at(orig) : std::vector<const Function *>{};
+    for (auto &i : orig->insts) {
+      if (i->op == Op::InlineEnter) open.push_back(i->blockFn);
+      else if (i->op == Op::InlineLeave && !open.empty()) open.pop_back();
+    }
+    dup->unwind = padFor(open);
+  }
+  return padFor({});
 }
 
 void joinDefinitions(Function &f, const std::vector<Definitions> &defs,

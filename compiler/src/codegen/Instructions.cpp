@@ -422,7 +422,30 @@ void CodeGen::emit(const xir::Instruction &i) {
     Value *d = dest(i);
     setNil(d); // the caller clears the result, so callees that return nothing need not
     auto call = [&](Value *n, Value *items) { b_.CreateCall(xbFuncTy_, callee, {fnCtx_, d, n, items}); };
-    if (i.hasRest()) {
+    xir::TypeSet first = xir::isEvalCall(i) ? plan_->types().of(ops[0]) : 0;
+    if (first & xir::typeBit(XB_T_BLOCK)) { // Eval( block, ... ): the block's function called here, as xb_block_call
+                                            // does (a block ends the loan of its arguments itself); else Eval()
+      bool surely = first == xir::typeBit(XB_T_BLOCK);
+      BasicBlock *block = newBlock("eval.block"), *other = surely ? nullptr : newBlock("eval.call");
+      BasicBlock *done = newBlock("eval.done");
+      if (surely) b_.CreateBr(block);
+      else branchLikely(b_.CreateICmpEQ(typeOf(ops[0], argv), ConstantInt::get(i32_, XB_T_BLOCK)), block, other);
+      b_.SetInsertPoint(block);
+      Value *self = itemPointer(argv, "block");
+      Value *fn = loadFrom(ptrTy_, b_.CreateStructGEP(blockTy_, self, 0), Mem::Unknown, "block.fn");
+      Value *rest = b_.CreateConstInBoundsGEP1_32(itemTy_, argv, 1);
+      b_.CreateCall(blockFnTy_, fn, {fnCtx_, d, ConstantInt::get(i32_, ops.size() - 1), rest, self});
+      b_.CreateBr(done);
+      if (other) {
+        b_.SetInsertPoint(other);
+        bool lent = lends(i, 0);
+        if (lent) lend(argv);
+        call(ConstantInt::get(i32_, ops.size()), argv);
+        if (lent) endLend();
+        b_.CreateBr(done);
+      }
+      b_.SetInsertPoint(done);
+    } else if (i.hasRest()) {
       withRest(i, argv, call);
     } else {
       bool lent = lends(i, 0);
@@ -590,7 +613,17 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.SetInsertPoint(inStr);
     storeTagged(b_.CreateStructGEP(refTy_, ref, RefValue), XB_T_STRING, byteString(strByte(s, pos0)));
     b_.CreateBr(join);
-    b_.SetInsertPoint(coll2);
+    b_.SetInsertPoint(coll2); // a local array, of any form, within its length: an element there (else the runtime's
+                              // bound error); a hash's entry in place (inlineRefTarget)
+    BasicBlock *arr = newBlock("each.array"), *arrLocal = newBlock("each.array.local"), *hash = newBlock("each.hash");
+    b_.CreateCondBr(b_.CreateICmpEQ(srcType, ConstantInt::get(i32_, XB_T_ARRAY)), arr, hash);
+    b_.SetInsertPoint(arr);
+    Value *array = itemPointer(src, "arr");
+    branchLikely(isLocal(array), arrLocal, slow);
+    b_.SetInsertPoint(arrLocal);
+    Value *at0 = b_.CreateSub(value(ops[1]), ConstantInt::get(i64_, 1));
+    branchLikely(b_.CreateICmpULT(at0, arrayLength(array)), join, slow);
+    b_.SetInsertPoint(hash);
     inlineRefTarget(ref, slow, src, srcType);
     b_.CreateBr(join);
     b_.SetInsertPoint(slow);

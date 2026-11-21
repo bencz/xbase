@@ -174,6 +174,7 @@ private:
   llvm::Value *loadVar(const xir::Var &v, xir::Access a, llvm::Value *shadow, llvm::BasicBlock *unwind);
   void storeVar(const xir::Var &v, xir::Access a, llvm::Value *src, llvm::BasicBlock *unwind);
   llvm::Value *hashLength(llvm::Value *hash);
+  void copyFrame(llvm::Value *frame, uint32_t n, bool restore);
   llvm::Value *inlineRefTarget(llvm::Value *ref, llvm::BasicBlock *miss, llvm::Value *coll = nullptr,
                                llvm::Value *collType = nullptr);
   llvm::Value *hashEntryAt(llvm::Value *hash, llvm::Value *pos0, llvm::BasicBlock *miss);

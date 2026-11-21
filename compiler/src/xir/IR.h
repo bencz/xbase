@@ -106,6 +106,8 @@ const Function *firstProgramFunction(const Module &m);
 bool hasDirectEntry(const Function &f);
 // A call that goes to a direct entry: to such a function, without `...` (it then needs no argument slots).
 bool isDirectCall(const Instruction &i);
+// A call of the runtime's Eval() with its operands (no `...`): of a codeblock, it runs the block's function.
+bool isEvalCall(const Instruction &i);
 
 // Whether two values are always the same: the same value, or equal constants
 // (each use of a literal may be its own Constant).

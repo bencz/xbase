@@ -178,10 +178,9 @@ bool worthSpeculating(const Instruction &i, const TypeInfo &types, const std::un
 } // namespace
 
 bool typedContinuations(Function &f) {
-  for (auto &b : f.blocks) {
+  if (isResumable(f)) return false; // its values live in the frame
+  for (auto &b : f.blocks)
     if (b->unwind) return false; // unwind blocks take no parameters: the copy could not be joined there
-    if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return false; // resumable: values in the frame
-  }
   if (instructionCount(f) > kMaxInstructions) return false;
 
   std::vector<Instruction *> checked;

@@ -345,9 +345,7 @@ void FramePlan::computeLiveness() {
 // value computed into its loop parameter's slot) are one unit already;
 // otherwise a result never shares a slot with an operand of the same
 // instruction (calls clear their result first).
-// Shadow slots come last, in a run of their own: none is live across a call or
-// a yield, so a resumable function's step keeps only the slots before them
-// (savedSize).
+// Shadow slots come last, in a run of their own (none is live across a call or a yield), after the temporaries.
 void FramePlan::allocate() {
   std::unordered_set<uint32_t> shadowUnits;
   for (auto &[v, u] : unit_)
@@ -356,8 +354,12 @@ void FramePlan::allocate() {
   std::vector<uint32_t> temps, shadows;
   for (uint32_t k = 0; k < units_.size(); ++k)
     if (!units_[k].pinned) (shadowUnits.count(k) ? shadows : temps).push_back(k);
-  savedSize_ = numVarSlots_ + scan(temps, numVarSlots_);
-  frameSize_ = savedSize_ + scan(shadows, savedSize_);
+  // A resumable function's values that live across a suspension are in its variables (Resumable.cpp): a step saves
+  // those slots alone, its temporaries dead there.
+  uint32_t tempSlots = scan(temps, numVarSlots_);
+  savedSize_ = xir::isResumable(f_) ? numVarSlots_ : numVarSlots_ + tempSlots;
+  frameSize_ = numVarSlots_ + tempSlots;
+  frameSize_ += scan(shadows, frameSize_);
   for (auto &[user, u] : groupUnit_) groupBase_[user] = units_[u].slot;
   for (auto &[v, u] : unit_) {
     if (units_[u].pinned) continue; // served by its parameter's slot (a Place)

@@ -300,52 +300,85 @@ Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss, Value *coll, Value
 }
 
 // A load that reads its element in place (FramePlan::eachMoveOf): the element at the each.move's position of its
-// source, when the source is a string (its byte, the shared one-byte string, into `own`), a local array of items within
-// it (the element) or a local hash without holes (the value of the entry at the position), as the loop's reference
-// designates it; anything else through the reference, as loadVar reads it. Null for another load, or one whose source's
-// type the code does not know.
+// source, as the loop's reference designates it, by the source's type (known in a loop versioned for it; in a
+// resumable function, which version-each leaves alone, tested here): a string's byte (the shared one-byte string, into
+// `own`), a local array's element within it (an item in place, an integer or a logical of a compact form into `own`:
+// emitCompactRead), the value of the entry at the position of a local hash without holes; anything else (a shared
+// collection, a NIL of a compact form) through the reference, as loadVar reads it. Null for another load, or one whose
+// source's type is not known (outside a resumable function) or can be none of those.
 Value *CodeGen::loadEachElement(const xir::Instruction &load, Value *own) {
   const xir::Instruction *found = plan_->eachMoveOf(&load);
   if (!found) return nullptr;
   const xir::Instruction &move = *found;
   const xir::Value *src = move.operand(2);
   xir::TypeSet t = plan_->types().of(src);
-  bool str = t == xir::typeBit(XB_T_STRING), hash = t == xir::typeBit(XB_T_HASH);
-  if (!str && !hash && t != xir::typeBit(XB_T_ARRAY)) return nullptr;
-  Value *coll = itemPointer(addr(src), "coll");
+  auto may = [&](xb_type k) { return (t & xir::typeBit(k)) != 0; };
+  if (!may(XB_T_STRING) && !may(XB_T_ARRAY) && !may(XB_T_HASH)) return nullptr;
+  if ((t & (t - 1)) != 0 && !xir::isResumable(*fnShown_)) return nullptr; // a loop's generic copy: no test worth it
+  Value *item = addr(src);
   Value *pos0 = b_.CreateSub(value(move.operand(1)), ConstantInt::get(i64_, 1));
-  BasicBlock *in = newBlock("each.in"), *miss = newBlock("each.miss"), *join = newBlock("each.read");
-  Value *got;
-  if (str) {
-    branchLikely(b_.CreateICmpULT(pos0, strLength(coll)), in, miss);
+  BasicBlock *miss = newBlock("each.miss"), *join = newBlock("each.read");
+  std::vector<std::pair<Value *, BasicBlock *>> got; // the element's address on each path that read it
+  auto read = [&](Value *at) {
+    got.push_back({at, b_.GetInsertBlock()});
+    b_.CreateBr(join);
+  };
+  auto within = [&](Value *len, const char *name) { // the position within `len`, or the miss
+    BasicBlock *in = newBlock(name);
+    branchLikely(b_.CreateICmpULT(pos0, len), in, miss);
     b_.SetInsertPoint(in);
-    storeTagged(own, XB_T_STRING, byteString(strByte(coll, pos0)));
-    got = own;
-  } else if (hash) {
-    BasicBlock *local = newBlock("each.hash.local");
-    branchLikely(isLocal(coll), local, miss); // a shared hash: through the reference
-    b_.SetInsertPoint(local);
-    got = heapItem(b_.CreateStructGEP(hentryTy_, hashEntryAt(coll, pos0, miss), HEntryValue));
-    b_.CreateBr(in);
-    b_.SetInsertPoint(in);
-  } else {
-    BasicBlock *local = newBlock("each.array.local");
-    branchLikely(isLocalItems(objectState(coll)), local, miss); // a compact or shared array: through the reference
-    b_.SetInsertPoint(local);
-    branchLikely(b_.CreateICmpULT(pos0, arrayLength(coll)), in, miss);
-    b_.SetInsertPoint(in);
-    got = arrayElement(coll, pos0);
+  };
+  SwitchInst *sw = b_.CreateSwitch(typeOf(src, item), miss, 3);
+  if (may(XB_T_STRING)) {
+    BasicBlock *str = newBlock("each.string");
+    sw->addCase(ConstantInt::get(i32_, XB_T_STRING), str);
+    b_.SetInsertPoint(str);
+    Value *s = itemPointer(item, "str");
+    within(strLength(s), "each.byte");
+    storeTagged(own, XB_T_STRING, byteString(strByte(s, pos0)));
+    read(own);
   }
-  BasicBlock *inEnd = b_.GetInsertBlock();
-  b_.CreateBr(join);
+  if (may(XB_T_ARRAY)) {
+    BasicBlock *arr = newBlock("each.array"), *items = newBlock("each.items"), *compact = newBlock("each.compact");
+    sw->addCase(ConstantInt::get(i32_, XB_T_ARRAY), arr);
+    b_.SetInsertPoint(arr);
+    Value *a = itemPointer(item, "arr");
+    Value *state = objectState(a);
+    branchLikely(isLocalItems(state), items, compact);
+    b_.SetInsertPoint(items);
+    within(arrayLength(a), "each.item");
+    read(arrayElement(a, pos0));
+    // A compact form is a local array's (a shared one holds items): its integers and logicals; its NILs (a value of
+    // the form's own) and the other forms through the reference.
+    b_.SetInsertPoint(compact);
+    BasicBlock *ints = newBlock("each.ints"), *logicals = newBlock("each.logicals");
+    SwitchInst *form = b_.CreateSwitch(elemsOf(state), miss, 2);
+    form->addCase(ConstantInt::get(i8_, XB_ELEMS_INT), ints);
+    form->addCase(ConstantInt::get(i8_, XB_ELEMS_LOGICAL), logicals);
+    for (bool logical : {false, true}) {
+      b_.SetInsertPoint(logical ? logicals : ints);
+      BasicBlock *in = newBlock("each.compact.in");
+      branchLikely(b_.CreateICmpULT(pos0, arrayLength(a)), in, miss);
+      emitCompactRead(logical, own, a, pos0, in, miss, join, nullptr);
+      got.push_back({own, b_.GetInsertBlock()});
+    }
+  }
+  if (may(XB_T_HASH)) {
+    BasicBlock *hash = newBlock("each.hash"), *local = newBlock("each.hash.local");
+    sw->addCase(ConstantInt::get(i32_, XB_T_HASH), hash);
+    b_.SetInsertPoint(hash);
+    Value *h = itemPointer(item, "hash");
+    branchLikely(isLocal(h), local, miss); // a shared hash: through the reference
+    b_.SetInsertPoint(local);
+    read(heapItem(b_.CreateStructGEP(hentryTy_, hashEntryAt(h, pos0, miss), HEntryValue)));
+  }
   b_.SetInsertPoint(miss);
   Value *other = loadVar(*load.var, load.access, own, unwind_);
-  BasicBlock *missEnd = b_.GetInsertBlock();
+  got.push_back({other, b_.GetInsertBlock()});
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
-  PHINode *phi = b_.CreatePHI(ptrTy_, 2, "each.elem");
-  phi->addIncoming(got, inEnd);
-  phi->addIncoming(other, missEnd);
+  PHINode *phi = b_.CreatePHI(ptrTy_, (unsigned)got.size(), "each.elem");
+  for (auto &[at, from] : got) phi->addIncoming(at, from);
   return phi;
 }
 

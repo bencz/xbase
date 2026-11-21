@@ -39,6 +39,11 @@ bool hasDirectEntry(const Function &f) {
   return f.kind == Function::Kind::Program && !f.readsArgs && !f.byRefBody && !f.usesRest;
 }
 
+bool isEvalCall(const Instruction &i) {
+  return i.op == Op::Call && !i.callee.function && i.callee.native && i.callee.name == "EVAL" && !i.hasRest() &&
+         !i.operands().empty();
+}
+
 bool isDirectCall(const Instruction &i) {
   return i.op == Op::Call && i.callee.function && hasDirectEntry(*i.callee.function) && !i.hasRest();
 }

@@ -148,8 +148,7 @@ void version(Function &f, Instruction *enter, size_t k, std::vector<BasicBlock *
 } // namespace
 
 bool versionEachLoops(Function &f) {
-  for (auto &b : f.blocks)
-    if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return false; // resumable: values in the frame
+  if (isResumable(f)) return false; // its values live in the frame (and a copied YIELD would resume twice)
   bool changed = false;
   std::unordered_set<const Instruction *> done;
   for (unsigned n = 0; n < kMaxVersioned; ++n) {

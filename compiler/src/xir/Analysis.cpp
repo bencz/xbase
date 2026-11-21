@@ -176,6 +176,12 @@ Predecessors predecessorTerminators(const Function &f) {
   return preds;
 }
 
+bool isResumable(const Function &f) {
+  for (auto &b : f.blocks)
+    if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return true;
+  return false;
+}
+
 bool removeUnreachableBlocks(Function &f) {
   CFG cfg(f);
   if (cfg.order().size() == f.blocks.size()) return false;

@@ -8,12 +8,12 @@
 //
 // A loop is fused when its enumerator goes only into its each.source (ascending, one collection, no key), the source
 // only into its each.enter, enum.len and each.move, it is entered as often as its enumerator is made (a loop around it
-// goes round the gen.new too), its header unwinds to the function's exit, its variable is the frame's alone (not
-// shared, not a parameter) with no other FOR EACH on it inside this one, and the generator's body has no unwind block
-// (BEGIN SEQUENCE), keeps no handler across YIELD, reads no parameter in its frame (PValue()), creates no PRIVATE, and
-// is small enough. Values the loop carries in its header are joined again through the generator's blocks (SSAUpdater).
-// A generator passed to another one (FOR EACH x IN Evens( Range() )) fuses in turn once promote-variables shows the
-// inner enumerator's gen.new to the copied loop.
+// goes round the gen.new too), its variable is the frame's alone (not shared, not a parameter) with no other FOR EACH
+// on it inside this one, and the generator's body has no unwind block (BEGIN SEQUENCE), keeps no handler across YIELD,
+// reads no parameter in its frame (PValue()), creates no PRIVATE, and is small enough. Values the loop carries in its
+// header are joined again through the generator's blocks (SSAUpdater). A generator passed to another one (FOR EACH x IN
+// Evens( Range() )) fuses in turn once promote-variables shows the inner enumerator's gen.new to the copied loop. In a
+// BEGIN SEQUENCE, the body unwinds through a block that leaves its frame (unwindBody).
 #include "xir/passes/Passes.h"
 
 #include "xir/Analysis.h"
@@ -149,10 +149,8 @@ bool fusibleLoop(const Function &f, const Loops &loops, Instruction *make, EachL
         return false;
   // The header's test: `index <= enum.len`, to the body or the end; a loop entered as often as its enumerator is
   // made (every loop around its each.enter goes round its gen.new too: an enumerator made once and gone through
-  // again goes on where it was), whose header unwinds to the function's exit (an unwind block would leave the
-  // generator's frame shown, as an inlined call's).
+  // again goes on where it was).
   l.header = l.len->parent;
-  if (l.header->unwind) return false;
   for (const Loop *around = loops.innermost(l.enter->parent); around; around = around->parent)
     if (!around->contains(make->parent)) return false;
   Instruction *t = l.header->terminator();
@@ -224,6 +222,17 @@ void fuse(Function &f, const EachLoop &l, Function &r, const Body &body) {
   std::vector<uint32_t> states;
   std::vector<BasicBlock *> ends;
   useBodyVars(copy, vars);
+  // In a BEGIN SEQUENCE (or a FOR EACH cleanup), the body unwinds through a block that leaves its frame, and its ways
+  // out to the loop are blocks of their own that unwind where the loop does (unwindBody).
+  BasicBlock *handler = l.header->unwind, *pad = unwindBody(f, r, copy, handler);
+  auto wayOut = [&](BasicBlock *b) {
+    if (!handler) return b;
+    BasicBlock *out = f.addBlock(b->name + ".out");
+    out->unwind = handler;
+    builder.br(out);
+    builder.setBlock(out);
+    return out;
+  };
   for (BasicBlock *orig : body.blocks) {
     BasicBlock *b = copy.blocks.at(orig);
     Instruction *t = b->terminator();
@@ -235,11 +244,12 @@ void fuse(Function &f, const EachLoop &l, Function &r, const Body &body) {
       b->takeTerminator();
       builder.setBlock(b);
       builder.setLoc(loc);
+      BasicBlock *out = wayOut(b);
       builder.store(l.var, Access::Direct, element);
       if (state) builder.store(state, Access::Direct, builder.integer(k, 10));
       builder.inlineLeave();
       builder.br(l.body);
-      yields.push_back({b, next});
+      yields.push_back({out, next});
       states.push_back(k);
     } else if (t->op == Op::Ret) {
       SourceLoc loc = t->loc;
@@ -247,16 +257,18 @@ void fuse(Function &f, const EachLoop &l, Function &r, const Body &body) {
       eraseInstruction(b->insts.back().get()); // gen.done
       builder.setBlock(b);
       builder.setLoc(loc);
+      BasicBlock *out = wayOut(b);
       leaveBody(builder, r, vars); // what the generator's frame held, let go as its end drops it
       builder.inlineLeave();
       builder.br(l.end);
-      ends.push_back(b);
+      ends.push_back(out);
     }
   }
 
   // The start: the frame shown, the parameters given the arguments (NIL past the last), the rest NIL; the way back
   // from the loop's body: the frame shown again, on after the YIELD that entered it.
   BasicBlock *start = f.addBlock("gen.fused"), *resume = f.addBlock("gen.resume");
+  start->unwind = resume->unwind = pad; // their ends have the generator's frame open
   builder.setBlock(start);
   builder.setLoc(l.len->loc); // where the loop steps it: the caller's line the generator's frame shows
   builder.inlineEnter(&r);
@@ -274,6 +286,7 @@ void fuse(Function &f, const EachLoop &l, Function &r, const Body &body) {
     resume->insts.push_back(std::move(unboxed));
     for (size_t k = 0; k + 1 < yields.size(); ++k) {
       BasicBlock *next = f.addBlock("gen.resume");
+      next->unwind = pad;
       builder.condBr(builder.intCmp(IntPred::Eq, k64, builder.i64(states[k])), yields[k].second, next);
       builder.setBlock(next);
     }
