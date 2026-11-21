@@ -2,9 +2,9 @@
 # Builds each benchmark with xbase and with every other compiler or interpreter found (bench/<language>/: the same
 # work, sizes and checks), runs each RUNS times and prints a Markdown table of the best time of each, in milliseconds.
 # xbase uses a Release build (BUILD, configured when missing); Harbour compiles the .prg itself (bench/compat.ch, its
-# class syntax), or its own form in bench/harbour/, with its fastest C output and the same optimization as xbc's
-# (-O2). A cell is "WRONG" when the program's check
-# failed, "fail" when it did not build or run, "timeout" past LIMIT seconds, "-" when that language has no version.
+# class syntax), or its own form in bench/harbour/, with its fastest C output (-gc3; -gc2 where HARBOUR_GC2 says) and
+# the same optimization as xbc's (-O2). A cell is "WRONG" when the program's check failed, "fail" when it did not
+# build or run, "timeout" past LIMIT seconds, "-" when that language has no version.
 # The programs run in BUILD/compare/run (the index benchmark writes its files there).
 #
 #   bench/compare.sh [-n RUNS] [-b BUILD] [-l LANGS] [-t LIMIT] [bench ...]
@@ -30,7 +30,7 @@ while getopts "n:b:l:t:" opt; do
     b) BUILD=$OPTARG ;;
     l) LANGS=$OPTARG ;;
     t) LIMIT=$OPTARG ;;
-    *) sed -n '2,13p' "$0"; exit 2 ;;
+    *) sed -n '2,14p' "$0"; exit 2 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -52,6 +52,9 @@ declare -A TITLE=([xbase]=xbase [harbour]=Harbour [c]=C [rust]=Rust [csharp]=C# 
 HARBOUR_SKIP=" generator tasks channels async async_generator higher_order_chain pipeline_tasks work_stealing 
               shared_counter memory_footprint "
 HARBOUR_MT=" async_pi parallel_map producer_consumer chameneos_redux "
+# Its -gc3 output multiplies by an integer constant in doubles, rounding products past 2^53, which these programs'
+# generators (seed * 1103515245) need exact: they are built with -gc2, which multiplies them in 64-bit integers.
+HARBOUR_GC2=" black_scholes crc_adler_fnv dgemm fft md5_sha1 monte_carlo_pi radix_sort random_massivo "
 declare -A JAVA=([fib]=Fib [loops]=Loops [sieve]=Sieve [matmul]=MatMul [qsort]=QSort [asort]=ASort [strings]=Strings
                  [crc32]=Crc32 [float]=FloatBench [mixed]=Mixed [oop]=Oop [gc]=Gc [bitlookup]=BitLookup
                  [generator]=Generator [pi]=Pi [tasks]=Tasks [channels]=Channels [async_pi]=AsyncPi
@@ -106,8 +109,9 @@ prepare() {
         echo "$BUILD is not a Release build: xbase is measured from Release builds only" >&2
         return 1
       fi ;;
-    csharp)
-      dotnet build bench/csharp -c Release -v q -nologo -nodeReuse:false -p:UseSharedCompilation=false \
+    csharp) # the SDK's collector reserves 8 GB of addresses, past a limit the script may run under: 4 GB
+      env DOTNET_GCRegionRange=0x100000000 DOTNET_GCHeapHardLimit=0x100000000 \
+        dotnet build bench/csharp -c Release -v q -nologo -nodeReuse:false -p:UseSharedCompilation=false \
         -o "$OUT/csharp" -p:BaseIntermediateOutputPath="$OUT/csharp-obj/" >/dev/null 2>&1 ;;
     java)
       mkdir -p "$OUT/java" && javac -d "$OUT/java" bench/java/*.java >/dev/null 2>&1 ;;
@@ -133,8 +137,10 @@ command_of() {
       [ -f "$ROOT/bench/harbour/$b.prg" ] && src=$ROOT/bench/harbour/$b.prg
       mt=()
       [[ $HARBOUR_MT == *" $b "* ]] && mt=(-mt)
+      gc=-gc3
+      [[ $HARBOUR_GC2 == *" $b "* ]] && gc=-gc2
       mkdir -p "$OUT/harbour" && (cd "$OUT/harbour" && rm -f "$b" &&
-        hbmk2 "${mt[@]}" -static -gtcgi -q -w0 -gc3 -cflag=-O2 -u+hbclass.ch -u+"$ROOT/bench/compat.ch" hbct.hbc \
+        hbmk2 "${mt[@]}" -static -gtcgi -q -w0 "$gc" -cflag=-O2 -u+hbclass.ch -u+"$ROOT/bench/compat.ch" hbct.hbc \
           "$src" -o"$b" >/dev/null 2>&1) && { echo "$exe"; return; } ;;
     c)
       [ -f "bench/c/$b.c" ] || return

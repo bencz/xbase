@@ -1,4 +1,5 @@
-// bench/crc_adler_fnv.prg in Harbour (its bit functions where xbase has bit operators).
+// bench/crc_adler_fnv.prg in Harbour (its bit functions where xbase has bit operators, FNV's product in two exact
+// parts).
 // Checksums of bytes: twenty buffers of 1,000,000 bytes from an LCG, built a character at a time, each hashed with
 // CRC-32 (from a table), Adler-32 and FNV-1a (32 bits); the functions are first checked against their published
 // values ("123456789", "Wikipedia", "a").
@@ -49,6 +50,9 @@ STATIC FUNCTION Adler32Of( s )
 STATIC FUNCTION Fnv1aOf( s )
    LOCAL h := 2166136261, i
    FOR i := 1 TO Len( s )
-      h := hb_bitAnd( hb_bitXor( h, Asc( SubStr( s, i, 1 ) ) ) * 16777619, 0xFFFFFFFF )
+      // h * 16777619 needs 56 bits, and Harbour multiplies a factor past 2^31 in doubles: h * 2^24 + h * 403, the
+      // first part cut to 32 bits so that its sum with the second (a double) stays below 2^53
+      h := hb_bitXor( h, Asc( SubStr( s, i, 1 ) ) )
+      h := hb_bitAnd( hb_bitAnd( hb_bitShift( h, 24 ), 0xFFFFFFFF ) + h * 403, 0xFFFFFFFF )
    NEXT
    RETURN h

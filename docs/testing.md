@@ -167,10 +167,12 @@ The differences that remain:
   no parallel speed-up; C's and JavaScript's `work_stealing` share one queue among the workers (none steals).
 - JavaScript computes in `BigInt` where integers pass 2^53 (`loops`, `random_massivo`, `radix_sort`'s total,
   `meteor_contest`'s masks).
-- Harbour (`-gc3`) multiplies integers in doubles, so products above 2^53 are rounded: the programs that draw numbers
-  with `seed * 1103515245` print `WRONG` there (`black_scholes`, `dgemm`, `fft`, `md5_sha1`, `monte_carlo_pi`,
-  `radix_sort`, `random_massivo`), as `crc_adler_fnv` does (its FNV product loses its low bits there with any flags);
-  `linked_list` crashes it (it frees nested arrays recursively, and the 1,000,000-deep chain overflows its stack), and
+- Harbour multiplies integers exactly (in 64 bits) only when both factors are below 2^31 and neither is an integer
+  constant of its `-gc3` output; other products are computed in doubles, rounded past 2^53. The programs that draw
+  numbers with `seed * 1103515245` (`black_scholes`, `crc_adler_fnv`, `dgemm`, `fft`, `md5_sha1`, `monte_carlo_pi`,
+  `radix_sort`, `random_massivo`) are therefore built with `-gc2` (`HARBOUR_GC2` in `compare.sh`), and
+  `crc_adler_fnv`'s form computes FNV's 56-bit product (a factor past 2^31) in two exact parts; `linked_list` crashes
+  it (it frees nested arrays recursively, and the 1,000,000-deep chain overflows its stack), and
   `hash_resize` takes minutes (a hash's key deletion).
 
 A language without a counterpart of a program has no version of it: C none of `async`, `async_generator`, `index`
@@ -185,9 +187,10 @@ interpreter found and print a Markdown table of the best time of each (`-n`/`-Ru
 picks languages by key: `xbase`, `harbour`, `c`, `rust`, `csharp`, `java`, `go`, `node`, `pypy`, `python`): xbase from a
 Release build (`build-release`, configured when missing; another build is refused), each benchmark target built again
 and a failed build shown as `fail`; Harbour from the `.prg` themselves, or their forms in `bench/harbour/`, when it is
-installed (`hbmk2 -gc3`, its C output compiled with `-O2` as `xbc -O2`, its class syntax header given on the command
-line, its CA-Tools library linked for the math functions, its threaded runtime for the programs that run threads;
-`bench/compat.ch` gives `ElapsedMs()` from `Date()` and `Seconds()` for it), C with `gcc -O2`, Rust with `rustc -C
-opt-level=2`, C# in Release, Python with `-B` (no compiled files beside the sources). The programs run in
-`<build>/compare/run`, under a memory limit (`compare.sh`: 16 GB of address space; C# with a 4 GB heap, whose
-collector would otherwise reserve 8 GB of addresses) and the time limit (`-t`/`-Limit`). The README shows its table.
+installed (`hbmk2 -gc3` or `-gc2`, above; its C output compiled with `-O2` as `xbc -O2`, its class syntax header given
+on the command line, its CA-Tools library linked for the math functions, its threaded runtime for the programs that run
+threads; `bench/compat.ch` gives `ElapsedMs()` from `Date()` and `Seconds()` for it), C with `gcc -O2`, Rust with `rustc
+-C opt-level=2`, C# in Release, Python with `-B` (no compiled files beside the sources). The programs run in
+`<build>/compare/run`, under a memory limit (`compare.sh`: 16 GB of address space; C# with a 4 GB heap, whose collector
+would otherwise reserve 8 GB of addresses, as its build does under the limit `compare.sh` may itself run under) and the
+time limit (`-t`/`-Limit`). The README shows its table.

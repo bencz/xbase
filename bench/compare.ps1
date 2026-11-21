@@ -2,10 +2,10 @@
 # Builds each benchmark with xbase and with every other compiler or interpreter found (bench/<language>/: the same
 # work, sizes and checks), runs each -Runs times and prints a Markdown table of the best time of each, in milliseconds.
 # The same as bench/compare.sh: xbase uses a Release build (-Build, configured when missing); Harbour compiles the
-# .prg itself (bench/compat.ch, its class syntax), or its own form in bench/harbour/, with its fastest C output and
-# -O2. A cell is "WRONG" when the program's check failed, "fail" when it did not build or run, "timeout" past -Limit
-# seconds, "-" when that language has no version. The programs run in <Build>/compare/run (the index benchmark writes
-# its files there).
+# .prg itself (bench/compat.ch, its class syntax), or its own form in bench/harbour/, with its fastest C output
+# (-gc3; -gc2 where $HarbourGc2 says) and -O2. A cell is "WRONG" when the program's check failed, "fail" when it did
+# not build or run, "timeout" past -Limit seconds, "-" when that language has no version. The programs run in
+# <Build>/compare/run (the index benchmark writes its files there).
 #
 #   bench/compare.ps1 [-Runs 3] [-Build build-release] [-Langs xbase,c,...] [-Limit 300] [bench ...]
 #
@@ -39,6 +39,10 @@ $Title = @{ xbase = "xbase"; harbour = "Harbour"; c = "C"; rust = "Rust"; csharp
 $HarbourSkip = "generator", "tasks", "channels", "async", "async_generator", "higher_order_chain", "pipeline_tasks",
                "work_stealing", "shared_counter", "memory_footprint"
 $HarbourMt = "async_pi", "parallel_map", "producer_consumer", "chameneos_redux"
+# Its -gc3 output multiplies by an integer constant in doubles, rounding products past 2^53, which these programs'
+# generators (seed * 1103515245) need exact: they are built with -gc2, which multiplies them in 64-bit integers.
+$HarbourGc2 = "black_scholes", "crc_adler_fnv", "dgemm", "fft", "md5_sha1", "monte_carlo_pi", "radix_sort",
+              "random_massivo"
 $Java = @{ fib = "Fib"; loops = "Loops"; sieve = "Sieve"; matmul = "MatMul"; qsort = "QSort"; asort = "ASort";
           strings = "Strings"; crc32 = "Crc32"; float = "FloatBench"; mixed = "Mixed"; oop = "Oop"; gc = "Gc";
           bitlookup = "BitLookup"; generator = "Generator"; pi = "Pi"; tasks = "Tasks"; channels = "Channels";
@@ -139,8 +143,9 @@ function CommandOf([string]$l, [string]$b) {
       if (-not (Test-Path $src)) { $src = Join-Path $Root "bench/$b.prg" }
       $mt = @()
       if ($HarbourMt -contains $b) { $mt = @("-mt") }
+      $gc = if ($HarbourGc2 -contains $b) { "-gc2" } else { "-gc3" }
       try {
-        hbmk2 @mt -static -gtcgi -q -w0 -gc3 -cflag=-O2 "-u+hbclass.ch" "-u+$Root/bench/compat.ch" hbct.hbc $src `
+        hbmk2 @mt -static -gtcgi -q -w0 $gc -cflag=-O2 "-u+hbclass.ch" "-u+$Root/bench/compat.ch" hbct.hbc $src `
           "-o$b" 2>&1 | Out-Null
       } finally { Pop-Location }
       if ($LASTEXITCODE -eq 0) { return , @(Join-Path $dir "$b$Exe") }
