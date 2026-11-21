@@ -36,6 +36,7 @@ public:
   // symbol table already, so not registered), and their frames keep line 0, as the runtime's C functions show.
   void setRuntimeLibrary(bool on) { runtimeLibrary_ = on; }
   static std::string librarySymbol(const std::string &module, const std::string &name);
+  static std::string sourceStamp(const std::string &module, uint64_t hash);
   // Adds one module of the program to the LLVM module; several modules may
   // share it (one object for several sources), each adding its own functions,
   // STATICs and registration.
@@ -104,6 +105,8 @@ private:
   void unlinkFrame(llvm::Value *frame, llvm::Value *prev = nullptr);
   llvm::FunctionCallee rt(const char *name, llvm::Type *ret, std::initializer_list<llvm::Type *> params);
   void addAbiAttributes(llvm::Function *f);
+  void stampSources(const xir::Module &m);
+  void keepReferences(const std::vector<llvm::Constant *> &symbols, const std::string &name);
   llvm::Function *functionOf(const xir::Function *f);
   llvm::Function *declare(const xir::Function &f);
   llvm::Function *externFunction(const xir::Callee &c);

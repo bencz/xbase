@@ -13,6 +13,7 @@
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <cstdio>
 #include <optional>
 
 using namespace llvm;
@@ -278,6 +279,38 @@ Function *CodeGen::functionOf(const xir::Function *f) {
   return functions_[f] = fn;
 }
 
+// The stamp of a carried runtime source's text (xir::Module::sourceHash): a module of the runtime defines it; a
+// program given the carried modules references each one's, so that a runtime built from other texts than the
+// compiler carries fails to link instead of running bodies that disagree with it.
+std::string CodeGen::sourceStamp(const std::string &module, uint64_t hash) {
+  char hex[17];
+  std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(hash));
+  return librarySymbol(module, std::string("source.") + hex);
+}
+
+void CodeGen::stampSources(const xir::Module &m) {
+  if (runtimeLibrary_) {
+    if (m.sourceHash)
+      new GlobalVariable(mod_, i8_, true, GlobalValue::ExternalLinkage, ConstantInt::get(i8_, 0),
+                         sourceStamp(m.name, m.sourceHash));
+    return;
+  }
+  std::vector<Constant *> stamps;
+  for (const xir::Module *l : m.library)
+    stamps.push_back(cast<Constant>(mod_.getOrInsertGlobal(sourceStamp(l->name, l->sourceHash), i8_)));
+  keepReferences(stamps, "xb.source.stamps");
+}
+
+// A table of `symbols` kept in the object file, so the linker resolves each one (bringing in what defines it from a
+// library) or reports it missing.
+void CodeGen::keepReferences(const std::vector<Constant *> &symbols, const std::string &name) {
+  if (symbols.empty()) return;
+  auto *ty = ArrayType::get(ptrTy_, symbols.size());
+  auto *table =
+      new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage, ConstantArray::get(ty, symbols), name);
+  appendToCompilerUsed(mod_, {table});
+}
+
 // A function of the runtime (NATIVE) or of another module of the program.
 Function *CodeGen::externFunction(const xir::Callee &c) {
   std::string sym = (c.native ? XB_RUNTIME_FUNC_PREFIX : XB_PROGRAM_FUNC_PREFIX) + c.name;
@@ -305,6 +338,7 @@ void CodeGen::run(const xir::Module &m) {
   moduleName_ = m.name;
   for (const xir::Module *l : m.library)
     for (auto &f : l->functions) carriedModule_[f.get()] = l->name;
+  stampSources(m);
   for (auto &f : m.functions) functions_[f.get()] = declare(*f);
   genClasses(m);
   directEntries(m);
@@ -403,16 +437,11 @@ void CodeGen::collectMemvars(const xir::Module &m) {
         ty, memvarTable_, ArrayRef<Constant *>{ConstantInt::get(i32_, 0), ConstantInt::get(i32_, k)});
 }
 
-// EXTERNAL: a table of the functions, kept in the object file, so the linker brings in the modules that define them
-// (from a library) or reports them missing.
+// EXTERNAL: the functions, which the linker brings in (from a library) or reports missing.
 void CodeGen::genRequests(const xir::Module &m) {
-  if (m.requests.empty()) return;
   std::vector<Constant *> fns;
   for (const std::string &name : m.requests) fns.push_back(externFunction(xir::Callee{nullptr, name, false}));
-  auto *ty = ArrayType::get(ptrTy_, fns.size());
-  auto *table = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage, ConstantArray::get(ty, fns),
-                                   "xb.module.requests");
-  appendToCompilerUsed(mod_, {table});
+  keepReferences(fns, "xb.module.requests");
 }
 
 bool CodeGen::finish(const xir::Function *start) {

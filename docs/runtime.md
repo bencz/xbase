@@ -1010,7 +1010,10 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   name as `$`): a program reaches them once the compiler ran a body of the runtime's in place ([xir.md](xir.md),
   `resolve-scalar-sends`), and `xb_scalar_replaced` (a byte for each type, set once a class of the program answers the
   type's messages before the runtime's own class: a `SCALAR CLASS` of the program, `ClassAssociate()`) tells compiled
-  code when it may call a method of that class directly.
+  code when it may call a method of that class directly. Each such module also defines `xbl_MODULE$source$HASH` (HASH
+  the FNV-1a 64 of its source text, 16 hexadecimal digits), which a program given the carried sources references
+  (`xb.source.stamps`): a runtime built from other texts than the compiler carries fails to link instead of running
+  bodies that disagree with the program's inlined copies.
 - Every runtime function is declared in `include/rtl.ch` (`EXTERN FUNCTION`, see [compiler.md](compiler.md#calls));
   the `runtime.declarations` test checks that the declarations and the `xbf_` definitions match.
 - This is the convention of every function's symbol: the runtime, `Do()`, codeblocks and other modules call through

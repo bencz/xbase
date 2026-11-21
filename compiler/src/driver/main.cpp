@@ -18,6 +18,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/GlobPattern.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/thread.h>
 #include <llvm/TargetParser/Triple.h>
@@ -208,6 +209,16 @@ std::unique_ptr<xb::Module> analyze(std::vector<xb::Token> tokens, const std::st
   return ast;
 }
 
+// FNV-1a 64 of a source's text: the stamp a carried runtime source's module and the runtime's own share.
+uint64_t sourceHash(std::string_view text) {
+  uint64_t h = 0xcbf29ce484222325u;
+  for (char c : text) {
+    h ^= static_cast<unsigned char>(c);
+    h *= 0x100000001b3u;
+  }
+  return h;
+}
+
 // Whether the module calls a function of the carried runtime sources (by name, as a function of the runtime) or sends
 // a message one of their classes declares.
 bool callsRuntimeLibrary(const xb::xir::Module &m) {
@@ -259,6 +270,7 @@ std::vector<std::unique_ptr<xb::xir::Module>> loadRuntimeLibrary(const std::vect
       return {};
     }
     for (auto &f : m->functions) f->carried = true;
+    m->sourceHash = sourceHash(s.text);
     out.push_back(std::move(m));
   }
   return out;
@@ -442,6 +454,10 @@ static int compile(int argc, char **argv) {
   bool libraryLoaded = false;
   for (Source &s : sources) {
     s.xir = xb::xir::Generator(runtimeLibrary).run(*s.ast);
+    if (runtimeLibrary) { // its stamp: a program that ran a body of it in place requires the same text (sourceHash)
+      auto text = llvm::MemoryBuffer::getFile(s.path, /*IsText=*/false, /*RequiresNullTerminator=*/false);
+      if (text) s.xir->sourceHash = sourceHash((*text)->getBuffer());
+    }
     if (std::string bad = xb::xir::verify(*s.xir); !bad.empty()) {
       std::fprintf(stderr, "xbc: internal error: invalid xIR: %s\n", bad.c_str());
       return 1;

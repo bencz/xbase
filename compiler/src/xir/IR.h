@@ -353,6 +353,9 @@ public:
   std::vector<std::string> requests;                // functions of other modules to link in (EXTERNAL)
   // Modules of the runtime's carried sources (driver/RuntimeLibrary.h), whose public functions calls may inline.
   std::vector<const Module *> library;
+  // FNV-1a 64 of the source's text, of a module of the runtime (xbc --runtime) or a carried one: its stamp, which a
+  // program given the carried module requires the runtime to define (XB_LIBRARY_FUNC_PREFIX, CodeGen::sourceStamp).
+  uint64_t sourceHash = 0;
   // The module's classes (xb_class_def in xbrt.h): their methods are functions of the module.
   struct Class {
     std::string name;

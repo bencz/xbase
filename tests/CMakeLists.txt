@@ -178,6 +178,11 @@ xb_add_codegen_test(tbaa_heap_items x86_64-linux-gnu "store [^\n]*!tbaa .*!\"hea
 # target (the runtime computes it alike for other strings), in the header laid
 # out for the target.
 xb_add_codegen_test(x86_64_string_hash x86_64-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
+# A program that runs bodies of the runtime's carried sources requires the stamps of their texts, which only a runtime
+# built from the same texts defines (a mismatch fails to link).
+set(stamps "@xb.source.stamps = private constant \\[2 x ptr\\] ")
+string(APPEND stamps "\\[ptr @\"xbl_ARRAYS\\$source\\$[0-9a-f]+\", ptr @\"xbl_COLLECTIONS\\$source\\$[0-9a-f]+\"\\]")
+xb_add_codegen_test(carried_source_stamps powerpc64-unknown-linux-gnu "${stamps}" carried_methods)
 xb_add_codegen_test(s390x_string_hash s390x-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
 xb_add_codegen_test(ppc32_string_hash powerpc-linux-gnu "i32 239963683, i32 7, \\[8 x i8\\] c\"cliente" hashes)
 
