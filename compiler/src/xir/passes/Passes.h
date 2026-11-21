@@ -95,6 +95,10 @@ void settleReturnTypes(Function &f);
 // starts at the integer 0 and adds doubles): the loop proper then carries it with one type (PeelTypes.cpp).
 bool peelForTypes(Function &f);
 
+// Runs a generator of the module in place in the FOR EACH that goes through the enumerator made right there: its body
+// copied into the function, each YIELD entering the loop's body (FuseGenerators.cpp).
+bool fuseGenerators(Function &f);
+
 // Versions FOR EACH loops whose collection may be a string, an array or a hash, among other things: a test of its type
 // before the loop enters a copy made for that type, where the collection's type is known (VersionEach.cpp).
 bool versionEachLoops(Function &f);

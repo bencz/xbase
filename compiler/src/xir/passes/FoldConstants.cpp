@@ -1,4 +1,4 @@
-// Constant folding on xIR: machine operations on constants, the truth test of
+// Constant folding on xIR: machine operations on constants, a machine value boxed and unboxed, the truth test of
 // a constant or of a logical just made, arithmetic (also - and ~ of one) and
 // comparisons of number constants (as the run-time operators compute them), comparisons of string
 // constants for equality, calls of FOLD functions on constants, ValType() of a value whose type is known, and
@@ -127,6 +127,14 @@ Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
     if (i.callee.name != "VALTYPE" || ops.size() != 1) return nullptr;
     if (std::optional<char> letter = typeLetter(types.of(ops[0]))) return b.string(std::string(1, *letter));
     return nullptr;
+  case Op::UnboxI64: case Op::UnboxBool: { // a machine value kept in an item and taken back (a fused generator's)
+    if (const Instruction *boxed = producedBy(ops[0], i.op == Op::UnboxI64 ? Op::BoxI64 : Op::BoxBool))
+      return boxed->operand(0);
+    const Constant *c = asConstant(ops[0]);
+    if (c && i.op == Op::UnboxI64 && c->lit == Constant::Lit::Integer) return b.i64(c->ival);
+    if (c && i.op == Op::UnboxBool && c->lit == Constant::Lit::Logical) return b.boolean(c->logical);
+    return nullptr;
+  }
   case Op::IntAdd: case Op::IntSub: {
     const Constant *x = asConstant(ops[0]), *y = asConstant(ops[1]);
     if (!x || !y) return nullptr;

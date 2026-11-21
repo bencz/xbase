@@ -601,12 +601,14 @@ and the element; `xb_gen_done` ends it and drops the frame, at the end of the bo
 those of the runtime's `Enumerable` (`g:Where( ... )`), the class its own class function makes (`xbf_ENUMERABLE`,
 `xb_class_send_as`): a program's class named `Enumerable` is another one. A message neither answers is the usual
 `GENERATOR:message` error. The `generator` benchmark (3,000,000 steps of one generator feeding another) takes about 60
-ms. The frame between steps is saved and loaded by `xb_frame_store` and `xb_frame_load` (`types/types.h`), which
-asynchronous functions use too: in place, each value shared first when the holder is shared (what a shared object
-holds is shared), and with no lock on either side: one step runs at a time, and the next one runs after the handoff
-that publishes it (a scheduling, a claim), so no thread reads the frame while another writes it (storing the slots
-under the array's stripe would cost an `ASYNC` function with twelve locals, suspended a million times, 24% more
-instructions); `tests/run/async_frames_threads.prg` checks frames handed between workers.
+ms through the enumerators; a `FOR EACH` over a generator of the module it calls itself runs the generator in place
+([xir.md](xir.md), `fuse-generators`): 2 ms. The frame between steps is saved and loaded by `xb_frame_store` and
+`xb_frame_load` (`types/types.h`), which asynchronous functions use too: in place, each value shared first when the
+holder is shared (what a shared object holds is shared), and with no lock on either side: one step runs at a time, and
+the next one runs after the handoff that publishes it (a scheduling, a claim), so no thread reads the frame while
+another writes it (storing the slots under the array's stripe would cost an `ASYNC` function with twelve locals,
+suspended a million times, 24% more instructions); `tests/run/async_frames_threads.prg` checks frames handed between
+workers.
 
 ### Asynchronous functions
 

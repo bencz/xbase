@@ -196,6 +196,25 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
     at most 30 instructions, or 200 when the call passes a codeblock literal (which the body may then run in place
     too). A function versioned for references runs, for arguments without a reference, the body after its
     `params.ref` test (which they pass); otherwise its other body (`NAME.byref`).
+  - `fuse-generators`, after it (which shows the enumerator a generator's function makes: `gen.new`): a `FOR EACH` over
+    an enumerator made in the function by `gen.new` of a generator of the module, used only by that loop's `each.source`
+    (ascending, one collection, no key), whose source goes only to its `each.enter`, `enum.len` and `each.move`, entered
+    as often as its enumerator is made (every loop around its `each.enter` goes round its `gen.new` too: an enumerator
+    made once and gone through again goes on where it was), whose header unwinds to the function's exit, whose variable
+    is the frame's alone (not shared, not a parameter) with no loop on it inside this one, and whose generator's body
+    (the resume function's blocks a step runs, of at most 300 instructions) has no unwind block, keeps no handler across
+    `YIELD`, reads no parameter in its frame and creates no `PRIVATE`, runs the generator in place
+    (`FuseGenerators.cpp`). The body is copied between `inline.enter` and `inline.leave` of the resume function (the
+    call stack shows it as its steps would), its variables new ones of the function (its parameters given the arguments,
+    the rest NIL: `bodyVars`, `enterBody` in `Transform`, which inlining uses too), started where a first step would,
+    the caller's line shown the loop's; each `gen.yield` assigns the loop variable and enters the loop's body, the
+    body's way back goes on after that `YIELD` (the state, when there are several, in a variable of its own), and
+    `gen.done` leaves the loop, its variables set to NIL as the end drops its frame (`leaveBody`). The variable is then
+    an ordinary one in the loop (over an enumerator, assigning it changes nothing else: its reads and writes become
+    direct), saved before and restored after it. The values the loop's header carried are joined again through the
+    generator's blocks (`SSAUpdater`; an edge that passes a parameter back to itself defines nothing new). A generator
+    fed by another (`FOR EACH x IN Evens( Range( 1, n ) )`) fuses in turn once `promote-variables` shows the inner
+    enumerator's `gen.new` to the copied loop. The `generator` benchmark runs in 2 ms (59 through the enumerators).
   - `inline-blocks`, after it (which may pass a block literal to an `Eval`): `Eval( {| p | body }, args )` of a
     codeblock literal of the function (`Eval` of the native runtime function), of at most 200 instructions, not the
     function itself (a block a call inlined in it runs), none of whose captured variables an inlined body binds anew
@@ -230,20 +249,20 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   `NIL`); renaming along the dominator tree replaces each `load` with the current value and drops the `store`s;
   parameters that only feed each other through a loop are removed (their arguments first, then them). The variables
   leave the frame.
-- `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `from_bool` and `truth` of
-  constants (`truth` of a logical just made is its boolean), `+`, `-`, `*`, the bit operators, unary `-` and `~`, and
-  the comparisons of two number constants (and of two logicals, and `=`, `==`, `!=` with a `NIL` constant:
-  `compareLogicals`, `compareNil`), as the run-time operators compute them from two values (`foldNumbers`,
-  `foldNumber` and `compareNumbers` of `opt/Fold`, with `runtime`: an integer result is a computed one, of width 0; a
-  double's decimals are the operator's; `/`, `%`, `^` and an integer product that overflows, whose decimals are SET
-  DECIMALS at run time, stay), `+` and `-` of two string constants (`stringJoin`), `=`, `==` and `!=` of two
-  string constants when SET EXACT cannot change the result, and their `$` (`stringTest`; both in `opt/Fold`, which
-  the syntax tree's folding uses too),
-  a call of a `FOLD` function on constants (`evaluateCall` of `opt/Fold`, without `literal`: the value the function
-  returns at run time, an integer a computed one; [compiler.md](compiler.md#constant-folding)),
-  `ValType()` of a value whose types all have one letter (`XB_TYPE_LETTERS`; not a string, which may be a memo field's
-  value: an array, codeblock or hash literal, a number, a logical), and `cond_br` on a constant becomes `br`. A folded
-  instruction is removed at once, also one that can fail in general (`truth`) but not with these operands.
+- `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `unbox.i64` and `unbox.bool` of what
+  `box.i64` and `box.bool` made or of a constant, `from_bool` and `truth` of constants (`truth` of a logical just made
+  is its boolean), `+`, `-`, `*`, the bit operators, unary `-` and `~`, and the comparisons of two number constants (and
+  of two logicals, and `=`, `==`, `!=` with a `NIL` constant: `compareLogicals`, `compareNil`), as the run-time
+  operators compute them from two values (`foldNumbers`, `foldNumber` and `compareNumbers` of `opt/Fold`, with
+  `runtime`: an integer result is a computed one, of width 0; a double's decimals are the operator's; `/`, `%`, `^` and
+  an integer product that overflows, whose decimals are SET DECIMALS at run time, stay), `+` and `-` of two string
+  constants (`stringJoin`), `=`, `==` and `!=` of two string constants when SET EXACT cannot change the result, and
+  their `$` (`stringTest`; both in `opt/Fold`, which the syntax tree's folding uses too), a call of a `FOLD` function on
+  constants (`evaluateCall` of `opt/Fold`, without `literal`: the value the function returns at run time, an integer a
+  computed one; [compiler.md](compiler.md#constant-folding)), `ValType()` of a value whose types all have one letter
+  (`XB_TYPE_LETTERS`; not a string, which may be a memo field's value: an array, codeblock or hash literal, a number, a
+  logical), and `cond_br` on a constant becomes `br`. A folded instruction is removed at once, also one that can fail in
+  general (`truth`) but not with these operands.
 - `simplify-cfg`: a block holding only `br` whose parameters nothing else uses is skipped by its predecessors; two
   branches to one block differing only in a `true`/`false` argument become a jump passing the condition; a block
   whose single predecessor jumps to it joins it; unreachable blocks go. The steps repeat until nothing changes.

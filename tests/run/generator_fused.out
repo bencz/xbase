@@ -1,0 +1,18 @@
+
+range:         15 after: before
+evens:        110 2 4 6 8 10 12 14 16 18 20 
+several: one two three:3 
+none: [] fewer:          3
+by reference: [11,12,13,         10
+exit and loop: 1357 before
+return:          4         -1
+assigned: 100 200 300  before
+nested yields: a1 a2 b1 b2 
+errors: 1 Argument error in FAULTY from FAILING 1234 Argument error in BODYFAILS
+break:          3 kept
+procname: NAMED MAIN 
+captured: 789
+carried: 182/26/13/ott 0/-1/0/ott 30/10/5/ott
+made once, gone through again: 12345;; 1;345;
+a loop inside, its variable carried: 122334 NIL NIL
+lines: FAILING2(143) STEPPED(135)

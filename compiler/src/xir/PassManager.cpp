@@ -25,6 +25,7 @@ template <bool (*P)(Function &)> bool onFunction(Module &, Function &f) { return
 
 constexpr Pass kPipeline[] = {
     {"inline-functions", inlineFunctions},             // first: the variables they free promote-variables takes
+    {"fuse-generators", onFunction<fuseGenerators>},   // after inline-functions, which shows the enumerator made
     {"inline-blocks", onFunction<inlineBlocks>},       // after inline-functions, which may pass a block to an Eval
     {"append-in-place", onFunction<appendInPlace>},    // before promote-variables, which takes the other LOCALs
     {"promote-variables", onFunction<promoteVariables>},

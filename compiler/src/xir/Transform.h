@@ -14,6 +14,8 @@
 // where a value gets a second definition.
 namespace xb::xir {
 
+class Builder;
+
 // Moves the instructions after position `k` of `b` into a new block (named like `b`, unwinding where `b` does) that `b`
 // jumps to, and returns it.
 BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k);
@@ -63,6 +65,29 @@ private:
 // A parameter among `placed` whose arguments (from the branches in `preds`) are all one other value, or itself, is
 // that value; removing one may make others so. Removed ones become null in `placed`.
 void removeTrivialParams(std::vector<BlockParam *> &placed, const Predecessors &preds);
+
+// Removes instruction `i` from its block, its uses undone.
+void eraseInstruction(Instruction *i);
+
+// A frame variable with no cell and no reference passed in: read and written directly.
+bool plainVar(const Var *v);
+
+// A function's body run in another one (an inlined call, a fused generator): the callee's variables, those of the
+// function its copied blocks use instead. Its captures are the variables `captures` gives; its frame variables (but
+// those below `firstVar`: a resume function's enumerator) new ones of `f`. A parameter, when an argument is a
+// reference (`refArgs`: @x), keeps reading and writing through what it holds, as do the callee's other variables
+// marked so (the parameters of a body inlined in it before).
+using VarMap = std::unordered_map<const Var *, Var *>;
+VarMap bodyVars(Function &f, const Function &callee, bool refArgs, const std::vector<Var *> &captures,
+                uint32_t firstVar = 0);
+// The copied instructions use the function's variables (and captures); a plain one is read and written directly.
+void useBodyVars(const BlockCopy &copy, const VarMap &vars);
+// At the body's entry: the parameters (frame slots `firstVar` on) given the arguments, NIL past the last, and the
+// LOCALs NIL; at its end, every variable NIL, as the callee's frame would be gone (promote-variables drops the stores
+// of those it takes).
+void enterBody(Builder &b, const Function &callee, const VarMap &vars, const std::vector<Value *> &args,
+               uint32_t firstVar = 0);
+void leaveBody(Builder &b, const Function &callee, const VarMap &vars);
 
 // SSA form again for values that copies of blocks define once more: each entry lists one value's definitions with
 // their blocks, the original first. Its reachable uses outside the blocks in `inside` (the original and copied blocks)

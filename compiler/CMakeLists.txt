@@ -53,6 +53,7 @@ add_executable(xbc
   src/xir/passes/RemoveDeadCode.cpp
   src/xir/passes/SimplifyCFG.cpp
   src/xir/passes/TypedContinuations.cpp
+  src/xir/passes/FuseGenerators.cpp
   src/xir/passes/PeelTypes.cpp
   src/xir/passes/VersionEach.cpp
   src/xir/passes/Specialize.cpp

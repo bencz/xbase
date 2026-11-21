@@ -40,11 +40,6 @@ std::vector<BasicBlock *> allBlocks(const Function &f) {
   return out;
 }
 
-void eraseInstruction(Instruction *i) {
-  BasicBlock *b = i->parent;
-  b->insts.erase(std::find_if(b->insts.begin(), b->insts.end(), [&](auto &p) { return p.get() == i; }));
-}
-
 // The blocks of a callee whose body can run in its caller's frame: they read no parameters in their frame slots
 // (PValue(): the inlined frame has none) and no `...`, create no PRIVATE (it would be the caller's, released later),
 // and have no unwind block (BEGIN SEQUENCE). The arguments as received (PCount()) are the inlined frame's, and a
@@ -76,9 +71,6 @@ std::vector<Value *> held(Builder &builder, const std::vector<Value *> &args) {
   while (!out.empty() && asConstant(out.back())) out.pop_back();
   return out;
 }
-
-// A frame variable with no cell and no reference passed in: read and written directly.
-bool plain(const Var *v) { return v && v->kind == Var::Kind::Frame && !mayBeInCell(*v); }
 
 bool anyReference(const std::vector<Value *> &args) {
   return std::any_of(args.begin(), args.end(), isReference);
@@ -131,51 +123,25 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   BasicBlock *tail = splitAfter(f, at, k);
   BlockParam *result = tail->addParam(Type::Item);
 
-  // The callee's variables: its captures are the cells' variables; its frame variables, new ones of the function. Its
-  // parameters, when an argument is a reference (@x), keep reading and writing through what they hold, as do its other
-  // variables marked so (the parameters of a body inlined in it before).
-  bool refArgs = anyReference(args);
-  std::unordered_map<const Var *, Var *> vars;
-  for (auto &v : callee.vars) {
-    if (v->kind == Var::Kind::Capture) {
-      vars[v.get()] = in.captures[v->index];
-      continue;
-    }
-    Var *nv = f.addFrameVar(v->name);
-    nv->param = v->param && (refArgs || v->index >= callee.numParams);
-    nv->shared = v->shared;
-    vars[v.get()] = nv;
-  }
-  auto varOf = [&](Var *v) { // the module's STATICs stay
-    auto it = vars.find(v);
-    return it == vars.end() ? v : it->second;
-  };
-
-  // The body, copied with constants of the function's own; its variables mapped, and each `ret` the end of the
-  // inlined frame, passing its value on, after its variables are cleared: as the callee's frame would at its return,
-  // they no longer keep what they held (promote-variables drops the stores of those it takes).
+  // The callee's variables (bodyVars), and the body, copied with constants of the function's own, using them; each
+  // `ret` the end of the inlined frame, passing its value on, after its variables are cleared (leaveBody).
+  VarMap vars = bodyVars(f, callee, anyReference(args), in.captures);
   BlockCopy body = copyBlocks(f, in.body, ".inline", [&](Value *v) -> Value * {
     const Constant *c = asConstant(v);
     return c ? copyConstant(f, *c) : v;
   });
+  useBodyVars(body, vars);
   Builder builder(&f);
   for (auto [orig, copy] : body.pairs) {
     auto *ni = copy->kind() == Value::Kind::Instruction ? static_cast<Instruction *>(copy) : nullptr;
-    if (!ni) continue;
-    if (ni->var) {
-      ni->var = varOf(ni->var);
-      if (plain(ni->var) && ni->access == Access::MaybeRef) ni->access = Access::Direct;
-    }
-    for (Var *&c : ni->captures) c = varOf(c);
-    if (ni->op != Op::Ret) continue;
+    if (!ni || ni->op != Op::Ret) continue;
     BasicBlock *nb = ni->parent;
     Value *value = ni->operands().empty() ? nullptr : ni->operand(0);
     SourceLoc loc = ni->loc;
     nb->takeTerminator();
     builder.setBlock(nb);
     builder.setLoc(loc);
-    for (auto &v : callee.vars)
-      if (v->kind == Var::Kind::Frame) builder.store(vars.at(v.get()), Access::Direct, builder.nil());
+    leaveBody(builder, callee, vars);
     builder.inlineLeave();
     builder.br(tail, {value ? value : builder.nil()});
   }
@@ -185,11 +151,7 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   builder.setBlock(at);
   builder.setLoc(call->loc);
   builder.inlineEnter(in.callee, callee.readsArgs ? args : held(builder, args));
-  for (auto &v : callee.vars) {
-    if (v->kind != Var::Kind::Frame) continue;
-    bool given = v->param && v->index < callee.numParams && v->index < args.size();
-    builder.store(vars.at(v.get()), Access::Direct, given ? args[v->index] : builder.nil());
-  }
+  enterBody(builder, callee, vars, args);
   builder.br(body.blocks.at(in.start));
   call->replaceAllUsesWith(result);
   eraseInstruction(call);
@@ -382,7 +344,7 @@ bool unshareVariables(Function &f) {
     }
   for (auto &b : f.blocks) {
     for (auto &i : b->insts)
-      if (plain(i->var) && i->access == Access::MaybeRef) {
+      if (plainVar(i->var) && i->access == Access::MaybeRef) {
         i->access = Access::Direct;
         changed = true;
       }

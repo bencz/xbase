@@ -3,6 +3,8 @@
 
 #include "xir/Builder.h"
 
+#include <algorithm>
+
 namespace xb::xir {
 
 Constant *copyConstant(Function &f, const Constant &c) {
@@ -146,6 +148,62 @@ void removeTrivialParams(std::vector<BlockParam *> &placed, const Predecessors &
       changed = true;
     }
   }
+}
+
+void eraseInstruction(Instruction *i) {
+  BasicBlock *b = i->parent;
+  b->insts.erase(std::find_if(b->insts.begin(), b->insts.end(), [&](auto &p) { return p.get() == i; }));
+}
+
+bool plainVar(const Var *v) { return v && v->kind == Var::Kind::Frame && !mayBeInCell(*v); }
+
+VarMap bodyVars(Function &f, const Function &callee, bool refArgs, const std::vector<Var *> &captures,
+                uint32_t firstVar) {
+  VarMap vars;
+  for (auto &v : callee.vars) {
+    if (v->kind == Var::Kind::Capture) {
+      vars[v.get()] = captures.at(v->index);
+      continue;
+    }
+    if (v->index < firstVar) continue;
+    Var *nv = f.addFrameVar(v->name);
+    nv->param = v->param && (refArgs || v->index >= callee.numParams);
+    nv->shared = v->shared;
+    vars[v.get()] = nv;
+  }
+  return vars;
+}
+
+void useBodyVars(const BlockCopy &copy, const VarMap &vars) {
+  auto varOf = [&](Var *v) { // the module's STATICs stay
+    auto it = vars.find(v);
+    return it == vars.end() ? v : it->second;
+  };
+  for (auto [orig, dup] : copy.pairs) {
+    if (dup->kind() != Value::Kind::Instruction) continue;
+    auto *ni = static_cast<Instruction *>(dup);
+    if (ni->var) {
+      ni->var = varOf(ni->var);
+      if (plainVar(ni->var) && ni->access == Access::MaybeRef) ni->access = Access::Direct;
+    }
+    for (Var *&c : ni->captures) c = varOf(c);
+  }
+}
+
+void enterBody(Builder &b, const Function &callee, const VarMap &vars, const std::vector<Value *> &args,
+               uint32_t firstVar) {
+  for (auto &v : callee.vars) {
+    if (v->kind != Var::Kind::Frame || v->index < firstVar) continue;
+    size_t k = v->index - firstVar;
+    bool given = v->param && v->index < callee.numParams && k < args.size();
+    b.store(vars.at(v.get()), Access::Direct, given ? args[k] : b.nil());
+  }
+}
+
+void leaveBody(Builder &b, const Function &callee, const VarMap &vars) {
+  for (auto &v : callee.vars)
+    if (auto it = vars.find(v.get()); v->kind == Var::Kind::Frame && it != vars.end())
+      b.store(it->second, Access::Direct, b.nil());
 }
 
 void joinDefinitions(Function &f, const std::vector<Definitions> &defs,
