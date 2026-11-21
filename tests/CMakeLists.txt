@@ -122,9 +122,10 @@ endforeach()
 file(GLOB XB_WARN_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/warn ${CMAKE_CURRENT_SOURCE_DIR}/warn/*.prg)
 foreach(t ${XB_WARN_TESTS})
   string(REGEX REPLACE "\\.prg$" "" t ${t})
+  set(cmd $<TARGET_FILE:xbc> -O2 ${CMAKE_CURRENT_SOURCE_DIR}/warn/${t}.prg -o ${CMAKE_CURRENT_BINARY_DIR}/warn_${t}.o)
   add_test(NAME warn.${t}
     COMMAND ${CMAKE_COMMAND}
-      "-DEXE=$<TARGET_FILE:xbc>;-O2;${CMAKE_CURRENT_SOURCE_DIR}/warn/${t}.prg;-o;${CMAKE_CURRENT_BINARY_DIR}/warn_${t}.o"
+      "-DEXE=${cmd}"
       -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/warn/${t}.warn
       -P ${CMAKE_CURRENT_SOURCE_DIR}/warn_test.cmake)
 endforeach()

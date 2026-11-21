@@ -40,7 +40,8 @@ if(NOT MSVC)
   add_custom_command(OUTPUT ${project}/app${CMAKE_EXECUTABLE_SUFFIX}
                      COMMAND ${XBC} ${CMAKE_CURRENT_SOURCE_DIR}/project.xbprj --out-dir=${project}
                              --depfile=${project}/app.d $<$<BOOL:${XBC_TARGET}>:--target=${XBC_TARGET}>
-                     DEPENDS ${sources} ${CMAKE_CURRENT_SOURCE_DIR}/project.prg ${CMAKE_CURRENT_SOURCE_DIR}/project.xbprj
+                     DEPENDS ${sources} ${CMAKE_CURRENT_SOURCE_DIR}/project.prg
+                             ${CMAKE_CURRENT_SOURCE_DIR}/project.xbprj
                      COMMENT "xbc project.xbprj")
   add_custom_target(project ALL DEPENDS ${project}/app${CMAKE_EXECUTABLE_SUFFIX})
 endif()

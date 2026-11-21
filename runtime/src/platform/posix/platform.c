@@ -152,7 +152,8 @@ void xb_platform_stack_give_back(const char *from, const char *to) {
 #if defined(__linux__)
   madvise((void *)(uintptr_t)from, (size_t)(to - from), MADV_DONTNEED);
 #else
-  mmap((void *)(uintptr_t)from, (size_t)(to - from), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+  mmap((void *)(uintptr_t)from, (size_t)(to - from), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+       -1, 0);
 #endif
 }
 

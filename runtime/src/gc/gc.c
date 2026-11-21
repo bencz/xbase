@@ -158,11 +158,11 @@
 #define XB_GC_TRIM_MAX_NS (320 * XB_NS_PER_SEC)  /* its longest */
 #define XB_GC_TRIM_STACK ((size_t)256 << 10)     /* the trimmer's stack: the collection's stacks are vectors */
 #define XB_GC_ALIGN 8u
-#define XB_GC_DEFRAG_RESERVE 16u                 /* new blocks a defragmentation may take: the heap's blocks / this */
-#define XB_GC_DEFRAG_LIVE_NUM 3u                 /* a block a full collection may empty: at most 3/4 of its bytes live */
+#define XB_GC_DEFRAG_RESERVE 16u      /* new blocks a defragmentation may take: the heap's blocks / this */
+#define XB_GC_DEFRAG_LIVE_NUM 3u      /* a block a full collection may empty: at most 3/4 of its bytes live */
 #define XB_GC_DEFRAG_LIVE_DEN 4u
-#define XB_GC_LIVE_UNKNOWN UINT32_MAX            /* xb_hblock.liveBytes of a block allocated in since a full collection */
-#define XB_GC_CLASS_DEFRAG_MIN 16u               /* size classes' blocks worth emptying (a move costs a stack scan) */
+#define XB_GC_LIVE_UNKNOWN UINT32_MAX /* xb_hblock.liveBytes of a block allocated in since a full collection */
+#define XB_GC_CLASS_DEFRAG_MIN 16u    /* size classes' blocks worth emptying (a move costs a stack scan) */
 #define XB_GC_STOP_LOOK_NS (XB_NS_PER_MS)        /* a collector waiting for threads to stop looks again after this */
 
 /* The metadata at the start of a block (its first XB_GC_FIRST_LINE lines). */
@@ -1244,7 +1244,8 @@ void xb_gc_add_root(xb_item *items, size_t count) {
 }
 
 /* The C roots' room is kept while a quarter of it or more is used, or it is this small; past that it halves at each
- * collection (the world stopped: no thread is pushing a root then), so that the peak of a deep nesting does not stay. */
+ * collection (the world stopped: no thread is pushing a root then), so that the peak of a deep nesting does not
+ * stay. */
 #define ROOTS_KEEP 1024u
 
 static void roots_shrink(xb_ctx *ctx) {

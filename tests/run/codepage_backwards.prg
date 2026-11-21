@@ -20,7 +20,8 @@ PROCEDURE Main()
       c := ""
       FOR EACH x IN { "A", "z", "é", "Ç", "ü", "€", "╬", "Σ", "ß", "★" }
          cBack := CPConvert( x, "UTF8", cp )
-         c += x + "=" + iif( Len( cBack ) == 1, LTrim( Str( Asc( cBack ) ) ), "len " + LTrim( Str( Len( cBack ) ) ) ) + " "
+         c += x + "=" + iif( Len( cBack ) == 1, LTrim( Str( Asc( cBack ) ) ), ;
+                             "len " + LTrim( Str( Len( cBack ) ) ) ) + " "
       NEXT
       ? cp, c
       cText := ""

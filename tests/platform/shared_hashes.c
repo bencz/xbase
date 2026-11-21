@@ -2,11 +2,12 @@
  * ones, which move objects, too) running meanwhile. First putters HSet() keys of their own (strings, shared as they
  * are stored; the hash's store grows many times) while readers look keys up and take HKeys(): the keys the hash held
  * before are found at every lookup (a lookup under the sequence counter that a growth overlaps reads again, never
- * misses), and in the end every key is there with its value. Then writers set values (alternating integers and doubles), HDel(), remove by position,
- * HSort(), HFill(), HCopy() into it, HAllocate(), HCaseMatch(), HValueAt() and test pairs ($) while readers look
- * keys up and take entries by position: a reader never sees an integer of a double's bits or a tiny double (an item
- * read torn), nor a value of another type, and in the end each key is there once, at its position. Last, one thread
- * sorts the hash over and over while another sets its values: no sort brings an older value back. */
+ * misses), and in the end every key is there with its value. Then writers set values (alternating integers and
+ * doubles), HDel(), remove by position, HSort(), HFill(), HCopy() into it, HAllocate(), HCaseMatch(), HValueAt() and
+ * test pairs ($) while readers look keys up and take entries by position: a reader never sees an integer of a double's
+ * bits or a tiny double (an item read torn), nor a value of another type, and in the end each key is there once, at
+ * its position. Last, one thread sorts the hash over and over while another sets its values: no sort brings an older
+ * value back. */
 #include "check.h"
 #include "core/shared.h"
 #include "xbrt_int.h"

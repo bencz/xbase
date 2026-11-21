@@ -22,11 +22,11 @@ static void report(const char *name, double scale) {
   printf("%-18s %8.1f\n", name, ns);
 }
 
-#define MEASURE(name, ...)                                                                                          \
+#define MEASURE(name, ...)                                                                                             \
   do {                                                                                                                 \
     start();                                                                                                           \
     for (long i = 1; i <= N; ++i) {                                                                                    \
-      __VA_ARGS__;                                                                                                          \
+      __VA_ARGS__;                                                                                                     \
     }                                                                                                                  \
     report(name, 1.0);                                                                                                 \
   } while (0)
@@ -92,7 +92,11 @@ int main(void) {
     memcpy(buf, s + a, b > a ? b - a : 0);
     sink += b > a ? b - a : 0;
   });
-  MEASURE("ltrim", { size_t a = trim_left(P[i % 4], plen[i % 4]); memcpy(buf, P[i % 4] + a, plen[i % 4] - a); sink += a; });
+  MEASURE("ltrim", {
+    size_t a = trim_left(P[i % 4], plen[i % 4]);
+    memcpy(buf, P[i % 4] + a, plen[i % 4] - a);
+    sink += a;
+  });
   MEASURE("rtrim", { size_t b = trim_right(P[i % 4], plen[i % 4]); memcpy(buf, P[i % 4], b); sink += b; });
   MEASURE("padl_20", {
     size_t n = plen[i % 4];

@@ -80,9 +80,9 @@ enum class Op : uint8_t {
   SubstCheck,     // operation -> Bool: right after it, its result is not of the types it gives itself (an error's
                   // block substituted it); with a mask (`imm`), a guard: the value is not of those types
   SubstValue,     // operation -> Item: that result, at the start of the block the check leads to
-  ScalarPlain,    // Item; index: a mask of types -> Bool: the value is of one of those types, whose own class of the runtime
-                  // answers its messages, no class of the program before it (xb_scalar_replaced): a method of that
-                  // class may be called directly
+  ScalarPlain,    // Item; index: a mask of types -> Bool: the value is of one of those types, whose own class of the
+                  // runtime answers its messages, no class of the program before it (xb_scalar_replaced): a method of
+                  // that class may be called directly
   IntAdd,         // I64, I64 -> I64
   IntSub,         // I64, I64 -> I64
   IntCmp,         // pred; I64, I64 -> Bool

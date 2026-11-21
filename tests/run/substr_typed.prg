@@ -9,7 +9,8 @@ PROCEDURE Main()
       cOut += "[" + Left( c, n ) + "|" + Right( c, n ) + "|" + SubStr( c, n ) + "|" + SubStr( c, n, 3 ) + "]"
    NEXT
    ? cOut
-   ? Left( c, 2.9 ), Right( c, 3.5 ), SubStr( c, 2.7, 2.2 ), SubStr( c, -2.5 ), SubStr( c, 11 ), "[" + Left( "", 3 ) + "]"
+   ? Left( c, 2.9 ), Right( c, 3.5 ), SubStr( c, 2.7, 2.2 ), SubStr( c, -2.5 ), SubStr( c, 11 ), ;
+     "[" + Left( "", 3 ) + "]"
    ? Left( c, 10 ) == c, Right( c, 99 ) == c, SubStr( c, 1 ) == c, SubStr( c, 1, 10 ) == c
    x := 0
    FOR k := 1 TO 1000
