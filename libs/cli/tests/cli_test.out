@@ -1,0 +1,36 @@
+
+[--top] [5] [in.txt]: top='5' set=.T. out=NIL case=.F. file='in.txt' second=NIL rest=0
+[--top=7] [-i] [in.txt] [more] [and more]: top='7' set=.T. out=NIL case=.T. file='in.txt' second='more' rest=1 last and more
+[-n] [3] [--ignore-case] [in.txt]: top='3' set=.T. out=NIL case=.T. file='in.txt' second=NIL rest=0
+[--top=] [in.txt]: top='' set=.T. out=NIL case=.F. file='in.txt' second=NIL rest=0
+[--top=1] [--top=2] [in.txt]: top='2' set=.T. out=NIL case=.F. file='in.txt' second=NIL rest=0
+[in.txt] [--] [--top=9] [-i]: top='10' set=.F. out=NIL case=.F. file='in.txt' second='--top=9' rest=1 last -i
+[-] [--out] [o.txt]: top='10' set=.F. out='o.txt' case=.F. file='-' second=NIL rest=0
+[--size] [in.txt]: fails: unknown option --size
+[--ignore-case=yes] [in.txt]: fails: the flag --ignore-case takes no value
+[in.txt] [--top]: fails: the option --top needs a value
+[-i]: fails: missing <file>
+[in.txt] [-x]: fails: unknown option -x
+[-h]: fails: help
+[in.txt] [--help]: fails: help
+[again.txt]: top='10' set=.F. out=NIL case=.F. file='again.txt' second=NIL rest=0
+[-n=3] [in.txt]: top='3' set=.T. out=NIL case=.F. file='in.txt' second=NIL rest=0
+[-i=x] [in.txt]: fails: the flag --ignore-case takes no value
+[--top] [-5] [in.txt]: top='-5' set=.T. out=NIL case=.F. file='in.txt' second=NIL rest=0
+[--top] [-h] [in.txt]: top='-h' set=.T. out=NIL case=.F. file='in.txt' second=NIL rest=0
+[--] [--help]: top='10' set=.F. out=NIL case=.F. file='--help' second=NIL rest=0
+[--size=3] [in.txt]: fails: unknown option --size
+[--top=1] [--]: fails: missing <file>
+isset: .T. .T. .T. .T. .F. .T.
+rest copy:          2
+usage: tool [options] <file> [<second>]
+Does things to files.
+  <file>             the input
+  <second>           another input
+  -n, --top <value>  how many (default: 10)
+      --out <value>  where to write
+  -i, --ignore-case  no letter case
+  -h, --help         shows this help
+.T.          2 NIL .F.
+usage: bare
+  -h, --help  shows this help

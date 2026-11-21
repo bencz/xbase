@@ -33,7 +33,25 @@ else()
   target_link_libraries(app PRIVATE m Threads::Threads)
 endif()
 
+# The same program from a project file, compiled and linked by xbc alone with the package's runtime and its cli library
+# (their module files: docs/projects.md), but with the MSVC tools, whose link.exe only a developer prompt finds.
+if(NOT MSVC)
+  set(project ${CMAKE_CURRENT_BINARY_DIR}/project)
+  add_custom_command(OUTPUT ${project}/app${CMAKE_EXECUTABLE_SUFFIX}
+                     COMMAND ${XBC} ${CMAKE_CURRENT_SOURCE_DIR}/project.xbprj --out-dir=${project}
+                             --depfile=${project}/app.d $<$<BOOL:${XBC_TARGET}>:--target=${XBC_TARGET}>
+                     DEPENDS ${sources} ${CMAKE_CURRENT_SOURCE_DIR}/project.prg ${CMAKE_CURRENT_SOURCE_DIR}/project.xbprj
+                     COMMENT "xbc project.xbprj")
+  add_custom_target(project ALL DEPENDS ${project}/app${CMAKE_EXECUTABLE_SUFFIX})
+endif()
+
 enable_testing()
+if(NOT MSVC)
+  add_test(NAME package.project
+    COMMAND ${CMAKE_COMMAND} "-DEXE=${CMAKE_CROSSCOMPILING_EMULATOR};${project}/app${CMAKE_EXECUTABLE_SUFFIX}"
+            -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/project_expected.txt
+            -DDEPS=${project}/app.d -DINCLUDE=${include} -P ${CMAKE_CURRENT_SOURCE_DIR}/check.cmake)
+endif()
 add_test(NAME package
   COMMAND ${CMAKE_COMMAND} "-DEXE=${CMAKE_CROSSCOMPILING_EMULATOR};$<TARGET_FILE:app>"
           -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected.txt

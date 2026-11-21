@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 58u
+#define XB_ABI_VERSION 59u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -302,6 +302,13 @@ typedef void (*xb_func)(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv)
  * STATIC functions), which a program reaches once the compiler ran a body of the runtime's in place (a method of a
  * runtime class, docs/xir.md): this prefix, the module's name, '$', and the function's name with ':' and '.' as '$'. */
 #define XB_LIBRARY_FUNC_PREFIX "xbl_"
+/* [ABI] The public functions of an xbase library (xbc --library, docs/projects.md): this prefix, the library's name,
+ * '$', the function's name, so that neither the program's functions nor another library's clash with them; and its
+ * stamp, xbx_LIBRARY$source$HASH (HASH the FNV-1a 64 of its sources), which every program compiled with it requires. */
+#define XB_XBLIB_FUNC_PREFIX "xbx_"
+/* The format of a module file (.xbm, docs/projects.md), which xbc reads and writes and the runtime's build writes for
+ * the runtime. */
+#define XB_MODULE_FILE_FORMAT 1
 
 /* [ABI] Whether a class of the program answers the messages to values of type t before the runtime's own class of the
  * type (a SCALAR CLASS of the program, or a class ClassAssociate() associated with the type): 0 while the runtime's
@@ -600,9 +607,15 @@ typedef struct xb_memvar {
   const char *name;         /* upper-cased */
   uint32_t id;              /* set by xb_module_register */
 } xb_memvar;
+/* [ABI] A module's level, which orders the modules whatever order the system runs their constructors in: a module of
+ * the runtime is 0, one of an xbase library 1 + the highest level of the libraries it uses (its module file's
+ * `level`), one of the program XB_LEVEL_PROGRAM. Modules initialize (STATICs, then INIT procedures) from the lowest
+ * level up and run their EXIT procedures from the highest down, registration order within a level; of the functions
+ * (and classes) of one name, the highest level's is the name's (the program's over a library's). */
+#define XB_LEVEL_PROGRAM UINT32_MAX
 void     xb_module_register(xb_module_init init, xb_item *statics, uint32_t nstatics, const xb_func *procs,
                             uint32_t ninit, uint32_t nexit, const xb_symbol *symbols, uint32_t nsymbols,
-                            xb_memvar *memvars, uint32_t nmemvars);
+                            xb_memvar *memvars, uint32_t nmemvars, uint32_t level);
 
 /* Memory variables (core/memvar.c), per context. The name designates the
  * variable visible now: the latest PRIVATE of that name still alive (one
@@ -740,7 +753,7 @@ typedef struct xb_class_def {
   uint32_t flags;           /* XB_CLASS_STATIC, XB_CLASS_SCALAR, XB_CLASS_RUNTIME */
   void *runtime;
 } xb_class_def;
-void     xb_classes_register(xb_class_def *defs, uint32_t n);
+void     xb_classes_register(xb_class_def *defs, uint32_t n, uint32_t level);
 /* The class function NAME(): a new object of the class, its variables at their
  * initial values (:New() then initializes it). */
 void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);

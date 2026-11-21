@@ -157,6 +157,7 @@ struct Callee {
   Function *function = nullptr; // the module's own
   std::string name;             // upper-cased xBase name
   bool native = false;          // external: written in C (runtime prefix), else another module's
+  std::string library;          // external: a public function of this xbase library (EXTERN FUNCTION ... LIBRARY)
   bool readsCallerArgs = false; // ARGS: it reads the arguments its caller received (PCount(), __ArgError())
   bool fold = false;            // FOLD: a call on constants is evaluated when compiling (opt/Fold's evaluateCall)
   uint32_t resultTypes = 0;     // RESULT: the types (a TypeSet) a call that raises no error gives; 0: any
@@ -350,7 +351,7 @@ public:
   std::vector<std::unique_ptr<Var>> statics;        // index = static slot
   Function *init = nullptr;                         // initializes the STATICs (null: none have initializers)
   std::vector<Function *> initProcs, exitProcs;     // INIT and EXIT procedures, in source order
-  std::vector<std::string> requests;                // functions of other modules to link in (EXTERNAL)
+  std::vector<Callee> requests;                     // functions of other modules to link in (EXTERNAL): name, library
   // Modules of the runtime's carried sources (driver/RuntimeLibrary.h), whose public functions calls may inline.
   std::vector<const Module *> library;
   // FNV-1a 64 of the source's text, of a module of the runtime (xbc --runtime) or a carried one: its stamp, which a

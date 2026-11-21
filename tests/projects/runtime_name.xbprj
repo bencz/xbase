@@ -1,0 +1,3 @@
+# A library whose public function has a runtime function's name (not RESERVED).
+type = library
+sources = runtime_name.prg

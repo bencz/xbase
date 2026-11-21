@@ -1,0 +1,3 @@
+type = library
+name = 9lives
+sources = qualified.prg

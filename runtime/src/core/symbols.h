@@ -25,11 +25,12 @@ typedef struct xb_symbol_entry {
   xb_funcref ref;           /* the name's function, as a function reference designates it (@Name() in a macro) */
   size_t len;
   int reserved;             /* a runtime function declared RESERVED (Type() calls the others "UI") */
+  uint32_t level;           /* of the module that registered it (XB_LEVEL_PROGRAM in xbrt.h) */
 } xb_symbol_entry;
 
-/* Adds the program's symbols (names upper-cased); a name already there keeps
- * its first function. Called while modules register, before the program runs. */
-void xb_symbols_add(const xb_symbol *symbols, uint32_t n);
+/* Adds a module's symbols (names upper-cased), the module's level `level`: a name already there takes the function of
+ * a higher level, else keeps its first. Called while modules register, before the program runs. */
+void xb_symbols_add(const xb_symbol *symbols, uint32_t n, uint32_t level);
 
 /* Adds the runtime's functions: the table is complete. xb_program_run calls
  * it before anything runs, on the program's one thread. */

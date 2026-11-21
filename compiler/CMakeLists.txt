@@ -80,7 +80,9 @@ add_executable(xbc
   src/codegen/MemoryTags.cpp
   src/codegen/Variables.cpp
   src/codegen/Emit.cpp
+  src/driver/Link.cpp
   src/driver/main.cpp
+  src/driver/Project.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/RuntimeSources.cpp
 )
 
@@ -105,8 +107,13 @@ target_include_directories(xbc SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
 # package is built without it, so its xbc holds no path of the machine that built it.
 option(XB_SOURCE_INCLUDE "xbc also looks for the standard headers in this source tree (the tests need it)" ON)
 target_compile_definitions(xbc PRIVATE XB_INCLUDE_FROM_BIN="${XB_INCLUDE_FROM_BIN}")
+# The module files of the runtime and of the installed libraries likewise (XB_MODULES_FROM_BIN), and the build tree's
+# runtime (its module file beside the archive: runtime/CMakeLists.txt).
+target_compile_definitions(xbc PRIVATE XB_MODULES_FROM_BIN="${XB_MODULES_FROM_BIN}"
+                           XB_RUNTIME_MODULE="${XB_RUNTIME_MODULE}")
 if(XB_SOURCE_INCLUDE)
-  target_compile_definitions(xbc PRIVATE XB_DEFAULT_INCLUDE_DIR="${PROJECT_SOURCE_DIR}/include")
+  target_compile_definitions(xbc PRIVATE XB_DEFAULT_INCLUDE_DIR="${PROJECT_SOURCE_DIR}/include"
+                             XB_BUILD_MODULE_DIR="$<TARGET_FILE_DIR:xbrt>")
 endif()
 target_compile_definitions(xbc PRIVATE XB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
   XB_VERSION_MINOR=${PROJECT_VERSION_MINOR} XB_VERSION_PATCH=${PROJECT_VERSION_PATCH})
@@ -129,7 +136,7 @@ if(LLVM_LINK_LLVM_DYLIB AND NOT XB_LLVM_STATIC)
   target_link_libraries(xbc PRIVATE LLVM)
 else()
   llvm_map_components_to_libnames(XB_LLVM_LIBS
-    core support target targetparser mc passes analysis
+    core support target targetparser mc object passes analysis
     ${LLVM_TARGETS_TO_BUILD})
   target_link_libraries(xbc PRIVATE ${XB_LLVM_LIBS})
 endif()

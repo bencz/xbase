@@ -1,0 +1,4 @@
+# A define named like a function of the library greet: its declarations do not go through the preprocessor.
+sources = define_like_function.prg
+libs = greet
+defines = TWICE=9

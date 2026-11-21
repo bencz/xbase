@@ -14,7 +14,8 @@ void CallResolver::run(Module &m) {
       const ExternDecl &p = *it->second;
       if (p.minArgs != d.minArgs || p.maxArgs != d.maxArgs || p.native != d.native || p.reserved != d.reserved ||
           p.checked != d.checked || p.fold != d.fold || p.args != d.args || p.params != d.params ||
-          p.abbrev != d.abbrev || p.resultTypes != d.resultTypes || p.byRef != d.byRef || p.restByRef != d.restByRef) {
+          p.abbrev != d.abbrev || p.resultTypes != d.resultTypes || p.byRef != d.byRef || p.restByRef != d.restByRef ||
+          p.library != d.library) {
         diag_.error(d.loc, "EXTERN FUNCTION '" + d.name + "' conflicts with an earlier declaration");
         diag_.note(p.loc, "previous declaration is here");
       }
@@ -38,7 +39,10 @@ void CallResolver::run(Module &m) {
     if (funcs_.count(r.name)) continue;
     const ExternDecl *d = findExtern(r.name, r.loc);
     if (d && d->native) continue;
-    if (d) r.name = d->name;
+    if (d) {
+      r.name = d->name;
+      r.library = d->library;
+    }
     if (requested.insert(r.name).second) requests.push_back(std::move(r));
   }
   m.requests = std::move(requests);

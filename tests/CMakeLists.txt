@@ -150,17 +150,21 @@ add_test(NAME pp.sources_pattern
 
 # Code generation checks on cross targets: the IR xbc emits for <triple> must
 # match a regular expression (tests/codegen_test.cmake). The source is
-# tests/run/funcs.prg, or the run test named by an optional fourth argument.
+# tests/run/funcs.prg, or the run test named by an optional fourth argument (a path from tests/ when it holds a /,
+# without .prg).
 function(xb_add_codegen_test name triple regex)
-  set(source funcs)
+  set(source run/funcs)
   if(ARGC GREATER 3)
     set(source ${ARGV3})
+    if(NOT source MATCHES "/")
+      set(source run/${source})
+    endif()
   endif()
   add_test(NAME codegen.${name}
     COMMAND ${CMAKE_COMMAND}
       -DXBC=$<TARGET_FILE:xbc>
       -DNAME=${name}
-      -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/run/${source}.prg
+      -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/${source}.prg
       -DTRIPLE=${triple}
       -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}
       "-DREGEX=${regex}"
@@ -180,6 +184,12 @@ xb_add_codegen_test(tbaa_heap_items x86_64-linux-gnu "store [^\n]*!tbaa .*!\"hea
 xb_add_codegen_test(x86_64_string_hash x86_64-linux-gnu "i32 239963683, i64 7, \\[8 x i8\\] c\"cliente" hashes)
 # A program that runs bodies of the runtime's carried sources requires the stamps of their texts, which only a runtime
 # built from the same texts defines (a mismatch fails to link).
+# Calls, function references and REQUESTs of an xbase library's functions reach its symbols, on a 32-bit and a
+# big-endian target.
+xb_add_codegen_test(library_call_i686 i686-pc-linux-gnu "call void @\"xbx_GREET\\$TWICE\"" codegen/library_call)
+xb_add_codegen_test(library_call_ppc64 powerpc64-unknown-linux-gnu
+                    "@xb.module.requests = private constant \\[1 x ptr\\] \\[ptr @\"xbx_GREET\\$DECORATE\"\\]"
+                    codegen/library_call)
 set(stamps "@xb.source.stamps = private constant \\[2 x ptr\\] ")
 string(APPEND stamps "\\[ptr @\"xbl_ARRAYS\\$source\\$[0-9a-f]+\", ptr @\"xbl_COLLECTIONS\\$source\\$[0-9a-f]+\"\\]")
 xb_add_codegen_test(carried_source_stamps powerpc64-unknown-linux-gnu "${stamps}" carried_methods)
@@ -264,6 +274,133 @@ add_test(NAME package.program
           --test-command ${CMAKE_CTEST_COMMAND} -C $<CONFIG> --output-on-failure)
 set_tests_properties(package.install PROPERTIES FIXTURES_SETUP package)
 set_tests_properties(package.program PROPERTIES FIXTURES_REQUIRED package)
+
+# Programs linked by xbc (docs/projects.md): not with the MSVC tools, whose link.exe only a developer prompt finds.
+if(NOT MSVC)
+
+# The libraries' own tests (libs/<library>/tests/<name>.prg, expecting <name>.out), as programs xbc compiles and links
+# with their library (--lib, --link), at -O0 and -O2.
+file(GLOB XB_LIBRARY_TESTS ${PROJECT_SOURCE_DIR}/libs/*/tests/*.prg)
+foreach(src ${XB_LIBRARY_TESTS})
+  get_filename_component(name ${src} NAME_WE)
+  get_filename_component(dir ${src} DIRECTORY)
+  get_filename_component(library ${dir} DIRECTORY)
+  get_filename_component(library ${library} NAME)
+  foreach(level 0 2)
+    set(exe ${CMAKE_CURRENT_BINARY_DIR}/libs/${library}/${name}_O${level}${CMAKE_EXECUTABLE_SUFFIX})
+    xb_build_project(OUTPUTS ${exe} DEPENDS xblib_${library}
+                     ARGS ${src} --lib=${library} --link -O${level} -o ${exe} COMMENT "xbc ${name}.prg --link")
+    add_custom_target(t_lib_${library}_${name}_O${level} ALL DEPENDS ${exe})
+    add_test(NAME lib${level}.${library}.${name}
+      COMMAND ${CMAKE_COMMAND} -DEXE=${exe} -DEXPECTED=${dir}/${name}.out -DEXPECTED_RC=0
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
+  endforeach()
+endforeach()
+
+# Projects (tests/projects/<name>.xbprj, with the xbc options of an optional <name>.args, one a line, @TARGET@ standing
+# for --target=XB_TARGET when the build names one): one with <name>.out is built and run (its output and exit code 0),
+# with the test libraries greet (tests/projects/greet, which uses cli) and other (which declares a function greet
+# declares too) beside it; one with <name>.err must fail to build with that message.
+set(XB_TEST_PROJECTS ${CMAKE_CURRENT_BINARY_DIR}/projects)
+set(XB_TEST_LIBRARIES "")
+foreach(library greet other)
+  set(archive ${XB_TEST_PROJECTS}/${library}/${CMAKE_STATIC_LIBRARY_PREFIX}${library}${CMAKE_STATIC_LIBRARY_SUFFIX})
+  xb_build_project(OUTPUTS ${archive} ${XB_TEST_PROJECTS}/${library}/${library}.xbm DEPENDS xblib_cli
+                   ARGS ${CMAKE_CURRENT_SOURCE_DIR}/projects/${library}/${library}.xbprj -o ${archive}
+                   COMMENT "xbc ${library}.xbprj")
+  add_custom_target(t_project_${library} ALL DEPENDS ${archive})
+  list(APPEND XB_TEST_LIBRARIES t_project_${library} ${archive})
+endforeach()
+file(GLOB XB_PROJECT_TESTS ${CMAKE_CURRENT_SOURCE_DIR}/projects/*.xbprj)
+foreach(prj ${XB_PROJECT_TESTS})
+  get_filename_component(name ${prj} NAME_WE)
+  set(base ${CMAKE_CURRENT_SOURCE_DIR}/projects/${name})
+  set(options "")
+  if(EXISTS ${base}.args)
+    file(STRINGS ${base}.args options)
+  endif()
+  # @TARGET@: the build's target, for a project that uses the libraries the build compiled for it.
+  set(target "")
+  if(XB_TARGET)
+    set(target --target=${XB_TARGET})
+  endif()
+  list(TRANSFORM options REPLACE "^@TARGET@$" "${target}")
+  list(REMOVE_ITEM options "")
+  if(EXISTS ${base}.out)
+    set(exe ${XB_TEST_PROJECTS}/${name}${CMAKE_EXECUTABLE_SUFFIX})
+    xb_build_project(OUTPUTS ${exe} DEPENDS ${XB_TEST_LIBRARIES}
+                     ARGS ${prj} --out-dir=${XB_TEST_PROJECTS} -L${XB_TEST_PROJECTS} ${options}
+                     COMMENT "xbc ${name}.xbprj")
+    add_custom_target(t_project_${name} ALL DEPENDS ${exe})
+    add_test(NAME project.${name}
+      COMMAND ${CMAKE_COMMAND} -DEXE=${exe} -DEXPECTED=${base}.out -DEXPECTED_RC=0
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake)
+  else()
+    set(cmd $<TARGET_FILE:xbc> ${prj} --out-dir=${XB_TEST_PROJECTS}/fail -L${XB_TEST_PROJECTS}
+        -L${PROJECT_BINARY_DIR}/libs ${options})
+    add_test(NAME project.${name}
+      COMMAND ${CMAKE_COMMAND} "-DEXE=${cmd}"
+        -DEXPECTED=${base}.err -P ${CMAKE_CURRENT_SOURCE_DIR}/fail_test.cmake)
+  endif()
+endforeach()
+# The dependency file of a program with libraries names, besides its sources, its project file, the libraries'
+# module files and archives and the runtime's, so that a build system rebuilds it when one changes.
+set(names uses_greet.prg uses_greet.xbprj greet.xbm ${CMAKE_STATIC_LIBRARY_PREFIX}greet${CMAKE_STATIC_LIBRARY_SUFFIX}
+          cli.xbm ${XB_RUNTIME_MODULE}.xbm $<TARGET_FILE_NAME:xbrt>)
+add_test(NAME project.depfile
+  COMMAND ${CMAKE_COMMAND} -DFILE=${XB_TEST_PROJECTS}/uses_greet${CMAKE_EXECUTABLE_SUFFIX}.d "-DNAMES=${names}"
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/depfile_test.cmake)
+# A project's settings for another platform's target (--target, preprocessing only).
+add_test(NAME project.qualified_windows
+  COMMAND ${CMAKE_COMMAND}
+    "-DEXE=$<TARGET_FILE:xbc>;${CMAKE_CURRENT_SOURCE_DIR}/projects/qualified.xbprj;--target=x86_64-pc-windows-msvc;-E"
+    "-DEXPECTED=QOut( \"windows\" == \"windows\" )" -P ${CMAKE_CURRENT_SOURCE_DIR}/contains_test.cmake)
+# The libraries' modules registered before the program's (library_order_test.cmake).
+add_test(NAME project.library_order
+  COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DAR=${CMAKE_AR}
+          "-DLIBDIRS=${XB_TEST_PROJECTS};${PROJECT_BINARY_DIR}/libs"
+          -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/projects/uses_greet.prg
+          -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/projects/uses_greet.out -DTARGET=${XB_TARGET}
+          -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/library_order_test.cmake)
+# A library's stamp (library_stamp_test.cmake).
+add_test(NAME project.library_stamp
+  COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DTARGET=${XB_TARGET} -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/library_stamp_test.cmake)
+
+# The samples (samples/<sample>/<sample>.xbprj), built by xbc from their project files. Each tests/samples/<case>.out
+# runs the sample its name starts with (<sample>.out, <sample>.<case>.out) from the sample's folder, with the arguments
+# of <case>.args (one a line) and the exit code of <case>.rc (else 0).
+file(GLOB XB_SAMPLES LIST_DIRECTORIES true ${PROJECT_SOURCE_DIR}/samples/*)
+foreach(dir ${XB_SAMPLES})
+  get_filename_component(sample ${dir} NAME)
+  set(exe ${CMAKE_CURRENT_BINARY_DIR}/samples/${sample}${CMAKE_EXECUTABLE_SUFFIX})
+  xb_build_project(OUTPUTS ${exe} DEPENDS xblib_cli
+                   ARGS ${dir}/${sample}.xbprj --out-dir=${CMAKE_CURRENT_BINARY_DIR}/samples
+                   COMMENT "xbc ${sample}.xbprj")
+  add_custom_target(t_sample_${sample} ALL DEPENDS ${exe})
+endforeach()
+file(GLOB XB_SAMPLE_CASES ${CMAKE_CURRENT_SOURCE_DIR}/samples/*.out)
+foreach(out ${XB_SAMPLE_CASES})
+  get_filename_component(sample ${out} NAME_WE)
+  get_filename_component(case ${out} NAME)
+  string(REGEX REPLACE "\\.out$" "" case ${case})
+  set(args "")
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/samples/${case}.args)
+    file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/samples/${case}.args args)
+  endif()
+  set(rc 0)
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/samples/${case}.rc)
+    file(READ ${CMAKE_CURRENT_SOURCE_DIR}/samples/${case}.rc rc)
+    string(STRIP "${rc}" rc)
+  endif()
+  add_test(NAME sample.${case}
+    COMMAND ${CMAKE_COMMAND} "-DEXE=${CMAKE_CURRENT_BINARY_DIR}/samples/${sample}${CMAKE_EXECUTABLE_SUFFIX};${args}"
+            -DEXPECTED=${out} -DEXPECTED_RC=${rc} -DEXPECTED_ERR=${CMAKE_CURRENT_SOURCE_DIR}/samples/${case}.err
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/run_test.cmake
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/samples/${sample})
+endforeach()
+
+endif()
 
 # A test that hangs or loops must fail quickly instead of exhausting the machine.
 get_property(XB_ALL_TESTS DIRECTORY PROPERTY TESTS)

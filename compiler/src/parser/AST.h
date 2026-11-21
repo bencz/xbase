@@ -526,6 +526,7 @@ struct ExternDecl {
   bool params = false;           // PARAMS: ARGS, and reads and writes that function's parameters (PValue)
   bool privates = false;         // PRIVATES: creates PRIVATEs of the function calling it (RESTORE)
   uint32_t abbrev = 0;           // ABBREV n: shortest accepted abbreviation (0: none)
+  std::string library;           // LIBRARY name: a public function of that xbase library (upper-cased; else none)
   uint32_t resultTypes = 0;      // RESULT letters: the type tags (a bit each) of what a call that raises no error
                                  // gives; 0: any
   std::vector<bool> byRef;       // NATIVE: per parameter, `@name`: receives a reference passed to it
@@ -549,6 +550,7 @@ struct ExternDecl {
 struct Request {
   SourceLoc loc;
   std::string name;              // upper-cased
+  std::string library;           // the xbase library that declares it (sema/Calls), else none
 };
 
 struct Module {

@@ -194,7 +194,7 @@ void Parser::parseLinkDecl() {
       skipToEndOfStmt();
       break;
     }
-    Request r{cur().loc, cur().upper};
+    Request r{cur().loc, cur().upper, {}};
     advance();
     if (!announces)
       requests_.push_back(std::move(r));
@@ -673,6 +673,10 @@ std::optional<ExternDecl> Parser::parseExtern() {
       if (!at(Tok::Number) || !cur().isInt || cur().ival < 1 || (size_t)cur().ival > d.name.size())
         return fail("ABBREV needs a length between 1 and the length of the name");
       d.abbrev = (uint32_t)cur().ival;
+    } else if (attr == "LIBRARY") {
+      advance();
+      if (!at(Tok::Ident)) return fail("LIBRARY needs the library's name");
+      d.library = cur().upper;
     } else if (attr == "RESULT") {
       advance();
       if (!at(Tok::Ident)) return fail("RESULT needs the ValType() letters of the types the function returns");
@@ -693,6 +697,11 @@ std::optional<ExternDecl> Parser::parseExtern() {
   bool anyByRef = d.restByRef || std::find(d.byRef.begin(), d.byRef.end(), true) != d.byRef.end();
   if (anyByRef && !d.native) {
     diag_.error(d.loc, "'@' parameters are for NATIVE functions (an xBase function always receives references)");
+    endOfStmt();
+    return std::nullopt;
+  }
+  if (d.native && !d.library.empty()) {
+    diag_.error(d.loc, "a NATIVE function is the runtime's: it belongs to no LIBRARY");
     endOfStmt();
     return std::nullopt;
   }

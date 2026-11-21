@@ -466,7 +466,8 @@ void xb_ctx_free(xb_ctx *ctx) {
 #define XB_STACK_KEEP ((size_t)1 << 20)
 #define XB_STACK_GIVE_ROOM ((size_t)64 << 10)
 /* A thread gives its stack's pages back at most once in this time: one that goes past the mark again and again (a loop
- * that recurses a little deeper) pays the system's call and the pages' faults that often at most, staying deep between. */
+ * that recurses a little deeper) pays the system's call and the pages' faults that often at most, staying deep
+ * between. */
 #define XB_STACK_GIVE_EVERY_NS ((int64_t)100 * 1000 * 1000)
 
 /* The stack error's limit: where the stack ends for the program's calls. */

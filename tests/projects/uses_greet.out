@@ -1,0 +1,7 @@
+greet init; program init
+<Hello, xbase>         42 [own]
+         8         10 [by name]
+mine:<Hello, subclass> MINE
+.T. .F.
+program exit
+greet exit

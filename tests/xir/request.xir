@@ -1,6 +1,6 @@
 module REQUEST
-  request ELSEWHERE
-  request OTHER
+  request ELSEWHERE extern
+  request OTHER extern
 
 function MAIN params 0 {
 entry:

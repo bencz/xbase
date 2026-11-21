@@ -187,9 +187,10 @@ in the phases of [concurrency.md](concurrency.md#phases).
 - FFI: `EXTERN C FUNCTION` with types and structures, functions of libraries loaded at run time (`LIBRARY`, `NAME`,
   calling conventions; [architecture.md](architecture.md#where-a-c-function-comes-from)), and runtime parts written in
   xBase.
-- Libraries written in xBase ([architecture.md](architecture.md#libraries-written-in-xbase)): `xbc --library` (a
-  static library and its generated header), a link step in `xbc` through the system's linker, the ABI checked by every
-  module; then shared libraries and project files.
+- Libraries written in xBase ([architecture.md](architecture.md#libraries-written-in-xbase)): project files, libraries
+  with module files, stamps and the link step are done ([projects.md](projects.md)); next, bodies of a library that
+  programs run in place (serialized xIR in its module file), guarded calls into replaceable drivers, qualified names,
+  C sources in a library, then shared libraries.
 - GC: free blocks returned to the operating system; statepoints and evacuation in the Immix heap
   ([xir.md](xir.md#phases)).
 

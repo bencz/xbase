@@ -1,0 +1,2 @@
+# The smallest project: one source, no library (docs/projects.md).
+sources = hello.prg

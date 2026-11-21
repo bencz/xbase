@@ -11,6 +11,7 @@
 
 #include <initializer_list>
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -35,8 +36,18 @@ public:
   // Modules of the runtime (xbc --runtime): public functions are runtime functions (xbf_NAME, in the runtime's
   // symbol table already, so not registered), and their frames keep line 0, as the runtime's C functions show.
   void setRuntimeLibrary(bool on) { runtimeLibrary_ = on; }
+  // Modules of xbase library `name` (xbc --library): `functions`, the public functions of its modules, are
+  // xbx_LIBRARY$NAME (also where another module of it calls them); `stamp` its sources' (defined, sourceStamp);
+  // `level` the modules' (XB_LEVEL_PROGRAM in xbrt.h).
+  void setLibrary(const std::string &name, std::unordered_set<std::string> functions, uint64_t stamp,
+                  uint32_t level);
+  // The stamps of the xbase libraries the program is compiled with, which it references (keepReferences).
+  void requireLibraries(std::vector<std::pair<std::string, uint64_t>> stamps) { libraryStamps_ = std::move(stamps); }
   static std::string librarySymbol(const std::string &module, const std::string &name);
-  static std::string sourceStamp(const std::string &module, uint64_t hash);
+  static std::string xblibSymbol(const std::string &library, const std::string &name);
+  // The stamp of sources (a module of the runtime's, prefix XB_LIBRARY_FUNC_PREFIX, or a library's): PREFIX SCOPE
+  // $source$ and the hash in 16 hexadecimal digits.
+  static std::string sourceStamp(const char *prefix, const std::string &scope, uint64_t hash);
   // Adds one module of the program to the LLVM module; several modules may
   // share it (one object for several sources), each adding its own functions,
   // STATICs and registration.
@@ -424,6 +435,12 @@ private:
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
   llvm::AllocaInst *blockTemp_ = nullptr;  // a codeblock while its cells are made (a C root then)
   std::string moduleName_;                                                  // the module's (librarySymbol)
+  std::string library_;                                                     // setLibrary's name ("": none)
+  std::unordered_set<std::string> libraryFunctions_;                       // and its public functions
+  uint64_t libraryStamp_ = 0;
+  uint32_t libraryLevel_ = 0;
+  std::vector<std::pair<std::string, uint64_t>> libraryStamps_;            // requireLibraries
+  std::set<std::string> requiredStamps_; // stamps the object references (stampSources), in a stable order
   std::unordered_map<const xir::Function *, std::string> carriedModule_;   // carried function -> its module
   std::unordered_set<const xir::Instruction *> sharingLoads_;              // loads that end an `append`'s growth
   std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<const xir::Var *>>

@@ -73,40 +73,59 @@ typedef struct cls {
 static xb_rlock preparing = XB_RLOCK_INIT;
 static uint32_t initsRunning;
 
-/* The classes by name, as modules register them (the first of a name stays). */
+/* The classes by name, as modules register them (of one name, the highest level's: XB_LEVEL_PROGRAM, the first of a
+ * level). */
 static xb_names names;
 static xb_class_def **byId;
+static uint32_t *levelById;
 static uint32_t capById;
 
-/* The SCALAR CLASSes of the types, as modules register them (the first of a type stays): the program's
+/* The SCALAR CLASSes of the types, as modules register them (of a type, the highest level's): the program's
  * (`typeClasses`), then the runtime's (`runtimeTypeClasses`, XB_CLASS_RUNTIME), which answers what the program's does
  * not; used until a class is associated with the type (ClassAssociate). Which registers first depends on the system's
  * order of the modules' constructors, so the two are kept apart. */
 static xb_class_def *typeClasses[XB_T_COUNT_];
+static uint32_t typeClassLevels[XB_T_COUNT_];
 static xb_class_def *runtimeTypeClasses[XB_T_COUNT_];
 uint8_t xb_scalar_replaced[XB_T_COUNT_];
 
-void xb_classes_register(xb_class_def *defs, uint32_t n) {
+void xb_classes_register(xb_class_def *defs, uint32_t n, uint32_t level) {
   for (uint32_t k = 0; k < n; ++k) {
     if (defs[k].flags & XB_CLASS_STATIC) continue;
     if (defs[k].flags & XB_CLASS_SCALAR) {
-      xb_class_def **of = defs[k].flags & XB_CLASS_RUNTIME ? runtimeTypeClasses : typeClasses;
+      int runtime = (defs[k].flags & XB_CLASS_RUNTIME) != 0;
       for (uint32_t t = 0; t < XB_T_COUNT_; ++t) {
         const char *name = xb_type_class_name(t);
         if (!name || strcmp(name, defs[k].name) != 0) continue;
-        if (!of[t]) of[t] = &defs[k];
-        if (!(defs[k].flags & XB_CLASS_RUNTIME)) xb_atomic_store8(&xb_scalar_replaced[t], 1, XB_RELEASE);
+        if (runtime) {
+          if (!runtimeTypeClasses[t]) runtimeTypeClasses[t] = &defs[k];
+          continue;
+        }
+        if (!typeClasses[t] || level > typeClassLevels[t]) {
+          typeClasses[t] = &defs[k];
+          typeClassLevels[t] = level;
+        }
+        xb_atomic_store8(&xb_scalar_replaced[t], 1, XB_RELEASE);
       }
     }
     uint32_t before = names.count, id = xb_names_add(&names, defs[k].name, strlen(defs[k].name));
-    if (names.count == before) continue;
+    if (names.count == before) {
+      if (level > levelById[id]) {
+        byId[id] = &defs[k];
+        levelById[id] = level;
+      }
+      continue;
+    }
     if (id == capById) {
       capById = capById ? capById * 2 : 32;
       xb_class_def **grown = realloc(byId, capById * sizeof *grown);
-      if (!grown) xb_gc_fatal("out of memory");
+      uint32_t *levels = realloc(levelById, capById * sizeof *levels);
+      if (!grown || !levels) xb_gc_fatal("out of memory");
       byId = grown;
+      levelById = levels;
     }
     byId[id] = &defs[k];
+    levelById[id] = level;
   }
 }
 

@@ -1,0 +1,2 @@
+sources = bom.prg
+libs = greet other

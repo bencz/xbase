@@ -1,0 +1,4 @@
+# A test library of two modules that uses another library (cli).
+type = library
+sources = greet.prg util.prg
+libs = cli

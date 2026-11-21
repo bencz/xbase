@@ -13,6 +13,8 @@ Find the task, read the doc it points to, then the code.
 | Values (`xb_item`), frames, calling convention, error propagation, operators, the ABI shared with the compiler | [runtime.md](runtime.md) |
 | The screen, keyboard and mouse: screen model, events, terminal drivers (planned), the native GUI (later) | [terminal.md](terminal.md) |
 | Work areas, field references, database drivers: DBF, DBT and FPT memos, NTX and CDX indexes, relations, sharing and locks | [rdd.md](rdd.md) |
+| Project files (`.xbprj`), libraries and their module files (`.xbm`), the link step, `libs/` and `samples/` | [projects.md](projects.md) |
+| The libraries xbase provides (`libs/`: `cli`) | [libraries.md](libraries.md) |
 | Adding or running tests | [testing.md](testing.md) |
 | Which commands and functions exist, and what to implement next | [coverage.md](coverage.md) |
 
@@ -30,7 +32,7 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 | `compiler/src/opt/` | optimizations on the syntax tree (constant folding) |
 | `compiler/src/xir/` | xIR: data structures, operation catalog, builder, verifier, printer, control flow analyses; syntax tree to xIR; pass manager and passes (`passes/`) |
 | `compiler/src/codegen/` | xIR to in-memory LLVM module (frame plan, instructions, fast paths); loop splitting; object emission |
-| `compiler/src/driver/` | `xbc` command line |
+| `compiler/src/driver/` | `xbc` command line; project and module files, archives and the link step ([projects.md](projects.md)) |
 | `include/` | `std.ch`, `set.ch` and the other standard headers |
 | `runtime/include/xbrt.h` | runtime ABI shared with the compiler |
 | `runtime/src/core/` | contexts and frames, operators, number formatting, `Set()`, memory variables, program startup, synchronization (`sync.c`) |
@@ -41,3 +43,6 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 | `runtime/src/platform/` | operating-system interface (`platform.h`) and one directory per platform |
 | `tests/run`, `tests/pp`, `tests/fail`, `tests/xir`, `tests/platform` | execution, preprocessor, compile-failure, xIR and platform tests |
 | `bench/` | benchmark programs and the `bench` target ([testing.md](testing.md#benchmarks)) |
+| `libs/` | the libraries xbase provides ([libraries.md](libraries.md)) |
+| `samples/` | sample programs, each a project ([projects.md](projects.md)) |
+| `tests/projects`, `tests/samples` | project files that build or fail, the samples' runs ([testing.md](testing.md)) |

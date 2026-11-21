@@ -283,6 +283,7 @@ Callee Generator::calleeOf(const CallExpr &c) {
   if (c.callee || c.external) {
     callee.name = c.name;
     callee.native = c.callee && c.callee->native;
+    if (c.callee) callee.library = c.callee->library;
     callee.readsCallerArgs = c.callee && c.callee->args;
     callee.fold = c.callee && c.callee->fold;
     callee.resultTypes = c.callee ? c.callee->resultTypes : 0;

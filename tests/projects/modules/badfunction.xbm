@@ -1,0 +1,5 @@
+# A module file with an invalid setting.
+format = 1
+library = BADFUNCTION
+archive = libbadfunction.a
+function = TWICE() ; ? "x"

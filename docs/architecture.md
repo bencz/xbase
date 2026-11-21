@@ -102,36 +102,46 @@ ENDLIBRARY
 
 ### Libraries written in xBase
 
-A library is written in xBase and distributed compiled, so that programs include its header and link it:
+A library is written in xBase and distributed compiled: its archive and its module file (`.xbm`), which a program's
+compilation reads ([projects.md](projects.md), done):
 
-- `xbc --library <name> <sources> -o <file>` compiles the modules (no start function) into a static library (`.a`,
-  `.lib`), written in-process by LLVM's archive writer, and generates `<name>.ch`: the library's public functions with
-  their parameters (classes once they exist) and its link dependencies (`#pragma link`). A description file beside it
-  gives the library's version, the runtime ABI it was compiled for, its include directories, its system libraries per
-  platform and the xbase libraries it needs.
-- A program uses it with `#include "<name>.ch"` and `--lib=<name>`; directories to search come from `-I`, `-L` and a
-  configuration file beside the executable (never environment variables).
-- Symbols: a library's public function is `xbl_<library>_<NAME>`, so libraries never clash when linked. In source, a
-  name declared by one library is called as written; a name two included libraries declare must be qualified,
-  `<library>::Name()`.
-- Every module checks `XB_ABI_VERSION` when it registers (not only the program): a library compiled for another ABI is
-  a clear error, not a crash. Until the ABI is stable, a library is recompiled with the compiler that uses it.
-- Linking: `xbc` gets a link step (`-L<dir>`, `-l<lib>`, `--lib=<name>`, the runtime added by itself), run through the
-  system's linker driver (`cc`/`clang`, `link.exe` or `lld-link`) with the dependencies the objects and the description
-  files name. An embedded LLD (self-contained, linking for other targets) may replace it later.
-- Shared libraries (`.so`, `.dll`, `.dylib`) come after the static ones: they need the runtime as a shared library too
-  (one collector, context and symbol table per process), the public functions exported (Windows), and modules that
+- A project file (`<name>.xbprj`: sources, include folders, defines, libraries, system libraries, options, settings
+  per platform) builds a program or a library in one step (`xbc <name>.xbprj`); `--library=<name>`, `--lib=<name>`,
+  `-L`, `-l` and `--link` do the same from the command line.
+- The module file gives the library's public functions (which a program gets declared, `EXTERN FUNCTION ... LIBRARY`),
+  the runtime ABI and the target it was compiled for, the libraries and system libraries it needs, and the stamp of
+  its sources, which every program compiled with it references, so that another build of the library fails to link.
+  The runtime's module file tells `xbc` how to link (the C compiler driver or `link`, the target's flags, the system
+  libraries).
+- Symbols: a library's public function is `xbx_<LIBRARY>$<NAME>` (`XB_XBLIB_FUNC_PREFIX`), so it clashes neither with
+  the program's functions nor with another library's.
+- Linking: `xbc` runs the system's linker driver (`cc`/`clang`/`gcc`, or `link.exe`) with the object, the libraries'
+  archives, the runtime's and the system libraries. An embedded LLD (self-contained, linking for other targets) may
+  replace it later.
+- The libraries xbase itself provides live in `libs/<name>/`, one directory each (its sources, its project file, its
+  tests), built by the same mechanism and installed beside the runtime's module file, where `--lib=<name>` finds them
+  ([libraries.md](libraries.md)). They hold what a program uses only by choice, above all what needs the system's
+  libraries: the Window terminal driver, the native GUI backends (Win32, Cocoa, GTK 4) with their xBase classes
+  ([terminal.md](terminal.md)), and later sockets, regular expressions, JSON, compression. What every program may use
+  without asking and that needs nothing outside the C library stays in the runtime (the screen model, the events and
+  the Stream, Dump, VT and Console terminal drivers). A library adds what it brings when its module registers (a
+  terminal driver registers itself with the terminal layer, so linking the Window driver makes `//TERM:WINDOW`
+  available).
+
+Planned:
+
+- Optimizing across a library's boundary. Inside a version bubble (a project and the libraries built with it) calls
+  inline freely; across it, a library's module file carries the interface (classes, result types) and the serialized
+  xIR of the bodies its author marks as stable, which programs may run in place, as they run the runtime's carried
+  sources. Each body run in place is covered by the library's stamp: a mismatch is a link error, never a silent
+  difference.
+- Replaceable drivers (terminal drivers, database drivers): a program never assumes which one is active. Compiled
+  code may call a driver directly only behind a guard on the active driver's identity, as it calls the runtime's
+  classes of built-in types behind `xb_scalar_replaced` ([xir.md](xir.md#passes)).
+- Qualified names (`<library>::Name()`) for a name two libraries declare; C sources in a library (its `NATIVE`
+  functions); shared libraries (`.so`, `.dll`, `.dylib`), which need the runtime as a shared library too (one
+  collector, context and symbol table per process), the public functions exported (Windows), and modules that
   register when a library is loaded after the program started.
-- A project file (sources, include directories, libraries) lets `xbc <project>` compile and link a program in one
-  step.
-- The libraries xbase itself provides live in `libs/<name>/`, one directory each (its xBase and C sources, its
-  description file, its tests), built by the same mechanism and installed beside the compiler, where `--lib=<name>`
-  finds them. They hold what a program uses only by choice, above all what needs the system's libraries: the Window
-  terminal driver, the native GUI backends (Win32, Cocoa, GTK 4) with their xBase classes ([terminal.md](terminal.md)),
-  and later sockets, regular expressions, JSON, compression. What every program may use without asking and that needs
-  nothing outside the C library stays in the runtime (the screen model, the events and the Stream, Dump, VT and
-  Console terminal drivers). A library adds what it brings when its module registers (a terminal driver registers
-  itself with the terminal layer, so linking the Window driver makes `//TERM:WINDOW` available).
 
 ### Classes
 

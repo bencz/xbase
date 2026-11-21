@@ -13,6 +13,12 @@ inline std::string upperCase(std::string_view s) {
   return u;
 }
 
+inline std::string lowerCase(std::string_view s) {
+  std::string l(s);
+  for (char &c : l) c = (char)std::tolower((unsigned char)c);
+  return l;
+}
+
 // Identifiers: a letter or `_`, then letters, digits and `_`.
 inline bool isIdentStart(char c) { return std::isalpha((unsigned char)c) || c == '_'; }
 inline bool isIdentChar(char c) { return std::isalnum((unsigned char)c) || c == '_'; }

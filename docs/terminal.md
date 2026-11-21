@@ -116,8 +116,7 @@ ends in any way (`QUIT`, an unrecoverable error, a fatal error, a signal that en
 3. The VT driver and its pty tests.
 4. The Console driver.
 5. `Alert`, `AChoice`, `MemoEdit`, `GET`/`READ`, `TBrowse`, `dbEdit`, menus, in xBase.
-6. The libraries' mechanism ([architecture.md](architecture.md#libraries-written-in-xbase): `xbc --library`,
-   `--lib=<name>`, the link step, `libs/`), then the Window driver and the native GUI as libraries.
+6. The Window driver and the native GUI as libraries (the libraries' mechanism is done: [projects.md](projects.md)).
 
 ## Settings without a Clipper form
 

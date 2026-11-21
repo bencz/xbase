@@ -1013,7 +1013,8 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   code when it may call a method of that class directly. Each such module also defines `xbl_MODULE$source$HASH` (HASH
   the FNV-1a 64 of its source text, 16 hexadecimal digits), which a program given the carried sources references
   (`xb.source.stamps`): a runtime built from other texts than the compiler carries fails to link instead of running
-  bodies that disagree with the program's inlined copies.
+  bodies that disagree with the program's inlined copies. The public functions of an xbase library are
+  `xbx_LIBRARY$NAME` (`XB_XBLIB_FUNC_PREFIX`), and its stamp `xbx_LIBRARY$source$HASH` ([projects.md](projects.md)).
 - Every runtime function is declared in `include/rtl.ch` (`EXTERN FUNCTION`, see [compiler.md](compiler.md#calls));
   the `runtime.declarations` test checks that the declarations and the `xbf_` definitions match.
 - This is the convention of every function's symbol: the runtime, `Do()`, codeblocks and other modules call through
@@ -1875,17 +1876,19 @@ Before `main`, the global constructor of every module calls `xb_module_register`
 initialization of its `STATIC`s (which become a GC root), its `INIT` and `EXIT` procedures, its public functions by
 name, and the names of its memory variables ([Memory variables](#memory-variables)). These go into the symbol table
 (`core/symbols.c`): upper-cased names numbered by a table of names (`core/names.c`, the one memory variables use too;
-lookups by a name in any letter case upper-case it first, `xb_names_find_upper`)
-and what each designates, which the runtime's own functions join when the program starts (`xb_program_run`), from a
-table generated from `include/rtl.ch` at build time (`runtime/symbols.cmake`, with which parameters take references,
-read from the declarations by `runtime/rtl_declarations.cmake`); a program function hides a runtime function of its
-name. The table refers to every runtime function, so every program links them all in. `Do( cName | bBlock, [args] )`
-calls a function found there (letter case aside; spaces are part of the name, which ends at a NUL), a codeblock or a
-function reference ([Function references](#function-references)), with
-its arguments: a reference goes on as passed to a compiled function and to a runtime function's parameter declared `@`,
-other runtime parameters receive the value. Do shows as `DO` on the call stack, and ends the PRIVATEs that a runtime
-function creates for its caller (`RESTORE`), as a compiled caller does; an unknown name is `BASE/1001`
-`Undefined function` (not substitutable), anything else as its first argument `BASE/3012`.
+lookups by a name in any letter case upper-case it first, `xb_names_find_upper`) and what each designates, which the
+runtime's own functions join when the program starts (`xb_program_run`), from a table generated from `include/rtl.ch` at
+build time (`runtime/symbols.cmake`, with which parameters take references, read from the declarations by
+`runtime/rtl_declarations.cmake`); a program function hides a runtime function of its name, and of the functions of one
+name that modules register, the one of the highest level stays (`xb_module_register`'s level, `XB_LEVEL_PROGRAM`: a
+module of the program over one of a library, [projects.md](projects.md); the first registered among equals); classes
+likewise (`xb_classes_register`). The table refers to every runtime function, so every program links them all in. `Do(
+cName | bBlock, [args] )` calls a function found there (letter case aside; spaces are part of the name, which ends at a
+NUL), a codeblock or a function reference ([Function references](#function-references)), with its arguments: a reference
+goes on as passed to a compiled function and to a runtime function's parameter declared `@`, other runtime parameters
+receive the value. Do shows as `DO` on the call stack, and ends the PRIVATEs that a runtime function creates for its
+caller (`RESTORE`), as a compiled caller does; an unknown name is `BASE/1001` `Undefined function` (not substitutable),
+anything else as its first argument `BASE/3012`.
 
 `main` (in `runtime/src/core/main.c`) runs the platform setup (`xb_platform_init`: on Windows, standard output and error
 in binary mode so programs write the same bytes everywhere) and takes the command-line arguments in UTF-8
@@ -1899,24 +1902,27 @@ reference), calls `xb_app_main( ctx, argc, argv )` (emitted by the compiler) wit
 returns the exit code. `xb_app_main` checks the ABI and calls `xb_program_run`, which runs, in this
 order:
 
-1. the modules' `STATIC` initializations, in registration order;
+1. the modules' `STATIC` initializations, from the lowest level up (a library before the ones that use it, the
+   program's modules last), in registration order within a level;
 2. `ErrorSys()`, found by name (the program's own, else the runtime's), which installs the error block
    ([Errors and pending requests](#errors-and-pending-requests));
-3. the `INIT` procedures, module by module in registration order and, within a module, from the last one written to
-   the first (as the reference does), each with the command-line arguments;
+3. the `INIT` procedures, module by module in that same order and, within a module, from the last one written to the
+   first (as the reference does), each with the command-line arguments;
 4. the start function, with the arguments, as Clipper passes them: strings, `NIL` for a parameter without one, and
    arguments past the parameters passed too; when it returns a `Task` (as an asynchronous start procedure will), the
    program waits for it, and a failure or a cancellation is raised as `Result` raises it (`xb_task_await_start`: the
    default error handler reports an error and ends the program with exit code 1); then the threads and the workers
    that still run are asked to `QUIT` and waited for, and the tasks that never started are canceled
    (`xb_threads_end`);
-5. the `EXIT` procedures, module by module, each module's in the order written, without arguments, the threads and
-   tasks they leave running ended the same way after them.
+5. the `EXIT` procedures, module by module from the highest level down (the program's modules first, then the
+   libraries they use), in registration order within a level, each module's in the order written, without arguments,
+   the threads and tasks they leave running ended the same way after them.
 
 A request to unwind (a `QUIT`, a `BREAK` with no sequence, an error that ended the program) stops steps 1 to 4; the
 request is then dropped (with a `BREAK` value) and step 5 runs, a new request stopping it. Then every table open is
 written and closed ([Work areas](#work-areas)), whatever ended the program. The exit code is the process's (any thread's
 code sets the same one) and kept throughout: `ErrorLevel( [nNew] )` returns it and sets it from an argument, a number
 wrapped to 32 bits, anything else 0 (the default error handler sets 1). Registration order follows the global
-constructors, which is the link order on the usual toolchains. Inside an `EXIT` procedure the call stack starts with it
-(the reference shows the function that ended the program, such as `__QUIT`, under it).
+constructors: the link order on ELF systems, the reverse on MinGW; the levels keep the libraries' modules before the
+program's whatever it is. Inside an `EXIT` procedure the call stack starts with it (the reference shows the function
+that ended the program, such as `__QUIT`, under it).

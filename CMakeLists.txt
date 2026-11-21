@@ -74,18 +74,37 @@ function(xb_compile_prg src obj)
   set_source_files_properties(${obj} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
 endfunction()
 
+# Builds with the build's xbc, for XB_TARGET, a project file or sources (docs/projects.md): OUTPUTS, the files it
+# makes (a program, or a library's archive first and its module file); DEPENDS, what else it needs (libraries of
+# this build, which xbc finds in <build>/libs); ARGS, xbc's arguments (the project file or the sources, options).
+function(xb_build_project)
+  cmake_parse_arguments(P "" "COMMENT" "OUTPUTS;DEPENDS;ARGS" ${ARGN})
+  list(GET P_OUTPUTS 0 first)
+  add_custom_command(
+    OUTPUT ${P_OUTPUTS}
+    COMMAND xbc ${P_ARGS} --depfile=${first}.d -I${PROJECT_SOURCE_DIR}/include -L${PROJECT_BINARY_DIR}/libs
+            $<$<BOOL:${XB_TARGET}>:--target=${XB_TARGET}>
+    DEPENDS xbc xbrt ${P_DEPENDS}
+    DEPFILE ${first}.d
+    COMMENT "${P_COMMENT}")
+endfunction()
+
 # Where cmake --install puts things. On Windows a package's own folders (the release's zip: bin/, include/, libs/,
 # docs/, README.md and LICENSE at the top); elsewhere the system's places (GNUInstallDirs: bin/, include/xbase/, lib/
 # or lib64/, share/doc/xbase/ with README.md, LICENSE and docs/). README.md's links into docs/ hold in both. xbc finds
 # the standard headers by the path from its folder to XB_INSTALL_INCLUDE (XB_INCLUDE_FROM_BIN: ../include in a package,
-# ../include/xbase in a system's install, absolute install folders taken into account).
+# ../include/xbase in a system's install, absolute install folders taken into account), and the module files of the
+# runtime and of the installed libraries likewise (XB_INSTALL_MODULES, XB_MODULES_FROM_BIN: ../libs in a package,
+# ../lib/xbase or ../lib64/xbase in a system's install).
 if(WIN32)
   set(XB_INSTALL_BIN bin)
   set(XB_INSTALL_INCLUDE include)
   set(XB_INSTALL_LIB libs)
   set(XB_INSTALL_DOC docs)
   set(XB_INSTALL_TOP .)
+  set(XB_INSTALL_MODULES libs)
   file(RELATIVE_PATH XB_INCLUDE_FROM_BIN /prefix/${XB_INSTALL_BIN} /prefix/${XB_INSTALL_INCLUDE})
+  file(RELATIVE_PATH XB_MODULES_FROM_BIN /prefix/${XB_INSTALL_BIN} /prefix/${XB_INSTALL_MODULES})
 else()
   include(GNUInstallDirs)
   set(XB_INSTALL_BIN ${CMAKE_INSTALL_BINDIR})
@@ -93,11 +112,16 @@ else()
   set(XB_INSTALL_LIB ${CMAKE_INSTALL_LIBDIR})
   set(XB_INSTALL_DOC ${CMAKE_INSTALL_DOCDIR}/docs)
   set(XB_INSTALL_TOP ${CMAKE_INSTALL_DOCDIR})
+  set(XB_INSTALL_MODULES ${CMAKE_INSTALL_LIBDIR}/xbase)
   file(RELATIVE_PATH XB_INCLUDE_FROM_BIN ${CMAKE_INSTALL_FULL_BINDIR} ${CMAKE_INSTALL_FULL_INCLUDEDIR}/xbase)
+  file(RELATIVE_PATH XB_MODULES_FROM_BIN ${CMAKE_INSTALL_FULL_BINDIR} ${CMAKE_INSTALL_FULL_LIBDIR}/xbase)
 endif()
 
+# The runtime's name: its archive's (the xbrt target), its module file's (<name>.xbm), which xbc's link step looks for.
+set(XB_RUNTIME_MODULE xbrt)
 add_subdirectory(runtime)
 add_subdirectory(compiler)
+add_subdirectory(libs)
 add_subdirectory(bench)
 
 # The standard headers (xbc finds them there by itself) beside the runtime's C headers, and the documentation.

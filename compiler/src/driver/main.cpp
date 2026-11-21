@@ -2,6 +2,9 @@
 #include "codegen/CodeGen.h"
 #include "codegen/Emit.h"
 #include "common/Diagnostics.h"
+#include "common/Text.h"
+#include "driver/Link.h"
+#include "driver/Project.h"
 #include "driver/RuntimeLibrary.h"
 #include "opt/Fold.h"
 #include "parser/Parser.h"
@@ -13,6 +16,7 @@
 #include "xir/PassManager.h"
 #include "xir/Printer.h"
 #include "xir/Verifier.h"
+#include "xbrt.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -31,6 +35,7 @@
 #include <optional>
 #include <unordered_map>
 #include <fstream>
+#include <functional>
 #include <set>
 #include <string>
 #include <vector>
@@ -38,19 +43,37 @@
 #ifndef XB_INCLUDE_FROM_BIN
 #error "XB_INCLUDE_FROM_BIN (where the standard headers are from xbc's folder) comes from the top-level CMakeLists.txt"
 #endif
+#ifndef XB_MODULES_FROM_BIN
+#error "XB_MODULES_FROM_BIN (where the module files are from xbc's folder) comes from the top-level CMakeLists.txt"
+#endif
+#ifndef XB_RUNTIME_MODULE
+#error "XB_RUNTIME_MODULE (the runtime's module file's name) comes from the top-level CMakeLists.txt"
+#endif
 #ifndef XB_DEFAULT_INCLUDE_DIR
 #define XB_DEFAULT_INCLUDE_DIR ""
+#endif
+#ifndef XB_BUILD_MODULE_DIR
+#define XB_BUILD_MODULE_DIR ""
 #endif
 
 namespace {
 
 const char *kUsage =
     "usage: xbc [options] <file.prg>...\n"
+    "       xbc [options] <project.xbprj>\n"
     "\n"
     "  Every source is a module; all of them go into one object, where calls between them are direct.\n"
-    "  A name with * or ? stands for the files it matches.\n"
+    "  A name with * or ? stands for the files it matches. A project file builds a program or a library\n"
+    "  in one step (docs/projects.md).\n"
     "\n"
-    "  -o <file>          output object file (default: the first source's name with .o)\n"
+    "  -o <file>          output object file (default: the first source's name with .o); with --link the\n"
+    "                     program, with --library the archive\n"
+    "  --link             link the program (the runtime and the libraries) instead of writing an object\n"
+    "  --library=<name>   compile an xbase library: its archive and its module file <name>.xbm\n"
+    "  --lib=<name>       use the xbase library <name> (found by its module file <name>.xbm)\n"
+    "  -L<dir>            add a folder to look for module files in\n"
+    "  -l<name>           link the system library <name> too (with --link)\n"
+    "  --out-dir=<dir>    where a project's program or library goes (default: the current folder)\n"
     "  -I<dir>            add an include directory\n"
     "  -D<name>[=<val>]   #define <name> [<val>]\n"
     "  -u                 do not load std.ch\n"
@@ -112,19 +135,31 @@ bool writeDepFile(const std::string &path, const std::string &target, const std:
   return (bool)f;
 }
 
-// Directory with the standard headers: where the install puts them, from the binary's folder (XB_INCLUDE_FROM_BIN),
-// or the source tree when running from a build directory (XB_DEFAULT_INCLUDE_DIR).
-std::vector<std::string> defaultIncludeDirs(const char *argv0) {
+// A folder of the install, by the path from the binary's folder to it (`fromBin`), then `buildDir`, the build tree's
+// (empty when xbc holds no path of the build: XB_SOURCE_INCLUDE off).
+std::vector<std::string> installDirs(const char *argv0, const char *fromBin, const char *buildDir) {
   std::vector<std::string> dirs;
-  std::string exe = llvm::sys::fs::getMainExecutable(argv0, (void *)&defaultIncludeDirs);
+  std::string exe = llvm::sys::fs::getMainExecutable(argv0, (void *)&installDirs);
   if (!exe.empty()) {
     llvm::SmallString<256> p(llvm::sys::path::parent_path(exe));
-    llvm::sys::path::append(p, XB_INCLUDE_FROM_BIN);
+    llvm::sys::path::append(p, fromBin);
     llvm::sys::path::remove_dots(p, /*remove_dot_dot=*/true);
     dirs.push_back(std::string(p));
   }
-  if (*XB_DEFAULT_INCLUDE_DIR) dirs.push_back(XB_DEFAULT_INCLUDE_DIR);
+  if (*buildDir) dirs.push_back(buildDir);
   return dirs;
+}
+
+// The standard headers: where the install puts them (XB_INCLUDE_FROM_BIN), or the source tree when running from a
+// build directory (XB_DEFAULT_INCLUDE_DIR).
+std::vector<std::string> defaultIncludeDirs(const char *argv0) {
+  return installDirs(argv0, XB_INCLUDE_FROM_BIN, XB_DEFAULT_INCLUDE_DIR);
+}
+
+// The module files of the runtime and of the libraries installed with xbc (XB_MODULES_FROM_BIN), or the build
+// tree's runtime (XB_BUILD_MODULE_DIR), after the -L folders.
+std::vector<std::string> defaultModuleDirs(const char *argv0) {
+  return installDirs(argv0, XB_MODULES_FROM_BIN, XB_BUILD_MODULE_DIR);
 }
 
 // A command-line source with `*` or `?` in its file name that names no file
@@ -139,11 +174,7 @@ bool expandInput(const std::string &arg, std::vector<std::string> &inputs) {
     return true;
   }
   constexpr bool foldCase = llvm::sys::path::is_style_windows(llvm::sys::path::Style::native);
-  auto fold = [&](std::string t) {
-    if (foldCase)
-      for (char &c : t) c = (char)std::tolower((unsigned char)c);
-    return t;
-  };
+  auto fold = [&](const std::string &t) { return foldCase ? xb::lowerCase(t) : t; };
   std::string glob;
   for (char c : fold(name)) {
     if (std::strchr("[]{}\\", c)) glob += '\\'; // literal for the matcher
@@ -192,13 +223,16 @@ void addFilesRead(std::vector<std::string> &filesRead, const xb::Preprocessor &p
 }
 
 // The syntax tree of a preprocessed source, its names resolved and checked; null after an error.
+// `declared`: declarations the module gets before its own (the public functions of the libraries it uses).
 std::unique_ptr<xb::Module> analyze(std::vector<xb::Token> tokens, const std::string &path, xb::Diagnostics &diag,
-                                    bool runtimeLibrary, xb::Sema::Undeclared undeclared) {
+                                    bool runtimeLibrary, xb::Sema::Undeclared undeclared,
+                                    const std::vector<xb::ExternDecl> &declared = {}) {
   unsigned errors = diag.errorCount();
   xb::Parser parser(std::move(tokens), diag);
   auto ast = parser.parseModule(moduleNameFor(path));
   ast->file = llvm::sys::path::filename(path).str();
   if (diag.errorCount() != errors) return nullptr;
+  ast->externs.insert(ast->externs.begin(), declared.begin(), declared.end());
   xb::ClassResolver(diag).run(*ast);
   if (diag.errorCount() != errors) return nullptr;
   xb::CallResolver(diag, xb::Folder::canEvaluate, runtimeLibrary).run(*ast);
@@ -209,9 +243,10 @@ std::unique_ptr<xb::Module> analyze(std::vector<xb::Token> tokens, const std::st
   return ast;
 }
 
-// FNV-1a 64 of a source's text: the stamp a carried runtime source's module and the runtime's own share.
-uint64_t sourceHash(std::string_view text) {
-  uint64_t h = 0xcbf29ce484222325u;
+// FNV-1a 64 of a source's text: the stamp a carried runtime source's module and the runtime's own share; a library's
+// goes on through its sources (`h` the hash so far).
+constexpr uint64_t kSourceHashBasis = 0xcbf29ce484222325u;
+uint64_t sourceHash(std::string_view text, uint64_t h = kSourceHashBasis) {
   for (char c : text) {
     h ^= static_cast<unsigned char>(c);
     h *= 0x100000001b3u;
@@ -311,12 +346,7 @@ constexpr unsigned kVersionNumber = XB_VERSION_MAJOR * 10000 + XB_VERSION_MINOR 
 // size, the byte order and the CPU family. A -D option given for one of them replaces it; #undef removes it.
 std::vector<std::string> targetDefines(const llvm::Triple &t) {
   std::vector<std::string> d{"__XBASE__=" + std::to_string(kVersionNumber)};
-  if (t.isOSWindows()) d.push_back("__PLATFORM__WINDOWS=1");
-  if (t.isOSLinux()) d.push_back("__PLATFORM__LINUX=1");
-  if (t.isOSDarwin()) d.push_back("__PLATFORM__DARWIN=1");
-  bool bsd = t.isOSFreeBSD() || t.isOSNetBSD() || t.isOSOpenBSD() || t.isOSDragonFly();
-  if (bsd) d.push_back("__PLATFORM__BSD=1");
-  if (t.isOSLinux() || t.isOSDarwin() || bsd || t.isOSSolaris() || t.isOSAIX()) d.push_back("__PLATFORM__UNIX=1");
+  for (const std::string &family : xb::platformFamilies(t)) d.push_back("__PLATFORM__" + family + "=1");
   if (t.isArch64Bit()) d.push_back("__ARCH64BIT__=1");
   else if (t.isArch32Bit()) d.push_back("__ARCH32BIT__=1");
   d.push_back(t.isLittleEndian() ? "__LITTLE_ENDIAN__=1" : "__BIG_ENDIAN__=1");
@@ -337,21 +367,109 @@ void checkDuplicates(const std::vector<Source> &sources, xb::Diagnostics &diag) 
     }
 }
 
+// A library's public function cannot have the name of a declared one (a runtime function's that is not RESERVED, or
+// another library's): every program using the library gets its declaration beside that one, which conflicts.
+void checkLibraryNames(const std::vector<Source> &sources, xb::Diagnostics &diag) {
+  for (const Source &s : sources)
+    for (auto &f : s.ast->funcs) {
+      if (f->isStatic || f->member != xb::FuncDecl::Member::None) continue;
+      for (const xb::ExternDecl &d : s.ast->externs)
+        if (d.name == f->name) {
+          diag.error(f->loc, "a library's public function cannot be named like the declared function '" + d.name +
+                                 "' (programs using the library would get both declarations)");
+          diag.note(d.loc, "the declaration is here");
+          break;
+        }
+    }
+}
+
+// Links the program `output` from `objects`, the libraries and the runtime (whose module file and archive go into
+// `depends`, for the dependency file).
+bool linkStep(const std::string &output, const std::vector<std::string> &objects,
+              const std::vector<xb::ModuleFile> &libraries, const std::vector<std::string> &system,
+              const std::vector<std::string> &moduleDirs, const llvm::Triple &triple,
+              std::vector<std::string> &depends) {
+  std::string err;
+  std::optional<xb::ModuleFile> runtime = xb::findModuleFile(XB_RUNTIME_MODULE, moduleDirs, triple, err);
+  if (!runtime) {
+    std::fprintf(stderr, "xbc: %s\n", err.c_str());
+    return false;
+  }
+  depends.push_back(runtime->path);
+  depends.push_back(xb::archivePath(*runtime));
+  // System libraries after every archive, each once, in its last place (where the last archive that needs it is).
+  std::vector<std::string> all;
+  for (const xb::ModuleFile &l : libraries) all.insert(all.end(), l.system.begin(), l.system.end());
+  all.insert(all.end(), system.begin(), system.end());
+  all.insert(all.end(), runtime->system.begin(), runtime->system.end());
+  std::vector<std::string> once;
+  for (size_t k = 0; k < all.size(); ++k)
+    if (std::find(all.begin() + (std::ptrdiff_t)k + 1, all.end(), all[k]) == all.end()) once.push_back(all[k]);
+  if (!xb::linkProgram(output, objects, libraries, *runtime, once, err)) {
+    std::fprintf(stderr, "xbc: %s\n", err.c_str());
+    return false;
+  }
+  return true;
+}
+
+// An object file given to link (`.o`, `.obj`), not a source.
+bool isObjectFile(const std::string &path) {
+  llvm::StringRef ext = llvm::sys::path::extension(path);
+  return ext.equals_insensitive(".o") || ext.equals_insensitive(".obj");
+}
+
 } // namespace
 
 static int compile(int argc, char **argv) {
   xb::TargetConfig tcfg;
-  std::string output, irDump, xirDump, depFile, stdFile = "std.ch";
-  bool xirTypes = false;
-  std::vector<std::string> inputs, includeDirs, defines;
+  std::string output, irDump, xirDump, depFile, stdFile = "std.ch", libraryName, outDir;
+  bool xirTypes = false, link = false;
+  std::vector<std::string> inputs, includeDirs, defines, libs, libDirs, system;
   bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false, runtimeLibrary = false;
   xb::Sema::Undeclared undeclared = xb::Sema::Undeclared::Warn;
 
-  for (int i = 1; i < argc; ++i) {
-    const char *a = argv[i];
-    if (!std::strcmp(a, "-o") && i + 1 < argc) output = argv[++i];
+  // A project file: its options come first, so that the command line's override them.
+  std::vector<std::string> args(argv + 1, argv + argc);
+  std::string projectPath;
+  for (size_t i = 0; i < args.size(); ++i) {
+    bool operand = i > 0 && (args[i - 1] == "-o" || args[i - 1] == "-I");
+    if (operand || args[i][0] == '-' || !llvm::sys::path::extension(args[i]).equals_insensitive(".xbprj")) continue;
+    if (!projectPath.empty()) {
+      std::fputs("xbc: one project file at a time\n", stderr);
+      return 2;
+    }
+    projectPath = args[i];
+    args.erase(args.begin() + (std::ptrdiff_t)i--);
+  }
+  std::vector<xb::KeyLine> projectLines;
+  if (!projectPath.empty()) {
+    std::string err;
+    auto lines = xb::readKeyFile(projectPath, err);
+    if (!lines) {
+      std::fprintf(stderr, "xbc: %s\n", err.c_str());
+      return 1;
+    }
+    projectLines = std::move(*lines);
+    std::optional<std::vector<std::string>> options = xb::projectOptions(projectPath, projectLines, err);
+    if (!options) {
+      std::fprintf(stderr, "xbc: %s\n", err.c_str());
+      return 1;
+    }
+    args.insert(args.begin(), options->begin(), options->end());
+  }
+
+  for (size_t i = 0; i < args.size(); ++i) {
+    const char *a = args[i].c_str();
+    bool next = i + 1 < args.size();
+    if (!std::strcmp(a, "-o") && next) output = args[++i];
     else if (startsWith(a, "-I") && a[2]) includeDirs.push_back(a + 2);
-    else if (!std::strcmp(a, "-I") && i + 1 < argc) includeDirs.push_back(argv[++i]);
+    else if (!std::strcmp(a, "-I") && next) includeDirs.push_back(args[++i]);
+    else if (startsWith(a, "-L") && a[2]) libDirs.push_back(a + 2);
+    else if (startsWith(a, "-l") && a[2]) system.push_back(a + 2);
+    else if (startsWith(a, "--lib=") && a[6]) libs.push_back(a + 6);
+    else if (startsWith(a, "--library=") && a[10]) libraryName = a + 10;
+    else if (!std::strcmp(a, "--link")) link = true;
+    else if (startsWith(a, "--out-dir=") && a[10]) outDir = a + 10;
     else if (startsWith(a, "-D") && a[2]) defines.push_back(a + 2);
     else if (!std::strcmp(a, "-u")) useStd = false;
     else if (startsWith(a, "-u") && a[2]) {
@@ -393,15 +511,130 @@ static int compile(int argc, char **argv) {
       return 2;
     }
   }
+  llvm::Triple triple = xb::targetTriple(tcfg);
+  std::string projectName;
+  if (!projectPath.empty()) {
+    std::string err;
+    std::optional<xb::Project> project = xb::makeProject(projectPath, projectLines, triple, err);
+    if (!project) {
+      std::fprintf(stderr, "xbc: %s\n", err.c_str());
+      return 1;
+    }
+    for (const std::string &s : project->sources)
+      if (!expandInput(s, inputs)) return 2;
+    includeDirs.insert(includeDirs.end(), project->includes.begin(), project->includes.end());
+    defines.insert(defines.begin(), project->defines.begin(), project->defines.end());
+    libs.insert(libs.end(), project->libs.begin(), project->libs.end());
+    libDirs.insert(libDirs.end(), project->libDirs.begin(), project->libDirs.end());
+    system.insert(system.end(), project->system.begin(), project->system.end());
+    projectName = project->name;
+    if (!project->library) link = true;
+    else if (libraryName.empty()) libraryName = project->name;
+  }
+  if (!libraryName.empty() && (link || runtimeLibrary)) {
+    std::fputs("xbc: --library makes a library: no --link, no --runtime\n", stderr);
+    return 2;
+  }
+  // A library's files are named in lower case (lib<name>.a, <name>.xbm), its symbols in upper case
+  // (XB_XBLIB_FUNC_PREFIX).
+  std::string libraryFile = xb::lowerCase(libraryName);
+  if (!libraryName.empty()) {
+    if (!xb::isIdentifier(libraryName)) {
+      std::fprintf(stderr, "xbc: '%s' is no library name (a name: letters, digits and _, not a digit first)\n",
+                   libraryName.c_str());
+      return 2;
+    }
+    libraryName = xb::upperCase(libraryName);
+    emitEntry = false;
+  }
   inputs = distinctFiles(inputs);
-  if (inputs.empty()) {
+  std::vector<std::string> objects; // linked with the program (--link)
+  for (const std::string &in : inputs)
+    if (isObjectFile(in)) objects.push_back(in);
+  inputs.erase(std::remove_if(inputs.begin(), inputs.end(), isObjectFile), inputs.end());
+  if (!objects.empty() && !link) {
+    std::fputs("xbc: object files are linked: --link\n", stderr);
+    return 2;
+  }
+  if (inputs.empty() && objects.empty()) {
     std::fputs(kUsage, stderr);
     return 2;
   }
-  if (output.empty()) output = withExtension(inputs.front(), ".o");
+  if (output.empty()) {
+    const std::string &first = inputs.empty() ? objects.front() : inputs.front();
+    std::string name = projectName.empty() ? llvm::sys::path::stem(first).str() : projectName;
+    llvm::SmallString<256> p(outDir);
+    llvm::sys::path::append(p, !libraryName.empty() ? xb::archiveName(libraryFile, triple)
+                               : link              ? xb::executableName(name, triple)
+                                                   : std::string());
+    output = !libraryName.empty() || link ? std::string(p) : withExtension(inputs.front(), ".o");
+  }
 
-  std::vector<std::string> predefined = targetDefines(xb::targetTriple(tcfg));
+  // The libraries the program uses, each before the ones it uses (as the linker wants them), and the declarations of
+  // their public functions, which every source gets after std.ch.
+  std::vector<std::string> moduleDirs = libDirs;
+  for (const std::string &d : defaultModuleDirs(argv[0])) moduleDirs.push_back(d);
+  std::vector<xb::ModuleFile> libraries;
+  std::set<std::string> visiting;
+  std::string libraryError;
+  std::function<bool(const std::string &)> use = [&](const std::string &name) {
+    if (!visiting.insert(xb::upperCase(name)).second) return true;
+    std::optional<xb::ModuleFile> m = xb::findModuleFile(name, moduleDirs, triple, libraryError);
+    if (!m) return false;
+    for (const std::string &u : m->uses)
+      if (!use(u)) return false;
+    libraries.push_back(std::move(*m));
+    return true;
+  };
+  for (const std::string &l : libs)
+    if (!use(l)) {
+      std::fprintf(stderr, "xbc: %s\n", libraryError.c_str());
+      return 1;
+    }
+  std::reverse(libraries.begin(), libraries.end());
+  // What the output depends on besides the files the preprocessor reads: the project file, the libraries' module files
+  // and archives (and the runtime's, when it links).
+  std::vector<std::string> depends;
+  if (!projectPath.empty()) depends.push_back(projectPath);
+  for (const xb::ModuleFile &m : libraries) {
+    depends.push_back(m.path);
+    depends.push_back(xb::archivePath(m));
+  }
+  auto writeDeps = [&](const std::vector<std::string> &filesRead) {
+    std::vector<std::string> all = filesRead;
+    all.insert(all.end(), depends.begin(), depends.end());
+    if (depFile.empty() || writeDepFile(depFile, output, all)) return true;
+    std::fprintf(stderr, "xbc: cannot write '%s'\n", depFile.c_str());
+    return false;
+  };
+  auto makeOutDir = [&] { // a program's or a library's folder
+    std::string dir = llvm::sys::path::parent_path(output).str();
+    if (dir.empty() || (!link && libraryName.empty())) return true;
+    std::error_code ec = llvm::sys::fs::create_directories(dir);
+    if (ec) std::fprintf(stderr, "xbc: cannot create '%s': %s\n", dir.c_str(), ec.message().c_str());
+    return !ec;
+  };
+  if (inputs.empty()) // objects alone: linked
+    return makeOutDir() && linkStep(output, objects, libraries, system, moduleDirs, triple, depends) && writeDeps({})
+               ? 0
+               : 1;
   xb::Diagnostics diag;
+  std::vector<xb::ExternDecl> libraryDeclarations; // EXTERN FUNCTION NAME( ... ) LIBRARY LIB, at the module file
+  unsigned level = 1;                              // a library's: 1 + the highest of the ones it uses
+  for (const xb::ModuleFile &m : libraries) {
+    level = std::max(level, m.level + 1);
+    uint32_t file = diag.addFile(m.path);
+    for (size_t k = 0; k < m.declarations.size(); ++k) {
+      xb::ExternDecl d;
+      d.loc = {file, m.declarationLines[k], 1};
+      d.name = m.declarations[k];
+      d.maxArgs = xb::ExternDecl::kUnlimited;
+      d.library = m.library;
+      libraryDeclarations.push_back(std::move(d));
+    }
+  }
+
+  std::vector<std::string> predefined = targetDefines(triple);
   std::string stdPath;
   std::vector<std::string> filesRead;
   std::vector<Source> sources;
@@ -442,22 +675,43 @@ static int compile(int argc, char **argv) {
       ppo << text;
     }
 
-    auto ast = analyze(std::move(tokens), input, diag, runtimeLibrary, undeclared);
+    auto ast = analyze(std::move(tokens), input, diag, runtimeLibrary, undeclared, libraryDeclarations);
     if (ast) sources.push_back({input, std::move(ast), nullptr});
   }
   if (ppOnly) return diag.errorCount() ? 1 : 0;
   checkDuplicates(sources, diag);
+  if (!libraryName.empty()) checkLibraryNames(sources, diag);
   if (diag.errorCount()) return 1;
 
   std::string xirText;
   std::vector<std::unique_ptr<xb::xir::Module>> library; // loaded once a module calls one of its functions
   bool libraryLoaded = false;
+  // A library's stamp: every file its sources read (themselves, std.ch, their includes) and the defines, in order.
+  uint64_t libraryStamp = kSourceHashBasis;
+  if (!libraryName.empty()) {
+    for (const std::string &f : filesRead) {
+      auto text = llvm::MemoryBuffer::getFile(f, /*IsText=*/false, /*RequiresNullTerminator=*/false);
+      if (!text) {
+        std::fprintf(stderr, "xbc: cannot read '%s'\n", f.c_str());
+        return 1;
+      }
+      libraryStamp = sourceHash((*text)->getBuffer(), sourceHash(llvm::sys::path::filename(f), libraryStamp));
+    }
+    for (const std::string &d : defines) libraryStamp = sourceHash(d + "\n", libraryStamp);
+  }
+  std::vector<std::string> publicFunctions; // a library's
   for (Source &s : sources) {
     s.xir = xb::xir::Generator(runtimeLibrary).run(*s.ast);
-    if (runtimeLibrary) { // its stamp: a program that ran a body of it in place requires the same text (sourceHash)
+    if (runtimeLibrary) { // its stamp: a program that ran a body of it in place requires the same text
       auto text = llvm::MemoryBuffer::getFile(s.path, /*IsText=*/false, /*RequiresNullTerminator=*/false);
-      if (text) s.xir->sourceHash = sourceHash((*text)->getBuffer());
+      if (!text) {
+        std::fprintf(stderr, "xbc: cannot read '%s'\n", s.path.c_str());
+        return 1;
+      }
+      s.xir->sourceHash = sourceHash((*text)->getBuffer());
     }
+    for (auto &f : s.xir->functions)
+      if (f->kind == xb::xir::Function::Kind::Program && !f->internal) publicFunctions.push_back(f->name);
     if (std::string bad = xb::xir::verify(*s.xir); !bad.empty()) {
       std::fprintf(stderr, "xbc: internal error: invalid xIR: %s\n", bad.c_str());
       return 1;
@@ -503,6 +757,11 @@ static int compile(int argc, char **argv) {
 
   xb::CodeGen cg(llctx, mod, diag);
   cg.setRuntimeLibrary(runtimeLibrary);
+  if (!libraryName.empty())
+    cg.setLibrary(libraryName, {publicFunctions.begin(), publicFunctions.end()}, libraryStamp, level);
+  std::vector<std::pair<std::string, uint64_t>> stamps;
+  for (const xb::ModuleFile &m : libraries) stamps.emplace_back(m.library, m.stamp);
+  cg.requireLibraries(std::move(stamps));
   for (const Source &s : sources) cg.run(*s.xir);
   if (!cg.finish(emitEntry ? startFunction(sources) : nullptr)) return 1;
 
@@ -520,15 +779,48 @@ static int compile(int argc, char **argv) {
     std::fprintf(stderr, "xbc: %s\n", err.c_str());
     return 1;
   }
-  if (!xb::emitObject(mod, *tm, output, err)) {
+  if (!makeOutDir()) return 1;
+  // A program or a library goes through an object of its own, removed once it is linked or archived.
+  std::string object = output;
+  if (link || !libraryName.empty()) {
+    llvm::SmallString<256> tmp;
+    if (std::error_code ec = llvm::sys::fs::createTemporaryFile("xbc", triple.isOSWindows() ? "obj" : "o", tmp)) {
+      std::fprintf(stderr, "xbc: cannot create a temporary object file: %s\n", ec.message().c_str());
+      return 1;
+    }
+    object = std::string(tmp);
+  }
+  struct RemoveObject {
+    const std::string &object, &output;
+    ~RemoveObject() {
+      if (object != output) llvm::sys::fs::remove(object);
+    }
+  } removeObject{object, output};
+  if (!xb::emitObject(mod, *tm, object, err)) {
     std::fprintf(stderr, "xbc: %s\n", err.c_str());
     return 1;
   }
-  if (!depFile.empty() && !writeDepFile(depFile, output, filesRead)) {
-    std::fprintf(stderr, "xbc: cannot write '%s'\n", depFile.c_str());
-    return 1;
+  if (!libraryName.empty()) {
+    xb::ModuleFile m;
+    m.library = libraryName;
+    m.abi = XB_ABI_VERSION;
+    m.target = triple.str();
+    m.archive = llvm::sys::path::filename(output).str();
+    m.stamp = libraryStamp;
+    m.level = level;
+    for (const xb::ModuleFile &l : libraries) m.uses.push_back(l.library);
+    m.system = system;
+    m.declarations = publicFunctions;
+    llvm::SmallString<256> xbm(llvm::sys::path::parent_path(output));
+    llvm::sys::path::append(xbm, libraryFile + ".xbm");
+    if (!xb::writeArchive(output, object, triple, err) || !xb::writeModuleFile(std::string(xbm), m, err)) {
+      std::fprintf(stderr, "xbc: %s\n", err.c_str());
+      return 1;
+    }
   }
-  return 0;
+  objects.insert(objects.begin(), object);
+  if (link && !linkStep(output, objects, libraries, system, moduleDirs, triple, depends)) return 1;
+  return writeDeps(filesRead) ? 0 : 1;
 }
 
 int main(int argc, char **argv) {

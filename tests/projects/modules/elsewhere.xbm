@@ -1,0 +1,6 @@
+# A module file of a library compiled for another target.
+format = 1
+library = ELSEWHERE
+abi = 1
+target = wasm32-unknown-wasi
+archive = libelsewhere.a

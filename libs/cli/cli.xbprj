@@ -1,0 +1,3 @@
+# The command line of a program (docs/libraries.md#cli).
+type = library
+sources = cli.prg

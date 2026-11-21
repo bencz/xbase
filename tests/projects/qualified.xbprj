@@ -1,0 +1,11 @@
+# Settings for some platforms only, quoted words, includes and options (one project for every platform: the program
+# checks that the right ones applied).
+sources = qualified.prg
+includes = inc
+defines = "GREETING='hi there'" LEVEL=2
+defines.windows = SIDE='windows'
+defines.unix = SIDE='unix'
+defines.linux = LINUX_TOO
+defines.darwin = DARWIN_TOO
+system.windows = ws2_32
+options = -O1 -Wno-undeclared

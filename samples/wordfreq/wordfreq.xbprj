@@ -1,0 +1,3 @@
+# Counts the words of text files, with the cli library for its command line (docs/projects.md).
+sources = wordfreq.prg
+libs = cli

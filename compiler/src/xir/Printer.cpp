@@ -57,6 +57,12 @@ const char *accessName(Access a) {
   return "";
 }
 
+// An external function as listings show it: its name, `native` (the runtime's), `library L` (an xbase library's) or
+// `extern` (another module's).
+std::string calleeName(const Callee &c) {
+  return c.name + (c.native ? " native" : !c.library.empty() ? " library " + c.library : " extern");
+}
+
 std::string quoted(const std::string &s) {
   std::string out = "\"";
   for (char c : s) {
@@ -95,7 +101,7 @@ public:
 
   void module(const Module &m) {
     out_ += "module " + m.name + "\n";
-    for (const std::string &r : m.requests) out_ += "  request " + r + "\n";
+    for (const Callee &r : m.requests) out_ += "  request " + calleeName(r) + "\n";
     for (auto &s : m.statics) out_ += "  " + varName(*s) + " = " + varDesc(*s) + "\n";
     for (auto &f : m.functions) {
       out_ += "\n";
@@ -180,8 +186,7 @@ private:
       if (i.imm != 0) out_ += " guard " + std::to_string((uint32_t)i.imm); // the types it lets on (TypeSet)
       break;
     case Op::Call: case Op::FuncRef:
-      out_ += " " + (i.callee.function ? i.callee.function->name : i.callee.name) +
-              (i.callee.function ? "" : i.callee.native ? " native" : " extern");
+      out_ += " " + (i.callee.function ? i.callee.function->name : calleeName(i.callee));
       break;
     case Op::Send: case Op::SendMacro:
       out_ += i.op == Op::Send ? " " + i.message : i.index ? std::string(" assign") : std::string();

@@ -1,0 +1,3 @@
+# A function of a library that the program only requests (REQUEST) and calls by name.
+sources = requests_library.prg
+libs = greet

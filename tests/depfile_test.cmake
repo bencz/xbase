@@ -1,0 +1,10 @@
+# A dependency file (FILE) names each of NAMES (file names, a list) as a path's last part.
+file(READ ${FILE} deps)
+string(REPLACE "\\ " " " deps "${deps}")
+file(TO_CMAKE_PATH "${deps}" deps)
+foreach(name ${NAMES})
+  string(FIND "${deps}" "/${name}" at)
+  if(at EQUAL -1)
+    message(FATAL_ERROR "${FILE} does not name ${name}:\n${deps}")
+  endif()
+endforeach()

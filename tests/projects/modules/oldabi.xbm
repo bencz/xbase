@@ -1,0 +1,5 @@
+# A module file of a library compiled for another runtime ABI.
+format = 1
+library = OLDABI
+abi = 1
+archive = liboldabi.a

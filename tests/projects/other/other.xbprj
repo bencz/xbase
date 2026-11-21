@@ -1,0 +1,3 @@
+# A test library that declares a function greet declares too.
+type = library
+sources = other.prg

@@ -1,0 +1,1 @@
+error: a library's public function cannot be named like the declared function 'ALLTRIM'

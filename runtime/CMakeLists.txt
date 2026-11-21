@@ -71,13 +71,15 @@ add_library(xbrt STATIC
   src/macro/run.c
 )
 
+# The system libraries the runtime needs, and so every program: names, or the linker's arguments (the runtime's module
+# file, below, gives them to xbc's link step).
 if(WIN32)
   target_sources(xbrt PRIVATE src/platform/win32/platform.c)
-  target_link_libraries(xbrt PUBLIC shell32) # CommandLineToArgvW
+  set(XB_RUNTIME_SYSTEM_LIBS shell32) # CommandLineToArgvW
 else()
   target_sources(xbrt PRIVATE src/platform/posix/platform.c)
   find_package(Threads REQUIRED)
-  target_link_libraries(xbrt PUBLIC m Threads::Threads)
+  set(XB_RUNTIME_SYSTEM_LIBS m ${CMAKE_THREAD_LIBS_INIT})
   # Atomic operations of every size the runtime uses (platform/atomic.h); a target without native ones for some size
   # (older ARM, some 32-bit systems) gets them from libatomic.
   include(CheckCSourceCompiles)
@@ -96,9 +98,10 @@ else()
     }" XB_ATOMICS_NATIVE)
   cmake_pop_check_state()
   if(NOT XB_ATOMICS_NATIVE)
-    target_link_libraries(xbrt PUBLIC atomic)
+    list(APPEND XB_RUNTIME_SYSTEM_LIBS atomic)
   endif()
 endif()
+target_link_libraries(xbrt PUBLIC ${XB_RUNTIME_SYSTEM_LIBS})
 
 # The runtime's functions written in xBase, compiled by the xbc of this build as modules of the runtime
 # (xbc --runtime) for XB_TARGET (top-level CMakeLists.txt).
@@ -139,6 +142,71 @@ xb_exact_doubles(xbrt ${XB_TARGET_X86_32})
 if(MSVC)
   target_compile_options(xbrt PRIVATE /volatile:ms)
 endif()
+
+# The runtime's module file (docs/projects.md), which xbc's link step reads: the archive, the system libraries, the
+# linker and its flags. The build tree's beside the archive, with the C compiler that built the runtime and the flags
+# it links programs with (the target's, the toolchain's own: a sanitizer, a sysroot); the installed one in the modules'
+# folder, with the compiler's name (found where the program is built) and the target's flags only.
+foreach(define XB_ABI_VERSION XB_MODULE_FILE_FORMAT)
+  file(STRINGS include/xbrt.h line REGEX "^#define ${define} [0-9]+u?$")
+  string(REGEX MATCH "[0-9]+" ${define} "${line}")
+endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS include/xbrt.h)
+string(TOUPPER ${XB_RUNTIME_MODULE} XB_RUNTIME_LIBRARY)
+set(XB_INSTALLED_FLAGS ${XB_TARGET_C_FLAGS})
+if(MSVC)
+  set(XB_LINK_STYLE msvc)
+  set(XB_LINKER link)
+  set(XB_INSTALLED_LINKER link)
+  set(XB_BUILD_FLAGS)
+else()
+  set(XB_LINK_STYLE gnu)
+  set(XB_LINKER ${CMAKE_C_COMPILER})
+  get_filename_component(XB_INSTALLED_LINKER ${CMAKE_C_COMPILER} NAME)
+  if(CMAKE_C_COMPILER_TARGET)
+    list(APPEND XB_INSTALLED_FLAGS --target=${CMAKE_C_COMPILER_TARGET})
+  endif()
+  separate_arguments(XB_BUILD_FLAGS UNIX_COMMAND "${CMAKE_C_FLAGS}")
+  if(CMAKE_SYSROOT)
+    list(APPEND XB_BUILD_FLAGS --sysroot=${CMAKE_SYSROOT})
+  endif()
+endif()
+separate_arguments(XB_LINKER_FLAGS NATIVE_COMMAND "${CMAKE_EXE_LINKER_FLAGS}")
+set(XB_BUILD_FLAGS ${XB_INSTALLED_FLAGS} ${XB_BUILD_FLAGS} ${XB_LINKER_FLAGS})
+# A list as the module file's words: each quoted, so that one may hold blanks.
+function(xb_module_words out)
+  set(words "")
+  foreach(word ${ARGN})
+    string(APPEND words " \"${word}\"")
+  endforeach()
+  set(${out} "${words}" PARENT_SCOPE)
+endfunction()
+xb_module_words(XB_SYSTEM_WORDS ${XB_RUNTIME_SYSTEM_LIBS})
+function(xb_runtime_module_file out archive linker)
+  xb_module_words(flags ${ARGN})
+  file(GENERATE OUTPUT ${out} CONTENT
+"# The module file of the xbase runtime, written by its build (docs/projects.md): how programs link with it.
+format = ${XB_MODULE_FILE_FORMAT}
+library = ${XB_RUNTIME_LIBRARY}
+abi = ${XB_ABI_VERSION}
+target = ${XB_TARGET}
+archive = ${archive}
+linker = ${linker}
+style = ${XB_LINK_STYLE}
+flags =${flags}
+system =${XB_SYSTEM_WORDS}
+")
+endfunction()
+xb_runtime_module_file($<TARGET_FILE_DIR:xbrt>/${XB_RUNTIME_MODULE}.xbm $<TARGET_FILE_NAME:xbrt> ${XB_LINKER}
+                       ${XB_BUILD_FLAGS})
+file(RELATIVE_PATH XB_ARCHIVE_FROM_MODULES /prefix/${XB_INSTALL_MODULES} /prefix/${XB_INSTALL_LIB})
+if(XB_ARCHIVE_FROM_MODULES)
+  string(REGEX REPLACE "/+$" "" XB_ARCHIVE_FROM_MODULES ${XB_ARCHIVE_FROM_MODULES})
+  string(APPEND XB_ARCHIVE_FROM_MODULES /)
+endif()
+xb_runtime_module_file(${CMAKE_CURRENT_BINARY_DIR}/install/${XB_RUNTIME_MODULE}.xbm
+                       ${XB_ARCHIVE_FROM_MODULES}$<TARGET_FILE_NAME:xbrt> ${XB_INSTALLED_LINKER} ${XB_INSTALLED_FLAGS})
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/install/${XB_RUNTIME_MODULE}.xbm DESTINATION ${XB_INSTALL_MODULES})
 
 # The package's runtime library and the C headers a NATIVE function written in C includes.
 install(TARGETS xbrt ARCHIVE DESTINATION ${XB_INSTALL_LIB})

@@ -37,6 +37,7 @@ system's places (with the default prefix, `/usr/local`):
 | `xbc` | `bin/` | `bin/` |
 | headers | `include/` | `include/xbase/` |
 | runtime library | `libs/` (`xbrt.lib` from MSVC, `libxbrt.a` from MinGW) | `lib/` or `lib64/` (`libxbrt.a`) |
+| module files of the runtime and of the libraries (`xbrt.xbm`, `cli.xbm`), the libraries' archives | `libs/` | `lib/xbase/` or `lib64/xbase/` |
 | documentation | `docs/`, with `README.md` and `LICENSE` at the top | `share/doc/xbase/` |
 
 `xbc` finds the standard headers by the path from its own folder to where the install put them: a program needs no `-I`
@@ -232,6 +233,20 @@ cc hello.o build/runtime/libxbrt.a -lm -o hello  # link with the runtime
 
 A program of several sources compiles in one run into one object (`xbc *.prg -o app.o`); calls between its modules
 need no declaration, and it starts at `Main()`.
+
+A project file builds a program, or a library, in one step: `xbc` compiles its sources and links the program with the
+runtime and the libraries it names, through the system's C compiler (`link.exe` from an MSVC developer prompt):
+
+```sh
+build/compiler/xbc samples/hello/hello.xbprj --out-dir=out     # out/hello
+build/compiler/xbc libs/cli/cli.xbprj --out-dir=out/cli          # out/cli/libcli.a and cli.xbm
+build/compiler/xbc samples/wordfreq/wordfreq.xbprj --out-dir=out -Lout
+out/wordfreq -n 5 samples/wordfreq/sample.txt
+```
+
+The build compiles the libraries of `libs/` into `build/libs/` (`-Lbuild/libs`), and an install puts them where its
+`xbc` finds them by itself. [docs/projects.md](docs/projects.md) describes the project files, and `--link`,
+`--library=<name>`, `--lib=<name>`, `-L<dir>` and `-l<name>`, which do the same from the command line.
 
 Useful options (`xbc --help` lists all of them):
 

@@ -1,0 +1,7 @@
+
+usage: wordfreq [options] <file>
+Shows the most frequent words of text files.
+  <file>             a text file
+  -n, --top <value>  how many words to show (default: 10)
+  -i, --ignore-case  counts words without letter case
+  -h, --help         shows this help

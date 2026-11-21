@@ -1,0 +1,5 @@
+# A module file of a format this xbc does not read.
+format = 2
+library = NEWER
+abi = 1
+archive = libnewer.a

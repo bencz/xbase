@@ -14,6 +14,7 @@
 //   CHECKED   the number of arguments is checked at compile time (from the required and optional parameters,
 //             unlimited with `...`)
 //   ABBREV n  calls may abbreviate the name to its first n or more letters
+//   LIBRARY name  a public function of the xbase library `name` (symbol xbx_NAME$FUNCTION; docs/projects.md)
 //   FOLD      calls with constant arguments are evaluated at compile time
 //   ARGS      reads the arguments the function calling it received: that function keeps them in its frame
 //   PARAMS    ARGS, and reads and writes that function's parameters: it keeps them in its frame slots

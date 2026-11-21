@@ -147,7 +147,7 @@ void CodeGen::initTypes() {
   rtSwitchCheck_ = rt("xb_switch_check", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtSwitchMatch_ = rt("xb_switch_match", i32_, {ptrTy_, ptrTy_});
   rtModuleRegister_ =
-      rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, i32_, ptrTy_, i32_, ptrTy_, i32_});
+      rt("xb_module_register", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, i32_, ptrTy_, i32_, ptrTy_, i32_, i32_});
   rtMvMark_ = rt("xb_mv_mark", i32_, {ptrTy_});
   rtMvRelease_ = rt("xb_mv_release", voidTy, {ptrTy_, i32_});
   rtMvGet_ = rt("xb_mv_get", voidTy, {ptrTy_, ptrTy_, ptrTy_});
@@ -186,7 +186,7 @@ void CodeGen::initTypes() {
   rtObjectGet_ = rt("xb_op_object_get", voidTy, {ptrTy_, ptrTy_, i32_});
   rtObjectSet_ = rt("xb_op_object_set", voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_});
   rtClassInstance_ = rt("xb_class_instance", voidTy, {ptrTy_, ptrTy_, ptrTy_});
-  rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_});
+  rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_, i32_});
   for (FunctionCallee c : {rtWriteItem_, rtWriteItems_, rtGcRemember_})
     cast<Function>(c.getCallee())->addFnAttr(kBarrierAttr);
   for (FunctionCallee c : {rtPending_, rtWriteItem_, rtWriteItems_, rtGcRemember_, rtCellOf_,
@@ -243,7 +243,9 @@ Function *CodeGen::declare(const xir::Function &f) {
     return fn;
   }
   if (program && !f.internal) {
-    std::string sym = (runtimeLibrary_ ? XB_RUNTIME_FUNC_PREFIX : XB_PROGRAM_FUNC_PREFIX) + f.name;
+    std::string sym = runtimeLibrary_     ? XB_RUNTIME_FUNC_PREFIX + f.name
+                      : library_.empty() ? XB_PROGRAM_FUNC_PREFIX + f.name
+                                          : xblibSymbol(library_, f.name);
     if (Function *fn = mod_.getFunction(sym)) {
       if (!fn->isDeclaration()) diag_.error({}, "internal compiler error: function " + f.name + " defined twice");
       return fn;
@@ -258,12 +260,17 @@ Function *CodeGen::declare(const xir::Function &f) {
   return fn;
 }
 
-// The symbol of a function of a runtime module written in xBase (XB_LIBRARY_FUNC_PREFIX in xbrt.h).
-std::string CodeGen::librarySymbol(const std::string &module, const std::string &name) {
-  std::string sym = XB_LIBRARY_FUNC_PREFIX + module + "$" + name;
+// A symbol of a scope (a runtime module, a library): the prefix, the scope, '$', the name with ':' and '.' as '$'.
+static std::string scopedSymbol(const char *prefix, const std::string &scope, const std::string &name) {
+  std::string sym = prefix + scope + "$" + name;
   for (char &c : sym)
     if (c == ':' || c == '.') c = '$';
   return sym;
+}
+
+// The symbol of a function of a runtime module written in xBase (XB_LIBRARY_FUNC_PREFIX in xbrt.h).
+std::string CodeGen::librarySymbol(const std::string &module, const std::string &name) {
+  return scopedSymbol(XB_LIBRARY_FUNC_PREFIX, module, name);
 }
 
 // The LLVM function of a function of the module, or of a carried runtime source's (declared by its library symbol).
@@ -279,26 +286,41 @@ Function *CodeGen::functionOf(const xir::Function *f) {
   return functions_[f] = fn;
 }
 
-// The stamp of a carried runtime source's text (xir::Module::sourceHash): a module of the runtime defines it; a
-// program given the carried modules references each one's, so that a runtime built from other texts than the
-// compiler carries fails to link instead of running bodies that disagree with it.
-std::string CodeGen::sourceStamp(const std::string &module, uint64_t hash) {
-  char hex[17];
-  std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(hash));
-  return librarySymbol(module, std::string("source.") + hex);
+std::string CodeGen::xblibSymbol(const std::string &library, const std::string &name) {
+  return scopedSymbol(XB_XBLIB_FUNC_PREFIX, library, name);
 }
 
+std::string CodeGen::sourceStamp(const char *prefix, const std::string &scope, uint64_t hash) {
+  char hex[17];
+  std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(hash));
+  return scopedSymbol(prefix, scope, std::string("source$") + hex);
+}
+
+void CodeGen::setLibrary(const std::string &name, std::unordered_set<std::string> functions, uint64_t stamp,
+                         uint32_t level) {
+  library_ = name;
+  libraryLevel_ = level;
+  libraryFunctions_ = std::move(functions);
+  libraryStamp_ = stamp;
+}
+
+// Stamps of sources (xir::Module::sourceHash, a library's): a module of the runtime, and a library, defines its own; a
+// program given the carried modules, or compiled with libraries, references theirs, so that a runtime or a library
+// built from other texts than the ones it was compiled with fails to link instead of running code that disagrees
+// with it (bodies inlined, an interface changed).
 void CodeGen::stampSources(const xir::Module &m) {
+  auto define = [&](const std::string &symbol) {
+    if (!mod_.getNamedGlobal(symbol))
+      new GlobalVariable(mod_, i8_, true, GlobalValue::ExternalLinkage, ConstantInt::get(i8_, 0), symbol);
+  };
   if (runtimeLibrary_) {
-    if (m.sourceHash)
-      new GlobalVariable(mod_, i8_, true, GlobalValue::ExternalLinkage, ConstantInt::get(i8_, 0),
-                         sourceStamp(m.name, m.sourceHash));
+    if (m.sourceHash) define(sourceStamp(XB_LIBRARY_FUNC_PREFIX, m.name, m.sourceHash));
     return;
   }
-  std::vector<Constant *> stamps;
+  if (!library_.empty()) define(sourceStamp(XB_XBLIB_FUNC_PREFIX, library_, libraryStamp_));
   for (const xir::Module *l : m.library)
-    stamps.push_back(cast<Constant>(mod_.getOrInsertGlobal(sourceStamp(l->name, l->sourceHash), i8_)));
-  keepReferences(stamps, "xb.source.stamps");
+    requiredStamps_.insert(sourceStamp(XB_LIBRARY_FUNC_PREFIX, l->name, l->sourceHash));
+  for (auto &[lib, stamp] : libraryStamps_) requiredStamps_.insert(sourceStamp(XB_XBLIB_FUNC_PREFIX, lib, stamp));
 }
 
 // A table of `symbols` kept in the object file, so the linker resolves each one (bringing in what defines it from a
@@ -311,9 +333,13 @@ void CodeGen::keepReferences(const std::vector<Constant *> &symbols, const std::
   appendToCompilerUsed(mod_, {table});
 }
 
-// A function of the runtime (NATIVE) or of another module of the program.
+// A function of the runtime (NATIVE), of an xbase library, or of another module of the program (of the library, for
+// one of its modules).
 Function *CodeGen::externFunction(const xir::Callee &c) {
-  std::string sym = (c.native ? XB_RUNTIME_FUNC_PREFIX : XB_PROGRAM_FUNC_PREFIX) + c.name;
+  std::string sym = c.native              ? XB_RUNTIME_FUNC_PREFIX + c.name
+                    : !c.library.empty() ? xblibSymbol(c.library, c.name)
+                    : libraryFunctions_.count(c.name) ? xblibSymbol(library_, c.name)
+                                                      : XB_PROGRAM_FUNC_PREFIX + c.name;
   Function *f = mod_.getFunction(sym);
   if (!f) {
     f = Function::Create(xbFuncTy_, GlobalValue::ExternalLinkage, sym, mod_);
@@ -440,12 +466,15 @@ void CodeGen::collectMemvars(const xir::Module &m) {
 // EXTERNAL: the functions, which the linker brings in (from a library) or reports missing.
 void CodeGen::genRequests(const xir::Module &m) {
   std::vector<Constant *> fns;
-  for (const std::string &name : m.requests) fns.push_back(externFunction(xir::Callee{nullptr, name, false}));
+  for (const xir::Callee &c : m.requests) fns.push_back(externFunction(c));
   keepReferences(fns, "xb.module.requests");
 }
 
 bool CodeGen::finish(const xir::Function *start) {
   if (start) genEntry(*start);
+  std::vector<Constant *> stamps;
+  for (const std::string &s : requiredStamps_) stamps.push_back(cast<Constant>(mod_.getOrInsertGlobal(s, i8_)));
+  keepReferences(stamps, "xb.source.stamps");
   std::string err;
   raw_string_ostream os(err);
   if (verifyModule(mod_, &os)) {
@@ -891,12 +920,15 @@ void CodeGen::genModuleRegistration(const xir::Module &m) {
   }
   Value *statics = statics_ ? static_cast<Value *>(statics_) : ConstantPointerNull::get(ptrTy_);
   Constant *memvars = memvarTable_ ? static_cast<Constant *>(memvarTable_) : ConstantPointerNull::get(ptrTy_);
-  if (classTable_) b_.CreateCall(rtClassesRegister_, {classTable_, ConstantInt::get(i32_, m.classes.size())});
+  // The module's level (XB_LEVEL_PROGRAM in xbrt.h): the runtime's 0, a library's its own (setLibrary).
+  Constant *level = ConstantInt::get(i32_, runtimeLibrary_ ? 0 : library_.empty() ? XB_LEVEL_PROGRAM : libraryLevel_);
+  if (classTable_)
+    b_.CreateCall(rtClassesRegister_, {classTable_, ConstantInt::get(i32_, m.classes.size()), level});
   b_.CreateCall(rtModuleRegister_, {init, statics, ConstantInt::get(i32_, m.statics.size()), table,
                                     ConstantInt::get(i32_, m.initProcs.size()),
                                     ConstantInt::get(i32_, m.exitProcs.size()), symbolTable,
                                     ConstantInt::get(i32_, symbols.size()), memvars,
-                                    ConstantInt::get(i32_, memvars_.size())});
+                                    ConstantInt::get(i32_, memvars_.size()), level});
   b_.CreateRetVoid();
   appendToGlobalCtors(mod_, reg, 65535);
 }

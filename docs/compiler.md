@@ -23,6 +23,11 @@ module that calls a function of the runtime's sources `xbc` carries (`driver/Run
 too, as modules of the runtime with `std.ch` and the target's defines only, for its calls to inline
 ([xir.md](xir.md#passes)); they are not lowered.
 
+A project file (`xbc <name>.xbprj`) gives the sources and options of a program or a library, which `xbc` then links or
+archives (`--link`, `--library`, `--lib`, `-L`, `-l`, `--out-dir`: [projects.md](projects.md)); a library a module
+uses (`--lib`) gives it the declarations of its public functions (made from the module file, before the module's
+own).
+
 The default include directories (`defaultIncludeDirs`), searched after the `-I` ones: where the install puts the
 standard headers, by the path from `xbc`'s own folder to them (`XB_INCLUDE_FROM_BIN`, computed by the top-level
 `CMakeLists.txt`: `../include` in a Windows package, `../include/xbase` in a system's install, so that an installed
@@ -293,8 +298,9 @@ function always receives the reference, so `@` in a declaration without `NATIVE`
 |---|---|
 | `RESERVED` | the program cannot define a function of this name (Clipper's predefined functions) |
 | `CHECKED` | the argument count is checked at compile time, between the required and all parameters |
-| `NATIVE` | written in C to the xBase calling convention: the call goes to `xbf_NAME`; without it the declaration names an xBase function of another module (`xbp_NAME`) |
+| `NATIVE` | written in C to the xBase calling convention: the call goes to `xbf_NAME`; without it the declaration names an xBase function of another module (`xbp_NAME`), or of a library (`LIBRARY`) |
 | `ABBREV n` | calls may abbreviate the name to its first `n` or more letters (the keyword rule, `keywordMatches`) |
+| `LIBRARY name` | a public function of the xbase library `name` (`ExternDecl::library`, `xir::Callee::library`, `Request::library`): the call, the function reference and the `REQUEST` go to `xbx_NAME$FUNCTION` ([projects.md](projects.md)); the declarations a program gets from the libraries it uses are such; two declarations of one name for different libraries conflict; not with `NATIVE` |
 | `FOLD` | calls with constant arguments are evaluated at compile time (see [Constant folding](#constant-folding)) |
 | `RESULT letters` | the types a call that raises no error returns, as `ValType()` letters (`N`, `C`, `L`, `D`, ...; `ExternDecl::resultTypes`, `xir::Callee::resultTypes`): type inference counts them; since an error block may substitute a value of any type for a failed call, the result has those types only past a `subst.check` ([xir.md](xir.md#types)) |
 | `ARGS` | the function reads the arguments the function calling it received (`PCount()`): that function (or codeblock) keeps them in its frame (`FuncDecl::readsArgs`, `BlockExpr::readsArgs`, `xir::Function::readsArgs`; `args` in the xIR listing), as does one that runs a macro (`Sema::keepsArgs`) |

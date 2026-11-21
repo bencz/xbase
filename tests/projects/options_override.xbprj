@@ -1,0 +1,3 @@
+# Options the command line overrides (options_override.args).
+sources = options_override.prg
+options = -DFROM_OPTIONS=1

@@ -1,0 +1,3 @@
+# A program with the test library greet (which uses cli): built with -L<build>/tests/projects.
+sources = uses_greet.prg
+libs = greet

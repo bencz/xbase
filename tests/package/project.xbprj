@@ -1,0 +1,5 @@
+# The package test's program built by xbc from a project file and linked by xbc's link step with the package's runtime
+# and its cli library (tests/package/CMakeLists.txt).
+name = app
+sources = main.prg greet.prg project.prg
+libs = cli
