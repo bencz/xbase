@@ -286,20 +286,23 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
 - `specialize-calls`, on each function after its pipeline (then the pipeline again when it changed it): a call of a
   function of the module (a `FUNCTION`, `PROCEDURE` or method with parameters, not an `INIT` or `EXIT` procedure, a body
   versioned for references, one that reads its arguments as received (`PCount()`, `PValue()`, `...`), a generator, an
-  `ASYNC` function, nor one that makes codeblocks or has unwind blocks; at most 2000 instructions) that passes no
-  reference nor `...` and whose arguments the type inference finds all integers, else all numbers, all logicals or all
-  dates for some parameter (an argument with no type at all, the result of a call that never returns, takes the
-  integers: no value of it reaches the call), or objects of one class `ClassInfo` knows, goes to a copy of the function
-  typed for them (`NAME.typedN`, shown on the call stack as the function: `stackName`). A function has at most 4 copies
-  of each kind (`kMaxCopies`: those that know every parameter, its types or its object's class, and those that leave
-  some parameter of any type); past that, a call goes to the copy made already whose parameters take its arguments with
-  the fewest types (the first made of those), else to the function itself. The copy's parameters have those types and
-  classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes keeps any type and class; a
-  method's copy, its Self of a known class, resolves the sends to Self), its versioning test is false (no call of it
-  passes a reference) and its body versioned for references goes. The copy is made once per function and parameter
-  types, optimized at once (its own calls with such arguments go to it, so a recursive function calls its copy), and
-  its return types are the least fixed point of what its `RETURN`s give with its calls of itself giving the types found
-  so far, from none (`settleReturnTypes`). `Fib( n - 1 ) + Fib( n - 2 )` then computes with numbers in registers.
+  `ASYNC` function, nor one that makes codeblocks or has unwind blocks; at most 2000 instructions, and past 300 only
+  when a value its parameters give, through what is computed from it and the variables and block parameters it goes to,
+  is used in a loop: elsewhere knowing their types pays little and the copy doubles the code generator's work,
+  `paramsReachLoops`) that passes no reference nor `...` and whose arguments the type inference finds all integers, else
+  all numbers, all logicals or all dates for some parameter (an argument with no type at all, the result of a call that
+  never returns, takes the integers: no value of it reaches the call), or objects of one class `ClassInfo` knows, goes
+  to a copy of the function typed for them (`NAME.typedN`, shown on the call stack as the function: `stackName`). A
+  function has at most 4 copies of each kind (`kMaxCopies`: those that know every parameter, its types or its object's
+  class, and those that leave some parameter of any type); past that, a call goes to the copy made already whose
+  parameters take its arguments with the fewest types (the first made of those), else to the function itself. The copy's
+  parameters have those types and classes (`Function::paramTypes`, `Function::paramClasses`; a parameter the body writes
+  keeps any type and class; a method's copy, its Self of a known class, resolves the sends to Self), its versioning test
+  is false (no call of it passes a reference) and its body versioned for references goes. The copy is made once per
+  function and parameter types, optimized at once (its own calls with such arguments go to it, so a recursive function
+  calls its copy), and its return types are the least fixed point of what its `RETURN`s give with its calls of itself
+  giving the types found so far, from none (`settleReturnTypes`). `Fib( n - 1 ) + Fib( n - 2 )` then computes with
+  numbers in registers.
 
   Settled one at a time, a copy that calls another copy sees its result of any type while that one is being optimized,
   and a result passed to a call, `Ack( m - 1, Ack( m, n - 1 ) )`, then goes to the function itself, whose result is of

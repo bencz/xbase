@@ -158,3 +158,13 @@ xb_str *xb_str_add(xb_ctx *ctx, const xb_str *a, const xb_str *b) {
   size_t len = a->len + b->len; /* two lengths of strings never wrap (XB_STR_MAX_LEN) */
   return len < XB_STR_VIEW_MIN ? concat_short(a, b, len) : add_long(ctx, a, b);
 }
+
+uint32_t xb_str_hash(xb_str *s) {
+  int growing = (s->flags & XB_STR_APPEND) != 0;
+  /* Threads may compute it at once: each stores the same value, atomically. */
+  uint32_t known = growing ? 0 : xb_atomic_load32(&s->hash, XB_RELAXED);
+  if (known) return known;
+  uint32_t v = xb_hash_bytes(xb_str_data(s), s->len);
+  if (!growing && !(s->flags & XB_STR_STATIC)) xb_atomic_store32(&s->hash, v, XB_RELAXED); /* strings are immutable */
+  return v;
+}

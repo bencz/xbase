@@ -33,6 +33,9 @@ constexpr TypeSet kClasses[] = {kIntType, kNumberTypes, typeBit(XB_T_LOGICAL), t
 // class, and those that leave some parameter of any type), each of at most this many instructions.
 constexpr size_t kMaxCopies = 4;
 constexpr size_t kMaxInstructions = 2000;
+// A function of more instructions than this is copied only when a value its parameters give is used in a loop, where
+// knowing their types pays: elsewhere the copy would double the work of the code generator for little.
+constexpr size_t kSmallInstructions = 300;
 
 // Rounds of refineCopies at most: each one grows some copy's return types or moves some call, which the number of
 // copies and of types bound; past them the copies stay as the pipeline left them.
@@ -52,6 +55,38 @@ TypeSet classOf(TypeSet t) {
   return kAnyType;
 }
 
+// Whether a value parameter k of `g` gives (it, what is computed from it, a variable or block parameter it goes to) is
+// used inside a loop of `g`.
+bool paramsReachLoops(const Function &g) {
+  CFG cfg(g);
+  Loops loops(cfg);
+  std::vector<const Value *> work;
+  std::unordered_set<const Value *> seen;
+  std::unordered_set<const Var *> vars;
+  auto add = [&](const Value *v) {
+    if (seen.insert(v).second) work.push_back(v);
+  };
+  for (auto &b : g.blocks)
+    for (auto &i : b->insts)
+      if (i->op == Op::Load && isParameter(i->var)) add(i.get());
+  while (!work.empty()) {
+    const Value *v = work.back();
+    work.pop_back();
+    for (const Instruction *u : v->users()) {
+      if (loops.innermost(u->parent)) return true;
+      if (u->op == Op::Store && u->var && vars.insert(u->var).second)
+        for (auto &b : g.blocks)
+          for (auto &i : b->insts)
+            if (i->op == Op::Load && i->var == u->var) add(i.get());
+      for (const Target &t : u->targets)
+        for (size_t k = 0; k < t.args.size(); ++k)
+          if (t.args[k] == v) add(t.block->params[k].get());
+      if (u->type() == Type::Item) add(u);
+    }
+  }
+  return false;
+}
+
 // A function whose copy behaves as it does: a FUNCTION, PROCEDURE or method of the program, not one that reads
 // its arguments as received (PCount(), PValue(), `...`), nor a generator or an ASYNC function (made by a resume
 // function), nor one that makes codeblocks (which would share their function with the copy) or recovers from errors.
@@ -66,7 +101,7 @@ bool copyable(const Function &g) {
           isSuspension(i->op) || i->op == Op::ArgsRest)
         return false;
   }
-  return true;
+  return instructionCount(g) <= kSmallInstructions || paramsReachLoops(g);
 }
 
 // A call that may go to a copy of `g` (its callee, or the function its callee is a copy of): no `...`, no reference.

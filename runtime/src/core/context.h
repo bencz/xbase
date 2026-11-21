@@ -116,12 +116,12 @@ struct xb_ctx {
    * error_trapped to its generic code (never 0). */
   uint32_t error_trap;
   int32_t  error_trapped;
-  /* Macros compiled lately (macro/run.c): per entry, chosen by a hash of the
-   * text, the text and its compiled function (roots of the collector), and
-   * what the text was compiled as (mgoal). The compiled function depends on
-   * the text alone, so the cache is the thread's. */
+  /* Macros compiled lately (macro/run.c): per entry, in a set of two a hash of the text chooses, the text and its
+   * compiled function (roots of the collector), and what the text was compiled as (mgoal); per set, the entry the next
+   * text takes. The compiled function depends on the text alone, so the cache is the thread's. */
   xb_item  macro_cache[2 * XB_MACRO_CACHE];
   uint8_t  macro_cache_goal[XB_MACRO_CACHE];
+  uint8_t  macro_cache_next[XB_MACRO_CACHE / 2];
   /* Names of memory variables the thread used lately by their text (core/memvar.c, xb_memvar_use): per entry, chosen
    * by a hash of the name, its number (UINT32_MAX: none), which the context holds, and the operations using it now. */
   uint32_t nameIds[XB_NAME_CACHE];

@@ -946,7 +946,11 @@ the `xb_macro_*` entry points in `xbrt.h`, see [compiler.md](compiler.md#grammar
   of its own, which ends its PRIVATEs.
 - What a text compiles to depends on the text alone (the symbol table is complete before the program runs, names keep
   their numbers), so each thread context keeps the last texts compiled and their functions (`xb_ctx.macro_cache`, 64
-  entries chosen by a hash of the text, roots of the collector): a macro in a loop is compiled once.
+  entries in sets of two, the set chosen by the text's hash, which the string keeps once computed, `xb_str_hash`; a
+  text found in its set makes the other entry the one the next text takes; roots of the collector): a macro in a loop
+  is compiled once. The evaluator computes an integer sum, difference or product that does not overflow, and a
+  comparison of two integers, in place, by the rules of constant folding at run time (`xb_fold_numbers`,
+  `xb_fold_compare`); any other case calls the operator.
 - Before it is compiled, the text goes through Clipper's text substitution, as a string literal with `&name` does
   (`xb_macro_text`): each `&name` or `&name.` whose name is a memory variable holding a string becomes that string, and
   the scan goes on at the start of what was inserted, so a name may run on past its end (`c := "&d"` then `&c`

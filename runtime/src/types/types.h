@@ -6,7 +6,10 @@
 #include "core/shared.h"
 
 /* Uninitialized string of `len` bytes (plus the terminating NUL). */
-xb_str *xb_str_alloc(uint64_t len); /* 64-bit: checked before it is narrowed to size_t (32-bit hosts) */
+xb_str *xb_str_alloc(uint64_t len);
+/* xb_hash_bytes of the string's bytes, computed once: kept in `hash` (literals carry theirs; a string an append grows
+ * keeps its room there, and is hashed each time). */
+uint32_t xb_str_hash(xb_str *s); /* 64-bit: checked before it is narrowed to size_t (32-bit hosts) */
 /* The same for a length the program chose: NULL when there is no memory for it (xb_gc_try_alloc). */
 xb_str *xb_str_try_alloc(uint64_t len);
 /* An appending `+` (xb_op_add_grow) whose result is shorter than this gives a plain string, copied whole: up to this

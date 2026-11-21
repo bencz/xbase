@@ -14,6 +14,26 @@ static uint32_t word(const unsigned char **pc) {
   return w;
 }
 
+/* `x op y` of two integers into *r, as the operator makes it (the folding's rules at run time), when it is an integer
+ * sum, difference or product, or a comparison: 0 for any other case, which the operator's function takes. */
+static int int_binary(uint32_t op, const xb_item *x, const xb_item *y, xb_item *r) {
+  static const int arith[] = {[MB_ADD] = XB_FOLD_ADD + 1, [MB_SUB] = XB_FOLD_SUB + 1, [MB_MUL] = XB_FOLD_MUL + 1};
+  static const int cmp[] = {[MB_EQ] = XB_FOLD_EQ + 1, [MB_EXACTEQ] = XB_FOLD_EQ + 1, [MB_NE] = XB_FOLD_NE + 1,
+                            [MB_LT] = XB_FOLD_LT + 1, [MB_LE] = XB_FOLD_LE + 1,     [MB_GT] = XB_FOLD_GT + 1,
+                            [MB_GE] = XB_FOLD_GE + 1};
+  if (op < sizeof arith / sizeof arith[0] && arith[op]) {
+    xb_folded a = xb_folded_int(x->v.i, 1), b = xb_folded_int(y->v.i, 1), v;
+    if (!xb_fold_numbers((xb_fold_op)(arith[op] - 1), &a, &b, 1, &v) || !v.is_int) return 0;
+    xb_set_int(r, v.i);
+    return 1;
+  }
+  if (op < sizeof cmp / sizeof cmp[0] && cmp[op]) {
+    xb_set_logical(r, xb_fold_compare((xb_fold_cmp)(cmp[op] - 1), (x->v.i > y->v.i) - (x->v.i < y->v.i)));
+    return 1;
+  }
+  return 0;
+}
+
 /* The memory variable numbered `id` (held, or permanent), as compiled code names one. */
 static xb_memvar memvar_of(uint32_t id) {
   size_t len;
@@ -250,6 +270,10 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
         [MB_BITOR] = xb_op_bitor,   [MB_BITXOR] = xb_op_bitxor, [MB_SHL] = xb_op_shl,       [MB_SHR] = xb_op_shr,
       };
       uint32_t b = word(&pc);
+      if (s[sp - 1].type == XB_T_INT && s[sp].type == XB_T_INT && int_binary(b, &s[sp - 1], &s[sp], &s[sp - 1])) {
+        --sp;
+        break;
+      }
       xb_set_nil(r);
       binary[b](ctx, r, &s[sp - 1], &s[sp]);
       s[--sp] = *r;
@@ -510,20 +534,29 @@ static int compile(xb_ctx *ctx, xb_item *code, xb_item *result, const xb_item *t
   xb_item substituted; /* first, as in Clipper */
   xb_macro_text(ctx, &substituted, text);
   xb_gc_root_push(ctx, &substituted);
-  const xb_str *s = substituted.v.s;
-  uint32_t slot = (xb_hash_bytes(xb_str_data(s), s->len) + (uint32_t)goal) % XB_MACRO_CACHE;
-  xb_item *key = &ctx->macro_cache[2 * slot], *cached = key + 1;
+  xb_str *s = substituted.v.s;
+  uint32_t set = (xb_str_hash(s) + (uint32_t)goal) % (XB_MACRO_CACHE / 2);
   int ok = 1;
-  if (key->type == XB_T_STRING && ctx->macro_cache_goal[slot] == goal && key->v.s->len == s->len &&
-      memcmp(xb_str_data(key->v.s), xb_str_data(s), s->len) == 0) {
-    *code = *cached;
-  } else if (xb_macro_compile(ctx, code, xb_str_data(s), s->len, goal) & XB_MACRO_SYNTAX) {
+  for (uint32_t way = 0; way < 2; ++way) {
+    uint32_t slot = 2 * set + way;
+    const xb_item *key = &ctx->macro_cache[2 * slot];
+    if (key->type == XB_T_STRING && ctx->macro_cache_goal[slot] == goal &&
+        (key->v.s == s || (key->v.s->len == s->len && memcmp(xb_str_data(key->v.s), xb_str_data(s), s->len) == 0))) {
+      *code = key[1];
+      ctx->macro_cache_next[set] = (uint8_t)(way ^ 1); /* the other one is the older */
+      xb_gc_root_pop(ctx, 1);
+      return 1;
+    }
+  }
+  if (xb_macro_compile(ctx, code, xb_str_data(s), s->len, goal) & XB_MACRO_SYNTAX) {
     syntax_error(ctx, result, text);
     ok = 0;
-  } else {
-    *key = substituted;
-    *cached = *code;
+  } else { /* into the set's entry used longer ago, which the newer becomes */
+    uint32_t slot = 2 * set + ctx->macro_cache_next[set];
+    ctx->macro_cache[2 * slot] = substituted;
+    ctx->macro_cache[2 * slot + 1] = *code;
     ctx->macro_cache_goal[slot] = (uint8_t)goal;
+    ctx->macro_cache_next[set] ^= 1;
   }
   xb_gc_root_pop(ctx, 1);
   return ok;
