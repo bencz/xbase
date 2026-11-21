@@ -315,6 +315,7 @@ private:
 
   // runtime entry points
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_, rtStackOverflow_, rtStackDeep_;
+  llvm::FunctionCallee rtStrLeft_, rtStrRight_, rtStrSub_; // typed substrings: xb_str_left, ... (xbrt.h)
   llvm::FunctionCallee rtInc_, rtDec_, rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_,
       rtPendingGc_;
   llvm::FunctionCallee rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_;

@@ -16,10 +16,31 @@ static int64_t num_arg(const xb_item *argv, uint32_t argc, uint32_t i, int64_t d
 
 static void ret_str(xb_item *ret, const char *p, size_t n) { xb_set_str(ret, xb_str_new(p, n)); }
 
-/* Returns `s` itself when the result is the whole string. */
+/* The bytes from `from` of `s`, `n` of them: `s` itself when that is all of it. */
+static xb_str *part(xb_str *s, size_t from, size_t n) {
+  return from == 0 && n == s->len ? s : xb_str_new(xb_str_data(s) + from, n);
+}
+
+/* A part of the string `whole` holds: the item itself when it is all of it (a memo field's value stays one). */
+static void ret_result(xb_item *ret, const xb_item *whole, xb_str *r) {
+  if (r == whole->v.s) *ret = *whole;
+  else xb_set_str(ret, r);
+}
+
 static void ret_part(xb_item *ret, const xb_item *whole, size_t from, size_t n) {
-  if (from == 0 && n == whole->v.s->len) *ret = *whole;
-  else ret_str(ret, xb_str_data(whole->v.s) + from, n);
+  ret_result(ret, whole, part(whole->v.s, from, n));
+}
+
+xb_str *xb_str_left(xb_str *s, int64_t n) { return part(s, 0, xb_take_count(n, s->len)); }
+
+xb_str *xb_str_right(xb_str *s, int64_t n) {
+  size_t take = xb_take_count(n, s->len);
+  return part(s, s->len - take, take);
+}
+
+xb_str *xb_str_sub(xb_str *s, int64_t start, int has_count, int64_t count) {
+  int64_t first, n = xb_substr_range((int64_t)s->len, start, has_count, count, &first);
+  return n ? part(s, (size_t)first, (size_t)n) : xb_str_new("", 0);
 }
 
 /* SubStr( c, nStart [, nCount] ) of `len` units (bytes or characters): xb_substr_range. */
@@ -34,15 +55,15 @@ static void substr(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, int 
     xb_fn_arg_error(ctx, ret, code, fn, argc, argv);
     return;
   }
-  const xb_codepage *cp = xb_codepage_of(ctx);
-  int64_t first, n = substr_range(chars ? (int64_t)xb_cp_count(cp, xb_str_data(s), s->len) : (int64_t)s->len, argc,
-                                   argv, &first);
-  if (n == 0) {
-    ret_str(ret, "", 0);
+  if (!chars) {
+    int64_t count = argc > 2 ? xb_num_to_i64(&argv[2]) : 0;
+    ret_result(ret, &argv[0], xb_str_sub(argv[0].v.s, xb_num_to_i64(&argv[1]), argc > 2, count));
     return;
   }
-  if (!chars) {
-    ret_part(ret, &argv[0], (size_t)first, (size_t)n);
+  const xb_codepage *cp = xb_codepage_of(ctx);
+  int64_t first, n = substr_range((int64_t)xb_cp_count(cp, xb_str_data(s), s->len), argc, argv, &first);
+  if (n == 0) {
+    ret_str(ret, "", 0);
     return;
   }
   size_t from = xb_cp_offset(cp, xb_str_data(s), s->len, (size_t)first);
@@ -64,17 +85,17 @@ static void left_right(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, 
     return;
   }
   int64_t n = xb_num_to_i64(&argv[1]);
+  if (!chars) {
+    ret_result(ret, &argv[0], right ? xb_str_right(argv[0].v.s, n) : xb_str_left(argv[0].v.s, n));
+    return;
+  }
   if (n <= 0) {
     ret_str(ret, "", 0);
     return;
   }
   const xb_codepage *cp = xb_codepage_of(ctx);
-  size_t units = chars ? xb_cp_count(cp, xb_str_data(s), s->len) : s->len;
+  size_t units = xb_cp_count(cp, xb_str_data(s), s->len);
   size_t take = xb_take_count(n, units);
-  if (!chars) {
-    ret_part(ret, &argv[0], right ? s->len - take : 0, take);
-    return;
-  }
   size_t from = right ? xb_cp_offset(cp, xb_str_data(s), s->len, units - take) : 0;
   ret_part(ret, &argv[0], from, right ? s->len - from : xb_cp_offset(cp, xb_str_data(s), s->len, take));
 }

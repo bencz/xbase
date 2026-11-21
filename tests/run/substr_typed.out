@@ -1,0 +1,6 @@
+
+[||abcdefghij|abc][||hij|hij][||j|j][||abcdefghij|abc][a|j|abcdefghij|abc][ab|ij|bcdefghij|bcd][abcde|fghij|efghij|efg][abcdefghi|bcdefghij|ij|ij][abcdefghij|abcdefghij|j|j][abcdefghij|abcdefghij||][abcdefghij|abcdefghij||]
+ab hij bc ij  []
+.T. .T. .T. .T.
+loop:     109908
+memo: MMMMCC memo text

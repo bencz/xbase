@@ -25,7 +25,8 @@ namespace xb {
 namespace {
 
 enum class Inline {
-  None, Len, Asc, Chr, SubStr, PCount, PValue, Int, ValType, Abs, Max, Min, Round, Sqrt, Exp, Log, Mod
+  None, Len, Asc, Chr, SubStr, SubStrFrom, Left, Right, PCount, PValue, Int, ValType, Abs, Max, Min, Round, Sqrt, Exp,
+  Log, Mod
 };
 
 // The powers of ten Round() scales by, exact as doubles up to 10^22 (pow( 10, n ) gives the same).
@@ -40,6 +41,7 @@ Inline inlineKind(const xir::Instruction &i) {
   } table[] = {
       {"LEN", 1, Inline::Len},       {"ASC", 1, Inline::Asc},          {"CHR", 1, Inline::Chr},
       {"SUBSTR", 3, Inline::SubStr}, {"PCOUNT", 0, Inline::PCount}, {"PVALUE", 1, Inline::PValue},
+      {"SUBSTR", 2, Inline::SubStrFrom}, {"LEFT", 2, Inline::Left}, {"RIGHT", 2, Inline::Right},
       {"INT", 1, Inline::Int},       {"VALTYPE", 1, Inline::ValType}, {"ABS", 1, Inline::Abs},
       {"MAX", 2, Inline::Max},       {"MIN", 2, Inline::Min},          {"ROUND", 2, Inline::Round},
       {"SQRT", 1, Inline::Sqrt},     {"EXP", 1, Inline::Exp},          {"LOG", 1, Inline::Log},
@@ -394,6 +396,8 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
   auto arg = [&](unsigned n) { return addr(i.operand(n)); }; // read in place: the argument group is for the call
   auto argType = [&](unsigned n) { return typeOf(i.operand(n), arg(n)); };
   auto isType = [&](Value *type, uint32_t tag) { return b_.CreateICmpEQ(type, ConstantInt::get(i32_, tag)); };
+  // A string with no width of its own: not a memo field's value, which a result of all of it keeps (the function's)
+  auto plainString = [&](Value *item) { return b_.CreateICmpEQ(loadHeader(item), headerWord(XB_T_STRING, 0, 0)); };
   BasicBlock *slow = newBlock("call"), *join = newBlock("join");
   switch (kind) {
   case Inline::Len: {
@@ -457,11 +461,33 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     Value *s = itemPointer(arg(0), "str");
     Value *pos = b_.CreateSub(numberAsInteger(arg(1), nType), ConstantInt::get(i64_, 1));
     Value *one = b_.CreateICmpEQ(numberAsInteger(arg(2), countType), ConstantInt::get(i64_, 1));
-    branchLikely(b_.CreateAnd(one, b_.CreateICmpULT(pos, strLength(s))), fast, slow);
+    BasicBlock *other = asc ? slow : newBlock("substr.other"), *typed = asc ? slow : newBlock("substr.typed");
+    branchLikely(b_.CreateAnd(one, b_.CreateICmpULT(pos, strLength(s))), fast, other);
     b_.SetInsertPoint(fast);
     Value *byte = strByte(s, pos);
     if (asc) storeInt(ascDest, byte);
     else storeTagged(d, XB_T_STRING, byteString(byte));
+    if (!asc) { // another count, or a position outside: the bytes, through the typed entry (a plain string's)
+      b_.CreateBr(join);
+      b_.SetInsertPoint(other);
+      branchLikely(plainString(arg(0)), typed, slow);
+      b_.SetInsertPoint(typed);
+      Value *count = numberAsInteger(arg(2), countType);
+      storeTagged(d, XB_T_STRING, b_.CreateCall(rtStrSub_, {s, numberAsInteger(arg(1), nType), b_.getInt32(1), count}));
+    }
+    break;
+  }
+  case Inline::SubStrFrom: // SubStr( c, n ), Left( c, n ), Right( c, n ) of a plain string (a memo field's value keeps
+  case Inline::Left:       // its item when the result is all of it: the function's) and a number: the typed entry
+  case Inline::Right: {
+    BasicBlock *fast = newBlock("substring");
+    Value *nType = argType(1);
+    branchLikely(b_.CreateAnd(plainString(arg(0)), isNumberType(nType)), fast, slow);
+    b_.SetInsertPoint(fast);
+    Value *s = itemPointer(arg(0), "str"), *n = numberAsInteger(arg(1), nType), *r;
+    if (kind == Inline::SubStrFrom) r = b_.CreateCall(rtStrSub_, {s, n, b_.getInt32(0), ConstantInt::get(i64_, 0)});
+    else r = b_.CreateCall(kind == Inline::Left ? rtStrLeft_ : rtStrRight_, {s, n});
+    storeTagged(d, XB_T_STRING, r);
     break;
   }
   case Inline::PCount: { // the function's own count (the slow path is never taken); a method always has Self

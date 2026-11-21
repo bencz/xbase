@@ -29,20 +29,22 @@ typedef struct xb_item {
   zero.
 - The heap types (`STRING` to `HASH`) are one range of tags (`XB_T_HEAP_FIRST`, `XB_T_HEAP_LAST`, `xb_type_is_heap`):
   an item of another type refers to no object, so the collector need not see it.
-- Strings (`xb_str`: flags, hash, length, bytes) are immutable, so they can be shared between items and threads. A
-  plain string's bytes follow its header (the member `bytes`) and are NUL-terminated. A view (the flag `XB_STR_VIEW`)
-  holds there instead the address of a buffer (`xb_strbuf` in `xbrt.h`: its room `cap`, its tip `used`, its bytes), a
-  heap object of its own: the view's bytes are the buffer's first `len` ones, which a longer view of the same buffer may
-  go on past, so they are not NUL-terminated. C code never names the member: it reads a string's bytes through
+- Strings (`xb_str`: flags, hash, length, bytes) are immutable, so they can be shared between items and threads. A plain
+  string's bytes follow its header (the member `bytes`) and are NUL-terminated. A view (the flag `XB_STR_VIEW`) holds
+  there instead the address of a buffer (`xb_strbuf` in `xbrt.h`: its room `cap`, its tip `used`, its bytes), a heap
+  object of its own: the view's bytes are the buffer's first `len` ones, which a longer view of the same buffer may go
+  on past, so they are not NUL-terminated. C code never names the member: it reads a string's bytes through
   `xb_str_data` (a test of the flag, then the header's bytes or the buffer's) and writes those of a string it has just
-  allocated and not yet shared, or of one only its variable sees (`XB_STR_APPEND`, below), through `xb_str_buffer`
-  (both in `xbrt.h`); code that hands them to something that reads up to a NUL (a path for the system, `GetEnv()`'s
-  name, `RUN`'s command line, `Do()`'s function name, a name in an error's text, `strlen`) takes them through
-  `xb_item_cstr` (`types/types.h`), which first replaces a view in the item, a root, with a plain copy of the same
-  text. Literals emitted by the compiler carry `XB_STR_STATIC` and are not heap objects, nor are the empty string and
-  the 256 strings of one byte (`xb_str_bytes` in `xbrt.h`): `xb_str_new` and `xb_str_concat` return those for results
-  of up to one byte (`Chr()`, `SubStr( c, n, 1 )`, ...), so making one allocates nothing, and compiled code takes them
-  from the table too.
+  allocated and not yet shared, or of one only its variable sees (`XB_STR_APPEND`, below), through `xb_str_buffer` (both
+  in `xbrt.h`); code that hands them to something that reads up to a NUL (a path for the system, `GetEnv()`'s name,
+  `RUN`'s command line, `Do()`'s function name, a name in an error's text, `strlen`) takes them through `xb_item_cstr`
+  (`types/types.h`), which first replaces a view in the item, a root, with a plain copy of the same text. Literals
+  emitted by the compiler carry `XB_STR_STATIC` and are not heap objects, nor are the empty string and the 256 strings
+  of one byte (`xb_str_bytes` in `xbrt.h`): `xb_str_new` and `xb_str_concat` return those for results of up to one byte
+  (`Chr()`, `SubStr( c, n, 1 )`, ...), so making one allocates nothing, and compiled code takes them from the table too.
+  `Left()`, `Right()` and `SubStr()` in bytes are `xb_str_left`, `xb_str_right` and `xb_str_sub` (`rtl/strings.c`), of a
+  string and integers, which raise no error: the functions call them, and so does compiled code that knows its
+  arguments' types.
 - A string `+` gives a plain string of the exact size (`xb_str_concat`), unless it appends: its result goes back where
   its left operand came from, `x += y` or `x := x + y + ...` written out on the same variable, element (an index that is
   the same variable or literal) or instance variable, which the compiler marks (`grows` in

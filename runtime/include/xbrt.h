@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 56u
+#define XB_ABI_VERSION 57u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -937,6 +937,13 @@ extern const xb_str1 xb_str_bytes[256];
  * up to one byte), and the concatenation of two. */
 xb_str  *xb_str_new(const char *p, size_t len);
 xb_str  *xb_str_concat(const xb_str *a, const xb_str *b);
+/* [ABI] Left( s, n ), Right( s, n ) and SubStr( s, start [, count] ) in bytes, of a string and numbers already taken
+ * as integers (xb_num_to_i64): `s` itself when the result is all of it, else a new string (the shared one for up to
+ * a byte). They raise no error: compiled code that knows its arguments' types calls them in place of the functions,
+ * which call them too (rtl/strings.c). */
+xb_str  *xb_str_left(xb_str *s, int64_t n);
+xb_str  *xb_str_right(xb_str *s, int64_t n);
+xb_str  *xb_str_sub(xb_str *s, int64_t start, int has_count, int64_t count);
 
 /* [ABI] Items are written as two 8-byte words, the header (type, width,
  * decimals) and the value, by the runtime and by compiled code alike: a load
