@@ -177,4 +177,5 @@ installed (`hbmk2 -gc3`, its C output compiled with `-O2` as `xbc -O2`, its clas
 line, its CA-Tools library linked for the math functions, its threaded runtime for the programs that run threads;
 `bench/compat.ch` gives `ElapsedMs()` from `Date()` and `Seconds()` for it), C with `gcc -O2`, Rust with `rustc -C
 opt-level=2`, C# in Release, Python with `-B` (no compiled files beside the sources). The programs run in
-`<build>/compare/run`, under a memory limit and the time limit (`-t`/`-Limit`). The README shows its table.
+`<build>/compare/run`, under a memory limit (`compare.sh`: 16 GB of address space; C# with a 4 GB heap, whose
+collector would otherwise reserve 8 GB of addresses) and the time limit (`-t`/`-Limit`). The README shows its table.

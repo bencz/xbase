@@ -144,7 +144,8 @@ command_of() {
       rustc -C opt-level=2 -o "$OUT/rust-$b" "bench/rust/$b.rs" 2>/dev/null && { echo "$OUT/rust-$b"; return; } ;;
     csharp)
       grep -q "case \"$b\"" bench/csharp/Program.cs || return
-      [ -n "${BUILT[csharp]}" ] && { echo "$OUT/csharp/Bench $b"; return; } ;;
+      # its collector reserves 8 GB of address space by default, past the run's limit (measure): a 4 GB heap
+      [ -n "${BUILT[csharp]}" ] && { echo "env DOTNET_GCHeapHardLimit=0x100000000 $OUT/csharp/Bench $b"; return; } ;;
     java)
       [ -n "${JAVA[$b]:-}" ] || return
       [ -n "${BUILT[java]}" ] && { echo "java -cp $OUT/java ${JAVA[$b]}"; return; } ;;
