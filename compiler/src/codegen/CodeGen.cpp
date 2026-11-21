@@ -995,13 +995,15 @@ void CodeGen::storeWords(Value *dst, Value *header, Value *payload) {
   tag(b_.CreateAlignedStore(payload, b_.CreateStructGEP(itemTy_, dst, FValue), itemAlign_), m);
 }
 
-// Between items in memory the value word moves as a vector of two 32-bit
-// integers (bit for bit, on any target): code generation merges a pair of
-// accesses of one type into a single 16-byte one, which then spans the two
-// stores that wrote the item and cannot be forwarded from them. A Local item
-// becomes registers, where the word keeps its integer type. A literal's words
-// are constants, stored as such: a choice between two literals is then one of
-// constants, not of loads (which code generation would turn into branches).
+// Between items in memory the value word is read by an unordered atomic load
+// (a plain load on every target): code generation merges a pair of simple
+// loads of consecutive words into a single 16-byte one, which then spans the
+// two stores that usually wrote the item and cannot be forwarded from them
+// (the load waits for the stores to reach the cache: spectral_norm 6% faster,
+// linked_list 4.6%, matmul 2.3% slower, its loads otherwise simplified). A
+// Local item becomes registers. A literal's words are constants, stored as
+// such: a choice between two literals is then one of constants, not of loads
+// (which code generation would turn into branches).
 void CodeGen::copyItem(Value *dst, Value *src) {
   if (dst == src) return;
   if (auto lit = literalWords_.find(src); lit != literalWords_.end()) {
@@ -1009,10 +1011,10 @@ void CodeGen::copyItem(Value *dst, Value *src) {
     return;
   }
   bool registers = localItems_.count(dst) || localItems_.count(src);
-  Type *word = registers ? static_cast<Type *>(i64_) : FixedVectorType::get(i32_, 2);
   Mem m = itemMemory(src);
   Value *header = tag(b_.CreateAlignedLoad(i64_, src, itemAlign_), m);
-  Value *payload = tag(b_.CreateAlignedLoad(word, b_.CreateStructGEP(itemTy_, src, FValue), itemAlign_), m);
+  LoadInst *payload = tag(b_.CreateAlignedLoad(i64_, b_.CreateStructGEP(itemTy_, src, FValue), itemAlign_), m);
+  if (!registers) payload->setAtomic(AtomicOrdering::Unordered); // not merged with the header's: a plain load
   storeWords(dst, header, payload);
 }
 

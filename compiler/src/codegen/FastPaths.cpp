@@ -103,16 +103,16 @@ static Intrinsic::ID overflowIntrinsic(BinOp op) {
   }
 }
 
-// The comparisons of a block whose only use is the truth test right after
-// them: the test takes the comparison's boolean, without the logical item in
-// between. Found once per block, before its instructions are lowered.
+// The comparisons and element reads of a block whose only use is the truth test right after them: the test takes the
+// comparison's boolean, or the logical a compact element holds, without the logical item in between (its slot is
+// written on the other paths only). Found once per block, before its instructions are lowered.
 void CodeGen::findFusedComparisons(const xir::BasicBlock &b) {
   fusedComparisons_.clear();
   for (size_t k = 0; k + 1 < b.insts.size(); ++k) {
     const xir::Instruction &i = *b.insts[k], &next = *b.insts[k + 1];
     xir::IntPred pred;
-    if (i.op == xir::Op::Binary && intPredicate(i.binop, pred) && i.hasOneUse() && i.users().front() == &next &&
-        next.op == xir::Op::Truth)
+    bool fusable = (i.op == xir::Op::Binary && intPredicate(i.binop, pred)) || i.op == xir::Op::Index;
+    if (fusable && i.hasOneUse() && i.users().front() == &next && next.op == xir::Op::Truth)
       fusedComparisons_.insert(&i);
   }
 }
@@ -785,19 +785,30 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
   Value *base = addr(i.operand(0)), *idx = addr(i.operand(1)), *d = dest(i);
   BasicBlock *slow = newBlock("index.call"), *join = newBlock("index.end"), *items = newBlock("index.items");
   Value *array, *pos, *state;
-  bool rows = onlyIndexed(i), logical = readAsLogical(i);
+  bool rows = onlyIndexed(i), logical = readAsLogical(i), fused = fusedComparisons_.count(&i) != 0;
   BasicBlock *compact = rows ? nullptr : newBlock("index.compact");
+  std::vector<std::pair<Value *, BasicBlock *>> bools; // fused: the truth test's answer on each path
+  auto test = [&] { // the item read into d, tested as the truth test would
+    if (fused) bools.push_back({testTruth(d, unwind_, typeOf(&i, d)), b_.GetInsertBlock()});
+  };
   // base and idx are read before d is written
   inlineIndex(i, base, idx, slow, items, compact, logical ? XB_ELEMS_LOGICAL : XB_ELEMS_INT, array, pos, state);
   b_.SetInsertPoint(items);
   copyItem(d, arrayElement(array, pos));
+  test();
   b_.CreateBr(join);
-  if (!rows) emitCompactRead(logical, d, array, pos, compact, slow, join);
+  if (!rows) emitCompactRead(logical, fused ? nullptr : d, array, pos, compact, slow, join, fused ? &bools : nullptr);
   b_.SetInsertPoint(slow);
   callItemOp(rtIndex_, d, {base, idx});
   checkPending(unwind_);
+  test();
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
+  if (fused) {
+    PHINode *phi = b_.CreatePHI(b_.getInt1Ty(), (unsigned)bools.size(), "elem.true");
+    for (auto &[v, from] : bools) phi->addIncoming(v, from);
+    fusedTruth_[i.users().front()] = phi;
+  }
 }
 
 // The path of a read of an array of a compact form, from block `compact` into `d`, then to `join`: one form inline,
@@ -806,14 +817,16 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
 // NILs (a new one, which its first store gives a form), and a NIL among logicals or integers (0, XB_ELEMS_INT_NIL),
 // rare where speed counts, so that the inline path gives a value of one type.
 void CodeGen::emitCompactRead(bool logical, Value *d, Value *array, Value *pos, BasicBlock *compact, BasicBlock *slow,
-                              BasicBlock *join) {
+                              BasicBlock *join, std::vector<std::pair<Value *, BasicBlock *>> *bools) {
   BasicBlock *one = newBlock("index.compact.one");
   b_.SetInsertPoint(compact);
   if (logical) {
     Value *byte = tag(b_.CreateLoad(i8_, compactElement(array, i8_, pos), "byte"), Mem::HeapItem);
     branchLikely(b_.CreateICmpNE(byte, ConstantInt::get(i8_, 0)), one, slow);
     b_.SetInsertPoint(one);
-    storeLogical(d, b_.CreateICmpEQ(byte, ConstantInt::get(i8_, XB_ELEMS_TRUE)));
+    Value *truth = b_.CreateICmpEQ(byte, ConstantInt::get(i8_, XB_ELEMS_TRUE));
+    if (bools) bools->push_back({truth, one}); // the truth test's answer: no item
+    else storeLogical(d, truth);
   } else {
     Value *n = tag(b_.CreateLoad(i64_, compactElement(array, i64_, pos), "n"), Mem::HeapItem);
     branchLikely(b_.CreateICmpNE(n, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL)), one, slow);

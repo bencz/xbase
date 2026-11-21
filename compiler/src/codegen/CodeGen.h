@@ -248,8 +248,10 @@ private:
                    llvm::BasicBlock *items, llvm::BasicBlock *compact, uint8_t form, llvm::Value *&array,
                    llvm::Value *&pos, llvm::Value *&state);
   void emitIndex(const xir::Instruction &i);
+  // bools: a fused truth test's answers (the logical's path writes no item into d then)
   void emitCompactRead(bool logical, llvm::Value *d, llvm::Value *array, llvm::Value *pos, llvm::BasicBlock *compact,
-                       llvm::BasicBlock *slow, llvm::BasicBlock *join);
+                       llvm::BasicBlock *slow, llvm::BasicBlock *join,
+                       std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> *bools = nullptr);
   void emitIndexSet(const xir::Instruction &i);
 
   // Instructions.cpp
