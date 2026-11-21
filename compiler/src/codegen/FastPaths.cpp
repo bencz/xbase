@@ -1000,18 +1000,20 @@ Value *CodeGen::localGenerator(Value *coll, BasicBlock *other) {
   return obj;
 }
 
-// enum.len, as xb_enum_len gives it: a string's length, a local array's, and of a local generator's enumerator that
-// has not ended its next step run here, its resume function called as xb_gen_move_next calls it (INT64_MAX when the
-// step yields, else 0; a step that fails ends the generator); the rest through xb_enum_len. A collection of a known
-// type (a loop versioned for it) takes its own path only.
+// enum.len, as xb_enum_len gives it: a string's length, a local array's or hash's, and of a local generator's
+// enumerator that has not ended its next step run here, its resume function called as xb_gen_move_next calls it
+// (INT64_MAX when the step yields, else 0; a step that fails ends the generator); the rest through xb_enum_len. A
+// collection of a known type (a loop versioned for it) takes its own path only.
 void CodeGen::emitEnumLen(const xir::Instruction &i) {
   Value *item = addr(i.operand(0));
   BasicBlock *object = newBlock("enum.object"), *slow = newBlock("enum.len"), *join = newBlock("enum.len.end");
   BasicBlock *str = newBlock("enum.string"), *arr = newBlock("enum.array"), *arrLocal = newBlock("enum.array.local");
-  SwitchInst *sw = b_.CreateSwitch(typeOf(i.operand(0), item), slow, 3);
+  BasicBlock *hash = newBlock("enum.hash"), *hashLocal = newBlock("enum.hash.local");
+  SwitchInst *sw = b_.CreateSwitch(typeOf(i.operand(0), item), slow, 4);
   sw->addCase(ConstantInt::get(i32_, XB_T_OBJECT), object);
   sw->addCase(ConstantInt::get(i32_, XB_T_STRING), str);
   sw->addCase(ConstantInt::get(i32_, XB_T_ARRAY), arr);
+  sw->addCase(ConstantInt::get(i32_, XB_T_HASH), hash);
   b_.SetInsertPoint(str);
   Value *strLen = strLength(itemPointer(item, "str"));
   b_.CreateBr(join);
@@ -1020,6 +1022,12 @@ void CodeGen::emitEnumLen(const xir::Instruction &i) {
   branchLikely(isLocal(array), arrLocal, slow); // a shared array's length is the runtime's to read
   b_.SetInsertPoint(arrLocal);
   Value *arrLen = arrayLength(array);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(hash);
+  Value *h = itemPointer(item, "hash");
+  branchLikely(isLocal(h), hashLocal, slow); // a shared hash's length is the runtime's to read
+  b_.SetInsertPoint(hashLocal);
+  Value *hashLen = hashLength(h);
   b_.CreateBr(join);
   b_.SetInsertPoint(object);
   Value *coll = callArg(item, 0);
@@ -1050,11 +1058,12 @@ void CodeGen::emitEnumLen(const xir::Instruction &i) {
   Value *called = b_.CreateCall(rtEnumLen_, {fnCtx_, callArg(item, 0)});
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
-  PHINode *n = b_.CreatePHI(i64_, 4, "enum.len");
+  PHINode *n = b_.CreatePHI(i64_, 5, "enum.len");
   n->addIncoming(stepped, steppedEnd);
   n->addIncoming(called, slow);
   n->addIncoming(strLen, str);
   n->addIncoming(arrLen, arrLocal);
+  n->addIncoming(hashLen, hashLocal);
   values_[&i] = n;
 }
 

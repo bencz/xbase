@@ -1,12 +1,12 @@
-// Versions of FOR EACH loops by the type of their collection: a loop whose collection may be a string or an array,
-// among other things, is copied, and a test of the collection's type before it (a guard: `subst.check` with a mask,
-// Types.h) enters the copy made for its type, where the collection is known to be a string (or an array). Code
+// Versions of FOR EACH loops by the type of their collection: a loop whose collection may be a string, an array or a
+// hash, among other things, is copied, and a test of the collection's type before it (a guard: `subst.check` with a
+// mask, Types.h) enters the copy made for its type, where the collection's type is known. Code
 // generation then takes each step's element, the variable's reads and the length test there in place, without testing
 // the loop reference's collection at every pass; the last copy keeps the loop for any collection.
 //
 // A loop is versioned when its collection (`each.source`) is used only from its each.enter on, and its blocks, with the
 // cleanup blocks only they unwind to (the restore of its variables), are few enough. The first type keeps the original
-// blocks; its guard narrows the collection itself, and a second type's guard narrows the value that goes on
+// blocks; its guard narrows the collection itself, and each next type's guard narrows the value that goes on
 // (`subst.value`), copied for that type, and again for the rest. Values of the loop used after it, and the collection
 // where the copies join again, are joined from the copies (joinDefinitions, Transform.h).
 #include "xir/passes/Passes.h"
@@ -27,7 +27,7 @@ namespace {
 constexpr size_t kMaxFunction = 4000; // instructions: the copies stay bounded
 constexpr size_t kMaxRegion = 250;    // instructions of a loop copied, once per version
 constexpr unsigned kMaxVersioned = 8; // loops versioned in a function
-constexpr xb_type kVersions[] = {XB_T_STRING, XB_T_ARRAY};
+constexpr xb_type kVersions[] = {XB_T_STRING, XB_T_ARRAY, XB_T_HASH};
 
 bool usesAny(const Instruction &i, const std::unordered_set<const Value *> &defs) {
   for (const Value *v : i.operands())

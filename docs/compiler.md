@@ -461,11 +461,11 @@ item values and block parameters when `--dump-xir-types` is given too ([xir.md](
   frame calls `xb_gen_restore` and `xb_gen_yield`. `enum.len` of a local generator's enumerator that has not ended calls
   its resume function itself (`emitEnumLen`, as `xb_gen_move_next` does: a step that fails ends it with `xb_gen_done`),
   and `each.move` of a local loop reference over one copies its `Current` into the reference's own item; a string's
-  length and a local array's are read in place; other collections and enumerators take `xb_enum_len` and `xb_each_move`.
-  Inside a sequence `WITH` a handler (also `TRY`), the error block it replaced lives in a frame variable of its own
-  (`Cleanup::oldBlockVar`, `Generator::hiddenVar`): before `gen.yield` each such handler, innermost first, is read
-  (`seq.with` of NIL) and the replaced block put back; after it, outermost first, `seq.with` puts the handler back and
-  stores the caller's block of the moment as the one to put back in the end. Then `makeResumable`
+  length and a local array's or hash's are read in place; other collections and enumerators take `xb_enum_len` and
+  `xb_each_move`. Inside a sequence `WITH` a handler (also `TRY`), the error block it replaced lives in a frame variable
+  of its own (`Cleanup::oldBlockVar`, `Generator::hiddenVar`): before `gen.yield` each such handler, innermost first, is
+  read (`seq.with` of NIL) and the replaced block put back; after it, outermost first, `seq.with` puts the handler back
+  and stores the caller's block of the moment as the one to put back in the end. Then `makeResumable`
   (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that lives across a
   `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a `Bool` or `I64`
   boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone. The dispatch goes
@@ -824,10 +824,11 @@ build xbc.
   dataflow of each such variable's last change: no assignment between on any path, nor an inner loop's restore, and none
   known where an unwinding enters; the plan keeps the source live at those reads and at their uses in their block),
   takes its element from the loop's source at the step's position when the source's type is known (`loadEachElement`): a
-  string's byte as the shared one-byte string, a local array's element within it; anything else through the reference.
-  `Asc()` of such a read, and its comparison with a one-character literal (`=`, `==`, `!=`), in the read's own block
-  read the byte from the string (`elementByte`). Over a string whose every read is such (`FramePlan::readsInPlace`),
-  `each.move` does nothing: no one reads the reference's item.
+  string's byte as the shared one-byte string, a local array's element within it, the value of the entry at the position
+  of a local hash without holes; anything else through the reference. `Asc()` of such a read, and its comparison with a
+  one-character literal (`=`, `==`, `!=`), in the read's own block read the byte from the string (`elementByte`). Over a
+  string whose every read is such (`FramePlan::readsInPlace`), `each.move` does nothing: no one reads the reference's
+  item.
 - `barrier` ([runtime.md](runtime.md#garbage-collector)): after a store into a local cell that holds no element (a
   captured variable's, or the one a variable holds), the cell's GC state byte is tested inline and `xb_gc_remember`
   called for an old cell (`cellStoreWritten`); a shared cell and an element took the value through `xb_ref_store`,

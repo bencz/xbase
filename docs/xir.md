@@ -333,16 +333,16 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   register of its kind (a double in a floating-point register): the Basel sum's loop runs in about 8 cycles a term
   (`bench/async_pi.prg`), as .NET's does.
 - `version-each`, after `peel-for-types`: a `FOR EACH` loop whose collection (`each.source`, used only from its
-  `each.enter` on, which follows it: a loop of one collection) may be a string or an array among other types is
+  `each.enter` on, which follows it: a loop of one collection) may be a string, an array or a hash among other types is
   versioned for them (`VersionEach.cpp`), innermost loops first (up to 8 loops in a function of at most 4000
   instructions, each loop of at most 250 with the blocks its checks lead to and the cleanup blocks only it unwinds to,
   which restore its variables): a guard on the collection (`subst.check` with the first type's mask) lets the original
-  loop go on with that type, a second guard on what goes on (`subst.value`) enters a copy for the second type, and the
+  loop go on with that type, a guard on what goes on (`subst.value`) enters a copy for the next type, and so on, and the
   rest enters a copy for any collection. The values of the loop used after it, and the collection where the copies meet
   again (a typed continuation's copy of the loop that the checks lead to), are joined from the copies (`SSAUpdater`).
   The lowering then knows the collection's type in each copy: the length test, the step and the variable's reads are
   done in place without testing the loop reference's collection at every pass ([compiler.md](compiler.md)). A loop over
-  a string runs in about 1 ns an element (`bench/primitives/iteration.prg`).
+  a string runs in about 1 ns an element, over a hash in about 3 (`bench/primitives/iteration.prg`).
 
 Shared changes of shape are in `Transform.*`: `splitAfter` (the rest of a block into a new one it jumps to),
 `copyBlocks` (blocks copied into their function or another, with the map from each original block and value to its

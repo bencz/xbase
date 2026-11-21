@@ -245,13 +245,18 @@ void CodeGen::storeVar(const xir::Var &v, xir::Access a, Value *src, BasicBlock 
 // The 0-based entry `pos0` of a hash without holes (xb_hash, `used` == `len`), where position k is entry k - 1;
 // branches to `miss` for one with holes or a position outside it.
 Value *CodeGen::hashEntryAt(Value *hash, Value *pos0, BasicBlock *miss) {
-  Value *len = b_.CreateZExt(loadFrom(i32_, b_.CreateStructGEP(hashTy_, hash, HashLen), Mem::Unknown, "hlen"), i64_);
+  Value *len = hashLength(hash);
   Value *used = b_.CreateZExt(loadFrom(i32_, b_.CreateStructGEP(hashTy_, hash, HashUsed), Mem::Unknown, "hused"), i64_);
   BasicBlock *in = newBlock("hash.entry");
   b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(used, len), b_.CreateICmpULT(pos0, len)), in, miss);
   b_.SetInsertPoint(in);
   Value *entries = loadFrom(ptrTy_, b_.CreateStructGEP(hashTy_, hash, HashEntries), Mem::Unknown, "entries");
   return b_.CreateInBoundsGEP(hentryTy_, entries, b_.CreateZExtOrTrunc(pos0, intPtrTy_), "entry");
+}
+
+// A local hash's live entries (xb_hash.len), as an i64.
+Value *CodeGen::hashLength(Value *hash) {
+  return b_.CreateZExt(loadFrom(i32_, b_.CreateStructGEP(hashTy_, hash, HashLen), Mem::Unknown, "hlen"), i64_);
 }
 
 // The element an xb_ref designates, when it is in place (see xb_ref in xbrt.h): an array's element within it (an array
@@ -294,19 +299,20 @@ Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss, Value *coll, Value
   return heapItem(target);
 }
 
-// A load that reads its element in place (FramePlan::eachMoveOf): the element at the each.move's position of its source,
-// when the source is a string (its byte, the shared one-byte string, into `own`) or a local array of items within it
-// (the element), as the loop's reference designates it; anything else through the reference, as loadVar reads it.
-// Null for another load, or one whose source's type the code does not know.
+// A load that reads its element in place (FramePlan::eachMoveOf): the element at the each.move's position of its
+// source, when the source is a string (its byte, the shared one-byte string, into `own`), a local array of items within
+// it (the element) or a local hash without holes (the value of the entry at the position), as the loop's reference
+// designates it; anything else through the reference, as loadVar reads it. Null for another load, or one whose source's
+// type the code does not know.
 Value *CodeGen::loadEachElement(const xir::Instruction &load, Value *own) {
   const xir::Instruction *found = plan_->eachMoveOf(&load);
   if (!found) return nullptr;
   const xir::Instruction &move = *found;
   const xir::Value *src = move.operand(2);
   xir::TypeSet t = plan_->types().of(src);
-  bool str = t == xir::typeBit(XB_T_STRING), arr = t == xir::typeBit(XB_T_ARRAY);
-  if (!str && !arr) return nullptr;
-  Value *coll = itemPointer(addr(src), str ? "str" : "arr");
+  bool str = t == xir::typeBit(XB_T_STRING), hash = t == xir::typeBit(XB_T_HASH);
+  if (!str && !hash && t != xir::typeBit(XB_T_ARRAY)) return nullptr;
+  Value *coll = itemPointer(addr(src), "coll");
   Value *pos0 = b_.CreateSub(value(move.operand(1)), ConstantInt::get(i64_, 1));
   BasicBlock *in = newBlock("each.in"), *miss = newBlock("each.miss"), *join = newBlock("each.read");
   Value *got;
@@ -315,6 +321,13 @@ Value *CodeGen::loadEachElement(const xir::Instruction &load, Value *own) {
     b_.SetInsertPoint(in);
     storeTagged(own, XB_T_STRING, byteString(strByte(coll, pos0)));
     got = own;
+  } else if (hash) {
+    BasicBlock *local = newBlock("each.hash.local");
+    branchLikely(isLocal(coll), local, miss); // a shared hash: through the reference
+    b_.SetInsertPoint(local);
+    got = heapItem(b_.CreateStructGEP(hentryTy_, hashEntryAt(coll, pos0, miss), HEntryValue));
+    b_.CreateBr(in);
+    b_.SetInsertPoint(in);
   } else {
     BasicBlock *local = newBlock("each.array.local");
     branchLikely(isLocalItems(objectState(coll)), local, miss); // a compact or shared array: through the reference

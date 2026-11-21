@@ -678,7 +678,8 @@ void FramePlan::findEachLoads() {
   for (const BasicBlock *b : cfg_.order())
     for (auto &i : b->insts) {
       const Var *v = i->var;
-      if (i->op == Op::EachMove && v->kind == Var::Kind::Frame && !v->shared && !v->param) index.emplace(v, index.size());
+      if (i->op == Op::EachMove && v->kind == Var::Kind::Frame && !v->shared && !v->param)
+        index.emplace(v, index.size());
     }
   if (index.empty()) return;
   using State = std::vector<const Instruction *>; // per variable: the each.move that last changed it, or none
