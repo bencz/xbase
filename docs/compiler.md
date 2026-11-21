@@ -802,18 +802,18 @@ build xbc.
   `xb_ref_load` copies the value into the load's own item (or its shadow slot), `xb_ref_store` writes it and makes its
   write barrier; they read and write the whole item under the object's counter or lock when it is shared, and raise the
   bound error of an element gone.
-- `block` creates the block first into an item of its own (`block.tmp`), kept as a C root (`xb_gc_root_push`) while
-  it obtains the cells (`xb_cell_of`: the variable's cell, made now if it has none, or a new cell holding the current
+- `block` creates the block first into an item of its own (`block.tmp`), kept as a C root (`xb_gc_root_push`) while it
+  obtains the cells (`xb_cell_of`: the variable's cell, made now if it has none, or a new cell holding the current
   element of a `FOR EACH` variable, which only the block refers to) and stores each one, then passes the barrier test
-  for the block (a collection meanwhile may have aged it) and copies it to its home, which may be the slot of a
-  variable that moved into its cell meanwhile.
-  `ref` calls `xb_ref_of` (or builds the `XB_T_CELL` item of a captured variable's cell); `ref.index` calls
-  `xb_ref_elem`. `each.enter` and `each.leave` call `xb_each_enter` and `xb_each_leave`; `each.move` stores the position
-  in the loop's reference (a local one: another goes to the runtime) and calls `xb_each_move` only when the element is
-  not one `inlineRefTarget` finds in place (an element of a local array within it, the entry at a position of a local
-  hash without holes; not a string's character, an enumerator's, a shared collection, the bound error), or when the
-  variable is in a shared cell (whose reference only the runtime moves); `each.key` stores the position for anything but
-  a hash, reads the key of a local hash without holes in place, and calls `xb_each_key` for the rest.
+  for the block (a collection meanwhile may have aged it) and copies it to its home, which may be the slot of a variable
+  that moved into its cell meanwhile. `ref` calls `xb_ref_of` (or builds the `XB_T_CELL` item of a captured variable's
+  cell); `ref.index` calls `xb_ref_elem`. `each.enter` and `each.leave` call `xb_each_enter` and `xb_each_leave`;
+  `each.move` stores the position in the loop's reference (a local one: another goes to the runtime) and calls
+  `xb_each_move` only when the element is not one `inlineRefTarget` finds in place (an element of a local array within
+  it, the entry at a position of a local hash without holes; a string's byte goes into the reference's own item as the
+  shared one-byte string, nothing past its end; not an enumerator's element, a shared collection, the bound error), or
+  when the variable is in a shared cell (whose reference only the runtime moves); `each.key` stores the position for
+  anything but a hash, reads the key of a local hash without holes in place, and calls `xb_each_key` for the rest.
 - `barrier` ([runtime.md](runtime.md#garbage-collector)): after a store into a local cell that holds no element (a
   captured variable's, or the one a variable holds), the cell's GC state byte is tested inline and `xb_gc_remember`
   called for an old cell (`cellStoreWritten`); a shared cell and an element took the value through `xb_ref_store`,

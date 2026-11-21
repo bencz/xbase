@@ -540,7 +540,8 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateCall(rtEachEnter_, {fnCtx_, dest(i), rawAddress(*i.var), eachHow(i), callArg(addr(ops[1]), 0)});
     break;
   }
-  case Op::EachMove: { // in place: to an element of a local array or hash without holes, or a local generator's Current
+  case Op::EachMove: { // in place: to an element of a local array or hash without holes, a local generator's
+                       // Current, or a string's byte
     // into the loop's own item (xb_each_move for the rest)
     Value *var = rawAddress(*i.var);
     BasicBlock *slow = newBlock("each.move"), *join = newBlock("each.moved"), *local = newBlock("each.local");
@@ -575,6 +576,16 @@ void CodeGen::emit(const xir::Instruction &i) {
     recordIfOld(ref, refState);
     b_.CreateBr(join);
     b_.SetInsertPoint(other);
+    BasicBlock *str = newBlock("each.string"), *inStr = newBlock("each.byte"), *coll2 = newBlock("each.elements");
+    b_.CreateCondBr(b_.CreateICmpEQ(itemType(coll), ConstantInt::get(i32_, XB_T_STRING)), str, coll2);
+    b_.SetInsertPoint(str); // a string's byte, the shared one-byte string, into the loop's own item (as move_to does;
+                            // past the end, nothing): a static string needs no barrier
+    Value *s = itemPointer(coll, "str"), *pos0 = b_.CreateSub(value(ops[1]), ConstantInt::get(i64_, 1));
+    b_.CreateCondBr(b_.CreateICmpULT(pos0, strLength(s)), inStr, join);
+    b_.SetInsertPoint(inStr);
+    storeTagged(b_.CreateStructGEP(refTy_, ref, RefValue), XB_T_STRING, byteString(strByte(s, pos0)));
+    b_.CreateBr(join);
+    b_.SetInsertPoint(coll2);
     inlineRefTarget(ref, slow);
     b_.CreateBr(join);
     b_.SetInsertPoint(slow);
