@@ -30,6 +30,7 @@
 #include <optional>
 #include <unordered_map>
 #include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -483,7 +484,15 @@ static int compile(int argc, char **argv) {
   for (const Source &s : sources) cg.run(*s.xir);
   if (!cg.finish(emitEntry ? startFunction(sources) : nullptr)) return 1;
 
-  xb::optimizeModule(mod, *tm, tcfg.optLevel);
+  // A function whose optimization makes the compilation slow: the program's author may split it.
+  std::set<std::string> warned;
+  for (auto [f, size] : xb::optimizeModule(mod, *tm, tcfg.optLevel)) {
+    const xb::xir::Function *xf = cg.sourceOf(f);
+    if (!xf || xf->blocks.empty() || xf->entry()->insts.empty() || !warned.insert(xf->stackName).second) continue;
+    diag.warning(xf->entry()->insts.front()->loc,
+                 "'" + xf->stackName + "' makes the compilation slow (" + std::to_string(size) +
+                     " instructions to optimize): smaller functions compile faster");
+  }
 
   if (!irDump.empty() && !xb::dumpIR(mod, irDump, err)) {
     std::fprintf(stderr, "xbc: %s\n", err.c_str());

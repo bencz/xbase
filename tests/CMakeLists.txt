@@ -117,6 +117,18 @@ foreach(t ${XB_FAIL_TESTS})
       -P ${CMAKE_CURRENT_SOURCE_DIR}/fail_test.cmake)
 endforeach()
 
+# Warning tests: compiling tests/warn/<name>.prg at -O2 must succeed with the warning in <name>.warn (none when it is
+# empty).
+file(GLOB XB_WARN_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/warn ${CMAKE_CURRENT_SOURCE_DIR}/warn/*.prg)
+foreach(t ${XB_WARN_TESTS})
+  string(REGEX REPLACE "\\.prg$" "" t ${t})
+  add_test(NAME warn.${t}
+    COMMAND ${CMAKE_COMMAND}
+      "-DEXE=$<TARGET_FILE:xbc>;-O2;${CMAKE_CURRENT_SOURCE_DIR}/warn/${t}.prg;-o;${CMAKE_CURRENT_BINARY_DIR}/warn_${t}.o"
+      -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/warn/${t}.warn
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/warn_test.cmake)
+endforeach()
+
 # -u<file> names a file relative to the current directory.
 add_test(NAME pp.custom_std
   COMMAND ${CMAKE_COMMAND}

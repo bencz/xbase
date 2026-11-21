@@ -905,19 +905,18 @@ below: SROA, early CSE, instruction combining, CFG simplification), and code gen
 (`CodeGenOptLevel::Less`, as at `-O1`): the fast allocator of `None` gives every value a stack slot of its own, so that
 a function of inline fast paths took kilobytes of stack per call (the `recursion_deep` test's function 3.8 KB on 32-bit
 x86 and 2.4 KB on x86-64; 0.7 KB and 0.2 KB so), and `xbc` emits no debugging information that such code would serve. It
-costs compile time: the `large_function` test at `-O0` takes 4.4 s instead of 1.4 s (`-O2`: 5.4 s).
+costs compile time (the `large_function` test's `Main`, below: 15 s at `-O0`, 39 s at `-O2`).
 
 A function of more than 60000 instructions as code generation makes it (`kLargeFunction`: a procedure of a few thousand
-statements) does not go through that pipeline: several of its passes and of code generation's take time that grows
-faster than a function's size (merging stores into `memset`s, turning selects into branches, which recomputes the
-dominator tree each time), and such a function took minutes. Measured through the whole pipeline (x86-64, a Release
-`xbc`): the `pi` benchmark's function of 50000 instructions takes 2.9 s, the statements of the `large_function` test cut
-to 60000 and 100000 instructions 0.9 s and 1.8 s, and all of them (408000) 31 s. It gets passes whose time follows its
-size (`cleanUpFunctions`: SROA, which keeps its `Local` items in registers, early CSE, instruction combining, CFG
-simplification), then is marked `optnone` and `noinline`: the pipeline skips it (`OptNoneInstrumentation`), the loop
-passes above leave it, nothing is inlined into it nor it into its caller, and code generation selects its instructions
-as at `-O0`. Its xIR is optimized as any other function's. The size is the one before LLVM inlines anything: a function
-that inlining makes that large goes through the pipeline (its time, not its result, is at stake).
+statements) makes the compilation slow: several passes of the pipeline and of code generation take time that grows
+faster than a function's size. It is optimized as any other, speed first, and from `-O1` on `xbc` warns which function
+it is, where it starts, with its size, so that its author may split it (`optimizeModule` returns those functions,
+`CodeGen::sourceOf` names them; the `warn.optimize_limit` tests). Measured (x86-64, a Release `xbc`): the
+`large_function` test's `Main` of 391000 instructions compiles in 39 s at `-O2` and 15 s at `-O0`. At `-O0` such a
+function is marked `optnone` and `noinline` after the passes whose time follows its size (`cleanUpFunctions`: SROA,
+which keeps its `Local` items in registers, early CSE, instruction combining, CFG simplification): the pipeline skips it
+(`OptNoneInstrumentation`) and nothing is inlined into it nor it into its caller. The size is the one before LLVM
+inlines anything.
 
 Code is position independent unless `--static` is given. The CPU is `generic` unless `--cpu` names one, so programs run
 on any CPU of the target, with one feature added: 32-bit x86 code computes doubles with SSE2 (`+sse2`, every x86 since

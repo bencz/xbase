@@ -22,7 +22,10 @@ void initializeTargets();
 llvm::Triple targetTriple(const TargetConfig &cfg);
 void printTargets();
 std::unique_ptr<llvm::TargetMachine> createTargetMachine(const TargetConfig &cfg, std::string &err);
-void optimizeModule(llvm::Module &m, llvm::TargetMachine &tm, unsigned optLevel);
+// Returns the functions whose size makes the compilation slow (kLargeFunction), with their instructions as code
+// generation made them, from -O1 on (all optimized as any other).
+std::vector<std::pair<const llvm::Function *, unsigned>> optimizeModule(llvm::Module &m, llvm::TargetMachine &tm,
+                                                                        unsigned optLevel);
 // Writes a native object file straight from the in-memory module.
 bool emitObject(llvm::Module &m, llvm::TargetMachine &tm, const std::string &path, std::string &err);
 // Debug aid only: textual dump of the module. Not part of the pipeline.

@@ -107,16 +107,16 @@ std::unique_ptr<TargetMachine> createTargetMachine(const TargetConfig &cfg, std:
 constexpr unsigned kGuardRounds = 3;
 constexpr unsigned kOneRound = 20000;
 
-// A function of more instructions than this (as code generation makes it, before any optimization) is too large for
-// the default pipeline and code generation, which take time growing faster than its size: it has passes whose time
-// grows with its size (its locals become registers, common subexpressions and constants fold, its control flow
-// simplifies), is generated as -O0 does, and is never inlined.
+// A function of more instructions than this (as code generation makes it, before any optimization) makes the
+// compilation slow: the default pipeline and code generation take time growing faster than a function's size. It is
+// optimized as any other (speed first), and xbc says which it is, so that its author may split it.
 constexpr unsigned kLargeFunction = 60000;
 
-// Passes whose time grows with a function's size (its locals become registers, common subexpressions and constants
-// fold, its control flow simplifies): for the functions too large to optimize fully (kLargeFunction), which they mark
-// so, and at -O0 for every function (`all`), whose code generation then keeps few values in memory.
-static void cleanUpFunctions(Module &m, FunctionAnalysisManager &fam, bool all) {
+// At -O0, passes whose time follows a function's size (its locals become registers, common subexpressions and
+// constants fold, its control flow simplifies), whose code generation then keeps few values in memory; a function of
+// more than kLargeFunction instructions is then marked optnone, which code generation selects fastest (the
+// large_function test: 4 s instead of 21).
+static void cleanUpFunctions(Module &m, FunctionAnalysisManager &fam) {
   FunctionPassManager fpm;
   fpm.addPass(SROAPass(SROAOptions::ModifyCFG));
   fpm.addPass(EarlyCSEPass());
@@ -125,7 +125,6 @@ static void cleanUpFunctions(Module &m, FunctionAnalysisManager &fam, bool all) 
   for (Function &f : m) {
     if (f.isDeclaration()) continue;
     bool large = f.getInstructionCount() > kLargeFunction;
-    if (!large && !all) continue;
     fpm.run(f, fam);
     if (!large) continue;
     f.addFnAttr(Attribute::NoInline);
@@ -133,12 +132,12 @@ static void cleanUpFunctions(Module &m, FunctionAnalysisManager &fam, bool all) 
   }
 }
 
-void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
+std::vector<std::pair<const Function *, unsigned>> optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   LoopAnalysisManager lam;
   FunctionAnalysisManager fam;
   CGSCCAnalysisManager cgam;
   ModuleAnalysisManager mam;
-  // The pipeline skips the functions marked optnone (cleanUpFunctions).
+  // The pipeline skips the functions marked optnone (cleanUpFunctions, at -O0).
   PassInstrumentationCallbacks pic;
   OptNoneInstrumentation optNone(/*DebugLogging=*/false);
   optNone.registerCallbacks(pic);
@@ -158,10 +157,13 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
                         : optLevel == 1 ? OptimizationLevel::O1
                         : optLevel == 3 ? OptimizationLevel::O3
                                         : OptimizationLevel::O2;
-  cleanUpFunctions(m, fam, optLevel == 0);
+  std::vector<std::pair<const Function *, unsigned>> large;
+  for (Function &f : m)
+    if (!f.isDeclaration() && f.getInstructionCount() > kLargeFunction) large.push_back({&f, f.getInstructionCount()});
+  if (optLevel == 0) cleanUpFunctions(m, fam);
   ModulePassManager mpm = optLevel == 0 ? pb.buildO0DefaultPipeline(lvl) : pb.buildPerModuleDefaultPipeline(lvl);
   mpm.run(m, mam);
-  if (optLevel == 0) return;
+  if (optLevel == 0) return {};
   std::unordered_map<const Function *, unsigned> size; // as the default pipeline left them
   for (Function &f : m) size[&f] = f.getInstructionCount();
   // Loops whose slow paths leave for a generic copy (LoopSplit.h), then fewer polls on the back edges of the fast
@@ -172,8 +174,8 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   auto again = [&](bool (*change)(Function &, FunctionAnalysisManager &), const char *what) {
     std::vector<Function *> changed;
     for (Function &f : m) {
-      bool large = size.count(&f) && size.at(&f) > kOneRound;
-      if (!f.isDeclaration() && !f.hasOptNone() && !(round > 0 && large) && change(f, fam)) {
+      bool big = size.count(&f) && size.at(&f) > kOneRound;
+      if (!f.isDeclaration() && !(round > 0 && big) && change(f, fam)) {
         changed.push_back(&f);
         fam.invalidate(f, PreservedAnalyses::none());
       }
@@ -219,7 +221,7 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   // Then the tests of pending requests that the inlined small entries made repeat what was tested before them.
   bool skipped = false;
   for (Function &f : m)
-    if (!f.isDeclaration() && !f.hasOptNone() && skipRepeatedTests(f)) {
+    if (!f.isDeclaration() && skipRepeatedTests(f)) {
       callers.push_back(&f);
       skipped = true;
     }
@@ -233,6 +235,7 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
     fam.invalidate(*f, PreservedAnalyses::none());
     fpm.run(*f, fam);
   }
+  return large;
 }
 
 // Code generation runs on the legacy pass manager: in LLVM 22 it is the one

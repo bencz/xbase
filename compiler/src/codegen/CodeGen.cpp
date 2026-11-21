@@ -1059,4 +1059,11 @@ void CodeGen::pollOnBackEdge(const xir::BasicBlock *from, const xir::BasicBlock 
   if (blockOrder_.at(to) <= blockOrder_.at(from)) checkPending(unwind_, true);
 }
 
+const xir::Function *CodeGen::sourceOf(const llvm::Function *f) const {
+  for (const auto *map : {&functions_, &direct_})
+    for (auto &[xf, lf] : *map)
+      if (lf == f) return xf;
+  return nullptr;
+}
+
 } // namespace xb

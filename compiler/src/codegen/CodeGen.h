@@ -42,6 +42,8 @@ public:
   // Then: the program entry calling `start` (none without one), and the check
   // of the LLVM module.
   bool finish(const xir::Function *start);
+  // The xIR function an LLVM function lowers (its entry, its direct body), null for none.
+  const xir::Function *sourceOf(const llvm::Function *f) const;
 
 private:
   // Fields of xb_item, xb_frame and the head of xb_ctx, in the LLVM structs
