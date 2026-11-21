@@ -59,7 +59,7 @@ void xb_str_share(xb_str *s) {
 xb_str *xb_str_new(const char *p, size_t len) {
   if (len <= 1) return len ? xb_str_byte((unsigned char)p[0]) : xb_str_empty();
   xb_str *s = xb_str_alloc(len);
-  if (len) memcpy(xb_str_buffer(s), p, len);
+  xb_copy(xb_str_buffer(s), p, len);
   return s;
 }
 
@@ -70,8 +70,8 @@ static const char *short_data(const xb_str *s) { return s->bytes; }
 static xb_str *concat_short(const xb_str *a, const xb_str *b, size_t len) {
   if (len <= 1) return xb_str_new(a->len ? short_data(a) : short_data(b), len);
   xb_str *s = xb_str_alloc(len);
-  memcpy(xb_str_buffer(s), short_data(a), a->len);
-  memcpy(xb_str_buffer(s) + a->len, short_data(b), b->len);
+  xb_copy(xb_str_buffer(s), short_data(a), a->len);
+  xb_copy(xb_str_buffer(s) + a->len, short_data(b), b->len);
   return s;
 }
 
@@ -149,8 +149,8 @@ xb_str *xb_str_concat(const xb_str *a, const xb_str *b) {
   size_t len = a->len + b->len;
   if (len < XB_STR_VIEW_MIN) return concat_short(a, b, len);
   xb_str *s = xb_str_alloc(len);
-  memcpy(xb_str_buffer(s), xb_str_data(a), a->len);
-  memcpy(xb_str_buffer(s) + a->len, xb_str_data(b), b->len);
+  xb_copy(xb_str_buffer(s), xb_str_data(a), a->len);
+  xb_copy(xb_str_buffer(s) + a->len, xb_str_data(b), b->len);
   return s;
 }
 
