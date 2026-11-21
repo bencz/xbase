@@ -42,6 +42,7 @@ bool resolveSends(Module &m, Function &f);
 // `x := x + y` on a LOCAL only the function sees and that holds strings
 // becomes one `append`, whose string grows in place (AppendInPlace.cpp).
 bool appendInPlace(Function &f);
+bool splitAppends(Function &f);
 
 // mem2reg: LOCALs reached only by direct loads and stores (not shared, not
 // parameters, not FOR EACH variables) become SSA values, with block

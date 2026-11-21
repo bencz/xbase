@@ -238,6 +238,7 @@ private:
   void shareString(llvm::Value *item);
   llvm::Value *isGrowing(llvm::Value *flags);
   void emitAppend(const xir::Instruction &i);
+  void copyBytes(llvm::Value *dst, llvm::Value *src, llvm::Value *n, llvm::BasicBlock *done);
   void findSharingLoads(const xir::Function &f, const xir::CFG &cfg);
   void shareOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to);
   void emitBitOp(xb_bit_op op, llvm::Value *x, llvm::Value *tx, llvm::Value *y, llvm::Value *ty, llvm::Value *d,

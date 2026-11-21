@@ -28,3 +28,28 @@ add_custom_target(bench
   DEPENDS ${targets}
   USES_TERMINAL
   COMMENT "Running the benchmarks")
+
+# The primitives: bench/primitives/<name>.prg times each primitive (nanoseconds per operation) and <name>.c the same
+# work in C; the `primitives` target builds both and prints them side by side (docs/testing.md).
+file(GLOB XB_PRIMITIVES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/primitives ${CMAKE_CURRENT_SOURCE_DIR}/primitives/*.prg)
+set(pairs "")
+set(targets "")
+foreach(p ${XB_PRIMITIVES})
+  string(REGEX REPLACE "\\.prg$" "" name ${p})
+  set(obj ${CMAKE_CURRENT_BINARY_DIR}/primitives_${name}.o)
+  xb_compile_prg(${CMAKE_CURRENT_SOURCE_DIR}/primitives/${p} ${obj} -O2)
+  add_executable(primitives_${name} EXCLUDE_FROM_ALL ${obj})
+  set_target_properties(primitives_${name} PROPERTIES LINKER_LANGUAGE C)
+  target_link_libraries(primitives_${name} PRIVATE xbrt)
+  add_executable(primitives_${name}_c EXCLUDE_FROM_ALL ${CMAKE_CURRENT_SOURCE_DIR}/primitives/${name}.c)
+  target_compile_options(primitives_${name}_c PRIVATE $<$<C_COMPILER_ID:GNU,Clang>:-O2>)
+  list(APPEND pairs "$<TARGET_FILE:primitives_${name}>|$<TARGET_FILE:primitives_${name}_c>")
+  list(APPEND targets primitives_${name} primitives_${name}_c)
+endforeach()
+set(pairs_file ${CMAKE_CURRENT_BINARY_DIR}/primitives-$<CONFIG>.txt)
+file(GENERATE OUTPUT ${pairs_file} CONTENT "$<JOIN:${pairs},\n>\n")
+add_custom_target(primitives
+  COMMAND ${CMAKE_COMMAND} -DLIST=${pairs_file} -P ${CMAKE_CURRENT_SOURCE_DIR}/primitives/run.cmake
+  DEPENDS ${targets}
+  USES_TERMINAL
+  COMMENT "Running the primitives")

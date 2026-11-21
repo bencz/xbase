@@ -89,6 +89,11 @@ memory than there is, expects the allocation to fail instead of the sanitizer to
 
 ## Benchmarks
 
+`bench/primitives/<name>.prg` time the primitives of the language one by one (`strings`: every string function and
+operator, appends, iteration over a string's bytes), each inline in a loop on data the pass chooses, in nanoseconds per
+operation; `<name>.c` does the same work in C as a C program would write it. `cmake --build build-release --target
+primitives` builds both and prints them side by side: where a primitive stands against C.
+
 `bench/<name>.prg` are benchmark programs: recursive calls (`fib`), an integer loop (`loops`), arrays (`sieve`,
 `matmul`), sorting in xBase (`qsort`) and with `ASort` (`asort`), strings (`strings`), the bit operators and string
 building (`crc32`), array cells read and changed in place in deeply nested loops (`pi`, digits of pi from a tape-machine

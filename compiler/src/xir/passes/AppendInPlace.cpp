@@ -9,7 +9,9 @@
 #include "xir/passes/Passes.h"
 
 #include "xir/Analysis.h"
+#include "xir/Types.h"
 
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -132,6 +134,66 @@ bool appendInPlace(Function &f) {
       auto it = appends.find(i.get());
       if (it != appends.end()) i = std::move(it->second);
     }
+    std::erase_if(b->insts, [&](const std::unique_ptr<Instruction> &i) { return gone.count(i.get()) != 0; });
+  }
+  return true;
+}
+
+// `append x, a + b + ... + z` whose pieces are all strings (the type inference says so) becomes one append per piece,
+// in order: no string is made for the sum, and each piece goes into the room the variable's string keeps. A `+` of two
+// strings fails only past the longest string, where the append of the piece then fails instead; the pieces are
+// computed before the first append as before the first `+` (each `+` ran after both of its operands).
+bool splitAppends(Function &f) {
+  CFG cfg(f);
+  TypeInfo types(cfg);
+  const TypeSet string = typeBit(XB_T_STRING);
+  std::unordered_map<const Instruction *, std::vector<Value *>> pieces; // each append split, its pieces in order
+  std::unordered_set<const Instruction *> gone;                         // the sums
+  for (auto &b : f.blocks)
+    for (auto &i : b->insts) {
+      if (i->op != Op::Append) continue;
+      std::vector<Value *> list;
+      std::vector<const Instruction *> sums;
+      Value *v = i->operand(0);
+      for (;;) {
+        auto *add = asInstruction(v, Op::Binary) ? static_cast<Instruction *>(v) : nullptr;
+        // A sum used only by the next one: its block dominates the append's, where the pieces are appended.
+        if (!add || add->binop != BinOp::Add || add->byOne || !add->hasOneUse()) break;
+        list.push_back(add->operand(1));
+        sums.push_back(add);
+        v = add->operand(0);
+      }
+      if (sums.empty()) continue;
+      list.push_back(v);
+      if (!std::all_of(list.begin(), list.end(), [&](const Value *p) { return types.of(p) == string; })) continue;
+      std::reverse(list.begin(), list.end());
+      pieces[i.get()] = std::move(list);
+      gone.insert(sums.begin(), sums.end());
+    }
+  if (pieces.empty()) return false;
+  for (auto &b : f.blocks) {
+    std::vector<std::unique_ptr<Instruction>> out;
+    for (auto &i : b->insts) {
+      auto it = pieces.find(i.get());
+      if (it == pieces.end()) {
+        out.push_back(std::move(i));
+        continue;
+      }
+      for (Value *p : it->second) {
+        auto append = std::make_unique<Instruction>(Op::Append, Type::Void, b.get());
+        append->loc = i->loc;
+        append->var = i->var;
+        append->access = i->access;
+        append->addOperand(p);
+        out.push_back(std::move(append));
+      }
+      i->dropOperands();
+    }
+    b->insts = std::move(out);
+  }
+  for (auto &b : f.blocks) {
+    for (auto &i : b->insts)
+      if (gone.count(i.get())) i->dropOperands();
     std::erase_if(b->insts, [&](const std::unique_ptr<Instruction> &i) { return gone.count(i.get()) != 0; });
   }
   return true;

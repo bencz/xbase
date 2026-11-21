@@ -623,8 +623,9 @@ build xbc.
   strings compare their bytes in place (so `ValType( x ) == "C"` calls nothing). Unary `-` of an integer other than
   INT64_MIN or of a double is done in place too. `InlineCalls.cpp` does a few runtime functions in place when their
   arguments allow it, with their rules: `Len()` of a string or a local array, `Asc()` of a string, `Chr()` of a number,
-  `SubStr( c, n, 1 )` with `n` within `c` (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()`
-  whose argument is the `SubStr()` right before it, used nowhere else, reads the byte itself (a view's in its buffer:
+  `SubStr( c, n, 1 )` with `n` within `c` (the position and the count any numbers, as `xb_num_to_i64` takes them: those
+  `%` and `/` make are doubles) (the last two give the shared one-byte string, `xb_str_bytes`), and an `Asc()` whose
+  argument is the `SubStr()` right before it, used nowhere else, reads the byte itself (a view's in its buffer:
   `strData` tests `XB_STR_VIEW` as `xb_str_data` does); `Int()` of an integer is it, of a double its conversion when it
   lies in [-2^63, 2^63) (truncated, as `xb_dbl_fits_i64` of its truncation would allow), with the double's width, its
   own or else the default one (`xb_num_dbl_width`'s rule, from the constants `XB_NUM_FITS_MAX`, `XB_NUM_FITS_MIN`,
@@ -650,21 +651,23 @@ build xbc.
   takes references, in a function with no other `...` and no `PCount()`/`PValue()`, passes the arguments where they are
   instead of copying them (`forwardInPlace_`). `append` copies a string's bytes (a view's from its buffer; the
   variable's growing string is never a view) into the room of the variable's growing string in place (one store for one
-  byte) when they fit, and calls `xb_op_append` otherwise. A `load` that an `append` of its variable reaches with no
-  other load in between ends the growth before the value goes on (`shareString`), unless only `Len()` and `Asc()` read
-  its value, in place; a forward data flow finds them (`findSharingLoads`), where a block entered by unwinding (a `BEGIN
-  SEQUENCE` handler, a `FOR EACH` cleanup) starts with every such variable growing, and a block reached growing along
-  some edges only, from which every path ends the growth before any append (a loop that reads what a loop before it
-  built), ends it on those edges instead, so the loop does not test it again; the edge of a `gen.yield` ends it before
-  the frame is saved, since the next step enters through the dispatch. The bit operators and functions take two integers
-  in two instructions and convert doubles on a path of their own, and the fast paths of calls read their operands in
-  place: the argument group is built only for the call. Calls set the result slot to `NIL`, then pass `(argc, argv)`
-  pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or `xbp_NAME` (`NATIVE` or not), one
-  to another module's function to `xbp_NAME`, one to a function of the module to its direct entry when it has one
-  (below), else to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC` function, a codeblock and a
-  module initialization are internal, under names nothing looks up, so modules sharing the object never clash. A call, a
-  send or an array literal with `...` (`withRest`) passes the count and the items of a frame built for it on the stack
-  ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions leave such calls alone.
+  byte; up to 16 bytes two loads and two stores of 8, 4, 2 or 1 bytes overlapping in the middle, `copyBytes`, with no
+  call; more through `memcpy`) when they fit, and calls `xb_op_append` otherwise. A `load` that an `append` of its
+  variable reaches with no other load in between ends the growth before the value goes on (`shareString`), unless only
+  `Len()` and `Asc()` read its value, in place; a forward data flow finds them (`findSharingLoads`), where a block
+  entered by unwinding (a `BEGIN SEQUENCE` handler, a `FOR EACH` cleanup) starts with every such variable growing, and a
+  block reached growing along some edges only, from which every path ends the growth before any append (a loop that
+  reads what a loop before it built), ends it on those edges instead, so the loop does not test it again; the edge of a
+  `gen.yield` ends it before the frame is saved, since the next step enters through the dispatch. The bit operators and
+  functions take two integers in two instructions and convert doubles on a path of their own, and the fast paths of
+  calls read their operands in place: the argument group is built only for the call. Calls set the result slot to `NIL`,
+  then pass `(argc, argv)` pointing at the argument slots; a call to an `EXTERN FUNCTION` goes to `xbf_NAME` or
+  `xbp_NAME` (`NATIVE` or not), one to another module's function to `xbp_NAME`, one to a function of the module to its
+  direct entry when it has one (below), else to it. A public function is `xbp_NAME` (prefixes in `xbrt.h`); a `STATIC`
+  function, a codeblock and a module initialization are internal, under names nothing looks up, so modules sharing the
+  object never clash. A call, a send or an array literal with `...` (`withRest`) passes the count and the items of a
+  frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions
+  leave such calls alone.
 - Direct entries (`directEntries`, `xir::hasDirectEntry`): a function of the program that does not read its arguments as
   received (its frame keeps none, `readsArgs`, and it has no `...`, `usesRest`) and is not the body versioned for
   references (`byRefBody`) gets its body in an internal function, `xb.direct.NAME`, taking the context, the result slot,

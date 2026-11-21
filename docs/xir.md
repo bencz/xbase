@@ -220,7 +220,10 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   there, and no write of `x` on any way from the load to the store, becomes `append x, y` when `x` is a `LOCAL` only the
   function sees (`directLocals` in `Analysis`) and holds strings (a string constant is stored into it or appended to it,
   and no number, logical or date constant is). The variable then stays in the frame, where `xb_op_append` grows its
-  string in place; a numeric accumulator, which promotion keeps in registers, is left alone.
+  string in place; a numeric accumulator, which promotion keeps in registers, is left alone. After the typed
+  continuations, `split-appends` makes `append x, a + b + ... + z` whose pieces the type inference finds all strings
+  (their checks passed) one `append` per piece, in order: no string is made for the sum (a `+` of two strings fails only
+  past the longest string, where the piece's append then fails instead).
 - `promote-variables` (mem2reg): `LOCAL`s reached only by direct `load` and `store` (not shared, not parameters, not
   `FOR EACH` variables) become SSA values, except in a function with `BEGIN SEQUENCE`. Block parameters go where
   definitions meet, in the iterated dominance frontiers of the blocks that store (the entry defines the variable as

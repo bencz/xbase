@@ -1,7 +1,7 @@
 // Calls to a few runtime functions done in place when their arguments allow
 // it, with the functions' own rules (rtl/lang.c, rtl/strings.c, rtl/numbers.c):
 // Len() of a string or an array, Asc() of a string, Chr() of a number and
-// SubStr( c, n, 1 ) with n within c (both give the shared one-byte string,
+// SubStr( c, n, 1 ) with n within c, n and 1 any numbers (both give the shared one-byte string,
 // xb_str_bytes), Asc( SubStr( c, n, 1 ) ) right after each other (the byte
 // itself, without a string), and the number functions Int, Abs, Max, Min,
 // Round, Sqrt, Exp, Log and Mod of numbers (Max and Min of dates too).
@@ -193,6 +193,34 @@ void CodeGen::shareString(Value *item) {
 // `append`: a string the variable grows (XB_STR_APPEND) takes a string's
 // bytes in place when they fit its room (`hash`), as xb_op_append does;
 // anything else calls it. The variable is a plain LOCAL (xir.md: append).
+// `n` bytes (an i64) from `src` to `dst`, which do not overlap, then on to `done`: up to 16 with two loads and two
+// stores of 8, 4, 2 or 1 bytes, overlapping in the middle (the first and the last of each size), with no call; more
+// through memcpy, which then pays for itself.
+void CodeGen::copyBytes(Value *dst, Value *src, Value *n, BasicBlock *done) {
+  BasicBlock *small = newBlock("copy.small"), *large = newBlock("copy.large");
+  branchLikely(b_.CreateICmpULE(n, ConstantInt::get(i64_, 16)), small, large);
+  b_.SetInsertPoint(large);
+  b_.CreateMemCpy(dst, MaybeAlign(1), src, MaybeAlign(1), b_.CreateZExtOrTrunc(n, intPtrTy_));
+  b_.CreateBr(done);
+  b_.SetInsertPoint(small);
+  for (unsigned size : {8u, 4u, 2u, 1u}) {
+    BasicBlock *these = newBlock("copy.words"), *next = newBlock("copy.next");
+    b_.CreateCondBr(b_.CreateICmpUGE(n, ConstantInt::get(i64_, size)), these, next);
+    b_.SetInsertPoint(these);
+    Type *word = IntegerType::get(ctx_, size * 8);
+    Value *lastAt = b_.CreateZExtOrTrunc(b_.CreateSub(n, ConstantInt::get(i64_, size)), intPtrTy_);
+    LoadInst *first = loadFrom(word, src, Mem::String, "first");
+    LoadInst *last = loadFrom(word, b_.CreateInBoundsGEP(i8_, src, lastAt), Mem::String, "last");
+    first->setAlignment(Align(1));
+    last->setAlignment(Align(1));
+    tag(b_.CreateAlignedStore(first, dst, Align(1)), Mem::String);
+    tag(b_.CreateAlignedStore(last, b_.CreateInBoundsGEP(i8_, dst, lastAt), Align(1)), Mem::String);
+    b_.CreateBr(done);
+    b_.SetInsertPoint(next);
+  }
+  b_.CreateBr(done); // none
+}
+
 void CodeGen::emitAppend(const xir::Instruction &i) {
   Value *var = rawAddress(*i.var);
   Value *y = addr(i.operand(0));
@@ -218,8 +246,7 @@ void CodeGen::emitAppend(const xir::Instruction &i) {
   tag(b_.CreateStore(loadFrom(i8_, from, Mem::String, "byte"), tail), Mem::String);
   b_.CreateBr(end);
   b_.SetInsertPoint(many);
-  b_.CreateMemCpy(tail, MaybeAlign(1), from, MaybeAlign(1), b_.CreateZExtOrTrunc(more, intPtrTy_));
-  b_.CreateBr(end);
+  copyBytes(tail, from, more, end);
   b_.SetInsertPoint(end);
   Value *newLen = b_.CreateAdd(len, more);
   tag(b_.CreateStore(b_.CreateZExtOrTrunc(newLen, intPtrTy_), b_.CreateStructGEP(ty, s, StrLen)), Mem::String);
@@ -419,15 +446,17 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     storeTagged(d, XB_T_STRING, byteString(b_.CreateAnd(numberAsInteger(arg(0), t), ConstantInt::get(i64_, 0xFF))));
     break;
   }
-  case Inline::SubStr: { // SubStr( c, n, 1 ) with 1 <= n <= Len( c )
+  case Inline::SubStr: { // SubStr( c, n, 1 ) with 1 <= n <= Len( c ); numbers as xb_num_to_i64 takes them (a double
+                         // that `%` or `/` made, as integers)
     BasicBlock *check = newBlock("substr.check"), *fast = newBlock("substr");
-    Value *ok = b_.CreateAnd(isType(argType(0), XB_T_STRING),
-                             b_.CreateAnd(isType(argType(1), XB_T_INT), isType(argType(2), XB_T_INT)));
+    Value *nType = argType(1), *countType = argType(2);
+    Value *numbers = b_.CreateAnd(isNumberType(nType), isNumberType(countType));
+    Value *ok = b_.CreateAnd(isType(argType(0), XB_T_STRING), numbers);
     branchLikely(ok, check, slow);
     b_.SetInsertPoint(check);
     Value *s = itemPointer(arg(0), "str");
-    Value *pos = b_.CreateSub(intValue(arg(1)), ConstantInt::get(i64_, 1));
-    Value *one = b_.CreateICmpEQ(intValue(arg(2)), ConstantInt::get(i64_, 1));
+    Value *pos = b_.CreateSub(numberAsInteger(arg(1), nType), ConstantInt::get(i64_, 1));
+    Value *one = b_.CreateICmpEQ(numberAsInteger(arg(2), countType), ConstantInt::get(i64_, 1));
     branchLikely(b_.CreateAnd(one, b_.CreateICmpULT(pos, strLength(s))), fast, slow);
     b_.SetInsertPoint(fast);
     Value *byte = strByte(s, pos);
