@@ -893,13 +893,14 @@ columns, `0xFFFFFFFFFFFFFFFF`, -1, 10), and one past 64 bits is an error.
 host), runs LLVM's default optimization pipeline for the `-O` level (new pass manager), then, from `-O1` on, splits the
 loops whose fast paths have cold edges (`LoopSplit.*`, below), places the polls of the loops' back edges (`LoopPolls.*`,
 below), moves loops' invariant tests before them (`LoopGuards.*`, below; three rounds, each followed by the versioning
-of loops on their arrays' forms, `unswitchFormTests`), versions the fast loops on their other invariant tests
+of loops on their arrays' forms, `unswitchFormTests`; one for a function past 20000 instructions as the default pipeline
+left it, `kOneRound`, which each round simplifies whole again), versions the fast loops on their other invariant tests
 (`versionInvariantColdExits`, `LoopSplit.*`, below; then the forms and the guards once more), sets frames up where they
 are needed (`FrameSetup.*`, below, whose small entries are then inlined: `AlwaysInlinerPass`), drops the tests of
 pending requests that repeat one made with no call since (`skipRepeatedTests`, below), each followed by the function
-simplification pipeline on the functions it changed, and writes the object with the target's object writer
-(code generation runs on the legacy pass manager: in LLVM 22 and 23 it is the one every target implements). At `-O0` (no
-xIR passes, LLVM's `-O0` pipeline) every function first gets the passes whose time follows its size (`cleanUpFunctions`,
+simplification pipeline on the functions it changed, and writes the object with the target's object writer (code
+generation runs on the legacy pass manager: in LLVM 22 and 23 it is the one every target implements). At `-O0` (no xIR
+passes, LLVM's `-O0` pipeline) every function first gets the passes whose time follows its size (`cleanUpFunctions`,
 below: SROA, early CSE, instruction combining, CFG simplification), and code generation allocates registers
 (`CodeGenOptLevel::Less`, as at `-O1`): the fast allocator of `None` gives every value a stack slot of its own, so that
 a function of inline fast paths took kilobytes of stack per call (the `recursion_deep` test's function 3.8 KB on 32-bit

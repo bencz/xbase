@@ -1,6 +1,7 @@
 #include "codegen/Emit.h"
 
 #include <algorithm>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "codegen/FrameSetup.h"
@@ -100,8 +101,11 @@ std::unique_ptr<TargetMachine> createTargetMachine(const TargetConfig &cfg, std:
 }
 
 // Rounds of moving loops' invariant tests out (LoopGuards.h): an array of arrays indexed by invariant positions takes
-// one per level.
+// one per level. A function of more instructions than kOneRound (as the default pipeline left it) takes one: each round
+// simplifies it whole again, which grows faster than its size (pi's PiDigits, 24000: 7.9 s to compile, 6.9 s with one
+// round, and 3.5% faster).
 constexpr unsigned kGuardRounds = 3;
+constexpr unsigned kOneRound = 20000;
 
 // A function of more instructions than this (as code generation makes it, before any optimization) is too large for
 // the default pipeline and code generation, which take time growing faster than its size: it has passes whose time
@@ -158,17 +162,22 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   ModulePassManager mpm = optLevel == 0 ? pb.buildO0DefaultPipeline(lvl) : pb.buildPerModuleDefaultPipeline(lvl);
   mpm.run(m, mam);
   if (optLevel == 0) return;
+  std::unordered_map<const Function *, unsigned> size; // as the default pipeline left them
+  for (Function &f : m) size[&f] = f.getInstructionCount();
   // Loops whose slow paths leave for a generic copy (LoopSplit.h), then fewer polls on the back edges of the fast
   // loops that leaves (LoopPolls.h); after each, the function simplification pipeline again on the functions it
   // changed.
   FunctionPassManager fpm = pb.buildFunctionSimplificationPipeline(lvl, ThinOrFullLTOPhase::None);
+  unsigned round = 0;
   auto again = [&](bool (*change)(Function &, FunctionAnalysisManager &), const char *what) {
     std::vector<Function *> changed;
-    for (Function &f : m)
-      if (!f.isDeclaration() && !f.hasOptNone() && change(f, fam)) {
+    for (Function &f : m) {
+      bool large = size.count(&f) && size.at(&f) > kOneRound;
+      if (!f.isDeclaration() && !f.hasOptNone() && !(round > 0 && large) && change(f, fam)) {
         changed.push_back(&f);
         fam.invalidate(f, PreservedAnalyses::none());
       }
+    }
     if (changed.empty()) return;
     std::string err;
     raw_string_ostream os(err);
@@ -179,10 +188,11 @@ void optimizeModule(Module &m, TargetMachine &tm, unsigned optLevel) {
   again(placeLoopPolls, "loop polls");
   // On the loops the simplification has rotated: a guard out of a loop makes what it guarded invariant, whose own test
   // may then go out too.
-  for (unsigned round = 0; round < kGuardRounds; ++round) {
+  for (; round < kGuardRounds; ++round) {
     again(hoistLoopGuards, "loop guards");
     again(unswitchFormTests, "form tests");
   }
+  round = 0;
   // Then the tests a fast loop makes on what it does not change that are not its header's: tested once, before it. The
   // form test of an array that only then reads what the loop does not change (an invariant row of an array of
   // arrays), and the guards after it, go out last.
