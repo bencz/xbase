@@ -1,0 +1,10 @@
+
+levels: C<B<A>> C.up/A.up B<A>
+multiple: M<X> A.up
+self reassigned: Message not found TOTHER:WHO
+on one path: A BASE/1004 Message not found TOTHER:WHO
+in a block: B<A> classname: TB
+scopes: A.protected BASE/41 Scope violation (hidden) TC:H
+variable: va!
+a subclass's variables first: va set set d b va
+association changed while the method runs: P

@@ -516,7 +516,9 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
   uint32_t view = object && argv[0].width < c->nline ? argv[0].width : 0; /* a cast: the class of the line it sees */
   if (object) argv[0].width = 0; /* a method's Self is the object itself */
   int related = f && kind_of(c, from); /* Self is of the method's class (it may have been assigned another object) */
-  if (super && !related) {
+  /* A Super send reaches the parent's member of the sending method's class (xb_member_reach): for a value that is no
+   * object (a scalar class's method) whatever class its type has now (ClassAssociate() while the method runs). */
+  if (super && !related && object) {
     not_found(ctx, r, c, message, &argv[0]);
     return;
   }
@@ -584,6 +586,10 @@ int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
     if (!def) continue;
     cls *own = prepare(ctx, def);
     if (!own) return 1; /* the error is pending */
+    if (own->base.nvars) { /* inherited from a class of another module, which the compiler could not see */
+      xb_class_scalar_vars_error(ctx, r, def->name, argc, argv);
+      return 1;
+    }
     if (lookup(own, message)) c = own;
   }
   if (!c) return 0;
@@ -611,6 +617,11 @@ int xb_class_send_as(xb_ctx *ctx, xb_item *r, xb_func classFunction, xb_class_de
   if (!lookup(c, message)) return 0;
   dispatch(ctx, r, c, message, NULL, 0, NULL, argc, argv);
   return 1;
+}
+
+void xb_class_scalar_vars_error(xb_ctx *ctx, xb_item *ret, const char *operation, uint32_t argc,
+                                const xb_item *argv) {
+  xb_error_described(ctx, ret, EG_ARG, 3005, "Scalar class cannot have instance variables", operation, 0, argc, argv);
 }
 
 int xb_class_associate(const xb_object *o, const char *type) {

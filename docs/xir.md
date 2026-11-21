@@ -312,13 +312,18 @@ result. Implemented (`xir/passes/`):
   against the integers alone (`subst.check` with the integer mask; an overflow's double goes on in the copy), so the
   loop computes with integers in registers; one whose ranges cannot overflow (`fits`) needs none.
 - `resolve-sends`, after `fold-constants`: a `send` (without `...`, not one an AWAIT fuses) to an object whose class
-  `ClassInfo` knows reaches what `ClassModel` finds for it from the send's class (`classIndex`) and `Super`: a method
-  becomes a `call` of its function (which `inline-functions` may then inline: a method is inlined like a function,
-  with its frame shown), an instance variable read an `object.get` (the arguments ignored, as the runtime does) and one
-  assigned with one argument that is no reference an `object.set` of its slot. Anything else stays a send: a class
-  variable, a cast, `New` or `Init` without a method, a message no member answers, a member whose scope the sender
-  reaches only as a friend (the runtime checks friends), a line not known. The classes' methods are optimized before
-  the other functions (`calleesFirst`), so that a call a send became inlines an optimized body.
+  `ClassInfo` knows, and a `Super` send of a method to its own `Self` that reaches a method (its parameter 0, which only
+  loads read, `onlyLoaded`: the runtime finds a `Super` member from the method's class alone, `Self` being of it or of a
+  subclass, and a value that is no object whatever class its type has now; a variable's slot is the object's class's,
+  which only the runtime knows), reaches what `ClassModel` finds for it from the send's class (`classIndex`) and
+  `Super`: a method becomes a `call` of its function (which `inline-functions` may then inline: a method is inlined like
+  a function, with its frame shown), an instance variable read an `object.get` (the arguments ignored, as the runtime
+  does) and one assigned with one argument that is no reference an `object.set` of its slot. Anything else stays a send:
+  a class variable, a cast, `New` or `Init` without a method, a message no member answers, a member whose scope the
+  sender reaches only as a friend (the runtime checks friends), a line not known. The classes' methods are optimized
+  before the other functions (`calleesFirst`), so that a call a send became inlines an optimized body. In the runtime's
+  classes, `ARRAY:Count`'s `::Super:Count( b )` becomes a call of `Enumerable:Count`, so that `a:Count( {| v | ... } )`
+  runs in place too (`resolve-scalar-sends`).
 - `resolve-scalar-sends`, after `resolve-sends` (`ScalarSends.cpp`): a send to a value whose types (as the type
   inference knows them) include built-in types whose class of the runtime (a `SCALAR CLASS` of a carried source:
   `ARRAY`, `CHARACTER`, `HASH`, ... and `Enumerable` they inherit) answers it with one method (the most such types;

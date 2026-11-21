@@ -193,7 +193,8 @@ Statements:
   `Self` is the object, `::name` is `Self:name`, and `Super:name` (when no variable named `Super` is declared there) or
   `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super` are ordinary names. `SCALAR CLASS
   type` declares the class of a built-in type's values (its name is the type's as `ClassName()` gives it; no class
-  function, no instance variables).
+  function, no instance variables, nor inherited ones from a class of the module: an error; from a class of another
+  module, the runtime's `BASE/3005` at its first message).
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
   other arguments (an element, a variable in parentheses, an expression) by value. `DO &name [WITH args]` (also
   `&name.suffix` and `&( expr )`, which the reference lacks) calls the procedure the text names when it runs, as

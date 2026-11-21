@@ -34,6 +34,17 @@ bool inherits(const ClassDecl &c, const ClassDecl &target, const std::unordered_
   return false;
 }
 
+// The first class of the module, `c` or one it inherits from, that declares instance variables; null for none.
+const ClassDecl *withVariables(const ClassDecl &c, const std::unordered_map<std::string, ClassDecl *> &byName,
+                               std::set<const ClassDecl *> &seen) {
+  if (!seen.insert(&c).second) return nullptr;
+  if (!c.vars.empty()) return &c;
+  for (const std::string &p : c.parents)
+    if (auto it = byName.find(p); it != byName.end())
+      if (const ClassDecl *v = withVariables(*it->second, byName, seen)) return v;
+  return nullptr;
+}
+
 } // namespace
 
 void ClassResolver::run(Module &m) {
@@ -73,7 +84,15 @@ void ClassResolver::run(Module &m) {
   }
   for (auto &c : m.classes) {
     std::set<const ClassDecl *> seen;
-    if (inherits(*c, *c, byName, seen)) diag_.error(c->loc, "class " + c->name + " inherits from itself");
+    if (inherits(*c, *c, byName, seen)) {
+      diag_.error(c->loc, "class " + c->name + " inherits from itself");
+      continue;
+    }
+    seen.clear();
+    // A value of a type has no area for variables: nor its class's own nor inherited ones (a class of another module
+    // the runtime checks when the class first answers).
+    if (const ClassDecl *v = c->scalar && c->vars.empty() ? withVariables(*c, byName, seen) : nullptr)
+      diag_.error(c->loc, "a SCALAR CLASS has no instance variables: " + c->name + " inherits those of " + v->name);
   }
   // Implementations: the class named, else the last one declared before them (Parser).
   std::vector<std::unique_ptr<FuncDecl>> made;

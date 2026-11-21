@@ -703,12 +703,14 @@ first time it is used (its class function, or a subclass):
   which sends `Init` with the arguments as the class's own method would (a PROTECTED or HIDDEN `Init` is reached) and
   returns the object; `Init` without a method returns the object. A method receives the object as its first argument
   (`Self`); its `PARAMETERS` name the arguments after it.
-- A message from a method of class F (or a codeblock it made: `xb_op_send_from`) reaches F's own HIDDEN member when
-  F has one; else a method of the object's class (an overriding method wins, and so do a subclass's ACCESS and ASSIGN
-  over a variable F declared); else the variable F sees (F's, or its ancestors', unless HIDDEN there); else what the
-  object's class answers. `Super:message` takes the member of the ancestors after F in F's line; `Super:ClassName()`
-  is F's first parent's name. When `Self` was assigned an object that is not of F's class, `Super:message` is
-  `Message not found`.
+- A message from a method of class F (or a codeblock it made: `xb_op_send_from`) reaches F's own HIDDEN member when F
+  has one; else a method of the object's class (an overriding method wins, and so do a subclass's ACCESS and ASSIGN over
+  a variable F declared); else the variable F sees (F's, or its ancestors', unless HIDDEN there); else what the object's
+  class answers. `Super:message` takes the member of the ancestors after F in F's line; `Super:ClassName()` is F's first
+  parent's name. When `Self` was assigned an object that is not of F's class, `Super:message` is `Message not found`. A
+  value that is no object (a scalar class's method) reaches the member of F's line whatever class its type has now:
+  deliberately, where `ClassAssociate()` changed it while the method runs (the reference's send then finds no member),
+  so that a `Super` send the compiler resolves from F alone gives the same (`resolve-sends`).
 - Class variables (`CLASSVAR`): each class of the line holds its own value of each, starting from the INIT value of
   the class that declares it (the value itself: an INIT array is the same array), except a `SHARED` one, which the
   class and its subclasses share; the values are roots of the collector. A cast reads the values of the class it sees.
@@ -747,24 +749,26 @@ first time it is used (its class function, or a subclass):
   `.AND.`, `.OR.` and unary minus cannot be overloaded (the compiler rejects `.AND.` and `.OR.`, which the reference
   accepts and never calls).
 - Built-in types as classes: a `SCALAR CLASS type` (`XB_CLASS_SCALAR`, named as `ClassName()` names the type: `ARRAY`,
-  `CHARACTER`, `HASH`, `NUMERIC`, `DATE`, `BLOCK`, ...; it has no class function and no instance variables) is the class
-  of the type's values when no class is associated with the type: a message to such a value reaches its methods, the
-  value as `Self`, and one the class does not answer keeps Clipper's error (`No exported method`). A program's `SCALAR
-  CLASS` of a type answers first and the runtime's answers what it does not (the compiler marks the runtime's classes
-  `XB_CLASS_RUNTIME`, so the order the system runs the modules' registrations in does not matter). The runtime's
-  (`rtl/collections.prg`) give the type's functions as messages (`a:Len()`, `a:Add( x )`, `a:Sort()`, `"x":Upper()`,
-  `s:Split( "," )`, `h:Keys()`, `n:Round( 2 )`, `d:Year()`, `b:Eval( ... )`); `ARRAY`, `CHARACTER` and `HASH` inherit
-  `Enumerable`, whose methods work on any collection through `FOR EACH` over `Self`: `Select( bMap )`, `Where( bTest )`,
-  `Take( n )`, `Skip( n )`, `TakeWhile( bTest )`, `SkipWhile( bTest )`, `SelectMany( bMap )`, `Concat( xOther )`, `Zip(
-  xOther, [bCombine] )`, `Distinct( [bKey] )` (equal by `==`; numbers, strings and dates found through a hash) and
-  `Reverse()` are generators (the sequence is made as it is gone through, so they chain); `OrderBy( [bKey] )` and
-  `OrderByDescending( [bKey] )` give an array ordered as `ASort` orders values (the primitive `__ValueLess`), equal keys
-  in their order; `GroupBy( bKey )` gives a hash of each key to the array of its elements, `ToHash( bKey, [bValue] )` a
-  hash; and `ToArray()`, `Count( [bTest] )`, `Any( [bTest] )`, `All( bTest )`, `First( [bTest] )`, `Last( [bTest] )`,
-  `Contains( x )`, `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )`, `Min( [bValue] )`, `Max( [bValue] )`, `Average(
-  [bValue] )` (the last three NIL without elements) and `ForEach( bBlock )` go through it at once. A class that inherits
-  `Enumerable` only needs `GetEnumerator()`; a generator's enumerator answers `Enumerable`'s messages too
-  (`xb_class_send_as`). `ClassName()` and `ValType()` of the values stay Clipper's.
+  `CHARACTER`, `HASH`, `NUMERIC`, `DATE`, `BLOCK`, ...; it has no class function and no instance variables, nor
+  inherited ones: the compiler rejects those of a class of the module, and a class of another module's makes its first
+  message `BASE/3005`, `xb_class_scalar_vars_error`, as `ClassAssociate()` of such a class) is the class of the type's
+  values when no class is associated with the type: a message to such a value reaches its methods, the value as `Self`,
+  and one the class does not answer keeps Clipper's error (`No exported method`). A program's `SCALAR CLASS` of a type
+  answers first and the runtime's answers what it does not (the compiler marks the runtime's classes `XB_CLASS_RUNTIME`,
+  so the order the system runs the modules' registrations in does not matter). The runtime's (`rtl/collections.prg`)
+  give the type's functions as messages (`a:Len()`, `a:Add( x )`, `a:Sort()`, `"x":Upper()`, `s:Split( "," )`,
+  `h:Keys()`, `n:Round( 2 )`, `d:Year()`, `b:Eval( ... )`); `ARRAY`, `CHARACTER` and `HASH` inherit `Enumerable`, whose
+  methods work on any collection through `FOR EACH` over `Self`: `Select( bMap )`, `Where( bTest )`, `Take( n )`, `Skip(
+  n )`, `TakeWhile( bTest )`, `SkipWhile( bTest )`, `SelectMany( bMap )`, `Concat( xOther )`, `Zip( xOther, [bCombine]
+  )`, `Distinct( [bKey] )` (equal by `==`; numbers, strings and dates found through a hash) and `Reverse()` are
+  generators (the sequence is made as it is gone through, so they chain); `OrderBy( [bKey] )` and `OrderByDescending(
+  [bKey] )` give an array ordered as `ASort` orders values (the primitive `__ValueLess`), equal keys in their order;
+  `GroupBy( bKey )` gives a hash of each key to the array of its elements, `ToHash( bKey, [bValue] )` a hash; and
+  `ToArray()`, `Count( [bTest] )`, `Any( [bTest] )`, `All( bTest )`, `First( [bTest] )`, `Last( [bTest] )`, `Contains( x
+  )`, `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )`, `Min( [bValue] )`, `Max( [bValue] )`, `Average( [bValue] )` (the
+  last three NIL without elements) and `ForEach( bBlock )` go through it at once. A class that inherits `Enumerable`
+  only needs `GetEnumerator()`; a generator's enumerator answers `Enumerable`'s messages too (`xb_class_send_as`).
+  `ClassName()` and `ValType()` of the values stay Clipper's.
 - Scalar classes: `ASSOCIATE CLASS name WITH TYPE type` (`std.ch`, `ClassAssociate( name(), "type" )`; a type as
   `ClassName()` names it: `ARRAY`, `BLOCK`, `CHARACTER`, `DATE`, `HASH`, `LOGICAL`, `NIL`, `NUMERIC`) makes values of
   the type answer the class's methods and class variables, the value as `Self`; `ClassName()` is the class's, and its

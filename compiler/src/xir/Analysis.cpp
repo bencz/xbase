@@ -176,6 +176,14 @@ Predecessors predecessorTerminators(const Function &f) {
   return preds;
 }
 
+bool onlyLoaded(const Function &f, const Var *v) {
+  if (v->shared) return false;
+  for (auto &b : f.blocks)
+    for (auto &i : b->insts)
+      if (i->var == v && i->op != Op::Load) return false;
+  return true;
+}
+
 bool isResumable(const Function &f) {
   for (auto &b : f.blocks)
     if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return true;

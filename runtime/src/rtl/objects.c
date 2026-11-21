@@ -119,8 +119,7 @@ void xbf_CLASSASSOCIATE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv)
   int done = xb_class_associate(o, type);
   xb_name_upper_free(type, buf);
   if (done < 0) {
-    xb_error_described(ctx, ret, EG_ARG, 3005, "Scalar class cannot have instance variables", "CLASSASSOCIATE",
-                       0, argc, argv);
+    xb_class_scalar_vars_error(ctx, ret, "CLASSASSOCIATE", argc, argv);
     return;
   }
   xb_set_logical(ret, done);

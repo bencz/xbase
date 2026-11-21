@@ -276,6 +276,10 @@ void       xb_classes_finalize(xb_ctx *ctx);
 int        xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def *from, uint32_t super,
                                 uint32_t argc, xb_item *argv);
 int        xb_class_associate(const xb_object *o, const char *type);
+/* BASE/3005: a class with instance variables cannot answer a type's values (ClassAssociate, a SCALAR CLASS that
+ * inherits variables from a class of another module), `operation` the function or the class. */
+void       xb_class_scalar_vars_error(xb_ctx *ctx, xb_item *ret, const char *operation, uint32_t argc,
+                                      const xb_item *argv);
 /* A message to argv[0] as if it were an object of the class whose objects the class function `classFunction` makes
  * (its methods, Self being argv[0]); `*def` keeps that class from the first message on (NULL before it). 0 when the
  * function makes no object of a compiled class, or the class does not answer the message. */

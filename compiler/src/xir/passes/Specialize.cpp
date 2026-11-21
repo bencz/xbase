@@ -193,12 +193,11 @@ Function *makeCopy(Module &m, const Function &g, const std::vector<TypeSet> &typ
   // A parameter some instruction writes (or passes on by reference) keeps any type and class.
   c.paramTypes = types;
   c.paramClasses = classes;
-  for (auto &b : g.blocks)
-    for (auto &i : b->insts)
-      if (isParameter(i->var) && i->var->index < types.size() && i->op != Op::Load) {
-        c.paramTypes[i->var->index] = kAnyType;
-        c.paramClasses[i->var->index] = kNoClass;
-      }
+  for (auto &v : g.vars)
+    if (isParameter(v.get()) && v->index < types.size() && !onlyLoaded(g, v.get())) {
+      c.paramTypes[v->index] = kAnyType;
+      c.paramClasses[v->index] = kNoClass;
+    }
   std::map<const Var *, Var *> vars;
   for (auto &v : g.vars) {
     Var *nv = c.addVar(v->kind, v->index, v->name);
