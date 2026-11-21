@@ -255,8 +255,8 @@ Instruction *Builder::eachEnter(Var *v, Value *inCell, Value *coll) {
   return i;
 }
 
-Instruction *Builder::eachMove(Var *v, Value *inCell, Value *idx) {
-  Instruction *i = make(Op::EachMove, Type::Void, {inCell, idx});
+Instruction *Builder::eachMove(Var *v, Value *inCell, Value *idx, Value *coll) {
+  Instruction *i = make(Op::EachMove, Type::Void, {inCell, idx, coll});
   i->var = v;
   return i;
 }

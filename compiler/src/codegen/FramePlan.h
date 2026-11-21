@@ -94,6 +94,10 @@ public:
   // (a call's arguments, an array's elements) once it copied the value.
   std::optional<uint32_t> lastUse(const xir::Value *v, const xir::Instruction *user) const;
   const std::vector<uint32_t> &clearsOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to) const;
+  // The each.move whose element a load of a FOR EACH variable may read from the loop's source in place (findEachLoads),
+  // or null; whether every load of the variable through its reference is such.
+  const xir::Instruction *eachMoveOf(const xir::Instruction *load) const;
+  bool readsInPlace(const xir::Var *v) const { return directEachVars_.count(v) != 0; }
 
 private:
   struct Unit {                  // what one allocation serves
@@ -118,6 +122,7 @@ private:
   void elideLoads(const xir::BasicBlock &b);
   bool canForward(const xir::Instruction &value, const xir::Instruction &store) const;
   void findUnwritten();
+  void findEachLoads();
   void computeLiveness();
   void allocate();
   uint32_t scan(std::vector<uint32_t> order, uint32_t base);
@@ -138,6 +143,10 @@ private:
   std::vector<const xir::Var *> params_;                // by parameter number
   std::unordered_set<const xir::Var *> registerParams_; // parameters out of the frame
   std::unordered_set<const xir::Var *> unwritten_; // frame variables nothing writes: a load of one is its item
+  std::unordered_map<const xir::Instruction *, const xir::Instruction *> eachLoads_; // load -> its each.move
+  std::unordered_set<const xir::Var *> directEachVars_; // FOR EACH variables all of whose loads are eachLoads_
+  // a loop's source -> the instructions that read it in place besides its own uses (the loads, their uses there)
+  std::unordered_map<const xir::Value *, std::vector<const xir::Instruction *>> sourceReaders_;
   std::unordered_map<const xir::Value *, uint32_t> pos_;          // definition position
   std::unordered_map<const xir::BasicBlock *, uint32_t> start_, end_, blockIndex_;
   std::unordered_map<const xir::Value *, Home> homes_;

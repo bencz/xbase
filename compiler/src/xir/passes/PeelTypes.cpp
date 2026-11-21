@@ -78,27 +78,11 @@ void peel(Function &f, const Loop &l) {
         if (tg.block == l.header) tg.block = first;
 
   // Values of the loop used after it: the loop's, or the copy's, whichever pass left it.
-  CFG now(f);
-  Predecessors preds;
-  for (auto &[b, terms] : predecessorTerminators(f))
-    for (Instruction *t : terms)
-      if (now.reachable(t->parent)) preds[b].push_back(t);
   std::unordered_set<const BasicBlock *> inside(blocks.begin(), blocks.end());
   for (auto &[b, dup] : copy.blocks) inside.insert(dup);
-  std::vector<BlockParam *> placed;
-  for (auto &[orig, dup] : copy.pairs) {
-    std::vector<Instruction *> after;
-    for (Instruction *u : orig->users())
-      if (!inside.count(u->parent) && now.reachable(u->parent)) after.push_back(u);
-    if (after.empty()) continue;
-    SSAUpdater up(f, orig->type(), preds, placed);
-    up.addAvailable(definingBlock(orig), orig);
-    up.addAvailable(definingBlock(dup), dup);
-    std::unordered_set<Instruction *> done;
-    for (Instruction *u : after)
-      if (done.insert(u).second) up.rewriteUse(u, orig);
-  }
-  removeTrivialParams(placed, preds);
+  std::vector<Definitions> defs;
+  for (auto &[orig, dup] : copy.pairs) defs.push_back({{definingBlock(orig), orig}, {definingBlock(dup), dup}});
+  joinDefinitions(f, defs, inside);
 }
 
 } // namespace

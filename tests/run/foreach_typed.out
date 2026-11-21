@@ -1,0 +1,15 @@
+
+kinds: a.b.c. 1.two.3. v.9. 7.8. []
+bytes: 65 122 0 255           3          2          0
+compare: 11101 00010 11101 
+assigned: HELLO hello
+array assigned:         10         20         30
+changed through the array:   1  2 30
+shrunk:  5 error 1132
+after exit: before
+one variable nested: a12ab12b a12abb12bc x12xyy12yzz12z{
+captured: ppqq
+assigned on one path: aXc restored on BREAK: before read after a release: bcqqqqq0U descend in a sequence: cba
+assigned on one path: aXc restored on BREAK: before read after a release: A descend in a sequence: cXa
+assigned on one path: 12 restored on BREAK: before read after a release: A descend in a sequence: 21
+sum:       4500

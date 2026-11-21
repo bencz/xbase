@@ -299,7 +299,8 @@ void CodeGen::emit(const xir::Instruction &i) {
     const Home &h = plan_->home(&i);
     bool inPlace = h.kind == Home::Kind::Place && h.place == &i;
     Value *own = inPlace ? (i.access == xir::Access::Direct ? nullptr : slot(plan_->shadowSlot(&i))) : addr(&i);
-    Value *p = loadVar(*i.var, i.access, own, unwind_);
+    Value *p = loadEachElement(i, own);
+    if (!p) p = loadVar(*i.var, i.access, own, unwind_);
     if (sharingLoads_.count(&i)) shareString(p); // the value leaves the variable: its string stops growing
     if (inPlace) values_[&i] = p;
     else if (p != own) copyItem(own, p);
@@ -541,9 +542,14 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::EachMove: { // in place: to an element of a local array or hash without holes, a local generator's
-                       // Current, or a string's byte
-    // into the loop's own item (xb_each_move for the rest)
+                       // Current, or a string's byte into the loop's own item (xb_each_move for the rest); the
+                       // collection is the loop's source (the reference's), whose type a versioned loop knows
+    // A string's byte that no load reads through the reference (they read it from the string, loadEachElement): none
+    // is put there. Their path through the reference, for a position past the end, never runs: the loop test keeps
+    // the position within the string, which does not change.
+    if (plan_->readsInPlace(i.var) && plan_->types().of(ops[2]) == xir::typeBit(XB_T_STRING)) break;
     Value *var = rawAddress(*i.var);
+    Value *src = addr(ops[2]), *srcType = typeOf(ops[2], src);
     BasicBlock *slow = newBlock("each.move"), *join = newBlock("each.moved"), *local = newBlock("each.local");
     if (i.var->kind == xir::Var::Kind::Static) { // shared storage: the runtime reads the variable whole
       BasicBlock *own = newBlock("static.local");
@@ -563,12 +569,11 @@ void CodeGen::emit(const xir::Instruction &i) {
     BasicBlock *refLocal = newBlock("each.ref.local"); // a loop's reference other threads reach: the runtime's
     branchLikely(isLocal(ref), refLocal, slow);
     b_.SetInsertPoint(refLocal);
-    tag(b_.CreateStore(value(ops[1]), b_.CreateStructGEP(refTy_, ref, RefIndex)), Mem::Unknown);
-    Value *coll = heapItem(b_.CreateStructGEP(refTy_, ref, RefColl));
+    tag(b_.CreateStore(value(ops[1]), b_.CreateStructGEP(refTy_, ref, RefIndex)), Mem::RefIndex);
     BasicBlock *object = newBlock("each.object"), *other = newBlock("each.collection");
-    b_.CreateCondBr(b_.CreateICmpEQ(itemType(coll), ConstantInt::get(i32_, XB_T_OBJECT)), object, other);
+    b_.CreateCondBr(b_.CreateICmpEQ(srcType, ConstantInt::get(i32_, XB_T_OBJECT)), object, other);
     b_.SetInsertPoint(object); // a local generator's Current into the loop's own item, as xb_ref_own_put puts it
-    Value *gen = localGenerator(coll, slow);
+    Value *gen = localGenerator(src, slow);
     Value *refState = stateByte(ref, AtomicOrdering::Monotonic);
     Value *vars = b_.CreateStructGEP(objectTy_, gen, ObjectVars);
     copyItem(b_.CreateStructGEP(refTy_, ref, RefValue),
@@ -577,16 +582,16 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateBr(join);
     b_.SetInsertPoint(other);
     BasicBlock *str = newBlock("each.string"), *inStr = newBlock("each.byte"), *coll2 = newBlock("each.elements");
-    b_.CreateCondBr(b_.CreateICmpEQ(itemType(coll), ConstantInt::get(i32_, XB_T_STRING)), str, coll2);
+    b_.CreateCondBr(b_.CreateICmpEQ(srcType, ConstantInt::get(i32_, XB_T_STRING)), str, coll2);
     b_.SetInsertPoint(str); // a string's byte, the shared one-byte string, into the loop's own item (as move_to does;
                             // past the end, nothing): a static string needs no barrier
-    Value *s = itemPointer(coll, "str"), *pos0 = b_.CreateSub(value(ops[1]), ConstantInt::get(i64_, 1));
+    Value *s = itemPointer(src, "str"), *pos0 = b_.CreateSub(value(ops[1]), ConstantInt::get(i64_, 1));
     b_.CreateCondBr(b_.CreateICmpULT(pos0, strLength(s)), inStr, join);
     b_.SetInsertPoint(inStr);
     storeTagged(b_.CreateStructGEP(refTy_, ref, RefValue), XB_T_STRING, byteString(strByte(s, pos0)));
     b_.CreateBr(join);
     b_.SetInsertPoint(coll2);
-    inlineRefTarget(ref, slow);
+    inlineRefTarget(ref, slow, src, srcType);
     b_.CreateBr(join);
     b_.SetInsertPoint(slow);
     b_.CreateCall(rtEachMove_, {fnCtx_, var, eachHow(i), value(ops[1])});

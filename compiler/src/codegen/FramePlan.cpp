@@ -28,6 +28,7 @@ bool returnsWords(const Function &f) {
 
 FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {
   findUnwritten();
+  findEachLoads();
   findRegisterParams();
   placeVariables();
   number();
@@ -298,7 +299,13 @@ void FramePlan::computeLiveness() {
       liveIn[bi] = stamp;
       work.push_back(b);
     };
-    for (const Instruction *user : v->users()) useIn(user->parent, pos_.at(user));
+    auto readers = sourceReaders_.find(v);
+    auto forUsers = [&](auto &&fn) {
+      for (const Instruction *user : v->users()) fn(user);
+      if (readers != sourceReaders_.end())
+        for (const Instruction *user : readers->second) fn(user);
+    };
+    forUsers([&](const Instruction *user) { useIn(user->parent, pos_.at(user)); });
     while (!work.empty()) {
       const BasicBlock *b = work.back();
       work.pop_back();
@@ -320,7 +327,7 @@ void FramePlan::computeLiveness() {
       uint32_t at = pos_.at(r);
       if (def == b && start > at) continue;
       bool live = false;
-      for (const Instruction *user : v->users()) live |= user->parent == b && pos_.at(user) > at;
+      forUsers([&](const Instruction *user) { live |= user->parent == b && pos_.at(user) > at; });
       for (size_t k = 0; !live && k < b->numSuccessors(); ++k) // a block with a use is live-in (but the def's)
         live = liveIn[blockIndex_.at(b->successor(k))] == stamp;
       if (live) liveAtRelease_[r].insert(u);
@@ -656,6 +663,88 @@ void FramePlan::pinMovedParams() {
       units_[u].slot = varSlot_.at(i->var);
       units_[u].param = i->var->index;
     }
+}
+
+// The loads of a FOR EACH variable that read its element from the loop's source and position (eachLoads_: the load ->
+// the each.move whose element it is) rather than through the loop's reference: a variable of the frame alone (not
+// shared, not a parameter: in no cell, and no reference or codeblock reaches it, nor a macro), whose last change on
+// every path to the load is that each.move, outside a cell (no assignment between, nor an inner loop's restore): a
+// forward dataflow of the last change of each such variable, none where paths bring different ones, and none where an
+// unwinding enters (it may leave a block at any point). The source is live at those loads and at their uses in their
+// block, which code generation reads it for (sourceReaders_). The variables all of whose loads are such
+// (directEachVars_) need nothing of their reference's item over a string.
+void FramePlan::findEachLoads() {
+  std::unordered_map<const Var *, size_t> index;
+  for (const BasicBlock *b : cfg_.order())
+    for (auto &i : b->insts) {
+      const Var *v = i->var;
+      if (i->op == Op::EachMove && v->kind == Var::Kind::Frame && !v->shared && !v->param) index.emplace(v, index.size());
+    }
+  if (index.empty()) return;
+  using State = std::vector<const Instruction *>; // per variable: the each.move that last changed it, or none
+  std::unordered_set<const BasicBlock *> unwindTargets;
+  for (const BasicBlock *b : cfg_.order())
+    if (b->unwind) unwindTargets.insert(b->unwind);
+  auto step = [&](const Instruction &i, State &s) {
+    auto k = i.var ? index.find(i.var) : index.end();
+    if (k == index.end() || (opInfo(i.op).effects & WritesVar) == 0) return;
+    const Constant *inCell = i.op == Op::EachMove ? asBool(i.operand(0)) : nullptr;
+    s[k->second] = inCell && !inCell->logical ? &i : nullptr;
+  };
+  std::unordered_map<const BasicBlock *, State> out;
+  auto entering = [&](const BasicBlock *b) {
+    State in(index.size(), nullptr);
+    if (unwindTargets.count(b) || b == cfg_.order().front()) return in;
+    bool first = true;
+    for (const BasicBlock *p : cfg_.preds(b)) {
+      auto o = out.find(p);
+      if (o == out.end()) continue; // not reached yet: no change of its own to join
+      for (size_t k = 0; k < in.size(); ++k)
+        if (first) in[k] = o->second[k];
+        else if (in[k] != o->second[k]) in[k] = nullptr;
+      first = false;
+    }
+    return in;
+  };
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (const BasicBlock *b : cfg_.order()) {
+      State s = entering(b);
+      for (auto &i : b->insts) step(*i, s);
+      auto o = out.find(b);
+      if (o == out.end() || o->second != s) {
+        out[b] = std::move(s);
+        changed = true;
+      }
+    }
+  }
+  std::unordered_set<const Var *> through; // variables with a load that is not such
+  for (const BasicBlock *b : cfg_.order()) {
+    State s = entering(b);
+    for (auto &i : b->insts) {
+      if (i->op == Op::Load && i->access == Access::ThroughRef) {
+        auto k = index.find(i->var);
+        const Instruction *move = k == index.end() ? nullptr : s[k->second];
+        if (!move) {
+          through.insert(i->var);
+        } else {
+          eachLoads_[i.get()] = move;
+          directEachVars_.insert(i->var);
+          auto &readers = sourceReaders_[move->operand(2)];
+          readers.push_back(i.get());
+          for (const Instruction *u : i->users())
+            if (u->parent == b) readers.push_back(u);
+        }
+      }
+      step(*i, s);
+    }
+  }
+  for (const Var *v : through) directEachVars_.erase(v);
+}
+
+const Instruction *FramePlan::eachMoveOf(const Instruction *load) const {
+  auto m = eachLoads_.find(load);
+  return m == eachLoads_.end() ? nullptr : m->second;
 }
 
 std::optional<uint32_t> FramePlan::lastUse(const Value *v, const Instruction *user) const {

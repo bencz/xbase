@@ -191,11 +191,12 @@ bool splitAppends(Function &f) {
     }
     b->insts = std::move(out);
   }
-  for (auto &b : f.blocks) {
+  // Every sum lets go of its operands before any goes: a sum may use one of another block.
+  for (auto &b : f.blocks)
     for (auto &i : b->insts)
       if (gone.count(i.get())) i->dropOperands();
+  for (auto &b : f.blocks)
     std::erase_if(b->insts, [&](const std::unique_ptr<Instruction> &i) { return gone.count(i.get()) != 0; });
-  }
   return true;
 }
 

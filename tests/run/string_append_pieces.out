@@ -5,3 +5,4 @@ the variable itself: ababxababxxababxababxxx
 s := s + a + b: [1,a2,b3,c4,d5,e
 unknown type: <a> Argument error +
 positions with decimals: C C B  [] A         90
+pieces of several blocks: a---|-b--|--cd|---d|

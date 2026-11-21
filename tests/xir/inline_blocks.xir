@@ -25,16 +25,16 @@ body:
   store $f6, nil
   inline.leave
   %16 = each.source %4, false
-  %17 = each.enter $f3, false, %16
-  br each.test(i64 0)
+  %17 = subst.check guard 16 %16
+  cond_br %17, body.3.other, body.3
 each.test(%19: i64):
   %20 = i.add %19, i64 1
   %21 = enum.len %16
   %22 = i.cmp le %20, %21
-  cond_br %22, each.body, each.end
+  cond_br %22, each.body, each.end(%39)
 each.body:
   %24 = i.add %19, i64 1
-  each.move $f3, false, %24
+  each.move $f3, false, %24, %16
   %26 = load $f3 ref
   inline.enter MAIN.block6 %26
   %28 = binary mul %26, 2:w10
@@ -43,11 +43,57 @@ each.body:
   barrier $f3 ref
   %32 = i.add %19, i64 1
   br each.test(%32)
-each.end:
-  each.leave $f3, false, %17
-  %35 = load $f1 maybe_ref
-  %36 = binary add %35, 3:w0
-  ret %36
+each.end(%34: item):
+  each.leave $f3, false, %34
+  %36 = load $f1 maybe_ref
+  %37 = binary add %36, 3:w0
+  ret %37
+body.3:
+  %39 = each.enter $f3, false, %16
+  br each.test(i64 0)
+body.3.other:
+  %41 = subst.value %16
+  %42 = subst.check guard 32 %41
+  cond_br %42, body.3.other.2, body.3.each1
+body.3.each1:
+  %44 = each.enter $f3, false, %41
+  br each.test.each1(i64 0)
+each.test.each1(%46: i64):
+  %47 = i.add %46, i64 1
+  %48 = enum.len %41
+  %49 = i.cmp le %47, %48
+  cond_br %49, each.body.each1, each.end(%44)
+each.body.each1:
+  %51 = i.add %46, i64 1
+  each.move $f3, false, %51, %41
+  %53 = load $f3 ref
+  inline.enter MAIN.block6 %53
+  %55 = binary mul %53, 2:w10
+  inline.leave
+  store $f3 ref, %55
+  barrier $f3 ref
+  %59 = i.add %46, i64 1
+  br each.test.each1(%59)
+body.3.other.2:
+  %61 = subst.value %41
+  %62 = each.enter $f3, false, %61
+  br each.test.each(i64 0)
+each.test.each(%64: i64):
+  %65 = i.add %64, i64 1
+  %66 = enum.len %61
+  %67 = i.cmp le %65, %66
+  cond_br %67, each.body.each, each.end(%62)
+each.body.each:
+  %69 = i.add %64, i64 1
+  each.move $f3, false, %69, %61
+  %71 = load $f3 ref
+  inline.enter MAIN.block6 %71
+  %73 = binary mul %71, 2:w10
+  inline.leave
+  store $f3 ref, %73
+  barrier $f3 ref
+  %77 = i.add %64, i64 1
+  br each.test.each(%77)
 }
 
 function MAIN.byref internal params 1 {
@@ -69,16 +115,16 @@ entry:
   inline.leave
   %11 = load $f0 maybe_ref
   %12 = each.source %11, false
-  %13 = each.enter $f3, false, %12
-  br each.test(i64 0)
+  %13 = subst.check guard 16 %12
+  cond_br %13, entry.3.other, entry.3
 each.test(%15: i64):
   %16 = i.add %15, i64 1
   %17 = enum.len %12
   %18 = i.cmp le %16, %17
-  cond_br %18, each.body, each.end
+  cond_br %18, each.body, each.end(%35)
 each.body:
   %20 = i.add %15, i64 1
-  each.move $f3, false, %20
+  each.move $f3, false, %20, %12
   %22 = load $f3 ref
   inline.enter MAIN.block3 %22
   %24 = binary mul %22, 2:w10
@@ -87,11 +133,57 @@ each.body:
   barrier $f3 ref
   %28 = i.add %15, i64 1
   br each.test(%28)
-each.end:
-  each.leave $f3, false, %13
-  %31 = load $f1 maybe_ref
-  %32 = binary add %31, 3:w0
-  ret %32
+each.end(%30: item):
+  each.leave $f3, false, %30
+  %32 = load $f1 maybe_ref
+  %33 = binary add %32, 3:w0
+  ret %33
+entry.3:
+  %35 = each.enter $f3, false, %12
+  br each.test(i64 0)
+entry.3.other:
+  %37 = subst.value %12
+  %38 = subst.check guard 32 %37
+  cond_br %38, entry.3.other.2, entry.3.each1
+entry.3.each1:
+  %40 = each.enter $f3, false, %37
+  br each.test.each1(i64 0)
+each.test.each1(%42: i64):
+  %43 = i.add %42, i64 1
+  %44 = enum.len %37
+  %45 = i.cmp le %43, %44
+  cond_br %45, each.body.each1, each.end(%40)
+each.body.each1:
+  %47 = i.add %42, i64 1
+  each.move $f3, false, %47, %37
+  %49 = load $f3 ref
+  inline.enter MAIN.block3 %49
+  %51 = binary mul %49, 2:w10
+  inline.leave
+  store $f3 ref, %51
+  barrier $f3 ref
+  %55 = i.add %42, i64 1
+  br each.test.each1(%55)
+entry.3.other.2:
+  %57 = subst.value %37
+  %58 = each.enter $f3, false, %57
+  br each.test.each(i64 0)
+each.test.each(%60: i64):
+  %61 = i.add %60, i64 1
+  %62 = enum.len %57
+  %63 = i.cmp le %61, %62
+  cond_br %63, each.body.each, each.end(%58)
+each.body.each:
+  %65 = i.add %60, i64 1
+  each.move $f3, false, %65, %57
+  %67 = load $f3 ref
+  inline.enter MAIN.block3 %67
+  %69 = binary mul %67, 2:w10
+  inline.leave
+  store $f3 ref, %69
+  barrier $f3 ref
+  %73 = i.add %60, i64 1
+  br each.test.each(%73)
 }
 
 block MAIN.block1 internal params 1 {

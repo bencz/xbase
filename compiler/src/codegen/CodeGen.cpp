@@ -69,6 +69,7 @@ void CodeGen::initTypes() {
       {Mem::Item, "item"},           {Mem::HeapItem, "heap item"}, {Mem::ArrayHeader, "array header"},
       {Mem::BlockCells, "block cells"}, {Mem::Ctx, "context"},     {Mem::FrameLink, "frame link"},
       {Mem::GcState, "gc state"},       {Mem::String, "string"},    {Mem::ObjectHeader, "object header"},
+      {Mem::RefIndex, "reference index"},
   };
   static_assert(std::size(kMemNames) + 1 == (size_t)Mem::Count_, "one name per memory class but Unknown");
   for (auto [m, name] : kMemNames) {

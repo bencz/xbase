@@ -332,13 +332,26 @@ it; invalid xIR is an internal error naming the pass. `--dump-xir` writes the re
   with the copy's (`SSAUpdater`). The loop then carries that value with one type, which the lowering keeps in a
   register of its kind (a double in a floating-point register): the Basel sum's loop runs in about 8 cycles a term
   (`bench/async_pi.prg`), as .NET's does.
+- `version-each`, after `peel-for-types`: a `FOR EACH` loop whose collection (`each.source`, used only from its
+  `each.enter` on, which follows it: a loop of one collection) may be a string or an array among other types is
+  versioned for them (`VersionEach.cpp`), innermost loops first (up to 8 loops in a function of at most 4000
+  instructions, each loop of at most 250 with the blocks its checks lead to and the cleanup blocks only it unwinds to,
+  which restore its variables): a guard on the collection (`subst.check` with the first type's mask) lets the original
+  loop go on with that type, a second guard on what goes on (`subst.value`) enters a copy for the second type, and the
+  rest enters a copy for any collection. The values of the loop used after it, and the collection where the copies meet
+  again (a typed continuation's copy of the loop that the checks lead to), are joined from the copies (`SSAUpdater`).
+  The lowering then knows the collection's type in each copy: the length test, the step and the variable's reads are
+  done in place without testing the loop reference's collection at every pass ([compiler.md](compiler.md)). A loop over
+  a string runs in about 1 ns an element (`bench/primitives/iteration.prg`).
 
 Shared changes of shape are in `Transform.*`: `splitAfter` (the rest of a block into a new one it jumps to),
 `copyBlocks` (blocks copied into their function or another, with the map from each original block and value to its
 copy; a value from outside the copied blocks stays, or is what a given function makes of it), `SSAUpdater` (SSA form
 rebuilt for a value that gets more definitions, given at the end of blocks: the value reaching a block, through block
 parameters made on demand where definitions meet, as in Braun et al.) and `removeTrivialParams` (a parameter made so
-whose arguments are one value is that value). `typed-continuations`, `peel-for-types` and the inlining passes use them.
+whose arguments are one value is that value), and `joinDefinitions` (the uses after copied blocks of each value they
+define, given its definitions, take the one that reaches them). `typed-continuations`, `peel-for-types`,
+`version-each` and the inlining passes use them.
 
 They use the mutation API of `IR.h` (replacing all uses of a value, redirecting a branch, removing a block parameter
 with its arguments, taking a terminator; `Builder::jump` replaces a terminator with a jump) and the predecessor
@@ -420,21 +433,21 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   right before its list, which is its one use in the block; the callee's `byref` the positions of a call that receive
   references), `func.ref` (a function reference, `@name()`: the `xb_funcref` of its callee as an item), hash literals
   (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its captured
-  variables, the `FOR` test, the `FOR EACH` operations (`each.source`, `each.in_cell`, `each.enter`, `each.move`,
-  `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose result is the value the `CASE`s match:
-  a substituted one after an error) and match, `seq.catch` and `seq.value` for `BEGIN SEQUENCE`, the generator
-  operations (`gen.new`, `gen.restore`, `gen.done`, the terminator `gen.yield`, and `box.i64`, `box.bool`, `unbox.i64`,
-  `unbox.bool` for the values kept in the frame), the asynchronous operations (`async.new`, `async.restore`,
-  `await.ready`, `await.value`, `await.wait`, `await.fuse`, `await.fused`, the terminator `async.suspend`), `append`
-  (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed continuations (the verifier keeps
-  the check right after its operation and the value first in the block only the check leads to), and for parameter
-  versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call with the
-  function's own arguments, as received), `inline.enter` (naming a function or block function) and `inline.leave`,
-  around an inlined body: the call stack shows that function in between, and `frame.release`, right after `x := NIL`
-  to a local or a parameter: the frame slots of the values dead there are set to `NIL` (the store itself may go as a
-  dead store, but the program let go of what x held); after the `LOCAL` standing for a parameter (`frame.release param
-  k of NAME`), also the parameter's own slot, or in the body of NAME inlined, the argument its `inline.enter` holds,
-  which nothing else lets go of before the function returns.
+  variables, the `FOR` test, the `FOR EACH` operations (`each.source`, `each.in_cell`, `each.enter`, `each.move`, which
+  takes the loop's collection too, `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose
+  result is the value the `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value` for
+  `BEGIN SEQUENCE`, the generator operations (`gen.new`, `gen.restore`, `gen.done`, the terminator `gen.yield`, and
+  `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), the asynchronous operations
+  (`async.new`, `async.restore`, `await.ready`, `await.value`, `await.wait`, `await.fuse`, `await.fused`, the terminator
+  `async.suspend`), `append` (`var := var + value`, `xb_op_append`), `subst.check` and `subst.value` for typed
+  continuations (the verifier keeps the check right after its operation and the value first in the block only the check
+  leads to), and for parameter versioning `params.ref` (whether parameters hold references their caller passed) and
+  `call.forward` (a call with the function's own arguments, as received), `inline.enter` (naming a function or block
+  function) and `inline.leave`, around an inlined body: the call stack shows that function in between, and
+  `frame.release`, right after `x := NIL` to a local or a parameter: the frame slots of the values dead there are set to
+  `NIL` (the store itself may go as a dead store, but the program let go of what x held); after the `LOCAL` standing for
+  a parameter (`frame.release param k of NAME`), also the parameter's own slot, or in the body of NAME inlined, the
+  argument its `inline.enter` holds, which nothing else lets go of before the function returns.
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `async.suspend`, `ret`.

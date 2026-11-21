@@ -6,14 +6,16 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 // Changes to the shape of functions that passes share: splitting a block, copying blocks, and rebuilding SSA form
 // where a value gets a second definition.
 namespace xb::xir {
 
-// Moves the instructions after position `k` of `b` into a new block (named like `b`) that `b` jumps to, and returns
-// it.
+// Moves the instructions after position `k` of `b` into a new block (named like `b`, unwinding where `b` does) that `b`
+// jumps to, and returns it.
 BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k);
 
 // A copy of blocks into function `f` (theirs, or another): each block's copy is named with `suffix`, takes parameters
@@ -61,5 +63,12 @@ private:
 // A parameter among `placed` whose arguments (from the branches in `preds`) are all one other value, or itself, is
 // that value; removing one may make others so. Removed ones become null in `placed`.
 void removeTrivialParams(std::vector<BlockParam *> &placed, const Predecessors &preds);
+
+// SSA form again for values that copies of blocks define once more: each entry lists one value's definitions with
+// their blocks, the original first. Its reachable uses outside the blocks in `inside` (the original and copied blocks)
+// take the definition that reaches them, through block parameters where they meet (SSAUpdater).
+using Definitions = std::vector<std::pair<const BasicBlock *, Value *>>;
+void joinDefinitions(Function &f, const std::vector<Definitions> &defs,
+                     const std::unordered_set<const BasicBlock *> &inside);
 
 } // namespace xb::xir

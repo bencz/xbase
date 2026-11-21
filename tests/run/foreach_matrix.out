@@ -1,0 +1,13 @@
+
+string    s:ss st ts tt a:s1 s2 t1 t2 h:s3 s4 t3 t4 g:s5 s6 t5 t6 s:sU sV tU tV o:so sp to tp 
+array     s:1s 1t 2s 2t a:11 12 21 22 h:13 14 23 24 g:15 16 25 26 s:1U 1V 2U 2V o:1o 1p 2o 2p 
+hash      s:3s 3t 4s 4t a:31 32 41 42 h:33 34 43 44 g:35 36 45 46 s:3U 3V 4U 4V o:3o 3p 4o 4p 
+generator s:5s 5t 6s 6t a:51 52 61 62 h:53 54 63 64 g:55 56 65 66 s:5U 5V 6U 6V o:5o 5p 6o 6p 
+sequence  s:Us Ut Vs Vt a:U1 U2 V1 V2 h:U3 U4 V3 V4 g:U5 U6 V5 V6 s:UU UV VU VV o:Uo Up Vo Vp 
+object    s:os ot ps pt a:o1 o2 p1 p2 h:o3 o4 p3 p4 g:o5 o6 p5 p6 s:oU oV pU pV o:oo op po pp 
+descend: c2c1b2b1a2a1 2 1
+exit and loop: a1a3b1b3c1c3 NIL NIL
+captured: p7 p8 q7 q8  U U
+the outer's element: a2b2/c3d3e3//
+chains: H,E,L,O,W,R,D,          2         60 z3,y2,x1,          6          3
+twice: sseeqq

@@ -322,7 +322,7 @@ void Generator::genForEach(const ForEachStmt &st) {
   b.setBlock(body);
   for (size_t k = 0; k < n; ++k) {
     Value *i = index(k); // emitted before the test of the cell, like the loop test does
-    b.eachMove(vars[k].x, eachInCell(vars[k]), i);
+    b.eachMove(vars[k].x, eachInCell(vars[k]), i, colls[k]);
     if (st.key) store(static_cast<const VarExpr &>(*st.key), b.eachKey(colls[k], i));
   }
   cur_.eachVars.insert(cur_.eachVars.end(), vars.begin(), vars.end());

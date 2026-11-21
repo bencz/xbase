@@ -435,7 +435,15 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
     storeTagged(d, XB_T_STRING, byteString(b_.CreateZExt(letter, i64_)));
     break;
   }
-  case Inline::Asc: { // an empty string reads its terminating NUL: 0
+  case Inline::Asc: { // an empty string reads its terminating NUL: 0; a FOR EACH variable's byte of its string, there
+    BasicBlock *item = newBlock("asc.item");
+    if (Value *byte = elementByte(i, i.operand(0), item)) {
+      storeInt(d, byte);
+      b_.CreateBr(join);
+    } else {
+      b_.CreateBr(item);
+    }
+    b_.SetInsertPoint(item);
     BasicBlock *fast = newBlock("asc");
     branchLikely(isType(argType(0), XB_T_STRING), fast, slow);
     b_.SetInsertPoint(fast);

@@ -3,6 +3,7 @@
 #include "codegen/LoopSplit.h"
 
 #include "xbrt.h" // constants only (type tags, GC state bits)
+#include "xir/Types.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/MDBuilder.h>
@@ -256,11 +257,12 @@ Value *CodeGen::hashEntryAt(Value *hash, Value *pos0, BasicBlock *miss) {
 // The element an xb_ref designates, when it is in place (see xb_ref in xbrt.h): an array's element within it (an array
 // of items), or the entry at a position of a hash without holes, of a local array or hash; branches to `miss`
 // otherwise (a shared collection, a compact array, anything else), where the runtime finds it or raises the bound
-// error.
-Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss) {
-  Value *coll = heapItem(b_.CreateStructGEP(refTy_, ref, RefColl));
-  Value *type = itemType(coll);
-  Value *pos0 = b_.CreateSub(loadFrom(i64_, b_.CreateStructGEP(refTy_, ref, RefIndex), Mem::Unknown, "index"),
+// error. `coll` and its `collType`, when given, are the reference's collection (a FOR EACH loop's source, whose type
+// a loop versioned for it knows).
+Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss, Value *coll, Value *collType) {
+  if (!coll) coll = heapItem(b_.CreateStructGEP(refTy_, ref, RefColl));
+  Value *type = collType ? collType : itemType(coll);
+  Value *pos0 = b_.CreateSub(loadFrom(i64_, b_.CreateStructGEP(refTy_, ref, RefIndex), Mem::RefIndex, "index"),
                              ConstantInt::get(i64_, 1));
   BasicBlock *arr = newBlock("ref.array"), *hash = newBlock("ref.hash"), *found = newBlock("ref.found");
   SwitchInst *sw = b_.CreateSwitch(type, miss, 2);
@@ -290,6 +292,65 @@ Value *CodeGen::inlineRefTarget(Value *ref, BasicBlock *miss) {
   target->addIncoming(elem, inArray);
   target->addIncoming(value, hashEnd);
   return heapItem(target);
+}
+
+// A load that reads its element in place (FramePlan::eachMoveOf): the element at the each.move's position of its source,
+// when the source is a string (its byte, the shared one-byte string, into `own`) or a local array of items within it
+// (the element), as the loop's reference designates it; anything else through the reference, as loadVar reads it.
+// Null for another load, or one whose source's type the code does not know.
+Value *CodeGen::loadEachElement(const xir::Instruction &load, Value *own) {
+  const xir::Instruction *found = plan_->eachMoveOf(&load);
+  if (!found) return nullptr;
+  const xir::Instruction &move = *found;
+  const xir::Value *src = move.operand(2);
+  xir::TypeSet t = plan_->types().of(src);
+  bool str = t == xir::typeBit(XB_T_STRING), arr = t == xir::typeBit(XB_T_ARRAY);
+  if (!str && !arr) return nullptr;
+  Value *coll = itemPointer(addr(src), str ? "str" : "arr");
+  Value *pos0 = b_.CreateSub(value(move.operand(1)), ConstantInt::get(i64_, 1));
+  BasicBlock *in = newBlock("each.in"), *miss = newBlock("each.miss"), *join = newBlock("each.read");
+  Value *got;
+  if (str) {
+    branchLikely(b_.CreateICmpULT(pos0, strLength(coll)), in, miss);
+    b_.SetInsertPoint(in);
+    storeTagged(own, XB_T_STRING, byteString(strByte(coll, pos0)));
+    got = own;
+  } else {
+    BasicBlock *local = newBlock("each.array.local");
+    branchLikely(isLocalItems(objectState(coll)), local, miss); // a compact or shared array: through the reference
+    b_.SetInsertPoint(local);
+    branchLikely(b_.CreateICmpULT(pos0, arrayLength(coll)), in, miss);
+    b_.SetInsertPoint(in);
+    got = arrayElement(coll, pos0);
+  }
+  BasicBlock *inEnd = b_.GetInsertBlock();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(miss);
+  Value *other = loadVar(*load.var, load.access, own, unwind_);
+  BasicBlock *missEnd = b_.GetInsertBlock();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+  PHINode *phi = b_.CreatePHI(ptrTy_, 2, "each.elem");
+  phi->addIncoming(got, inEnd);
+  phi->addIncoming(other, missEnd);
+  return phi;
+}
+
+// The byte that a load of loadEachElement over a string holds, read again at its position in the loop's source, for
+// `use` of it in the load's own block (where FramePlan keeps the source live): null when `v` is no such load. Branches
+// to `miss` for a position outside the string (where the load read through the loop's reference).
+Value *CodeGen::elementByte(const xir::Instruction &use, const xir::Value *v, BasicBlock *miss) {
+  const auto *load = dynamic_cast<const xir::Instruction *>(v);
+  const xir::Instruction *found = load ? plan_->eachMoveOf(load) : nullptr;
+  if (!found || load->parent != use.parent) return nullptr;
+  const xir::Instruction &move = *found;
+  if (plan_->types().of(move.operand(2)) != xir::typeBit(XB_T_STRING)) return nullptr;
+  Value *s = itemPointer(addr(move.operand(2)), "str");
+  Value *pos0 = b_.CreateSub(value(move.operand(1)), ConstantInt::get(i64_, 1));
+  BasicBlock *in = newBlock("elem.in");
+  branchLikely(b_.CreateICmpULT(pos0, strLength(s)), in, miss);
+  b_.SetInsertPoint(in);
+  return strByte(s, pos0);
 }
 
 // Branches to a new block when `cond` holds (marked unlikely) and continues

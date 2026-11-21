@@ -72,10 +72,10 @@ private:
   // headers, codeblocks' cell pointers, the context's head, frame links, the
   // collector's state bytes, strings and views' buffers (compiled code reads
   // them, and writes the strings an `append` grows: bytes, length, flags,
-  // room), and objects' class pointers.
+  // room), objects' class pointers, and FOR EACH references' positions.
   // Unknown memory is not tagged.
   enum class Mem : uint8_t {
-    Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, String, ObjectHeader, Count_
+    Unknown, Item, HeapItem, ArrayHeader, BlockCells, Ctx, FrameLink, GcState, String, ObjectHeader, RefIndex, Count_
   };
 
   // CodeGen.cpp: types, runtime declarations, the module, functions and
@@ -173,7 +173,8 @@ private:
   VarTarget varTarget(const xir::Var &v, xir::Access a, bool load = false);
   llvm::Value *loadVar(const xir::Var &v, xir::Access a, llvm::Value *shadow, llvm::BasicBlock *unwind);
   void storeVar(const xir::Var &v, xir::Access a, llvm::Value *src, llvm::BasicBlock *unwind);
-  llvm::Value *inlineRefTarget(llvm::Value *ref, llvm::BasicBlock *miss);
+  llvm::Value *inlineRefTarget(llvm::Value *ref, llvm::BasicBlock *miss, llvm::Value *coll = nullptr,
+                               llvm::Value *collType = nullptr);
   llvm::Value *hashEntryAt(llvm::Value *hash, llvm::Value *pos0, llvm::BasicBlock *miss);
   llvm::BasicBlock *beginUnlikely(llvm::Value *cond, const char *name);
   void endUnlikely(llvm::BasicBlock *join);
@@ -240,6 +241,8 @@ private:
   void emitAppend(const xir::Instruction &i);
   void copyBytes(llvm::Value *dst, llvm::Value *src, llvm::Value *n, llvm::BasicBlock *done);
   void findSharingLoads(const xir::Function &f, const xir::CFG &cfg);
+  llvm::Value *loadEachElement(const xir::Instruction &load, llvm::Value *own);
+  llvm::Value *elementByte(const xir::Instruction &use, const xir::Value *v, llvm::BasicBlock *miss);
   void shareOnEdge(const xir::BasicBlock *from, const xir::BasicBlock *to);
   void emitBitOp(xb_bit_op op, llvm::Value *x, llvm::Value *tx, llvm::Value *y, llvm::Value *ty, llvm::Value *d,
                  llvm::function_ref<void()> slow);

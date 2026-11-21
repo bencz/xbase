@@ -312,7 +312,7 @@ private:
       if (i.var && i.var->kind == Var::Kind::Capture) fail("a FOR EACH over a captured variable");
       if (i.op == Op::EachInCell) expect(i, 0, {});
       else if (i.op == Op::EachEnter) expect(i, 2, {Type::Bool, Type::Item});
-      else if (i.op == Op::EachMove) expect(i, 2, {Type::Bool, Type::I64});
+      else if (i.op == Op::EachMove) expect(i, 3, {Type::Bool, Type::I64, Type::Item});
       else expect(i, 2, {Type::Bool, Type::Item});
       break;
     case Op::RefIndex: expect(i, 2, {Type::Item, Type::Item}); break;

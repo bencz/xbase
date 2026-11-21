@@ -20,6 +20,7 @@ Constant *copyConstant(Function &f, const Constant &c) {
 
 BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k) {
   BasicBlock *tail = f.addBlock(b->name);
+  tail->unwind = b->unwind;
   for (size_t j = k + 1; j < b->insts.size(); ++j) {
     b->insts[j]->parent = tail;
     tail->insts.push_back(std::move(b->insts[j]));
@@ -145,6 +146,29 @@ void removeTrivialParams(std::vector<BlockParam *> &placed, const Predecessors &
       changed = true;
     }
   }
+}
+
+void joinDefinitions(Function &f, const std::vector<Definitions> &defs,
+                     const std::unordered_set<const BasicBlock *> &inside) {
+  CFG now(f);
+  Predecessors preds;
+  for (auto &[b, terms] : predecessorTerminators(f))
+    for (Instruction *t : terms)
+      if (now.reachable(t->parent)) preds[b].push_back(t);
+  std::vector<BlockParam *> placed;
+  for (const Definitions &d : defs) {
+    Value *orig = d.front().second;
+    std::vector<Instruction *> after;
+    for (Instruction *u : orig->users())
+      if (!inside.count(u->parent) && now.reachable(u->parent)) after.push_back(u);
+    if (after.empty()) continue;
+    SSAUpdater up(f, orig->type(), preds, placed);
+    for (auto &[block, value] : d) up.addAvailable(block, value);
+    std::unordered_set<Instruction *> done;
+    for (Instruction *u : after)
+      if (done.insert(u).second) up.rewriteUse(u, orig);
+  }
+  removeTrivialParams(placed, preds);
 }
 
 } // namespace xb::xir

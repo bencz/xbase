@@ -222,6 +222,23 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   // Both operands are read before `d`, which may be one of them, is written.
   std::vector<std::pair<Value *, BasicBlock *>> bools; // the comparison's result on each fast path
   if (mayStrings) { // two one-character strings (ValType( x ) == "C"): their bytes, for = and == alike
+    // A FOR EACH variable's byte of its string and a one-character literal: the byte (elementByte).
+    for (unsigned k = 0; k < 2; ++k) {
+      const auto *lit = xir::asConstant(i.operand(1 - k));
+      if (!lit || lit->lit != xir::Constant::Lit::String || lit->str.size() != 1) continue;
+      BasicBlock *item = newBlock("str1.item");
+      if (Value *byte = elementByte(i, i.operand(k), item)) {
+        Value *same = b_.CreateICmpEQ(byte, ConstantInt::get(i64_, static_cast<unsigned char>(lit->str[0])));
+        Value *r = i.binop == BinOp::NotEq ? b_.CreateNot(same) : same;
+        if (!fused) storeLogical(d, r);
+        bools.push_back({r, b_.GetInsertBlock()});
+        b_.CreateBr(join);
+      } else {
+        b_.CreateBr(item);
+      }
+      b_.SetInsertPoint(item);
+      break;
+    }
     BasicBlock *strBB = newBlock("str1"), *notStr = newBlock("not.str1");
     Value *isStr = ConstantInt::get(i32_, XB_T_STRING);
     BasicBlock *strings = newBlock("strings");
@@ -983,14 +1000,29 @@ Value *CodeGen::localGenerator(Value *coll, BasicBlock *other) {
   return obj;
 }
 
-// enum.len of a local generator's enumerator that has not ended: its next step run here, its resume function called
-// as xb_gen_move_next calls it (INT64_MAX when the step yields, else 0; a step that fails ends the generator); the
-// rest through xb_enum_len.
+// enum.len, as xb_enum_len gives it: a string's length, a local array's, and of a local generator's enumerator that
+// has not ended its next step run here, its resume function called as xb_gen_move_next calls it (INT64_MAX when the
+// step yields, else 0; a step that fails ends the generator); the rest through xb_enum_len. A collection of a known
+// type (a loop versioned for it) takes its own path only.
 void CodeGen::emitEnumLen(const xir::Instruction &i) {
-  Value *coll = callArg(addr(i.operand(0)), 0);
+  Value *item = addr(i.operand(0));
   BasicBlock *object = newBlock("enum.object"), *slow = newBlock("enum.len"), *join = newBlock("enum.len.end");
-  b_.CreateCondBr(b_.CreateICmpEQ(typeOf(i.operand(0), coll), ConstantInt::get(i32_, XB_T_OBJECT)), object, slow);
+  BasicBlock *str = newBlock("enum.string"), *arr = newBlock("enum.array"), *arrLocal = newBlock("enum.array.local");
+  SwitchInst *sw = b_.CreateSwitch(typeOf(i.operand(0), item), slow, 3);
+  sw->addCase(ConstantInt::get(i32_, XB_T_OBJECT), object);
+  sw->addCase(ConstantInt::get(i32_, XB_T_STRING), str);
+  sw->addCase(ConstantInt::get(i32_, XB_T_ARRAY), arr);
+  b_.SetInsertPoint(str);
+  Value *strLen = strLength(itemPointer(item, "str"));
+  b_.CreateBr(join);
+  b_.SetInsertPoint(arr);
+  Value *array = itemPointer(item, "arr");
+  branchLikely(isLocal(array), arrLocal, slow); // a shared array's length is the runtime's to read
+  b_.SetInsertPoint(arrLocal);
+  Value *arrLen = arrayLength(array);
+  b_.CreateBr(join);
   b_.SetInsertPoint(object);
+  Value *coll = callArg(item, 0);
   Value *gen = localGenerator(coll, slow);
   Value *vars = b_.CreateStructGEP(objectTy_, gen, ObjectVars);
   auto var = [&](uint32_t k) { return b_.CreateInBoundsGEP(itemTy_, vars, ConstantInt::get(i64_, k)); };
@@ -1015,12 +1047,14 @@ void CodeGen::emitEnumLen(const xir::Instruction &i) {
   BasicBlock *steppedEnd = b_.GetInsertBlock();
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
-  Value *called = b_.CreateCall(rtEnumLen_, {fnCtx_, coll});
+  Value *called = b_.CreateCall(rtEnumLen_, {fnCtx_, callArg(item, 0)});
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
-  PHINode *n = b_.CreatePHI(i64_, 2, "enum.len");
+  PHINode *n = b_.CreatePHI(i64_, 4, "enum.len");
   n->addIncoming(stepped, steppedEnd);
   n->addIncoming(called, slow);
+  n->addIncoming(strLen, str);
+  n->addIncoming(arrLen, arrLocal);
   values_[&i] = n;
 }
 

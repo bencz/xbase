@@ -460,16 +460,17 @@ item values and block parameters when `--dump-xir-types` is given too ([xir.md](
   (`xb_gc_write_items` for an old frame not recorded, the enumerator's state byte); a shared enumerator or a shorter
   frame calls `xb_gen_restore` and `xb_gen_yield`. `enum.len` of a local generator's enumerator that has not ended calls
   its resume function itself (`emitEnumLen`, as `xb_gen_move_next` does: a step that fails ends it with `xb_gen_done`),
-  and `each.move` of a local loop reference over one copies its `Current` into the reference's own item; other
-  collections and enumerators take `xb_enum_len` and `xb_each_move`. Inside a sequence `WITH` a handler (also `TRY`),
-  the error block it replaced lives in a frame variable of its own (`Cleanup::oldBlockVar`, `Generator::hiddenVar`):
-  before `gen.yield` each such handler, innermost first, is read (`seq.with` of NIL) and the replaced block put back;
-  after it, outermost first, `seq.with` puts the handler back and stores the caller's block of the moment as the one to
-  put back in the end. Then `makeResumable` (`xir/passes/Resumable.cpp`) moves every value whose definition does not
-  dominate a use (one that lives across a `YIELD`) into a frame variable of its own, stored where it is computed and
-  loaded before each use (a `Bool` or `I64` boxed with `box.bool`/`box.i64`); promote-variables and typed continuations
-  leave generators alone. The dispatch goes only to the points a step can stop at: those of code nothing reaches (a copy
-  of `ALWAYS` code after a `RETURN`) are left out with it.
+  and `each.move` of a local loop reference over one copies its `Current` into the reference's own item; a string's
+  length and a local array's are read in place; other collections and enumerators take `xb_enum_len` and `xb_each_move`.
+  Inside a sequence `WITH` a handler (also `TRY`), the error block it replaced lives in a frame variable of its own
+  (`Cleanup::oldBlockVar`, `Generator::hiddenVar`): before `gen.yield` each such handler, innermost first, is read
+  (`seq.with` of NIL) and the replaced block put back; after it, outermost first, `seq.with` puts the handler back and
+  stores the caller's block of the moment as the one to put back in the end. Then `makeResumable`
+  (`xir/passes/Resumable.cpp`) moves every value whose definition does not dominate a use (one that lives across a
+  `YIELD`) into a frame variable of its own, stored where it is computed and loaded before each use (a `Bool` or `I64`
+  boxed with `box.bool`/`box.i64`); promote-variables and typed continuations leave generators alone. The dispatch goes
+  only to the points a step can stop at: those of code nothing reaches (a copy of `ALWAYS` code after a `RETURN`) are
+  left out with it.
 - An `ASYNC` function is generated the same way (`Generator::genResumable`, `FuncDecl::async`, the task as parameter
   0): its entry returns `async.new` of its resume function with its arguments, its entry named (`Instruction::blockFn`,
   kept when the entry is inlined); the resume function starts with `async.restore` and the same dispatch, `RETURN`
@@ -561,11 +562,12 @@ build xbc.
   `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements, cells,
   reference targets), array headers, codeblocks' cell pointers, the context's head, frame links, the collector's state
   bytes, strings and their buffers (lengths, flags and bytes, which compiled code reads, a view's through its buffer's
-  address, and the flags, where it clears `XB_STR_APPEND`) and objects' class pointers (`xb_object.cls`, which a send's
-  in-place path reads). An address that may be either kind (a variable reached through a possible reference, an argument
-  such as `argv` or the result pointer) is not tagged. LLVM then knows that a store into an element changes no frame
-  slot and no array header; by itself this changes little in the code today, and it is the ground for moving array
-  headers out of fast loops.
+  address, and the flags, where it clears `XB_STR_APPEND`), objects' class pointers (`xb_object.cls`, which a send's
+  in-place path reads) and a `FOR EACH` reference's position (`xb_ref.index`, which `each.move` writes: a string's
+  length and bytes stay in registers across it). An address that may be either kind (a variable reached through a
+  possible reference, an argument such as `argv` or the result pointer) is not tagged. LLVM then knows that a store into
+  an element changes no frame slot and no array header; by itself this changes little in the code today, and it is the
+  ground for moving array headers out of fast loops.
 - Items are stored and copied as two 8-byte words, the header (type, width, decimals; `headerWord`, in the target's byte
   order, as `xb_header_word` in `xbrt.h`) and the value, and fields are read out of the header word (their bit positions
   come from the target's layout, `headerShift`): a load is served by the store that wrote it (store forwarding) only
@@ -810,12 +812,22 @@ build xbc.
   for the block (a collection meanwhile may have aged it) and copies it to its home, which may be the slot of a variable
   that moved into its cell meanwhile. `ref` calls `xb_ref_of` (or builds the `XB_T_CELL` item of a captured variable's
   cell); `ref.index` calls `xb_ref_elem`. `each.enter` and `each.leave` call `xb_each_enter` and `xb_each_leave`;
-  `each.move` stores the position in the loop's reference (a local one: another goes to the runtime) and calls
-  `xb_each_move` only when the element is not one `inlineRefTarget` finds in place (an element of a local array within
-  it, the entry at a position of a local hash without holes; a string's byte goes into the reference's own item as the
-  shared one-byte string, nothing past its end; not an enumerator's element, a shared collection, the bound error), or
-  when the variable is in a shared cell (whose reference only the runtime moves); `each.key` stores the position for
-  anything but a hash, reads the key of a local hash without holes in place, and calls `xb_each_key` for the rest.
+  `each.move` stores the position in the loop's reference (a local one: another goes to the runtime), taking the
+  collection's type from the loop's source (its operand, whose type a loop that `version-each` versioned knows: then
+  only that type's path is emitted), and calls `xb_each_move` only when the element is not one `inlineRefTarget` finds
+  in place (an element of a local array within it, the entry at a position of a local hash without holes; a string's
+  byte goes into the reference's own item as the shared one-byte string, nothing past its end; not an enumerator's
+  element, a shared collection, the bound error), or when the variable is in a shared cell (whose reference only the
+  runtime moves); `each.key` stores the position for anything but a hash, reads the key of a local hash without holes in
+  place, and calls `xb_each_key` for the rest. A read of a `FOR EACH` variable of the frame alone (not shared, not a
+  parameter), whose last change on every path to it is the loop's `each.move` (`FramePlan::findEachLoads`, a forward
+  dataflow of each such variable's last change: no assignment between on any path, nor an inner loop's restore, and none
+  known where an unwinding enters; the plan keeps the source live at those reads and at their uses in their block),
+  takes its element from the loop's source at the step's position when the source's type is known (`loadEachElement`): a
+  string's byte as the shared one-byte string, a local array's element within it; anything else through the reference.
+  `Asc()` of such a read, and its comparison with a one-character literal (`=`, `==`, `!=`), in the read's own block
+  read the byte from the string (`elementByte`). Over a string whose every read is such (`FramePlan::readsInPlace`),
+  `each.move` does nothing: no one reads the reference's item.
 - `barrier` ([runtime.md](runtime.md#garbage-collector)): after a store into a local cell that holds no element (a
   captured variable's, or the one a variable holds), the cell's GC state byte is tested inline and `xb_gc_remember`
   called for an old cell (`cellStoreWritten`); a shared cell and an element took the value through `xb_ref_store`,

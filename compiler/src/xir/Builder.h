@@ -95,7 +95,7 @@ public:
   Instruction *eachSource(Value *coll, Value *descend);
   Instruction *eachInCell(Var *v);
   Instruction *eachEnter(Var *v, Value *inCell, Value *coll);
-  Instruction *eachMove(Var *v, Value *inCell, Value *idx);
+  Instruction *eachMove(Var *v, Value *inCell, Value *idx, Value *coll);
   Instruction *eachLeave(Var *v, Value *inCell, Value *saved);
   Instruction *eachKey(Value *coll, Value *idx);
   Instruction *refVar(Var *v);

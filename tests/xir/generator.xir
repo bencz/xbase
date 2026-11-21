@@ -58,20 +58,21 @@ each.body:
   %32 = load $f6
   %33 = unbox.i64 %32
   %34 = i.add %33, i64 1
-  each.move $f3, false, %34
-  %36 = load $f3 ref
-  gen.yield $f0, %36, 2, each.next
+  %35 = load $f4
+  each.move $f3, false, %34, %35
+  %37 = load $f3 ref
+  gen.yield $f0, %37, 2, each.next
 each.next:
-  %38 = load $f6
-  %39 = unbox.i64 %38
-  %40 = i.add %39, i64 1
-  br each.test(%40)
+  %39 = load $f6
+  %40 = unbox.i64 %39
+  %41 = i.add %40, i64 1
+  br each.test(%41)
 each.end:
-  %42 = load $f5
-  each.leave $f3, false, %42
+  %43 = load $f5
+  each.leave $f3, false, %43
   gen.done $f0
   ret .F.
 gen.dispatch.2:
-  %46 = i.cmp eq %0, i64 2
-  cond_br %46, each.next, gen.start
+  %47 = i.cmp eq %0, i64 2
+  cond_br %47, each.next, gen.start
 }

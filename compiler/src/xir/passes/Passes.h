@@ -95,6 +95,10 @@ void settleReturnTypes(Function &f);
 // starts at the integer 0 and adds doubles): the loop proper then carries it with one type (PeelTypes.cpp).
 bool peelForTypes(Function &f);
 
+// Versions FOR EACH loops whose collection may be a string or an array, among other things: a test of its type before
+// the loop enters a copy made for that type, where the collection's type is known (VersionEach.cpp).
+bool versionEachLoops(Function &f);
+
 // A generator's values that live across a YIELD move into frame variables, which the enumerator saves between steps
 // (Resumable.cpp). Not an optimization: Gen runs it on every generator, and the other passes leave such functions'
 // variables in memory.

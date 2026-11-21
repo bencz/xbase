@@ -47,6 +47,7 @@ constexpr Pass kFinal[] = {
     {"typed-continuations", onFunction<typedContinuations>},
     {"split-appends", onFunction<splitAppends>},  // after the checks, which tell the pieces' types
     {"peel-for-types", onFunction<peelForTypes>}, // after the checks, which narrow what the loops carry
+    {"version-each", onFunction<versionEachLoops>},
     {"simplify-cfg", onFunction<simplifyCFG>},
     {"remove-dead-code", onFunction<removeDeadCode>},
 };

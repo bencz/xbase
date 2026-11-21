@@ -32,7 +32,8 @@ enum class Op : uint8_t {
   EachInCell,     // var -> Bool: it is shared, in a cell the loop works inside (moved into one if it holds an
                   // element passed to it by reference)
   EachEnter,      // var; Bool in_cell, collection -> Item: saves the variable, installs the loop's reference
-  EachMove,       // var; Bool in_cell, I64 index: the loop's reference at an element         [may fail]
+  EachMove,       // var; Bool in_cell, I64 index, collection (each.source's): the loop's reference at an element
+                  //                                                                            [may fail]
   EachLeave,      // var; Bool in_cell, saved value: restores the variable
   EachKey,        // collection, I64 index -> Item: the key of a hash's entry, else the index      [may fail]
   RefVar,         // var -> Item: a reference to the variable, for an argument passed by reference

@@ -54,6 +54,7 @@ add_executable(xbc
   src/xir/passes/SimplifyCFG.cpp
   src/xir/passes/TypedContinuations.cpp
   src/xir/passes/PeelTypes.cpp
+  src/xir/passes/VersionEach.cpp
   src/xir/passes/Specialize.cpp
   src/xir/passes/ResolveSends.cpp
   src/xir/ClassModel.cpp

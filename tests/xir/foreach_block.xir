@@ -15,16 +15,16 @@ body:
   store $f2 maybe_ref, 0:w10
   barrier $f2 maybe_ref
   %7 = each.source %4, false
-  %8 = each.enter $f1, false, %7
-  br each.test(i64 0)
+  %8 = subst.check guard 16 %7
+  cond_br %8, body.2.other, body.2
 each.test(%10: i64):
   %11 = i.add %10, i64 1
   %12 = enum.len %7
   %13 = i.cmp le %11, %12
-  cond_br %13, each.body, each.end
+  cond_br %13, each.body, each.end(%33)
 each.body:
   %15 = i.add %10, i64 1
-  each.move $f1, false, %15
+  each.move $f1, false, %15, %7
   %17 = load $f2 maybe_ref
   %18 = load $f1 ref
   %19 = binary add.grow %17, %18
@@ -32,15 +32,59 @@ each.body:
   barrier $f2 maybe_ref
   %22 = i.add %10, i64 1
   br each.test(%22)
-each.end:
-  each.leave $f1, false, %8
-  %25 = block MAIN.block2 $f2
+each.end(%24: item):
+  each.leave $f1, false, %24
+  %26 = block MAIN.block2 $f2
   inline.enter MAIN.block2
-  %27 = load $f2 maybe_ref
-  %28 = binary mul 2:w10, %27
+  %28 = load $f2 maybe_ref
+  %29 = binary mul 2:w10, %28
   inline.leave
-  %30 = array %28, %25
-  ret %30
+  %31 = array %29, %26
+  ret %31
+body.2:
+  %33 = each.enter $f1, false, %7
+  br each.test(i64 0)
+body.2.other:
+  %35 = subst.value %7
+  %36 = subst.check guard 32 %35
+  cond_br %36, body.2.other.2, body.2.each1
+body.2.each1:
+  %38 = each.enter $f1, false, %35
+  br each.test.each1(i64 0)
+each.test.each1(%40: i64):
+  %41 = i.add %40, i64 1
+  %42 = enum.len %35
+  %43 = i.cmp le %41, %42
+  cond_br %43, each.body.each1, each.end(%38)
+each.body.each1:
+  %45 = i.add %40, i64 1
+  each.move $f1, false, %45, %35
+  %47 = load $f2 maybe_ref
+  %48 = load $f1 ref
+  %49 = binary add.grow %47, %48
+  store $f2 maybe_ref, %49
+  barrier $f2 maybe_ref
+  %52 = i.add %40, i64 1
+  br each.test.each1(%52)
+body.2.other.2:
+  %54 = subst.value %35
+  %55 = each.enter $f1, false, %54
+  br each.test.each(i64 0)
+each.test.each(%57: i64):
+  %58 = i.add %57, i64 1
+  %59 = enum.len %54
+  %60 = i.cmp le %58, %59
+  cond_br %60, each.body.each, each.end(%55)
+each.body.each:
+  %62 = i.add %57, i64 1
+  each.move $f1, false, %62, %54
+  %64 = load $f2 maybe_ref
+  %65 = load $f1 ref
+  %66 = binary add.grow %64, %65
+  store $f2 maybe_ref, %66
+  barrier $f2 maybe_ref
+  %69 = i.add %57, i64 1
+  br each.test.each(%69)
 }
 
 function MAIN.byref internal params 1 {
@@ -52,16 +96,16 @@ entry:
   barrier $f2 maybe_ref
   %2 = load $f0 maybe_ref
   %3 = each.source %2, false
-  %4 = each.enter $f1, false, %3
-  br each.test(i64 0)
+  %4 = subst.check guard 16 %3
+  cond_br %4, entry.2.other, entry.2
 each.test(%6: i64):
   %7 = i.add %6, i64 1
   %8 = enum.len %3
   %9 = i.cmp le %7, %8
-  cond_br %9, each.body, each.end
+  cond_br %9, each.body, each.end(%29)
 each.body:
   %11 = i.add %6, i64 1
-  each.move $f1, false, %11
+  each.move $f1, false, %11, %3
   %13 = load $f2 maybe_ref
   %14 = load $f1 ref
   %15 = binary add.grow %13, %14
@@ -69,15 +113,59 @@ each.body:
   barrier $f2 maybe_ref
   %18 = i.add %6, i64 1
   br each.test(%18)
-each.end:
-  each.leave $f1, false, %4
-  %21 = block MAIN.block1 $f2
+each.end(%20: item):
+  each.leave $f1, false, %20
+  %22 = block MAIN.block1 $f2
   inline.enter MAIN.block1
-  %23 = load $f2 maybe_ref
-  %24 = binary mul 2:w10, %23
+  %24 = load $f2 maybe_ref
+  %25 = binary mul 2:w10, %24
   inline.leave
-  %26 = array %24, %21
-  ret %26
+  %27 = array %25, %22
+  ret %27
+entry.2:
+  %29 = each.enter $f1, false, %3
+  br each.test(i64 0)
+entry.2.other:
+  %31 = subst.value %3
+  %32 = subst.check guard 32 %31
+  cond_br %32, entry.2.other.2, entry.2.each1
+entry.2.each1:
+  %34 = each.enter $f1, false, %31
+  br each.test.each1(i64 0)
+each.test.each1(%36: i64):
+  %37 = i.add %36, i64 1
+  %38 = enum.len %31
+  %39 = i.cmp le %37, %38
+  cond_br %39, each.body.each1, each.end(%34)
+each.body.each1:
+  %41 = i.add %36, i64 1
+  each.move $f1, false, %41, %31
+  %43 = load $f2 maybe_ref
+  %44 = load $f1 ref
+  %45 = binary add.grow %43, %44
+  store $f2 maybe_ref, %45
+  barrier $f2 maybe_ref
+  %48 = i.add %36, i64 1
+  br each.test.each1(%48)
+entry.2.other.2:
+  %50 = subst.value %31
+  %51 = each.enter $f1, false, %50
+  br each.test.each(i64 0)
+each.test.each(%53: i64):
+  %54 = i.add %53, i64 1
+  %55 = enum.len %50
+  %56 = i.cmp le %54, %55
+  cond_br %56, each.body.each, each.end(%51)
+each.body.each:
+  %58 = i.add %53, i64 1
+  each.move $f1, false, %58, %50
+  %60 = load $f2 maybe_ref
+  %61 = load $f1 ref
+  %62 = binary add.grow %60, %61
+  store $f2 maybe_ref, %62
+  barrier $f2 maybe_ref
+  %65 = i.add %53, i64 1
+  br each.test.each(%65)
 }
 
 block MAIN.block1 internal params 1 {

@@ -2,7 +2,8 @@
 // strings, and the inline copy of each piece (8, 4, 2 and 1 bytes at both ends up to 16, memcpy past it): pieces of
 // every length from 0 to 40 bytes; sums of calls in a loop (their results checked); a sum that holds the variable
 // itself (`s += s + "x"`); `s := s + a + b`; a piece of unknown type (a parameter: no split, its error as the `+`'s);
-// SubStr() with positions and counts that are numbers with decimals (`%` and `/` make them).
+// SubStr() with positions and counts that are numbers with decimals (`%` and `/` make them); pieces each made in a
+// block of its own (IIf()), whose sums lie in several blocks.
 PROCEDURE Main()
    LOCAL s, k, i, c := "", cAlpha := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
    FOR k := 0 TO 40
@@ -30,6 +31,11 @@ PROCEDURE Main()
    ? "positions with decimals:", SubStr( cAlpha, 10 % 4 + 1, 1 ), SubStr( cAlpha, 7 / 2, 1 ), ;
       SubStr( cAlpha, 2.9, 1.5 ), SubStr( cAlpha, 63 % 64, 1 ), "[" + SubStr( cAlpha, 63.5, 1 ) + "]", ;
       SubStr( cAlpha, 0.5, 1 ), Asc( SubStr( cAlpha, 26 % 27, 1 ) )
+   s := ""
+   FOR i := 1 TO 4
+      s += IIf( i == 1, "a", "-" ) + IIf( i == 2, "b", "-" ) + IIf( i == 3, "c", "-" ) + IIf( i > 2, "d", "-" ) + "|"
+   NEXT
+   ? "pieces of several blocks:", s
 RETURN
 
 // x is a string or not: s += "<" + x + ">" appends as a whole (the `+` fails as it would).
