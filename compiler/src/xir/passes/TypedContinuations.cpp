@@ -41,7 +41,9 @@ namespace {
 
 // The function is copied, and each check is an entry into the copy where the
 // values live there are joined: both are bounded, so that compile time and
-// code size stay so. The checks kept are those of the most nested loops.
+// code size stay so. The checks kept are those of the most nested loops. A
+// larger function copied grows past what the code generator optimizes
+// (kLargeFunction): pi's PiDigits, of 2000 instructions, ran 4.9 times slower.
 constexpr size_t kMaxInstructions = 500;
 constexpr size_t kMaxChecks = 64;
 
