@@ -261,12 +261,29 @@ in the phases of [concurrency.md](concurrency.md#phases).
 
 ## Order of the work
 
-1. Classes (multiple inheritance, scopes) and the enumerator model; `BEGIN SEQUENCE WITH`, `ALWAYS`,
-   `TRY`/`CATCH`/`FINALLY`; `WITH OBJECT`, extended codeblocks.
-2. Files and directories; the terminal layer; GET/READ and TBrowse.
-3. The RDD layer.
-4. Generators, async/await and threads, sockets and the other libraries.
+Each stream below is done whole before the next starts: its design, the compiler and the runtime parts, its tests and
+the benchmarks it moves, so that each one is of use on its own and no step waits for a later one.
 
-Alongside, the compiler's own track ([xir.md](xir.md#phases)): type inference and unboxed numbers, value numbering,
-statepoints and a moving collector, inlining, loop optimizations, measured with the benchmarks
-([testing.md](testing.md#benchmarks)).
+1. Strings and the runtime's primitives (planned, next). A review of every string function and operator measured
+   against C, then the representation, the compiler and the runtime together: the operations the compiler knows
+   (length, a byte, a prefix, a character set, appends and concatenations, iteration over a string's bytes)
+   recognized on the syntax tree and lowered inline, with no call and no allocation where the value is not kept;
+   shared one-byte and empty strings; allocations bumped inline in compiled code; the runtime's string functions
+   written word at a time, without the C library where it costs (copies, searches, case); the codepage's paths only
+   where the codepage needs them. Then the same for arrays, hashes, numbers and dates. A benchmark per primitive
+   keeps each one measured.
+2. Calls and objects: the cost of a call and of a send (frames, arguments, the send cache), `FINAL` classes and
+   methods that the compiler calls directly, interfaces checked when the class is compiled, `ABSTRACT` methods and
+   classes, and `USING` over an interface of disposal, as in .NET.
+3. Machine types, shared by FFI and the optimizer: signed and unsigned integers of 8 to 64 bits, pointer-sized
+   integers, `FLOAT`, `DOUBLE`, `BOOL`, pointers to a type, structures and unions with nested structures, arrays
+   inside them, pointer fields, arrays of structures and function pointers, laid out by the target's data layout;
+   memory owned by C or by the program; typed locals, parameters and runtime entry points that the compiler keeps in
+   registers without checks.
+4. JSON in the runtime, written in C, and the serialization of objects to JSON and back through their classes'
+   reflection.
+5. Asynchronous I/O and sockets, then the libraries, each a library of classes outside the runtime (`libs/`):
+   `libs/xbws` (the web server), `libs/regex`, `libs/rdd/sqlite`, `libs/rdd/pgsql`, `libs/gt`.
+
+Alongside, the benchmarks in every language follow the same code ([testing.md](testing.md#benchmarks)): a function
+the runtime gains that other languages have natively is used in each port alike.
