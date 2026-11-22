@@ -269,7 +269,11 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   4 MB. The budget doubles after a collection where more than half of the allocation survived (collecting such
   objects early only promotes them) and halves when less than an eighth did; it never exceeds a quarter of the live
   data the last full collection found, so the heap stays near the live data (the old generation grows to half again
-  the live data, the young one to a quarter of it).
+  the live data, the young one to a quarter of it). A young collection also scans old objects, the recorded ones and
+  the dirty cards of large arrays, loading what they refer to however little survives: after one, the budget is at
+  least 128 bytes (`XB_GC_SCAN_BYTES`) for each old reference it scanned, up to the live data, so that a program that
+  keeps storing into a large old structure does not rescan it every few megabytes (`linked_list`: 17% faster, 27%
+  more memory; `object_churn` 4% faster, 11% more).
 - Write barrier: storing a pointer into an old object must record that object in the remembered set, because a young
   collection does not scan old objects. The state byte sits `XB_GC_STATE_BACK` bytes before the object; its bits
   `XB_GC_STATE_OLD` and `XB_GC_STATE_RECORDED` tell whether a store must record it (`xb_gc_write` in `xbrt.h`). C code

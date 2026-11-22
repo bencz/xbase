@@ -135,9 +135,15 @@
  * only promotes them) and halve while few do. They never exceed a quarter of
  * the live data the last full collection found (nor go below the minimum), so
  * the heap stays near the live data: the old generation grows to half again
- * the live data before a full collection, the young one to a quarter of it. */
+ * the live data before a full collection, the young one to a quarter of it
+ * (more for what young collections scan of old objects: XB_GC_SCAN_BYTES). */
 #define XB_GC_YOUNG_MIN ((size_t)4 << 20)
 #define XB_GC_YOUNG_SHARE 4u                      /* of the live data: the most the young budget takes */
+/* A young collection also scans old objects: those the barrier recorded and the dirty cards of large arrays, whose
+ * referents it loads (each a likely cache miss), however little survives. The budget gives each such reference of the
+ * last young collection at least this much allocation, up to the live data (past the quarter above), so that a
+ * program that keeps storing into a large old structure does not rescan it every few megabytes. */
+#define XB_GC_SCAN_BYTES 128u
 #define XB_GC_FULL_GROWTH 2u                      /* old growth past the live data that starts a full one: 1/2 */
 /* A full collection also runs when as much as XB_GC_FULL_ALLOC times the live data (at least XB_GC_MIN_FULL) was
  * allocated since the last one, or XB_GC_FULL_EVERY_NS passed with a young budget allocated, or this many objects with
@@ -298,6 +304,7 @@ static struct {
   size_t oldBytes;                 /* estimated size of the old generation */
   size_t fullThreshold;            /* old bytes that trigger a full collection */
   size_t markedBytes;              /* marked by the current collection */
+  size_t scannedRefs;              /* old references the current young collection scanned (XB_GC_SCAN_BYTES) */
   size_t markedObjects;
   size_t liveObjects;              /* found by the last full collection */
   xb_gc_hdr **stack;               /* marking stack */
@@ -1576,6 +1583,7 @@ static int trace_cards(xb_array *a) {
       if (to > a->len) to = a->len;
       int keep = 0;
       for (size_t i = from; i < to; ++i) keep |= mark_item(&((xb_item *)a->data)[i]);
+      heap.scannedRefs += to > from ? to - from : 0;
       cards[c] = (uint8_t)keep;
       young |= keep;
     }
@@ -2201,6 +2209,12 @@ static int pick_defrag(void) {
   return pick_class_defrag() + k > 0;
 }
 
+/* About how many references a recorded old object's trace visits: an array's items, the item-sized words of others. */
+static size_t refs_estimate(const xb_gc_hdr *h) {
+  if (h->kind == XB_GC_ARRAY) return ((const xb_array *)(h + 1))->len;
+  return h->size / sizeof(xb_item);
+}
+
 /* A collection, full or young, with every other thread stopped. `due`: one an allocation asks for, which a
  * collection another thread made meanwhile may have made needless. */
 static void collect(int full, int due) {
@@ -2223,6 +2237,7 @@ static void collect(int full, int due) {
   next_epoch();
   heap.markedBytes = 0;
   heap.markedObjects = 0;
+  heap.scannedRefs = 0;
   heap.evacuating = full && !xb_atomic_load32(&heap.holds, XB_RELAXED) && tlh && stacks_known() && pick_defrag();
   if (full) /* counted anew as the collection reaches the objects (push) */
     for (size_t k = 0; k < heap.blockCount; ++k) heap.blocks[k]->liveBytes = 0;
@@ -2236,6 +2251,7 @@ static void collect(int full, int due) {
     xb_gc_hdr *h = heap.remembered[i];
     uint8_t how = h->state & (XB_GC_REMEMBERED | XB_GC_CARDED);
     set_state(h, XB_GC_MARKED);
+    if (how & XB_GC_REMEMBERED) heap.scannedRefs += refs_estimate(h);
     int young = (how & XB_GC_REMEMBERED) ? trace(h) : trace_cards((xb_array *)(h + 1));
     if (young) retain(h, (how & XB_GC_REMEMBERED) ? XB_GC_REMEMBERED : XB_GC_CARDED);
   }
@@ -2274,6 +2290,11 @@ static void collect(int full, int due) {
   }
   if (heap.youngBudget > heap.liveBytes / XB_GC_YOUNG_SHARE) heap.youngBudget = heap.liveBytes / XB_GC_YOUNG_SHARE;
   if (heap.youngBudget < XB_GC_YOUNG_MIN) heap.youngBudget = XB_GC_YOUNG_MIN;
+  if (!full) {
+    size_t scan = heap.scannedRefs > SIZE_MAX / XB_GC_SCAN_BYTES ? SIZE_MAX : heap.scannedRefs * XB_GC_SCAN_BYTES;
+    if (scan > heap.liveBytes) scan = heap.liveBytes;
+    if (heap.youngBudget < scan) heap.youngBudget = scan;
+  }
   heap.allocatedSinceFull = full ? 0 : heap.allocatedSinceFull + heap.allocated;
   heap.allocated = 0;
   give_back();
