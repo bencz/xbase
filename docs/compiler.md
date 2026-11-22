@@ -630,10 +630,11 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   within it, an integer or a truncated double below 2^63 (the array's `len` and `data`, `xb_array` in `xbrt.h`). One
   test of the array's state byte (`isLocalItems`: neither shared nor of a compact form, the usual case) leads to the
   path of items, where the store calls `xb_gc_write_item` only for a value of a heap type (`xb_type_is_heap`) into an
-  array that is old and not recorded (`needsRecord`, `xb_gc_needs_record` on the state byte read before the store), and
-  makes no test at all when type inference finds the value refers to no heap object (`mayReferToHeap`; so do
-  `object.set` and a send's in-place write, `storeObjectVariable`); a shared array's items are the runtime's
-  to read and write whole, and an index out of bounds calls the runtime, which raises the error. A local array of a
+  array that is old and not recorded (`needsRecord`, `xb_gc_needs_record` on the state byte, read again once the value's
+  type is a heap one: kept live from before the store, it cost loops a register), and makes no test at all when type
+  inference finds the value refers to no heap object (`mayReferToHeap`; so do `object.set` and a send's in-place write,
+  `storeObjectVariable`); a shared array's items are the runtime's to read and write whole, and an index out of bounds
+  calls the runtime, which raises the error. A local array of a
   compact form ([runtime.md](runtime.md#values)) has paths of its own, after a branch that is no cold path (`kFormTest`,
   below), for one form each, which one test of the form (a compact form is a local array's) selects: a read inlines the
   logicals' when a condition or `.NOT.` tests the element (`readAsLogical`), the integers' otherwise, and gives an item

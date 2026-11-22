@@ -906,17 +906,20 @@ void CodeGen::emitIndexSet(const xir::Instruction &i) {
   }
   b_.CreateBr(join);
 
-  // The barrier (xb_gc_write_item) for a heap value stored into an old array not recorded whole yet, tested on the
-  // state byte read before the store (no safepoint between); none when the value's types refer to no heap object.
+  // The barrier (xb_gc_write_item) for a heap value stored into an old array not recorded whole yet: the value's type
+  // first, then the state byte read again there (cache-hot; the one read before the store, kept live this far, cost the
+  // loop a register); none when the value's types refer to no heap object.
   b_.SetInsertPoint(items);
   copyItem(arrayElement(array, pos), v);
   if (mayReferToHeap(i.operand(2))) {
     Value *type = typeOf(i.operand(2), v);
     Value *heap = b_.CreateICmpULE(b_.CreateSub(type, ConstantInt::get(i32_, XB_T_HEAP_FIRST)),
                                    ConstantInt::get(i32_, XB_T_HEAP_LAST - XB_T_HEAP_FIRST));
-    BasicBlock *barrierJoin = beginUnlikely(b_.CreateAnd(needsRecord(state), heap), "barrier");
+    BasicBlock *heapJoin = beginUnlikely(heap, "barrier.heap");
+    BasicBlock *barrierJoin = beginUnlikely(needsRecord(objectState(array, false)), "barrier");
     b_.CreateCall(rtWriteItem_, {array, b_.CreateZExtOrTrunc(pos, intPtrTy_)});
     endUnlikely(barrierJoin);
+    endUnlikely(heapJoin);
   }
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
