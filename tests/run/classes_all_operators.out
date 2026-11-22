@@ -1,0 +1,17 @@
+
+arithmetic:         10          2         12          1.50          2.00         36.00        216.00
+equality: = 4 == 4 .T. .T. .T. same
+order: .F. .F. .T. .T.
+contains: $ 4 $ 3
+not: .F. .F.
+increment:          7          6
+decrement:          6
+index read:        300 key k
+index assigned: [3] [k] [1]:=one [2] [2]:=205 [4] [4]:=401 
+nested: b
+list read:         10         30          3
+list for each: 11 25 30 
+list enumerable:          2        132         66
+list bound:       1132 Bound error TLIST[]
+right operand:       1081 Argument error +
+unary minus:       1080 Argument error -
