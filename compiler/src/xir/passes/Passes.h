@@ -61,6 +61,12 @@ bool promoteVariables(Function &f);
 // condition becomes a jump.
 bool foldConstants(Function &f);
 
+// A STATIC its initializer alone writes, with a constant (not passed by reference nor a FOR EACH variable, assigned
+// nowhere else in the module), holds that constant wherever code reads it: every module's STATICs are initialized,
+// with constants, before any code of the program runs (xb_program_run). Each of its loads becomes the constant
+// (FoldConstants.cpp).
+bool foldConstantStatics(Module &m);
+
 // Removes unreachable blocks, sends branches past blocks that only jump on,
 // merges a block into its single predecessor when that one jumps to it, and
 // turns two branches to one block that differ in a true/false argument into a

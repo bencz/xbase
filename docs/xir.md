@@ -168,6 +168,12 @@ result. Implemented (`xir/passes/`):
   its parameters never hold a reference: its `params.ref` test becomes false, the
   branch to its other body goes, and that body (`NAME.byref`), which nothing else calls, leaves the module with the
   codeblocks it makes; the module's functions are verified after it.
+- `fold-constant-statics` (`FoldConstants.cpp`), once on the module after it: a `STATIC` that its initializer alone
+  writes, with a constant (not passed by reference nor a `FOR EACH` variable, so not `shared`, and stored nowhere else
+  in the module: no function, method or codeblock writes it), holds that constant wherever code reads it, since every
+  module's `STATIC`s are initialized, with constants, before any code of the program runs (`xb_program_run`); each of
+  its loads becomes the constant, with its literal's width and decimals (`whetstone`'s `t`, `t1`, `t2`). An
+  initializer whose decimals are SET DECIMALS' is an instruction, not a constant, and stays a load.
 
 - Inlining (`Inline.cpp`), first of the passes on each function: a call runs its callee's body in place, between
   `inline.enter` (which names the callee: the call stack shows it, as its call would) and `inline.leave`; each `ret`

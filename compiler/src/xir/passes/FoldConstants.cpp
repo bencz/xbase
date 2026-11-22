@@ -7,9 +7,11 @@
 
 #include "opt/Fold.h"
 #include "xir/Builder.h"
+#include "xir/Transform.h"
 #include "xir/Types.h"
 
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace xb::xir {
@@ -196,6 +198,42 @@ bool foldConstants(Function &f) {
         b.jump(bb.get(), taken.block, taken.args);
         changed = true;
       }
+    }
+  }
+  return changed;
+}
+
+bool foldConstantStatics(Module &m) {
+  if (!m.init) return false;
+  std::unordered_map<const Var *, const Constant *> value;
+  std::unordered_set<const Var *> written;
+  for (auto &b : m.init->blocks)
+    for (auto &i : b->insts)
+      if (i->op == Op::Store && i->var && i->var->kind == Var::Kind::Static && !i->var->shared) {
+        const Constant *c = asConstant(i->operand(0));
+        if (c && !value.count(i->var)) value[i->var] = c;
+        else written.insert(i->var);
+      }
+  for (auto &f : m.functions) {
+    if (f.get() == m.init) continue;
+    for (auto &b : f->blocks)
+      for (auto &i : b->insts)
+        if (i->var && (i->effects() & WritesVar)) written.insert(i->var);
+  }
+  bool changed = false;
+  for (auto &f : m.functions) {
+    if (f.get() == m.init) continue;
+    for (auto &b : f->blocks) {
+      std::unordered_set<const Instruction *> folded;
+      for (auto &i : b->insts) {
+        if (i->op != Op::Load || !value.count(i->var) || written.count(i->var)) continue;
+        i->replaceAllUsesWith(copyConstant(*f, *value.at(i->var)));
+        i->dropOperands();
+        folded.insert(i.get());
+      }
+      if (folded.empty()) continue;
+      std::erase_if(b->insts, [&](const std::unique_ptr<Instruction> &i) { return folded.count(i.get()) != 0; });
+      changed = true;
     }
   }
   return changed;

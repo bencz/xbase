@@ -1,0 +1,179 @@
+module STATICS
+  $s0 = static 0 "S_NSTEP"
+  $s1 = static 1 "S_NTOTAL"
+  $s2 = static 2 shared "S_NBYREF"
+
+function SUM params 1 {
+  $f0 = frame 0 "N"
+  $f3 = frame 3 "N"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward SUM.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  %5 = subst.check guard 12 %4
+  cond_br %5, body.subst, for.test(1:w10)
+for.test(%7: item):
+  %8 = for.test %7, %4, 1:w0
+  cond_br %8, for.body, for.end
+for.body:
+  %10 = load $s1
+  %11 = load $s2 maybe_ref
+  %12 = binary add 3:w10, %11
+  %13 = subst.check %12
+  cond_br %13, for.body.subst, for.body.2
+for.end:
+  %15 = ref $s2
+  inline.enter BUMP.byref %15
+  store $f3, %15
+  %18 = load $f3 maybe_ref
+  %19 = binary add.one %18, 1:w0
+  store $f3 maybe_ref, %19
+  barrier $f3 maybe_ref
+  store $f3, nil
+  inline.leave
+  %24 = load $s1
+  ret %24
+for.body.2:
+  %26 = binary add.grow %10, %12
+  store $s1, %26
+  %28 = binary add.one %7, 1:w0
+  %29 = subst.check guard 4 %28
+  cond_br %29, for.body.2.subst, for.test(%28)
+for.test.any(%31: item, %32: item):
+  %33 = for.test %31, %32, 1:w0
+  cond_br %33, for.body.any, for.end.any
+for.body.any:
+  %35 = load $s1
+  %36 = load $s2 maybe_ref
+  %37 = binary add 3:w10, %36
+  br for.body.2.any(%31, %32, %35, %37)
+for.end.any:
+  %39 = ref $s2
+  inline.enter BUMP.byref %39
+  store $f3, %39
+  %42 = load $f3 maybe_ref
+  %43 = binary add.one %42, 1:w0
+  store $f3 maybe_ref, %43
+  barrier $f3 maybe_ref
+  store $f3, nil
+  inline.leave
+  %48 = load $s1
+  ret %48
+for.body.2.any(%50: item, %51: item, %52: item, %53: item):
+  %54 = binary add.grow %52, %53
+  store $s1, %54
+  %56 = binary add.one %50, 1:w0
+  br for.test.any(%56, %51)
+for.body.subst:
+  %58 = subst.value %12
+  br for.body.2.any(%7, %4, %10, %58)
+for.body.2.subst:
+  %60 = subst.value %28
+  br for.test.any(%60, %4)
+body.subst:
+  %62 = subst.value %4
+  br for.test.any(1:w10, %62)
+}
+
+function BUMP internal params 1 {
+  $f0 = frame 0 "N"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward BUMP.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  %5 = binary add.one %4, 1:w0
+  ret
+}
+
+function SUM.byref internal params 1 {
+  $f0 = frame 0 "N"
+  $f2 = frame 2 "N"
+entry:
+  br for.test(1:w10)
+for.test(%1: item):
+  %2 = load $f0 maybe_ref
+  %3 = for.test %1, %2, 1:w0
+  cond_br %3, for.body, for.end
+for.body:
+  %5 = load $s1
+  %6 = load $s2 maybe_ref
+  %7 = binary add 3:w10, %6
+  %8 = subst.check %7
+  cond_br %8, for.body.subst, for.body.2
+for.end:
+  %10 = ref $s2
+  inline.enter BUMP.byref %10
+  store $f2, %10
+  %13 = load $f2 maybe_ref
+  %14 = binary add.one %13, 1:w0
+  store $f2 maybe_ref, %14
+  barrier $f2 maybe_ref
+  store $f2, nil
+  inline.leave
+  %19 = load $s1
+  ret %19
+for.body.2:
+  %21 = binary add.grow %5, %7
+  store $s1, %21
+  %23 = binary add.one %1, 1:w0
+  %24 = subst.check guard 4 %23
+  cond_br %24, for.body.2.subst, for.test(%23)
+for.test.any(%26: item):
+  %27 = load $f0 maybe_ref
+  %28 = for.test %26, %27, 1:w0
+  cond_br %28, for.body.any, for.end.any
+for.body.any:
+  %30 = load $s1
+  %31 = load $s2 maybe_ref
+  %32 = binary add 3:w10, %31
+  br for.body.2.any(%26, %30, %32)
+for.end.any:
+  %34 = ref $s2
+  inline.enter BUMP.byref %34
+  store $f2, %34
+  %37 = load $f2 maybe_ref
+  %38 = binary add.one %37, 1:w0
+  store $f2 maybe_ref, %38
+  barrier $f2 maybe_ref
+  store $f2, nil
+  inline.leave
+  %43 = load $s1
+  ret %43
+for.body.2.any(%45: item, %46: item, %47: item):
+  %48 = binary add.grow %46, %47
+  store $s1, %48
+  %50 = binary add.one %45, 1:w0
+  br for.test.any(%50)
+for.body.subst:
+  %52 = subst.value %7
+  br for.body.2.any(%1, %5, %52)
+for.body.2.subst:
+  %54 = subst.value %23
+  br for.test.any(%54)
+}
+
+function BUMP.byref internal params 1 {
+  $f0 = frame 0 "N"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = binary add.one %0, 1:w0
+  store $f0 maybe_ref, %1
+  barrier $f0 maybe_ref
+  ret
+}
+
+module_init module.init internal params 0 {
+entry:
+  store $s0, 3:w10
+  store $s1, 0:w10
+  store $s2, 1:w10
+  ret
+}

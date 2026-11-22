@@ -109,6 +109,10 @@ std::string optimize(Module &m, bool final) {
     for (auto &f : m.functions)
       if (std::string report = verify(m, *f); !report.empty() && bad.empty())
         bad = "after drop-reference-bodies: " + report;
+  if (foldConstantStatics(m))
+    for (auto &f : m.functions)
+      if (std::string report = verify(m, *f); !report.empty() && bad.empty())
+        bad = "after fold-constant-statics: " + report;
   auto rounds = [&](Function &f) {
     for (unsigned round = 0; round < kMaxRounds && bad.empty(); ++round) {
       bool changed = false;
