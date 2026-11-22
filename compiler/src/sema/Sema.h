@@ -36,6 +36,7 @@ private:
   bool declaredVariable(const std::string &name) const;
   struct Frame;
   void markBoxed(Frame &f, uint32_t slot);
+  void markStaticInCell(uint32_t slot);
   void declare(LocalDecl &d, bool isStatic, Scope &s);
   void declareMemvar(const LocalDecl &d);
   void declareField(const LocalDecl &d, const std::string &alias);

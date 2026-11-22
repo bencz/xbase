@@ -196,6 +196,13 @@ void Sema::markBoxed(Frame &f, uint32_t slot) {
   boxed[slot] = true;
 }
 
+// A STATIC passed by reference or made a FOR EACH variable: its storage may hold a cell (Module::staticsInCell).
+void Sema::markStaticInCell(uint32_t slot) {
+  std::vector<bool> &inCell = module_->staticsInCell;
+  if (inCell.size() <= slot) inCell.resize(slot + 1);
+  inCell[slot] = true;
+}
+
 // Whether `name` is a LOCAL, STATIC or parameter where the code is (a MEMVAR
 // declaration of the name wins, as in resolve).
 bool Sema::declaredVariable(const std::string &name) const {
@@ -369,6 +376,7 @@ void Sema::stmt(Stmt &st, Scope &s) {
       VarWhere where = v.kind == ExprKind::Var ? static_cast<const VarExpr &>(v).where : VarWhere::Frame;
       if (where == VarWhere::Field)
         diag_.error(v.loc, "a field cannot be the variable of FOR EACH");
+      if (where == VarWhere::Static) markStaticInCell(static_cast<const VarExpr &>(v).slot);
     };
     if (f.key) loopVar(*f.key);
     for (auto &v : f.vars) loopVar(*v);
@@ -639,13 +647,15 @@ void Sema::expr(Expr &e, Scope &s) {
     break;
   case ExprKind::Ref: {
     // A variable passed by reference is shared with the callee: a function's
-    // or a codeblock's LOCAL or parameter is marked; STATICs and captured
-    // variables are reached with a run-time test anyway.
+    // or a codeblock's LOCAL or parameter is marked boxed, a STATIC in cells
+    // (markStaticInCell); captured variables are reached with a run-time test
+    // anyway.
     Expr &target = *static_cast<RefExpr &>(e).target;
     expr(target, s);
     if (target.kind == ExprKind::Var) {
       auto &v = static_cast<VarExpr &>(target);
       if (v.where == VarWhere::Frame) markBoxed(frames_.back(), v.slot);
+      if (v.where == VarWhere::Static) markStaticInCell(v.slot);
       if (v.where == VarWhere::Field) diag_.error(v.loc, "a field cannot be passed by reference");
     }
     break;

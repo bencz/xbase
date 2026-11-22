@@ -395,13 +395,13 @@ item values and block parameters when `--dump-xir-types` is given too ([xir.md](
   text (once, also for `o:&c += v`), then the object, then the arguments, as in the reference; its text names the
   message when it runs.
 - Variables: frame variables (parameters and `LOCAL`s), a codeblock's captures, and the module's `STATIC`s. A frame
-  variable moves into a cell when a codeblock captures it (`block`) or a reference is taken (`ref`), as in Clipper,
-  and a `STATIC` when a reference is taken; its own item then holds the cell (`Var::shared` marks the frame variables
-  that may). A `FOR EACH`
-  variable of a loop being generated is accessed through its reference; a `STATIC`, a shared variable, a captured
-  variable or a parameter is tested at run time for a cell or a reference (an argument passed by reference); other
-  `LOCAL`s never hold one. An argument `@x` is `ref` (the variable's cell), `@a[i]` is `ref.index`. A store into a
-  variable that may live in the heap (a cell, an element through a reference) is followed by `barrier`.
+  variable moves into a cell when a codeblock captures it (`block`) or a reference is taken (`ref`), as in Clipper, and
+  a `STATIC` when a reference is taken or it is a `FOR EACH` variable; its own item then holds the cell (`Var::shared`
+  marks the frame variables and the `STATIC`s that may: Sema records the `STATIC`s in `Module::staticsInCell`). A `FOR
+  EACH` variable of a loop being generated is accessed through its reference; such a `STATIC`, a shared variable, a
+  captured variable or a parameter is tested at run time for a cell or a reference (an argument passed by reference);
+  other `LOCAL`s and `STATIC`s never hold one. An argument `@x` is `ref` (the variable's cell), `@a[i]` is `ref.index`.
+  A store into a variable that may live in the heap (a cell, an element through a reference) is followed by `barrier`.
 - Parameter versioning: a parameter may hold a reference only if its caller passed one, and one that is never shared
   cannot become one. A function with such parameters is generated twice: its own body starts with `params.ref`, which
   tests them; when none holds a reference, each is moved once into a `LOCAL` standing for it (which mem2reg makes an SSA

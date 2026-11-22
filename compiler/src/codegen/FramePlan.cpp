@@ -129,7 +129,7 @@ void FramePlan::elideLoads(const BasicBlock &b) {
         if (!isPlain(*load.var, load.access)) written |= lastIndirect > at;
         if (written) continue;
         homes_[&load] = {Home::Kind::Place, 0, &load};
-        if (load.access != Access::Direct) shadowed_.insert(&load);
+        if (!isPlain(*load.var, load.access)) shadowed_.insert(&load); // the runtime may read it (a STATIC too)
       }
     }
     uint32_t p = pos_.at(&u);
@@ -143,24 +143,19 @@ void FramePlan::elideLoads(const BasicBlock &b) {
   }
 }
 
-// A value computed into the variable of the store right after it: only into
-// the variable's own item (a store through a cell or a reference may find a
-// shared cell or an element, which the runtime writes whole). A call may only
-// write into a plain frame variable: the callee must not see the variable
-// cleared (a STATIC it may read). In a block
-// that unwinds (to a BEGIN SEQUENCE handler, which may read the variable, or a
-// FOR EACH cleanup), an operation that can fail is not computed in place: a
-// call may clear its result first.
+// A value computed into the variable of the store right after it: only into a plain frame variable's own item (a store
+// through a cell or a reference may find a shared cell or an element, and a STATIC's storage may be shared, which the
+// runtime writes whole; and a callee must not see a STATIC it may read cleared). In a block that unwinds (to a BEGIN
+// SEQUENCE handler, which may read the variable, or a FOR EACH cleanup), an operation that can fail is not computed in
+// place: a call may clear its result first.
 bool FramePlan::canForward(const Instruction &value, const Instruction &store) const {
   if (store.op != Op::Store || store.operand(0) != &value || !value.hasOneUse()) return false;
-  if (store.access != Access::Direct) return false;
+  if (!isPlain(*store.var, store.access)) return false;
   if (value.mayFail() && store.parent->unwind) return false;
   switch (value.op) {
   case Op::Unary: case Op::Binary: case Op::Index: case Op::ArrayLit: case Op::MakeBlock: case Op::NumDefaultDec:
-  case Op::FromBool: case Op::ObjectGet: case Op::ObjectSet:
+  case Op::FromBool: case Op::ObjectGet: case Op::ObjectSet: case Op::Call: case Op::Send: case Op::SendMacro:
     return true;
-  case Op::Call: case Op::Send: case Op::SendMacro:
-    return isPlain(*store.var, store.access);
   default:
     return false;
   }

@@ -473,13 +473,16 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
 - Values: instruction results, block parameters, and constants (`nil`, logicals, numbers with their display width and
   decimals, strings), which lower to static items. A number whose decimals are SET DECIMALS at run time is an
   instruction, since it needs the context.
-- Variables are memory places of the function: frame variables (parameters and `LOCAL`s; a shared one moves into a
-  cell when captured or passed by reference), captured variables of a codeblock, and the module's `STATIC`s. `load`
-  reads one into a value, `store` writes one, and `barrier` follows a store into a variable that may live in the
-  heap. A `FOR EACH` variable is accessed through its reference; a `STATIC`, a shared or captured variable or a
-  parameter is tested for a cell or reference at run time. `ref` and `ref.index` make the reference an argument `@x`
-  or `@a[i]` passes. `load ... move` is the load of a parameter into the `LOCAL` that stands for it (parameter
-  versioning): nothing reads the parameter after; its slot keeps the value until the function returns or that
+- Variables are memory places of the function: frame variables (parameters and `LOCAL`s; a shared one moves into a cell
+  when captured or passed by reference), captured variables of a codeblock, and the module's `STATIC`s. `load` reads one
+  into a value, `store` writes one, and `barrier` follows a store into a variable that may live in the heap. A `FOR
+  EACH` variable is accessed through its reference; a shared or captured variable, a parameter, and a `STATIC` passed by
+  reference or made a `FOR EACH` variable somewhere in its module (Sema's `staticsInCell`: macros never see a `STATIC`,
+  so its uses are all in the module's source) is tested for a cell or reference at run time; another `STATIC` is read
+  and written directly (its storage still goes through the runtime once threads share it, `xb_storage_shared`, which
+  also keeps it from being an elided load's place or a forwarded store's). `ref` and `ref.index` make the reference an
+  argument `@x` or `@a[i]` passes. `load ... move` is the load of a parameter into the `LOCAL` that stands for it
+  (parameter versioning): nothing reads the parameter after; its slot keeps the value until the function returns or that
   `LOCAL` is set to `NIL`.
 - Operations mirror the runtime: unary and binary operators (`++`, `--` and the step of a `FOR` without `STEP` are a
   `binary add` or `sub` of 1 marked `byOne`, printed `add.one`: the same fast paths, and an error that is theirs,

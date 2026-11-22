@@ -562,6 +562,9 @@ struct Module {
   std::vector<LocalDecl> fileMemvars; // MEMVARs before the first function: declared in the whole file
   std::vector<std::unique_ptr<LocalStmt>> fileFields; // FIELD statements before the first function: the whole file
   std::vector<LocalDecl *> statics;   // every STATIC of the module, in slot order (set by Sema)
+  // By static slot, set by Sema: passed by reference (@s) or the variable of a FOR EACH somewhere in the module, so its
+  // storage may hold a cell; any other is only ever read and assigned (macros never see a STATIC).
+  std::vector<bool> staticsInCell;
   std::vector<ExternDecl> externs;
   // The EXTERNAL names; after CallResolver, only those of another module of the program (the runtime's functions
   // are all linked in, and the module's own are here).

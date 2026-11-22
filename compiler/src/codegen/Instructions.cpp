@@ -312,7 +312,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     // The variable's own item serves the use (an elided load), or what the runtime read into the load's shadow slot.
     const Home &h = plan_->home(&i);
     bool inPlace = h.kind == Home::Kind::Place && h.place == &i;
-    Value *own = inPlace ? (i.access == xir::Access::Direct ? nullptr : slot(plan_->shadowSlot(&i))) : addr(&i);
+    Value *own = inPlace ? (xir::isPlain(*i.var, i.access) ? nullptr : slot(plan_->shadowSlot(&i))) : addr(&i);
     Value *p = loadEachElement(i, own);
     if (!p) p = loadVar(*i.var, i.access, own, unwind_);
     if (sharingLoads_.count(&i)) shareString(p); // the value leaves the variable: its string stops growing

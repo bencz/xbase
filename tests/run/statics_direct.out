@@ -1,0 +1,10 @@
+
+loops:     500500       -900
+callee between:         11          6
+in a list:          6          7          7
+block:         21       -879
+array in a static:         55        110
+by reference:         10         20         20
+after:         23
+each: start         10         20         30
+counter:          1          2          3

@@ -122,7 +122,8 @@ struct Var {
   enum class Kind : uint8_t { Frame, Capture, Static };
   Kind kind;
   uint32_t index;            // frame slot, capture index, or static index
-  bool shared = false;       // Frame: captured by a codeblock or passed by reference somewhere
+  bool shared = false;       // Frame: captured by a codeblock or passed by reference somewhere; Static: passed by
+                             // reference or a FOR EACH variable somewhere in the module (its item may hold a cell)
   bool param = false;        // Frame: a parameter (its caller may have passed a reference)
   std::string name;          // for the printer
 };
@@ -138,10 +139,10 @@ enum class Access : uint8_t {
 // A parameter of its function: its caller may have passed it by reference, or a typed copy typed it.
 inline bool isParameter(const Var *v) { return v && v->kind == Var::Kind::Frame && v->param; }
 
-// Its own item may hold a cell: a STATIC, or a frame variable that is shared
-// or a parameter. Others are never shared and never hold a reference.
+// Its own item may hold a cell: a STATIC or a frame variable that is shared,
+// or a parameter. Others never hold a reference.
 inline bool mayBeInCell(const Var &v) {
-  return v.kind == Var::Kind::Static || (v.kind == Var::Kind::Frame && (v.shared || v.param));
+  return (v.kind != Var::Kind::Capture && v.shared) || (v.kind == Var::Kind::Frame && v.param);
 }
 
 // Reached directly in its frame slot (the access of a frame variable that is
