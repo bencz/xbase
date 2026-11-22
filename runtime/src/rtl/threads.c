@@ -261,12 +261,13 @@ void xbf_THREADSTART(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * asynchronously (LockAsync, HoldAsync: `waits` below), and how many waiters each flow has in line. */
 
 enum {
-  M_STATE, M_OWNER, M_DEPTH, M_QUEUE, M_WAITING, M_WAITERS, M_WAITERS_HEAD, M_WAITERS_COUNT, M_FLOWS, M_COUNT_
+  M_STATE, M_OWNER, M_DEPTH, M_QUEUE, M_WAITING, M_WAITERS, M_WAITERS_HEAD, M_WAITERS_COUNT, M_FLOWS, M_RELEASE,
+  M_COUNT_
 };
 static const xb_class_var mutex_vars[] = {
   {"(STATE)", XB_VAR_ANY},   {"(OWNER)", XB_VAR_ANY},        {"(DEPTH)", XB_VAR_ANY},
   {"(QUEUE)", XB_VAR_ANY},   {"(WAITING)", XB_VAR_ANY},      {"(WAITERS)", XB_VAR_ANY},
-  {"(WAITERSHEAD)", XB_VAR_ANY}, {"(WAITERSCOUNT)", XB_VAR_ANY}, {"(FLOWS)", XB_VAR_ANY}};
+  {"(WAITERSHEAD)", XB_VAR_ANY}, {"(WAITERSCOUNT)", XB_VAR_ANY}, {"(FLOWS)", XB_VAR_ANY}, {"(RELEASE)", XB_VAR_ANY}};
 _Static_assert(XB_TABLE_SIZE(mutex_vars) == M_COUNT_, "one M_ index per Mutex variable");
 
 /* Asynchronous waits for what a Mutex or a Semaphore gives (a lock, a place): the object's variables of its waiters
@@ -540,6 +541,45 @@ static const xb_class_method holder_methods[] = {{"DISPOSE", holder_dispose}};
 static const xb_class holder_class = {
   "MUTEXHOLDER", H_COUNT_, holder_vars, NULL, XB_TABLE_SIZE(holder_methods), holder_methods, NULL};
 
+/* A Mutex's releaser, made with it (M_RELEASE): what SYNCHRONIZED holds (__Synchronize), whose Dispose() releases the
+ * mutex once for the flow holding it. One per mutex serves every SYNCHRONIZED: the program never has it in a variable
+ * (USING holds it hidden and disposes of it once), so nothing disposes of it twice, as a Hold()'s holder must allow. */
+enum { R_MUTEX, R_COUNT_ };
+static const xb_class_var releaser_vars[] = {{"(MUTEX)", XB_VAR_ANY}};
+_Static_assert(XB_TABLE_SIZE(releaser_vars) == R_COUNT_, "one R_ index per releaser variable");
+
+/* oReleaser:Dispose(): the mutex released once, by the flow holding it (nothing from another). */
+static void releaser_dispose(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(argc);
+  xb_set_nil(r);
+  xb_item m;
+  xb_object_get(argv[0].v.p, R_MUTEX, &m);
+  xb_gc_root_push(ctx, &m);
+  mutex_release(ctx, &m, xb_flow_self());
+  xb_gc_root_pop(ctx, 1);
+}
+
+static const xb_class_method releaser_methods[] = {{"DISPOSE", releaser_dispose}};
+static const xb_class releaser_class = {
+  "MUTEXRELEASER", R_COUNT_, releaser_vars, NULL, XB_TABLE_SIZE(releaser_methods), releaser_methods, NULL};
+
+/* __Synchronize( oMutex ): SYNCHRONIZED's start: takes the lock as Lock() does and returns the mutex's releaser, which
+ * the statement disposes of at its end (NIL when a QUIT ended the wait: nothing to release); nothing is allocated. For a
+ * value that is no Mutex, its Hold(), as the statement sent before. */
+void xbf___SYNCHRONIZE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  xb_set_nil(ret);
+  if (!argc || !is_mutex(&argv[0])) {
+    xb_op_send(ctx, ret, "HOLD", argc ? 1 : 0, argv);
+    return;
+  }
+  if (!mutex_take(ctx, &argv[0])) return;
+  if (xb_pending_get(ctx) & XB_PENDING_UNWIND) { /* a QUIT came meanwhile: no USING will dispose of it */
+    mutex_release(ctx, &argv[0], xb_flow_self());
+    return;
+  }
+  xb_object_get(argv[0].v.p, M_RELEASE, ret);
+}
+
 /* oMutex:Hold(): takes the lock as Lock() does and returns a holder whose Dispose() releases it (NIL when a QUIT ended
  * the wait). */
 static void mutex_hold(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
@@ -611,7 +651,12 @@ void xbf_MUTEX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   for (uint32_t k = 0; k < M_WAITERS; ++k) xb_set_logical(&m->vars[k], 0);
   xb_ring_init(m, mutex_waits.ring);
   xb_set_hash(&m->vars[M_FLOWS], xb_hash_alloc()); /* `m` is new: no barrier */
-  xb_set_object(ret, m);
+  xb_set_object(ret, m); /* a root while the releaser is made */
+  xb_object *rel = xb_object_new(&releaser_class);
+  m = ret->v.p;
+  xb_set_object(&rel->vars[R_MUTEX], m); /* `rel` is new: no barrier */
+  xb_set_object(&m->vars[M_RELEASE], rel);
+  xb_gc_write(m);
 }
 
 /* Conditions: one 64-bit word holds the waiters, the signals given to them (16 bits each: a waiter takes its signal and

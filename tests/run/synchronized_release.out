@@ -1,0 +1,8 @@
+
+nested: .T.
+return: inside .T.
+exit: .T.
+break: out .T.
+error:       1081 .T.
+own hold:          1
+own dispose:          1          1

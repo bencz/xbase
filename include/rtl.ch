@@ -406,6 +406,7 @@ EXTERN FUNCTION __Affix( cText, cPart, lEnd ) NATIVE
 EXTERN FUNCTION __RangeCount( nRest, [nCount] ) NATIVE
 EXTERN FUNCTION __RangeStart( nLen, [nStart] ) NATIVE
 EXTERN FUNCTION __ScanValue( xTarget, xSearch, nStart, nCount ) NATIVE
+EXTERN FUNCTION __Synchronize( oMutex ) NATIVE
 EXTERN FUNCTION __ValueLess( x, y ) NATIVE
 EXTERN FUNCTION __ValueMatches( xValue, xSearch ) NATIVE
 EXTERN FUNCTION __SetCentury( [lOn] ) NATIVE

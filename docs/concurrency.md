@@ -210,8 +210,11 @@ Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); th
   and timed-out ones are passed over), in the order they came; a thread waiting with `Lock()` may take it before them. A
   limit that is no number, or a token that is no token, is `BASE/9024` `Argument error`.
 - `SYNCHRONIZED oMutex ... END` (`END SYNCHRONIZED` too) runs the body holding the mutex and releases it however the
-  body ends: a `std.ch` rule, `USING oMutex:Hold()` (`oMutex` is a variable, an element, a call or a message: an
-  operator around it would bind before `:Hold()`). `RETURN`, `EXIT` and `LOOP` may leave it. `AWAIT SYNCHRONIZED
+  body ends: a `std.ch` rule, `USING __Synchronize( oMutex )`, which takes the lock as `Lock()` does and gives the
+  mutex's own releaser, made with it, whose `Dispose()` releases it once for the flow holding it: nothing is allocated
+  (one releaser serves every `SYNCHRONIZED`, since the program never has it in a variable to dispose of twice, as a
+  `Hold()` holder allows; a value that is no `Mutex` gets its `Hold()` sent). `RETURN`, `EXIT` and `LOOP` may leave
+  it. `AWAIT SYNCHRONIZED
   oMutex ... END`, in an `ASYNC` function, awaits the mutex instead (`USING AWAIT oMutex:HoldAsync()`) and holds it
   across the `AWAIT`s of the body.
 - `Condition()` makes a condition variable. `oCondition:Wait( oMutex, [nMs] )` releases `oMutex`, which the flow

@@ -1,7 +1,7 @@
-using oMutex:Hold()
+using __Synchronize( oMutex )
 Synchronize( "a" )
 Sync( 1, 2 )
 Synch()
 end
-using aLocks[ 2 ]:Hold()
+using __Synchronize( aLocks[ 2 ] )
 end

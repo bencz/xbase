@@ -28,9 +28,9 @@
 
 #command REQUEST <vars,...>            => EXTERNAL <vars>
 
-/* SYNCHRONIZED oMutex ... END: the body runs holding the mutex, released however it ends (USING, the compiler's). The
- * whole word only: Sync(), Synchronize() stay calls. */
-#xcommand SYNCHRONIZED <m>             => using <m>:Hold()
+/* SYNCHRONIZED oMutex ... END: the body runs holding the mutex, released however it ends (USING, the compiler's, over
+ * the mutex's own releaser: nothing allocated). The whole word only: Sync(), Synchronize() stay calls. */
+#xcommand SYNCHRONIZED <m>             => using __Synchronize( <m> )
 
 /* AWAIT SYNCHRONIZED oMutex ... END: the same in an ASYNC function, which awaits the mutex (HoldAsync) instead of
  * waiting for it on its worker, and holds it across the AWAITs of the body. */
