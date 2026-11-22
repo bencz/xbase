@@ -66,14 +66,14 @@ const char *kUsage =
     "  A name with * or ? stands for the files it matches. A project file builds a program or a library\n"
     "  in one step (docs/projects.md).\n"
     "\n"
-    "  -o <file>          output object file (default: the first source's name with .o); with --link the\n"
-    "                     program, with --library the archive\n"
-    "  --link             link the program (the runtime and the libraries) instead of writing an object\n"
+    "  -o <file>          the program (default: the first source's name), with -c the object (default:\n"
+    "                     the first source's name with .o), with --library the archive\n"
+    "  -c                 write the object only, without linking the program (the runtime and the libraries)\n"
     "  --library=<name>   compile an xbase library: its archive and its module file <name>.xbm\n"
     "  --lib=<name>       use the xbase library <name> (found by its module file <name>.xbm)\n"
     "  -L<dir>            add a folder to look for module files in\n"
-    "  -l<name>           link the system library <name> too (with --link)\n"
-    "  --out-dir=<dir>    where a project's program or library goes (default: the current folder)\n"
+    "  -l<name>           link the system library <name> too\n"
+    "  --out-dir=<dir>    where a project's program, library or object goes (default: the current folder)\n"
     "  -I<dir>            add an include directory\n"
     "  -D<name>[=<val>]   #define <name> [<val>]\n"
     "  -u                 do not load std.ch\n"
@@ -91,8 +91,8 @@ const char *kUsage =
     "  --static           non-PIC code\n"
     "  --runtime          compile modules of the runtime library: their public functions are the\n"
     "                     runtime's (xbf_NAME, declared NATIVE in rtl.ch); implies --no-entry\n"
-    "  --no-entry         do not emit the program entry (xb_app_main): the modules are linked into\n"
-    "                     a program whose entry another object has\n"
+    "  --no-entry         do not emit the program entry (xb_app_main), and write an object: the modules\n"
+    "                     are linked into a program whose entry another object has\n"
     "  --depfile=<file>   write a Make-style dependency file for the object\n"
     "  --dump-ir=<file>   debug: also write the LLVM module as text\n"
     "  --dump-xir=<file>  debug: also write the module's xIR as text\n"
@@ -423,7 +423,7 @@ bool isObjectFile(const std::string &path) {
 static int compile(int argc, char **argv) {
   xb::TargetConfig tcfg;
   std::string output, irDump, xirDump, depFile, stdFile = "std.ch", libraryName, outDir;
-  bool xirTypes = false, link = false;
+  bool xirTypes = false, compileOnly = false;
   std::vector<std::string> inputs, includeDirs, defines, libs, libDirs, system;
   bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false, runtimeLibrary = false;
   xb::Sema::Undeclared undeclared = xb::Sema::Undeclared::Warn;
@@ -468,7 +468,7 @@ static int compile(int argc, char **argv) {
     else if (startsWith(a, "-l") && a[2]) system.push_back(a + 2);
     else if (startsWith(a, "--lib=") && a[6]) libs.push_back(a + 6);
     else if (startsWith(a, "--library=") && a[10]) libraryName = a + 10;
-    else if (!std::strcmp(a, "--link")) link = true;
+    else if (!std::strcmp(a, "-c")) compileOnly = true;
     else if (startsWith(a, "--out-dir=") && a[10]) outDir = a + 10;
     else if (startsWith(a, "-D") && a[2]) defines.push_back(a + 2);
     else if (!std::strcmp(a, "-u")) useStd = false;
@@ -528,11 +528,10 @@ static int compile(int argc, char **argv) {
     libDirs.insert(libDirs.end(), project->libDirs.begin(), project->libDirs.end());
     system.insert(system.end(), project->system.begin(), project->system.end());
     projectName = project->name;
-    if (!project->library) link = true;
-    else if (libraryName.empty()) libraryName = project->name;
+    if (project->library && libraryName.empty()) libraryName = project->name;
   }
-  if (!libraryName.empty() && (link || runtimeLibrary)) {
-    std::fputs("xbc: --library makes a library: no --link, no --runtime\n", stderr);
+  if (!libraryName.empty() && (compileOnly || runtimeLibrary)) {
+    std::fputs("xbc: --library makes a library: no -c, no --runtime\n", stderr);
     return 2;
   }
   // A library's files are named in lower case (lib<name>.a, <name>.xbm), its symbols in upper case
@@ -547,13 +546,17 @@ static int compile(int argc, char **argv) {
     libraryName = xb::upperCase(libraryName);
     emitEntry = false;
   }
+  // A program is linked unless -c asks for its object; modules without the entry (--no-entry, --runtime) go into an
+  // object, a library into its archive.
+  bool link = !compileOnly && emitEntry;
   inputs = distinctFiles(inputs);
-  std::vector<std::string> objects; // linked with the program (--link)
+  std::vector<std::string> objects; // linked with the program
   for (const std::string &in : inputs)
     if (isObjectFile(in)) objects.push_back(in);
   inputs.erase(std::remove_if(inputs.begin(), inputs.end(), isObjectFile), inputs.end());
   if (!objects.empty() && !link) {
-    std::fputs("xbc: object files are linked: --link\n", stderr);
+    std::fputs("xbc: object files are linked into a program: not with -c, --no-entry, --runtime or --library\n",
+               stderr);
     return 2;
   }
   if (inputs.empty() && objects.empty()) {
@@ -566,8 +569,10 @@ static int compile(int argc, char **argv) {
     llvm::SmallString<256> p(outDir);
     llvm::sys::path::append(p, !libraryName.empty() ? xb::archiveName(libraryFile, triple)
                                : link              ? xb::executableName(name, triple)
-                                                   : std::string());
-    output = !libraryName.empty() || link ? std::string(p) : withExtension(inputs.front(), ".o");
+                                                   : name + ".o");
+    // An object goes beside its first source, a project's into the output folder.
+    bool beside = !link && libraryName.empty() && projectName.empty();
+    output = beside ? withExtension(inputs.front(), ".o") : std::string(p);
   }
 
   // The libraries the program uses, each before the ones it uses (as the linker wants them), and the declarations of
@@ -607,9 +612,9 @@ static int compile(int argc, char **argv) {
     std::fprintf(stderr, "xbc: cannot write '%s'\n", depFile.c_str());
     return false;
   };
-  auto makeOutDir = [&] { // a program's or a library's folder
+  auto makeOutDir = [&] { // the output's folder
     std::string dir = llvm::sys::path::parent_path(output).str();
-    if (dir.empty() || (!link && libraryName.empty())) return true;
+    if (dir.empty()) return true;
     std::error_code ec = llvm::sys::fs::create_directories(dir);
     if (ec) std::fprintf(stderr, "xbc: cannot create '%s': %s\n", dir.c_str(), ec.message().c_str());
     return !ec;

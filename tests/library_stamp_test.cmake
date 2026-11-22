@@ -1,4 +1,4 @@
-# A library's stamp: a program's object compiled with a library links with that library (xbc --link given the object),
+# A library's stamp: a program's object compiled with a library links with that library (xbc given the object),
 # and no longer once the library is rebuilt from other sources (the link error names the stamp it requires). XBC,
 # TARGET (xbc's target or empty), WORKDIR.
 set(dir ${WORKDIR}/library_stamp)
@@ -19,9 +19,9 @@ function(run what)
     message(FATAL_ERROR "failed: ${ARGN}\n${out}${err}")
   endif()
 endfunction()
-set(link ${XBC} ${dir}/main.o --lib=stamped -L${dir}/lib --link -o ${dir}/main ${target})
+set(link ${XBC} ${dir}/main.o --lib=stamped -L${dir}/lib -o ${dir}/main ${target})
 run(must ${XBC} ${dir}/lib/stamped.xbprj --out-dir=${dir}/lib ${target})
-run(must ${XBC} ${dir}/main.prg --lib=stamped -L${dir}/lib -o ${dir}/main.o ${target})
+run(must ${XBC} -c ${dir}/main.prg --lib=stamped -L${dir}/lib -o ${dir}/main.o ${target})
 run(must ${link})
 file(WRITE ${dir}/lib/stamped.prg "FUNCTION One()\nRETURN 2\n")
 run(must ${XBC} ${dir}/lib/stamped.xbprj --out-dir=${dir}/lib ${target})

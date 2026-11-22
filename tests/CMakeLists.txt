@@ -108,7 +108,7 @@ foreach(t ${XB_FAIL_TESTS})
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.args)
     file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.args options)
   endif()
-  set(cmd $<TARGET_FILE:xbc> ${options} ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.prg ${with}
+  set(cmd $<TARGET_FILE:xbc> -c ${options} ${CMAKE_CURRENT_SOURCE_DIR}/fail/${t}.prg ${with}
       -o ${CMAKE_CURRENT_BINARY_DIR}/fail_${t}.o)
   add_test(NAME fail.${t}
     COMMAND ${CMAKE_COMMAND}
@@ -122,7 +122,8 @@ endforeach()
 file(GLOB XB_WARN_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/warn ${CMAKE_CURRENT_SOURCE_DIR}/warn/*.prg)
 foreach(t ${XB_WARN_TESTS})
   string(REGEX REPLACE "\\.prg$" "" t ${t})
-  set(cmd $<TARGET_FILE:xbc> -O2 ${CMAKE_CURRENT_SOURCE_DIR}/warn/${t}.prg -o ${CMAKE_CURRENT_BINARY_DIR}/warn_${t}.o)
+  set(cmd $<TARGET_FILE:xbc> -c -O2 ${CMAKE_CURRENT_SOURCE_DIR}/warn/${t}.prg
+      -o ${CMAKE_CURRENT_BINARY_DIR}/warn_${t}.o)
   add_test(NAME warn.${t}
     COMMAND ${CMAKE_COMMAND}
       "-DEXE=${cmd}"
@@ -294,7 +295,7 @@ set_tests_properties(package.program PROPERTIES FIXTURES_REQUIRED package)
 if(NOT MSVC)
 
 # The libraries' own tests (libs/<library>/tests/<name>.prg, expecting <name>.out), as programs xbc compiles and links
-# with their library (--lib, --link), at -O0 and -O2.
+# with their library (--lib), at -O0 and -O2.
 file(GLOB XB_LIBRARY_TESTS ${PROJECT_SOURCE_DIR}/libs/*/tests/*.prg)
 foreach(src ${XB_LIBRARY_TESTS})
   get_filename_component(name ${src} NAME_WE)
@@ -304,7 +305,7 @@ foreach(src ${XB_LIBRARY_TESTS})
   foreach(level 0 2)
     set(exe ${CMAKE_CURRENT_BINARY_DIR}/libs/${library}/${name}_O${level}${CMAKE_EXECUTABLE_SUFFIX})
     xb_build_project(OUTPUTS ${exe} DEPENDS xblib_${library}
-                     ARGS ${src} --lib=${library} --link -O${level} -o ${exe} COMMENT "xbc ${name}.prg --link")
+                     ARGS ${src} --lib=${library} -O${level} -o ${exe} COMMENT "xbc ${name}.prg")
     add_custom_target(t_lib_${library}_${name}_O${level} ALL DEPENDS ${exe})
     add_test(NAME lib${level}.${library}.${name}
       COMMAND ${CMAKE_COMMAND} -DEXE=${exe} -DEXPECTED=${dir}/${name}.out -DEXPECTED_RC=0
@@ -377,6 +378,10 @@ add_test(NAME project.library_order
           -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/projects/uses_greet.prg
           -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/projects/uses_greet.out -DTARGET=${XB_TARGET}
           -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/library_order_test.cmake)
+# What xbc writes by default: the program, with -c the object (driver_output_test.cmake).
+add_test(NAME project.driver_output
+  COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DTARGET=${XB_TARGET} -DSUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
+          -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/driver_output_test.cmake)
 # A library's stamp (library_stamp_test.cmake).
 add_test(NAME project.library_stamp
   COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DTARGET=${XB_TARGET} -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}

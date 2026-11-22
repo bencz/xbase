@@ -21,7 +21,8 @@ set(sources ${CMAKE_CURRENT_SOURCE_DIR}/main.prg ${CMAKE_CURRENT_SOURCE_DIR}/gre
 set(obj ${CMAKE_CURRENT_BINARY_DIR}/app${CMAKE_C_OUTPUT_EXTENSION})
 set(deps ${CMAKE_CURRENT_BINARY_DIR}/app.d)
 add_custom_command(OUTPUT ${obj}
-                   COMMAND ${XBC} ${sources} -o ${obj} --depfile=${deps} $<$<BOOL:${XBC_TARGET}>:--target=${XBC_TARGET}>
+                   COMMAND ${XBC} -c ${sources} -o ${obj} --depfile=${deps}
+                           $<$<BOOL:${XBC_TARGET}>:--target=${XBC_TARGET}>
                    DEPENDS ${sources} COMMENT "xbc (no -I)")
 add_executable(app ${obj})
 set_target_properties(app PROPERTIES LINKER_LANGUAGE C)

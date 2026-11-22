@@ -66,7 +66,7 @@ function(xb_compile_prg src obj)
   get_filename_component(file ${src} NAME)
   add_custom_command(
     OUTPUT ${obj}
-    COMMAND xbc ${src} -o ${obj} --depfile=${obj}.d -I${PROJECT_SOURCE_DIR}/include
+    COMMAND xbc -c ${src} -o ${obj} --depfile=${obj}.d -I${PROJECT_SOURCE_DIR}/include
             $<$<BOOL:${XB_TARGET}>:--target=${XB_TARGET}> ${ARGN}
     DEPENDS xbc ${src}
     DEPFILE ${obj}.d

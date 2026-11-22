@@ -107,7 +107,7 @@ compilation reads ([projects.md](projects.md), done):
 
 - A project file (`<name>.xbprj`: sources, include folders, defines, libraries, system libraries, options, settings
   per platform) builds a program or a library in one step (`xbc <name>.xbprj`); `--library=<name>`, `--lib=<name>`,
-  `-L`, `-l` and `--link` do the same from the command line.
+  `-L` and `-l` do the same from the command line, where `xbc` links a program unless `-c` asks for its object.
 - The module file gives the library's public functions (which a program gets declared, `EXTERN FUNCTION ... LIBRARY`),
   the runtime ABI and the target it was compiled for, the libraries and system libraries it needs, and the stamp of
   its sources, which every program compiled with it references, so that another build of the library fails to link.

@@ -21,12 +21,12 @@ foreach(library greet cli)
     endif()
   endforeach()
 endforeach()
-execute_process(COMMAND ${XBC} ${SOURCE} --lib=greet ${dirs} -o ${dir}/program.o ${target} RESULT_VARIABLE rc
+execute_process(COMMAND ${XBC} -c ${SOURCE} --lib=greet ${dirs} -o ${dir}/program.o ${target} RESULT_VARIABLE rc
                 ERROR_VARIABLE err)
 if(NOT rc EQUAL 0)
   message(FATAL_ERROR "${err}")
 endif()
-execute_process(COMMAND ${XBC} ${objects} ${dir}/program.o --lib=greet ${dirs} --link -o ${dir}/program ${target}
+execute_process(COMMAND ${XBC} ${objects} ${dir}/program.o --lib=greet ${dirs} -o ${dir}/program ${target}
                 RESULT_VARIABLE rc ERROR_VARIABLE err)
 if(NOT rc EQUAL 0)
   message(FATAL_ERROR "${err}")

@@ -47,17 +47,20 @@ setting, a quote left open, a project without sources, a `type` other than the t
 name are errors that name the file and the line.
 
 `xbc <project>.xbprj [options]` builds the project in the folder `--out-dir=<dir>` (default: the current one): a program
-as `<name>` (`<name>.exe` for Windows), a library as its archive and module file (below). `-o` names the program or the
-archive instead; the folder is created when missing. Sources given beside the project file are added to its sources,
-and `--library=<name>` names a library project's library. The objects go through a temporary file, removed afterwards;
-nothing is built incrementally: a build system does that with `--depfile`, which names, besides the files the
-preprocessor read, the project file, the libraries' module files and archives and, for a program, the runtime's.
+as `<name>` (`<name>.exe` for Windows), or with `-c` its object `<name>.o` only, a library as its archive and module
+file (below). `-o` names the program, the object or the archive instead; the folder is created when missing. Sources
+given beside the project file are added to its sources, and `--library=<name>` names a library project's library. A
+program's or a library's object goes through a temporary file, removed afterwards; nothing is built incrementally: a
+build system does that with `--depfile`, which names, besides the files the preprocessor read, the project file, the
+libraries' module files and archives and, for a program it links, the runtime's.
 
-The same works from the command line, without a project file:
+The same works from the command line, without a project file, where `xbc` links the program its sources make unless `-c`
+asks for the object only (`-o`, by default the first source's name with `.o`, beside it); object files given (`.o`,
+`.obj`) are linked with the program, and objects alone are only linked:
 
 | Option | Meaning |
 |---|---|
-| `--link` | link the program (`-o`, default: the first source's name) instead of writing an object; object files given (`.o`, `.obj`) are linked with it, and objects alone are only linked |
+| `-c` | write the object only, without linking the program |
 | `--library=<name>` | compile a library: `-o` names its archive (default `lib<name>.a`, `<name>.lib` with the MSVC tools), and its module file `<name>.xbm` goes beside it |
 | `--lib=<name>` | use the library `<name>` |
 | `-L<dir>` | add a folder to look for module files in |
@@ -137,13 +140,13 @@ The libraries a library uses are looked up likewise; each library comes before t
 
 ## The link step
 
-`--link` (and a program's project) writes the object to a temporary file, then runs the linker the runtime's module
-file names, found in the system's program path unless it is a full path: with the `gnu` style
-`<linker> <flags> -o <program> <objects...> <archives...> <runtime archive> -l<system>...`, with `msvc`
-`link /nologo /OUT:<program> <objects...> <archives...> <runtime archive> <system>.lib... <flags>`. The system
-libraries are the libraries', the project's and the runtime's, each once, in the place of its last mention. A failed
-link reports the linker's own messages and `xbc` fails. The MSVC tools are found only from a developer prompt, so the
-build does not link programs with them (no library, project or sample test there).
+Linking a program writes its object to a temporary file, then runs the linker the runtime's module file names, found in
+the system's program path unless it is a full path: with the `gnu` style `<linker> <flags> -o <program> <objects...>
+<archives...> <runtime archive> -l<system>...`, with `msvc` `link /nologo /OUT:<program> <objects...> <archives...>
+<runtime archive> <system>.lib... <flags>`. The system libraries are the libraries', the project's and the runtime's,
+each once, in the place of its last mention. A failed link reports the linker's own messages and `xbc` fails. The MSVC
+tools are found only from a developer prompt, so the build does not link programs with them (no library, project or
+sample test there).
 
 ## Tests and folders
 

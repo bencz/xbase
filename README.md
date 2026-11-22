@@ -47,14 +47,14 @@ from) and, where LLVM has a shared library, `-DXB_LLVM_STATIC=ON` (its `xbc` nee
 from a Visual Studio command prompt:
 
 ```bat
-xbc\bin\xbc hello.prg -o hello.obj
+xbc\bin\xbc -c hello.prg -o hello.obj
 link hello.obj xbc\libs\xbrt.lib shell32.lib /out:hello.exe
 ```
 
 With the MinGW-w64 package:
 
 ```sh
-xbc/bin/xbc hello.prg -o hello.o
+xbc/bin/xbc -c hello.prg -o hello.o
 gcc hello.o xbc/libs/libxbrt.a -lshell32 -o hello.exe
 ```
 
@@ -226,16 +226,18 @@ Harbour's, 1.01 times JavaScript's, 1.62 times C#'s, 1.63 times Java's, 2.74 tim
 ## Use
 
 ```sh
-build/compiler/xbc hello.prg -o hello.o        # compile to a native object
-cc hello.o build/runtime/libxbrt.a -lm -o hello  # link with the runtime
+build/compiler/xbc hello.prg                     # compile and link: ./hello
 ./hello
+build/compiler/xbc -c hello.prg                  # only compile, to a native object: hello.o
+cc hello.o build/runtime/libxbrt.a -lm -o hello  # link with the runtime yourself
 ```
 
-A program of several sources compiles in one run into one object (`xbc *.prg -o app.o`); calls between its modules
-need no declaration, and it starts at `Main()`.
+`xbc` compiles a program's sources and links it with the runtime and the libraries it uses, through the system's C
+compiler (`link.exe` from an MSVC developer prompt); `-c` writes the object only. A program of several sources compiles
+in one run into one object (`xbc *.prg -o app`); calls between its modules need no declaration, and it starts at
+`Main()`.
 
-A project file builds a program, or a library, in one step: `xbc` compiles its sources and links the program with the
-runtime and the libraries it names, through the system's C compiler (`link.exe` from an MSVC developer prompt):
+A project file builds a program, or a library, in one step, from the sources, options and libraries it names:
 
 ```sh
 build/compiler/xbc samples/hello/hello.xbprj --out-dir=out     # out/hello
@@ -245,13 +247,15 @@ out/wordfreq -n 5 samples/wordfreq/sample.txt
 ```
 
 The build compiles the libraries of `libs/` into `build/libs/` (`-Lbuild/libs`), and an install puts them where its
-`xbc` finds them by itself. [docs/projects.md](docs/projects.md) describes the project files, and `--link`,
-`--library=<name>`, `--lib=<name>`, `-L<dir>` and `-l<name>`, which do the same from the command line.
+`xbc` finds them by itself. [docs/projects.md](docs/projects.md) describes the project files, and the options
+that do the same from the command line: `--library=<name>`, `--lib=<name>`, `-L<dir>` and `-l<name>`.
 
 Useful options (`xbc --help` lists all of them):
 
 | Option | Meaning |
 |---|---|
+| `-o <file>` | the program (default: the first source's name), or with `-c` the object |
+| `-c` | write the object only, without linking the program |
 | `-E` | print the preprocessed source and stop |
 | `-p` | also write each preprocessed source to `<file>.ppo` |
 | `-I<dir>`, `-D<name>[=<value>]` | include directory, `#define` (the target defines a few names itself: [preprocessor.md](docs/preprocessor.md#predefined-names)) |

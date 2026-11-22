@@ -10,21 +10,21 @@ module, optimize that, emit the object file. A stage that reports errors stops t
 
 ## Sources and modules
 
-`xbc` takes one or more sources (`xbc main.prg repository.prg`, `xbc *.prg`); each is a module, and a file given
-twice is compiled once. A source whose file name contains `*` (any characters) or `?` (one character) and names no
-file stands for the files of its directory that match it, sorted by name, except names starting with `.` unless the
-pattern does; names compare without case on Windows. This serves shells that do not expand patterns. Each
-source is preprocessed on its own, with `std.ch` and the command-line defines (its `#define`s and rules do not reach
-the next source), and goes through the front end; a source with errors does not stop the others from being checked.
-Two modules defining the same public function is an error. Then every module is lowered into one LLVM module and one
-object (`-o`, by default the first source's name with `.o`), where calls between the modules are direct and LLVM can
-inline across them; `-p` writes a `.ppo` per source, `-E` prints them all, `--depfile` lists every file read. A
-module that calls a function of the runtime's sources `xbc` carries (`driver/RuntimeLibrary.h`) has them compiled
-too, as modules of the runtime with `std.ch` and the target's defines only, for its calls to inline
-([xir.md](xir.md#passes)); they are not lowered.
+`xbc` takes one or more sources (`xbc main.prg repository.prg`, `xbc *.prg`); each is a module, and a file given twice
+is compiled once. A source whose file name contains `*` (any characters) or `?` (one character) and names no file stands
+for the files of its directory that match it, sorted by name, except names starting with `.` unless the pattern does;
+names compare without case on Windows. This serves shells that do not expand patterns. Each source is preprocessed on
+its own, with `std.ch` and the command-line defines (its `#define`s and rules do not reach the next source), and goes
+through the front end; a source with errors does not stop the others from being checked. Two modules defining the same
+public function is an error. Then every module is lowered into one LLVM module and one object, where calls between the
+modules are direct and LLVM can inline across them, which `xbc` links into the program (`-o`, by default the first
+source's name; with `-c` the object only, by default the first source's name with `.o`); `-p` writes a `.ppo` per
+source, `-E` prints them all, `--depfile` lists every file read. A module that calls a function of the runtime's sources
+`xbc` carries (`driver/RuntimeLibrary.h`) has them compiled too, as modules of the runtime with `std.ch` and the
+target's defines only, for its calls to inline ([xir.md](xir.md#passes)); they are not lowered.
 
 A project file (`xbc <name>.xbprj`) gives the sources and options of a program or a library, which `xbc` then links or
-archives (`--link`, `--library`, `--lib`, `-L`, `-l`, `--out-dir`: [projects.md](projects.md)); a library a module
+archives (`-c`, `--library`, `--lib`, `-L`, `-l`, `--out-dir`: [projects.md](projects.md)); a library a module
 uses (`--lib`) gives it the declarations of its public functions (made from the module file, before the module's
 own).
 
