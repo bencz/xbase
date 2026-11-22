@@ -74,7 +74,7 @@ std::unique_ptr<Instruction> resolved(const ClassModel &model, int32_t c, const 
 }
 
 // The classes a test of the receiver may take for a send, at most this many (a test each).
-constexpr size_t kMaxSpeculated = 4;
+constexpr size_t kMaxSpeculated = 8;
 
 // The classes of the module (not SCALAR ones, whose values are no objects) that answer send `i` by resolving it to
 // what `*member` is set to: a method all of them reach, or an instance variable of the one class that reaches it;
