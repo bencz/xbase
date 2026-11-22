@@ -175,10 +175,11 @@ Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); th
 
 - `ThreadStart( bWork, [xArgs...] )` runs `Eval( bWork, xArgs... )` on a new thread (a codeblock or a function
   reference; anything else is the argument error `BASE/9016`, and a thread the system cannot make `BASE/9017`) and
-  returns its `Thread` object. The arguments are values (one written `@` passes its value), and they and the block
-  are shared before the thread starts. `oThread:Join()` waits
-  for the thread to end and returns what the block returned (`NIL` when a `BREAK` left it); a thread that joins itself
-  gets `BASE/9018` `Thread joins itself` (substitutable). `oThread:IsAlive()` tells whether it still runs.
+  returns its `Thread` object. The arguments are values (one written `@` passes its value), and they and the block are
+  shared before the thread starts. `oThread:Join()` waits for the thread to end and returns what the block returned
+  (`NIL` when a `BREAK` left it), the thread having let go of the memory variables' names it held (its bindings, its
+  cache of names: `xb_memvar_let_go`) before it said it ended; a thread that joins itself gets `BASE/9018` `Thread joins
+  itself` (substitutable). `oThread:IsAlive()` tells whether it still runs.
 - The thread starts with a copy of its creator's environment: the `SET` values (`SET DECIMALS` too), `ErrorBlock()`,
   the language and the code page, the default driver, and the memory variables its creator sees: a `PRIVATE` visible
   then is the same variable in both (assigned in one, seen by the other); no work area is open. What the thread

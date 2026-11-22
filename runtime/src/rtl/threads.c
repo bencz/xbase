@@ -219,6 +219,7 @@ static void thread_body(xb_ctx *ctx, void *p) {
   xb_gc_root_push(ctx, &work);
   if (!(xb_pending_get(ctx) & XB_PENDING_QUIT)) xb_eval_work(ctx, &result, &work);
   xb_env_close_areas(ctx);
+  xb_memvar_let_go(ctx);
   finish(ctx, &thread, &result);
   xb_gc_root_pop(ctx, 3);
 }

@@ -448,8 +448,7 @@ void xb_ctx_free(xb_ctx *ctx) {
   if (stackOwner == ctx) stackOwner = NULL; /* freed by its own thread */
   xb_env_recent_orphan(ctx); /* before the collector stops seeing the context */
   xb_gc_unregister(ctx);
-  for (uint32_t i = 0; i < XB_NAME_CACHE; ++i)
-    if (ctx->nameIds[i] != UINT32_MAX) xb_memvar_unhold(ctx->nameIds[i]);
+  xb_memvar_cache_drop(ctx);
   free(ctx->roots);
   env_free(NULL, ctx->env);
   if (ctx->spareEnv) env_free(NULL, ctx->spareEnv);

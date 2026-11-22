@@ -53,6 +53,13 @@ uint32_t *xb_memvar_visible(xb_ctx *ctx, uint32_t *count);
 void xb_memvar_bindings_each(xb_env *e, void (*fn)(xb_item *it, void *data), void *data);
 void xb_memvar_bindings_free(xb_env *e);
 
+/* The context's cache of names (xb_memvar_use) lets go of the names it holds, but those an operation uses now. */
+void xb_memvar_cache_drop(xb_ctx *ctx);
+
+/* A thread that ends lets go of the names it holds (its environment's bindings, its cache of names) before it says it
+ * ended: a name only it held is free once its Join() returns. */
+void xb_memvar_let_go(xb_ctx *ctx);
+
 /* Shares the memory variables of the context's environments (the one running and those set aside): the bindings
  * visible and those PRIVATEs hid (publication, every other thread stopped). */
 void xb_memvar_share(xb_ctx *ctx);

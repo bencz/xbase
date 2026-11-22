@@ -185,6 +185,19 @@ static int spelled_as(uint32_t id, const char *name, size_t len) {
   return 1;
 }
 
+void xb_memvar_cache_drop(xb_ctx *ctx) {
+  for (uint32_t k = 0; k < XB_NAME_CACHE; ++k)
+    if (ctx->nameIds[k] != NO_ID && !ctx->namePins[k]) {
+      xb_memvar_unhold(ctx->nameIds[k]);
+      ctx->nameIds[k] = NO_ID;
+    }
+}
+
+void xb_memvar_let_go(xb_ctx *ctx) {
+  xb_memvar_bindings_free(ctx->env);
+  xb_memvar_cache_drop(ctx);
+}
+
 uint32_t xb_memvar_use(xb_ctx *ctx, const char *name, size_t len, int number, uint32_t *slot) {
   uint32_t k = name_slot(name, len), id = ctx->nameIds[k];
   if (id != NO_ID && spelled_as(id, name, len)) { /* the usual case: no lock, no atomic */
@@ -868,12 +881,7 @@ uint32_t *xb_memvar_visible(xb_ctx *ctx, uint32_t *count) {
  * (permanent), and those something holds now, the threads' caches of names (xb_memvar_use) too; with .T., the calling
  * thread lets go of the names its cache holds first. */
 void xbf___MEMNAMESINUSE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  if (argc && argv[0].type == XB_T_LOGICAL && argv[0].v.l)
-    for (uint32_t k = 0; k < XB_NAME_CACHE; ++k)
-      if (ctx->nameIds[k] != NO_ID && !ctx->namePins[k]) {
-        xb_memvar_unhold(ctx->nameIds[k]);
-        ctx->nameIds[k] = NO_ID;
-      }
+  if (argc && argv[0].type == XB_T_LOGICAL && argv[0].v.l) xb_memvar_cache_drop(ctx);
   xb_rwlock_read_lock(names_lock());
   uint32_t n = numbered - freeLen;
   xb_rwlock_read_unlock(names_lock());
