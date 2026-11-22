@@ -148,6 +148,7 @@ static int key_equal(const xb_hash *h, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_STRING || b->type == XB_T_STRING) {
     if (a->type != b->type) return 0;
     const xb_str *x = a->v.s, *y = b->v.s;
+    if (x == y) return 1; /* the same string: a literal key, or a key read back from the hash */
     if (x->len != y->len) return 0;
     if (!(h->flags & XB_HASH_IGNORECASE)) return memcmp(xb_str_data(x), xb_str_data(y), x->len) == 0;
     for (size_t i = 0; i < x->len; ++i)

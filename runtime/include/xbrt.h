@@ -1075,15 +1075,25 @@ static inline uint64_t xb_hash_mix64(uint64_t x) {
   x ^= x >> 33;
   return x;
 }
+/* Bytes p[0] .. p[n - 1] (n at most 8) as a little-endian word; with `upper`, ASCII letters upper-cased. Eight bytes
+ * without `upper` are a fixed pattern compilers make one load (and a byte swap on a big-endian target). */
+static inline uint64_t xb_hash_word(const char *p, size_t n, int upper) {
+  uint64_t w = 0;
+  if (n == 8 && !upper) {
+    for (size_t i = 0; i < 8; ++i) w |= (uint64_t)(unsigned char)p[i] << (8 * i);
+    return w;
+  }
+  for (size_t i = 0; i < n; ++i) {
+    unsigned char c = (unsigned char)(upper ? xb_ascii_upper(p[i]) : p[i]);
+    w |= (uint64_t)c << (8 * i);
+  }
+  return w;
+}
 static inline uint32_t xb_hash_bytes_as(const char *p, size_t n, int upper) {
   uint64_t h = UINT64_C(0x9e3779b97f4a7c15) ^ (uint64_t)n;
   while (n > 0) {
     size_t take = n < 8 ? n : 8;
-    uint64_t w = 0;
-    for (size_t i = 0; i < take; ++i) {
-      unsigned char c = (unsigned char)(upper ? xb_ascii_upper(p[i]) : p[i]);
-      w |= (uint64_t)c << (8 * i);
-    }
+    uint64_t w = xb_hash_word(p, take, upper);
     h = (h ^ (w * UINT64_C(0x87c37b91114253d5))) * UINT64_C(0x4cf5ad432745937f);
     h = (h << 31) | (h >> 33);
     p += take;

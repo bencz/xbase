@@ -442,10 +442,12 @@ counter ([Threads and synchronization](#threads-and-synchronization)).
   position of an entry, in O(log n); so deleting from the front, or while walking the hash, stays cheap. The functions
   that go over every entry (`HKeys`, `HValues`, `HFill`, `HSort`, `HScan` with a value, `HCopy`) compact first
   (`xb_hash_compact`), which keeps positions as they were.
-- Key hashes: a string's is `xb_hash_bytes` (`xbrt.h`), which reads its bytes one at a time, so every target, little
+- Key hashes: a string's is `xb_hash_bytes` (`xbrt.h`), which takes its bytes eight at a time as a little-endian word
+  (`xb_hash_word`: a pattern compilers make one load, with a byte swap on a big-endian target), so every target, little
   or big endian, 32 or 64 bits, computes the same value. The compiler stores it in the `hash` field of the strings it
   emits, and the runtime caches it there for heap strings (0 means not computed). A hash that ignores case hashes the
-  upper-cased letters. Numbers and dates are scrambled by `xb_hash_mix64`.
+  upper-cased letters. Numbers and dates are scrambled by `xb_hash_mix64`. Two string keys that are the same string (a
+  literal key, a key read back from the hash) are equal without comparing their bytes.
 - Flooding: those hashes are fixed, so anyone can choose keys whose hashes share their low bits (integers through the
   inverse of `xb_hash_mix64`), and each probe would walk them all: n insertions in n^2 / 2 steps. An insertion whose
   probe passes 128 slots, which keys that do not collide on purpose never make (the index is at most half full),
