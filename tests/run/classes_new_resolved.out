@@ -1,0 +1,10 @@
+
+init of the class: TA         40
+init of a parent: TC         50 w
+no init: TB default
+init returns another value: TR
+chain:         70        160
+loop:    5005000
+own new: TD         -9
+substituted error: O TF         99
+hidden init:         41 TE:INIT

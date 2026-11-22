@@ -73,6 +73,29 @@ std::unique_ptr<Instruction> resolved(const ClassModel &model, int32_t c, const 
   return made;
 }
 
+// New sent to an object of class `c` (send `k` of block `b`) that no member of its line answers, nor names (a cast):
+// what the runtime answers itself, the class's Init sent from the class with the arguments, then the object: a call
+// of that method (its result unused) when it is one the class reaches, nothing when no member answers Init; the send's
+// value is the object. False, the send kept, for anything else (an Init variable, a scope only a friend passes);
+// `erased` tells that the send left the block with nothing in its place.
+bool newByInit(const ClassModel &model, int32_t c, BasicBlock *b, size_t k, bool &erased) {
+  Instruction &send = *b->insts[k];
+  if (send.message != "NEW" || !model.answersByDefault(c, "NEW")) return false;
+  Value *object = send.operand(0);
+  std::unique_ptr<Instruction> made;
+  if (std::optional<xb_member> init = model.resolve(c, c, false, "INIT")) {
+    if (init->kind != XB_MK_METHOD || !(made = resolved(model, c, *init, send, b))) return false;
+  } else if (!model.answersByDefault(c, "INIT")) {
+    return false;
+  }
+  send.replaceAllUsesWith(object);
+  send.dropOperands();
+  erased = !made;
+  if (made) b->insts[k] = std::move(made);
+  else b->insts.erase(b->insts.begin() + (std::ptrdiff_t)k);
+  return true;
+}
+
 // The classes a test of the receiver may take for a send, at most this many (a test each).
 constexpr size_t kMaxSpeculated = 8;
 
@@ -149,6 +172,12 @@ bool resolveSends(Module &m, Function &f) {
       if (fromMethod) c = i.classIndex;
       if (c == kNoClass) continue;
       std::optional<xb_member> member = model.resolve(c, i.classIndex, i.superSend, i.message);
+      bool erased = false;
+      if (!member && !i.superSend && !fromMethod && newByInit(model, c, b, k, erased)) {
+        if (erased) --k; // the next instruction is at k now (unsigned: wraps, then back to 0)
+        changed = true;
+        continue;
+      }
       if (!member || (fromMethod && member->kind != XB_MK_METHOD)) continue;
       std::unique_ptr<Instruction> made = resolved(model, c, *member, i, b);
       if (!made) continue;

@@ -13,61 +13,60 @@ body:
   inline.enter TPAIR
   %6 = class.new 1
   inline.leave
-  %8 = send NEW %6
-  %9 = array %8
-  %10 = object.set 0 %8, 1:w10
-  %11 = object.get 0 %8
-  inline.enter TBASIS:DOUBLED %8
-  %13 = object.get 3 %8
-  %14 = binary mul %13, 2:w10
+  %8 = array %6
+  %9 = object.set 0 %6, 1:w10
+  %10 = object.get 0 %6
+  inline.enter TBASIS:DOUBLED %6
+  %12 = object.get 3 %6
+  %13 = binary mul %12, 2:w10
   inline.leave
-  %16 = binary add %11, %14
-  %17 = object.set 1 %8, %16
-  inline.enter TPAIR:TOTAL %8
-  %19 = object.get 0 %8
-  %20 = object.get 1 %8
-  %21 = binary add %19, %20
-  %22 = object.get 3 %8
-  %23 = binary add %21, %22
-  %24 = binary gt %23, 100:w10
-  %25 = truth %24
-  cond_br %25, endif.inline(100:w10), endif.inline(%23)
+  %15 = binary add %10, %13
+  %16 = object.set 1 %6, %15
+  inline.enter TPAIR:TOTAL %6
+  %18 = object.get 0 %6
+  %19 = object.get 1 %6
+  %20 = binary add %18, %19
+  %21 = object.get 3 %6
+  %22 = binary add %20, %21
+  %23 = binary gt %22, 100:w10
+  %24 = truth %23
+  cond_br %24, endif.inline(100:w10), endif.inline(%22)
 body.2:
-  %27 = send FIRST %56
-  br body.2.2(%27)
-body.2.2(%29: item):
-  %30 = object.is 1 %4
-  cond_br %30, body.2.2.resolved, body.2.2
+  %26 = send FIRST %55
+  br body.2.2(%26)
+body.2.2(%28: item):
+  %29 = object.is 1 %4
+  cond_br %29, body.2.2.resolved, body.2.2
 body.2.resolved:
-  %32 = object.get 0 %56
-  br body.2.2(%32)
+  %31 = object.get 0 %55
+  br body.2.2(%31)
 body.2.2:
-  %34 = send FIRST %4
-  br body.2.2.2(%34)
-body.2.2.2(%36: item):
-  %37 = call QOUT native %48, %51, %52, %53, %54, %55, %29, %36
+  %33 = send FIRST %4
+  br body.2.2.2(%33)
+body.2.2.2(%35: item):
+  %36 = call QOUT native %47, %50, %51, %52, %53, %54, %28, %35
   ret
 body.2.2.resolved:
-  %39 = object.get 0 %4
-  br body.2.2.2(%39)
-endif.inline(%41: item):
-  inline.enter TBASIS:DOUBLED %8
-  %43 = object.get 3 %8
-  %44 = binary mul %43, 2:w10
+  %38 = object.get 0 %4
+  br body.2.2.2(%38)
+endif.inline(%40: item):
+  inline.enter TBASIS:DOUBLED %6
+  %42 = object.get 3 %6
+  %43 = binary mul %42, 2:w10
   inline.leave
-  %46 = binary add %41, %44
-  %47 = object.get 3 %8
-  %48 = binary sub %46, %47
+  %45 = binary add %40, %43
+  %46 = object.get 3 %6
+  %47 = binary sub %45, %46
   inline.leave
-  %50 = send TBASIS %8
-  %51 = send BASE %50
-  %52 = send COUNT %8
-  %53 = send _FIRST %8
-  %54 = send NOTHING %8
-  %55 = send SECRET %8
-  %56 = index %9, 1:w10
-  %57 = object.is 1 %56
-  cond_br %57, body.2.resolved, body.2
+  %49 = send TBASIS %6
+  %50 = send BASE %49
+  %51 = send COUNT %6
+  %52 = send _FIRST %6
+  %53 = send NOTHING %6
+  %54 = send SECRET %6
+  %55 = index %8, 1:w10
+  %56 = object.is 1 %55
+  cond_br %56, body.2.resolved, body.2
 }
 
 function TPAIR:TOTAL internal params 1 method {
@@ -141,62 +140,61 @@ entry:
   inline.enter TPAIR
   %1 = class.new 1
   inline.leave
-  %3 = send NEW %1
-  %4 = array %3
-  %5 = object.set 0 %3, 1:w10
-  %6 = object.get 0 %3
-  inline.enter TBASIS:DOUBLED %3
-  %8 = object.get 3 %3
-  %9 = binary mul %8, 2:w10
+  %3 = array %1
+  %4 = object.set 0 %1, 1:w10
+  %5 = object.get 0 %1
+  inline.enter TBASIS:DOUBLED %1
+  %7 = object.get 3 %1
+  %8 = binary mul %7, 2:w10
   inline.leave
-  %11 = binary add %6, %9
-  %12 = object.set 1 %3, %11
-  inline.enter TPAIR:TOTAL %3
-  %14 = object.get 0 %3
-  %15 = object.get 1 %3
-  %16 = binary add %14, %15
-  %17 = object.get 3 %3
-  %18 = binary add %16, %17
-  %19 = binary gt %18, 100:w10
-  %20 = truth %19
-  cond_br %20, endif.inline(100:w10), endif.inline(%18)
+  %10 = binary add %5, %8
+  %11 = object.set 1 %1, %10
+  inline.enter TPAIR:TOTAL %1
+  %13 = object.get 0 %1
+  %14 = object.get 1 %1
+  %15 = binary add %13, %14
+  %16 = object.get 3 %1
+  %17 = binary add %15, %16
+  %18 = binary gt %17, 100:w10
+  %19 = truth %18
+  cond_br %19, endif.inline(100:w10), endif.inline(%17)
 entry.2:
-  %22 = send FIRST %52
-  br entry.2.2(%22)
-entry.2.2(%24: item):
-  %25 = load $f0 maybe_ref
-  %26 = object.is 1 %25
-  cond_br %26, entry.2.2.resolved, entry.2.2
+  %21 = send FIRST %51
+  br entry.2.2(%21)
+entry.2.2(%23: item):
+  %24 = load $f0 maybe_ref
+  %25 = object.is 1 %24
+  cond_br %25, entry.2.2.resolved, entry.2.2
 entry.2.resolved:
-  %28 = object.get 0 %52
-  br entry.2.2(%28)
+  %27 = object.get 0 %51
+  br entry.2.2(%27)
 entry.2.2:
-  %30 = send FIRST %25
-  br entry.2.2.2(%30)
-entry.2.2.2(%32: item):
-  %33 = call QOUT native %44, %47, %48, %49, %50, %51, %24, %32
+  %29 = send FIRST %24
+  br entry.2.2.2(%29)
+entry.2.2.2(%31: item):
+  %32 = call QOUT native %43, %46, %47, %48, %49, %50, %23, %31
   ret
 entry.2.2.resolved:
-  %35 = object.get 0 %25
-  br entry.2.2.2(%35)
-endif.inline(%37: item):
-  inline.enter TBASIS:DOUBLED %3
-  %39 = object.get 3 %3
-  %40 = binary mul %39, 2:w10
+  %34 = object.get 0 %24
+  br entry.2.2.2(%34)
+endif.inline(%36: item):
+  inline.enter TBASIS:DOUBLED %1
+  %38 = object.get 3 %1
+  %39 = binary mul %38, 2:w10
   inline.leave
-  %42 = binary add %37, %40
-  %43 = object.get 3 %3
-  %44 = binary sub %42, %43
+  %41 = binary add %36, %39
+  %42 = object.get 3 %1
+  %43 = binary sub %41, %42
   inline.leave
-  %46 = send TBASIS %3
-  %47 = send BASE %46
-  %48 = send COUNT %3
-  %49 = send _FIRST %3
-  %50 = send NOTHING %3
-  %51 = send SECRET %3
-  %52 = index %4, 1:w10
-  %53 = object.is 1 %52
-  cond_br %53, entry.2.resolved, entry.2
+  %45 = send TBASIS %1
+  %46 = send BASE %45
+  %47 = send COUNT %1
+  %48 = send _FIRST %1
+  %49 = send NOTHING %1
+  %50 = send SECRET %1
+  %51 = index %3, 1:w10
+  %52 = object.is 1 %51
+  cond_br %52, entry.2.resolved, entry.2
 }
 
 function TPAIR:TOTAL.byref internal params 1 method {

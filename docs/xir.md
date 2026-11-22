@@ -324,12 +324,15 @@ result. Implemented (`xir/passes/`):
   which only the runtime knows), reaches what `ClassModel` finds for it from the send's class (`classIndex`) and
   `Super`: a method becomes a `call` of its function (which `inline-functions` may then inline: a method is inlined like
   a function, with its frame shown), an instance variable read an `object.get` (the arguments ignored, as the runtime
-  does) and one assigned with one argument that is no reference an `object.set` of its slot. Anything else stays a send:
-  a class variable, a cast, `New` or `Init` without a method, a message no member answers, a member whose scope the
-  sender reaches only as a friend (the runtime checks friends), a line not known. The classes' methods are optimized
-  before the other functions (`calleesFirst`), so that a call a send became inlines an optimized body. In the runtime's
-  classes, `ARRAY:Count`'s `::Super:Count( b )` becomes a call of `Enumerable:Count`, so that `a:Count( {| v | ... } )`
-  runs in place too (`resolve-scalar-sends`).
+  does) and one assigned with one argument that is no reference an `object.set` of its slot. `New` that no member of the
+  line answers nor names is what the runtime answers itself (`newByInit`): the class's `Init` sent from the class with
+  the arguments, a `call` of that method when the class reaches it (its result unused), nothing when no member answers
+  `Init`; the send's value is the object (`object_creation`: 0.35 of the cycles before). Anything else stays a send: a
+  class variable, a cast, `New` whose `Init` is a variable or a member only a friend reaches, `Init` without a method, a
+  message no member answers, a member whose scope the sender reaches only as a friend (the runtime checks friends), a
+  line not known. The classes' methods are optimized before the other functions (`calleesFirst`), so that a call a send
+  became inlines an optimized body. In the runtime's classes, `ARRAY:Count`'s `::Super:Count( b )` becomes a call of
+  `Enumerable:Count`, so that `a:Count( {| v | ... } )` runs in place too (`resolve-scalar-sends`).
 - `resolve-scalar-sends`, after `resolve-sends` (`ScalarSends.cpp`): a send to a value whose types (as the type
   inference knows them) include built-in types whose class of the runtime (a `SCALAR CLASS` of a carried source:
   `ARRAY`, `CHARACTER`, `HASH`, ... and `Enumerable` they inherit) answers it with one method (the most such types;

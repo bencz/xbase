@@ -6,16 +6,15 @@ entry:
   inline.enter TFOO
   %1 = class.new 0
   inline.leave
-  %3 = send NEW %1
-  inline.enter TFOO:GET %3
-  store $f0, %3
-  %6 = block TFOO:GET.block1 $f0
-  %7 = load $f0 maybe_ref
-  %8 = send GET super 0 %7
-  %9 = binary add %6, %8
+  inline.enter TFOO:GET %1
+  store $f0, %1
+  %5 = block TFOO:GET.block1 $f0
+  %6 = load $f0 maybe_ref
+  %7 = send GET super 0 %6
+  %8 = binary add %5, %7
   store $f0, nil
   inline.leave
-  %12 = call QOUT native %9
+  %11 = call QOUT native %8
   ret
 }
 

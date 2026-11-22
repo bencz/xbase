@@ -1,8 +1,9 @@
-// Sends resolved when the object's class is known (resolve-sends), and those left to the runtime: a method becomes a
-// call (inlined when small), a variable an object.get or object.set of its slot (TPair's own variables first, then
-// its parent's area); a cast, a class variable, an assignment without its value, a message no member answers and a
-// HIDDEN variable from outside stay sends. A send to an object whose class is not known (an element, a parameter) is
-// versioned on its class (speculate-sends): first is TPair's alone, an object.get when the object is a TPair.
+// Sends resolved when the object's class is known (resolve-sends), and those left to the runtime: New without an Init
+// is the object itself, a method becomes a call (inlined when small), a variable an object.get or object.set of its
+// slot (TPair's own variables first, then its parent's area); a cast, a class variable, an assignment without its
+// value, a message no member answers and a HIDDEN variable from outside stay sends. A send to an object whose class is
+// not known (an element, a parameter) is versioned on its class (speculate-sends): first is TPair's alone, an
+// object.get when the object is a TPair.
 PROCEDURE Main( x )
    LOCAL o := TPair():New(), a := { o }
    o:first := 1
