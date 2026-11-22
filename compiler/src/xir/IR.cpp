@@ -239,7 +239,7 @@ BasicBlock *Function::addBlock(const std::string &blockName) {
 }
 
 Var *Function::addVar(Var::Kind k, uint32_t index, std::string varName) {
-  vars.push_back(std::make_unique<Var>(Var{k, index, false, false, std::move(varName)}));
+  vars.push_back(std::make_unique<Var>(Var{k, index, false, false, std::move(varName), false, {}}));
   return vars.back().get();
 }
 

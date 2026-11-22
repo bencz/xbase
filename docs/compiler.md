@@ -650,26 +650,31 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   and `*` of two numbers of which one is a double, in doubles (an integer beyond 2^53 in magnitude, which a double
   cannot hold exactly, goes to the runtime, so that every target converts it as the runtime does), with the decimals the
   runtime gives (the larger for `+` and `-`, the sum for `*`); two doubles, the usual case of these paths, take a path
-  of their own (their bits and decimals as they are, no test of exactness). Of operands that may be two integers and
-  may be two doubles, the path of an integer with a double is cold (`splitColdLoopPaths` leaves the fast loop for it),
-  unless strings may come too, an operand is a block parameter (a value carried around a loop changes from an integer
-  to a double once, `s := 0` then `s := s + x` of doubles, and each entry of the loop would leave it) or a call's
-  result (its loop makes the call: there is no fast loop to keep, only code to add); the comparisons
-  of two numbers (integers exactly, others as doubles with IEEE 754's comparisons, as `xb_compare` and `xb_order_is`
-  make them); `for.test` with an integer counter, limit and step; `index` and `index.set` of a local array with an index
-  within it, an integer or a truncated double below 2^63 (the array's `len` and `data`, `xb_array` in `xbrt.h`). One
-  test of the array's state byte (`isLocalItems`: neither shared nor of a compact form, the usual case) leads to the
-  path of items, where the store calls `xb_gc_write_item` only for a value of a heap type (`xb_type_is_heap`) into an
-  array that is old and not recorded (`needsRecord`, `xb_gc_needs_record` on the state byte, read again once the value's
-  type is a heap one: kept live from before the store, it cost loops a register), and makes no test at all when type
-  inference finds the value refers to no heap object (`mayReferToHeap`; so do `object.set` and a send's in-place write,
-  `storeObjectVariable`); a shared array's items are the runtime's to read and write whole, and an index out of bounds
-  calls the runtime, which raises the error. A local array of a
-  compact form ([runtime.md](runtime.md#values)) has paths of its own, after a branch that is no cold path (`kFormTest`,
-  below), for one form each, which one test of the form (a compact form is a local array's) selects: a read inlines the
-  logicals' when a condition or `.NOT.` tests the element (`readAsLogical`), the integers' otherwise, and gives an item
-  of that one type (each inline path joins the path of items and costs it registers: three of them made `matmul`'s loop
-  16% slower); a store the logicals' for a value that can only be a logical or `NIL`, the integers' for any other, and
+  of their own (their bits and decimals as they are, no test of exactness). Of operands that may be two integers and may
+  be two doubles, the path of an integer with a double is cold (`splitColdLoopPaths` leaves the fast loop for it),
+  unless strings may come too, an operand is a block parameter (a value carried around a loop changes from an integer to
+  a double once, `s := 0` then `s := s + x` of doubles, and each entry of the loop would leave it) or a call's result
+  (its loop makes the call: there is no fast loop to keep, only code to add); the comparisons of two numbers (integers
+  exactly, others as doubles with IEEE 754's comparisons, as `xb_compare` and `xb_order_is` make them); `for.test` with
+  an integer counter, limit and step; `index` and `index.set` of a local array with an index within it, an integer or a
+  truncated double below 2^63 (the array's `len` and `data`, `xb_array` in `xbrt.h`). One test of the array's state byte
+  (`isLocalItems`: neither shared nor of a compact form, the usual case) leads to the path of items, where the store
+  calls `xb_gc_write_item` only for a value of a heap type (`xb_type_is_heap`) into an array that is old and not
+  recorded (`needsRecord`, `xb_gc_needs_record` on the state byte, read again once the value's type is a heap one: kept
+  live from before the store, it cost loops a register), and makes no test at all when type inference finds the value
+  refers to no heap object (`mayReferToHeap`; so do `object.set` and a send's in-place write, `storeObjectVariable`); a
+  shared array's items are the runtime's to read and write whole, and an index out of bounds calls the runtime, which
+  raises the error (`indexPosition` makes the position of an integer or a double index for both `index` and
+  `table.index`). `table.index` reads a table `STATIC`'s elements, emitted once as an array of `xb_item` constants
+  (`tableData`, private, from the literal items' header fields and value words), at a position within it while the table
+  holds; any other index loads the `STATIC` and calls the runtime's `xb_op_index`, whose error gives the array to code
+  that may change it, so that path first breaks the table (`tableData`'s flag, a byte read and written relaxed: a change
+  on another thread reaches a reader through the synchronization that orders them). A local array of a compact form
+  ([runtime.md](runtime.md#values)) has paths of its own, after a branch that is no cold path (`kFormTest`, below), for
+  one form each, which one test of the form (a compact form is a local array's) selects: a read inlines the logicals'
+  when a condition or `.NOT.` tests the element (`readAsLogical`), the integers' otherwise, and gives an item of that
+  one type (each inline path joins the path of items and costs it registers: three of them made `matmul`'s loop 16%
+  slower); a store the logicals' for a value that can only be a logical or `NIL`, the integers' for any other, and
   writes its byte or word in place for a value whose header word the form holds. Everything else goes to the runtime, as
   cold paths: another form, an array of `NIL`s (a new one: its first store gives it a form), a `NIL` among logicals or
   integers on a read, a value the form does not hold on a store (the runtime turns the array). So no fast loop changes

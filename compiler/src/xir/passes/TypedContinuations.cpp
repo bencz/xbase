@@ -97,7 +97,8 @@ bool entersLoopAsNumber(const Instruction &i, const Loops &loops) {
 bool computedWith(const Instruction &i) {
   for (const Instruction *u : i.users())
     switch (u->op) {
-    case Op::Binary: case Op::Unary: case Op::ForTest: case Op::SwitchCheck: case Op::Index: case Op::IndexSet:
+    case Op::Binary: case Op::Unary: case Op::ForTest: case Op::SwitchCheck: case Op::Index: case Op::TableIndex:
+    case Op::IndexSet:
     case Op::Br: case Op::CondBr:
       return true;
     default:

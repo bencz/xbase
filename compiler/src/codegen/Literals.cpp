@@ -82,6 +82,33 @@ Constant *CodeGen::literal(const xir::Constant &c) {
   report_fatal_error("xbc: not an item constant");
 }
 
+// The elements of a table STATIC (xir::Var::items) as constant data, an xb_item each, as its array holds them (the
+// literal items' header fields and value words), and its flag: a byte, 1 once the table is broken (emitTableIndex).
+std::pair<GlobalVariable *, GlobalVariable *> CodeGen::tableData(const xir::Var &table) {
+  auto &[data, broken] = tables_[&table];
+  if (data) return {data, broken};
+  Type *rep = itemTy_->getElementType(FValue);
+  std::vector<Constant *> items;
+  for (const xir::Constant *c : table.items) {
+    Constant *lit = cast<GlobalVariable>(literal(*c))->getInitializer(); // NIL's: all zeros, no ConstantStruct
+    Constant *word = constantPayloadWord(lit->getAggregateElement(FValue));
+    if (!word) report_fatal_error("xbc: a table element without a value word");
+    Constant *value = rep == i64_             ? word
+                      : rep->isPointerTy()    ? ConstantExpr::getIntToPtr(word, rep)
+                                              : ConstantExpr::getBitCast(word, rep);
+    items.push_back(ConstantStruct::get(itemTy_, {lit->getAggregateElement(FType), lit->getAggregateElement(FWidth),
+                                                  lit->getAggregateElement(FDec), value}));
+  }
+  auto *type = ArrayType::get(itemTy_, items.size());
+  data = new GlobalVariable(mod_, type, true, GlobalValue::PrivateLinkage, ConstantArray::get(type, items),
+                            ".xb.table");
+  data->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+  data->setAlignment(itemAlign_);
+  broken = new GlobalVariable(mod_, i8_, false, GlobalValue::PrivateLinkage, ConstantInt::get(i8_, 0),
+                              ".xb.table.broken");
+  return {data, broken};
+}
+
 // Strings are emitted as static xb_str objects (header + bytes + NUL), so a
 // literal costs nothing at run time and is never touched by the GC.
 // xb_str: { flags, hash, len, bytes[] } with the bytes typed as `data`.

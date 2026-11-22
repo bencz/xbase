@@ -10,6 +10,8 @@
 #include "xir/Transform.h"
 #include "xir/Types.h"
 
+#include <algorithm>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -203,15 +205,98 @@ bool foldConstants(Function &f) {
   return changed;
 }
 
+namespace {
+
+// An element a table holds as constant data: NIL, a logical or a number (a string's item points at its bytes).
+bool tableElement(const Value *v) {
+  const Constant *c = asConstant(v);
+  return c && (c->lit == Constant::Lit::Nil || c->lit == Constant::Lit::Logical || c->lit == Constant::Lit::Integer ||
+               c->lit == Constant::Lit::Double);
+}
+
+// A use of a table's load that leaves the array as it is and inside: an element read (`s[i]`, not by the array itself)
+// or Len( s ).
+bool readsTable(const Instruction &u, const Value *load) {
+  if (u.op == Op::Index) return u.operand(0) == load && u.operand(1) != load;
+  return u.op == Op::Call && !u.callee.function && u.callee.native && u.callee.name == "LEN" &&
+         u.operands().size() == 1 && !u.hasRest();
+}
+
+// The STATICs of `arrays` (each initialized with its array literal) whose array no code changes or lets out: no
+// instruction of the module but the init's store names them, besides loads whose every use reads the table; marked
+// tables, their elements the literal's constants.
+void markTables(Module &m, const std::unordered_map<const Var *, const Instruction *> &arrays) {
+  std::unordered_set<const Var *> out;
+  for (auto &f : m.functions)
+    for (auto &b : f->blocks)
+      for (auto &i : b->insts) {
+        for (const Var *c : i->captures) out.insert(c);
+        if (!i->var || !arrays.count(i->var)) continue;
+        if (f.get() == m.init ? i->op != Op::Store : i->op != Op::Load) {
+          out.insert(i->var);
+          continue;
+        }
+        for (const Instruction *u : i->users())
+          if (!readsTable(*u, i.get())) out.insert(i->var);
+      }
+  for (auto &v : m.statics) {
+    auto array = arrays.find(v.get());
+    if (array == arrays.end() || out.count(v.get())) continue;
+    v->table = true;
+    for (const Value *e : array->second->operands()) v->items.push_back(asConstant(e));
+  }
+}
+
+// Each element read of a table becomes table.index (a Len() of it stays a call: the array's length changes once its
+// table is broken, see table.index); a load left unused goes.
+bool readTables(Function &f) {
+  bool changed = false;
+  for (auto &bb : f.blocks) {
+    std::unordered_set<const Instruction *> gone;
+    for (auto &ip : bb->insts) {
+      Instruction &load = *ip;
+      if (load.op != Op::Load || !load.var->table) continue;
+      for (Instruction *u : std::vector<Instruction *>(load.users())) {
+        if (u->op != Op::Index) continue;
+        auto read = std::make_unique<Instruction>(Op::TableIndex, Type::Item, u->parent);
+        read->loc = u->loc;
+        read->var = load.var;
+        read->access = load.access;
+        read->addOperand(u->operand(1));
+        u->replaceAllUsesWith(read.get());
+        u->dropOperands();
+        auto &slot = *std::find_if(u->parent->insts.begin(), u->parent->insts.end(),
+                                   [&](const std::unique_ptr<Instruction> &p) { return p.get() == u; });
+        slot = std::move(read);
+        changed = true;
+      }
+      if (load.users().empty()) {
+        load.dropOperands();
+        gone.insert(&load);
+      }
+    }
+    std::erase_if(bb->insts, [&](const std::unique_ptr<Instruction> &i) { return gone.count(i.get()) != 0; });
+  }
+  return changed;
+}
+
+} // namespace
+
 bool foldConstantStatics(Module &m) {
   if (!m.init) return false;
   std::unordered_map<const Var *, const Constant *> value;
+  std::unordered_map<const Var *, const Instruction *> arrays; // initialized with an array literal of table elements
   std::unordered_set<const Var *> written;
   for (auto &b : m.init->blocks)
     for (auto &i : b->insts)
       if (i->op == Op::Store && i->var && i->var->kind == Var::Kind::Static && !i->var->shared) {
         const Constant *c = asConstant(i->operand(0));
-        if (c && !value.count(i->var)) value[i->var] = c;
+        const Instruction *array = asInstruction(i->operand(0), Op::ArrayLit);
+        bool constants = array && array->hasOneUse() && !array->hasRest() &&
+                         std::all_of(array->operands().begin(), array->operands().end(), tableElement);
+        if (value.count(i->var) || arrays.count(i->var)) written.insert(i->var);
+        else if (c) value[i->var] = c;
+        else if (constants) arrays[i->var] = array;
         else written.insert(i->var);
       }
   for (auto &f : m.functions) {
@@ -220,6 +305,8 @@ bool foldConstantStatics(Module &m) {
       for (auto &i : b->insts)
         if (i->var && (i->effects() & WritesVar)) written.insert(i->var);
   }
+  for (const Var *v : written) arrays.erase(v);
+  markTables(m, arrays);
   bool changed = false;
   for (auto &f : m.functions) {
     if (f.get() == m.init) continue;
@@ -235,6 +322,7 @@ bool foldConstantStatics(Module &m) {
       std::erase_if(b->insts, [&](const std::unique_ptr<Instruction> &i) { return folded.count(i.get()) != 0; });
       changed = true;
     }
+    changed |= readTables(*f);
   }
   return changed;
 }

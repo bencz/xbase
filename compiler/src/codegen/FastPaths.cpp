@@ -724,37 +724,23 @@ void CodeGen::emitForTest(const xir::Instruction &i) {
   values_[&i] = phi;
 }
 
-// The element base[idx] when base is an array and idx a number within it
-// (1-based; a double is truncated, as xb_num_to_i64 does) and the array is
-// local: branches to `items` for an array of items, to `compact` for one of a
-// compact form, with the array, the 0-based position and the array's state
-// byte; any other case (a shared array included, whose items the runtime
-// reads and writes whole, and one of a compact form other than `form`, any of
-// them when `compact` is null) branches to `slow`. An integer index, the
-// usual one, has a path of its own. A shared array goes to the runtime first:
-// its length, read meanwhile, decides nothing. The state byte tells a local
-// array of items from the others in one test; one on an invariant array
-// leaves a fast loop with the tests versionInvariantColdExits makes once,
-// before it.
-void CodeGen::inlineIndex(const xir::Instruction &i, Value *base, Value *idx, BasicBlock *slow, BasicBlock *items,
-                          BasicBlock *compact, uint8_t form, Value *&array, Value *&pos, Value *&state) {
-  Value *baseType = typeOf(i.operand(0), base), *idxType = typeOf(i.operand(1), idx);
-  Value *isArray = b_.CreateICmpEQ(baseType, ConstantInt::get(i32_, XB_T_ARRAY));
+// The 0-based position of index `idx` (of type `idxType`) where `ok` holds: an integer's, less one, or a double's from
+// 1 to 2^63 (excluded), truncated, as xb_num_to_i64 does; the builder is left where it is known, after a branch to
+// `slow` for any other index (NaN included) or where `ok` does not hold. Its bounds are the caller's to test. An
+// integer index is the usual one: a loop indexing with doubles runs in the generic copy of splitColdLoopPaths, which
+// keeps the double path inline.
+Value *CodeGen::indexPosition(Value *idx, Value *idxType, Value *ok, BasicBlock *slow) {
   BasicBlock *intIdx = newBlock("index.int"), *notInt = newBlock("index.other"), *dblIdx = newBlock("index.double");
   BasicBlock *at = newBlock("index.at");
-  // An integer index is the usual one: a loop indexing with doubles runs in the
-  // generic copy of splitColdLoopPaths, which keeps the double path inline.
-  branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_INT))), intIdx, notInt);
+  branchLikely(b_.CreateAnd(ok, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_INT))), intIdx, notInt);
   b_.SetInsertPoint(notInt);
-  branchLikely(b_.CreateAnd(isArray, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
+  branchLikely(b_.CreateAnd(ok, b_.CreateICmpEQ(idxType, ConstantInt::get(i32_, XB_T_DOUBLE))), dblIdx, slow);
   Value *one = ConstantInt::get(i64_, 1);
 
   b_.SetInsertPoint(intIdx);
   Value *intPos = b_.CreateSub(intValue(idx), one);
   b_.CreateBr(at);
 
-  // A double from 1 to 2^63 (excluded) truncates to a position, which the
-  // length then bounds; NaN and anything else go to the runtime.
   b_.SetInsertPoint(dblIdx);
   Type *f64 = b_.getDoubleTy();
   Value *d = b_.CreateBitCast(intValue(idx), f64);
@@ -767,8 +753,22 @@ void CodeGen::inlineIndex(const xir::Instruction &i, Value *base, Value *idx, Ba
   PHINode *p = b_.CreatePHI(i64_, 2, "pos");
   p->addIncoming(intPos, intIdx);
   p->addIncoming(dblPos, dblIdx);
+  return p;
+}
+
+// The element base[idx] when base is an array and idx a number within it (1-based, indexPosition) and the array is
+// local: branches to `items` for an array of items, to `compact` for one of a compact form, with the array, the 0-based
+// position and the array's state byte; any other case (a shared array included, whose items the runtime reads and
+// writes whole, and one of a compact form other than `form`, any of them when `compact` is null) branches to `slow`. A
+// shared array goes to the runtime first: its length, read meanwhile, decides nothing. The state byte tells a local
+// array of items from the others in one test; one on an invariant array leaves a fast loop with the tests
+// versionInvariantColdExits makes once, before it.
+void CodeGen::inlineIndex(const xir::Instruction &i, Value *base, Value *idx, BasicBlock *slow, BasicBlock *items,
+                          BasicBlock *compact, uint8_t form, Value *&array, Value *&pos, Value *&state) {
+  Value *baseType = typeOf(i.operand(0), base);
+  Value *isArray = b_.CreateICmpEQ(baseType, ConstantInt::get(i32_, XB_T_ARRAY));
+  pos = indexPosition(idx, typeOf(i.operand(1), idx), isArray, slow);
   array = itemPointer(base, "arr");
-  pos = p;
   state = objectState(array);
   BasicBlock *ofItems = newBlock("index.items.local");
   if (!compact) {
@@ -839,6 +839,35 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
     for (auto &[v, from] : bools) phi->addIncoming(v, from);
     fusedTruth_[i.users().front()] = phi;
   }
+}
+
+// An element of a table STATIC (xir::Var::items): a number within it (indexPosition) reads the constant data while
+// the table holds. Any other index (out of bounds, no number) reads the STATIC's array through the runtime, whose error
+// gives the error block the array itself (its arguments), which code may then change: the table breaks first (its
+// flag, tableData), and every read of it from then on is the runtime's. The flag is a relaxed byte: the code that
+// could change the array runs after its store on this thread, and another thread's change reaches a reader through
+// the synchronization that orders the two, which orders the store before it too.
+void CodeGen::emitTableIndex(const xir::Instruction &i) {
+  Value *idx = addr(i.operand(0)), *d = dest(i);
+  auto [table, broken] = tableData(*i.var);
+  BasicBlock *holds = newBlock("table.holds"), *at = newBlock("table.at"), *slow = newBlock("table.call");
+  BasicBlock *join = newBlock("table.end");
+  LoadInst *flag = b_.CreateLoad(i8_, broken, "table.broken");
+  flag->setAtomic(AtomicOrdering::Monotonic);
+  branchLikely(b_.CreateICmpEQ(flag, ConstantInt::get(i8_, 0)), holds, slow);
+  b_.SetInsertPoint(holds);
+  Value *pos = indexPosition(idx, typeOf(i.operand(0), idx), b_.getTrue(), slow);
+  branchLikely(b_.CreateICmpULT(pos, ConstantInt::get(i64_, i.var->items.size())), at, slow);
+  b_.SetInsertPoint(at);
+  copyItem(d, b_.CreateInBoundsGEP(table->getValueType(), table, {ConstantInt::get(i64_, 0), pos}));
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  b_.CreateStore(ConstantInt::get(i8_, 1), broken)->setAtomic(AtomicOrdering::Monotonic);
+  Value *base = loadVar(*i.var, i.access, scratchItem(3), unwind_);
+  callItemOp(rtIndex_, d, {base, idx});
+  checkPending(unwind_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
 }
 
 // The path of a read of an array of a compact form, from block `compact` into `d`, then to `join`: one form inline,

@@ -1,0 +1,21 @@
+
+         1         10 N
+         2         -3 N
+         3          1.50 N
+         4          2.125 N
+         5 .T. L
+         6 NIL U
+         7  9223372036854775807 N
+double index:         -3         10  9223372036854775807
+sum:      13500.00
+last plus one:  9223372036854776000
+index          0 error       1132 Bound error          2 A
+index          8 error       1132 Bound error          2 A
+index         -1 error       1132 Bound error          2 A
+index  9223372036854775807 error       1132 Bound error          2 A
+empty:       1132          0
+not a number: substituted substituted
+written:          1         20          3
+passed:         51          6
+in a block:          7          9
+broken:          7         8         9 changed 16 18 80

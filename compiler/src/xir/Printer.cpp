@@ -103,6 +103,12 @@ public:
     out_ += "module " + m.name + "\n";
     for (const Callee &r : m.requests) out_ += "  request " + calleeName(r) + "\n";
     for (auto &s : m.statics) out_ += "  " + varName(*s) + " = " + varDesc(*s) + "\n";
+    for (auto &s : m.statics) {
+      if (!s->table) continue;
+      out_ += "  table " + varName(*s) + ":";
+      for (size_t e = 0; e < s->items.size(); ++e) out_ += (e ? ", " : " ") + value(s->items[e]);
+      out_ += "\n";
+    }
     for (auto &f : m.functions) {
       out_ += "\n";
       function(*f);

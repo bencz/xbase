@@ -126,15 +126,19 @@ struct Var {
                              // reference or a FOR EACH variable somewhere in the module (its item may hold a cell)
   bool param = false;        // Frame: a parameter (its caller may have passed a reference)
   std::string name;          // for the printer
+  // Static: it holds an array of constants that no code changes (fold-constant-statics), whose elements (the init's
+  // constants) table.index reads as constant data.
+  bool table = false;
+  std::vector<const Constant *> items;
 };
 
 // How a load or store reaches a variable's item.
 enum class Access : uint8_t {
   Direct,     // the variable's own item (or its cell's)
   ThroughRef, // a FOR EACH variable of a loop in progress: the element its reference designates
-  MaybeRef,   // a captured or shared variable, a parameter, a STATIC passed by reference or a FOR EACH variable: through
-              // the cell or element it designates if it holds one (tested at run time; a parameter may have been
-              // passed by reference)
+  MaybeRef,   // a captured or shared variable, a parameter, a STATIC passed by reference or a FOR EACH variable:
+              // through the cell or element it designates if it holds one (tested at run time; a parameter may have
+              // been passed by reference)
 };
 
 // A parameter of its function: its caller may have passed it by reference, or a typed copy typed it.

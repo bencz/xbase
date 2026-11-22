@@ -106,7 +106,8 @@ dates and numbers a date; the bit operators on numbers an integer; ...; `=`, `==
 left, any type: its class may define the operator, whose method gives the result even where the operands make no
 error, as in `o == NIL`; other operators on an object fail without one, which counts),
 `unary` (`~` gives an integer), `from_bool`,
-literals and the constructors give their type, a parameter of a typed copy the types its calls pass
+literals and the constructors give their type, `table.index` its table's elements' unless the table is broken (any type,
+as a substitution; fold-constant-statics below), a parameter of a typed copy the types its calls pass
 (`Function::paramTypes`, `specialize-calls` below), a call of a runtime function declared with `RESULT` the types it
 returns (those of its arguments for a `CHOOSES` one, which returns one of them; its `INTEGER RANGE` the range of its
 integers where no error substitutes the value: a `TOTAL` call of arguments of its types; a value a check lets through
@@ -174,8 +175,17 @@ result. Implemented (`xir/passes/`):
   writes, with a constant (not passed by reference nor a `FOR EACH` variable, so not `shared`, and stored nowhere else
   in the module: no function, method or codeblock writes it), holds that constant wherever code reads it, since every
   module's `STATIC`s are initialized, with constants, before any code of the program runs (`xb_program_run`); each of
-  its loads becomes the constant, with its literal's width and decimals (`whetstone`'s `t`, `t1`, `t2`). An
-  initializer whose decimals are SET DECIMALS' is an instruction, not a constant, and stays a load.
+  its loads becomes the constant, with its literal's width and decimals (`whetstone`'s `t`, `t1`, `t2`). An initializer
+  whose decimals are SET DECIMALS' is an instruction, not a constant, and stays a load. A `STATIC` that its initializer
+  alone writes, with an array literal of constants (NIL, logicals, numbers; no `...`), and whose array no code changes
+  or lets out (no instruction of the module names it but loads whose every use is an element read `s[i]` or `Len( s )`;
+  a codeblock of the module reads it the same way) is a table (`Var::table`, its elements the literal's constants in
+  `Var::items`, listed as `table $sN:` under the module): each element read becomes `table.index $sN, i`, which reads
+  the elements as constant data (`bitlookup`'s nibble table, `md5_sha1`'s constants). The array stays in the `STATIC`,
+  where an index out of bounds or no number finds it; that error gives its handler the array (its arguments), which code
+  may then change, so the table breaks there for good (its flag, compiler.md) and every read is the array's from then
+  on: `table.index` gives its elements' types and range only as `Substitution::None` sees them, and any type as a
+  substitution would (a check narrows it), and `Len()` of it stays a call.
 
 - Inlining (`Inline.cpp`), first of the passes on each function: a call runs its callee's body in place, between
   `inline.enter` (which names the callee: the call stack shows it, as its call would) and `inline.leave`; each `ret`
@@ -521,7 +531,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   an array literal is its last operand, of type `args`, `args.rest`: the function's arguments past its parameters, made
   right before its list, which is its one use in the block; the callee's `byref` the positions of a call that receive
   references), `func.ref` (a function reference, `@name()`: the `xb_funcref` of its callee as an item), hash literals
-  (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its captured
+  (`hash`, keys and values alternating), element read and write (`index`, `index.set`; `table.index`, an element of a
+  table `STATIC`, fold-constant-statics in [Passes](#passes)), codeblock creation with the cells of its captured
   variables (`block`; with value cells, `cells vc...` in order, a cell of its own for each operand, a value captured,
   `v`, and a variable's, `c`), the `FOR` test, the `FOR EACH` operations (`each.source`, `each.in_cell`, `each.enter`,
   `each.move`, which takes the loop's collection too, `each.leave`, and `each.key`, the key at a position), the `SWITCH`

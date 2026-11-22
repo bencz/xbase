@@ -334,6 +334,11 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   case Op::HashLit: return {typeBit(XB_T_HASH), false};
   case Op::MakeBlock: return {typeBit(XB_T_BLOCK), false};
   case Op::FuncRef: return {typeBit(XB_T_SYMBOL), false};
+  case Op::TableIndex: { // an element, unless its table is broken: the array's, of any type, as a substitution's
+    TypeSet elements = 0;
+    for (const Constant *c : i.var->items) elements |= literalType(*c);
+    return {elements, true};
+  }
   case Op::Call:
   case Op::CallForward: // what the module's function returns (its errors are its own: none substitutes the call)
     // a runtime function's (RESULT, of its arguments' types for CHOOSES), unless an error substitutes it
@@ -520,6 +525,12 @@ IntRange TypeInfo::computeRange(const Instruction &i) const {
     IntRange q;
     if (intQuotient(i, &q)) return q;
     if (of(i.operand(0)) == kIntType) return rangeOf(i.operand(0), i.parent); // Int() of an integer: itself
+  }
+  if (i.op == Op::TableIndex) { // one of the table's integers (Substitution::None: its table whole)
+    IntRange elements;
+    for (const Constant *c : i.var->items)
+      if (c->lit == Constant::Lit::Integer) elements = hull(elements, IntRange::of(c->ival));
+    return elements;
   }
   IntRange range = IntRange::full();
   if (i.op == Op::Call && !i.callee.function && i.callee.chooses && !i.hasRest()) { // one of its integer arguments

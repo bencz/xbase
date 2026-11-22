@@ -187,6 +187,12 @@ private:
       expect(i, 1, {Type::Item});
       break;
     case Op::Binary: case Op::Index: case Op::SwitchMatch: expect(i, 2, {Type::Item, Type::Item}); break;
+    case Op::TableIndex:
+      needsVar(i);
+      expect(i, 1, {Type::Item});
+      if (i.var && (i.var->kind != Var::Kind::Static || !i.var->table))
+        fail("table.index of a STATIC that is no table");
+      break;
     case Op::IndexSet: case Op::ForTest: expect(i, 3, {Type::Item, Type::Item, Type::Item}); break;
     case Op::Call:
       allItems(i);

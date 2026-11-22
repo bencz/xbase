@@ -1,0 +1,80 @@
+module STATIC_TABLES
+  $s0 = static 0 "S_ATABLE"
+  $s1 = static 1 "S_AWRITTEN"
+  $s2 = static 2 "S_APASSED"
+  table $s0: 1:w10, 2.5:w10:d1, .F., nil
+
+function READ params 1 {
+  $f0 = frame 0 "I"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward READ.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  %5 = load $s1
+  index.set %5, %4, 0:w10
+  %7 = table.index $s0, %4
+  %8 = load $s0
+  %9 = call LEN native %8
+  %10 = binary add %7, %9
+  %11 = load $s1
+  %12 = index %11, %4
+  %13 = binary add %10, %12
+  %14 = load $s2
+  %15 = binary add %13, %14
+  ret %15
+}
+
+function PASS params 1 {
+  $f0 = frame 0 "A"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward PASS.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  ret %4
+}
+
+function READ.byref internal params 1 {
+  $f0 = frame 0 "I"
+entry:
+  %0 = load $s1
+  %1 = load $f0 maybe_ref
+  index.set %0, %1, 0:w10
+  %3 = load $f0 maybe_ref
+  %4 = table.index $s0, %3
+  %5 = load $s0
+  %6 = call LEN native %5
+  %7 = binary add %4, %6
+  %8 = load $s1
+  %9 = load $f0 maybe_ref
+  %10 = index %8, %9
+  %11 = binary add %7, %10
+  %12 = load $s2
+  %13 = binary add %11, %12
+  ret %13
+}
+
+function PASS.byref internal params 1 {
+  $f0 = frame 0 "A"
+entry:
+  %0 = load $f0 maybe_ref
+  ret %0
+}
+
+module_init module.init internal params 0 {
+entry:
+  %0 = array 1:w10, 2.5:w10:d1, .F., nil
+  store $s0, %0
+  %2 = array 1:w10, 2:w10
+  store $s1, %2
+  %4 = array 3:w10, 4:w10
+  store $s2, %4
+  ret
+}

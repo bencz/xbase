@@ -162,6 +162,7 @@ private:
   llvm::Constant *funcRef(const xir::Callee &c);
   llvm::Constant *constantPayloadWord(llvm::Constant *payload);
   llvm::Constant *literal(const xir::Constant &c);
+  std::pair<llvm::GlobalVariable *, llvm::GlobalVariable *> tableData(const xir::Var &table);
   llvm::Constant *stringLiteral(const std::string &s);
   llvm::Constant *messageName(const std::string &message);
   llvm::Constant *aliasName(const std::string &alias);
@@ -275,6 +276,8 @@ private:
                    llvm::BasicBlock *items, llvm::BasicBlock *compact, uint8_t form, llvm::Value *&array,
                    llvm::Value *&pos, llvm::Value *&state);
   void emitIndex(const xir::Instruction &i);
+  void emitTableIndex(const xir::Instruction &i);
+  llvm::Value *indexPosition(llvm::Value *idx, llvm::Value *idxType, llvm::Value *ok, llvm::BasicBlock *slow);
   // bools: a fused truth test's answers (the logical's path writes no item into d then)
   void emitCompactRead(bool logical, llvm::Value *d, llvm::Value *array, llvm::Value *pos, llvm::BasicBlock *compact,
                        llvm::BasicBlock *slow, llvm::BasicBlock *join,
@@ -390,6 +393,8 @@ private:
   // The words of each literal item whose value word is a constant (a string's only where its pointer fills the
   // word): a copy of the literal stores them instead of loading them.
   std::unordered_map<const llvm::Value *, std::pair<llvm::Constant *, llvm::Constant *>> literalWords_;
+  // Each table STATIC's elements and flag (tableData).
+  std::unordered_map<const xir::Var *, std::pair<llvm::GlobalVariable *, llvm::GlobalVariable *>> tables_;
   llvm::Constant *nilLit_ = nullptr;
   llvm::Constant *trueLit_ = nullptr, *falseLit_ = nullptr;
 
