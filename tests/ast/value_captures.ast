@@ -1,0 +1,36 @@
+module VALUE_CAPTURES
+  function MK locals 1 shared:0 by.value:0
+    return
+      block params 1 locals 1 frame:0
+        binary add
+          var X frame 0
+          var K capture 0
+  function BASE locals 2 shared:1 by.value:1
+    local
+      binary mul
+        var N frame 0
+        number 2 w10
+    return
+      block params 0 locals 0 frame:1
+        var M capture 0
+  function COUNT locals 1 shared:0
+    local
+      number 0 w10
+    return
+      block params 0 locals 0 frame:0
+        inc prefix
+          var C capture 0
+  function REF locals 1 shared:0
+    expr
+      call TWICE
+        ref
+          var V frame 0
+    return
+      block params 0 locals 0 frame:0
+        var V capture 0
+  procedure TWICE locals 1
+    expr
+      assign mul
+        var V frame 0
+        number 2 w10
+    return

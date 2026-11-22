@@ -453,6 +453,9 @@ struct FuncDecl {
   Block body;
   uint32_t numLocals = 0;        // params + LOCALs, set by Sema
   std::vector<bool> boxed;       // per slot, set by Sema: captured by a codeblock or passed by reference (shared)
+  // Per slot, set by the value-captures pass: a parameter or LOCAL that codeblocks capture and nothing assigns, passes
+  // by reference or loops with (in the function or its codeblocks): a block may capture its value, a cell of its own.
+  std::vector<bool> capturedByValue;
   bool readsArgs = false;        // set by Sema: calls an ARGS function, so its frame keeps the arguments received
   bool readsParams = false;      // set by Sema: calls a PARAMS function, which reads its parameters in its frame slots
   bool callsPrivates = false;    // set by Sema: calls a PRIVATES function, so it ends the PRIVATEs created

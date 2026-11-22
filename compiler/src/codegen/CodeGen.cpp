@@ -129,6 +129,7 @@ void CodeGen::initTypes() {
   rtWriteItem_ = rt("xb_gc_write_item", voidTy, {ptrTy_, intPtrTy_});
   rtWriteItems_ = rt("xb_gc_write_items", voidTy, {ptrTy_, intPtrTy_, intPtrTy_});
   rtCellOf_ = rt("xb_cell_of", ptrTy_, {ptrTy_, ptrTy_, i32_});
+  rtCellNew_ = rt("xb_cell_new", ptrTy_, {ptrTy_, ptrTy_});
   rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, i32_});
   rtRootPush_ = rt("xb_gc_root_push", voidTy, {ptrTy_, ptrTy_});
   rtRootPop_ = rt("xb_gc_root_pop", voidTy, {ptrTy_, i32_});
@@ -189,7 +190,7 @@ void CodeGen::initTypes() {
   rtClassesRegister_ = rt("xb_classes_register", voidTy, {ptrTy_, i32_, i32_});
   for (FunctionCallee c : {rtWriteItem_, rtWriteItems_, rtGcRemember_})
     cast<Function>(c.getCallee())->addFnAttr(kBarrierAttr);
-  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtWriteItems_, rtGcRemember_, rtCellOf_,
+  for (FunctionCallee c : {rtPending_, rtWriteItem_, rtWriteItems_, rtGcRemember_, rtCellOf_, rtCellNew_,
                            rtBlockNew_, rtRootPush_, rtRootPop_, rtArrayNew_,
                            rtEachShared_, rtEachEnter_, rtEachLeave_, rtRefOf_, rtNumDefaultDec_, rtSwitchMatch_,
                            rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_,

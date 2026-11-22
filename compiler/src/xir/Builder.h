@@ -60,7 +60,10 @@ public:
   Instruction *hashLit(const std::vector<Value *> &pairs);
   Instruction *index(Value *base, Value *idx);
   Instruction *indexSet(Value *base, Value *idx, Value *value);
-  Instruction *makeBlock(Function *blockFn, std::vector<Var *> captures);
+  // The block of `blockFn`: its cells the variables' `captures` and the `values` captured by value, in the order
+  // `valueCells` gives (empty: the variables' alone).
+  Instruction *makeBlock(Function *blockFn, std::vector<Var *> captures, const std::vector<Value *> &values = {},
+                         std::vector<bool> valueCells = {});
   Instruction *paramsRef(std::vector<Var *> params);
   Instruction *callForward(Function *callee);
   Instruction *funcRef(Callee callee);

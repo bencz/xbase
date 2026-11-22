@@ -244,9 +244,19 @@ foreach(t ${XB_XIR_TESTS})
   string(REGEX REPLACE "\\.prg$" "" t ${t})
   string(REGEX MATCH "^types_" types ${t})
   add_test(NAME xir.${t}
-    COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DTYPES=${types} -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.prg
-            -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.xir -DOUT=${CMAKE_CURRENT_BINARY_DIR}/xir_${t}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/xir_test.cmake)
+    COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DDUMP=xir -DTYPES=${types}
+            -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.prg -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/xir/${t}.xir
+            -DOUT=${CMAKE_CURRENT_BINARY_DIR}/xir_${t} -P ${CMAKE_CURRENT_SOURCE_DIR}/dump_test.cmake)
+endforeach()
+
+# AST tests: the syntax tree of tests/ast/<name>.prg after the AST passes (--dump-ast) must equal <name>.ast.
+file(GLOB XB_AST_TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/ast ${CMAKE_CURRENT_SOURCE_DIR}/ast/*.prg)
+foreach(t ${XB_AST_TESTS})
+  string(REGEX REPLACE "\\.prg$" "" t ${t})
+  add_test(NAME ast.${t}
+    COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DDUMP=ast -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/ast/${t}.prg
+            -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/ast/${t}.ast -DOUT=${CMAKE_CURRENT_BINARY_DIR}/ast_${t}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/dump_test.cmake)
 endforeach()
 
 # include/rtl.ch declares exactly the functions the runtime defines.

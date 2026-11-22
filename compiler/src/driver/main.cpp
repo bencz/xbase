@@ -6,6 +6,7 @@
 #include "driver/Link.h"
 #include "driver/Project.h"
 #include "driver/RuntimeLibrary.h"
+#include "opt/AstPasses.h"
 #include "opt/Fold.h"
 #include "parser/Parser.h"
 #include "preprocessor/Preprocessor.h"
@@ -95,6 +96,7 @@ const char *kUsage =
     "                     are linked into a program whose entry another object has\n"
     "  --depfile=<file>   write a Make-style dependency file for the object\n"
     "  --dump-ir=<file>   debug: also write the LLVM module as text\n"
+    "  --dump-ast=<file>  debug: also write the module's syntax tree as text (after the AST passes)\n"
     "  --dump-xir=<file>  debug: also write the module's xIR as text\n"
     "  --dump-xir-types   debug: with --dump-xir, each item value's inferred types too\n"
     "  --print-targets    list the targets this xbc can generate code for\n"
@@ -295,11 +297,13 @@ std::vector<std::unique_ptr<xb::xir::Module>> loadRuntimeLibrary(const std::vect
       failed = true;
       return {};
     }
+    std::string bad = xb::optimizeAst(*ast); // loaded for an optimized program only
+    if (!bad.empty()) bad = "invalid syntax tree " + bad;
     auto m = xb::xir::Generator(true).run(*ast);
-    std::string bad = xb::xir::verify(*m);
+    if (bad.empty()) bad = xb::xir::verify(*m);
     if (bad.empty()) bad = xb::xir::optimize(*m, false);
     if (!bad.empty()) {
-      std::fprintf(stderr, "xbc: internal error: invalid xIR in the carried runtime source %s: %s\n", s.name,
+      std::fprintf(stderr, "xbc: internal error: the carried runtime source %s: %s\n", s.name,
                    bad.c_str());
       failed = true;
       return {};
@@ -422,7 +426,7 @@ bool isObjectFile(const std::string &path) {
 
 static int compile(int argc, char **argv) {
   xb::TargetConfig tcfg;
-  std::string output, irDump, xirDump, depFile, stdFile = "std.ch", libraryName, outDir;
+  std::string output, irDump, astDump, xirDump, depFile, stdFile = "std.ch", libraryName, outDir;
   bool xirTypes = false, compileOnly = false;
   std::vector<std::string> inputs, includeDirs, defines, libs, libDirs, system;
   bool emitEntry = true, ppOnly = false, ppFile = false, useStd = true, customStd = false, runtimeLibrary = false;
@@ -491,6 +495,7 @@ static int compile(int argc, char **argv) {
       emitEntry = false;
     }
     else if (startsWith(a, "--dump-ir=")) irDump = a + 10;
+    else if (startsWith(a, "--dump-ast=")) astDump = a + 11;
     else if (startsWith(a, "--dump-xir=")) xirDump = a + 11;
     else if (std::strcmp(a, "--dump-xir-types") == 0) xirTypes = true;
     else if (startsWith(a, "--depfile=")) depFile = a + 10;
@@ -688,7 +693,7 @@ static int compile(int argc, char **argv) {
   if (!libraryName.empty()) checkLibraryNames(sources, diag);
   if (diag.errorCount()) return 1;
 
-  std::string xirText;
+  std::string xirText, astText;
   std::vector<std::unique_ptr<xb::xir::Module>> library; // loaded once a module calls one of its functions
   bool libraryLoaded = false;
   // A library's stamp: every file its sources read (themselves, std.ch, their includes) and the defines, in order.
@@ -706,6 +711,12 @@ static int compile(int argc, char **argv) {
   }
   std::vector<std::string> publicFunctions; // a library's
   for (Source &s : sources) {
+    std::string badAst = tcfg.optLevel > 0 ? xb::optimizeAst(*s.ast) : xb::verifyAst(*s.ast);
+    if (!badAst.empty()) {
+      std::fprintf(stderr, "xbc: internal error: invalid syntax tree %s\n", badAst.c_str());
+      return 1;
+    }
+    if (!astDump.empty()) astText += xb::printAst(*s.ast);
     s.xir = xb::xir::Generator(runtimeLibrary).run(*s.ast);
     if (runtimeLibrary) { // its stamp: a program that ran a body of it in place requires the same text
       auto text = llvm::MemoryBuffer::getFile(s.path, /*IsText=*/false, /*RequiresNullTerminator=*/false);
@@ -737,6 +748,14 @@ static int compile(int argc, char **argv) {
       }
     }
     if (!xirDump.empty()) xirText += xb::xir::print(*s.xir, xirTypes);
+  }
+  if (!astDump.empty()) {
+    std::ofstream out(astDump, std::ios::binary);
+    out << astText;
+    if (!out) {
+      std::fprintf(stderr, "xbc: cannot write '%s'\n", astDump.c_str());
+      return 1;
+    }
   }
   if (!xirDump.empty()) {
     std::ofstream out(xirDump, std::ios::binary);

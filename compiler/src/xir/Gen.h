@@ -74,6 +74,7 @@ private:
   Value *genLogic(const LogicExpr &l);
   Value *genIIf(const IIfExpr &e);
   Value *genCodeblock(const BlockExpr &b);
+  bool capturesValue(uint32_t slot) const;
 
   bool runtimeLibrary_;
   std::unique_ptr<Module> mod_;
@@ -118,6 +119,7 @@ private:
     std::string scope;             // name prefix for codeblock functions
     std::string function;          // the xBase function being generated (its codeblocks' too)
     std::unordered_map<uint32_t, Var *> paramLocals; // parameter slot -> the LOCAL standing for it
+    const FuncDecl *decl = nullptr; // the function whose own body this is (null in its codeblocks)
     int32_t classIndex = -1;       // a method's class (Module::classes), for its codeblocks too; -1 elsewhere
     bool generator = false;        // a generator's resume function: YIELD suspends, RETURN ends the enumeration
     bool async = false;            // an ASYNC function's resume function: AWAIT may suspend, RETURN gives the result

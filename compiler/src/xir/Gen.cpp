@@ -106,9 +106,10 @@ void Generator::genFunction(const FuncDecl &f, Function *fn) {
     genResumable(f, fn);
     return;
   }
-  std::vector<uint32_t> plain;
+  std::vector<uint32_t> plain; // a parameter captured by value is plain here too: its blocks get its value
   for (uint32_t s = 0; s < f.params.size(); ++s)
-    if (!(s < f.boxed.size() && f.boxed[s])) plain.push_back(s);
+    if (!(s < f.boxed.size() && f.boxed[s]) || (s < f.capturedByValue.size() && f.capturedByValue[s]))
+      plain.push_back(s);
   if (plain.empty()) {
     genBody(f, fn, nullptr, {});
     return;
@@ -174,6 +175,7 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   cur_.classIndex = f.ofClass ? classIndex_.at(f.ofClass) : -1;
   cur_.generator = f.generator;
   cur_.async = f.async;
+  cur_.decl = &f;
   fn->stackName = f.name;
   fn->hidden = runtimeLibrary_ && f.isStatic;
   fn->numParams = (uint32_t)f.params.size();
@@ -183,7 +185,12 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
   fn->callsPrivates = f.callsPrivates;
   for (uint32_t s = 0; s < f.numLocals; ++s) {
     Var *v = fn->addVar(Var::Kind::Frame, s, s < f.params.size() ? f.params[s].name : "");
-    v->shared = s < f.boxed.size() && f.boxed[s];
+    // A variable its blocks capture by value stays in the frame: a LOCAL, a resumable function's parameter (a value:
+    // its entry passes none by reference), a parameter of the body that holds no reference (`byRef`: its LOCAL
+    // stands for it, parameter versioning).
+    bool byValue = s < f.capturedByValue.size() && f.capturedByValue[s] &&
+                   (s >= f.params.size() || f.resumable() || byRef != nullptr);
+    v->shared = s < f.boxed.size() && f.boxed[s] && !byValue;
     v->param = s < f.params.size();
   }
   Builder &b = *cur_.b;

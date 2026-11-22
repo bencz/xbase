@@ -342,7 +342,8 @@ extended codeblock's `LOCAL`) is captured the same way, marked shared in that co
 and the reference reject that ("outer codeblock variable is out of reach"). A function's or a codeblock's `LOCAL` or
 parameter passed by reference (`@x`) is marked shared too, and so are all the parameters of a function that calls a
 `PARAMS` function (`PValue()`), which reads and writes them in the frame. A shared variable moves into a cell only when
-a codeblock captures it or a reference is taken, at run time.
+a codeblock captures it or a reference is taken, at run time; a variable its blocks capture by value
+([AST passes](#ast-passes)) stays in the frame.
 
 `STATIC`s get slots in the module's static storage (`Module::statics`, `VarWhere::Static`). File-wide statics are
 visible in every function; a function's statics are visible in that function only. They are never captured: codeblocks
@@ -367,6 +368,31 @@ Sema reports: duplicate functions, parameters or locals, `EXIT` outside a loop o
 outside a loop, a `LOCAL`, `STATIC` or `MEMVAR` that follows an executable statement or appears inside a nested block, a
 non-constant `STATIC` initializer, a `SWITCH` `CASE` that is not an integer or string constant ("CASE requires either
 numeric or string constant"), and a `CASE` value repeated in a `SWITCH`.
+
+## AST passes
+
+The syntax tree Sema resolved goes through passes of its own before code generation (`opt/AstPasses.*`, from `-O1`;
+at `-O0` it is only verified). Each pass rewrites the tree or records facts on it that code generation reads; the
+verifier (`verifyAst`) checks the tree after each one that changed it, and an invalid tree is an internal error naming
+the pass: every variable reaches a slot of its frame (the function's, or its codeblock's), a capture of its codeblock or
+a `STATIC` of the module, every capture of a codeblock one its parent has, the facts recorded fit the frames. Every pass
+and the folder and call resolver go through the tree with one traversal, `parser/Walk.h` (the children of each node in
+source order, each as the pointer that holds it, which a pass may replace). `--dump-ast=<file>` writes the tree after
+the passes (`printAst`: a node per line, its children indented, a function's shared slots and facts on its line).
+The carried runtime sources go through them too.
+
+- `value-captures` (`opt/ValueCaptures.cpp`): a function's parameter or `LOCAL` that its codeblocks capture and that
+  nothing assigns after its declaration (no assignment, `++`/`--`, reference `@x`, `FOR` or `FOR EACH`, `RECOVER USING`,
+  in the function or in its codeblocks, nor `PValue()`: not a parameter of a function that calls a `PARAMS` function or
+  a macro, `readsParams`) holds one value as long as a block can see it (a block captures only variables declared
+  before it, whose initializers have run): `FuncDecl::capturedByValue`. A block made where the variable holds no
+  reference gets a cell of its own holding the value (`block` with value cells, [xir.md](xir.md)): a `LOCAL`, a
+  resumable function's parameter, or a parameter of the body versioned for arguments without references (whose
+  `LOCAL` stands for it); the function keeps the variable in its frame (not shared), read directly, which
+  `promote-variables` may then take. Not a codeblock's own variables (`Eval()` may pass references) nor the hidden ones
+  of `WITH OBJECT`, `USING` and `AWAIT FOR EACH`, which their statements assign. A function returning `{| x | x + k }`,
+  inlined into a loop that evaluates the block, runs in place (`inline-blocks` gives the value to the block's body): 12
+  times fewer instructions than with the cell shared.
 
 ## Code generation
 
@@ -839,29 +865,29 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   bound error of an element gone.
 - `block` creates the block first into an item of its own (`block.tmp`), kept as a C root (`xb_gc_root_push`) while it
   obtains the cells (`xb_cell_of`: the variable's cell, made now if it has none, or a new cell holding the current
-  element of a `FOR EACH` variable, which only the block refers to) and stores each one, then passes the barrier test
-  for the block (a collection meanwhile may have aged it) and copies it to its home, which may be the slot of a variable
-  that moved into its cell meanwhile. `ref` calls `xb_ref_of` (or builds the `XB_T_CELL` item of a captured variable's
-  cell); `ref.index` calls `xb_ref_elem`. `each.enter` and `each.leave` call `xb_each_enter` and `xb_each_leave`;
-  `each.move` stores the position in the loop's reference (a local one: another goes to the runtime), taking the
-  collection's type from the loop's source (its operand, whose type a loop that `version-each` versioned knows: then
-  only that type's path is emitted), and calls `xb_each_move` only when the element is not one it finds in place (an
-  element of a local array of any form within its length, the entry at a position of a local hash without holes; a
-  string's byte goes into the reference's own item as the shared one-byte string, nothing past its end; not an
-  enumerator's element, a shared collection, the bound error), or when the variable is in a shared cell (whose reference
-  only the runtime moves); `each.key` stores the position for anything but a hash, reads the key of a local hash without
-  holes in place, and calls `xb_each_key` for the rest. A read of a `FOR EACH` variable of the frame alone (not shared,
-  not a parameter), whose last change on every path to it is the loop's `each.move` (`FramePlan::findEachLoads`, a
-  forward dataflow of each such variable's last change: no assignment between on any path, nor an inner loop's restore,
-  and none known where an unwinding enters; the plan keeps the source live at those reads and at their uses in their
-  block), takes its element from the loop's source at the step's position (`loadEachElement`), by the source's type
-  (known in a loop `version-each` versioned; tested there in a resumable function, which it leaves alone): a string's
-  byte as the shared one-byte string, a local array's element within it (an item in place; an integer or a logical of a
-  compact form into the read's item, a `NIL` of one through the reference), the value of the entry at the position of a
-  local hash without holes; anything else through the reference. `Asc()` of such a read, and its comparison with a
-  one-character literal (`=`, `==`, `!=`), in the read's own block read the byte from the string (`elementByte`). Over a
-  string whose every read is such (`FramePlan::readsInPlace`), `each.move` does nothing: no one reads the reference's
-  item.
+  element of a `FOR EACH` variable, which only the block refers to; `xb_cell_new` for a value captured) and stores each
+  one, then passes the barrier test for the block (a collection meanwhile may have aged it) and copies it to its home,
+  which may be the slot of a variable that moved into its cell meanwhile. `ref` calls `xb_ref_of` (or builds the
+  `XB_T_CELL` item of a captured variable's cell); `ref.index` calls `xb_ref_elem`. `each.enter` and `each.leave` call
+  `xb_each_enter` and `xb_each_leave`; `each.move` stores the position in the loop's reference (a local one: another
+  goes to the runtime), taking the collection's type from the loop's source (its operand, whose type a loop that
+  `version-each` versioned knows: then only that type's path is emitted), and calls `xb_each_move` only when the element
+  is not one it finds in place (an element of a local array of any form within its length, the entry at a position of a
+  local hash without holes; a string's byte goes into the reference's own item as the shared one-byte string, nothing
+  past its end; not an enumerator's element, a shared collection, the bound error), or when the variable is in a shared
+  cell (whose reference only the runtime moves); `each.key` stores the position for anything but a hash, reads the key
+  of a local hash without holes in place, and calls `xb_each_key` for the rest. A read of a `FOR EACH` variable of the
+  frame alone (not shared, not a parameter), whose last change on every path to it is the loop's `each.move`
+  (`FramePlan::findEachLoads`, a forward dataflow of each such variable's last change: no assignment between on any
+  path, nor an inner loop's restore, and none known where an unwinding enters; the plan keeps the source live at those
+  reads and at their uses in their block), takes its element from the loop's source at the step's position
+  (`loadEachElement`), by the source's type (known in a loop `version-each` versioned; tested there in a resumable
+  function, which it leaves alone): a string's byte as the shared one-byte string, a local array's element within it (an
+  item in place; an integer or a logical of a compact form into the read's item, a `NIL` of one through the reference),
+  the value of the entry at the position of a local hash without holes; anything else through the reference. `Asc()` of
+  such a read, and its comparison with a one-character literal (`=`, `==`, `!=`), in the read's own block read the byte
+  from the string (`elementByte`). Over a string whose every read is such (`FramePlan::readsInPlace`), `each.move` does
+  nothing: no one reads the reference's item.
 - `barrier` ([runtime.md](runtime.md#garbage-collector)): after a store into a local cell that holds no element (a
   captured variable's, or the one a variable holds), the cell's GC state byte is tested inline and `xb_gc_remember`
   called for an old cell (`cellStoreWritten`); a shared cell and an element took the value through `xb_ref_store`,

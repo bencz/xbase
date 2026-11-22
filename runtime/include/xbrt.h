@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 60u
+#define XB_ABI_VERSION 61u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -512,6 +512,9 @@ void     xb_gc_root_pop(xb_ctx *ctx, unsigned n);
  * STATIC's own item, in the program's storage: read and written whole under
  * its stripe, through the cell or element it holds (xb_storage_shared). */
 xb_cell *xb_cell_of(xb_ctx *ctx, xb_item *var, uint32_t is_static);
+/* A new cell holding a copy of `value`: a codeblock's capture of a variable by its value (one never assigned after
+ * the block is made), which the block alone refers to. */
+xb_cell *xb_cell_new(xb_ctx *ctx, const xb_item *value);
 /* [ABI] Nonzero once a second thread has attached: the program's storage (the STATICs, the class variables, the memory
  * variables visible then) is shared from then on (docs/concurrency.md, publication), so compiled code reads and writes
  * a STATIC through xb_ref_load and xb_ref_store with the type XB_T_NIL. Set while every other thread is stopped. */

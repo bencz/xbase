@@ -37,7 +37,9 @@ add_executable(xbc
   src/sema/Calls.cpp
   src/sema/Classes.cpp
   src/sema/Sema.cpp
+  src/opt/AstPasses.cpp
   src/opt/Fold.cpp
+  src/opt/ValueCaptures.cpp
   src/xir/Analysis.cpp
   src/xir/Builder.cpp
   src/xir/Gen.cpp

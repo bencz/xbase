@@ -196,10 +196,13 @@ Instruction *Builder::frameRelease(uint32_t param, Function *of) {
   return i;
 }
 
-Instruction *Builder::makeBlock(Function *blockFn, std::vector<Var *> captures) {
+Instruction *Builder::makeBlock(Function *blockFn, std::vector<Var *> captures, const std::vector<Value *> &values,
+                               std::vector<bool> valueCells) {
   Instruction *i = make(Op::MakeBlock, Type::Item);
   i->blockFn = blockFn;
   i->captures = std::move(captures);
+  for (Value *v : values) i->addOperand(v);
+  i->valueCells = std::move(valueCells);
   return i;
 }
 

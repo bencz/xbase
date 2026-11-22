@@ -500,7 +500,9 @@ A variable that a codeblock captures, or that is passed by reference, moves into
 value moves into a new cell and an `XB_T_CELL` item is left in its slot or `STATIC` storage (a parameter passed by
 reference already holds its caller's). `xb_cell_of` returns the cell a codeblock captures; for a `LOCAL` or parameter
 that holds the reference of a `FOR EACH` loop it returns a new cell holding the current element, and the variable stays
-the loop's. The function and every block that captured it share the cell, which outlives the function. A codeblock is a
+the loop's. The function and every block that captured it share the cell, which outlives the function. `xb_cell_new`
+makes a cell holding a copy of a value: a block's capture of a variable by its value (one nothing assigns after the
+block is made, [compiler.md](compiler.md#ast-passes)), which the block alone refers to. A codeblock is a
 compiled function `(ctx, ret, argc, argv, self)` plus the captured cells (`self->cells[]`); `xb_block_new` creates it
 and the compiled code stores the cells. `Eval( bBlock, ... )` and `xb_block_call` run it (compiled code calls the
 function of a codeblock it passes `Eval` itself, as `xb_block_call` does, and `Eval` for anything else); the caller sets

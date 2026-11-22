@@ -13,8 +13,12 @@ namespace xb::xir {
 namespace {
 
 // Removing it changes nothing but its result (see Effect): it cannot fail and
-// writes nothing. Reading, depending on settings and allocating are harmless.
+// writes nothing. Reading, depending on settings and allocating are harmless,
+// and so is a codeblock nothing uses: the variables it would move into cells
+// are reached through the cell test wherever they may be in one (inline-blocks
+// drops such a block likewise).
 bool removable(const Instruction &i) {
+  if (i.op == Op::MakeBlock) return true;
   return !i.mayFail() && !(i.effects() & (WritesVar | WritesHeap | WritesState | RunsCode | Terminator));
 }
 

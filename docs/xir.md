@@ -235,8 +235,10 @@ result. Implemented (`xir/passes/`):
     function itself (a block a call inlined in it runs), none of whose captured variables is bound anew by an inlined
     body (a direct store of a shared variable: the block holds the cell of when it was made) or by a `FOR EACH` (a block
     made while the variable holds a loop's reference holds a cell of its own with the element of then). The block is
-    immutable and its body reaches its cells through the same variables, so other uses may keep it; it is no longer made
-    once none is left. Afterwards, `unshare-variables` runs.
+    immutable and its body reaches its cells through the same variables, so other uses may keep it; a value it captured
+    (a value cell) is a new variable of the function, given the value the block was made with at the inlined entry
+    (shared when a block the body makes captures it on). It is no longer made once none is left. Afterwards,
+    `unshare-variables` runs.
 
   The driver compiles the runtime's carried sources (`driver/RuntimeLibrary.h`: the `.prg` files `XB_INLINE_PRG` in
   `compiler/CMakeLists.txt` lists, held in `xbc` as bytes with their public functions' names and the messages their
@@ -287,8 +289,9 @@ result. Implemented (`xir/passes/`):
   branches to one block differing only in a `true`/`false` argument become a jump passing the condition; a block
   whose single predecessor jumps to it joins it; unreachable blocks go. The steps repeat until nothing changes.
 - `remove-dead-code`: instructions whose result is unused and that cannot fail and write nothing (the effects in
-  `Ops.*`), and unused block parameters with their arguments, by a worklist; then the frame variables (not
-  parameters) no instruction reaches any more (those of inlined bodies that promote-variables took).
+  `Ops.*`; a `block` nothing uses too: the variables it would move into cells are reached through the cell test), and
+  unused block parameters with their arguments, by a worklist; then the frame variables (not parameters) no instruction
+  reaches any more (those of inlined bodies that promote-variables took).
 - `unshare-variables`, after it: a frame variable (not a parameter) that nothing captures or passes by reference any
   more (the block that did is gone: inlined, or dead code) loses its cell (`shared`); its accesses become direct and
   their barriers go, so `promote-variables` takes it in the next round.
@@ -512,23 +515,24 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   right before its list, which is its one use in the block; the callee's `byref` the positions of a call that receive
   references), `func.ref` (a function reference, `@name()`: the `xb_funcref` of its callee as an item), hash literals
   (`hash`, keys and values alternating), element read and write, codeblock creation with the cells of its captured
-  variables, the `FOR` test, the `FOR EACH` operations (`each.source`, `each.in_cell`, `each.enter`, `each.move`, which
-  takes the loop's collection too, `each.leave`, and `each.key`, the key at a position), the `SWITCH` check (whose
-  result is the value the `CASE`s match: a substituted one after an error) and match, `seq.catch` and `seq.value` for
-  `BEGIN SEQUENCE`, the generator operations (`gen.new`, `gen.restore`, `gen.done`, the terminator `gen.yield`, and
-  `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), the asynchronous operations
-  (`async.new`, `async.restore`, `await.ready`, `await.value`, `await.wait`, `await.fuse`, `await.fused`, the terminator
-  `async.suspend`), `append` (`var := var + value`, `xb_op_append`), `scalar.plain` (a value of one of the types of a
-  mask whose classes of the runtime answer its messages: `resolve-scalar-sends`), `object.is` (an object of a class of
-  the module, exactly: `speculate-sends`), `subst.check` and `subst.value` for
-  typed continuations (the verifier keeps the check right after its operation and the value first in the block only the
-  check leads to), and for parameter versioning `params.ref` (whether parameters hold references their caller passed)
-  and `call.forward` (a call with the function's own arguments, as received), `inline.enter` (naming a function or block
-  function) and `inline.leave`, around an inlined body: the call stack shows that function in between, and
-  `frame.release`, right after `x := NIL` to a local or a parameter: the frame slots of the values dead there are set to
-  `NIL` (the store itself may go as a dead store, but the program let go of what x held); after the `LOCAL` standing for
-  a parameter (`frame.release param k of NAME`), also the parameter's own slot, or in the body of NAME inlined, the
-  argument its `inline.enter` holds, which nothing else lets go of before the function returns.
+  variables (`block`; with value cells, `cells vc...` in order, a cell of its own for each operand, a value captured,
+  `v`, and a variable's, `c`), the `FOR` test, the `FOR EACH` operations (`each.source`, `each.in_cell`, `each.enter`,
+  `each.move`, which takes the loop's collection too, `each.leave`, and `each.key`, the key at a position), the `SWITCH`
+  check (whose result is the value the `CASE`s match: a substituted one after an error) and match, `seq.catch` and
+  `seq.value` for `BEGIN SEQUENCE`, the generator operations (`gen.new`, `gen.restore`, `gen.done`, the terminator
+  `gen.yield`, and `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), the asynchronous
+  operations (`async.new`, `async.restore`, `await.ready`, `await.value`, `await.wait`, `await.fuse`, `await.fused`, the
+  terminator `async.suspend`), `append` (`var := var + value`, `xb_op_append`), `scalar.plain` (a value of one of the
+  types of a mask whose classes of the runtime answer its messages: `resolve-scalar-sends`), `object.is` (an object of a
+  class of the module, exactly: `speculate-sends`), `subst.check` and `subst.value` for typed continuations (the
+  verifier keeps the check right after its operation and the value first in the block only the check leads to), and for
+  parameter versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call
+  with the function's own arguments, as received), `inline.enter` (naming a function or block function) and
+  `inline.leave`, around an inlined body: the call stack shows that function in between, and `frame.release`, right
+  after `x := NIL` to a local or a parameter: the frame slots of the values dead there are set to `NIL` (the store
+  itself may go as a dead store, but the program let go of what x held); after the `LOCAL` standing for a parameter
+  (`frame.release param k of NAME`), also the parameter's own slot, or in the body of NAME inlined, the argument its
+  `inline.enter` holds, which nothing else lets go of before the function returns.
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `async.suspend`, `ret`.

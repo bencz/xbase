@@ -233,7 +233,10 @@ public:
   bool dispatched = false; // a send kept for the runtime to dispatch where a version calls the method (ScalarSends)
   // MakeBlock; AsyncNew: the entry it runs in (its own, inlined or not); FrameRelease with a parameter: its function
   Function *blockFn = nullptr;
-  std::vector<Var *> captures;        // MakeBlock: the cells the block receives, in its capture order
+  std::vector<Var *> captures;        // MakeBlock: the variables whose cells the block receives, in its capture order
+  // MakeBlock: per cell of the block, in order, a cell of its own holding the next operand (a variable captured by its
+  // value, FuncDecl::capturedByValue) or the cell of the next of `captures`; empty: every cell a variable's.
+  std::vector<bool> valueCells;
   std::vector<Target> targets;        // Br: one; CondBr: then, else (operand 0 is the condition)
 
 private:

@@ -1,0 +1,11 @@
+
+by reference:          5
+assigned after:          2 in another block:          3 by FOR:          8
+by PValue:          7 not assigned:         10
+kept:   11  22  33  44  55
+inlined:     503503.00
+nested:         14
+self:          7         14
+generator:   8  9 10
+async:         18
+with object:  5 5

@@ -76,13 +76,15 @@ bool anyReference(const std::vector<Value *> &args) {
 
 // What runs in place of a call: the blocks `body` of `callee`, from `start`, with parameter k given the call's operand
 // firstArg + k (read when it is inlined: an earlier call inlined may have replaced one) and capture k the variable
-// captures[k].
+// captures[k]; capture k by value (null there) a new variable of the caller's, given its value `captured` at the
+// entry.
 struct Inlined {
   Function *callee;
   std::vector<BasicBlock *> body;
   BasicBlock *start;
   size_t firstArg;
   std::vector<Var *> captures;
+  std::vector<std::pair<size_t, Value *>> captured;
 };
 
 // The public function `name` of a carried runtime source, and its module; null when none has one.
@@ -99,6 +101,15 @@ std::vector<Value *> operandsFrom(const Instruction &call, size_t first) {
   return out;
 }
 
+// Whether a block that `body` (a codeblock's) makes captures that codeblock's capture `k` (passes its cell on).
+bool capturedByBlock(const std::vector<BasicBlock *> &body, uint32_t k) {
+  for (const BasicBlock *b : body)
+    for (auto &i : b->insts)
+      for (const Var *c : i->captures)
+        if (i->op == Op::MakeBlock && c->kind == Var::Kind::Capture && c->index == k) return true;
+  return false;
+}
+
 void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   const Function &callee = *in.callee;
   std::vector<Value *> args = operandsFrom(*call, in.firstArg);
@@ -110,7 +121,12 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
 
   // The callee's variables (bodyVars), and the body, copied with constants of the function's own, using them; each
   // `ret` the end of the inlined frame, passing its value on, after its variables are cleared (leaveBody).
-  VarMap vars = bodyVars(f, callee, anyReference(args), in.captures);
+  std::vector<Var *> captures = in.captures;
+  for (const auto &c : in.captured) {
+    captures[c.first] = f.addFrameVar("");
+    captures[c.first]->shared = capturedByBlock(in.body, (uint32_t)c.first); // a block within takes its cell
+  }
+  VarMap vars = bodyVars(f, callee, anyReference(args), captures);
   BlockCopy body = copyBlocks(f, in.body, ".inline", [&](Value *v) -> Value * {
     const Constant *c = asConstant(v);
     return c ? copyConstant(f, *c) : v;
@@ -150,6 +166,7 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   }
   builder.inlineEnter(in.callee, callee.readsArgs ? args : held(builder, args));
   enterBody(builder, callee, vars, args);
+  for (const auto &c : in.captured) builder.store(captures[c.first], Access::Direct, c.second);
   builder.br(body.blocks.at(in.start));
   call->replaceAllUsesWith(result);
   eraseInstruction(call);
@@ -240,7 +257,8 @@ std::unordered_set<const Var *> reboundVars(const Function &f) {
 
 // The Eval of a codeblock literal of the function (`call EVAL native %block, args...`, none of the block's captured
 // variables bound anew): what runs in its place, or nothing. The block is immutable and its body reaches the cells it
-// captured through the same variables, so its other uses (another Eval, a call it is passed to) may keep it.
+// captured through the same variables, so its other uses (another Eval, a call it is passed to) may keep it; a value
+// it captured (a cell of its own) is the value the block was made with.
 std::optional<Inlined> blockOf(const Function &f, const Instruction &call,
                                const std::unordered_set<const Var *> &rebound) {
   if (!isEvalCall(call)) return std::nullopt;
@@ -252,7 +270,15 @@ std::optional<Inlined> blockOf(const Function &f, const Instruction &call,
   if (blk == &f) return std::nullopt; // a block that runs itself (a call inlined in it made it)
   std::vector<BasicBlock *> body = allBlocks(*blk);
   if (!inlinable(*blk, body, kMaxBlockInstructions)) return std::nullopt;
-  return Inlined{blk, std::move(body), blk->entry(), 1, mk->captures};
+  if (mk->valueCells.empty()) return Inlined{blk, std::move(body), blk->entry(), 1, mk->captures, {}};
+  std::vector<Var *> cells;
+  std::vector<std::pair<size_t, Value *>> captured;
+  size_t var = 0, value = 0;
+  for (bool byValue : mk->valueCells) {
+    if (byValue) captured.push_back({cells.size(), mk->operand(value++)});
+    cells.push_back(byValue ? nullptr : mk->captures[var++]);
+  }
+  return Inlined{blk, std::move(body), blk->entry(), 1, std::move(cells), std::move(captured)};
 }
 
 // A call of a function of the module, or of a public function of a carried runtime source (`from` its module): what
@@ -288,7 +314,7 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
   if (!inlinable(*callee, body, passesBlock ? kMaxFunctionWithBlockInstructions : kMaxFunctionInstructions) ||
       ((from || callee->carried) && !selfContained(body)))
     return std::nullopt;
-  return Inlined{callee, std::move(body), start, 0, {}};
+  return Inlined{callee, std::move(body), start, 0, {}, {}};
 }
 
 // Inlines the calls found while the function stays within kMaxCallerInstructions (an Eval's block that nothing else

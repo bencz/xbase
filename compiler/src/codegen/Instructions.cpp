@@ -878,18 +878,25 @@ void CodeGen::emit(const xir::Instruction &i) {
 
 // block: the block made first, into an item of its own (blockTemp_) kept as a C root while its cells are obtained, each
 // stored in it at once: obtaining one may allocate (a variable's first cell, a new one holding the current element of a
-// FOR EACH variable, which only the block refers to) and so collect, which may move the block (read again from its
-// item) or age it (the barrier test after the stores). It goes to its home last, which may be the slot of a variable
-// that moved into its cell meanwhile.
+// FOR EACH variable or a value captured, which only the block refers to) and so collect, which may move the block (read
+// again from its item) or age it (the barrier test after the stores). It goes to its home last, which may be the slot
+// of a variable that moved into its cell meanwhile.
 void CodeGen::emitMakeBlock(const xir::Instruction &i) {
   if (!blockTemp_) blockTemp_ = entryAlloca("block.tmp");
-  b_.CreateCall(rtBlockNew_, {fnCtx_, blockTemp_, functions_.at(i.blockFn), ConstantInt::get(i32_, i.captures.size())});
+  size_t ncells = i.valueCells.empty() ? i.captures.size() : i.valueCells.size();
+  b_.CreateCall(rtBlockNew_, {fnCtx_, blockTemp_, functions_.at(i.blockFn), ConstantInt::get(i32_, ncells)});
   b_.CreateCall(rtRootPush_, {fnCtx_, blockTemp_});
-  for (uint32_t k = 0; k < i.captures.size(); ++k) {
-    const xir::Var *c = i.captures[k];
-    Value *cell = c->kind == xir::Var::Kind::Capture
-                      ? capturedCell(*c)
-                      : b_.CreateCall(rtCellOf_, {fnCtx_, rawAddress(*c), isStaticArg(*c)}, "cell");
+  size_t var = 0, value = 0;
+  for (uint32_t k = 0; k < ncells; ++k) {
+    Value *cell;
+    if (!i.valueCells.empty() && i.valueCells[k]) {
+      cell = b_.CreateCall(rtCellNew_, {fnCtx_, callArg(addr(i.operand(value++)), 0)}, "cell");
+    } else {
+      const xir::Var *c = i.captures[var++];
+      cell = c->kind == xir::Var::Kind::Capture ? capturedCell(*c)
+                                                 : b_.CreateCall(rtCellOf_, {fnCtx_, rawAddress(*c), isStaticArg(*c)},
+                                                                 "cell");
+    }
     tag(b_.CreateStore(cell, capturedCellAddress(itemPointer(blockTemp_, "block"), k)), Mem::BlockCells);
   }
   Value *block = itemPointer(blockTemp_, "block");

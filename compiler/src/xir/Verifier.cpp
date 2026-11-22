@@ -6,6 +6,7 @@
 #include "xir/Analysis.h"
 #include "xir/Printer.h"
 
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -237,8 +238,12 @@ private:
       allItems(i);
       if (i.operands().size() % 2) fail("hash with a key without a value");
       break;
-    case Op::MakeBlock:
-      expect(i, 0, {});
+    case Op::MakeBlock: {
+      size_t values = (size_t)std::count(i.valueCells.begin(), i.valueCells.end(), true);
+      if (i.operands().size() != values) fail("block whose values are not its value cells");
+      allItems(i);
+      if (!i.valueCells.empty() && i.valueCells.size() != values + i.captures.size())
+        fail("block whose cells are not its values and captured variables");
       if (!i.blockFn || i.blockFn->kind != Function::Kind::Block) fail("block without a block function");
       for (Var *c : i.captures) {
         bool ok = false;
@@ -246,6 +251,7 @@ private:
         if (!ok) fail("a block captures something other than a shared variable of this function");
       }
       break;
+    }
     case Op::ParamsRef:
       expect(i, 0, {});
       for (Var *c : i.captures) {

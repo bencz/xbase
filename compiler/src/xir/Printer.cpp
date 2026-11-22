@@ -206,6 +206,10 @@ private:
     case Op::MvParam: out_ += " " + i.message + " " + std::to_string(i.index); break;
     case Op::MakeBlock: case Op::InlineEnter:
       out_ += " " + i.blockFn->name;
+      if (!i.valueCells.empty()) { // the cells in order: v a value (the next operand), c a variable's
+        out_ += " cells ";
+        for (bool v : i.valueCells) out_ += v ? 'v' : 'c';
+      }
       for (Var *c : i.captures) out_ += " " + varName(*c);
       break;
     case Op::ParamsRef:

@@ -347,7 +347,7 @@ private:
   llvm::FunctionCallee rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArgsRest_;
   llvm::FunctionCallee rtExp_, rtLog_; // xb_exp, xb_log: no memory touched
-  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtWriteItems_, rtCellOf_,
+  llvm::FunctionCallee rtArrayNew_, rtIndex_, rtIndexSet_, rtWriteItem_, rtWriteItems_, rtCellOf_, rtCellNew_,
       rtBlockNew_, rtRootPush_, rtRootPop_;
   llvm::FunctionCallee rtEnumLen_, rtEachSource_, rtEachShared_, rtEachEnter_, rtEachMove_, rtEachLeave_, rtRefLoad_;
   llvm::FunctionCallee rtRefStore_;

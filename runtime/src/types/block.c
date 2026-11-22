@@ -58,6 +58,15 @@ xb_cell *xb_cell_of(xb_ctx *ctx, xb_item *var, uint32_t is_static) {
   return c;
 }
 
+xb_cell *xb_cell_new(xb_ctx *ctx, const xb_item *value) {
+  xb_item v = *value; /* rooted while the cell is allocated: `value` may be a scratch item no collection sees */
+  xb_gc_root_push(ctx, &v);
+  xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell));
+  xb_gc_root_pop(ctx, 1);
+  c->value = v;
+  return c;
+}
+
 xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, uint32_t ncells) {
   XB_UNUSED(ctx);
   xb_block *b = xb_gc_alloc(XB_GC_BLOCK, sizeof(xb_block) + ncells * sizeof(xb_cell *));

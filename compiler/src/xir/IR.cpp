@@ -105,6 +105,7 @@ void Instruction::copyData(const Instruction &from) {
   dispatched = from.dispatched;
   blockFn = from.blockFn;
   captures = from.captures;
+  valueCells = from.valueCells;
   alias = from.alias;
 }
 

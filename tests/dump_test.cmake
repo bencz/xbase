@@ -1,0 +1,15 @@
+# Dump test: what xbc writes for a source with --dump-<DUMP>=file (DUMP xir: the xIR, with the inferred types when
+# TYPES is set; DUMP ast: the syntax tree after the AST passes) must equal the expected file.
+set(flags --dump-${DUMP}=${OUT}.${DUMP})
+if(TYPES)
+  list(APPEND flags --dump-xir-types)
+endif()
+execute_process(COMMAND ${XBC} -c ${SRC} -o ${OUT}.o ${flags} RESULT_VARIABLE rc ERROR_VARIABLE err)
+if(NOT rc EQUAL 0)
+  message(FATAL_ERROR "xbc failed:\n${err}")
+endif()
+file(READ ${OUT}.${DUMP} actual)
+file(READ ${EXPECTED} expected)
+if(NOT actual STREQUAL expected)
+  message(FATAL_ERROR "${DUMP} mismatch\n--- expected ---\n${expected}\n--- actual ---\n${actual}")
+endif()

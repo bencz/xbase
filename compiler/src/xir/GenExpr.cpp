@@ -466,22 +466,42 @@ Value *Generator::genIIf(const IIfExpr &e) {
   return result;
 }
 
+// Whether a block made here captures the function's slot `slot` by its value (FuncDecl::capturedByValue): in the
+// function's own body, a LOCAL, or a parameter that holds no reference there (its LOCAL stands for it, or the
+// function is resumable: its entry passes values).
+bool Generator::capturesValue(uint32_t slot) const {
+  const FuncDecl *f = cur_.decl;
+  if (!f || slot >= f->capturedByValue.size() || !f->capturedByValue[slot]) return false;
+  return slot >= f->params.size() || cur_.paramLocals.count(slot) || f->resumable();
+}
+
 // The block receives the cells it captures: the current function's shared
-// variables (moved into cells if they are not yet), or cells the current
-// block itself captured.
+// variables (moved into cells if they are not yet), cells the current block
+// itself captured, or cells of their own holding the values of the variables
+// it captures by value.
 Value *Generator::genCodeblock(const BlockExpr &blk) {
   Function *fn = genCodeblockFunction(blk);
   std::vector<Var *> captures;
+  std::vector<Value *> values;
+  std::vector<bool> valueCells;
+  bool anyValue = false;
   for (const BlockExpr::Capture &cap : blk.captures) {
-    if (cap.fromParentCapture) {
+    bool byValue = !cap.fromParentCapture && capturesValue(cap.index);
+    valueCells.push_back(byValue);
+    anyValue |= byValue;
+    if (byValue) {
+      Var *v = frameVar(cap.index);
+      values.push_back(cur_.b->load(v, accessOf(*v)));
+    } else if (cap.fromParentCapture) {
       for (auto &v : cur_.fn->vars)
         if (v->kind == Var::Kind::Capture && v->index == cap.index) captures.push_back(v.get());
     } else {
       captures.push_back(frameVar(cap.index));
     }
   }
+  if (!anyValue) valueCells.clear();
   cur_.b->setLoc(blk.loc);
-  return cur_.b->makeBlock(fn, std::move(captures));
+  return cur_.b->makeBlock(fn, std::move(captures), values, std::move(valueCells));
 }
 
 } // namespace xb::xir
