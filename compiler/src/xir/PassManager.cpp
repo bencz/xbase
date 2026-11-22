@@ -32,6 +32,7 @@ constexpr Pass kPipeline[] = {
     {"fold-constants", onFunction<foldConstants>},
     {"resolve-sends", resolveSends},                   // after promote-variables: the objects' classes flow
     {"resolve-scalar-sends", resolveScalarSends},     // after promote-variables: the values' types flow
+    {"speculate-sends", speculateSends},               // after the two above: what they leave unresolved
     {"simplify-cfg", onFunction<simplifyCFG>},
     {"remove-dead-code", onFunction<removeDeadCode>},
     {"unshare-variables", onFunction<unshareVariables>}, // after remove-dead-code: captures gone with dead code

@@ -63,8 +63,16 @@ block TFOO:GET.block1 internal params 0 {
   $c0 = capture 0 "SELF"
 entry:
   %0 = load $c0 maybe_ref
-  %1 = send A from 0 %0
-  ret %1
+  %1 = object.is 0 %0
+  cond_br %1, entry.2.resolved, entry.2
+entry.2:
+  %3 = send A from 0 %0
+  br entry.2(%3)
+entry.2(%5: item):
+  ret %5
+entry.2.resolved:
+  %7 = object.get 0 %0
+  br entry.2(%7)
 }
 
 function TBAR:GET.byref internal params 1 method {

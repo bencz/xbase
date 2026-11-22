@@ -339,6 +339,19 @@ result. Implemented (`xir/passes/`):
   and run the codeblocks in place: `a:Where( {| v | ... } ):Select( {| v | ... } ):Sum()` becomes one loop
   (`bench/primitives/iteration.prg`: 25 to 6 ns an element), and `s:ForEach( {| c, i | ... } )` a loop written in
   place.
+- `speculate-sends`, after `resolve-scalar-sends` (`ResolveSends.cpp`): a `send` (without `...`, not `Super`, not one
+  an AWAIT fuses, not kept by a version already: `dispatched`) to a value that may be an object whose class `ClassInfo`
+  does not know (made by a macro, read from an element or a parameter), when the classes of the module that answer it
+  (not `SCALAR` ones) all reach one method by `ClassModel`'s rules from the send's class, at most `kMaxSpeculated` of
+  them (or one class reaches an instance variable, read or assigned with one value that is no reference), is versioned
+  on the object's class: `object.is` of those classes (their "or": `not( and( not a, not b ) )`) right before it, and
+  the copy that runs then holds what `resolve-sends` makes of it (a call, inlined in later rounds; an `object.get` or
+  `object.set`), the other the send (`dispatched`), its value joined after (`joinDefinitions`). A class's members are
+  fixed once it is prepared, so an object of one of those classes, exactly, reaches that member whatever made it; any
+  other value (an object of another module's class, of a class whose line the compiler does not know, a value that is
+  no object) gets what the runtime finds. A method's sends to its own `Self` are left alone (`readsOwnSelf`): its body
+  stays small enough to be inlined where its class is known, and the sends of a body inlined where it is not are the
+  caller's, which this versions. `method_call_overhead`: 180 to 47 ms (its sends to an object a macro made).
 - `specialize-calls`, on each function after its pipeline (then the pipeline again when it changed it): a call of a
   function of the module (a `FUNCTION`, `PROCEDURE` or method with parameters, not of a carried runtime source (whose
   classes and `STATIC`s are its module's), not an `INIT` or `EXIT` procedure, a body versioned for references, one that
@@ -493,7 +506,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   `box.i64`, `box.bool`, `unbox.i64`, `unbox.bool` for the values kept in the frame), the asynchronous operations
   (`async.new`, `async.restore`, `await.ready`, `await.value`, `await.wait`, `await.fuse`, `await.fused`, the terminator
   `async.suspend`), `append` (`var := var + value`, `xb_op_append`), `scalar.plain` (a value of one of the types of a
-  mask whose classes of the runtime answer its messages: `resolve-scalar-sends`), `subst.check` and `subst.value` for
+  mask whose classes of the runtime answer its messages: `resolve-scalar-sends`), `object.is` (an object of a class of
+  the module, exactly: `speculate-sends`), `subst.check` and `subst.value` for
   typed continuations (the verifier keeps the check right after its operation and the value first in the block only the
   check leads to), and for parameter versioning `params.ref` (whether parameters hold references their caller passed)
   and `call.forward` (a call with the function's own arguments, as received), `inline.enter` (naming a function or block

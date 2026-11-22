@@ -296,6 +296,7 @@ private:
       break;
     }
     case Op::ScalarPlain: expect(i, 1, {Type::Item}); break;
+    case Op::ObjectIs: expect(i, 1, {Type::Item}); break;
     case Op::SubstValue: // first in a block reached only from the operation's check
       expect(i, 1, {Type::Item});
       if (pos != 0 || (cfg_.reachable(i.parent) && (cfg_.preds(i.parent).size() != 1 ||

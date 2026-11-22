@@ -91,6 +91,7 @@ public:
   Instruction *substCheck(Value *checked);
   Instruction *substValue(Value *checked);
   Instruction *scalarPlain(Value *v, uint32_t types);
+  Instruction *objectIs(Value *v, int32_t classIndex);
   Instruction *forTest(Value *counter, Value *limit, Value *step);
   Instruction *enumLen(Value *coll);
   Instruction *eachSource(Value *coll, Value *descend);

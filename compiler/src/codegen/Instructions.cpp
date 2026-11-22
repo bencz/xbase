@@ -284,6 +284,20 @@ void CodeGen::emitBranch(const xir::Target &t) {
   }
 }
 
+// A test speculate-sends makes: object.is, or the "or" of several (not( and( not a, not b ) )).
+static bool classTest(const xir::Instruction &i) {
+  if (i.op == xir::Op::ObjectIs) return true;
+  const auto *a = i.op == xir::Op::BoolNot ? xir::asInstruction(i.operand(0), xir::Op::BoolAnd) : nullptr;
+  if (!a) return false;
+  for (const xir::Value *v : a->operands()) {
+    const xir::Instruction *n = xir::asInstruction(v, xir::Op::BoolNot);
+    const xir::Value *o = n ? n->operand(0) : nullptr;
+    if (!o || o->kind() != xir::Value::Kind::Instruction || !classTest(*static_cast<const xir::Instruction *>(o)))
+      return false;
+  }
+  return true;
+}
+
 void CodeGen::emit(const xir::Instruction &i) {
   using xir::Op;
   const auto &ops = i.operands();
@@ -697,6 +711,32 @@ void CodeGen::emit(const xir::Instruction &i) {
     values_[&i] = b_.CreateAnd(inMask, b_.CreateICmpEQ(flag, ConstantInt::get(i8_, 0)));
     break;
   }
+  case Op::ObjectIs: { // an object whose class is the module's class `classIndex`: its xb_class_def's `runtime`
+    Value *item = addr(ops[0]);
+    Value *isObject = b_.CreateICmpEQ(typeOf(ops[0], item), ConstantInt::get(i32_, XB_T_OBJECT));
+    BasicBlock *from = b_.GetInsertBlock(), *object = newBlock("object.is"), *done = newBlock("object.is.done");
+    b_.CreateCondBr(isObject, object, done);
+    b_.SetInsertPoint(object);
+    Value *cls = loadFrom(ptrTy_, b_.CreateStructGEP(objectTy_, itemPointer(item, "obj"), ObjectCls),
+                          Mem::ObjectHeader, "cls");
+    auto *defTy = cast<StructType>(cast<ArrayType>(classTable_->getValueType())->getElementType());
+    // `runtime`, the last field: written once, when the class is prepared (before any object of it exists)
+    auto *runtime = cast<LoadInst>(loadFrom(ptrTy_, b_.CreateStructGEP(defTy, classDef(i.classIndex),
+                                                                       defTy->getNumElements() - 1),
+                                            Mem::Unknown, "class.runtime"));
+    runtime->setAtomic(AtomicOrdering::Unordered);
+    // Written once: a value read before (null) only fails the test, which the send then answers.
+    runtime->setMetadata(LLVMContext::MD_invariant_load, MDNode::get(ctx_, {}));
+    Value *same = b_.CreateICmpEQ(cls, runtime);
+    BasicBlock *at = b_.GetInsertBlock();
+    b_.CreateBr(done);
+    b_.SetInsertPoint(done);
+    PHINode *is = b_.CreatePHI(b_.getInt1Ty(), 2, "object.is");
+    is->addIncoming(b_.getFalse(), from);
+    is->addIncoming(same, at);
+    values_[&i] = is;
+    break;
+  }
   case Op::SwitchCheck:
     callItemOp(rtSwitchCheck_, dest(i), {addr(ops[0])});
     checkPending(unwind_);
@@ -811,6 +851,8 @@ void CodeGen::emit(const xir::Instruction &i) {
                                                                        : nullptr;
     if (cond && cond->op == xir::Op::SubstCheck) // a substituted value of another type: rare
       branchLikely(b_.CreateNot(value(ops[0])), dests[1], dests[0]);
+    else if (cond && classTest(*cond)) // speculate-sends: the classes it chose are the ones its objects have
+      branchLikely(value(ops[0]), dests[0], dests[1]);
     else
       b_.CreateCondBr(value(ops[0]), dests[0], dests[1]);
     for (size_t k = 0; k < 2; ++k) {

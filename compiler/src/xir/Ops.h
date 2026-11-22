@@ -83,6 +83,8 @@ enum class Op : uint8_t {
   ScalarPlain,    // Item; index: a mask of types -> Bool: the value is of one of those types, whose own class of the
                   // runtime answers its messages, no class of the program before it (xb_scalar_replaced): a method of
                   // that class may be called directly
+  ObjectIs,       // Item; classIndex: a class of the module -> Bool: the value is an object of that class exactly, whose
+                  // messages are resolved when compiling (speculate-sends)
   IntAdd,         // I64, I64 -> I64
   IntSub,         // I64, I64 -> I64
   IntCmp,         // pred; I64, I64 -> Bool

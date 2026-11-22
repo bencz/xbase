@@ -71,6 +71,7 @@ constexpr OpInfo kOps[] = {
     {Op::SubstCheck, "subst.check", 0},
     {Op::SubstValue, "subst.value", 0},
     {Op::ScalarPlain, "scalar.plain", ReadsState},
+    {Op::ObjectIs, "object.is", 0},
     {Op::IntAdd, "i.add", Commutative},
     {Op::IntSub, "i.sub", 0},
     {Op::IntCmp, "i.cmp", 0},

@@ -2,13 +2,30 @@
 // and a Super send of a method to its own Self (a method), reaches what the runtime would reach: found when compiling
 // by the runtime's own rules (xbclass.h, through ClassModel), a method becomes a call of its function, an instance
 // variable read or assigned an object.get or object.set of its slot.
+//
+// A send to an object whose class is not known (made by a macro, read from an array, a method's Self) reaches the same
+// when the object is of a class whose messages are resolved here: when the classes of the module that answer the
+// message all reach one method (or one class reaches an instance variable), the send is versioned on the object's
+// class (`object.is`): the version for those classes reaches what resolving gives (a call the inliner may then run in
+// place), the other keeps the send (`dispatched`). A class's members are fixed once it is prepared, so an object of
+// the class, exactly, reaches them whatever made it. A method's sends to its own Self are left alone: its body stays as
+// small as it was, to be inlined where its class is known (resolve-sends there, or its copy typed for it) or not (its
+// sends are then the caller's, which this versions).
 #include "xir/passes/Passes.h"
 
 #include "xir/Analysis.h"
+#include "xir/Builder.h"
 #include "xir/ClassModel.h"
+#include "xir/Transform.h"
+#include "xir/Types.h"
 
+#include "xbrt.h" // type tags
+
+#include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 namespace xb::xir {
 
@@ -21,6 +38,97 @@ bool readsOwnSelf(const Function &f, const Value *v) {
   const Instruction *load = asInstruction(v, Op::Load);
   const Var *self = load ? load->var : nullptr;
   return f.method && self && self->kind == Var::Kind::Frame && self->index == 0 && onlyLoaded(f, self);
+}
+
+// What send `i` becomes in block `b` when its receiver is an object of class `c` that reaches `member`: a call of a
+// method, an object.get or object.set of an instance variable; null for what the runtime answers itself (a class
+// variable, an assignment of several values or of a reference).
+std::unique_ptr<Instruction> resolved(const ClassModel &model, int32_t c, const xb_member &member, const Instruction &i,
+                                      BasicBlock *b) {
+  std::unique_ptr<Instruction> made;
+  switch (member.kind) {
+  case XB_MK_METHOD: {
+    Function *fn = model.method(member);
+    if (!fn) return nullptr;
+    made = std::make_unique<Instruction>(Op::Call, Type::Item, b);
+    made->callee.function = fn;
+    for (Value *v : i.operands()) made->addOperand(v);
+    break;
+  }
+  case XB_MK_GET: // the arguments are ignored, as the runtime does
+    made = std::make_unique<Instruction>(Op::ObjectGet, Type::Item, b);
+    made->addOperand(i.operand(0));
+    made->index = model.slot(c, member);
+    break;
+  case XB_MK_SET: // NIL for none, the first of several, the value a reference designates: the runtime's
+    if (i.operands().size() != 2 || isReference(i.operand(1))) return nullptr;
+    made = std::make_unique<Instruction>(Op::ObjectSet, Type::Item, b);
+    made->addOperand(i.operand(0));
+    made->addOperand(i.operand(1));
+    made->index = model.slot(c, member);
+    break;
+  default: return nullptr; // a class variable: the runtime's
+  }
+  made->loc = i.loc;
+  return made;
+}
+
+// The classes a test of the receiver may take for a send, at most this many (a test each).
+constexpr size_t kMaxSpeculated = 4;
+
+// The classes of the module (not SCALAR ones, whose values are no objects) that answer send `i` by resolving it to
+// what `*member` is set to: a method all of them reach, or an instance variable of the one class that reaches it;
+// none when the classes answering reach different members, or too many of them do.
+std::vector<int32_t> answering(const Module &m, const ClassModel &model, const Instruction &i,
+                               std::optional<xb_member> &member) {
+  std::vector<int32_t> out;
+  const Function *fn = nullptr;
+  for (int32_t c = 0; c < (int32_t)m.classes.size(); ++c) {
+    if (m.classes[(size_t)c].scalar) continue;
+    std::optional<xb_member> reached = model.resolve(c, i.classIndex, false, i.message);
+    if (!reached) continue;
+    const Function *g = reached->kind == XB_MK_METHOD ? model.method(*reached) : nullptr;
+    if (!out.empty() && (!g || g != fn)) return {};
+    fn = g;
+    member = reached;
+    out.push_back(c);
+  }
+  if (out.size() > kMaxSpeculated) return {};
+  return out;
+}
+
+// Versions send `s` (at position `k` of block `b`) on the class of its receiver: the test goes right before it, and the
+// copy that runs when the receiver is one of `classes` holds `made` instead of the send.
+void version(Function &f, BasicBlock *b, size_t k, const std::vector<int32_t> &classes,
+             std::unique_ptr<Instruction> made) {
+  Instruction *s = b->insts[k].get();
+  Builder builder(&f);
+  builder.setBlock(b);
+  builder.setLoc(s->loc);
+  size_t before = b->insts.size();
+  Value *test = nullptr;
+  for (int32_t c : classes) {
+    Value *is = builder.objectIs(s->operand(0), c);
+    test = test ? builder.boolNot(builder.boolAnd(builder.boolNot(test), builder.boolNot(is))) : is;
+  }
+  size_t tests = b->insts.size() - before; // made at the end: moved before the send
+  std::rotate(b->insts.begin() + (std::ptrdiff_t)k, b->insts.end() - (std::ptrdiff_t)tests, b->insts.end());
+  BasicBlock *region = splitAfter(f, b, k + tests - 1);
+  splitAfter(f, region, 0);
+  BlockCopy copy = copyBlocks(f, {region}, ".resolved");
+  BasicBlock *direct = copy.blocks.at(region);
+  auto *copied = static_cast<Instruction *>(copy.values.at(s));
+  made->parent = direct;
+  copy.values[s] = made.get();
+  copied->replaceAllUsesWith(made.get());
+  copied->dropOperands();
+  for (auto &slot : direct->insts)
+    if (slot.get() == copied) slot = std::move(made);
+  s->dispatched = true; // the version for the other classes
+  b->takeTerminator();
+  builder.setBlock(b);
+  builder.condBr(test, direct, region);
+  joinDefinitions(f, {{{region, s}, {direct, copy.values.at(s)}}}, {region, direct});
 }
 
 } // namespace
@@ -42,35 +150,43 @@ bool resolveSends(Module &m, Function &f) {
       if (c == kNoClass) continue;
       std::optional<xb_member> member = model.resolve(c, i.classIndex, i.superSend, i.message);
       if (!member || (fromMethod && member->kind != XB_MK_METHOD)) continue;
-      std::unique_ptr<Instruction> made;
-      switch (member->kind) {
-      case XB_MK_METHOD: {
-        Function *fn = model.method(*member);
-        if (!fn) continue;
-        made = std::make_unique<Instruction>(Op::Call, Type::Item, b);
-        made->callee.function = fn;
-        for (Value *v : i.operands()) made->addOperand(v);
-        break;
-      }
-      case XB_MK_GET: // the arguments are ignored, as the runtime does
-        made = std::make_unique<Instruction>(Op::ObjectGet, Type::Item, b);
-        made->addOperand(i.operand(0));
-        made->index = model.slot(c, *member);
-        break;
-      case XB_MK_SET: // NIL for none, the first of several, the value a reference designates: the runtime's
-        if (i.operands().size() != 2 || isReference(i.operand(1))) continue;
-        made = std::make_unique<Instruction>(Op::ObjectSet, Type::Item, b);
-        made->addOperand(i.operand(0));
-        made->addOperand(i.operand(1));
-        made->index = model.slot(c, *member);
-        break;
-      default: continue; // a class variable: the runtime's
-      }
-      made->loc = i.loc;
+      std::unique_ptr<Instruction> made = resolved(model, c, *member, i, b);
+      if (!made) continue;
       i.replaceAllUsesWith(made.get());
       i.dropOperands();
       b->insts[k] = std::move(made);
       changed = true;
+    }
+  }
+  return changed;
+}
+
+bool speculateSends(Module &m, Function &f) {
+  if (m.classes.empty()) return false;
+  ClassModel model(m);
+  bool changed = false;
+  for (bool again = true; again;) {
+    again = false;
+    CFG cfg(f);
+    TypeInfo types(cfg);
+    ClassInfo classes(f, cfg, model);
+    for (BasicBlock *b : cfg.order()) {
+      for (size_t k = 0; k < b->insts.size() && !again; ++k) {
+        Instruction &s = *b->insts[k];
+        if (s.op != Op::Send || s.hasRest() || s.superSend || s.dispatched ||
+            (k > 0 && b->insts[k - 1]->op == Op::AwaitFuse) ||
+            classes.of(s.operand(0)) != kNoClass || !(types.of(s.operand(0)) & typeBit(XB_T_OBJECT)) ||
+            readsOwnSelf(f, s.operand(0)))
+          continue;
+        std::optional<xb_member> member;
+        std::vector<int32_t> those = answering(m, model, s, member);
+        if (those.empty()) continue;
+        std::unique_ptr<Instruction> made = resolved(model, those.front(), *member, s, b);
+        if (!made) continue;
+        version(f, b, k, those, std::move(made));
+        again = changed = true;
+      }
+      if (again) break;
     }
   }
   return changed;

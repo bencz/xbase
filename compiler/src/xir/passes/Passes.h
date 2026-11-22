@@ -38,6 +38,9 @@ bool unshareVariables(Function &f);
 // A send to an object whose class is known exactly (one of the module's, its whole line the module's) is what the
 // runtime would do: a call of the method it reaches, or an object.get or object.set of the variable (ResolveSends.cpp).
 bool resolveSends(Module &m, Function &f);
+// A send to an object whose class is not known, versioned on its class when the classes of the module that answer it
+// all reach one method (or one class an instance variable): resolved for those, the send kept for the others.
+bool speculateSends(Module &m, Function &f);
 
 // Sends to values of a built-in type whose class of the runtime answers them, and chains of Enumerable's methods on
 // what they make, become calls of those methods behind a test that no class of the program answers first

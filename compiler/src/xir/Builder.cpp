@@ -228,6 +228,12 @@ Instruction *Builder::scalarPlain(Value *v, uint32_t types) {
   return i;
 }
 
+Instruction *Builder::objectIs(Value *v, int32_t classIndex) {
+  Instruction *i = make(Op::ObjectIs, Type::Bool, {v});
+  i->classIndex = classIndex;
+  return i;
+}
+
 Instruction *Builder::funcRef(Callee callee) {
   Instruction *i = make(Op::FuncRef, Type::Item);
   i->callee = std::move(callee);

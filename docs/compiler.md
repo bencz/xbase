@@ -511,9 +511,13 @@ build xbc. A function of a carried runtime source (`Function::carried`) is no fu
 its library symbol (`functionOf`, `librarySymbol`: `XB_LIBRARY_FUNC_PREFIX`, the module's name and its own), which a
 module of the runtime defines with external linkage for each of its other `FUNCTION`s, `PROCEDURE`s and methods (its
 codeblocks stay its own); `scalar.plain` reads `xb_scalar_replaced` at the value's type, unordered, and tests the type
-against its mask. `stampSources` stamps those texts (`Module::sourceHash`, the FNV-1a 64 the driver takes of each): a
-module of the runtime defines its stamp (`sourceStamp`), and a module given the carried sources references all of theirs
-from a table the linker must resolve (`keepReferences`, as `EXTERNAL`'s requests).
+against its mask; `object.is` tests the item's type for `XB_T_OBJECT`, then the object's class (`xb_object.cls`) against
+the `runtime` field of the class's `xb_class_def` (written once, when the runtime prepares the class, before any object
+of it exists: the load is unordered and `!invariant.load`, a value read before, null, only failing the test), and the
+branch on it, or on the "or" of several, is likely (`classTest`). `stampSources` stamps those texts
+(`Module::sourceHash`, the FNV-1a 64 the driver takes of each): a module of the runtime defines its stamp
+(`sourceStamp`), and a module given the carried sources references all of theirs from a table the linker must resolve
+(`keepReferences`, as `EXTERNAL`'s requests).
 
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
   from its uses back to its definition, slots are assigned by linear scan and reused once free. A dead value's slot
