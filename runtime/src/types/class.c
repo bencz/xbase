@@ -60,6 +60,8 @@ typedef struct cls {
   const char **messageOf;   /* each member's message */
   uint32_t nmembers, capMembers;
   xb_item *initial;         /* its own variables' initial values, then its class variables' (a root) */
+  xb_item *model;           /* an object's variables as a new object has them, slot by slot (a root, once ready) */
+  uint32_t *deep, ndeep;    /* the slots whose initial value each object copies (an array, a hash) */
   uint32_t *classArea;      /* the first class variable of each class of the line */
   xb_item *classValues;     /* the values of the class variables it holds itself (a root) */
   xb_item **classSlots;     /* where each class variable of the line is: here, or an ancestor's when SHARED */
@@ -228,6 +230,24 @@ static void build_tables(cls *c) {
   if (ninitial) xb_gc_add_root(c->initial, ninitial);
 }
 
+/* A new object's variables, once the INIT values are known: the initial value of each variable of the line, in the
+ * object's order, which an object copies whole (each array or hash its own copy, from `deep`). */
+static void make_model(cls *c) {
+  uint32_t n = c->base.nvars;
+  c->model = malloc((n ? n : 1) * sizeof *c->model);
+  c->deep = malloc((n ? n : 1) * sizeof *c->deep);
+  if (!c->model || !c->deep) xb_gc_fatal("out of memory");
+  for (uint32_t k = 0; k < c->nline; ++k) {
+    const cls *x = runtime_of(c->line[k]);
+    for (uint32_t i = 0; i < c->line[k]->nvars; ++i) {
+      const xb_item *v = &x->initial[i];
+      c->model[c->area[k] + i] = *v;
+      if (v->type == XB_T_ARRAY || v->type == XB_T_HASH) c->deep[c->ndeep++] = c->area[k] + i;
+    }
+  }
+  if (n) xb_gc_add_root(c->model, n);
+}
+
 /* The class variables' values once the INIT values are known: its own, and a
  * copy of each ancestor's initial value for those it does not share. */
 static void start_class_vars(cls *c) {
@@ -324,6 +344,7 @@ static cls *prepare_locked(xb_ctx *ctx, xb_class_def *def) {
     return NULL;
   }
   start_class_vars(c);
+  if (!c->model) make_model(c);
   if (xb_storage_is_shared()) { /* threads run: what the class holds is shared before another one can reach it */
     for (uint32_t i = 0; i < c->def->nvars + c->def->nclassVars; ++i) xb_share(&c->initial[i]);
     for (uint32_t k = 0, n = c->classArea[c->nline - 1] + c->line[c->nline - 1]->nclassVars; k < n; ++k)
@@ -346,21 +367,22 @@ static cls *prepare(xb_ctx *ctx, xb_class_def *def) {
 void xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def) {
   cls *c = prepare(ctx, def);
   if (!c) return;
-  xb_object *o = xb_object_new(&c->base);
+  uint32_t n = c->base.nvars;
+  xb_object *o = xb_gc_alloc(XB_GC_OBJECT, offsetof(xb_object, vars) + n * sizeof(xb_item));
+  o->cls = &c->base;
+  o->nvars = n;
+  for (uint32_t k = 0; k < n; ++k) o->vars[k] = c->model[k]; /* a few items: no call */
   xb_set_object(r, o); /* rooted there from now on */
+  xb_gc_write(o);      /* what the model refers to, in an object that may be old (a large one) */
   if (c->finalized) xb_gc_finalizable(o);
+  if (!c->ndeep) return;
   xb_item copy;
   xb_set_nil(&copy);
   xb_gc_root_push(ctx, &copy);
-  for (uint32_t k = 0; k < c->nline; ++k) {
-    const cls *x = runtime_of(c->line[k]);
-    for (uint32_t i = 0; i < c->line[k]->nvars; ++i) {
-      const xb_item *v = &x->initial[i];
-      if (v->type == XB_T_ARRAY || v->type == XB_T_HASH) xb_clone_deep(ctx, &copy, v); /* each object its own */
-      else copy = *v;
-      o->vars[c->area[k] + i] = copy;
-      xb_gc_write(o);
-    }
+  for (uint32_t k = 0; k < c->ndeep; ++k) { /* each object its own array or hash */
+    xb_clone_deep(ctx, &copy, &c->model[c->deep[k]]);
+    o->vars[c->deep[k]] = copy;
+    xb_gc_write(o);
   }
   xb_gc_root_pop(ctx, 1);
 }

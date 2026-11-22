@@ -1,0 +1,8 @@
+
+first:          3          2          7          2
+second:          2          1          3          1
+third:          2          1          3          1
+plain:          1 base NIL         10         20         30          1 base
+diamond:          1          1 base
+fragile, first: Argument error
+fragile, second:         20 box          2

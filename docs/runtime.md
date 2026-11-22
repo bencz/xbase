@@ -685,14 +685,15 @@ first time it is used (its class function, or a subclass):
   evaluated meanwhile, inherits from itself (`BASE/0` `Class inherits from itself`, the class's name as the operation;
   the compiler reports it within a module).
 - The messages it answers are tabled: for each class of the line in order, its methods, then its variables (`NAME`
-  reads, `_NAME` assigns), then its class variables; the first class that has a message takes it. These rules (the
-  line, the table's order, what a message from a method or `Super:` reaches, the scope a sender needs) are one
-  implementation, `xbclass.h` (`types/members.c`), which the compiler applies too when it resolves a send to an object
-  whose class it knows ([xir.md](xir.md#classes)). The INIT values are evaluated then, once per
-  class (`CLS:(INIT)`); each new object gets them, an array or a hash copied for each object (`xb_clone_deep`). When
-  evaluating them fails, the class is not usable yet and they are evaluated again the next time it is used; INIT
-  values that need an object of their own class, or of a subclass being prepared, are `BASE/0` `Class used by its own
-  initial values`.
+  reads, `_NAME` assigns), then its class variables; the first class that has a message takes it. These rules (the line,
+  the table's order, what a message from a method or `Super:` reaches, the scope a sender needs) are one implementation,
+  `xbclass.h` (`types/members.c`), which the compiler applies too when it resolves a send to an object whose class it
+  knows ([xir.md](xir.md#classes)). The INIT values are evaluated then, once per class (`CLS:(INIT)`); each new object
+  gets them, an array or a hash copied for each object (`xb_clone_deep`): once they are known the class keeps a new
+  object's variables in the object's order (`model`, a root of the collector, and the slots to copy, `deep`), which
+  `xb_class_instance` copies whole into the object it allocates. When evaluating them fails, the class is not usable yet
+  and they are evaluated again the next time it is used; INIT values that need an object of their own class, or of a
+  subclass being prepared, are `BASE/0` `Class used by its own initial values`.
 - Threads prepare classes one at a time, under one lock for every class (`xb_rlock`, taken again by the thread that
   holds it as a preparation nests into parents and INIT values); a class is published ready (an atomic store of its
   state after everything else) and from then on used without the lock. The part a preparation makes is never freed: a
