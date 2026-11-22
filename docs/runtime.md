@@ -241,12 +241,12 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   (`xb_gc_trim_end` stops it as the program ends). A 1.6 GB peak dropped by a program that then only waits goes back to
   the system within about 5 seconds (resident memory 1645 MB to 8 MB), with no `__GcCollect()`.
 - Allocation: every thread fills a hole, a run of free lines, by bumping a cursor, without locking (and takes the slots
-  of a size class from a block of its own); when the object
-  does not fit, it takes the block's next hole, then a recyclable block (free lines among live ones), then a free
-  block. An object above one line that does not fit the hole goes to an overflow run of the thread instead (holes
-  large enough for it, from the same recyclable blocks, then free ones; a recyclable block without one leaves the list
-  until the next sweep), so no hole is given up for it and the free lines of recyclable blocks serve objects of every
-  size.
+  of a size class from a block of its own). That bump is `xb_gc_alloc`'s only inline path, which makes no call (no
+  frame, no saved registers) and writes the header as one store; everything else is `alloc_other`'s. When the object
+  does not fit, it takes the block's next hole, then a recyclable block (free lines among live ones), then a free block.
+  An object above one line that does not fit the hole goes to an overflow run of the thread instead (holes large enough
+  for it, from the same recyclable blocks, then free ones; a recyclable block without one leaves the list until the next
+  sweep), so no hole is given up for it and the free lines of recyclable blocks serve objects of every size.
 - Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest, and
   halves at a collection while it is past 1024 entries and three quarters empty, so a deep nesting's peak does not
   stay; also compiled code's, while it makes a codeblock's cells) of every registered context, and global item arrays

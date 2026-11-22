@@ -807,7 +807,7 @@ static void set_start(const void *p) {
  * line, the next hole of the block, or another block (a recyclable one first);
  * a young collection runs first when the allocation since the last one
  * reached the budget. */
-static xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
+static XB_NOINLINE xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
   xb_gc_safepoint(); /* a collection another thread asked for: an allocation is a safepoint */
   int medium = total > XB_GC_LINE_SIZE, collected = 0;
   for (;;) {
@@ -871,7 +871,7 @@ static void class_block_init(xb_hblock *b, unsigned c) {
 /* A slot of size class `c` for an object: from the thread's block of the class, else another block of it with free
  * slots, else a free block made one; a young collection runs first when the allocation since the last one reached the
  * budget. */
-static xb_gc_hdr *alloc_class(xb_tlh *t, unsigned c) {
+static XB_NOINLINE xb_gc_hdr *alloc_class(xb_tlh *t, unsigned c) {
   int collected = 0;
   for (;;) {
     xb_hblock *b = t->cls[c];
@@ -1082,7 +1082,7 @@ static void give_back_large(void) {
 /* A large object of `size` bytes (Large objects above), in the young list; a young collection runs first when the
  * allocation since the last one reached the budget, a full one when the system has no memory, before the program ends.
  */
-static void *alloc_large(size_t size, int fallible) {
+static XB_NOINLINE void *alloc_large(size_t size, int fallible) {
   if (size > SIZE_MAX - XB_GC_LARGE_MAP - LARGE_HEAD) { /* no address space holds it (rounded up to pages) */
     if (fallible) return NULL;
     out_of_memory();
@@ -1134,31 +1134,47 @@ static inline void *labeled(xb_gc_hdr *h, xb_gc_kind kind, size_t size) {
   return h + 1;
 }
 
-void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
+/* A new object's header, written as one store. */
+static void set_header(xb_gc_hdr *h, xb_gc_kind kind, size_t size, uint16_t flags) {
+  xb_gc_hdr made = {(uint32_t)(size > UINT32_MAX ? UINT32_MAX : size), (uint8_t)kind, 0, flags};
+  memcpy(h, &made, sizeof made);
+}
+
+/* Every allocation but a bump in the thread's hole: a new hole, a size class, a large object. */
+static XB_NOINLINE void *alloc_other(xb_gc_kind kind, size_t size) {
   if (size > SIZE_MAX / 2) out_of_memory();
   size_t total = object_total(size);
   xb_gc_hdr *h;
   if (total <= XB_GC_SMALL_MAX) {
     xb_tlh *t = thread_heap();
-    if (total <= room(t->cursor, t->limit)) { /* the fast path: a bump in the hole */
-      h = (xb_gc_hdr *)t->cursor;
-      t->cursor += total;
-    } else {
-      h = alloc_slow(t, total);
-    }
+    h = alloc_slow(t, total);
     t->allocated += total;
     set_start(h);
-    h->flags = 0;
   } else if (total <= heap.classMax) {
     xb_tlh *t = thread_heap();
     unsigned c = heap.classOf[(total - XB_GC_SMALL_MAX - 1) / XB_GC_ALIGN];
     h = alloc_class(t, c);
     t->allocated += heap.classSize[c];
-    h->flags = 0;
   } else {
-    h = alloc_large(size, 0);
+    return labeled(alloc_large(size, 0), kind, size);
   }
-  return labeled(h, kind, size);
+  set_header(h, kind, size, 0);
+  return h + 1;
+}
+
+/* The fast path, a bump in the thread's hole, makes no call (no saved registers, no frame); the rest is alloc_other's.
+ * A size within the small objects' cannot overflow object_total. */
+void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
+  xb_tlh *t = tlh;
+  size_t total = object_total(size);
+  if (size > XB_GC_SMALL_MAX - sizeof(xb_gc_hdr) || !t || total > room(t->cursor, t->limit))
+    return alloc_other(kind, size);
+  xb_gc_hdr *h = (xb_gc_hdr *)t->cursor;
+  t->cursor += total;
+  t->allocated += total;
+  set_start(h);
+  set_header(h, kind, size, 0);
+  return h + 1;
 }
 
 void *xb_gc_try_alloc(xb_gc_kind kind, size_t size) {
