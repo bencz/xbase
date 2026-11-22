@@ -276,10 +276,12 @@ static void fire(xb_ctx *ctx, const xb_item *target, const xb_item *antecedent, 
   case K_RUN:
   case K_ASYNC: { /* scheduled: a continuation runs, a suspended function goes on */
     uint32_t created = S_CREATED;
-    /* Next on this worker, but after a yield: behind the work queued already, which the yield lets run first. */
-    int next = !antecedent || xb_atomic_load32(xb_object_word(antecedent, V_KIND), XB_RELAXED) != K_YIELD;
+    /* Next on this worker (a continuation), but after a yield: behind the work queued already, which the yield lets
+     * run first. */
+    int yield = antecedent && xb_atomic_load32(xb_object_word(antecedent, V_KIND), XB_RELAXED) == K_YIELD;
+    int how = yield ? XB_SUBMIT_QUEUE : XB_SUBMIT_CONTINUE;
     if (xb_atomic_cas32(xb_object_word(target, V_STATE), &created, S_SCHEDULED, XB_ACQ_REL))
-      xb_sched_submit(target->v.p, next);
+      xb_sched_submit(target->v.p, how);
     break;
   }
   case K_WHEN_ALL:
@@ -694,7 +696,7 @@ int xb_task_resume(xb_ctx *ctx, const xb_item *task, int here) {
   if (!here) { /* a worker runs it, on a stack of its own: shared first (a parked task may be local) */
     xb_share(task);
     if (xb_atomic_cas32(xb_object_word(task, V_STATE), &created, S_SCHEDULED, XB_ACQ_REL))
-      xb_sched_submit(task->v.p, xb_sched_in_worker());
+      xb_sched_submit(task->v.p, xb_sched_in_worker() ? XB_SUBMIT_NEXT : XB_SUBMIT_QUEUE);
     return 0;
   }
   if (!xb_atomic_cas32(xb_object_word(task, V_STATE), &created, S_RUNNING, XB_ACQ_REL)) return 0;
@@ -896,7 +898,7 @@ void xbf_TASKRUN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
     return;
   }
   run_task_new(ctx, ret, S_SCHEDULED, argc, argv);
-  xb_sched_submit(ret->v.p, xb_sched_in_worker());
+  xb_sched_submit(ret->v.p, xb_sched_in_worker() ? XB_SUBMIT_NEXT : XB_SUBMIT_QUEUE);
 }
 
 /* TaskFromResult( xValue ): a task completed with xValue. */

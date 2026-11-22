@@ -547,15 +547,18 @@ static void worker_body(xb_ctx *ctx, void *arg) {
 
 static void timers_start(void);
 
-void xb_sched_submit(xb_object *task, int next) {
+void xb_sched_submit(xb_object *task, int how) {
   xb_once(&poolMade, make_pool);
   timers_start(); /* the monitor too */
   xb_atomic_add32(&counts.queued.n, 1, XB_SEQ_CST);
   worker *w = me;
-  if (w && next) {
+  if (w && how != XB_SUBMIT_QUEUE) {
     void *before = xb_atomic_xchgptr(&w->next, task, XB_ACQ_REL);
-    if (!before) return; /* this worker runs it next: waking another would only have it search (a chain spins one) */
-    runq_put(w, before);
+    if (!before && how == XB_SUBMIT_CONTINUE) {
+      if (xb_atomic_load32(&timerIdle, XB_SEQ_CST)) timers_wake(); /* the monitor sees a completer that goes on */
+      return;
+    }
+    if (before) runq_put(w, before);
   } else if (w) {
     runq_put(w, task);
   } else if ((w = feeder()) != NULL) {

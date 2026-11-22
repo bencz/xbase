@@ -5,9 +5,18 @@
 
 #include "core/context.h"
 
-/* Schedules `task` (an object of the Task class, shared, its state scheduled): on the calling worker's own queue, the
- * next it runs when `next`, else on the pool's; workers are woken or started as the work needs. */
-void xb_sched_submit(xb_object *task, int next);
+/* Where xb_sched_submit puts a task: */
+enum {
+  XB_SUBMIT_QUEUE, /* on the calling worker's queue (the pool's from another thread) */
+  XB_SUBMIT_NEXT,  /* the next the calling worker runs; others woken as for any submission (the caller goes on) */
+  XB_SUBMIT_CONTINUE /* the next the calling worker runs, a continuation a completion readied: with nothing displaced,
+                        no worker is woken (the completer usually ends or suspends at once, and one woken would only
+                        search), the monitor only, so that a completer that goes on hands it over once it runs long */
+};
+
+/* Schedules `task` (an object of the Task class, shared, its state scheduled), as `how` says (XB_SUBMIT_*); workers are
+ * woken or started as the work needs. */
+void xb_sched_submit(xb_object *task, int how);
 
 /* Whether the calling thread is a worker running a task. */
 int xb_sched_in_worker(void);

@@ -261,9 +261,11 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   tasks, taking its share of what waits. A worker that finds nothing steals half of another's ring (that worker's next
   task when its ring is empty and its task has run 5 µs: a task that ends soon runs the task it made ready itself,
   without a thread switch), searches 50 µs more while another worker runs (one searcher at a time), then parks; a
-  submission wakes a parked worker, or starts one, while fewer are active than the target and none searches; not one
-  into the worker's next slot that displaced nothing, which that worker runs itself next (a woken worker would only
-  search: a chain of tasks kept one spinning, three times the processor time of `async`). The
+  submission wakes a parked worker, or starts one, while fewer are active than the target and none searches; a
+  continuation a completion readies into the worker's empty next slot wakes none, only the monitor when it is idle
+  (`XB_SUBMIT_CONTINUE`: the completer usually ends or suspends at once and the worker runs it, where a woken worker
+  would only search, which kept one spinning, three times the processor time of `async`; one that goes on hands it
+  over once it runs long). A `TaskRun()` from a task wakes as any submission: its parent goes on. The
   counters every worker changes (active, searching, queued and ended tasks) each sit on a cache line of their own
   (`XB_CACHE_LINE`, `core/sync.h`), so that changing one does not slow the readers of another.
 - **Blocking handoff**: every operation that may block the thread runs through the runtime: one that waits (`Mutex`
