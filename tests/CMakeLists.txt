@@ -267,6 +267,7 @@ foreach(t ${XB_PLATFORM_TESTS})
   endif()
   add_executable(p_${name} platform/${t} ${prg})
   xb_target_warnings(p_${name})
+  xb_exact_doubles(p_${name} ${XB_TARGET_X86_32}) # the runtime's inline arithmetic (xbmath.h) as the runtime has it
   if(MSVC)
     target_compile_options(p_${name} PRIVATE /volatile:ms)
   endif()

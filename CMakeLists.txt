@@ -58,6 +58,13 @@ endif()
 if(XB_TARGET_C_FLAGS AND NOT XB_TARGET)
   message(FATAL_ERROR "XB_TARGET_C_FLAGS needs the target named with -DXB_TARGET=<triple>")
 endif()
+# The runtime's target is 32-bit x86: named, or the host's when none is (xb_exact_doubles: the runtime and the tests
+# that include its inline arithmetic).
+set(XB_TARGET_X86_32 OFF)
+if(XB_TARGET MATCHES "^i[3-6]86" OR
+   (NOT XB_TARGET AND CMAKE_C_SIZEOF_DATA_PTR EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86)$"))
+  set(XB_TARGET_X86_32 ON)
+endif()
 
 # Compiles an xBase source with xbc into an object file for XB_TARGET (extra
 # xbc options in ARGN); used by the runtime, the tests and the benchmarks. The standard headers are named (-I): the
