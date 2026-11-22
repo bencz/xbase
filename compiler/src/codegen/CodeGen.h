@@ -185,6 +185,8 @@ private:
   llvm::Value *elemsOf(llvm::Value *state);
   llvm::LoadInst *objectState(llvm::Value *obj, bool fromItem = true);
   void recordIfOld(llvm::Value *obj, llvm::Value *state);
+  llvm::Value *needsRecord(llvm::Value *state);
+  bool mayReferToHeap(const xir::Value *v);
   llvm::Value *isLocal(llvm::Value *obj, bool fromItem = true);
   VarTarget varTarget(const xir::Var &v, xir::Access a, bool load = false);
   llvm::Value *loadVar(const xir::Var &v, xir::Access a, llvm::Value *shadow, llvm::BasicBlock *unwind);
@@ -232,7 +234,8 @@ private:
   void sendInPlace(const xir::Instruction &i, llvm::Value *argv, llvm::Value *d, llvm::GlobalVariable *cache,
                    const std::function<void()> &slowSend);
   llvm::Value *objectVariable(llvm::Value *obj, llvm::Value *slot, llvm::BasicBlock *shared, llvm::Value *&state);
-  void storeObjectVariable(llvm::Value *obj, llvm::Value *var, llvm::Value *state, const Words &value);
+  void storeObjectVariable(llvm::Value *obj, llvm::Value *var, llvm::Value *state, const xir::Value *v,
+                           const Words &value);
   void copyObjectVariable(llvm::Value *d, llvm::Value *var);
   void emitObjectAccess(const xir::Instruction &i);
   llvm::Value *genFrame(llvm::Value *gen, llvm::BasicBlock *slow, llvm::Value *&state);

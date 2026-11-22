@@ -215,8 +215,16 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   }
   Value *isDouble = ConstantInt::get(i32_, XB_T_DOUBLE);
   if (mayDouble) {
+    // Operands read from memory or computed that may be two integers and may be two doubles are rarely one of each:
+    // the path of an integer with a double is then cold (a loop's generic copy ends such an iteration, LoopSplit.h),
+    // which keeps its conversions and bounds out of the fast loop. It stays as fast where it is the only way to a
+    // double, where strings may come, and for a block parameter: a value carried around a loop changes from an
+    // integer to a double once (s := 0, then s := s + x of doubles), and every entry of the loop would leave it.
     BasicBlock *mixed = newBlock("mixed");
-    b_.CreateCondBr(b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble)), dblBB, mixed);
+    Value *doubles = b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble));
+    bool carried = xir::asParam(i.operand(0)) || xir::asParam(i.operand(1));
+    if (mayInt && !mayStrings && !carried) branchLikely(doubles, dblBB, mixed);
+    else b_.CreateCondBr(doubles, dblBB, mixed);
     b_.SetInsertPoint(mixed);
   }
   // Both operands are read before `d`, which may be one of them, is written.
@@ -496,7 +504,7 @@ void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, Glob
     BasicBlock *set = newBlock("send.set");
     b_.SetInsertPoint(set);
     Value *var = objectVariable(obj, slot, slow, state);
-    storeObjectVariable(obj, var, state, value);
+    storeObjectVariable(obj, var, state, i.operand(1), value);
     storeWords(d, value.header, value.payload);
     b_.CreateBr(join);
     sw->addCase(ConstantInt::get(cast<IntegerType>(intPtrTy_), XB_SEND_SET), set);
@@ -531,10 +539,11 @@ Value *CodeGen::objectVariable(Value *obj, Value *slot, BasicBlock *shared, Valu
   return b_.CreateInBoundsGEP(itemTy_, vars, b_.CreateZExtOrTrunc(slot, i64_), "var");
 }
 
-// Stores the words of a value into a local object's variable, then the write barrier on its state byte.
-void CodeGen::storeObjectVariable(Value *obj, Value *var, Value *state, const Words &value) {
+// Stores the words of `v` (`value`) into a local object's variable, then the write barrier on its state byte when `v`
+// may refer to a heap object.
+void CodeGen::storeObjectVariable(Value *obj, Value *var, Value *state, const xir::Value *v, const Words &value) {
   storeWords(var, value.header, value.payload);
-  recordIfOld(obj, state);
+  if (mayReferToHeap(v)) recordIfOld(obj, state);
 }
 
 // Copies a local object's variable into `d` as copyItem copies an item, word by word: an assignment's two 8-byte
@@ -560,7 +569,7 @@ void CodeGen::emitObjectAccess(const xir::Instruction &i) {
   if (i.op == xir::Op::ObjectGet) {
     copyObjectVariable(d, var);
   } else {
-    storeObjectVariable(obj, var, state, value);
+    storeObjectVariable(obj, var, state, i.operand(1), value);
     storeWords(d, value.header, value.payload);
   }
   b_.CreateBr(join);
@@ -892,15 +901,18 @@ void CodeGen::emitIndexSet(const xir::Instruction &i) {
   }
   b_.CreateBr(join);
 
+  // The barrier (xb_gc_write_item) for a heap value stored into an old array not recorded whole yet, tested on the
+  // state byte read before the store (no safepoint between); none when the value's types refer to no heap object.
   b_.SetInsertPoint(items);
   copyItem(arrayElement(array, pos), v);
-  Value *type = typeOf(i.operand(2), v);
-  Value *heap = b_.CreateICmpULE(b_.CreateSub(type, ConstantInt::get(i32_, XB_T_HEAP_FIRST)),
-                                 ConstantInt::get(i32_, XB_T_HEAP_LAST - XB_T_HEAP_FIRST));
-  BasicBlock *barrier = newBlock("barrier");
-  b_.CreateCondBr(heap, barrier, join);
-  b_.SetInsertPoint(barrier);
-  b_.CreateCall(rtWriteItem_, {array, b_.CreateZExtOrTrunc(pos, intPtrTy_)});
+  if (mayReferToHeap(i.operand(2))) {
+    Value *type = typeOf(i.operand(2), v);
+    Value *heap = b_.CreateICmpULE(b_.CreateSub(type, ConstantInt::get(i32_, XB_T_HEAP_FIRST)),
+                                   ConstantInt::get(i32_, XB_T_HEAP_LAST - XB_T_HEAP_FIRST));
+    BasicBlock *barrierJoin = beginUnlikely(b_.CreateAnd(needsRecord(state), heap), "barrier");
+    b_.CreateCall(rtWriteItem_, {array, b_.CreateZExtOrTrunc(pos, intPtrTy_)});
+    endUnlikely(barrierJoin);
+  }
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   b_.CreateCall(rtIndexSet_, {fnCtx_, callArg(base, 0), callArg(idx, 1), callArg(v, 2)});

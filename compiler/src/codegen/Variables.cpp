@@ -103,10 +103,21 @@ Value *CodeGen::isLocalState(Value *state) {
 // The barrier's test (xb_gc_write in xbrt.h) on the state byte `state` of `obj`, read before its store: an old object
 // not yet recorded is recorded.
 void CodeGen::recordIfOld(Value *obj, Value *state) {
-  Value *bits = b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
-  BasicBlock *join = beginUnlikely(b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD)), "gc.old");
+  BasicBlock *join = beginUnlikely(needsRecord(state), "gc.old");
   b_.CreateCall(rtGcRemember_, {obj});
   endUnlikely(join);
+}
+
+// xb_gc_needs_record (xbrt.h) on a state byte: the object is old and not recorded yet.
+Value *CodeGen::needsRecord(Value *state) {
+  Value *bits = b_.CreateAnd(state, ConstantInt::get(i8_, XB_GC_STATE_OLD | XB_GC_STATE_RECORDED));
+  return b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD));
+}
+
+// Whether `v` may refer to a heap object, as far as type inference knows: a store of it needs the write barrier.
+bool CodeGen::mayReferToHeap(const xir::Value *v) {
+  xir::TypeSet t = plan_->types().of(v);
+  return t == 0 || (t & xir::kHeapTypes) != 0;
 }
 
 // Where a load (`load`) or store of the variable reaches its value (see xir::Access). `local` is the item in place,

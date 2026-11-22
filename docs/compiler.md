@@ -620,12 +620,18 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   and `*` of two numbers of which one is a double, in doubles (an integer beyond 2^53 in magnitude, which a double
   cannot hold exactly, goes to the runtime, so that every target converts it as the runtime does), with the decimals the
   runtime gives (the larger for `+` and `-`, the sum for `*`); two doubles, the usual case of these paths, take a path
-  of their own (their bits and decimals as they are, no test of exactness); the comparisons of two numbers (integers
-  exactly, others as doubles with IEEE 754's comparisons, as `xb_compare` and `xb_order_is` make them); `for.test` with
-  an integer counter, limit and step; `index` and `index.set` of a local array with an index within it, an integer or a
-  truncated double below 2^63 (the array's `len` and `data`, `xb_array` in `xbrt.h`). One test of the array's state byte
-  (`isLocalItems`: neither shared nor of a compact form, the usual case) leads to the path of items, where the store
-  calls `xb_gc_write_item` only for a value of a heap type (`xb_type_is_heap`); a shared array's items are the runtime's
+  of their own (their bits and decimals as they are, no test of exactness). Of operands that may be two integers and
+  may be two doubles, the path of an integer with a double is cold (`splitColdLoopPaths` leaves the fast loop for it),
+  unless strings may come too or an operand is a block parameter: a value carried around a loop changes from an integer
+  to a double once (`s := 0`, then `s := s + x` of doubles), and each entry of the loop would leave it; the comparisons
+  of two numbers (integers exactly, others as doubles with IEEE 754's comparisons, as `xb_compare` and `xb_order_is`
+  make them); `for.test` with an integer counter, limit and step; `index` and `index.set` of a local array with an index
+  within it, an integer or a truncated double below 2^63 (the array's `len` and `data`, `xb_array` in `xbrt.h`). One
+  test of the array's state byte (`isLocalItems`: neither shared nor of a compact form, the usual case) leads to the
+  path of items, where the store calls `xb_gc_write_item` only for a value of a heap type (`xb_type_is_heap`) into an
+  array that is old and not recorded (`needsRecord`, `xb_gc_needs_record` on the state byte read before the store), and
+  makes no test at all when type inference finds the value refers to no heap object (`mayReferToHeap`; so do
+  `object.set` and a send's in-place write, `storeObjectVariable`); a shared array's items are the runtime's
   to read and write whole, and an index out of bounds calls the runtime, which raises the error. A local array of a
   compact form ([runtime.md](runtime.md#values)) has paths of its own, after a branch that is no cold path (`kFormTest`,
   below), for one form each, which one test of the form (a compact form is a local array's) selects: a read inlines the
