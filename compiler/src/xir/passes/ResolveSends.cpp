@@ -77,8 +77,10 @@ std::unique_ptr<Instruction> resolved(const ClassModel &model, int32_t c, const 
 // what the runtime answers itself, the class's Init sent from the class with the arguments, then the object: a call
 // of that method (its result unused) when it is one the class reaches, nothing when no member answers Init; the send's
 // value is the object. False, the send kept, for anything else (an Init variable, a scope only a friend passes);
-// `erased` tells that the send left the block with nothing in its place.
-bool newByInit(const ClassModel &model, int32_t c, BasicBlock *b, size_t k, bool &erased) {
+// `erased` tells that the send left the block with nothing in its place. The send goes to `removed`, kept to the end of
+// the pass: ClassInfo knows values by address, which a new instruction must not take over.
+bool newByInit(const ClassModel &model, int32_t c, BasicBlock *b, size_t k, bool &erased,
+               std::vector<std::unique_ptr<Instruction>> &removed) {
   Instruction &send = *b->insts[k];
   if (send.message != "NEW" || !model.answersByDefault(c, "NEW")) return false;
   Value *object = send.operand(0);
@@ -91,6 +93,7 @@ bool newByInit(const ClassModel &model, int32_t c, BasicBlock *b, size_t k, bool
   send.replaceAllUsesWith(object);
   send.dropOperands();
   erased = !made;
+  removed.push_back(std::move(b->insts[k]));
   if (made) b->insts[k] = std::move(made);
   else b->insts.erase(b->insts.begin() + (std::ptrdiff_t)k);
   return true;
@@ -161,6 +164,7 @@ bool resolveSends(Module &m, Function &f) {
   ClassModel model(m);
   CFG cfg(f);
   ClassInfo classes(f, cfg, model);
+  std::vector<std::unique_ptr<Instruction>> removed; // freed at the end: ClassInfo knows values by address
   bool changed = false;
   for (BasicBlock *b : cfg.order()) {
     for (size_t k = 0; k < b->insts.size(); ++k) {
@@ -173,7 +177,7 @@ bool resolveSends(Module &m, Function &f) {
       if (c == kNoClass) continue;
       std::optional<xb_member> member = model.resolve(c, i.classIndex, i.superSend, i.message);
       bool erased = false;
-      if (!member && !i.superSend && !fromMethod && newByInit(model, c, b, k, erased)) {
+      if (!member && !i.superSend && !fromMethod && newByInit(model, c, b, k, erased, removed)) {
         if (erased) --k; // the next instruction is at k now (unsigned: wraps, then back to 0)
         changed = true;
         continue;
@@ -183,6 +187,7 @@ bool resolveSends(Module &m, Function &f) {
       if (!made) continue;
       i.replaceAllUsesWith(made.get());
       i.dropOperands();
+      removed.push_back(std::move(b->insts[k]));
       b->insts[k] = std::move(made);
       changed = true;
     }
