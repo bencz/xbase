@@ -146,7 +146,8 @@ endif()
 # The runtime's module file (docs/projects.md), which xbc's link step reads: the archive, the system libraries, the
 # linker and its flags. The build tree's beside the archive, with the C compiler that built the runtime and the flags
 # it links programs with (the target's, the toolchain's own: a sanitizer, a sysroot); the installed one in the modules'
-# folder, with the compiler's name (found where the program is built) and the target's flags only.
+# folder, with the compiler's name (found where the program is built), or its path in the toolchain installed with the
+# runtime (XB_BUNDLE_TOOLCHAIN), and the target's flags only.
 foreach(define XB_ABI_VERSION XB_MODULE_FILE_FORMAT)
   file(STRINGS include/xbrt.h line REGEX "^#define ${define} [0-9]+u?$")
   string(REGEX MATCH "[0-9]+" ${define} "${line}")
@@ -155,6 +156,9 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS include/xbrt.h)
 string(TOUPPER ${XB_RUNTIME_MODULE} XB_RUNTIME_LIBRARY)
 set(XB_INSTALLED_FLAGS ${XB_TARGET_C_FLAGS})
 if(MSVC)
+  if(XB_BUNDLE_TOOLCHAIN)
+    message(FATAL_ERROR "XB_BUNDLE_TOOLCHAIN installs a GNU-style toolchain (a C compiler driver), not the MSVC tools")
+  endif()
   set(XB_LINK_STYLE msvc)
   set(XB_LINKER link)
   set(XB_INSTALLED_LINKER link)
@@ -163,6 +167,18 @@ else()
   set(XB_LINK_STYLE gnu)
   set(XB_LINKER ${CMAKE_C_COMPILER})
   get_filename_component(XB_INSTALLED_LINKER ${CMAKE_C_COMPILER} NAME)
+  if(XB_BUNDLE_TOOLCHAIN)
+    cmake_path(IS_PREFIX XB_BUNDLE_TOOLCHAIN "${CMAKE_C_COMPILER}" NORMALIZE holds)
+    if(NOT holds)
+      message(FATAL_ERROR "XB_BUNDLE_TOOLCHAIN (${XB_BUNDLE_TOOLCHAIN}) does not hold the C compiler "
+                          "(${CMAKE_C_COMPILER}), which programs link with")
+    endif()
+    set(XB_INSTALLED_LINKER ${CMAKE_C_COMPILER})
+    cmake_path(RELATIVE_PATH XB_INSTALLED_LINKER BASE_DIRECTORY ${XB_BUNDLE_TOOLCHAIN})
+    file(RELATIVE_PATH XB_INSTALLED_LINKER /prefix/${XB_INSTALL_MODULES}
+         /prefix/${XB_INSTALL_TOOLCHAIN}/${XB_INSTALLED_LINKER})
+    install(DIRECTORY ${XB_BUNDLE_TOOLCHAIN}/ DESTINATION ${XB_INSTALL_TOOLCHAIN} USE_SOURCE_PERMISSIONS)
+  endif()
   if(CMAKE_C_COMPILER_TARGET)
     list(APPEND XB_INSTALLED_FLAGS --target=${CMAKE_C_COMPILER_TARGET})
   endif()

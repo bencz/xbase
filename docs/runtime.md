@@ -1759,7 +1759,8 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   token `GetEnumerator` was given and the task of its `MoveNextAsync` that waits (read and set under the channel's lock:
   a second one while it waits raises 9035). Their error codes are xbase's own: 9016 to 9031, and 9035.
 
-- Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`): threads (`xb_thread_start` with a
+- Platform layer (`platform/platform.h`, implemented in `posix/` and `win32/`, which needs Windows 8 or later and says
+  so to the system's headers, `_WIN32_WINNT`, whatever version a toolchain assumes): threads (`xb_thread_start` with a
   reserved stack size, rounded up to the system's page and minimum; `xb_thread_join`; `xb_thread_detach`, the thread and
   its starter each letting go of its record, the last one freeing it; `xb_platform_threads_wait`, which the program's
   `main` calls last: on Windows it waits until every detached thread has ended at the system's level (their handles

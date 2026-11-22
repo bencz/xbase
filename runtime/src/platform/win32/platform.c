@@ -1,4 +1,8 @@
 #define _CRT_RAND_S /* rand_s, from the system's source of randomness */
+/* The oldest Windows whose functions the runtime calls: 8 (GetCurrentThreadStackLimits, GetActiveProcessorCount), not
+   the version a toolchain assumes (llvm-mingw's headers: 7). */
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
 #include "platform/os.h"
 
 #include <fcntl.h>

@@ -78,11 +78,19 @@ std::optional<ModuleFile> findModuleFile(const std::string &name, const std::vec
   return std::nullopt;
 }
 
-std::string archivePath(const ModuleFile &m) {
+namespace {
+
+// A relative path a module file gives is from the module file's folder.
+std::string fromModuleFile(const ModuleFile &m, const std::string &path) {
+  if (llvm::sys::path::is_absolute(path)) return path;
   llvm::SmallString<256> p(llvm::sys::path::parent_path(m.path));
-  llvm::sys::path::append(p, m.archive);
+  llvm::sys::path::append(p, path);
   return std::string(p);
 }
+
+} // namespace
+
+std::string archivePath(const ModuleFile &m) { return fromModuleFile(m, m.archive); }
 
 bool linkProgram(const std::string &output, const std::vector<std::string> &objects,
                  const std::vector<ModuleFile> &libraries,
@@ -91,8 +99,11 @@ bool linkProgram(const std::string &output, const std::vector<std::string> &obje
     error = runtime.path + ": names no linker";
     return false;
   }
+  // A name is looked up in the system's program path; a relative path is from the module file's folder (a toolchain
+  // installed with the runtime).
   std::string linker = runtime.linker;
-  if (!llvm::sys::path::is_absolute(linker)) {
+  if (llvm::sys::path::has_parent_path(linker)) linker = fromModuleFile(runtime, linker);
+  else {
     auto found = llvm::sys::findProgramByName(linker);
     if (!found) {
       error = "cannot find the linker '" + linker + "' (" + runtime.path + ")";

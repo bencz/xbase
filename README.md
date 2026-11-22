@@ -28,41 +28,37 @@ build whose toolchain builds `xbc` for another machine cannot build the runtime 
 ## Packages
 
 `cmake --install build --prefix <dir>` installs `xbc`, the standard headers (`std.ch`, `fileio.ch`, ...) with the
-runtime's C headers (`xbrt.h`), the runtime library and the documentation. On Windows it makes the package a GitHub
-release carries (built with MSVC and with MinGW-w64 by `.github/workflows/release.yml`); elsewhere it follows the
-system's places (with the default prefix, `/usr/local`):
+runtime's C headers (`xbrt.h`), the runtime library, the libraries and the documentation. On Windows it makes the
+package a GitHub release carries (`.github/workflows/release.yml`); elsewhere it follows the system's places (with the
+default prefix, `/usr/local`):
 
 | | Windows package (`--prefix <dir>/xbc`) | Linux, macOS, other systems |
 |---|---|---|
 | `xbc` | `bin/` | `bin/` |
 | headers | `include/` | `include/xbase/` |
-| runtime library | `libs/` (`xbrt.lib` from MSVC, `libxbrt.a` from MinGW) | `lib/` or `lib64/` (`libxbrt.a`) |
+| runtime library | `libs/` (`libxbrt.a`) | `lib/` or `lib64/` (`libxbrt.a`) |
 | module files of the runtime and of the libraries (`xbrt.xbm`, `cli.xbm`), the libraries' archives | `libs/` | `lib/xbase/` or `lib64/xbase/` |
+| the toolchain programs link with (`-DXB_BUNDLE_TOOLCHAIN`) | `toolchain/` | `lib/xbase/toolchain/` or `lib64/xbase/toolchain/` |
 | documentation | `docs/`, with `README.md` and `LICENSE` at the top | `share/doc/xbase/` |
 
-`xbc` finds the standard headers by the path from its own folder to where the install put them: a program needs no `-I`
-for them (on Linux, `cc hello.o -lxbrt -lm -lpthread` links a program, the library being in `/usr/local/lib` or
-`lib64`). A package is built with `-DXB_SOURCE_INCLUDE=OFF` (its `xbc` then holds no path to the source tree it came
-from) and, where LLVM has a shared library, `-DXB_LLVM_STATIC=ON` (its `xbc` needs no LLVM DLL). With the MSVC package,
-from a Visual Studio command prompt:
+`xbc` finds the standard headers and the module files by the path from its own folder to where the install put them: a
+program needs no `-I` and no `-L` for them. A package is built with `-DXB_SOURCE_INCLUDE=OFF` (its `xbc` then holds no
+path to the source tree it came from) and, where LLVM has a shared library, `-DXB_LLVM_STATIC=ON` (its `xbc` needs no
+LLVM DLL). The runtime's module file names the C compiler programs link with: by default the name of the one that built
+the runtime, found on the path; `-DXB_BUNDLE_TOOLCHAIN=<folder>` installs the toolchain whose C compiler built the
+runtime with it instead, and names that compiler by its path in the install. The Windows package does so with
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (clang, lld, MinGW-w64's C runtime for UCRT; `xbc` itself is built
+with MSYS2's MinGW-w64 GCC), so that on a machine with nothing else installed:
 
 ```bat
-xbc\bin\xbc -c hello.prg -o hello.obj
-link hello.obj xbc\libs\xbrt.lib shell32.lib /out:hello.exe
+xbc\bin\xbc hello.prg
+hello.exe
 ```
 
-With the MinGW-w64 package:
-
-```sh
-xbc/bin/xbc -c hello.prg -o hello.o
-gcc hello.o xbc/libs/libxbrt.a -lshell32 -o hello.exe
-```
-
-`tests/package` builds a program that way with CMake (`-DXBASE_ROOT=<dir>/xbc`), as the release workflow does on
-each package before it attaches it (and the tests do on an install into the build folder). Each package's `xbc`
-cross-compiles to the targets its LLVM was built with: the MSVC one to those of the LLVM project's Windows release
-(x86, ARM, AArch64, RISC-V, WebAssembly, BPF, NVPTX), the MinGW one to all of MSYS2's (PowerPC, MIPS, SystemZ, SPARC,
-LoongArch, ... too); `xbc --print-targets` lists them.
+`tests/package` builds programs from an install with CMake (`-DXBASE_ROOT=<dir>/xbc`), as the release workflow does on
+the package before it attaches it (and the tests do on an install into the build folder), and the workflow also builds
+and runs one with no compiler on the path. The package's `xbc` cross-compiles to the targets MSYS2's LLVM was built with
+(x86, ARM, AArch64, RISC-V, PowerPC, MIPS, SystemZ, SPARC, LoongArch, ...; `xbc --print-targets` lists them).
 
 ## Test
 

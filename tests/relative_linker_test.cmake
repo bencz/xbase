@@ -1,0 +1,36 @@
+# A runtime module file whose linker is a relative path (a toolchain installed with the runtime, XB_BUNDLE_TOOLCHAIN):
+# xbc runs the linker from the module file's folder, not from the folder it runs in (where ../tools is no folder). The
+# module file is the build's (RUNTIME, its archive given by its full path) with `linker = ../tools/link`, a script that
+# notes its run and runs the build's linker. XBC, RUNTIME, TARGET (xbc's target or empty), SUFFIX (the target's program
+# suffix), WORKDIR.
+set(dir ${WORKDIR}/relative_linker)
+file(REMOVE_RECURSE ${dir})
+file(MAKE_DIRECTORY ${dir}/libs ${dir}/tools ${dir}/run/deep)
+file(READ ${RUNTIME} module)
+string(REGEX MATCH "\nlinker = ([^\n]*)" found "${module}")
+set(linker ${CMAKE_MATCH_1})
+string(REGEX MATCH "\narchive = ([^\n]*)" found "${module}")
+get_filename_component(runtime_dir ${RUNTIME} DIRECTORY)
+set(archive ${runtime_dir}/${CMAKE_MATCH_1})
+string(REGEX REPLACE "\nlinker = [^\n]*" "\nlinker = ../tools/link" module "${module}")
+string(REGEX REPLACE "\narchive = [^\n]*" "\narchive = ${archive}" module "${module}")
+file(WRITE ${dir}/libs/xbrt.xbm "${module}")
+file(WRITE ${dir}/tools/link "#!/bin/sh\necho ran > '${dir}/tools/ran'\nexec '${linker}' \"$@\"\n")
+file(CHMOD ${dir}/tools/link PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+file(WRITE ${dir}/hello.prg "PROCEDURE Main()\n   ? 'linked'\nRETURN\n")
+set(target "")
+if(TARGET)
+  set(target --target=${TARGET})
+endif()
+execute_process(COMMAND ${XBC} ${dir}/hello.prg -L${dir}/libs -o ${dir}/hello ${target}
+                WORKING_DIRECTORY ${dir}/run/deep RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(NOT rc EQUAL 0)
+  message(FATAL_ERROR "xbc failed:\n${out}${err}")
+endif()
+if(NOT EXISTS ${dir}/tools/ran)
+  message(FATAL_ERROR "the module file's linker (../tools/link) did not run")
+endif()
+execute_process(COMMAND ${dir}/hello${SUFFIX} RESULT_VARIABLE rc OUTPUT_VARIABLE out)
+if(NOT rc EQUAL 0 OR NOT out MATCHES "linked")
+  message(FATAL_ERROR "the program printed: ${out}")
+endif()

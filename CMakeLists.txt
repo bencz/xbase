@@ -117,6 +117,17 @@ else()
   file(RELATIVE_PATH XB_MODULES_FROM_BIN ${CMAKE_INSTALL_FULL_BINDIR} ${CMAKE_INSTALL_FULL_LIBDIR}/xbase)
 endif()
 
+# A toolchain installed with the runtime, so that the install links programs with nothing else installed (the Windows
+# package's llvm-mingw): XB_BUNDLE_TOOLCHAIN, the folder of the toolchain whose C compiler builds the runtime, goes into
+# XB_INSTALL_TOOLCHAIN, and the installed runtime's module file names that compiler by its path from the module files'
+# folder (runtime/CMakeLists.txt).
+set(XB_BUNDLE_TOOLCHAIN "" CACHE PATH "the C compiler's toolchain folder, installed with the runtime to link programs")
+if(WIN32)
+  set(XB_INSTALL_TOOLCHAIN toolchain)
+else()
+  set(XB_INSTALL_TOOLCHAIN ${CMAKE_INSTALL_LIBDIR}/xbase/toolchain)
+endif()
+
 # The runtime's name: its archive's (the xbrt target), its module file's (<name>.xbm), which xbc's link step looks for.
 set(XB_RUNTIME_MODULE xbrt)
 add_subdirectory(runtime)

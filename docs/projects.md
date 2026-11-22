@@ -118,17 +118,18 @@ system = m
 function = COMMANDLINE
 ```
 
-The same syntax as project files, without platform qualifiers. `format` (`XB_MODULE_FILE_FORMAT` in `xbrt.h`),
-`library` and `archive` (a path from the module file's folder) are required; `abi` is the runtime ABI the library was
-compiled for (`XB_ABI_VERSION`), `level` its modules' level, `target` its triple, `stamp` its stamp in hexadecimal,
-`uses` the libraries it uses, `system` the system libraries it needs, and one `function` line for each public
-function. `library`, `uses` and `function` hold names. The runtime's module file (`xbrt.xbm`, written by the build:
-`runtime/CMakeLists.txt`) has `library = XBRT`, the archive, and how programs link: `linker` (the C compiler that built
-the runtime, a full path in the build tree and its name in an install; `link` for the MSVC tools), `style` (`gnu` or
-`msvc`), `flags` and `system` (`m`, the threads library, `atomic` where needed; `shell32` on Windows). Its `flags` are
-the target's C flags (`XB_TARGET_C_FLAGS`, and `--target` for a toolchain given a target); in the build tree also the
-toolchain's own (`CMAKE_C_FLAGS`, `CMAKE_EXE_LINKER_FLAGS`, the sysroot), so that programs link like the build's (a
-sanitizer's runtime). Without `target`, it is the runtime of `xbc`'s default target.
+The same syntax as project files, without platform qualifiers. `format` (`XB_MODULE_FILE_FORMAT` in `xbrt.h`), `library`
+and `archive` (a path from the module file's folder) are required; `abi` is the runtime ABI the library was compiled for
+(`XB_ABI_VERSION`), `level` its modules' level, `target` its triple, `stamp` its stamp in hexadecimal, `uses` the
+libraries it uses, `system` the system libraries it needs, and one `function` line for each public function. `library`,
+`uses` and `function` hold names. The runtime's module file (`xbrt.xbm`, written by the build: `runtime/CMakeLists.txt`)
+has `library = XBRT`, the archive, and how programs link: `linker` (the C compiler that built the runtime, a full path
+in the build tree and its name in an install, or with `XB_BUNDLE_TOOLCHAIN` its path from the module file's folder in
+the toolchain installed with the runtime; `link` for the MSVC tools), `style` (`gnu` or `msvc`), `flags` and `system`
+(`m`, the threads library, `atomic` where needed; `shell32` on Windows). Its `flags` are the target's C flags
+(`XB_TARGET_C_FLAGS`, and `--target` for a toolchain given a target); in the build tree also the toolchain's own
+(`CMAKE_C_FLAGS`, `CMAKE_EXE_LINKER_FLAGS`, the sysroot), so that programs link like the build's (a sanitizer's
+runtime). Without `target`, it is the runtime of `xbc`'s default target.
 
 `--lib=<name>` looks for `<name>.xbm` (lower case), then `<name>/<name>.xbm`, in the `-L` folders and `libdirs` in
 order, then in the install's modules folder, by the path from `xbc`'s folder (`XB_MODULES_FROM_BIN`: `../libs` in a
@@ -140,13 +141,13 @@ The libraries a library uses are looked up likewise; each library comes before t
 
 ## The link step
 
-Linking a program writes its object to a temporary file, then runs the linker the runtime's module file names, found in
-the system's program path unless it is a full path: with the `gnu` style `<linker> <flags> -o <program> <objects...>
-<archives...> <runtime archive> -l<system>...`, with `msvc` `link /nologo /OUT:<program> <objects...> <archives...>
-<runtime archive> <system>.lib... <flags>`. The system libraries are the libraries', the project's and the runtime's,
-each once, in the place of its last mention. A failed link reports the linker's own messages and `xbc` fails. The MSVC
-tools are found only from a developer prompt, so the build does not link programs with them (no library, project or
-sample test there).
+Linking a program writes its object to a temporary file, then runs the linker the runtime's module file names (a name
+found in the system's program path, a relative path from the module file's folder, `fromModuleFile` in `Link.cpp`): with
+the `gnu` style `<linker> <flags> -o <program> <objects...> <archives...> <runtime archive> -l<system>...`, with `msvc`
+`link /nologo /OUT:<program> <objects...> <archives...> <runtime archive> <system>.lib... <flags>`. The system libraries
+are the libraries', the project's and the runtime's, each once, in the place of its last mention. A failed link reports
+the linker's own messages and `xbc` fails. The MSVC tools are found only from a developer prompt, so the build does not
+link programs with them (no library, project or sample test there).
 
 ## Tests and folders
 

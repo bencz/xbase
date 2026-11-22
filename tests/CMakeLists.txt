@@ -382,6 +382,13 @@ add_test(NAME project.library_order
 add_test(NAME project.driver_output
   COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DTARGET=${XB_TARGET} -DSUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
           -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/driver_output_test.cmake)
+# A runtime module file naming its linker by a relative path (relative_linker_test.cmake; the linker a shell script).
+if(NOT WIN32)
+  add_test(NAME project.relative_linker
+    COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DRUNTIME=$<TARGET_FILE_DIR:xbrt>/${XB_RUNTIME_MODULE}.xbm
+            -DTARGET=${XB_TARGET} -DSUFFIX=${CMAKE_EXECUTABLE_SUFFIX} -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/relative_linker_test.cmake)
+endif()
 # A library's stamp (library_stamp_test.cmake).
 add_test(NAME project.library_stamp
   COMMAND ${CMAKE_COMMAND} -DXBC=$<TARGET_FILE:xbc> -DTARGET=${XB_TARGET} -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}
