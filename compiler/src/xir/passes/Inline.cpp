@@ -61,11 +61,11 @@ bool inlinable(const Function &callee, const std::vector<BasicBlock *> &body, si
 bool inlinableCall(const Instruction &call) { return call.op == Op::Call && !call.hasRest(); }
 
 // The arguments an inlined body holds while it runs, as the callee's parameters would hold them, in their positions (a
-// release of a parameter's LOCAL lets go of its own): a codeblock literal, which folding may leave unmade, is NIL
-// there; constants hold nothing (none at the end).
+// release of a parameter's LOCAL lets go of its own): one whose hold nothing sees (heldUnseen) is NIL there; constants
+// hold nothing (none at the end).
 std::vector<Value *> held(Builder &builder, const std::vector<Value *> &args) {
   std::vector<Value *> out;
-  for (Value *a : args) out.push_back(asInstruction(a, Op::MakeBlock) ? builder.nil() : a);
+  for (Value *a : args) out.push_back(heldUnseen(a) ? builder.nil() : a);
   while (!out.empty() && asConstant(out.back())) out.pop_back();
   return out;
 }

@@ -1,0 +1,10 @@
+
+elements:          1        20       200         2
+sum:    3003000
+row:         99 same
+written:          1        20         3
+counted:        107         32
+bound:       1132 Bound error
+zero:       1132
+blocks:        275
+changed by a handler:          0        99

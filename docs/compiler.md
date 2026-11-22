@@ -836,16 +836,17 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   the caller still uses it or another parameter, of that body or of an outer one, holds it too (a value so held keeps a
   slot of its own: no block parameter shares it, no direct call or group it is passed to while the body runs lets go of
   it, and a load of it is not served by its variable, which the body may write); a codeblock literal is passed as `NIL`
-  (folding may leave it unmade). Once that release is on every path, later ones let go of the argument where it is dead
-  (a copy kept it). A body that reads its arguments as received keeps them as received, as the function called would. A
-  `frame.release` of the function's own parameter that no load reads any more (its `move` gone) clears the parameter's
-  slot. The bodies open where each block starts are those of the `inline.enter`s on the way to it (`openInlineBodies` in
-  `xir/Analysis`: an inlined body is entered at its start and left at its end). That store of the line counts as one
-  `placeLines` made. `inline.leave` first sets to `NIL` the slots of the body's values that are dead there and that no
-  live value holds (`FramePlan::clearsAt`: the units of each body's values, argument lists and received arguments, found
-  by a forward walk with one set per open body, `walkBodies`): as when a callee returns, an object only they held can be
-  collected (and its destructor run). A body left without a frame (nothing in it can see the call stack) has no
-  `inline.leave` and clears nothing there: its values are like the function's own.
+  (folding may leave it unmade), and so is an array literal whose element reads `fold-constants` replaced, when its
+  elements' lifetimes cannot be seen ([xir.md](xir.md#passes)). Once that release is on every path, later ones let go of
+  the argument where it is dead (a copy kept it). A body that reads its arguments as received keeps them as received, as
+  the function called would. A `frame.release` of the function's own parameter that no load reads any more (its `move`
+  gone) clears the parameter's slot. The bodies open where each block starts are those of the `inline.enter`s on the way
+  to it (`openInlineBodies` in `xir/Analysis`: an inlined body is entered at its start and left at its end). That store
+  of the line counts as one `placeLines` made. `inline.leave` first sets to `NIL` the slots of the body's values that
+  are dead there and that no live value holds (`FramePlan::clearsAt`: the units of each body's values, argument lists
+  and received arguments, found by a forward walk with one set per open body, `walkBodies`): as when a callee returns,
+  an object only they held can be collected (and its destructor run). A body left without a frame (nothing in it can see
+  the call stack) has no `inline.leave` and clears nothing there: its values are like the function's own.
 - After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
   `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
   load stays in a loop without calls instead of leaving it; the loads carry the metadata `xb.poll`, on a back edge, or

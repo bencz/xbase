@@ -8,7 +8,7 @@ PROCEDURE Main( x )
    LOCAL o := TPair():New(), a := { o }
    o:first := 1
    o:last := o:first + o:Doubled()
-   ? o:Total(), o:TBasis:base, o:count, o:_first(), o:Nothing(), o:secret, a[ 1 ]:first, x:first
+   ? o:Total(), o:TBasis:base, o:count, o:_first(), o:Nothing(), o:secret, a[ Len( a ) ]:first, x:first
 RETURN
 
 CLASS TBasis

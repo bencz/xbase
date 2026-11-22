@@ -1,0 +1,79 @@
+module ARRAY_LITERAL_READS
+
+function READS params 1 {
+  $f0 = frame 0 "N"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward READS.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  %5 = array 1:w10, 2:w10
+  index.set %5, 1:w10, %4
+  inline.enter READS.block2
+  %8 = binary add 5:w10, %4
+  inline.leave
+  %10 = binary add %8, 9:w0
+  %11 = array %4, 1:w10
+  inline.enter SUM2 %11
+  %13 = binary add %4, 1:w10
+  inline.leave
+  %15 = binary add %10, %13
+  %16 = index %5, 1:w10
+  %17 = binary add %15, %16
+  ret %17
+}
+
+function SUM2 internal params 1 {
+  $f0 = frame 0 "V"
+entry:
+  %0 = load $f0 move
+  %1 = index %0, 1:w10
+  %2 = index %0, 2:w10
+  %3 = binary add %1, %2
+  ret %3
+}
+
+function READS.byref internal params 1 {
+  $f0 = frame 0 shared "N"
+entry:
+  %0 = array 1:w10, 2:w10
+  %1 = load $f0 maybe_ref
+  index.set %0, 1:w10, %1
+  inline.enter READS.block1
+  %4 = load $f0 maybe_ref
+  %5 = binary add 5:w10, %4
+  inline.leave
+  %7 = binary add %5, 9:w0
+  %8 = load $f0 maybe_ref
+  %9 = array %8, 1:w10
+  inline.enter SUM2 %9
+  %11 = binary add %8, 1:w10
+  inline.leave
+  %13 = binary add %7, %11
+  %14 = index %0, 1:w10
+  %15 = binary add %13, %14
+  ret %15
+}
+
+block READS.block1 internal params 1 {
+  $f0 = frame 0 "X"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = load $c0 maybe_ref
+  %2 = binary add %0, %1
+  ret %2
+}
+
+block READS.block2 internal params 1 {
+  $f0 = frame 0 "X"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = load $c0 maybe_ref
+  %2 = binary add %0, %1
+  ret %2
+}

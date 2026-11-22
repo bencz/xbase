@@ -10,3 +10,5 @@ shown
 after an inlined body: destroyed number kept: 5 1234567 8 910112468***16182022369****24273033
 copied, both dropped: keptO then destroyed keptO then destroyedxxx
 parameter dropped, its copy passed on: kept
+array unread: kept
+array element dropped: kept

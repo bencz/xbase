@@ -71,6 +71,10 @@ void removeTrivialParams(std::vector<BlockParam *> &placed, const Predecessors &
 // made alike): no STATIC of it, none of its classes, no codeblock of it made.
 bool selfContained(const std::vector<BasicBlock *> &body);
 
+// A value whose hold by an inlined body (inline.enter) nothing can see: a constant, which holds nothing, or a
+// codeblock literal, which folding may leave unmade (the body then holds NIL in its place).
+bool heldUnseen(const Value *v);
+
 // Removes instruction `i` from its block, its uses undone.
 void eraseInstruction(Instruction *i);
 

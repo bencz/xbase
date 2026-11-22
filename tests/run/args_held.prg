@@ -11,7 +11,9 @@
 // copy whose LOCAL keeps the value. And a parameter copied into a LOCAL, both set to NIL in turn (a method, and an
 // inlined function with a loop): the object stays while the copy holds it, and goes after; and a parameter set to NIL
 // once its copy is passed on to an inlined function, which holds it. (A parameter set to NIL on some paths only, not
-// on every path to where its copy dies, holds the object until the function returns.)
+// on every path to where its copy dies, holds the object until the function returns.) And an array literal passed to
+// an inlined function that never reads it, or reads its element into a LOCAL it then sets to NIL: the array holds the
+// object until the function returns.
 STATIC s_o
 PROCEDURE Main()
    LOCAL aLog := { .F. }, aSeen := {}, x, i, o
@@ -42,7 +44,24 @@ PROCEDURE Main()
       CopiedInlined( Made( aLog := { .F. } ), aLog )
    aLog := { .F. }
    ? "parameter dropped, its copy passed on:", Made( { .F. } ):PassesCopy( Made( aLog ), aLog )
+   aLog := { .F. }
+   ? "array unread:", ArrayUnread( { Made( aLog ) }, aLog )
+   aLog := { .F. }
+   ? "array element dropped:", ArrayElementDropped( { Made( aLog ) }, aLog )
 RETURN
+
+STATIC FUNCTION ArrayUnread( v, aLog )
+   LOCAL x := 1
+   x := NIL
+   __GcCollect()
+RETURN IIf( aLog[ 1 ], "destroyed", "kept" )
+
+STATIC FUNCTION ArrayElementDropped( v, aLog )
+   LOCAL y := v[ 1 ], x := 1
+   y := NIL
+   x := NIL
+   __GcCollect()
+RETURN IIf( aLog[ 1 ], "destroyed", "kept" )
 
 STATIC FUNCTION Passes( o, aLog )
 RETURN Drops( o, aLog )

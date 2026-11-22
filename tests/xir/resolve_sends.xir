@@ -32,13 +32,13 @@ body:
   %24 = truth %23
   cond_br %24, endif.inline(100:w10), endif.inline(%22)
 body.2:
-  %26 = send FIRST %55
+  %26 = send FIRST %56
   br body.2.2(%26)
 body.2.2(%28: item):
   %29 = object.is 1 %4
   cond_br %29, body.2.2.resolved, body.2.2
 body.2.resolved:
-  %31 = object.get 0 %55
+  %31 = object.get 0 %56
   br body.2.2(%31)
 body.2.2:
   %33 = send FIRST %4
@@ -64,9 +64,10 @@ endif.inline(%40: item):
   %52 = send _FIRST %6
   %53 = send NOTHING %6
   %54 = send SECRET %6
-  %55 = index %8, 1:w10
-  %56 = object.is 1 %55
-  cond_br %56, body.2.resolved, body.2
+  %55 = call LEN native %8
+  %56 = index %8, %55
+  %57 = object.is 1 %56
+  cond_br %57, body.2.resolved, body.2
 }
 
 function TPAIR:TOTAL internal params 1 method {
@@ -159,14 +160,14 @@ entry:
   %19 = truth %18
   cond_br %19, endif.inline(100:w10), endif.inline(%17)
 entry.2:
-  %21 = send FIRST %51
+  %21 = send FIRST %52
   br entry.2.2(%21)
 entry.2.2(%23: item):
   %24 = load $f0 maybe_ref
   %25 = object.is 1 %24
   cond_br %25, entry.2.2.resolved, entry.2.2
 entry.2.resolved:
-  %27 = object.get 0 %51
+  %27 = object.get 0 %52
   br entry.2.2(%27)
 entry.2.2:
   %29 = send FIRST %24
@@ -192,9 +193,10 @@ endif.inline(%36: item):
   %48 = send _FIRST %1
   %49 = send NOTHING %1
   %50 = send SECRET %1
-  %51 = index %3, 1:w10
-  %52 = object.is 1 %51
-  cond_br %52, entry.2.resolved, entry.2
+  %51 = call LEN native %3
+  %52 = index %3, %51
+  %53 = object.is 1 %52
+  cond_br %53, entry.2.resolved, entry.2
 }
 
 function TPAIR:TOTAL.byref internal params 1 method {

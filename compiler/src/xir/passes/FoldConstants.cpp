@@ -1,8 +1,8 @@
 // Constant folding on xIR: machine operations on constants, a machine value boxed and unboxed, the truth test of
 // a constant or of a logical just made, arithmetic (also - and ~ of one) and
 // comparisons of number constants (as the run-time operators compute them), comparisons of string
-// constants for equality, calls of FOLD functions on constants, ValType() of a value whose type is known, and
-// branches on known conditions.
+// constants for equality, calls of FOLD functions on constants, ValType() of a value whose type is known, element
+// reads of read-only array literals, and branches on known conditions.
 #include "xir/passes/Passes.h"
 
 #include "opt/Fold.h"
@@ -94,11 +94,36 @@ Value *foldedCall(const Instruction &i, Builder &b) {
   }
 }
 
+// An array literal (no `...`) whose every use reads an element of it (`index` at a position that is a number: one
+// that is not raises an error whose handler receives the array and may change it, then substitutes a value and goes
+// on; a number out of bounds raises one that cannot go on) or holds it as an argument of a body inlined
+// (`inline.enter`) that does not read its arguments as received (an ARGS function there could hand them on): none
+// changes it or lets it out, so each element stays the value it was made with.
+const Instruction *readOnlyArray(const Value *v, const TypeInfo &types) {
+  const Instruction *array = asInstruction(v, Op::ArrayLit);
+  if (!array || array->hasRest()) return nullptr;
+  for (const Instruction *u : array->users()) {
+    TypeSet position = u->op == Op::Index ? types.of(u->operand(1)) : 0;
+    bool read = u->op == Op::Index && u->operand(0) == array && position && (position & ~kNumberTypes) == 0;
+    bool held = u->op == Op::InlineEnter && !u->blockFn->readsArgs;
+    if (!read && !held) return nullptr;
+  }
+  return array;
+}
+
 // The value `i` always gives, or null. Counters wrap like the machine
 // arithmetic they lower to.
 Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
   const auto &ops = i.operands();
   switch (i.op) {
+  case Op::Index: { // an element of a read-only array literal at a constant position: the value it was made with
+    const Instruction *array = readOnlyArray(ops[0], types);
+    const Constant *k = asConstant(ops[1]);
+    if (!array || !k || k->lit != Constant::Lit::Integer || k->ival < 1 ||
+        (uint64_t)k->ival > array->operands().size())
+      return nullptr;
+    return array->operand((size_t)k->ival - 1);
+  }
   case Op::Unary:
     if (std::optional<NumberExpr> x = asNumber(ops[0]))
       if (ExprPtr r = foldNumber({}, i.unop, *x, true)) return b.number(static_cast<const NumberExpr &>(*r));
@@ -202,6 +227,21 @@ bool foldConstants(Function &f) {
       }
     }
   }
+  // A read-only array literal that inlined bodies only hold (its reads folded, or none), whose elements' lifetimes
+  // nothing can see (heldUnseen, or values that refer to no heap object): the bodies hold NIL instead, and
+  // remove-dead-code takes the array away. An element that is an object stays held by the array until the bodies end,
+  // as a parameter holds its argument.
+  for (auto &bb : f.blocks)
+    for (auto &ip : bb->insts) {
+      if (!readOnlyArray(ip.get(), types) || ip->users().empty()) continue;
+      bool onlyHeld = std::all_of(ip->users().begin(), ip->users().end(),
+                                  [](const Instruction *u) { return u->op == Op::InlineEnter; });
+      bool unseen = std::all_of(ip->operands().begin(), ip->operands().end(),
+                                [&](const Value *e) { return heldUnseen(e) || types.noHeap(e); });
+      if (!onlyHeld || !unseen) continue;
+      for (Instruction *u : std::vector<Instruction *>(ip->users())) u->replaceUses(ip.get(), b.nil());
+      changed = true;
+    }
   return changed;
 }
 

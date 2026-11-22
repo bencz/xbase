@@ -163,6 +163,8 @@ bool selfContained(const std::vector<BasicBlock *> &body) {
   return true;
 }
 
+bool heldUnseen(const Value *v) { return asConstant(v) || asInstruction(v, Op::MakeBlock); }
+
 void eraseInstruction(Instruction *i) {
   BasicBlock *b = i->parent;
   b->insts.erase(std::find_if(b->insts.begin(), b->insts.end(), [&](auto &p) { return p.get() == i; }));
