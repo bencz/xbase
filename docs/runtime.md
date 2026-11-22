@@ -788,22 +788,23 @@ first time it is used (its class function, or a subclass):
   what is still queued, before the `EXIT` procedures. A destructor runs once: one that stores its object keeps it alive,
   without the reference's error. Objects die when a collection finds them unreachable (a frame temporary may keep one
   until its function returns), not, as with the reference's reference counts, the moment the last reference goes.
-- Inline caches: each send of compiled code has its own `xb_send_cache`, of `XB_SEND_CACHE_WAYS` (4) ways. A message
-  that reaches a member of an object (not through a cast) stores the object's class, the member and its slot there (a
-  variable's index, a class variable's address) as the newest way (the oldest of a full cache goes); the next message
-  from that send to an object of one of those classes runs the member at once, without the lookup, the scope checks
-  (which give the same answer for the same class at the same send) or a call to `dispatch` (`perform`). A runtime
-  class's member (`xb_runtime_member`: a variable or a method, found as `xb_op_send` finds it) is kept too, its index
-  and how it is reached in the slot and no member (`XB_SEND_OTHER` for compiled code), and run by
-  `xb_runtime_perform`: a `Channel`'s or a `Task`'s send repeated finds its method with no search by name. Messages to
-  casts and to values of scalar classes always look up. Each way also tells compiled code
-  what the member is (`kind`: `XB_SEND_GET`, `XB_SEND_SET`, `XB_SEND_METHOD` with the method's function in `fn`, or
-  `XB_SEND_OTHER`), so that it performs the newest way in place ([compiler.md](compiler.md#xir-to-llvm)). Threads share
-  the caches: each one is a sequence lock (`version`, odd while a thread changes it). A reader that finds the version
-  odd, or changed once it has read a way, does the full lookup instead (nothing torn is used, nothing is tried again),
-  and a writer that finds another one at work leaves the cache as it is; 20,000,000 messages to objects of two classes
-  through one send take the same time as without it. Where the compiler knows the object's class, it resolves the send
-  by these rules instead: a call of the method, or the variable at its slot ([xir.md](xir.md#classes)).
+- Inline caches: each send of compiled code has its own `xb_send_cache`, of `XB_SEND_CACHE_WAYS` (8) ways (four held too
+  few classes for a send that sees six of them, `virtual_dispatch`: every message missed). A message that reaches a
+  member of an object (not through a cast) stores the object's class, the member and its slot there (a variable's index,
+  a class variable's address) as the newest way (the oldest of a full cache goes); the next message from that send to an
+  object of one of those classes runs the member at once, without the lookup, the scope checks (which give the same
+  answer for the same class at the same send) or a call to `dispatch` (`perform`). A runtime class's member
+  (`xb_runtime_member`: a variable or a method, found as `xb_op_send` finds it) is kept too, its index and how it is
+  reached in the slot and no member (`XB_SEND_OTHER` for compiled code), and run by `xb_runtime_perform`: a `Channel`'s
+  or a `Task`'s send repeated finds its method with no search by name. Messages to casts and to values of scalar classes
+  always look up. Each way also tells compiled code what the member is (`kind`: `XB_SEND_GET`, `XB_SEND_SET`,
+  `XB_SEND_METHOD` with the method's function in `fn`, or `XB_SEND_OTHER`), so that it performs the newest way in place
+  ([compiler.md](compiler.md#xir-to-llvm)). Threads share the caches: each one is a sequence lock (`version`, odd while
+  a thread changes it). A reader that finds the version odd, or changed once it has read a way, does the full lookup
+  instead (nothing torn is used, nothing is tried again), and a writer that finds another one at work leaves the cache
+  as it is; 20,000,000 messages to objects of two classes through one send take the same time as without it. Where the
+  compiler knows the object's class, it resolves the send by these rules instead: a call of the method, or the variable
+  at its slot ([xir.md](xir.md#classes)).
 
 ## References
 

@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 59u
+#define XB_ABI_VERSION 60u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -794,7 +794,7 @@ void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
  * variable `slot` and XB_SEND_SET writes it (with the argument) when the object
  * is local (not shared), XB_SEND_METHOD calls `fn`; XB_SEND_OTHER is left to
  * the runtime. XB_SEND_CACHE_* are the word positions of each array's first way. */
-#define XB_SEND_CACHE_WAYS 4
+#define XB_SEND_CACHE_WAYS 8
 #define XB_SEND_CACHE_WORDS (1 + 5 * XB_SEND_CACHE_WAYS)
 #define XB_SEND_CACHE_CLS 1
 #define XB_SEND_CACHE_SLOT (1 + 2 * XB_SEND_CACHE_WAYS)
