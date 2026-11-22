@@ -218,12 +218,17 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
     // Operands read from memory or computed that may be two integers and may be two doubles are rarely one of each:
     // the path of an integer with a double is then cold (a loop's generic copy ends such an iteration, LoopSplit.h),
     // which keeps its conversions and bounds out of the fast loop. It stays as fast where it is the only way to a
-    // double, where strings may come, and for a block parameter: a value carried around a loop changes from an
-    // integer to a double once (s := 0, then s := s + x of doubles), and every entry of the loop would leave it.
+    // double, where strings may come, for a block parameter (a value carried around a loop changes from an integer
+    // to a double once: s := 0, then s := s + x of doubles; every entry of the loop would leave it), and for a call's
+    // result (its loop makes the call: no fast loop to keep, only code to add).
     BasicBlock *mixed = newBlock("mixed");
     Value *doubles = b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble));
-    bool carried = xir::asParam(i.operand(0)) || xir::asParam(i.operand(1));
-    if (mayInt && !mayStrings && !carried) branchLikely(doubles, dblBB, mixed);
+    auto flowing = [](const xir::Value *v) {
+      return xir::asParam(v) || xir::asInstruction(v, xir::Op::Call) || xir::asInstruction(v, xir::Op::Send) ||
+             xir::asInstruction(v, xir::Op::SendMacro) || xir::asInstruction(v, xir::Op::MacroCall) ||
+             xir::asInstruction(v, xir::Op::CallForward);
+    };
+    if (mayInt && !mayStrings && !flowing(i.operand(0)) && !flowing(i.operand(1))) branchLikely(doubles, dblBB, mixed);
     else b_.CreateCondBr(doubles, dblBB, mixed);
     b_.SetInsertPoint(mixed);
   }
