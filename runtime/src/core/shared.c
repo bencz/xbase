@@ -125,9 +125,9 @@ void xb_seq_lock(const void *obj) {
   uint32_t none = 0;
   if (!xb_atomic_cas32(&s->lock, &none, LOCK_HELD, XB_ACQUIRE)) {
     unsigned spins = 0;
-    for (; spins < SPINS; ++spins) {
+    for (; spins < SPINS; ++spins) { /* a load first: a compare-and-swap takes the line from the holder each time */
       none = 0;
-      if (xb_atomic_cas32(&s->lock, &none, LOCK_HELD, XB_ACQUIRE)) break;
+      if (!xb_atomic_load32(&s->lock, XB_RELAXED) && xb_atomic_cas32(&s->lock, &none, LOCK_HELD, XB_ACQUIRE)) break;
     }
     if (spins == SPINS) lock_slow(s);
   }
@@ -152,10 +152,24 @@ void xb_seq_put(const void *obj, xb_item *dst, const xb_item *src) {
   xb_seq_unlock(obj);
 }
 
-/* The walk of xb_share: objects whose bit it set, still to visit. */
+int xb_seq_int_step(xb_item *it, xb_int_step next, const int64_t *args, int64_t *was) {
+  if (!wide) return 0;
+  uint64_t *word = (uint64_t *)(void *)&it->v.i;
+  uint64_t old = xb_atomic_load64(word, XB_RELAXED);
+  for (;;) {
+    int64_t changed;
+    if (!next((int64_t)old, args, &changed) || xb_atomic_cas64(word, &old, (uint64_t)changed, XB_SEQ_CST)) break;
+  }
+  *was = (int64_t)old;
+  return 1;
+}
+
+/* The walk of xb_share: objects whose bit it set, still to visit; in `local`, on the stack, until they outgrow it. */
+#define WALK_LOCAL 64u
 typedef struct walk {
   void **objs;
   size_t len, cap;
+  void *local[WALK_LOCAL];
 } walk;
 
 static void visit(walk *w, const xb_item *it) {
@@ -166,9 +180,10 @@ static void visit(walk *w, const xb_item *it) {
   if (xb_atomic_load8(&xb_gc_header(obj)->state, XB_RELAXED) & XB_GC_SHARED) return;
   if (xb_atomic_or8(&xb_gc_header(obj)->state, XB_GC_SHARED, XB_RELAXED) & XB_GC_SHARED) return;
   if (w->len == w->cap) {
-    size_t n = w->cap ? w->cap * 2 : 64;
-    void **list = realloc(w->objs, n * sizeof *list);
+    size_t n = w->cap * 2;
+    void **list = w->objs == w->local ? malloc(n * sizeof *list) : realloc(w->objs, n * sizeof *list);
     if (!list) xb_gc_fatal("out of memory");
+    if (w->objs == w->local) memcpy(list, w->local, sizeof w->local);
     w->objs = list;
     w->cap = n;
   }
@@ -176,7 +191,10 @@ static void visit(walk *w, const xb_item *it) {
 }
 
 void xb_share_walk(const xb_item *it) {
-  walk w = {NULL, 0, 0};
+  walk w;
+  w.objs = w.local;
+  w.len = 0;
+  w.cap = WALK_LOCAL;
   visit(&w, it);
   while (w.len) {
     void *obj = w.objs[--w.len];
@@ -222,5 +240,5 @@ void xb_share_walk(const xb_item *it) {
       default: break; /* items and stores are reached through their owners, under their owners' stripes */
     }
   }
-  free(w.objs);
+  if (w.objs != w.local) free(w.objs);
 }

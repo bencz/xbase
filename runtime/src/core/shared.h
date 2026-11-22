@@ -42,6 +42,14 @@ void     xb_seq_store(xb_item *dst, const xb_item *src);
 /* The item `dst` of a shared object set to `src`, under its lock. */
 void     xb_seq_put(const void *obj, xb_item *dst, const xb_item *src);
 
+/* The integer item `it` of a shared object, whose type never changes (an AtomicInt's value), changed in one
+ * compare-and-swap of its value word where items' words are read whole as 8 bytes (xb_seq_load): no stripe lock, and
+ * a reader sees the old value or the new one. `next( value, args, &changed )` gives the new value (0: none). Returns 0,
+ * nothing done, where words are 4 bytes (32-bit x86): the caller then writes under the lock; else 1, the value it had
+ * in *was. */
+typedef int (*xb_int_step)(int64_t value, const int64_t *args, int64_t *changed);
+int      xb_seq_int_step(xb_item *it, xb_int_step next, const int64_t *args, int64_t *was);
+
 /* The program's storage (docs/concurrency.md, publication): once a second thread attaches (xb_storage_shared), what
  * the STATICs, the class variables and the memory variables then visible hold is shared, and a STATIC's own item is
  * read and written whole under the stripe of its address (types/ref.c, types/block.c, core/control.c). Publication

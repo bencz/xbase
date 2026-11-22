@@ -1673,7 +1673,8 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   (`xb_ring`) of `{task, flow, value}` in the object's variables under a short lock of their own, with their count in a
   word kept equal to the ring's under that lock: the task is a waiter's (`xb_task_waiter`: its token cancels it, its
   timer completes it with the value it was made with); a release that frees what they wait for, after a sequentially
-  consistent fence, reads the count and, when there are waiters, takes the lock and grants them in turn (the lock taken
+  consistent fence (for a `Mutex`, the sequentially consistent change of its state word, `xb_rwords`, orders it: no
+  fence), reads the count and, when there are waiters, takes the lock and grants them in turn (the lock taken
   for the waiter's flow, or a place; the waiter claimed, then completed once the lock is released; one that ended
   meanwhile passed over, one that ends as it is granted given back), and a new waiter, counted before a fence and its
   try once it is in the ring, tries again: one of the two sees the other. A new waiter goes in line whenever one waits
@@ -1821,18 +1822,19 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   tells whether a lock's holder is a flow the running one runs inside on the thread (a `Mutex` wait for it raises
   `BASE/9031` instead of never ending), `xb_once` (a function run once whatever threads ask at the same time, the others
   waiting until it returns), a recursive lock over three words (`xb_rwords`: the state, 0 free, 1 held, 2 held and maybe
-  waited for; the holder's number; the depth: the holder takes it again, and holds it until it has released it as often;
-  a release wakes a waiter only when the state was 2), which `xb_rlock` keeps together (made statically, for rare
-  nesting work such as preparing classes) and a `Mutex` object in its variables, and a parking lot: `xb_park_wait`
-  sleeps while a 32-bit value at an address is the one expected (with an optional limit in nanoseconds, which its own
-  deadline decides), `xb_park_wake` wakes the waiter of the address that came first, or every one. Waiters queue in
-  arrival order in one of 256 buckets chosen by the address (each made when first used) and sleep on a condition of
-  their own, so a wake reaches only the waiters it marks. A waiter counts itself in its bucket before it tests the value
-  under the bucket's lock; the waker, after changing the value and a full fence, reads the count: none waits, it takes
-  no lock (completing a task nobody waits for costs a load); else it takes the lock, so no wake is lost. The lock of a
-  `Mutex` or a `Channel` looks at the state a few times before its waiter sleeps, and so does a wait for a task (short
-  work on the other side ends sooner than a sleep). `xb_park_wait_blocking` waits so in a blocking operation. The output
-  lock (`xb_output_lock`) serializes the program's writes to the standard streams.
+  waited for, changed by sequentially consistent read-modify-writes; the holder's number; the depth: the holder takes it
+  again, and holds it until it has released it as often; a release wakes a waiter only when the state was 2), which
+  `xb_rlock` keeps together (made statically, for rare nesting work such as preparing classes) and a `Mutex` object in
+  its variables, and a parking lot: `xb_park_wait` sleeps while a 32-bit value at an address is the one expected (with
+  an optional limit in nanoseconds, which its own deadline decides), `xb_park_wake` wakes the waiter of the address that
+  came first, or every one. Waiters queue in arrival order in one of 256 buckets chosen by the address (each made when
+  first used) and sleep on a condition of their own, so a wake reaches only the waiters it marks. A waiter counts itself
+  in its bucket before it tests the value under the bucket's lock; the waker, after changing the value and a full fence,
+  reads the count: none waits, it takes no lock (completing a task nobody waits for costs a load); else it takes the
+  lock, so no wake is lost. The lock of a `Mutex` or a `Channel` looks at the state a few times before its waiter
+  sleeps, and so does a wait for a task (short work on the other side ends sooner than a sleep). `xb_park_wait_blocking`
+  waits so in a blocking operation. The output lock (`xb_output_lock`) serializes the program's writes to the standard
+  streams.
 - Shared objects (`core/shared.h`, [concurrency.md](concurrency.md#shared-objects); the runtime's operations on arrays,
   hashes, objects, cells and references use them, and compiled code tests the bit): `XB_GC_SHARED` in an object's header
   (`XB_GC_STATE_SHARED`, kept by every collection) marks one that more than one flow can reach. `xb_share` marks what an

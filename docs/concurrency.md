@@ -234,7 +234,9 @@ Done (`rtl/threads.c`, [runtime.md](runtime.md#threads-and-synchronization)); th
 - `AtomicInt( [nValue] )` holds a 64-bit integer (0 without a value; a number is truncated toward zero, saturated):
   `Value` reads it, `Value := n` stores n, `Add( n )` adds n and returns the new value (wrapping as two's complement
   does), `CompareExchange( nExpected, nNew )` stores nNew when the value is nExpected and tells whether it did; each in
-  one step whatever other threads do. An argument that is no number is `BASE/9020`.
+  one step whatever other threads do: once it is shared, one compare-and-swap of its value's word, without a lock
+  (`xb_seq_int_step`; under its stripe's lock where items' words are 4 bytes, 32-bit x86). An argument that is no
+  number is `BASE/9020`.
 - Console output: what one `QOut()`, `QQOut()`, `OutStd()` or `OutErr()` call writes, and the runtime's report of an
   unrecoverable error, is written whole: the outputs of threads never split one another
   ([runtime.md](runtime.md#functions-written-in-xbase)). The default error handler's report is several `OutErr()`
@@ -259,7 +261,9 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   tasks, taking its share of what waits. A worker that finds nothing steals half of another's ring (that worker's next
   task when its ring is empty and its task has run 5 µs: a task that ends soon runs the task it made ready itself,
   without a thread switch), searches 50 µs more while another worker runs (one searcher at a time), then parks; a
-  submission wakes a parked worker, or starts one, while fewer are active than the target and none searches. The
+  submission wakes a parked worker, or starts one, while fewer are active than the target and none searches; not one
+  into the worker's next slot that displaced nothing, which that worker runs itself next (a woken worker would only
+  search: a chain of tasks kept one spinning, three times the processor time of `async`). The
   counters every worker changes (active, searching, queued and ended tasks) each sit on a cache line of their own
   (`XB_CACHE_LINE`, `core/sync.h`), so that changing one does not slow the readers of another.
 - **Blocking handoff**: every operation that may block the thread runs through the runtime: one that waits (`Mutex`

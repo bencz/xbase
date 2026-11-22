@@ -554,7 +554,8 @@ void xb_sched_submit(xb_object *task, int next) {
   worker *w = me;
   if (w && next) {
     void *before = xb_atomic_xchgptr(&w->next, task, XB_ACQ_REL);
-    if (before) runq_put(w, before);
+    if (!before) return; /* this worker runs it next: waking another would only have it search (a chain spins one) */
+    runq_put(w, before);
   } else if (w) {
     runq_put(w, task);
   } else if ((w = feeder()) != NULL) {

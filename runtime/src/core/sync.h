@@ -45,7 +45,8 @@ void xb_once(xb_once_flag *flag, void (*fn)(void));
  * marks the lock waited for and takes it if it was free meanwhile: 1; 0 when the caller must wait while the state is 2
  * (on its address) and claim again. xb_rwords_release releases it once (the next waiter woken when it is free): 0 when
  * `self` does not hold it. The holder's word is 64 bits, 8-aligned, read and written atomically: a torn read could
- * show another flow its own number. */
+ * show another flow its own number. The state changes by sequentially consistent read-modify-writes, so that what a
+ * Mutex reads after one (its count of asynchronous waiters) needs no fence of its own (rtl/threads.c). */
 typedef struct xb_rwords {
   uint32_t *state;
   uint64_t *owner;

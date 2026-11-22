@@ -185,13 +185,13 @@ int xb_rwords_try(xb_rwords w, uint64_t self) {
     return 1;
   }
   uint32_t free_state = 0;
-  if (!xb_atomic_cas32(w.state, &free_state, 1, XB_ACQUIRE)) return 0;
+  if (!xb_atomic_cas32(w.state, &free_state, 1, XB_SEQ_CST)) return 0;
   hold(w, self);
   return 1;
 }
 
 int xb_rwords_claim(xb_rwords w, uint64_t self) {
-  if (xb_atomic_xchg32(w.state, 2, XB_ACQUIRE) != 0) return 0;
+  if (xb_atomic_xchg32(w.state, 2, XB_SEQ_CST) != 0) return 0;
   hold(w, self);
   return 1;
 }
@@ -200,7 +200,7 @@ int xb_rwords_release(xb_rwords w, uint64_t self) {
   if (xb_atomic_load64(w.owner, XB_RELAXED) != self) return 0;
   if (--*w.depth) return 1;
   xb_atomic_store64(w.owner, 0, XB_RELAXED);
-  if (xb_atomic_xchg32(w.state, 0, XB_RELEASE) == 2) xb_park_wake(w.state, 0);
+  if (xb_atomic_xchg32(w.state, 0, XB_SEQ_CST) == 2) xb_park_wake(w.state, 0);
   return 1;
 }
 

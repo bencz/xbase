@@ -357,8 +357,10 @@ void xbf___AWAITEACHAWAITS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *ar
                           ((const xb_object *)argv[0].v.p)->cls == &await_each_class);
 }
 
-/* __Dispose( xValue ): the end of a USING statement: xValue:Dispose(), unless xValue is NIL. */
+/* __Dispose( xValue ): the end of a USING statement: xValue:Dispose(), unless xValue is NIL; through a send cache of
+ * its own, which the classes a program disposes of (a Mutex's holders of SYNCHRONIZED) fill once. */
 void xbf___DISPOSE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  static xb_send_cache cache;
   if (!argc || argv[0].type == XB_T_NIL) return;
-  xb_op_send(ctx, ret, "DISPOSE", 1, argv);
+  xb_op_send_from(ctx, ret, "DISPOSE", NULL, 0, &cache, 1, argv);
 }

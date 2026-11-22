@@ -470,18 +470,25 @@ static const waits mutex_waits = {M_QUEUE,        M_WAITING,       {M_WAITERS, M
                                   M_FLOWS,        mutex_take_for,  mutex_give_back,
                                   mutex_owner};
 
+/* released() right after the mutex's state word changed (xb_rwords: a sequentially consistent read-modify-write, which
+ * orders the count's load as the fence does; a take that changed nothing, by its holder, has no other side to see:
+ * a waiter of its flow takes it again itself). */
+static void mutex_released(xb_ctx *ctx, const xb_item *m) {
+  if (xb_atomic_load32(xb_object_word(m, mutex_waits.waiting), XB_SEQ_CST)) grant(ctx, m, &mutex_waits);
+}
+
 /* The mutex released once by `self`: 0 when `self` does not hold it. Released whole, it goes to an asynchronous
  * waiter. */
 static int mutex_release(xb_ctx *ctx, const xb_item *m, uint64_t self) {
   if (!xb_rwords_release(mutex_words(m), self)) return 0;
-  if (mutex_owner(m) != self) released(ctx, m, &mutex_waits);
+  if (mutex_owner(m) != self) mutex_released(ctx, m);
   return 1;
 }
 
 /* The mutex taken by this flow, as Lock() does: its waiters of this flow already in line take it too (released). */
 static int mutex_take(xb_ctx *ctx, const xb_item *m) {
   if (!xb_object_lock(ctx, m, M_STATE)) return 0;
-  released(ctx, m, &mutex_waits);
+  mutex_released(ctx, m);
   return 1;
 }
 
@@ -498,7 +505,7 @@ static void mutex_lock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
 static void mutex_try_lock(xb_ctx *ctx, xb_item *r, uint32_t argc, xb_item *argv) {
   XB_UNUSED(argc);
   int taken = xb_rwords_try(mutex_words(&argv[0]), xb_flow_self());
-  if (taken) released(ctx, &argv[0], &mutex_waits);
+  if (taken) mutex_released(ctx, &argv[0]);
   xb_set_logical(r, taken);
 }
 
@@ -877,8 +884,8 @@ void xbf_SEMAPHORE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_object(ret, s);
 }
 
-/* Atomic integers: one integer, read whole and changed under the object's lock once it is shared (in place while it
- * is local). */
+/* Atomic integers: one integer, changed in place while it is local; once it is shared, read whole and changed by one
+ * compare-and-swap of its word (xb_seq_int_step), or under the object's lock where items' words are 4 bytes. */
 
 enum { A_VALUE, A_COUNT_ };
 static const xb_class_var atomic_vars[] = {{"(VALUE)", XB_VAR_ANY}};
@@ -886,10 +893,11 @@ _Static_assert(XB_TABLE_SIZE(atomic_vars) == A_COUNT_, "one A_ index per AtomicI
 
 
 /* The value replaced by next( value, args ) unless that returns 0, in one step: the value it had. */
-static int64_t atomic_step(const xb_item *a, int (*next)(int64_t value, const int64_t *args, int64_t *out),
-                           const int64_t *args) {
+static int64_t atomic_step(const xb_item *a, xb_int_step next, const int64_t *args) {
   xb_object *o = a->v.p;
   int shared = xb_is_shared(o);
+  int64_t was;
+  if (shared && xb_seq_int_step(&o->vars[A_VALUE], next, args, &was)) return was;
   if (shared) xb_seq_lock(o);
   int64_t value = o->vars[A_VALUE].v.i, changed;
   if (next(value, args, &changed)) {

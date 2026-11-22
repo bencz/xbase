@@ -176,9 +176,9 @@ Statements:
 - `USING [v :=] expr ... END` (`END USING` too): `expr` is evaluated once into a `LOCAL` of its own
   (`UsingStmt::hidden`, a name no program can write), then `v` (when written) is assigned from it and the body runs;
   however they end (their end, `RETURN`, `EXIT`, `LOOP`, a `BREAK`, an error, `QUIT`), `__Dispose()` sends the value
-  `Dispose()` unless it is NIL, and a `BREAK` or an error goes on after it. Not `YIELD` inside. `USING`, like `YIELD`,
-  starts the statement unless the name is followed by what makes it a variable or a function (an assignment, `(`, `[`,
-  `:`, `->`, the end of the statement).
+  `Dispose()` unless it is NIL (through a send cache of its own), and a `BREAK` or an error goes on after it. Not
+  `YIELD` inside. `USING`, like `YIELD`, starts the statement unless the name is followed by what makes it a variable or
+  a function (an assignment, `(`, `[`, `:`, `->`, the end of the statement).
   `std.ch` builds `SYNCHRONIZED` and `AWAIT SYNCHRONIZED` (`USING AWAIT oMutex:HoldAsync()`, the operand of `USING`
   an awaited value) on it ([concurrency.md](concurrency.md#threads)).
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
