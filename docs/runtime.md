@@ -1667,30 +1667,32 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   aside (`ALWAYS` code running, counted in `xb_ctx.quitAside` by `xb_seq_suspend` and `xb_seq_resume`), or the context
   ending the program (`xb_threads_end`), waits no more; any other waits for its `QUIT`, so that it leaves with the
   request pending (a `Join()` that saw `ending` first once returned with none, and its caller went on: seen on ppc64).
-  An `AtomicInt`'s integer is changed under its stripe's lock once it is shared, in place while it is local. `QUIT` in a
-  thread raises it on every other context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before the `EXIT`
-  procedures and after them) does too when threads still run, and waits until none does; a thread made meanwhile quits
-  at once. A `Mutex`'s `Hold()` returns a `MutexHolder` (the mutex in its own variable) whose `Dispose()` releases it
-  once. A `Mutex`'s and a `Semaphore`'s asynchronous waiters (`LockAsync`, `HoldAsync`, `WaitAsync`) are a ring
-  (`xb_ring`) of `{task, flow, value}` in the object's variables under a short lock of their own, with their count in a
-  word kept equal to the ring's under that lock: the task is a waiter's (`xb_task_waiter`: its token cancels it, its
-  timer completes it with the value it was made with); a release that frees what they wait for, after a sequentially
-  consistent fence (for a `Mutex`, the sequentially consistent change of its state word, `xb_rwords`, orders it: no
-  fence), reads the count and, when there are waiters, takes the lock and grants them in turn (the lock taken
-  for the waiter's flow, or a place; the waiter claimed, then completed once the lock is released; one that ended
-  meanwhile passed over, one that ends as it is granted given back), and a new waiter, counted before a fence and its
-  try once it is in the ring, tries again: one of the two sees the other. A new waiter goes in line whenever one waits
-  (strict order), unless its flow holds the lock already. A `Mutex` also keeps how many waiters each flow has in line (a
-  hash): once a flow holds the lock, granted or taken with `Lock()` or `TryLock()`, its waiters further in line take it
-  too at once (they would wait behind others for what their flow has). A `Condition` keeps its waiters, the signals
-  given to them (16 bits each: a waiter takes a signal and leaves in one compare-and-swap, so a signal never outlives
-  the waiters it was for) and the generation of the last signal (32 bits) in one 64-bit word: a waiter takes only a
-  signal given after it came (one that starts waiting right after a `NotifyAll()` would take another's otherwise, which
-  would wait on unwoken), and parks on a second word that each signal, and each departure from a full word, changes (one
-  that a `Notify()` woke for another passes the wake on); a `Semaphore` its count and maximum (`Release( n )` wakes one
-  waiter when the count leaves 0: each that takes a place with more left wakes the next). Their waits take a limit in
-  milliseconds on the monotonic clock. The words, the waits with a limit, the checks of arguments and the error codes
-  that threads and tasks share are in `rtl/flows.h`.
+  An `AtomicInt`'s integer is changed by a compare-and-swap of its word once it is shared (`xb_seq_int_step`; under its
+  stripe's lock where items' words are 4 bytes), in place while it is local. `QUIT` in a thread raises it on every other
+  context (`xb_gc_raise_all`); the program's end (`xb_threads_end`, before the `EXIT` procedures and after them) does
+  too when threads still run, and waits until none does; a thread made meanwhile quits at once. A `Mutex`'s `Hold()`
+  returns a `MutexHolder` (the mutex in its own variable) whose `Dispose()` releases it once; `SYNCHRONIZED` gets the
+  mutex's own `MutexReleaser`, made with it (`__Synchronize`: nothing allocated per entry). A `Mutex`'s and a
+  `Semaphore`'s asynchronous waiters (`LockAsync`, `HoldAsync`, `WaitAsync`) are a ring (`xb_ring`) of `{task, flow,
+  value}` in the object's variables under a short lock of their own, with their count in a word kept equal to the ring's
+  under that lock: the task is a waiter's (`xb_task_waiter`: its token cancels it, its timer completes it with the value
+  it was made with); a release that frees what they wait for, after a sequentially consistent fence (for a `Mutex`, the
+  sequentially consistent change of its state word, `xb_rwords`, orders it: no fence), reads the count and, when there
+  are waiters, takes the lock and grants them in turn (the lock taken for the waiter's flow, or a place; the waiter
+  claimed, then completed once the lock is released; one that ended meanwhile passed over, one that ends as it is
+  granted given back), and a new waiter, counted before a fence and its try once it is in the ring, tries again: one of
+  the two sees the other. A new waiter goes in line whenever one waits (strict order), unless its flow holds the lock
+  already. A `Mutex` also keeps how many waiters each flow has in line (a hash): once a flow holds the lock, granted or
+  taken with `Lock()` or `TryLock()`, its waiters further in line take it too at once (they would wait behind others for
+  what their flow has). A `Condition` keeps its waiters, the signals given to them (16 bits each: a waiter takes a
+  signal and leaves in one compare-and-swap, so a signal never outlives the waiters it was for) and the generation of
+  the last signal (32 bits) in one 64-bit word: a waiter takes only a signal given after it came (one that starts
+  waiting right after a `NotifyAll()` would take another's otherwise, which would wait on unwoken), and parks on a
+  second word that each signal, and each departure from a full word, changes (one that a `Notify()` woke for another
+  passes the wake on); a `Semaphore` its count and maximum (`Release( n )` wakes one waiter when the count leaves 0:
+  each that takes a place with more left wakes the next). Their waits take a limit in milliseconds on the monotonic
+  clock. The words, the waits with a limit, the checks of arguments and the error codes that threads and tasks share are
+  in `rtl/flows.h`.
 - The scheduler (`core/sched.c`, [concurrency.md](concurrency.md#scheduler)) and tasks (`rtl/tasks.c`,
   [concurrency.md](concurrency.md#tasks)). Workers are program threads started when tasks first need them, `target` of
   them active at once (one per processor, or `//WORKERS:n`), up to 1024 with those that took the place of blocked ones.
@@ -1841,15 +1843,17 @@ services below, which tasks will be built on too ([concurrency.md](concurrency.m
   hashes, objects, cells and references use them, and compiled code tests the bit): `XB_GC_SHARED` in an object's header
   (`XB_GC_STATE_SHARED`, kept by every collection) marks one that more than one flow can reach. `xb_share` marks what an
   item refers to and all it reaches (an explicit stack, stopping at what is shared already, literal strings left alone,
-  a growing string no longer growing in place); it allocates nothing. A shared object's items are read under the
-  sequence counter of its stripe, one of 1024 chosen by its address, each on a cache line of its own
-  (`xb_seq_read_begin`, the items' words loaded with acquire order, `xb_seq_read_valid`; `xb_seq_get` for one item), and
-  written under the stripe's lock (`xb_seq_lock`, which makes the counter odd, the words stored with release order,
-  `xb_seq_unlock`; `xb_seq_put`), with no fences, so the thread sanitizer follows them. A waiter spins, then yields (a
-  reader), or sleeps on the lock word through `xb_waiting_run` (a writer); a writer never reaches a safepoint while it
-  holds a stripe, so a reader that waits never holds up a collection. A writer that has waited a millisecond marks the
-  lock starving, and its release then hands the lock to a thread that slept waiting instead of freeing it: a thread
-  that takes the lock again and again (long operations such as `AIns` on a large array) cannot keep a waiting one out.
+  a growing string no longer growing in place); it allocates nothing (its list of objects to visit starts on the stack).
+  A stripe, one of 1024 chosen by an object's address, each on a cache line of its own, is one word: the lock's bits
+  below a sequence count that each release moves, so that taking and releasing it is a read-modify-write each. A shared
+  object's items are read while the lock is not held (`xb_seq_read_begin`, the items' words loaded with acquire order,
+  `xb_seq_read_valid`: the word unchanged; `xb_seq_get` for one item), and written under the lock (`xb_seq_lock`, a load
+  before each compare-and-swap of its spin, the words stored with release order, `xb_seq_unlock`; `xb_seq_put`), with no
+  fences, so the thread sanitizer follows them. A waiter spins, then yields (a reader), or sleeps on the word through
+  `xb_waiting_run` (a writer); a writer never reaches a safepoint while it holds a stripe, so a reader that waits never
+  holds up a collection. A writer that has waited a millisecond marks the lock starving, and its release then hands the
+  lock to a thread that slept waiting instead of freeing it: a thread that takes the lock again and again (long
+  operations such as `AIns` on a large array) cannot keep a waiting one out.
 - Arrays (`types/array.c`): `xb_array_length`, `xb_array_get` and `xb_array_put` read and write an element whole (under
   the array's sequence counter or lock when it is shared, in place when it is local; a read a writer overlapped never
   reaches its destination; a value stored into a shared array is shared first), and the index operators, `Len`, `Empty`,

@@ -516,8 +516,8 @@ environments, and the variables made in them, come with `ThreadStart`) and the f
 - **Implementation steps.** (1, done: [runtime.md](runtime.md#threads-and-synchronization)) The header bit
   (`XB_GC_SHARED` in the state byte), sharing an object graph (an explicit stack, stopping at what is shared already; a
   string loses its append flag), and the sequence counters and locks: a table of stripes chosen by the object's address
-  (an object moves only while every thread is stopped, between operations), each a counter (odd while a writer works)
-  and a lock word parked on when contended; with C tests on threads. (2, done) The runtime's operations on arrays,
+  (an object moves only while every thread is stopped, between operations), each one word, a lock whose releases move a
+  count above its bits, parked on when contended; with C tests on threads. (2, done) The runtime's operations on arrays,
   hashes, object variables, cells, references, the elements `FOR EACH` reads and generators take the shared path when
   the bit is set. (3, done) Compiled code's in-place reads and writes test the bit, measured on the benchmarks (ABI 44).
   (4, done) Publication: a store into a shared object shares the value stored first; `STATIC`s, class variables and

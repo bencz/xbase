@@ -6,14 +6,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Each stripe on a cache line of its own: `seq` is odd while a writer works, `lock` is the writers' lock (its states
- * below, at lock_slow). Objects are XB_GC_ALIGN-aligned and at least two of those apart. */
+/* Each stripe on a cache line of its own, one word: the writers' lock in its low bits (LOCK_*, below at lock_slow;
+ * LOCK_HELD while a writer works) and the sequence count above them (LOCK_SEQ_ONE more at each release), so that taking
+ * the lock and releasing it are a read-modify-write each. A reader reads while the lock is not held and checks the whole
+ * word unchanged after (a writer changed it: the lock taken, the count moved). Objects are XB_GC_ALIGN-aligned and at
+ * least two of those apart. */
 #define STRIPES 1024u
 #define SPINS 64u
 typedef struct stripe {
-  uint32_t seq;
-  uint32_t lock;
-  char pad[XB_CACHE_LINE - 2 * sizeof(uint32_t)];
+  uint32_t word;
+  char pad[XB_CACHE_LINE - sizeof(uint32_t)];
 } stripe;
 static _Alignas(XB_CACHE_LINE) stripe stripes[STRIPES];
 
@@ -71,17 +73,25 @@ static void back_off(unsigned spins) {
   if (spins >= SPINS) xb_thread_yield();
 }
 
+#define LOCK_HELD 1u
+#define LOCK_WAITED 2u
+#define LOCK_STARVING 4u
+#define LOCK_HANDED 8u
+#define LOCK_BITS 15u
+#define LOCK_SEQ_ONE 16u
+#define STARVING_NS 1000000
+
 uint32_t xb_seq_read_begin(const void *obj) {
-  const uint32_t *seq = &stripe_of(obj)->seq;
+  const uint32_t *word = &stripe_of(obj)->word;
   for (unsigned spins = 0;; ++spins) {
-    uint32_t s = xb_atomic_load32(seq, XB_ACQUIRE);
-    if (!(s & 1u)) return s;
+    uint32_t s = xb_atomic_load32(word, XB_ACQUIRE);
+    if (!(s & LOCK_HELD)) return s;
     back_off(spins); /* a writer, which reaches no safepoint before it ends: no collection waits for this */
   }
 }
 
 int xb_seq_read_valid(const void *obj, uint32_t seq) {
-  return xb_atomic_load32(&stripe_of(obj)->seq, XB_RELAXED) == seq; /* after the items' acquire loads */
+  return xb_atomic_load32(&stripe_of(obj)->word, XB_RELAXED) == seq; /* after the items' acquire loads */
 }
 
 void xb_seq_get(const void *obj, xb_item *dst, const xb_item *src) {
@@ -92,29 +102,24 @@ void xb_seq_get(const void *obj, xb_item *dst, const xb_item *src) {
   }
 }
 
-/* A stripe's `lock`: free (0), held (LOCK_HELD), held while threads may sleep waiting for it (LOCK_WAITED: its release
- * wakes the first), and so with a waiter that has waited STARVING_NS (LOCK_STARVING: its release hands the lock over,
- * LOCK_HANDED, instead of freeing it). A handed lock is free for a thread that has slept waiting, not for a newcomer.
- * Without the hand-over, a thread that takes the lock again and again would find it free at each release and take it
- * before the woken thread could, which would find it taken again. */
-#define LOCK_HELD 1u
-#define LOCK_WAITED 2u
-#define LOCK_STARVING 4u
-#define LOCK_HANDED 8u
-#define STARVING_NS 1000000
-
+/* The lock's bits: free (none), held (LOCK_HELD), held while threads may sleep waiting for it (LOCK_WAITED: its
+ * release wakes the first), and so with a waiter that has waited STARVING_NS (LOCK_STARVING: its release hands the
+ * lock over, LOCK_HANDED, instead of freeing it). A handed lock is free for a thread that has slept waiting, not for a
+ * newcomer. Without the hand-over, a thread that takes the lock again and again would find it free at each release and
+ * take it before the woken thread could, which would find it taken again. A waiter parks on the whole word, which every
+ * release changes (the count). */
 static void lock_slow(stripe *s) {
   int slept = 0, starving = 0;
   int64_t since = xb_platform_monotonic_ns();
   for (;;) {
-    uint32_t v = xb_atomic_load32(&s->lock, XB_RELAXED);
-    if (v == 0 || (v == LOCK_HANDED && slept)) { /* LOCK_WAITED: other threads may still sleep waiting */
-      if (xb_atomic_cas32(&s->lock, &v, LOCK_HELD | LOCK_WAITED, XB_ACQUIRE)) return;
+    uint32_t v = xb_atomic_load32(&s->word, XB_RELAXED), bits = v & LOCK_BITS, count = v & ~LOCK_BITS;
+    if (bits == 0 || (bits == LOCK_HANDED && slept)) { /* LOCK_WAITED: other threads may still sleep waiting */
+      if (xb_atomic_cas32(&s->word, &v, count | LOCK_HELD | LOCK_WAITED, XB_ACQUIRE)) return;
       continue;
     }
-    uint32_t seen = v == LOCK_HANDED ? v : v | LOCK_WAITED | (starving ? LOCK_STARVING : 0u);
-    if (seen != v && !xb_atomic_cas32(&s->lock, &v, seen, XB_RELAXED)) continue;
-    xb_park_wait_short(&s->lock, seen, -1); /* a writer's work is short; collections go on without this thread */
+    uint32_t seen = bits == LOCK_HANDED ? v : v | LOCK_WAITED | (starving ? LOCK_STARVING : 0u);
+    if (seen != v && !xb_atomic_cas32(&s->word, &v, seen, XB_RELAXED)) continue;
+    xb_park_wait_short(&s->word, seen, -1); /* a writer's work is short; collections go on without this thread */
     slept = 1;
     starving = starving || xb_platform_monotonic_ns() - since >= STARVING_NS;
   }
@@ -122,28 +127,25 @@ static void lock_slow(stripe *s) {
 
 void xb_seq_lock(const void *obj) {
   stripe *s = stripe_of(obj);
-  uint32_t none = 0;
-  if (!xb_atomic_cas32(&s->lock, &none, LOCK_HELD, XB_ACQUIRE)) {
-    unsigned spins = 0;
-    for (; spins < SPINS; ++spins) { /* a load first: a compare-and-swap takes the line from the holder each time */
-      none = 0;
-      if (!xb_atomic_load32(&s->lock, XB_RELAXED) && xb_atomic_cas32(&s->lock, &none, LOCK_HELD, XB_ACQUIRE)) break;
-    }
-    if (spins == SPINS) lock_slow(s);
+  uint32_t v = xb_atomic_load32(&s->word, XB_RELAXED);
+  unsigned spins = 0;
+  for (; spins < SPINS; ++spins) { /* a load first: a compare-and-swap takes the line from the holder each time */
+    if (!(v & LOCK_BITS) && xb_atomic_cas32(&s->word, &v, v | LOCK_HELD, XB_ACQUIRE)) break;
+    v = xb_atomic_load32(&s->word, XB_RELAXED);
   }
-  xb_atomic_add32(&s->seq, 1, XB_RELAXED); /* odd: readers wait or read again */
-  /* The odd count is seen before any write that follows, plain stores too (a hash's words, xb_seq_read_valid's
-   * readers on weak memory: ARM, POWER): a reader that sees a write sees the count changed. */
+  if (spins == SPINS) lock_slow(s);
+  /* The lock taken (readers wait or read again) is seen before any write that follows, plain stores too (a hash's
+   * words, xb_seq_read_valid's readers on weak memory: ARM, POWER): a reader that sees a write sees the word changed. */
   xb_atomic_fence(XB_RELEASE);
 }
 
 void xb_seq_unlock(const void *obj) {
   stripe *s = stripe_of(obj);
-  xb_atomic_add32(&s->seq, 1, XB_RELEASE); /* even, after the writes */
-  uint32_t v = xb_atomic_load32(&s->lock, XB_RELAXED);
-  while (!xb_atomic_cas32(&s->lock, &v, v & LOCK_STARVING ? LOCK_HANDED : 0u, XB_RELEASE)) {
-  }
-  if (v & LOCK_WAITED) xb_park_wake(&s->lock, 0);
+  uint32_t v = xb_atomic_load32(&s->word, XB_RELAXED), next;
+  do /* the count moved, after the writes; the lock freed, or handed over to a starving waiter */
+    next = ((v & ~LOCK_BITS) + LOCK_SEQ_ONE) | (v & LOCK_STARVING ? LOCK_HANDED : 0u);
+  while (!xb_atomic_cas32(&s->word, &v, next, XB_RELEASE));
+  if (v & LOCK_WAITED) xb_park_wake(&s->word, 0);
 }
 
 void xb_seq_put(const void *obj, xb_item *dst, const xb_item *src) {
