@@ -145,7 +145,40 @@ static int clone_item(clone_map *m, xb_item *it) {
   return 1;
 }
 
+static int holds_collection(const xb_item *items, size_t n, size_t stride) {
+  for (size_t i = 0; i < n; ++i) {
+    const xb_item *it = (const xb_item *)((const char *)items + i * stride);
+    if (it->type == XB_T_ARRAY || it->type == XB_T_HASH) return 1;
+  }
+  return 0;
+}
+
+/* The deep copy of a local array or hash that holds no array or hash: its copy alone, made without the map (the usual
+ * INIT {} of a class variable, and most AClone()s); 0 for any other. `root` stays a root throughout. */
+static int clone_flat(xb_ctx *ctx, xb_item *ret, const xb_item *root) {
+  if (root->type == XB_T_ARRAY) {
+    const xb_array *a = root->v.p;
+    if (xb_is_shared(a) ||
+        (xb_array_elems(a) == XB_ELEMS_ITEMS && holds_collection(xb_array_items(a), a->len, sizeof(xb_item))))
+      return 0;
+    xb_array *copy = xb_array_snapshot(ctx, a); /* read after its one allocation: nothing collects meanwhile */
+    xb_set_array(ret, copy);
+    return 1;
+  }
+  if (root->type != XB_T_HASH) return 0;
+  const xb_hash *h = root->v.p;
+  if (xb_is_shared(h) || (h->used && holds_collection(&h->entries[0].value, h->used, sizeof h->entries[0]))) return 0;
+  xb_item made;
+  xb_set_hash(&made, xb_hash_alloc());
+  xb_gc_root_push(ctx, &made); /* the copy's storage is a second allocation */
+  xb_hash_copy(made.v.p, root->v.p);
+  xb_gc_root_pop(ctx, 1);
+  *ret = made;
+  return 1;
+}
+
 void xb_clone_deep(xb_ctx *ctx, xb_item *ret, const xb_item *root) {
+  if (clone_flat(ctx, ret, root)) return;
   clone_map m = {ctx, calloc(16, sizeof(clone_entry)), 15, 0, NULL, 0, 0};
   if (!m.slots) xb_gc_fatal("out of memory");
   xb_gc_hold(); /* the map keeps the sources' and copies' addresses, which no collection may change meanwhile */

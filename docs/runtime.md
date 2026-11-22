@@ -482,8 +482,9 @@ counter ([Threads and synchronization](#threads-and-synchronization)).
   the hash stays as the block left it). No change made by a block leaves the hash inconsistent.
 - Copies: `HClone` and `AClone` copy the arrays and hashes inside too (`xb_clone_deep`), each once, so shared and
   cyclic parts stay shared and cyclic in the copy; objects and codeblocks are shared. The copy works through a list
-  of copies to visit, not recursion, so the depth of the structure has no limit. `HCopy` and `HMerge` copy entries
-  only.
+  of copies to visit, not recursion, so the depth of the structure has no limit, under a map of the copies made; a local
+  array or hash that holds no array or hash (most of them, and the usual `INIT {}` of a class) is copied whole instead,
+  without the map (`clone_flat`). `HCopy` and `HMerge` copy entries only.
 - Collector: a hash (`XB_GC_HASH`) is traced by marking its store and the keys and values of its entries; the store
   holds no pointers of its own to trace. C code calls `xb_gc_write(hash)` after storing into an entry.
 
