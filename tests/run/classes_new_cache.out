@@ -1,0 +1,5 @@
+
+new: TA:10 TB:NIL TC:30 TD:-4 TA:50 TB:NIL TC:70 TD:-8 TA:10 TB:NIL TC:30 TD:-4 TA:50 TB:NIL TC:70 TD:-8 
+init: TB:NIL TA:50 TB:NIL TA:50 
+scope: error 41 TE:INIT made TA error 41 TE:INIT made TA 
+failing init: broke init fails TA broke init fails TA 

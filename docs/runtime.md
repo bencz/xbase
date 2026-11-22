@@ -796,15 +796,18 @@ first time it is used (its class function, or a subclass):
   answer for the same class at the same send) or a call to `dispatch` (`perform`). A runtime class's member
   (`xb_runtime_member`: a variable or a method, found as `xb_op_send` finds it) is kept too, its index and how it is
   reached in the slot and no member (`XB_SEND_OTHER` for compiled code), and run by `xb_runtime_perform`: a `Channel`'s
-  or a `Task`'s send repeated finds its method with no search by name. Messages to casts and to values of scalar classes
-  always look up. Each way also tells compiled code what the member is (`kind`: `XB_SEND_GET`, `XB_SEND_SET`,
-  `XB_SEND_METHOD` with the method's function in `fn`, or `XB_SEND_OTHER`), so that it performs the newest way in place
-  ([compiler.md](compiler.md#xir-to-llvm)). Threads share the caches: each one is a sequence lock (`version`, odd while
-  a thread changes it). A reader that finds the version odd, or changed once it has read a way, does the full lookup
-  instead (nothing torn is used, nothing is tried again), and a writer that finds another one at work leaves the cache
-  as it is; 20,000,000 messages to objects of two classes through one send take the same time as without it. Where the
-  compiler knows the object's class, it resolves the send by these rules instead: a call of the method, or the variable
-  at its slot ([xir.md](xir.md#classes)).
+  or a `Task`'s send repeated finds its method with no search by name. What the runtime answers itself for a class
+  without such a member is kept as a member of its own (`XB_MK_NEW`, `XB_MK_CLASS_NAME` in `xbclass.h`, made when the
+  class is tabled): `New` (the class's `Init` with the arguments, then the object; the object alone without an `Init`),
+  `Init` of none and `ClassName`; not `New` whose `Init` is not a method the class's scope reaches (an error each time),
+  nor through `Super`. Messages to casts and to values of scalar classes always look up. Each way also tells compiled
+  code what the member is (`kind`: `XB_SEND_GET`, `XB_SEND_SET`, `XB_SEND_METHOD` with the method's function in `fn`, or
+  `XB_SEND_OTHER`), so that it performs the newest way in place ([compiler.md](compiler.md#xir-to-llvm)). Threads share
+  the caches: each one is a sequence lock (`version`, odd while a thread changes it). A reader that finds the version
+  odd, or changed once it has read a way, does the full lookup instead (nothing torn is used, nothing is tried again),
+  and a writer that finds another one at work leaves the cache as it is; 20,000,000 messages to objects of two classes
+  through one send take the same time as without it. Where the compiler knows the object's class, it resolves the send
+  by these rules instead: a call of the method, or the variable at its slot ([xir.md](xir.md#classes)).
 
 ## References
 

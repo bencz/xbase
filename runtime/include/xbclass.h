@@ -15,7 +15,18 @@
 extern "C" {
 #endif
 
-typedef enum xb_member_kind { XB_MK_GET, XB_MK_SET, XB_MK_CLASS_GET, XB_MK_CLASS_SET, XB_MK_METHOD } xb_member_kind;
+/* XB_MK_NEW and XB_MK_CLASS_NAME are the runtime's own answers, in no class's table, which its send caches hold like
+ * members: New of a class without a member of that name (its Init with the arguments, `fn`, then the object; NULL
+ * `fn`: no Init, the object), also Init of none; ClassName of none (the name of `owner`). */
+typedef enum xb_member_kind {
+  XB_MK_GET,
+  XB_MK_SET,
+  XB_MK_CLASS_GET,
+  XB_MK_CLASS_SET,
+  XB_MK_METHOD,
+  XB_MK_NEW,
+  XB_MK_CLASS_NAME
+} xb_member_kind;
 
 /* What a message reaches: a variable of `owner` (its `index` among the owner's variables or class variables) read or
  * assigned, or a method of `owner` (its `index` among the owner's methods, and its function). `flags`: the scope and

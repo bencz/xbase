@@ -65,6 +65,8 @@ typedef struct cls {
   uint32_t *classArea;      /* the first class variable of each class of the line */
   xb_item *classValues;     /* the values of the class variables it holds itself (a root) */
   xb_item **classSlots;     /* where each class variable of the line is: here, or an ancestor's when SHARED */
+  member construct;         /* New without a member of the class (XB_MK_NEW; kind XB_MK_GET: none to cache) */
+  member className;         /* ClassName without a member (XB_MK_CLASS_NAME) */
   uint32_t state;           /* cls_state; ready is published (release) after everything else */
   int finalized;            /* a class of its line has a destructor */
   uint32_t initsBefore;     /* C_LINE: the INIT evaluations in progress when it began */
@@ -310,6 +312,22 @@ static xb_class_def **linearize(xb_ctx *ctx, xb_class_def *def, uint32_t *count)
 
 static void set_state(cls *c, cls_state state) { xb_atomic_store32(&c->state, state, XB_RELEASE); }
 
+static const member *lookup_of(void *data, const xb_class_def *c, const char *message);
+static int friend_of(const xb_ctx *ctx, const xb_class_def *owner, const xb_class_def *from);
+
+/* The members the runtime answers itself for a tabled class: ClassName, and New as dispatch makes it, Init sent from
+ * the class itself, when that is a method its scope lets the class reach, or none (then the object); else nothing a
+ * cache could hold (an Init variable). */
+static void make_answers(xb_ctx *ctx, cls *c) {
+  c->className = (member){XB_MK_CLASS_NAME, 0, c->def, 0, NULL};
+  c->construct = (member){XB_MK_GET, 0, c->def, 0, NULL};
+  const member *init = xb_member_reach(c->def, c->def, (const xb_class_def *const *)c->line, c->nline, 0, 1, "INIT",
+                                       lookup_of, NULL);
+  if (!init) c->construct.kind = XB_MK_NEW;
+  else if (init->kind == XB_MK_METHOD && (xb_member_scope_ok(init, c->def, 1) || friend_of(ctx, init->owner, c->def)))
+    c->construct = (member){XB_MK_NEW, 0, c->def, 0, init->fn};
+}
+
 /* Prepares the class under the lock of preparations: NULL when an error stopped it, with a request to unwind
  * pending. */
 static cls *prepare_locked(xb_ctx *ctx, xb_class_def *def) {
@@ -336,6 +354,7 @@ static cls *prepare_locked(xb_ctx *ctx, xb_class_def *def) {
       return NULL;
     }
     build_tables(c);
+    make_answers(ctx, c);
   }
   set_state(c, C_INIT);
   int ok = call_init(ctx, c);
@@ -517,6 +536,20 @@ static void perform(xb_ctx *ctx, xb_item *r, const member *m, uintptr_t slot, ui
       xb_fuse_target(ctx, m->fn);
       m->fn(ctx, r, argc, argv);
       return;
+    case XB_MK_NEW: {
+      xb_item self = argv[0];
+      if (!m->fn) {
+        *r = self;
+        return;
+      }
+      xb_gc_root_push(ctx, &self);
+      xb_fuse_target(ctx, m->fn);
+      m->fn(ctx, r, argc, argv);
+      xb_gc_root_pop(ctx, 1);
+      if (!(xb_pending_get(ctx) & XB_PENDING_UNWIND)) *r = self;
+      return;
+    }
+    case XB_MK_CLASS_NAME: xb_set_str(r, xb_str_new(m->owner->name, strlen(m->owner->name))); return;
     case XB_MK_CLASS_GET: /* the program's storage: whole under the stripe of its address once it is shared */
       if (xb_storage_is_shared()) xb_seq_get((void *)slot, r, (xb_item *)slot);
       else *r = *(xb_item *)slot;
@@ -569,12 +602,21 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
                                            lookup_of, NULL);
   if (!m) {
     if (object && cast(r, c, view, &argv[0], message)) return;
+    /* What the runtime answers itself; the same next time for the object's class at this send, unless it reads the
+     * sending method's class (a cast's view, Super). */
+    int same = cache && object && !view && !super;
     if (strcmp(message, "CLASSNAME") == 0) { /* a cast's is the class it sees; Super:ClassName() the parent's */
+      if (same) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &c->className, 0);
       const char *name = view ? c->line[view]->name : super && f->nline > 1 ? f->line[1]->name : c->def->name;
       xb_set_str(r, xb_str_new(name, strlen(name)));
       return;
     }
     if (strcmp(message, "NEW") == 0) { /* New: Init with the arguments, as the class's own method sends it */
+      if (same && c->construct.kind == XB_MK_NEW) {
+        cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &c->construct, 0);
+        perform(ctx, r, &c->construct, 0, argc, argv);
+        return;
+      }
       xb_item self = argv[0];
       xb_gc_root_push(ctx, &self);
       if (super) dispatch(ctx, r, c, "INIT", from, 1, NULL, argc, argv);
@@ -584,6 +626,8 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
       return;
     }
     if (strcmp(message, "INIT") == 0) {
+      static const member none = {XB_MK_NEW, 0, NULL, 0, NULL};
+      if (same) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &none, 0);
       *r = argv[0];
       return;
     }
