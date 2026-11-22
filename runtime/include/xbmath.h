@@ -452,15 +452,14 @@ static inline xb_dd xb_math_exp_fast_parts(double x, int *q) {
 #define XB_MATH_NEAR_ROW1_ERR 4.440892098500626e-16
 
 /* The first step's bound for |x| below 0.005, where k is 0: r is x exactly (a = x, e = 0) and the table's value is
- * 1, so v = 1 + (x + t) with only x + t rounded (below 2^-53 of |x|, t below 0.51 x^2), t's own rounding (below 2^-51
+ * 1, so v = 1 + (x + t) with only x + t rounded (half a unit of it: below 1.003 2^-53 |x|, t below 0.51 x^2), t's own rounding (below 2^-51
  * of t) and the terms left out (below |x|^8 / 8!, 2^-67 of |x|): all below 2^-52 |x| of v (v above 0.99), which
  * XB_MATH_NEAR_ROW1_ERR bounds twice over. Far tighter than 2^-58 for small x, whose e^x lies near 1, where a value
  * near a rounding boundary would otherwise take the full form at every call; tried only when 2^-58 cannot settle it
  * (no cost on the usual path). */
 #define XB_MATH_EXP_ROW1 0.005
-static inline double xb_math_exp_fast_err(double x) {
-  return fabs(x) < XB_MATH_EXP_ROW1 ? fabs(x) * XB_MATH_NEAR_ROW1_ERR : XB_MATH_EXP_FAST_ERR;
-}
+static inline int xb_math_exp_near_row1(double x) { return fabs(x) < XB_MATH_EXP_ROW1; }
+static inline double xb_math_exp_near_row1_err(double x) { return fabs(x) * XB_MATH_NEAR_ROW1_ERR; }
 
 /* Exp( x ): the first step when its bound settles the double, else xb_math_exp_dd. */
 static inline double xb_math_exp(double x) {
@@ -470,7 +469,7 @@ static inline double xb_math_exp(double x) {
     int q;
     xb_dd v = xb_math_exp_fast_parts(x, &q); /* q set before it is read */
     if (xb_math_sure(v, q, XB_MATH_EXP_FAST_ERR, &r)) return r;
-    if (fabs(x) < XB_MATH_EXP_ROW1 && xb_math_sure(v, q, xb_math_exp_fast_err(x), &r)) return r;
+    if (xb_math_exp_near_row1(x) && xb_math_sure(v, q, xb_math_exp_near_row1_err(x), &r)) return r;
   }
   xb_dd y = {x, 0.0};
   xb_math_exp_dd(y, 0.0, 1, &r);
@@ -504,10 +503,8 @@ static inline xb_dd xb_math_log_fast(double x) {
  * whose size is below 0.51 a^2) with those left out (below |a|^10 / 10): below 2^-51.9 |a| of the result (whose size
  * is above 0.997 |a|), which XB_MATH_NEAR_ROW1_ERR bounds; tried, as Exp's, only when 2^-58 cannot settle it. */
 #define XB_MATH_LOG_ROW1 0.0039
-static inline double xb_math_log_fast_err(double x) {
-  double a = fabs(x - 1.0);
-  return a < XB_MATH_LOG_ROW1 ? a * XB_MATH_NEAR_ROW1_ERR : XB_MATH_LOG_FAST_ERR;
-}
+static inline int xb_math_log_near_row1(double x) { return fabs(x - 1.0) < XB_MATH_LOG_ROW1; }
+static inline double xb_math_log_near_row1_err(double x) { return fabs(x - 1.0) * XB_MATH_NEAR_ROW1_ERR; }
 
 /* Log( x ): 0 gives minus infinity, a negative number a NaN (C's log; the callers apply Clipper's) */
 static inline double xb_math_log(double x) {
@@ -517,7 +514,7 @@ static inline double xb_math_log(double x) {
   double r;
   xb_dd fast = xb_math_log_fast(x);
   if (xb_math_sure(fast, 0, XB_MATH_LOG_FAST_ERR, &r)) return r;
-  if (fabs(x - 1.0) < XB_MATH_LOG_ROW1 && xb_math_sure(fast, 0, xb_math_log_fast_err(x), &r)) return r;
+  if (xb_math_log_near_row1(x) && xb_math_sure(fast, 0, xb_math_log_near_row1_err(x), &r)) return r;
   if (xb_math_sure(xb_math_log_quick(x), 0, XB_MATH_LOG_QUICK_ERR, &r)) return r;
   xb_dd l = xb_math_log_dd(x);
   return l.hi + l.lo;

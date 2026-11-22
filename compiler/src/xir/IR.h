@@ -132,8 +132,9 @@ struct Var {
 enum class Access : uint8_t {
   Direct,     // the variable's own item (or its cell's)
   ThroughRef, // a FOR EACH variable of a loop in progress: the element its reference designates
-  MaybeRef,   // a STATIC, captured variable or parameter: through the cell or element it designates if it
-              // holds one (tested at run time; a parameter may have been passed by reference)
+  MaybeRef,   // a captured or shared variable, a parameter, a STATIC passed by reference or a FOR EACH variable: through
+              // the cell or element it designates if it holds one (tested at run time; a parameter may have been
+              // passed by reference)
 };
 
 // A parameter of its function: its caller may have passed it by reference, or a typed copy typed it.

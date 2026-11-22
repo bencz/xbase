@@ -1265,16 +1265,16 @@ Conventions:
   a fast form (the table's value as a double-double, the reduced argument's terms in double, summed once: relative error
   below 2^-58; near the table's row of 1, `Exp` of |x| below 0.005 and `Log` of |x - 1| below 0.0039, where only the
   argument plus its terms is rounded, below 2^-51 |x| and 2^-51 |x - 1|, so that a value near 1 that lies close to a tie
-  is still settled at once, `xb_math_exp_fast_err`, tried when 2^-58 cannot settle it), then for `Log` a quick form (the
-  series in double beyond its first terms, below 2^-66; `^` takes the quick forms, below 2^-62 for e^y); each gives the
-  result when its error bound cannot change the rounding (Ziv's strategy), else the next one, and the full form decides
-  last (for about 1 argument in 128). `^`'s exact and halfway results (an integer exponent, or `n / 2^k` of an exact
-  root, such as `7 ^ 19` and `1046529 ^ 1.5`) are computed exactly, ties to even, and `x ^ 0.5` is IEEE's square root.
-  C's special cases of `pow` hold (`0 ^ 0` is 1, a negative base needs an integer exponent). The compiler folds `^` of
-  constants with the same code, and its inline `Exp()` and `Log()` call `xb_exp` and `xb_log`; none of them writes
-  `errno`. They cost more than the C library's (x86-64: `^` about 150 ns, `Exp` 22 ns, `Log` 30 ns, against 10, 4 and 4
-  ns). The runtime and `xbc` are compiled without contracting `a * b + c` into fused multiply-adds and, on 32-bit x86,
-  with SSE2 rather than the x87 unit (`xb_exact_doubles` in CMake), on which double-double arithmetic depends.
+  is still settled at once, `xb_math_exp_near_row1_err`, tried when 2^-58 cannot settle it), then for `Log` a quick form
+  (the series in double beyond its first terms, below 2^-66; `^` takes the quick forms, below 2^-62 for e^y); each gives
+  the result when its error bound cannot change the rounding (Ziv's strategy), else the next one, and the full form
+  decides last (for about 1 argument in 128). `^`'s exact and halfway results (an integer exponent, or `n / 2^k` of an
+  exact root, such as `7 ^ 19` and `1046529 ^ 1.5`) are computed exactly, ties to even, and `x ^ 0.5` is IEEE's square
+  root. C's special cases of `pow` hold (`0 ^ 0` is 1, a negative base needs an integer exponent). The compiler folds
+  `^` of constants with the same code, and its inline `Exp()` and `Log()` call `xb_exp` and `xb_log`; none of them
+  writes `errno`. They cost more than the C library's (x86-64: `^` about 150 ns, `Exp` 22 ns, `Log` 30 ns, against 10, 4
+  and 4 ns). The runtime and `xbc` are compiled without contracting `a * b + c` into fused multiply-adds and, on 32-bit
+  x86, with SSE2 rather than the x87 unit (`xb_exact_doubles` in CMake), on which double-double arithmetic depends.
 - The CA-Tools math functions (`core/trig.c`, `rtl/numbers.c`) are correctly rounded the same way, the same doubles
   everywhere: `Sin`, `Cos`, `Tan` and `Cot` reduce any argument exactly (`Sin( 10^22 )` is -0.8522008497671888), to a
   multiple of pi / 128 and a rest, by a table of sin and cos at those multiples (below 2^14 in one step with pi / 128 in

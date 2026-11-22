@@ -114,10 +114,10 @@ Value *CodeGen::needsRecord(Value *state) {
   return b_.CreateICmpEQ(bits, ConstantInt::get(i8_, XB_GC_STATE_OLD));
 }
 
-// Whether `v` may refer to a heap object, as far as type inference knows: a store of it needs the write barrier.
+// Whether `v` may refer to a heap object, as far as type inference knows (noHeap; no type at all, a value it never
+// reached, counts as any): a store of it needs the write barrier.
 bool CodeGen::mayReferToHeap(const xir::Value *v) {
-  xir::TypeSet t = plan_->types().of(v);
-  return t == 0 || (t & xir::kHeapTypes) != 0;
+  return plan_->types().of(v) == 0 || !plan_->types().noHeap(v);
 }
 
 // Where a load (`load`) or store of the variable reaches its value (see xir::Access). `local` is the item in place,
@@ -454,8 +454,8 @@ void CodeGen::cellWritten(Value *cell) {
 }
 
 // Write barrier after a store into a variable (see xb_gc_write in xbrt.h). A
-// captured variable's cell is a heap object; a STATIC, a shared variable and
-// a parameter may hold a cell. A store through an element (a FOR EACH
+// captured variable's cell is a heap object; a shared variable, a parameter and
+// a STATIC that a reference is taken of may hold a cell. A store through an element (a FOR EACH
 // variable's too) went through xb_ref_store. Frame slots and STATIC storage
 // are roots and need nothing.
 void CodeGen::writeBarrier(const xir::Var &v, xir::Access a) {

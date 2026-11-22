@@ -358,9 +358,10 @@ bool Generator::isEachVar(const VarExpr &v) const {
 
 // A FOR EACH variable of a loop being generated holds a reference to the
 // element. A variable that may be in a cell or hold a reference is tested at
-// run time: a STATIC, a captured or shared variable (its cell may hold the
-// reference of a loop), a parameter (its caller may pass a reference). Other
-// LOCALs never do.
+// run time: a captured or shared variable (its cell may hold the reference of
+// a loop), a STATIC passed by reference or a FOR EACH variable somewhere in
+// the module, a parameter (its caller may pass a reference). Other LOCALs and
+// STATICs never do.
 Access Generator::accessOf(const VarExpr &v) {
   return isEachVar(v) ? Access::ThroughRef : accessOf(*varOf(v));
 }

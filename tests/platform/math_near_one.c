@@ -33,13 +33,13 @@ static double exp_error_ratio(double x) {
   xb_dd y = {x, 0.0};
   xb_dd v = xb_math_exp_fast_parts(x, &q), full = xb_math_exp_parts(y, 0, &qf);
   xb_dd d = xb_dd_add(v, (xb_dd){-full.hi, -full.lo});
-  return fabs(d.hi) / fabs(full.hi) / xb_math_exp_fast_err(x);
+  return fabs(d.hi) / fabs(full.hi) / (xb_math_exp_near_row1(x) ? xb_math_exp_near_row1_err(x) : XB_MATH_EXP_FAST_ERR);
 }
 
 static double log_error_ratio(double x) {
   xb_dd v = xb_math_log_fast(x), full = xb_math_log_dd(x);
   xb_dd d = xb_dd_add(v, (xb_dd){-full.hi, -full.lo});
-  return fabs(d.hi) / fabs(full.hi) / xb_math_log_fast_err(x);
+  return fabs(d.hi) / fabs(full.hi) / (xb_math_log_near_row1(x) ? xb_math_log_near_row1_err(x) : XB_MATH_LOG_FAST_ERR);
 }
 
 int main(void) {

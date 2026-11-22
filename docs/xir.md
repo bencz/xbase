@@ -489,7 +489,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   reference or made a `FOR EACH` variable somewhere in its module (Sema's `staticsInCell`: macros never see a `STATIC`,
   so its uses are all in the module's source) is tested for a cell or reference at run time; another `STATIC` is read
   and written directly (its storage still goes through the runtime once threads share it, `xb_storage_shared`, which
-  also keeps it from being an elided load's place or a forwarded store's). `ref` and `ref.index` make the reference an
+  also keeps it from being a forwarded store's place and gives an elided load of it a shadow slot the runtime may read
+  it into). `ref` and `ref.index` make the reference an
   argument `@x` or `@a[i]` passes. `load ... move` is the load of a parameter into the `LOCAL` that stands for it
   (parameter versioning): nothing reads the parameter after; its slot keeps the value until the function returns or that
   `LOCAL` is set to `NIL`.

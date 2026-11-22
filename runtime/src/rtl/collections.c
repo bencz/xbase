@@ -171,7 +171,7 @@ static int clone_flat(xb_ctx *ctx, xb_item *ret, const xb_item *root) {
   xb_item made;
   xb_set_hash(&made, xb_hash_alloc());
   xb_gc_root_push(ctx, &made); /* the copy's storage is a second allocation */
-  xb_hash_copy(made.v.p, root->v.p);
+  xb_hash_copy_any(made.v.p, root->v.p); /* shared meanwhile (a thread's start publishes at a safepoint): locked */
   xb_gc_root_pop(ctx, 1);
   *ret = made;
   return 1;
