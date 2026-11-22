@@ -108,14 +108,14 @@ error, as in `o == NIL`; other operators on an object fail without one, which co
 `unary` (`~` gives an integer), `from_bool`,
 literals and the constructors give their type, a parameter of a typed copy the types its calls pass
 (`Function::paramTypes`, `specialize-calls` below), a call of a runtime function declared with `RESULT` the types it
-returns (its `INTEGER RANGE` the range of its integers where no error substitutes the value: a `TOTAL` call of arguments
-of its types; a value a check lets through may be any integer) or, when it fails, the value an error block substitutes
-(any type, unless `subst.check` follows; none for a `TOTAL` one whose arguments are of its parameters' types), a call of
-a function of the module (or `call.forward`) gives the types its `RETURN`s give (`Function::returnTypes`, below), and
-anything else read from memory (a variable, an element, another call's result) may hold any type. The lowering uses it
-to keep values that never refer to a heap object out of the frame ([compiler.md](compiler.md#xir-to-llvm)), where a
-value has a single possible type, uses it as a constant instead of reading it, and emits only the fast paths the
-operands' types allow.
+returns (those of its arguments for a `CHOOSES` one, which returns one of them; its `INTEGER RANGE` the range of its
+integers where no error substitutes the value: a `TOTAL` call of arguments of its types; a value a check lets through
+may be any integer) or, when it fails, the value an error block substitutes (any type, unless `subst.check` follows;
+none for a `TOTAL` one whose arguments are of its parameters' types), a call of a function of the module (or
+`call.forward`) gives the types its `RETURN`s give (`Function::returnTypes`, below), and anything else read from memory
+(a variable, an element, another call's result) may hold any type. The lowering uses it to keep values that never refer
+to a heap object out of the frame ([compiler.md](compiler.md#xir-to-llvm)), where a value has a single possible type,
+uses it as a constant instead of reading it, and emits only the fast paths the operands' types allow.
 
 The return types of a function (`returnTypes`): the union of the types of the values its `ret`s give (`NIL` for a
 `ret` without one), with the function's own type inference; every type for a generator's resume function. The pass
@@ -135,23 +135,23 @@ of the mask (see `typed-continuations` in [Passes](#passes)).
 
 Integer ranges (`IntRange`, the values an item holds when it is an integer) grow with the types in the same optimistic
 fixpoint, since each needs the other: `+`, `-` and `*` of two integers give an integer, not a double, when the operands'
-ranges keep the result within int64 (`TypeInfo::fits`, the corners computed with LLVM's checked arithmetic), and
-`Int( x / k )` of an integer `x` (`k` an integer constant other than -1, 0 and 1, `intQuotientDividend`) is an integer
-(its range exact only within 2^53, where the double quotient is). `BitAnd` with a non-negative constant is within it, a
-negation negates the range and `Int()` of an integer keeps it, and a value an error may substitute has any range,
-checked or not (a `subst.check` lets a substituted value of the operation's own types through). A block parameter's
-range is widened once it has grown twice: on the side that grows, to the next of the function's integer constants, their
-neighbours (c - 1, c + 1) or the end of int64 (thresholds), so that the fixpoint ends (and the hull of two empty ranges
-is the one empty range, however a bound wrote them: `1..0` for a FOR that never runs); two rounds of narrowing then
-compute every range again from the others, and the types once more with the ranges fixed. The tests bound the values
-they compare (`Bound`): a FOR's true branch bounds its counter by its limit (no greater; no less with a negative step)
-when both and the step are integers and the step's sign is known, and either branch of a comparison `<` `<=` `>` `>=` of
-two numbers bounds each operand by the other when that is an integer (the false branch by the negation). Such a bound
-holds in the blocks its branch dominates when the branch's edge is the only way into its block from outside it (its
-other predecessors are back edges), at most 16 of each value (the first in reverse postorder: a value compared in
-thousands of places would make each look-up as long), and for the arguments that branch passes to a block parameter in
-any case (a loop's back edge from an `IF n > 3; EXIT`). `--dump-xir-types` prints the types after each item value and
-block parameter.
+ranges keep the result within int64 (`TypeInfo::fits`, the corners computed with LLVM's checked arithmetic), and `Int( x
+/ k )` of an integer `x` (`k` an integer constant other than -1, 0 and 1, `intQuotientDividend`) is an integer (its
+range exact within 2^53, where the double quotient is; past it the quotient and its truncation move by less than 2^-51
+of it and one more, a slack the range takes). `BitAnd` with a non-negative constant is within it, a negation negates the
+range and `Int()` of an integer keeps it, and a value an error may substitute has any range, checked or not (a
+`subst.check` lets a substituted value of the operation's own types through). A block parameter's range is widened once
+it has grown twice: on the side that grows, to the next of the function's integer constants, their neighbours (c - 1,
+c + 1) or the end of int64 (thresholds), so that the fixpoint ends (and the hull of two empty ranges is the one empty
+range, however a bound wrote them: `1..0` for a FOR that never runs); two rounds of narrowing then compute every range
+again from the others, and the types once more with the ranges fixed. The tests bound the values they compare (`Bound`):
+a FOR's true branch bounds its counter by its limit (no greater; no less with a negative step) when both and the step
+are integers and the step's sign is known, and either branch of a comparison `<` `<=` `>` `>=` of two numbers bounds
+each operand by the other when that is an integer (the false branch by the negation). Such a bound holds in the blocks
+its branch dominates when the branch's edge is the only way into its block from outside it (its other predecessors are
+back edges), at most 16 of each value (the first in reverse postorder: a value compared in thousands of places would
+make each look-up as long), and for the arguments that branch passes to a block parameter in any case (a loop's back
+edge from an `IF n > 3; EXIT`). `--dump-xir-types` prints the types after each item value and block parameter.
 
 ## Passes
 
@@ -318,14 +318,15 @@ result. Implemented (`xir/passes/`):
   request waits for the next poll), and not `xb_pending_gc`. The same pass guards the values that enter a loop with a
   type the code would not know there (with substitutions counted: a parameter, a variable, a call's result, an operation
   whose error may substitute it) when the loop takes them as numbers (a `FOR`'s start or limit, an operand of `-`, `*`,
-  `/`, `%`, `^`, a comparison, a negation): `subst.check` with a mask (`imm`, the number types) right after the value,
-  into the same copy otherwise, so the loop keeps its values typed and out of the frame. The guarded value itself keeps
-  a home the collector sees (`TypeInfo::guardNeedsHome`) when until its check it may hold anything (a substituted error,
-  a value read from memory: the pending test after a call may collect). It also speculates: in a loop, `+`, `-` and `*`
-  of two values that are integers once the speculations hold (the greatest set of the loops' values that are integers,
-  `+ - *` or `Int( x / k )` of such, or block parameters all of whose arguments are) and whose ranges may overflow get a
-  guard against the integers alone (`subst.check` with the integer mask; an overflow's double goes on in the copy), so
-  the loop computes with integers in registers; one whose ranges cannot overflow (`fits`) needs none.
+  `/`, `%`, `^`, a comparison, a negation): `subst.check` with a mask (`imm`: the number types it gives itself, as an
+  integer for `Max()` of integers, both when it gives none) right after the value, into the same copy otherwise, so the
+  loop keeps its values typed and out of the frame. The guarded value itself keeps a home the collector sees
+  (`TypeInfo::guardNeedsHome`) when until its check it may hold anything (a substituted error, a value read from memory:
+  the pending test after a call may collect). It also speculates: in a loop, `+`, `-` and `*` of two values that are
+  integers once the speculations hold (the greatest set of the loops' values that are integers, `+ - *` or `Int( x / k
+  )` of such, or block parameters all of whose arguments are) and whose ranges may overflow get a guard against the
+  integers alone (`subst.check` with the integer mask; an overflow's double goes on in the copy), so the loop computes
+  with integers in registers; one whose ranges cannot overflow (`fits`) needs none.
 - `resolve-sends`, after `fold-constants`: a `send` (without `...`, not one an AWAIT fuses) to an object whose class
   `ClassInfo` knows, and a `Super` send of a method to its own `Self` that reaches a method (its parameter 0, which only
   loads read, `onlyLoaded`: the runtime finds a `Super` member from the method's class alone, `Self` being of it or of a

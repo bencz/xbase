@@ -141,6 +141,18 @@ bool totalCall(const Instruction &i, const TypeInfo &t) {
   return true;
 }
 
+// The types of the arguments of a CHOOSES call, one of which it returns as it received it: any type when one is spread
+// (`...`) or passed by reference (the function receives its variable's value).
+TypeSet argumentTypes(const Instruction &i, const TypeInfo &t) {
+  if (i.hasRest()) return kAnyType;
+  TypeSet types = 0;
+  for (const Value *a : i.operands()) {
+    if (isReference(a)) return kAnyType;
+    types |= t.of(a);
+  }
+  return types;
+}
+
 // Int( x ) of one argument (the runtime's), not spread from an array.
 bool intCall(const Instruction &i) {
   return i.op == Op::Call && !i.callee.function && i.callee.native && i.callee.name == "INT" &&
@@ -324,8 +336,12 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   case Op::FuncRef: return {typeBit(XB_T_SYMBOL), false};
   case Op::Call:
   case Op::CallForward: // what the module's function returns (its errors are its own: none substitutes the call)
-    if (!i.callee.function && i.callee.result.tags) // a runtime function's (RESULT), unless an error substitutes it
-      return {i.callee.result.tags & kAnyType, !totalCall(i, t)};
+    // a runtime function's (RESULT, of its arguments' types for CHOOSES), unless an error substitutes it
+    if (!i.callee.function && i.callee.result.tags) {
+      TypeSet types = i.callee.result.tags & kAnyType;
+      if (i.callee.chooses) types &= argumentTypes(i, t);
+      return {types, !totalCall(i, t)};
+    }
     return {i.callee.function ? i.callee.function->returnTypes & kAnyType : kAnyType, false};
   case Op::Load: { // a parameter of a typed copy, which no store changes: the types its calls pass
     const Function *f = i.parent->parent;
@@ -459,12 +475,17 @@ bool TypeInfo::intQuotient(const Instruction &call, IntRange *r) const {
   const auto *div = static_cast<const Instruction *>(call.operand(0));
   const int64_t k = asConstant(div->operand(1))->ival;
   IntRange x = rangeOf(dividend, div->parent);
-  *r = IntRange::full();
   if (x.empty()) {
     *r = {};
-  } else if (x.lo > -kExactDoubles && x.hi < kExactDoubles) { // the quotient a double gives exactly
-    int64_t a = x.lo / k, b = x.hi / k; // truncated, as Int() truncates it
-    *r = {std::min(a, b), std::max(a, b)};
+    return true;
+  }
+  int64_t a = x.lo / k, b = x.hi / k; // truncated, as Int() truncates it; within 2^62, |k| being 2 or more
+  *r = {std::min(a, b), std::max(a, b)};
+  if (x.lo <= -kExactDoubles || x.hi >= kExactDoubles) {
+    // The dividend, the divisor (past 2^53) and the quotient round as doubles, by 2^-53 of each: the quotient moves by
+    // less than 2^-51 of itself, and its truncation by one more; each end by its own share.
+    auto slack = [](int64_t q) { return ((q < 0 ? -q : q) >> 50) + 2; };
+    *r = {r->lo - slack(r->lo), r->hi + slack(r->hi)};
   }
   return true;
 }
@@ -500,9 +521,16 @@ IntRange TypeInfo::computeRange(const Instruction &i) const {
     if (intQuotient(i, &q)) return q;
     if (of(i.operand(0)) == kIntType) return rangeOf(i.operand(0), i.parent); // Int() of an integer: itself
   }
+  IntRange range = IntRange::full();
+  if (i.op == Op::Call && !i.callee.function && i.callee.chooses && !i.hasRest()) { // one of its integer arguments
+    range = {};
+    for (const Value *a : i.operands())
+      if (of(a) & kIntType) range = hull(range, rangeOf(a, i.parent));
+    if (range.empty()) return range;
+  }
   if (i.op == Op::Call && !i.callee.function && i.callee.result.ranged) // RESULT INTEGER RANGE lo TO hi
-    return {i.callee.result.lo, i.callee.result.hi};
-  return IntRange::full();
+    range = {std::max(range.lo, i.callee.result.lo), std::min(range.hi, i.callee.result.hi)};
+  return range;
 }
 
 void TypeInfo::findThresholds() {

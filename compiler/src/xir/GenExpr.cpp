@@ -290,6 +290,7 @@ Callee Generator::calleeOf(const CallExpr &c) {
       callee.result = c.callee->result;
       callee.paramTypes = c.callee->paramTypes;
       callee.total = c.callee->total;
+      callee.chooses = c.callee->chooses;
       callee.minArgs = c.callee->minArgs;
     }
     if (c.callee) callee.byref = c.callee->refMask();

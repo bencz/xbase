@@ -24,6 +24,7 @@
 //             joined by | (each named once), or ANY alone (any value); a parameter's `AS t` is the type of what it
 //             takes (no RANGE)
 //   TOTAL     a call whose arguments are of their parameters' types raises no error (with a RESULT)
+//   CHOOSES   a call that raises no error returns one of its arguments as it received it: of their types
 //
 // Every function here exists in the runtime, and every xBase-callable runtime function is declared here (the
 // runtime.declarations test checks both).
@@ -137,8 +138,8 @@ EXTERN FUNCTION Int( nValue ) NATIVE RESERVED CHECKED RESULT NUMERIC
 EXTERN FUNCTION L2Bin( nLong ) NATIVE
 EXTERN FUNCTION LenNum( nNumber ) NATIVE
 EXTERN FUNCTION Log( nValue ) NATIVE RESERVED CHECKED RESULT NUMERIC
-EXTERN FUNCTION Max( xValue1, xValue2 ) NATIVE RESERVED CHECKED RESULT NUMERIC|DATE
-EXTERN FUNCTION Min( xValue1, xValue2 ) NATIVE RESERVED CHECKED RESULT NUMERIC|DATE
+EXTERN FUNCTION Max( xValue1, xValue2 ) NATIVE RESERVED CHECKED RESULT NUMERIC|DATE CHOOSES
+EXTERN FUNCTION Min( xValue1, xValue2 ) NATIVE RESERVED CHECKED RESULT NUMERIC|DATE CHOOSES
 EXTERN FUNCTION Mod( nNumber, nBase ) NATIVE RESULT NUMERIC
 EXTERN FUNCTION Round( nValue, nDecimals ) NATIVE RESERVED CHECKED ABBREV 4 RESULT NUMERIC
 EXTERN FUNCTION Sqrt( nValue ) NATIVE RESERVED CHECKED RESULT NUMERIC

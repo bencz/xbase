@@ -542,6 +542,7 @@ struct ExternDecl {
   ValueType result;              // RESULT type: what a call that raises no error gives (no tags: any value)
   std::vector<ValueType> paramTypes; // per parameter, its AS type (no tags: any value)
   bool total = false;            // TOTAL: a call whose arguments are of their parameters' types raises no error
+  bool chooses = false;          // CHOOSES: a call that raises no error returns one of its arguments as it received it
   std::vector<bool> byRef;       // NATIVE: per parameter, `@name`: receives a reference passed to it
   bool restByRef = false;        // NATIVE: `@...`: so do the arguments past the named parameters
   static constexpr uint32_t kUnlimited = UINT32_MAX;

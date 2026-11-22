@@ -165,6 +165,7 @@ struct Callee {
   ValueType result;             // RESULT: what a call that raises no error gives (tags: a TypeSet; none: any)
   std::vector<ValueType> paramTypes; // the parameters' AS types (no tags: any)
   bool total = false;           // TOTAL: a call whose arguments are of those types raises no error
+  bool chooses = false;         // CHOOSES: a call that raises no error returns one of its arguments as received
   uint32_t minArgs = 0;         // the required parameters (a TOTAL call passes them all)
   // The arguments it takes as references (bit k: argument k, bit 31: argument 31 and after; xb_refs_take, as
   // xb_funcref's): a native function's declared ones, every one for an xBase function. A call with `...` passes the

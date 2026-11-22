@@ -2,8 +2,9 @@
  * arguments of its parameters' AS types (any value for a parameter without one), every count from its required
  * parameters to all of them and one past them for `...`, over a matrix of values of each type; then with any value for
  * every parameter. With arguments of their types, a TOTAL one raises no error; any call that raises none gives a value
- * of a RESULT type, within its RANGE. What the compiler takes from the declarations (the types and ranges of results,
- * calls that cannot fail) is then what the runtime does. */
+ * of a RESULT type, within its RANGE, and for a CHOOSES one, one of its arguments as it received it. What the compiler
+ * takes from the declarations (the types and ranges of results, calls that cannot fail) is then what the runtime does.
+ */
 #include "check.h"
 #include "xbrt_int.h"
 
@@ -25,7 +26,7 @@ typedef struct decl {
   int rest; /* `...`: the last of the nparams is one argument past the named ones */
   uint32_t types[MAX_PARAMS]; /* 0: any */
   uint32_t result;
-  int ranged, total;
+  int ranged, total, chooses;
   int64_t lo, hi;
 } decl;
 
@@ -149,6 +150,7 @@ static int parse(const char *text, decl *d) {
   while (word(text, &p, w, sizeof w)) {
     if (!strcmp(w, "NATIVE")) native = 1;
     if (!strcmp(w, "TOTAL")) d->total = 1;
+    if (!strcmp(w, "CHOOSES")) d->chooses = 1;
     if (!strcmp(w, "RESULT")) {
       d->result = type_at(text, &p, d, 1);
       result = 1;
@@ -241,6 +243,14 @@ static void call_all(xb_ctx *ctx, const decl *d, xb_func fn, uint32_t argc, xb_i
       }
       if (d->ranged && ret.type == XB_T_INT && (ret.v.i < d->lo || ret.v.i > d->hi)) {
         fprintf(stderr, "%s: %lld out of its RANGE\n", d->name, (long long)ret.v.i);
+        exit(1);
+      }
+      int chosen = 0;
+      for (uint32_t k = 0; k < argc; ++k)
+        chosen |= ret.type == argv[k].type && ret.v.i == argv[k].v.i && ret.width == argv[k].width &&
+                  ret.dec == argv[k].dec;
+      if (d->chooses && !chosen) {
+        fprintf(stderr, "%s: a result that is none of its arguments\n", d->name);
         exit(1);
       }
     }

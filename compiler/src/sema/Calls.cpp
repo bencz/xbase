@@ -16,7 +16,8 @@ void CallResolver::run(Module &m) {
       if (p.minArgs != d.minArgs || p.maxArgs != d.maxArgs || p.native != d.native || p.reserved != d.reserved ||
           p.checked != d.checked || p.fold != d.fold || p.args != d.args || p.params != d.params ||
           p.privates != d.privates || p.abbrev != d.abbrev || !(p.result == d.result) || p.paramTypes != d.paramTypes ||
-          p.total != d.total || p.byRef != d.byRef || p.restByRef != d.restByRef || p.library != d.library) {
+          p.total != d.total || p.chooses != d.chooses || p.byRef != d.byRef || p.restByRef != d.restByRef ||
+          p.library != d.library) {
         diag_.error(d.loc, "EXTERN FUNCTION '" + d.name + "' conflicts with an earlier declaration");
         diag_.note(p.loc, "previous declaration is here");
       }

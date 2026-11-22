@@ -1,0 +1,185 @@
+module CHOOSES_LIMITS
+
+function LIMITS params 1 {
+  $f0 = frame 0 "N"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward LIMITS.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  %5 = call LEN native %4
+  %6 = call MAX native %5, 4:w10
+  %7 = binary div %6, 2:w10
+  %8 = call INT native %7
+  %9 = binary sub %8, 1:w10
+  %10 = call MAX native %9, 0:w10
+  %11 = subst.check guard 4 %10
+  cond_br %11, body.subst, for.test(1:w10, 0:w10)
+for.test(%13: item, %14: item):
+  %15 = call LEN native %4
+  %16 = subst.check %15
+  cond_br %16, for.test.subst, for.test.3
+for.body:
+  %18 = binary sub %13, %10
+  %19 = call MAX native 1:w10, %18
+  %20 = subst.check %19
+  cond_br %20, for.body.subst, for.test.2(%19, %14)
+for.incr:
+  %22 = binary add.one %13, 1:w0
+  %23 = subst.check guard 4 %22
+  cond_br %23, for.incr.subst, for.test(%22, %26)
+for.test.2(%25: item, %26: item):
+  %27 = call LEN native %4
+  %28 = binary add %13, %10
+  %29 = call MIN native %27, %28
+  %30 = subst.check %29
+  cond_br %30, for.test.2.subst, for.test.2
+for.body.2:
+  %32 = binary add.grow %26, %25
+  %33 = binary add.one %25, 1:w0
+  br for.test.2(%33, %32)
+seq.exit:
+  ret %14
+for.test.2:
+  %36 = for.test %25, %29, 1:w0
+  cond_br %36, for.body.2, for.incr
+for.test.3:
+  %38 = for.test %13, %15, 1:w0
+  cond_br %38, for.body, seq.exit
+for.test.any(%40: item, %41: item, %42: item, %43: item):
+  %44 = call LEN native %42
+  br for.test.3.any(%40, %41, %42, %43, %44)
+for.body.any:
+  %46 = binary sub %72, %75
+  %47 = call MAX native 1:w10, %46
+  br for.test.2.any(%47, %73, %72, %74, %75)
+for.incr.any:
+  %49 = binary add.one %64, 1:w0
+  br for.test.any(%49, %66, %67, %68)
+for.test.2.any(%51: item, %52: item, %53: item, %54: item, %55: item):
+  %56 = call LEN native %54
+  %57 = binary add %53, %55
+  %58 = call MIN native %56, %57
+  br for.test.2.any.2(%53, %51, %52, %54, %55, %58)
+for.body.2.any:
+  %60 = binary add.grow %66, %65
+  %61 = binary add.one %65, 1:w0
+  br for.test.2.any(%61, %60, %64, %67, %68)
+seq.exit.any:
+  ret %73
+for.test.2.any.2(%64: item, %65: item, %66: item, %67: item, %68: item, %69: item):
+  %70 = for.test %65, %69, 1:w0
+  cond_br %70, for.body.2.any, for.incr.any
+for.test.3.any(%72: item, %73: item, %74: item, %75: item, %76: item):
+  %77 = for.test %72, %76, 1:w0
+  cond_br %77, for.body.any, seq.exit.any
+for.test.2.subst:
+  %79 = subst.value %29
+  br for.test.2.any.2(%13, %25, %26, %4, %10, %79)
+for.test.subst:
+  %81 = subst.value %15
+  br for.test.3.any(%13, %14, %4, %10, %81)
+for.body.subst:
+  %83 = subst.value %19
+  br for.test.2.any(%83, %14, %13, %4, %10)
+for.incr.subst:
+  %85 = subst.value %22
+  br for.test.any(%85, %26, %4, %10)
+body.subst:
+  %87 = subst.value %10
+  br for.test.any(1:w10, 0:w10, %4, %87)
+}
+
+function LIMITS.byref internal params 1 {
+  $f0 = frame 0 "N"
+entry:
+  %0 = load $f0 maybe_ref
+  %1 = call LEN native %0
+  %2 = call MAX native %1, 4:w10
+  %3 = binary div %2, 2:w10
+  %4 = call INT native %3
+  %5 = binary sub %4, 1:w10
+  %6 = call MAX native %5, 0:w10
+  %7 = subst.check guard 4 %6
+  cond_br %7, entry.subst, for.test(1:w10, 0:w10)
+for.test(%9: item, %10: item):
+  %11 = load $f0 maybe_ref
+  %12 = call LEN native %11
+  %13 = subst.check %12
+  cond_br %13, for.test.subst, for.test.3
+for.body:
+  %15 = binary sub %9, %6
+  %16 = call MAX native 1:w10, %15
+  %17 = subst.check %16
+  cond_br %17, for.body.subst, for.test.2(%16, %10)
+for.incr:
+  %19 = binary add.one %9, 1:w0
+  %20 = subst.check guard 4 %19
+  cond_br %20, for.incr.subst, for.test(%19, %23)
+for.test.2(%22: item, %23: item):
+  %24 = load $f0 maybe_ref
+  %25 = call LEN native %24
+  %26 = binary add %9, %6
+  %27 = call MIN native %25, %26
+  %28 = subst.check %27
+  cond_br %28, for.test.2.subst, for.test.2
+for.body.2:
+  %30 = binary add.grow %23, %22
+  %31 = binary add.one %22, 1:w0
+  br for.test.2(%31, %30)
+seq.exit:
+  ret %10
+for.test.2:
+  %34 = for.test %22, %27, 1:w0
+  cond_br %34, for.body.2, for.incr
+for.test.3:
+  %36 = for.test %9, %12, 1:w0
+  cond_br %36, for.body, seq.exit
+for.test.any(%38: item, %39: item, %40: item):
+  %41 = load $f0 maybe_ref
+  %42 = call LEN native %41
+  br for.test.3.any(%38, %39, %40, %42)
+for.body.any:
+  %44 = binary sub %69, %71
+  %45 = call MAX native 1:w10, %44
+  br for.test.2.any(%45, %70, %69, %71)
+for.incr.any:
+  %47 = binary add.one %62, 1:w0
+  br for.test.any(%47, %64, %65)
+for.test.2.any(%49: item, %50: item, %51: item, %52: item):
+  %53 = load $f0 maybe_ref
+  %54 = call LEN native %53
+  %55 = binary add %51, %52
+  %56 = call MIN native %54, %55
+  br for.test.2.any.2(%51, %49, %50, %52, %56)
+for.body.2.any:
+  %58 = binary add.grow %64, %63
+  %59 = binary add.one %63, 1:w0
+  br for.test.2.any(%59, %58, %62, %65)
+seq.exit.any:
+  ret %70
+for.test.2.any.2(%62: item, %63: item, %64: item, %65: item, %66: item):
+  %67 = for.test %63, %66, 1:w0
+  cond_br %67, for.body.2.any, for.incr.any
+for.test.3.any(%69: item, %70: item, %71: item, %72: item):
+  %73 = for.test %69, %72, 1:w0
+  cond_br %73, for.body.any, seq.exit.any
+for.test.2.subst:
+  %75 = subst.value %27
+  br for.test.2.any.2(%9, %22, %23, %6, %75)
+for.test.subst:
+  %77 = subst.value %12
+  br for.test.3.any(%9, %10, %6, %77)
+for.body.subst:
+  %79 = subst.value %16
+  br for.test.2.any(%79, %10, %9, %6)
+for.incr.subst:
+  %81 = subst.value %19
+  br for.test.any(%81, %23, %6)
+entry.subst:
+  %83 = subst.value %6
+  br for.test.any(1:w10, 0:w10, %83)
+}

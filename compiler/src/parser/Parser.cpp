@@ -670,7 +670,7 @@ std::optional<ValueType> Parser::parseValueType(bool ranges, std::string &error)
 }
 
 // EXTERN FUNCTION name( p1 [AS type], [p2] [AS type], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ARGS] [PARAMS]
-// [ABBREV n] [RESULT type] [TOTAL]
+// [ABBREV n] [RESULT type] [TOTAL] [CHOOSES]
 // Required parameters come first; `...` ends the list and lifts the maximum.
 // `@` before a parameter (or `...`) of a NATIVE function: it receives
 // references passed to it. A malformed declaration is reported once and skipped.
@@ -760,6 +760,8 @@ std::optional<ExternDecl> Parser::parseExtern() {
       continue; // past the type already
     } else if (attr == "TOTAL") {
       d.total = true;
+    } else if (attr == "CHOOSES") {
+      d.chooses = true;
     } else {
       return fail("unknown EXTERN FUNCTION attribute");
     }
@@ -784,6 +786,11 @@ std::optional<ExternDecl> Parser::parseExtern() {
   }
   if (d.total && !d.result.tags) {
     diag_.error(d.loc, "TOTAL needs a RESULT type (a call that raises no error gives one)");
+    endOfStmt();
+    return std::nullopt;
+  }
+  if (d.chooses && (!d.native || !d.result.tags)) {
+    diag_.error(d.loc, "CHOOSES is for a NATIVE function with a RESULT type (the runtime's, which its tests check)");
     endOfStmt();
     return std::nullopt;
   }

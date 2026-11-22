@@ -225,9 +225,10 @@ bool typedContinuations(Function &f) {
           guards[i.get()] = kIntType;
         } else if (chosen.count(i.get())) {
           checked.push_back(i.get());
-        } else if (worthGuarding(*i, seen, loops)) {
+        } else if (worthGuarding(*i, seen, loops)) { // against the numbers it gives itself (Max() of integers: one)
           checked.push_back(i.get());
-          guards[i.get()] = kNumberTypes;
+          TypeSet own = types.of(i.get()) & kNumberTypes;
+          guards[i.get()] = own ? own : kNumberTypes;
         }
       }
     std::stable_sort(checked.begin(), checked.end(), [&](const Instruction *a, const Instruction *b) {

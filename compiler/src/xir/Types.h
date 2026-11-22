@@ -69,15 +69,16 @@ struct IntRange {
 };
 
 // The types and, for the values that may be integers, the ranges of those integers: an interval per value, from the
-// integer constants through + - * of integers, unary -, & with a constant, Int() of an integer divided by a constant,
-// and block parameters (widened once one grows twice: to the next of the function's integer constants, their
-// neighbours, or an end of int64). Tests bound them (`Bound`): a FOR's counter is no greater than its limit (no less
-// with a negative step) where its true branch leads, when the limit and the step are integers and the step's sign is
-// known; either operand of < <= > >= of two numbers is bounded by the other, an integer, on either branch. A bound
-// holds in the blocks its branch dominates when the branch is the only way into its block from outside it, and for the
-// arguments the branch passes. + - * of two integers whose ranges cannot overflow give an integer only (`fits`), and
-// so does Int() of an integer divided by a constant other than -1, 0 and 1. One optimistic fixpoint for both, then the
-// ranges narrowed and the types inferred again with them (docs/xir.md, Types).
+// integer constants through + - * of integers, unary -, & with a constant, Int() of an integer divided by a constant, a
+// runtime function's RESULT INTEGER RANGE, a CHOOSES call (the hull of its arguments'), and block parameters (widened
+// once one grows twice: to the next of the function's integer constants, their neighbours, or an end of int64). Tests
+// bound them (`Bound`): a FOR's counter is no greater than its limit (no less with a negative step) where its true
+// branch leads, when the limit and the step are integers and the step's sign is known; either operand of < <= > >= of
+// two numbers is bounded by the other, an integer, on either branch. A bound holds in the blocks its branch dominates
+// when the branch is the only way into its block from outside it, and for the arguments the branch passes. + - * of two
+// integers whose ranges cannot overflow give an integer only (`fits`), and so does Int() of an integer divided by a
+// constant other than -1, 0 and 1. One optimistic fixpoint for both, then the ranges narrowed and the types inferred
+// again with them (docs/xir.md, Types).
 class TypeInfo {
 public:
   // The function the CFG was built for; `assumedChecks` (with Substitution::Any): operations taken as if subst.check
