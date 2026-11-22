@@ -283,16 +283,18 @@ runtime function, a function of a C library written to the runtime's convention,
 argument count is to be checked); the runtime's are declared in `include/rtl.ch`, which `std.ch` includes:
 
 ```
-EXTERN FUNCTION SubStr( cString, nStart, [nCount] ) NATIVE RESERVED CHECKED ABBREV 4
+EXTERN FUNCTION SubStr( cString AS STRING, nStart AS NUMERIC, [nCount] AS NUMERIC ) NATIVE RESERVED CHECKED ;
+   ABBREV 4 FOLD RESULT STRING TOTAL
 EXTERN FUNCTION QOut( ... ) NATIVE
 ```
 
-Parameters are names; `[name]` is optional. `[ ]` delimit strings in xBase, so the parser receives a string and takes
-any string whose text is a name as an optional parameter (a `.ppo` listing writes it as `"name"`, which compiles the
-same). Required parameters come first, and `...` allows any number of further arguments. In a `NATIVE` declaration,
-`@` before a parameter (`@name`, `[@name]`, `@...`) means the function receives a reference passed there (`Eval`
-passes them on to the block); a native function otherwise receives the value of an argument written `@x`. An xBase
-function always receives the reference, so `@` in a declaration without `NATIVE` is an error. Attributes:
+Parameters are names, each with an optional `AS type`, the type of what it takes; `[name]` is optional. `[ ]` delimit
+strings in xBase, so the parser receives a string and takes any string whose text is a name as an optional parameter (a
+`.ppo` listing writes it as `"name"`, which compiles the same). Required parameters come first, and `...` allows any
+number of further arguments. In a `NATIVE` declaration, `@` before a parameter (`@name`, `[@name]`, `@...`) means the
+function receives a reference passed there (`Eval` passes them on to the block); a native function otherwise receives
+the value of an argument written `@x`. An xBase function always receives the reference, so `@` in a declaration without
+`NATIVE` is an error. Attributes:
 
 | Attribute | Meaning |
 |---|---|
@@ -302,7 +304,8 @@ function always receives the reference, so `@` in a declaration without `NATIVE`
 | `ABBREV n` | calls may abbreviate the name to its first `n` or more letters (the keyword rule, `keywordMatches`) |
 | `LIBRARY name` | a public function of the xbase library `name` (`ExternDecl::library`, `xir::Callee::library`, `Request::library`): the call, the function reference and the `REQUEST` go to `xbx_NAME$FUNCTION` ([projects.md](projects.md)); the declarations a program gets from the libraries it uses are such; two declarations of one name for different libraries conflict; not with `NATIVE` |
 | `FOLD` | calls with constant arguments are evaluated at compile time (see [Constant folding](#constant-folding)) |
-| `RESULT letters` | the types a call that raises no error returns, as `ValType()` letters (`N`, `C`, `L`, `D`, ...; `ExternDecl::resultTypes`, `xir::Callee::resultTypes`): type inference counts them; since an error block may substitute a value of any type for a failed call, the result has those types only past a `subst.check` ([xir.md](xir.md#types)) |
+| `RESULT type` | the type of what a call that raises no error returns (`ExternDecl::result`, `xir::Callee::result`): type inference counts it ([xir.md](xir.md#types)); a type is `NIL`, `LOGICAL`, `INTEGER`, `DOUBLE`, `NUMERIC` (an integer or a double), `STRING`, `DATE`, `ARRAY`, `HASH`, `BLOCK`, `OBJECT`, `SYMBOL`, or several joined by `\|`, each named once (`NUMERIC` holds `INTEGER`), or `ANY` alone, any value (as no `AS`; `ValueType`, `Parser::parseValueType`); `INTEGER RANGE lo TO hi` (a `RESULT`'s only) holds the integers from lo to hi, which the inference's ranges take where no error substitutes the value |
+| `TOTAL` | (with a `RESULT`) a call whose arguments are of their parameters' `AS` types (the required ones passed, none past them, no `...`) raises no error: its result has the `RESULT` type with no `subst.check` (`totalCall` in `xir/Types.cpp`); an error block may substitute any value for another call's. `tests/platform/declarations.c` calls every `NATIVE` function with a `RESULT` over a matrix of values of its parameters' types, where a `TOTAL` one raises no error, then of any type, where every call that raises none gives a value of its `RESULT` type, within its `RANGE` |
 | `ARGS` | the function reads the arguments the function calling it received (`PCount()`): that function (or codeblock) keeps them in its frame (`FuncDecl::readsArgs`, `BlockExpr::readsArgs`, `xir::Function::readsArgs`; `args` in the xIR listing), as does one that runs a macro (`Sema::keepsArgs`) |
 | `PARAMS` | `ARGS`, and the function reads and writes the parameters of the function calling it (`PValue()`): that function keeps them in its frame slots, as written (no parameter versioning, no SSA values; `FuncDecl::readsParams`, `BlockExpr::readsParams`, `xir::Function::readsParams`); a function or codeblock that runs a macro is taken as calling one (the text may call `PValue()`) |
 | `PRIVATES` | the function creates PRIVATEs of the function calling it (`RESTORE`): that function (or codeblock) takes a PRIVATE mark and ends them when it returns (`FuncDecl::callsPrivates`, `BlockExpr::callsPrivates`, `xir::Function::callsPrivates`; `privates` in the xIR listing) |

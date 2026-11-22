@@ -1,0 +1,5 @@
+// Each type of a union is named once: NUMERIC holds INTEGER.
+EXTERN FUNCTION Foo( a ) NATIVE RESULT NUMERIC|INTEGER RANGE 0 TO 5
+
+PROCEDURE Main()
+   RETURN

@@ -514,6 +514,15 @@ struct ClassDecl {
   FuncDecl *initValues = nullptr; // set by Sema: returns the INIT values, or null when there are none
 };
 
+// A declared value type (EXTERN FUNCTION's RESULT, a parameter's AS): the type tags it admits (a bit each, as
+// xir::TypeSet; 0: any value) and, for INTEGER RANGE lo TO hi, the integers among them.
+struct ValueType {
+  uint32_t tags = 0;
+  bool ranged = false;
+  int64_t lo = 0, hi = 0;
+  bool operator==(const ValueType &) const = default;
+};
+
 // EXTERN FUNCTION name( params ) attributes: a function the program calls but
 // does not define (the runtime's are declared in include/rtl.ch).
 struct ExternDecl {
@@ -530,8 +539,9 @@ struct ExternDecl {
   bool privates = false;         // PRIVATES: creates PRIVATEs of the function calling it (RESTORE)
   uint32_t abbrev = 0;           // ABBREV n: shortest accepted abbreviation (0: none)
   std::string library;           // LIBRARY name: a public function of that xbase library (upper-cased; else none)
-  uint32_t resultTypes = 0;      // RESULT letters: the type tags (a bit each) of what a call that raises no error
-                                 // gives; 0: any
+  ValueType result;              // RESULT type: what a call that raises no error gives (no tags: any value)
+  std::vector<ValueType> paramTypes; // per parameter, its AS type (no tags: any value)
+  bool total = false;            // TOTAL: a call whose arguments are of their parameters' types raises no error
   std::vector<bool> byRef;       // NATIVE: per parameter, `@name`: receives a reference passed to it
   bool restByRef = false;        // NATIVE: `@...`: so do the arguments past the named parameters
   static constexpr uint32_t kUnlimited = UINT32_MAX;

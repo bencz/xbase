@@ -286,7 +286,12 @@ Callee Generator::calleeOf(const CallExpr &c) {
     if (c.callee) callee.library = c.callee->library;
     callee.readsCallerArgs = c.callee && c.callee->args;
     callee.fold = c.callee && c.callee->fold;
-    callee.resultTypes = c.callee ? c.callee->resultTypes : 0;
+    if (c.callee) {
+      callee.result = c.callee->result;
+      callee.paramTypes = c.callee->paramTypes;
+      callee.total = c.callee->total;
+      callee.minArgs = c.callee->minArgs;
+    }
     if (c.callee) callee.byref = c.callee->refMask();
   } else {
     callee.function = funcs_.at(c.name);

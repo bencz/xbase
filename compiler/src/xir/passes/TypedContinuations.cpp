@@ -46,6 +46,9 @@ namespace {
 // (kLargeFunction): pi's PiDigits, of 2000 instructions, ran 4.9 times slower.
 constexpr size_t kMaxInstructions = 500;
 constexpr size_t kMaxChecks = 64;
+// Rounds of the choice of checks past the first (worthChecking): each may find an operation that a check it did not
+// choose leaves substitutable; past them, what is left only stays generic.
+constexpr int kCheckRounds = 4;
 
 // An operation of a loop that takes its operand as a number (an operand of another type is an error, or another
 // operation altogether).
@@ -104,11 +107,15 @@ bool computedWith(const Instruction &i) {
 }
 
 // An operation worth checking: in a loop, its error may substitute the
-// result, the types it gives itself hold no heap reference (the value can
-// stay out of the frame) or are a single type (its tag is a constant: a
-// string concatenation), and it is computed with (computedWith).
-bool worthChecking(const Instruction &i, const TypeInfo &types, const Loops &loops) {
-  if (i.type() != Type::Item || !loops.innermost(i.parent) || !types.maySubstitute(i)) return false;
+// result, the types it gives itself (`types`: as if every operation were
+// checked) hold no heap reference (the value can stay out of the frame) or are
+// a single type (its tag is a constant: a string concatenation), and it is
+// computed with (computedWith). Whether it may substitute is `view`'s: first
+// `types`' own, then the types with the checks chosen so far only, where an
+// operation not chosen may give any type (a call whose argument it gives, TOTAL
+// of its arguments' types in `types`, may then fail).
+bool worthChecking(const Instruction &i, const TypeInfo &types, const TypeInfo &view, const Loops &loops) {
+  if (i.type() != Type::Item || !loops.innermost(i.parent) || !view.maySubstitute(i)) return false;
   TypeSet own = types.of(&i);
   bool single = (own & (own - 1)) == 0;
   if (own == 0 || ((own & kHeapTypes) != 0 && !single)) return false;
@@ -190,12 +197,33 @@ bool typedContinuations(Function &f) {
     TypeInfo types(cfg, Substitution::None), seen(cfg);
     Loops loops(cfg);
     std::unordered_set<const Value *> ints = speculatedIntegers(f, cfg, seen, loops);
+    std::unordered_set<const Instruction *> chosen;
+    auto found = [&](const TypeInfo &view) {
+      std::vector<const Instruction *> list;
+      for (BasicBlock *b : cfg.order())
+        for (auto &i : b->insts)
+          if (!chosen.count(i.get()) && worthChecking(*i, types, view, loops)) list.push_back(i.get());
+      return list;
+    };
+    for (const Instruction *i : found(types)) chosen.insert(i);
+    for (int round = 0; round < kCheckRounds; ++round) {
+      std::vector<const Instruction *> list = found(TypeInfo(cfg, Substitution::Any, &chosen));
+      // Of those, the ones that may fail even with all of them checked: one found only because another of this round
+      // gives any type (a product of Asc()'s result, while Asc() is unchecked) cannot fail once that one is checked.
+      std::unordered_set<const Instruction *> all = chosen;
+      all.insert(list.begin(), list.end());
+      TypeInfo with(cfg, Substitution::Any, &all);
+      bool grew = false;
+      for (const Instruction *i : list)
+        if (with.maySubstitute(*i)) grew = chosen.insert(i).second;
+      if (!grew) break;
+    }
     for (BasicBlock *b : cfg.order())
       for (auto &i : b->insts) {
         if (worthSpeculating(*i, seen, ints)) { // a guard against fewer types than a check's
           checked.push_back(i.get());
           guards[i.get()] = kIntType;
-        } else if (worthChecking(*i, types, loops)) {
+        } else if (chosen.count(i.get())) {
           checked.push_back(i.get());
         } else if (worthGuarding(*i, seen, loops)) {
           checked.push_back(i.get());

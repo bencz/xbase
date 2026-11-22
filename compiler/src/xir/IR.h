@@ -162,7 +162,10 @@ struct Callee {
   std::string library;          // external: a public function of this xbase library (EXTERN FUNCTION ... LIBRARY)
   bool readsCallerArgs = false; // ARGS: it reads the arguments its caller received (PCount(), __ArgError())
   bool fold = false;            // FOLD: a call on constants is evaluated when compiling (opt/Fold's evaluateCall)
-  uint32_t resultTypes = 0;     // RESULT: the types (a TypeSet) a call that raises no error gives; 0: any
+  ValueType result;             // RESULT: what a call that raises no error gives (tags: a TypeSet; none: any)
+  std::vector<ValueType> paramTypes; // the parameters' AS types (no tags: any)
+  bool total = false;           // TOTAL: a call whose arguments are of those types raises no error
+  uint32_t minArgs = 0;         // the required parameters (a TOTAL call passes them all)
   // The arguments it takes as references (bit k: argument k, bit 31: argument 31 and after; xb_refs_take, as
   // xb_funcref's): a native function's declared ones, every one for an xBase function. A call with `...` passes the
   // arguments on as they are there, references included; a send or an array literal passes their values.

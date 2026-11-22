@@ -59,6 +59,7 @@ private:
   // Parser.cpp: functions, declarations and blocks
   std::unique_ptr<FuncDecl> parseFunc();
   std::optional<ExternDecl> parseExtern();
+  std::optional<ValueType> parseValueType(bool ranges, std::string &error);
   void parseLinkDecl();
   void finishModule(Module &mod);
   Block parseBlock(std::initializer_list<const char *> enders);

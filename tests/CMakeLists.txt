@@ -282,6 +282,7 @@ foreach(t ${XB_PLATFORM_TESTS})
     target_compile_options(p_${name} PRIVATE /volatile:ms)
   endif()
   target_include_directories(p_${name} PRIVATE ${PROJECT_SOURCE_DIR}/runtime/src ${PROJECT_SOURCE_DIR}/include)
+  target_compile_definitions(p_${name} PRIVATE XB_TEST_RTL_CH="${PROJECT_SOURCE_DIR}/include/rtl.ch") # declarations.c
   target_link_libraries(p_${name} PRIVATE xbrt)
   add_test(NAME platform.${name} COMMAND p_${name})
 endforeach()

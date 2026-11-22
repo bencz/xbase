@@ -605,7 +605,72 @@ std::string Parser::operatorMessage() {
   return text;
 }
 
-// EXTERN FUNCTION name( p1, [p2], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ARGS] [PARAMS] [ABBREV n]
+// A value type: type names joined by `|`, each named once (NUMERIC holds INTEGER), INTEGER followed by RANGE lo TO hi
+// for the integers it holds (`ranges`: a RESULT's; a parameter's type has none, which no call's argument is checked
+// against), or ANY alone (any value: no tags, as a parameter without AS). Empty, with what is wrong in `error`, when it
+// is no type.
+std::optional<ValueType> Parser::parseValueType(bool ranges, std::string &error) {
+  static const std::pair<const char *, uint32_t> names[] = {
+      {"NIL", 1u << XB_T_NIL},       {"LOGICAL", 1u << XB_T_LOGICAL},
+      {"INTEGER", 1u << XB_T_INT},   {"DOUBLE", 1u << XB_T_DOUBLE},
+      {"NUMERIC", (1u << XB_T_INT) | (1u << XB_T_DOUBLE)},
+      {"STRING", 1u << XB_T_STRING}, {"DATE", 1u << XB_T_DATE},
+      {"ARRAY", 1u << XB_T_ARRAY},   {"HASH", 1u << XB_T_HASH},
+      {"BLOCK", 1u << XB_T_BLOCK},   {"OBJECT", 1u << XB_T_OBJECT},
+      {"SYMBOL", 1u << XB_T_SYMBOL}};
+  auto integer = [&](int64_t &out) {
+    bool minus = accept(Tok::Minus);
+    if (!at(Tok::Number) || !cur().isInt) return false;
+    out = minus ? -cur().ival : cur().ival;
+    advance();
+    return true;
+  };
+  ValueType t;
+  if (at(Tok::Ident) && cur().upper == "ANY") {
+    advance();
+    if (at(Tok::Pipe)) {
+      error = "ANY is any value: no other type joins it";
+      return std::nullopt;
+    }
+    return t;
+  }
+  do {
+    uint32_t tags = 0;
+    if (at(Tok::Ident))
+      for (const auto &[name, bits] : names)
+        if (cur().upper == name) tags = bits;
+    if (!tags) {
+      error = "expected a type name (NIL, LOGICAL, INTEGER, DOUBLE, NUMERIC, STRING, DATE, ARRAY, HASH, BLOCK, "
+              "OBJECT, SYMBOL, ANY)";
+      return std::nullopt;
+    }
+    if (t.tags & tags) {
+      error = "a type named twice";
+      return std::nullopt;
+    }
+    bool isInteger = cur().upper == "INTEGER";
+    t.tags |= tags;
+    advance();
+    if (isInteger && at(Tok::Ident) && cur().upper == "RANGE") {
+      if (!ranges) {
+        error = "RANGE is a RESULT's only";
+        return std::nullopt;
+      }
+      advance();
+      bool ok = integer(t.lo) && at(Tok::Ident) && cur().upper == "TO";
+      if (ok) advance();
+      if (!ok || !integer(t.hi) || t.lo > t.hi) {
+        error = "RANGE needs two integers, lo TO hi, lo not above hi";
+        return std::nullopt;
+      }
+      t.ranged = true;
+    }
+  } while (accept(Tok::Pipe));
+  return t;
+}
+
+// EXTERN FUNCTION name( p1 [AS type], [p2] [AS type], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ARGS] [PARAMS]
+// [ABBREV n] [RESULT type] [TOTAL]
 // Required parameters come first; `...` ends the list and lifts the maximum.
 // `@` before a parameter (or `...`) of a NATIVE function: it receives
 // references passed to it. A malformed declaration is reported once and skipped.
@@ -655,6 +720,15 @@ std::optional<ExternDecl> Parser::parseExtern() {
       if (!optional) ++d.minArgs;
       ++d.maxArgs;
       advance();
+      ValueType type;
+      if (at(Tok::Ident) && cur().upper == "AS") {
+        advance();
+        std::string error;
+        std::optional<ValueType> t = parseValueType(false, error);
+        if (!t) return fail(error);
+        type = *t;
+      }
+      d.paramTypes.push_back(type);
       if (accept(Tok::RParen)) break;
       if (!accept(Tok::Comma)) return fail("expected ',' or ')'");
     }
@@ -679,15 +753,13 @@ std::optional<ExternDecl> Parser::parseExtern() {
       d.library = cur().upper;
     } else if (attr == "RESULT") {
       advance();
-      if (!at(Tok::Ident)) return fail("RESULT needs the ValType() letters of the types the function returns");
-      for (char letter : cur().upper) {
-        // Every tag ValType() shows with the letter (not U: a cell or a reference shows as NIL).
-        uint32_t tags = 0;
-        for (uint32_t t = 0; letter != 'U' && t < sizeof XB_TYPE_LETTERS - 1; ++t)
-          if (XB_TYPE_LETTERS[t] == letter) tags |= 1u << t;
-        if (!tags) return fail(std::string("RESULT: '") + letter + "' is not a ValType() letter of a type returned");
-        d.resultTypes |= tags;
-      }
+      std::string error;
+      std::optional<ValueType> t = parseValueType(true, error);
+      if (!t) return fail("RESULT: " + error);
+      d.result = *t;
+      continue; // past the type already
+    } else if (attr == "TOTAL") {
+      d.total = true;
     } else {
       return fail("unknown EXTERN FUNCTION attribute");
     }
@@ -707,6 +779,11 @@ std::optional<ExternDecl> Parser::parseExtern() {
   }
   if (d.args && !d.native) {
     diag_.error(d.loc, "ARGS and PARAMS are for NATIVE functions (an xBase function cannot reach its caller's frame)");
+    endOfStmt();
+    return std::nullopt;
+  }
+  if (d.total && !d.result.tags) {
+    diag_.error(d.loc, "TOTAL needs a RESULT type (a call that raises no error gives one)");
     endOfStmt();
     return std::nullopt;
   }

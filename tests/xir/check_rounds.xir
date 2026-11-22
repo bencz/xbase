@@ -1,0 +1,116 @@
+module CHECK_ROUNDS
+
+function CODES params 1 {
+  $f0 = frame 0 "C"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward CODES.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  br for.test(1:w10, 0:w10)
+for.test(%6: item, %7: item):
+  %8 = call LEN native %4
+  %9 = subst.check %8
+  cond_br %9, for.test.subst, for.test.2
+for.body:
+  %11 = call SUBSTR native %4, %6, 1:w10
+  %12 = call ASC native %11
+  %13 = subst.check %12
+  cond_br %13, for.body.subst, for.body.2
+seq.exit:
+  ret %7
+for.test.2:
+  %16 = for.test %6, %8, 1:w0
+  cond_br %16, for.body, seq.exit
+for.body.2:
+  %18 = binary mul %12, 65536:w10
+  %19 = binary add.grow %7, %18
+  %20 = binary add.one %6, 1:w0
+  %21 = subst.check guard 4 %20
+  cond_br %21, for.body.2.subst, for.test(%20, %19)
+for.body.any:
+  %23 = call SUBSTR native %29, %27, 1:w10
+  %24 = call ASC native %23
+  br for.body.2.any(%27, %28, %29, %24)
+seq.exit.any:
+  ret %28
+for.test.2.any(%27: item, %28: item, %29: item, %30: item):
+  %31 = for.test %27, %30, 1:w0
+  cond_br %31, for.body.any, seq.exit.any
+for.body.2.any(%33: item, %34: item, %35: item, %36: item):
+  %37 = binary mul %36, 65536:w10
+  %38 = binary add.grow %34, %37
+  %39 = binary add.one %33, 1:w0
+  br for.body.2.any.2(%35, %38, %39)
+for.body.2.any.2(%41: item, %42: item, %43: item):
+  %44 = call LEN native %41
+  br for.test.2.any(%43, %42, %41, %44)
+for.test.subst:
+  %46 = subst.value %8
+  br for.test.2.any(%6, %7, %4, %46)
+for.body.subst:
+  %48 = subst.value %12
+  br for.body.2.any(%6, %7, %4, %48)
+for.body.2.subst:
+  %50 = subst.value %20
+  br for.body.2.any.2(%4, %19, %50)
+}
+
+function CODES.byref internal params 1 {
+  $f0 = frame 0 "C"
+entry:
+  br for.test(1:w10, 0:w10)
+for.test(%1: item, %2: item):
+  %3 = load $f0 maybe_ref
+  %4 = call LEN native %3
+  %5 = subst.check %4
+  cond_br %5, for.test.subst, for.test.2
+for.body:
+  %7 = load $f0 maybe_ref
+  %8 = call SUBSTR native %7, %1, 1:w10
+  %9 = call ASC native %8
+  %10 = subst.check %9
+  cond_br %10, for.body.subst, for.body.2
+seq.exit:
+  ret %2
+for.test.2:
+  %13 = for.test %1, %4, 1:w0
+  cond_br %13, for.body, seq.exit
+for.body.2:
+  %15 = binary mul %9, 65536:w10
+  %16 = binary add.grow %2, %15
+  %17 = binary add.one %1, 1:w0
+  %18 = subst.check guard 4 %17
+  cond_br %18, for.body.2.subst, for.test(%17, %16)
+for.test.any(%20: item, %21: item):
+  %22 = load $f0 maybe_ref
+  %23 = call LEN native %22
+  br for.test.2.any(%20, %21, %23)
+for.body.any:
+  %25 = load $f0 maybe_ref
+  %26 = call SUBSTR native %25, %30, 1:w10
+  %27 = call ASC native %26
+  br for.body.2.any(%30, %31, %27)
+seq.exit.any:
+  ret %31
+for.test.2.any(%30: item, %31: item, %32: item):
+  %33 = for.test %30, %32, 1:w0
+  cond_br %33, for.body.any, seq.exit.any
+for.body.2.any(%35: item, %36: item, %37: item):
+  %38 = binary mul %37, 65536:w10
+  %39 = binary add.grow %36, %38
+  %40 = binary add.one %35, 1:w0
+  br for.test.any(%40, %39)
+for.test.subst:
+  %42 = subst.value %4
+  br for.test.2.any(%1, %2, %42)
+for.body.subst:
+  %44 = subst.value %9
+  br for.body.2.any(%1, %2, %44)
+for.body.2.subst:
+  %46 = subst.value %17
+  br for.test.any(%46, %16)
+}

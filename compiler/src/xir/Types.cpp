@@ -128,6 +128,19 @@ bool arithmetic(const Instruction &i) {
 
 namespace {
 
+// A call of a TOTAL function whose arguments are all of their parameters' types: it raises no error (no `...`, whose
+// arguments are unknown; the required ones all passed, an optional one absent; none past the declared parameters).
+bool totalCall(const Instruction &i, const TypeInfo &t) {
+  if (i.op != Op::Call || !i.callee.total || i.hasRest() || i.operands().size() < i.callee.minArgs ||
+      i.operands().size() > i.callee.paramTypes.size())
+    return false;
+  for (size_t k = 0; k < i.operands().size(); ++k) {
+    uint32_t allowed = i.callee.paramTypes[k].tags;
+    if (allowed && (t.of(i.operand(k)) & ~allowed)) return false;
+  }
+  return true;
+}
+
 // Int( x ) of one argument (the runtime's), not spread from an array.
 bool intCall(const Instruction &i) {
   return i.op == Op::Call && !i.callee.function && i.callee.native && i.callee.name == "INT" &&
@@ -166,7 +179,9 @@ constexpr int64_t kExactDoubles = int64_t(1) << XB_DBL_EXACT_BITS; // the intege
 
 } // namespace
 
-TypeInfo::TypeInfo(const CFG &cfg, Substitution substitution) : cfg_(&cfg), substitution_(substitution) {
+TypeInfo::TypeInfo(const CFG &cfg, Substitution substitution,
+                   const std::unordered_set<const Instruction *> *assumedChecks)
+    : cfg_(&cfg), substitution_(substitution), assumedChecks_(assumedChecks) {
   findBounds();
   findThresholds();
   // Types and ranges together, from nothing (optimistic): a value found an integer of a range gives one to what is
@@ -309,8 +324,8 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   case Op::FuncRef: return {typeBit(XB_T_SYMBOL), false};
   case Op::Call:
   case Op::CallForward: // what the module's function returns (its errors are its own: none substitutes the call)
-    if (!i.callee.function && i.callee.resultTypes) // a runtime function's (RESULT), unless an error substitutes it
-      return {i.callee.resultTypes & kAnyType, true};
+    if (!i.callee.function && i.callee.result.tags) // a runtime function's (RESULT), unless an error substitutes it
+      return {i.callee.result.tags & kAnyType, !totalCall(i, t)};
     return {i.callee.function ? i.callee.function->returnTypes & kAnyType : kAnyType, false};
   case Op::Load: { // a parameter of a typed copy, which no store changes: the types its calls pass
     const Function *f = i.parent->parent;
@@ -369,7 +384,8 @@ TypeSet TypeInfo::compute(const Instruction &i) const {
               ((a & kIntType) && (b & kIntType) ? kIntType : 0);
   }
   if (intCall(i) && intQuotient(i, nullptr)) return kIntType & guardMask(i); // a number: no error
-  bool any = r.substitutable && substitution_ == Substitution::Any && !checked(i);
+  bool any = r.substitutable && substitution_ == Substitution::Any && !checked(i) &&
+             !(assumedChecks_ && assumedChecks_->count(&i));
   return (r.types | (any ? kAnyType : 0)) & guardMask(i);
 }
 
@@ -484,6 +500,8 @@ IntRange TypeInfo::computeRange(const Instruction &i) const {
     if (intQuotient(i, &q)) return q;
     if (of(i.operand(0)) == kIntType) return rangeOf(i.operand(0), i.parent); // Int() of an integer: itself
   }
+  if (i.op == Op::Call && !i.callee.function && i.callee.result.ranged) // RESULT INTEGER RANGE lo TO hi
+    return {i.callee.result.lo, i.callee.result.hi};
   return IntRange::full();
 }
 

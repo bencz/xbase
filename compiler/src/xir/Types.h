@@ -80,7 +80,10 @@ struct IntRange {
 // ranges narrowed and the types inferred again with them (docs/xir.md, Types).
 class TypeInfo {
 public:
-  explicit TypeInfo(const CFG &cfg, Substitution s = Substitution::Any); // the function the CFG was built for
+  // The function the CFG was built for; `assumedChecks` (with Substitution::Any): operations taken as if subst.check
+  // followed each (the checks passes/TypedContinuations.cpp has chosen so far).
+  explicit TypeInfo(const CFG &cfg, Substitution s = Substitution::Any,
+                    const std::unordered_set<const Instruction *> *assumedChecks = nullptr);
   TypeSet of(const Value *v) const;
   // The operation may fail with an error whose block may substitute its result.
   bool maySubstitute(const Instruction &i) const;
@@ -117,6 +120,7 @@ private:
   bool intQuotient(const Instruction &call, IntRange *r) const; // Int( i / k ): an integer, in the range *r
   const CFG *cfg_; // while the constructor runs, then null
   Substitution substitution_;
+  const std::unordered_set<const Instruction *> *assumedChecks_;
   std::unordered_map<const Value *, TypeSet> types_;
   std::unordered_map<const Value *, IntRange> ranges_;
   // The bounds of each value (as `x` or `y`) whose branch is the only way into its block from outside it: they hold
