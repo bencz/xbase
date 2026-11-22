@@ -455,7 +455,8 @@ static inline xb_dd xb_math_exp_fast_parts(double x, int *q) {
  * 1, so v = 1 + (x + t) with only x + t rounded (below 2^-53 of |x|, t below 0.51 x^2), t's own rounding (below 2^-51
  * of t) and the terms left out (below |x|^8 / 8!, 2^-67 of |x|): all below 2^-52 |x| of v (v above 0.99), which
  * XB_MATH_NEAR_ROW1_ERR bounds twice over. Far tighter than 2^-58 for small x, whose e^x lies near 1, where a value
- * near a rounding boundary would otherwise take the full form at every call. */
+ * near a rounding boundary would otherwise take the full form at every call; tried only when 2^-58 cannot settle it
+ * (no cost on the usual path). */
 #define XB_MATH_EXP_ROW1 0.005
 static inline double xb_math_exp_fast_err(double x) {
   return fabs(x) < XB_MATH_EXP_ROW1 ? fabs(x) * XB_MATH_NEAR_ROW1_ERR : XB_MATH_EXP_FAST_ERR;
@@ -468,7 +469,8 @@ static inline double xb_math_exp(double x) {
   if (x <= 709.8 && x >= -745.2) {
     int q;
     xb_dd v = xb_math_exp_fast_parts(x, &q); /* q set before it is read */
-    if (xb_math_sure(v, q, xb_math_exp_fast_err(x), &r)) return r;
+    if (xb_math_sure(v, q, XB_MATH_EXP_FAST_ERR, &r)) return r;
+    if (fabs(x) < XB_MATH_EXP_ROW1 && xb_math_sure(v, q, xb_math_exp_fast_err(x), &r)) return r;
   }
   xb_dd y = {x, 0.0};
   xb_math_exp_dd(y, 0.0, 1, &r);
@@ -500,7 +502,7 @@ static inline xb_dd xb_math_log_fast(double x) {
 /* The first step's bound for |x - 1| below 0.0039 (under 1/256: m is x, e is 0, the table's row is r = 1 with ln 0):
  * a = x - 1 exactly, the low parts are 0, and the result is a plus the terms rounded (below 2^-51.4 of the terms,
  * whose size is below 0.51 a^2) with those left out (below |a|^10 / 10): below 2^-51.9 |a| of the result (whose size
- * is above 0.997 |a|), which XB_MATH_NEAR_ROW1_ERR bounds. */
+ * is above 0.997 |a|), which XB_MATH_NEAR_ROW1_ERR bounds; tried, as Exp's, only when 2^-58 cannot settle it. */
 #define XB_MATH_LOG_ROW1 0.0039
 static inline double xb_math_log_fast_err(double x) {
   double a = fabs(x - 1.0);
@@ -513,7 +515,9 @@ static inline double xb_math_log(double x) {
   if (x == 0.0) return -HUGE_VAL;
   if (x < 0.0) return NAN;
   double r;
-  if (xb_math_sure(xb_math_log_fast(x), 0, xb_math_log_fast_err(x), &r)) return r;
+  xb_dd fast = xb_math_log_fast(x);
+  if (xb_math_sure(fast, 0, XB_MATH_LOG_FAST_ERR, &r)) return r;
+  if (fabs(x - 1.0) < XB_MATH_LOG_ROW1 && xb_math_sure(fast, 0, xb_math_log_fast_err(x), &r)) return r;
   if (xb_math_sure(xb_math_log_quick(x), 0, XB_MATH_LOG_QUICK_ERR, &r)) return r;
   xb_dd l = xb_math_log_dd(x);
   return l.hi + l.lo;
