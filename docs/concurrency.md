@@ -255,22 +255,24 @@ Done (`core/sched.c`, [runtime.md](runtime.md#threads-and-synchronization)), but
   which submits tasks to the pool and waits for them as any other thread (a task it returns is waited for at its end).
 - Each worker has a queue of its own, a ring of 256 tasks it fills at the tail and takes from at the head, and a slot
   for the task it made last (run next, for locality). A chain of tasks run from that slot, each making the next ready,
-  shares one slice of time: once a link starts 1 ms or more after the chain began, a task that waits (in the ring, the
-  pool's queue, another worker's ring or a submitting thread's) runs before the next link, which begins a new chain;
-  with none waiting, the chain gets another slice. So a chain never starves the other tasks, wherever they wait. A
-  thread outside the pool that submits tasks (the program's thread, `ThreadStart`'s, the timers') fills a ring of its
-  own the same way, without a lock, which workers steal from as from one another (the ring serves another thread once
-  its thread ends); the half a full ring sheds goes to the pool's queue, which a worker looks at first once every 61
-  tasks, taking its share of what waits. A worker that finds nothing steals half of another's ring (that worker's next
-  task when its ring is empty and its task has run 5 µs: a task that ends soon runs the task it made ready itself,
-  without a thread switch), searches 50 µs more while another worker runs (one searcher at a time), then parks; a
-  submission wakes a parked worker, or starts one, while fewer are active than the target and none searches; a
+  shares one slice of time: once the monitor finds the same chain running at its looks 10 ms apart while work waits, a
+  task that waits (in the ring, the pool's queue, another worker's ring or a submitting thread's) runs before the next
+  link, which begins a new chain; with none waiting, the chain goes on. A worker reads no clock to run a task: the
+  monitor and thieves tell how long a task or a chain runs by its counts of tasks and chains, unchanged between their
+  looks. So a chain never starves the other tasks, wherever they wait. A thread outside the pool that submits tasks (the
+  program's thread, `ThreadStart`'s, the timers') fills a ring of its own the same way, without a lock, which workers
+  steal from as from one another (the ring serves another thread once its thread ends); the half a full ring sheds goes
+  to the pool's queue, which a worker looks at first once every 61 tasks, taking its share of what waits. A worker that
+  finds nothing steals half of another's ring (that worker's next task when its ring is empty and it has seen that
+  worker run the same task 5 µs (its count of tasks unchanged): a task that ends soon runs the task it made ready
+  itself, without a thread switch), searches 50 µs more while another worker runs (one searcher at a time), then parks;
+  a submission wakes a parked worker, or starts one, while fewer are active than the target and none searches; a
   continuation a completion readies into the worker's empty next slot wakes none, only the monitor when it is idle
   (`XB_SUBMIT_CONTINUE`: the completer usually ends or suspends at once and the worker runs it, where a woken worker
-  would only search, which kept one spinning, three times the processor time of `async`; one that goes on hands it
-  over once it runs long). A `TaskRun()` from a task wakes as any submission: its parent goes on. The
-  counters every worker changes (active, searching, queued and ended tasks) each sit on a cache line of their own
-  (`XB_CACHE_LINE`, `core/sync.h`), so that changing one does not slow the readers of another.
+  would only search, which kept one spinning, three times the processor time of `async`; one that goes on hands it over
+  once it runs long). A `TaskRun()` from a task wakes as any submission: its parent goes on. The counters every worker
+  changes (active, searching, queued and ended tasks) each sit on a cache line of their own (`XB_CACHE_LINE`,
+  `core/sync.h`), so that changing one does not slow the readers of another.
 - **Blocking handoff**: every operation that may block the thread runs through the runtime: one that waits (`Mutex`
   waits, `Wait()`, a lock's pause between tries, a command run) through `xb_sleeping_run`, one that usually returns at
   once (a file's I/O, a file lock tried, console output) through `xb_blocking_run`. While a worker running a task waits
