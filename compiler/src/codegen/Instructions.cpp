@@ -544,22 +544,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     checkPending(unwind_);
     break;
   }
-  case Op::MakeBlock: {
-    // The cells first (a variable moving into its cell changes its slot, which
-    // the block's home may be), then the block, which receives them: nothing
-    // can allocate between its creation and the last cell store.
-    std::vector<Value *> cells;
-    for (const xir::Var *c : i.captures) {
-      if (c->kind == xir::Var::Kind::Capture) cells.push_back(capturedCell(*c));
-      else cells.push_back(b_.CreateCall(rtCellOf_, {fnCtx_, rawAddress(*c), isStaticArg(*c)}, "cell"));
-    }
-    Value *d = dest(i);
-    Value *block = b_.CreateCall(rtBlockNew_, {fnCtx_, d, functions_.at(i.blockFn),
-                                               ConstantInt::get(i32_, i.captures.size())}, "block");
-    for (uint32_t k = 0; k < cells.size(); ++k)
-      tag(b_.CreateStore(cells[k], capturedCellAddress(block, k)), Mem::BlockCells);
-    break;
-  }
+  case Op::MakeBlock: emitMakeBlock(i); break;
   case Op::ForTest: emitForTest(i); break;
   case Op::EnumLen:
     emitEnumLen(i);
@@ -889,6 +874,28 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateBr(fnExit_);
     break;
   }
+}
+
+// block: the block made first, into an item of its own (blockTemp_) kept as a C root while its cells are obtained, each
+// stored in it at once: obtaining one may allocate (a variable's first cell, a new one holding the current element of a
+// FOR EACH variable, which only the block refers to) and so collect, which may move the block (read again from its
+// item) or age it (the barrier test after the stores). It goes to its home last, which may be the slot of a variable
+// that moved into its cell meanwhile.
+void CodeGen::emitMakeBlock(const xir::Instruction &i) {
+  if (!blockTemp_) blockTemp_ = entryAlloca("block.tmp");
+  b_.CreateCall(rtBlockNew_, {fnCtx_, blockTemp_, functions_.at(i.blockFn), ConstantInt::get(i32_, i.captures.size())});
+  b_.CreateCall(rtRootPush_, {fnCtx_, blockTemp_});
+  for (uint32_t k = 0; k < i.captures.size(); ++k) {
+    const xir::Var *c = i.captures[k];
+    Value *cell = c->kind == xir::Var::Kind::Capture
+                      ? capturedCell(*c)
+                      : b_.CreateCall(rtCellOf_, {fnCtx_, rawAddress(*c), isStaticArg(*c)}, "cell");
+    tag(b_.CreateStore(cell, capturedCellAddress(itemPointer(blockTemp_, "block"), k)), Mem::BlockCells);
+  }
+  Value *block = itemPointer(blockTemp_, "block");
+  recordIfOld(block, stateByte(block, AtomicOrdering::Monotonic));
+  b_.CreateCall(rtRootPop_, {fnCtx_, ConstantInt::get(i32_, 1)});
+  copyItem(dest(i), blockTemp_);
 }
 
 } // namespace xb

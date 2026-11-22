@@ -1,6 +1,7 @@
 #include "opt/Fold.h"
 
 #include "common/BitFunctions.h"
+#include "parser/Walk.h"
 #include "xbrt.h" // the shared folding rules
 
 #include <unordered_map>
@@ -152,179 +153,22 @@ void Folder::run(Module &m) {
 }
 
 void Folder::block(Block &b) {
-  for (auto &s : b) stmt(*s);
+  for (auto &s : b) forEachPart(*s, [&](ExprPtr &e) { fold(e); }, [&](Block &x) { block(x); });
 }
 
-void Folder::stmt(Stmt &s) {
-  switch (s.kind) {
-  case StmtKind::Expr:
-    fold(static_cast<ExprStmt &>(s).expr);
-    break;
-  case StmtKind::Local:
-  case StmtKind::Static:
-  case StmtKind::Private:
-  case StmtKind::Public:
-    for (LocalDecl &d : static_cast<LocalStmt &>(s).decls)
-      if (d.init) fold(d.init);
-    break;
-  case StmtKind::ForEach: {
-    auto &f = static_cast<ForEachStmt &>(s);
-    for (auto &c : f.collections) fold(c);
-    block(f.body);
-    break;
-  }
-  case StmtKind::Switch: {
-    auto &w = static_cast<SwitchStmt &>(s);
-    fold(w.value);
-    for (auto &c : w.cases) {
-      if (c.value) fold(c.value);
-      block(c.body);
-    }
-    break;
-  }
-  case StmtKind::Return: {
-    auto &r = static_cast<ReturnStmt &>(s);
-    if (r.value) fold(r.value);
-    break;
-  }
-  case StmtKind::If: {
-    auto &i = static_cast<IfStmt &>(s);
-    for (auto &arm : i.arms) {
-      fold(arm.cond);
-      block(arm.body);
-    }
-    block(i.elseBody);
-    break;
-  }
-  case StmtKind::While: {
-    auto &w = static_cast<WhileStmt &>(s);
-    fold(w.cond);
-    block(w.body);
-    break;
-  }
-  case StmtKind::For: {
-    auto &f = static_cast<ForStmt &>(s);
-    fold(f.start);
-    fold(f.limit);
-    if (f.step) fold(f.step);
-    block(f.body);
-    break;
-  }
-  case StmtKind::Yield:
-    fold(static_cast<YieldStmt &>(s).value);
-    break;
-  case StmtKind::WithObject: {
-    auto &w = static_cast<WithObjectStmt &>(s);
-    fold(w.object);
-    block(w.body);
-    break;
-  }
-  case StmtKind::Sequence: {
-    auto &q = static_cast<SequenceStmt &>(s);
-    if (q.handler) fold(q.handler);
-    block(q.body);
-    block(q.recover);
-    block(q.always);
-    break;
-  }
-  case StmtKind::Using: {
-    auto &u = static_cast<UsingStmt &>(s);
-    fold(u.value);
-    block(u.seq);
-    break;
-  }
-  case StmtKind::AwaitEach: {
-    auto &a = static_cast<AwaitEachStmt &>(s);
-    for (LocalDecl &h : a.hidden) fold(h.init);
-    block(a.seq);
-    break;
-  }
-  case StmtKind::Exit:
-  case StmtKind::Loop:
-  case StmtKind::Parameters:
-  case StmtKind::Memvar:
-  case StmtKind::Field:
-    break;
-  }
-}
-
+// The children first (an element target's indexes, a reference's, a macro's text too), then the node itself.
 void Folder::fold(ExprPtr &e) {
+  forEachChildExpr(*e, [&](ExprPtr &c) { fold(c); });
+  forEachChildBlock(*e, [&](Block &x) { block(x); });
   ExprPtr r;
   switch (e->kind) {
-  case ExprKind::Unary: {
-    auto &u = static_cast<UnaryExpr &>(*e);
-    fold(u.operand);
-    r = foldUnary(u);
-    break;
-  }
-  case ExprKind::Await:
-    fold(static_cast<AwaitExpr &>(*e).operand);
-    break;
-  case ExprKind::Binary: {
-    auto &b = static_cast<BinaryExpr &>(*e);
-    fold(b.lhs);
-    fold(b.rhs);
-    r = foldBinary(b);
-    break;
-  }
-  case ExprKind::And:
-  case ExprKind::Or: {
-    auto &l = static_cast<LogicExpr &>(*e);
-    fold(l.lhs);
-    fold(l.rhs);
-    r = foldLogic(l, e->kind == ExprKind::And);
-    break;
-  }
-  case ExprKind::Assign: {
-    auto &a = static_cast<AssignExpr &>(*e);
-    fold(a.target); // the indexes of an element target
-    fold(a.value);
-    break;
-  }
-  case ExprKind::Call: {
-    auto &c = static_cast<CallExpr &>(*e);
-    for (auto &arg : c.args) fold(arg);
-    r = foldCall(c);
-    break;
-  }
-  case ExprKind::ArrayLit:
-    for (auto &el : static_cast<ArrayLitExpr &>(*e).elems) fold(el);
-    break;
-  case ExprKind::HashLit: {
-    auto &h = static_cast<HashLitExpr &>(*e);
-    for (size_t k = 0; k < h.keys.size(); ++k) {
-      fold(h.keys[k]);
-      fold(h.values[k]);
-    }
-    break;
-  }
-  case ExprKind::Index: {
-    auto &ix = static_cast<IndexExpr &>(*e);
-    fold(ix.base);
-    fold(ix.index);
-    break;
-  }
-  case ExprKind::Send: {
-    auto &m = static_cast<SendExpr &>(*e);
-    if (m.messageText) fold(m.messageText);
-    fold(m.object);
-    for (auto &a : m.args) fold(a);
-    break;
-  }
-  case ExprKind::Block:
-    for (auto &b : static_cast<BlockExpr &>(*e).body) fold(b);
-    block(static_cast<BlockExpr &>(*e).statements);
-    break;
-  case ExprKind::IncDec:
-    fold(static_cast<IncDecExpr &>(*e).target);
-    break;
-  case ExprKind::Ref:
-    fold(static_cast<RefExpr &>(*e).target); // the indexes of an element
-    break;
+  case ExprKind::Unary: r = foldUnary(static_cast<UnaryExpr &>(*e)); break;
+  case ExprKind::Binary: r = foldBinary(static_cast<BinaryExpr &>(*e)); break;
+  case ExprKind::And: case ExprKind::Or: r = foldLogic(static_cast<LogicExpr &>(*e), e->kind == ExprKind::And); break;
+  case ExprKind::Call: r = foldCall(static_cast<CallExpr &>(*e)); break;
   case ExprKind::List: {
     // The elements before the last are evaluated for their effects only.
     auto &l = static_cast<ListExpr &>(*e);
-    for (auto &x : l.exprs) fold(x);
     bool effects = false;
     for (size_t k = 0; k + 1 < l.exprs.size(); ++k) effects |= !isConstant(*l.exprs[k]);
     if (!effects) r = std::move(l.exprs.back());
@@ -332,9 +176,6 @@ void Folder::fold(ExprPtr &e) {
   }
   case ExprKind::IIf: {
     auto &i = static_cast<IIfExpr &>(*e);
-    fold(i.cond);
-    fold(i.then);
-    fold(i.otherwise);
     if (const LogicalExpr *c = logical(i.cond)) r = std::move(c->value ? i.then : i.otherwise);
     break;
   }

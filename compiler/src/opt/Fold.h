@@ -58,7 +58,6 @@ public:
 
 private:
   void block(Block &b);
-  void stmt(Stmt &s);
   void fold(ExprPtr &e);
   ExprPtr foldBinary(BinaryExpr &b);
   ExprPtr foldUnary(UnaryExpr &u);

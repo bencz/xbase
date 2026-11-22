@@ -280,6 +280,7 @@ private:
                        llvm::BasicBlock *slow, llvm::BasicBlock *join,
                        std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> *bools = nullptr);
   void emitIndexSet(const xir::Instruction &i);
+  void emitMakeBlock(const xir::Instruction &i);
 
   // Instructions.cpp
   void emit(const xir::Instruction &i);

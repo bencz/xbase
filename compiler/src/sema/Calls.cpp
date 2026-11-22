@@ -2,6 +2,7 @@
 #include "sema/Calls.h"
 
 #include "common/Text.h"
+#include "parser/Walk.h"
 
 #include <utility>
 
@@ -110,189 +111,13 @@ void CallResolver::checkArgs(const CallExpr &c, const ExternDecl &d) {
 }
 
 void CallResolver::expr(Expr &e) {
-  switch (e.kind) {
-  case ExprKind::Nil: case ExprKind::Logical: case ExprKind::Number: case ExprKind::String: case ExprKind::Var:
-  case ExprKind::Spread: case ExprKind::MacroText:
-    break;
-  case ExprKind::Call: {
-    auto &c = static_cast<CallExpr &>(e);
-    for (auto &a : c.args) expr(*a);
-    call(c);
-    break;
-  }
-  case ExprKind::Unary:
-    expr(*static_cast<UnaryExpr &>(e).operand);
-    break;
-  case ExprKind::Await:
-    expr(*static_cast<AwaitExpr &>(e).operand);
-    break;
-  case ExprKind::Binary: {
-    auto &b = static_cast<BinaryExpr &>(e);
-    expr(*b.lhs);
-    expr(*b.rhs);
-    break;
-  }
-  case ExprKind::And: case ExprKind::Or: {
-    auto &b = static_cast<LogicExpr &>(e);
-    expr(*b.lhs);
-    expr(*b.rhs);
-    break;
-  }
-  case ExprKind::Assign: {
-    auto &a = static_cast<AssignExpr &>(e);
-    expr(*a.target);
-    expr(*a.value);
-    break;
-  }
-  case ExprKind::IncDec:
-    expr(*static_cast<IncDecExpr &>(e).target);
-    break;
-  case ExprKind::Ref:
-    expr(*static_cast<RefExpr &>(e).target);
-    break;
-  case ExprKind::Field:
-    if (auto &f = static_cast<FieldExpr &>(e); f.aliasExpr) expr(*f.aliasExpr);
-    break;
-  case ExprKind::ArrayLit:
-    for (auto &el : static_cast<ArrayLitExpr &>(e).elems) expr(*el);
-    break;
-  case ExprKind::HashLit: {
-    auto &h = static_cast<HashLitExpr &>(e);
-    for (size_t k = 0; k < h.keys.size(); ++k) {
-      expr(*h.keys[k]);
-      expr(*h.values[k]);
-    }
-    break;
-  }
-  case ExprKind::Index: {
-    auto &ix = static_cast<IndexExpr &>(e);
-    expr(*ix.base);
-    expr(*ix.index);
-    break;
-  }
-  case ExprKind::Send: {
-    auto &m = static_cast<SendExpr &>(e);
-    if (m.messageText) expr(*m.messageText);
-    expr(*m.object);
-    for (auto &a : m.args) expr(*a);
-    break;
-  }
-  case ExprKind::Block:
-    for (auto &b : static_cast<BlockExpr &>(e).body) expr(*b);
-    block(static_cast<BlockExpr &>(e).statements);
-    break;
-  case ExprKind::List:
-    for (auto &x : static_cast<ListExpr &>(e).exprs) expr(*x);
-    break;
-  case ExprKind::IIf: {
-    auto &i = static_cast<IIfExpr &>(e);
-    expr(*i.cond);
-    expr(*i.then);
-    expr(*i.otherwise);
-    break;
-  }
-  case ExprKind::Macro:
-    expr(*static_cast<MacroExpr &>(e).text);
-    break;
-  case ExprKind::MacroCall: {
-    auto &m = static_cast<MacroCallExpr &>(e);
-    expr(*m.text);
-    for (auto &a : m.args) expr(*a);
-    break;
-  }
-  }
+  forEachChildExpr(e, [&](ExprPtr &c) { expr(*c); });
+  forEachChildBlock(e, [&](Block &x) { block(x); });
+  if (e.kind == ExprKind::Call) call(static_cast<CallExpr &>(e));
 }
 
 void CallResolver::block(Block &b) {
-  for (auto &st : b) {
-    switch (st->kind) {
-    case StmtKind::Expr:
-      expr(*static_cast<ExprStmt &>(*st).expr);
-      break;
-    case StmtKind::Local: case StmtKind::Static: case StmtKind::Private: case StmtKind::Public:
-      for (LocalDecl &d : static_cast<LocalStmt &>(*st).decls) {
-        if (d.macro) expr(*d.macro);
-        if (d.init) expr(*d.init);
-      }
-      break;
-    case StmtKind::Parameters: case StmtKind::Memvar: case StmtKind::Field: // names only
-      break;
-    case StmtKind::Return: {
-      auto &r = static_cast<ReturnStmt &>(*st);
-      if (r.value) expr(*r.value);
-      break;
-    }
-    case StmtKind::If: {
-      auto &i = static_cast<IfStmt &>(*st);
-      for (auto &arm : i.arms) {
-        expr(*arm.cond);
-        block(arm.body);
-      }
-      block(i.elseBody);
-      break;
-    }
-    case StmtKind::While: {
-      auto &w = static_cast<WhileStmt &>(*st);
-      expr(*w.cond);
-      block(w.body);
-      break;
-    }
-    case StmtKind::For: {
-      auto &f = static_cast<ForStmt &>(*st);
-      expr(*f.start);
-      expr(*f.limit);
-      if (f.step) expr(*f.step);
-      block(f.body);
-      break;
-    }
-    case StmtKind::ForEach: {
-      auto &f = static_cast<ForEachStmt &>(*st);
-      for (auto &c : f.collections) expr(*c);
-      block(f.body);
-      break;
-    }
-    case StmtKind::Switch: {
-      auto &w = static_cast<SwitchStmt &>(*st);
-      expr(*w.value);
-      for (auto &c : w.cases) {
-        if (c.value) expr(*c.value);
-        block(c.body);
-      }
-      break;
-    }
-    case StmtKind::Yield:
-      expr(*static_cast<YieldStmt &>(*st).value);
-      break;
-    case StmtKind::WithObject: {
-      auto &w = static_cast<WithObjectStmt &>(*st);
-      expr(*w.object);
-      block(w.body);
-      break;
-    }
-    case StmtKind::Sequence: {
-      auto &q = static_cast<SequenceStmt &>(*st);
-      if (q.handler) expr(*q.handler);
-      block(q.body);
-      block(q.recover);
-      block(q.always);
-      break;
-    }
-    case StmtKind::Using: {
-      auto &u = static_cast<UsingStmt &>(*st);
-      expr(*u.value);
-      block(u.seq);
-      break;
-    }
-    case StmtKind::AwaitEach: {
-      auto &a = static_cast<AwaitEachStmt &>(*st);
-      for (LocalDecl &h : a.hidden) expr(*h.init);
-      block(a.seq);
-      break;
-    }
-    case StmtKind::Exit: case StmtKind::Loop:
-      break;
-    }
-  }
+  for (auto &st : b) forEachPart(*st, [&](ExprPtr &e) { expr(*e); }, [&](Block &x) { block(x); });
 }
 
 } // namespace xb
