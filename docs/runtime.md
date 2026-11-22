@@ -1207,7 +1207,8 @@ numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`):
   ones (`clipper_digits`, `core/numfmt.c`): Clipper takes the fraction's from repeated products by ten in doubles,
   whose error reaches the 13th decimal and beyond, so with 13 or more decimals xbase may show a digit closer to the
   value than the reference does (`Str( 8528950501312055 / 2 ^ 53, 18, 16 )` is `0.9469037222444915` here,
-  `0.9469037222444916` there);
+  `0.9469037222444916` there); a double that holds an integer below 2^52 in magnitude takes the integers' way, which
+  gives the same text without computing a fraction's digits (`format_double`; digits two at a time, `uint_digits`);
 - a minus sign appears only when a non-zero digit is shown (`-0.001` with 2 decimals prints `0.00`);
 - a value that does not fit, and any infinite or NaN value, fills the field with `*`.
 

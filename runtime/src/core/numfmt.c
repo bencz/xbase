@@ -39,17 +39,32 @@ static int place(char *s, int width, int dec, int neg, const char *intDigits, si
   return 1;
 }
 
+#define XB_UINT64_DIGITS 20
+
+/* The decimal digits of `w` (no leading zeros; "0" for 0), written to end at `end`, two at a time: their count. */
+static size_t uint_digits(uint64_t w, char *end) {
+  static const char pairs[] = "00010203040506070809101112131415161718192021222324252627282930313233343536373839"
+                              "40414243444546474849505152535455565758596061626364656667686970717273747576777879"
+                              "8081828384858687888990919293949596979899";
+  char *p = end;
+  for (; w >= 100; w /= 100) {
+    p -= 2;
+    memcpy(p, pairs + 2 * (w % 100), 2);
+  }
+  if (w >= 10) {
+    p -= 2;
+    memcpy(p, pairs + 2 * w, 2);
+  } else {
+    *--p = (char)('0' + w);
+  }
+  return (size_t)(end - p);
+}
+
 static void format_int(char *s, int64_t v, int width, int dec) {
-  char digits[24];
+  char digits[XB_UINT64_DIGITS];
   uint64_t mag = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
-  size_t n = 0;
-  char rev[24];
-  do {
-    rev[n++] = (char)('0' + (int)(mag % 10u));
-    mag /= 10u;
-  } while (mag);
-  for (size_t i = 0; i < n; ++i) digits[i] = rev[n - 1 - i];
-  if (!place(s, width, dec, v < 0, digits, n, NULL)) overflow(s, field_len(width, dec));
+  size_t n = uint_digits(mag, digits + sizeof digits);
+  if (!place(s, width, dec, v < 0, digits + sizeof digits - n, n, NULL)) overflow(s, field_len(width, dec));
 }
 
 /* The half is added to ten times the scaled value and the sum divided back, which is how Clipper gets its results in
@@ -128,15 +143,10 @@ static void fraction_digits(fraction *fr, char *out, int count) {
 static int clipper_digits(double a, int dec, char *intDigits, size_t *intLen, char *frac) {
   double whole, f = modf(a, &whole);
   if (!(whole < (double)UINT64_MAX) || dec > XB_NUM_PRECISION) return 0;
-  char ints[24];
-  int len = 0;
-  for (uint64_t w = (uint64_t)whole; len == 0 || w; w /= 10) ints[len++] = (char)('0' + w % 10);
+  char digitsOf[XB_UINT64_DIGITS];
+  int len = (int)uint_digits((uint64_t)whole, digitsOf + sizeof digitsOf);
   if (len > XB_NUM_PRECISION) return 0;
-  for (int i = 0, j = len - 1; i < j; ++i, --j) {
-    char c = ints[i];
-    ints[i] = ints[j];
-    ints[j] = c;
-  }
+  const char *ints = digitsOf + sizeof digitsOf - len;
   /* The fraction's digits: the `dec` shown and the next one, then, after a 4, those the precision leaves. */
   char digits[2 * XB_NUM_PRECISION + 1];
   fraction fr;
@@ -178,6 +188,10 @@ static int clipper_digits(double a, int dec, char *intDigits, size_t *intLen, ch
 static void format_double(char *s, double v, int width, int dec) {
   if (!xb_dbl_finite(v)) {
     overflow(s, field_len(width, dec));
+    return;
+  }
+  if (fabs(v) < XB_DBL_INTEGRAL && v == trunc(v)) { /* an integer's digits and zero decimals, as below; -0.0 unsigned */
+    format_int(s, (int64_t)v, width, dec);
     return;
   }
   char intDigits[XB_NUM_PRECISION + 2], frac[XB_NUM_PRECISION];
