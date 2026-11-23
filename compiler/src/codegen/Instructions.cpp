@@ -815,28 +815,54 @@ void CodeGen::emit(const xir::Instruction &i) {
     callItemOp(i.op == Op::AwaitValue ? rtAwaitResult_ : rtAwaitWait_, dest(i), {addr(ops[0])});
     checkPending(unwind_);
     break;
-  case Op::InlineEnter: { // a frame without slots, showing the inlined function, over the innermost one
-    if (inlineFrames_.size() == inlineOpen_.size()) {
+  case Op::InlineEnter: { // a body whose position the frame below shows (lineValue); one that reads its arguments as
+                           // received, or an ASYNC function's entry (xb_async_new runs its first step fused with the
+                           // AWAIT of the call when the entry's frame is the innermost, over the AWAIT's), links a
+                           // frame without slots, showing the inlined function, over the innermost one
+    uint32_t callLine = lineValue(inlineOpen_.size(), showsLines() ? line_ : 0); // as the call it replaces stores it
+    bool makesTask = std::any_of(i.blockFn->blocks.begin(), i.blockFn->blocks.end(), [](const auto &b) {
+      return std::any_of(b->insts.begin(), b->insts.end(), [](const auto &x) { return x->op == Op::AsyncNew; });
+    });
+    if (!i.blockFn->readsArgs && !makesTask) {
+      inlineCaller_[&i] = callLine;
+      inlineOpen_.push_back(&i);
+      break;
+    }
+    size_t depth = 0; // of the bodies open that link a frame
+    for (const xir::Instruction *open : inlineOpen_) depth += inlineFrame_.count(open);
+    if (inlineFrames_.size() == depth) {
       IRBuilder<> entry(&fn_->getEntryBlock(), fn_->getEntryBlock().begin());
       inlineFrames_.push_back(entry.CreateAlloca(frameType(0), nullptr, "inline.frame"));
     }
-    Value *frame = inlineFrames_[inlineOpen_.size()];
+    Value *frame = inlineFrames_[depth];
     Value *outer = innermostFrame();
-    if (line_ && showsLines()) { // the line of the call it replaces, as that call would store it (see markLine)
+    {
       Value *at = b_.CreateStructGEP(frameType(0), outer, FrameLine);
-      StoreInst *line = b_.CreateStore(ConstantInt::get(i32_, line_), at);
+      StoreInst *line = b_.CreateStore(ConstantInt::get(i32_, callLine), at);
       tag(line, Mem::FrameLink);
-      line->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
+      line->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, callLine))));
       callFrame_[line] = outer;
     }
+    // Its own proc, which holds the positions of the bodies inlined into it in turn.
+    Constant *shared = procOf(*i.blockFn);
+    Constant *proc = shared;
+    if (auto *gv = dyn_cast<GlobalVariable>(shared)) {
+      Constant *init = withInlines(gv->getInitializer(), ConstantPointerNull::get(ptrTy_));
+      auto *own = new GlobalVariable(mod_, gv->getValueType(), true, GlobalValue::PrivateLinkage, init, ".xb.proc");
+      own->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+      proc = own;
+    }
+    inlineTableOf_[&i] = inlineTables_.size();
+    inlineTables_.push_back({dyn_cast<GlobalVariable>(proc), {}, {}});
+    inlineFrame_[&i] = frame;
     if (i.blockFn->readsArgs) { // the arguments as received, which its body reads (PCount())
       Value *argv = operandGroup(i);
       tag(b_.CreateStore(argv, b_.CreateStructGEP(frameType(0), frame, FrameArgv)), Mem::FrameLink);
       Value *argc = ConstantInt::get(i32_, i.operands().size());
       tag(b_.CreateStore(argc, b_.CreateStructGEP(frameType(0), frame, FrameArgc)), Mem::FrameLink);
     }
-    linkFrame(frame, ConstantInt::get(i32_, 0), procOf(*i.blockFn), outer);
-    inlineOpen_.push_back(i.blockFn);
+    linkFrame(frame, ConstantInt::get(i32_, 0), proc, outer);
+    inlineOpen_.push_back(&i);
     break;
   }
   case Op::FrameRelease:
@@ -844,8 +870,9 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   case Op::InlineLeave: {
     for (uint32_t s : plan_->clearsAt(&i)) setNil(slot(s));
+    bool linked = inlineFrame_.count(inlineOpen_.back()) != 0;
     inlineOpen_.pop_back();
-    tag(b_.CreateStore(innermostFrame(), b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
+    if (linked) tag(b_.CreateStore(innermostFrame(), b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames)), Mem::Ctx);
     break;
   }
   case Op::Br:

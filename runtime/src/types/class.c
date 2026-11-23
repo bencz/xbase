@@ -474,10 +474,11 @@ static int friend_of(const xb_ctx *ctx, const xb_class_def *owner, const xb_clas
   for (uint32_t k = 0; from && k < owner->nfriendClasses; ++k)
     if (strcmp(owner->friendClasses[k], from->name) == 0) return 1;
   if (!owner->nfriendFunctions) return 0;
-  const xb_frame *fr = ctx->frames; /* a macro's frame is its caller's code */
-  while (fr && (!fr->proc || (fr->proc->flags & XB_PROC_TRANSPARENT))) fr = fr->prev;
-  if (!fr || from) return 0;
-  const char *name = fr->proc->name;
+  xb_activation a; /* a macro's frame is its caller's code */
+  xb_activation_first(&a, ctx->frames);
+  while (a.frame && (!a.proc || (a.proc->flags & XB_PROC_TRANSPARENT))) xb_activation_next(&a);
+  if (!a.frame || from) return 0;
+  const char *name = a.proc->name;
   while (strncmp(name, XB_BLOCK_PREFIX, strlen(XB_BLOCK_PREFIX)) == 0) name += strlen(XB_BLOCK_PREFIX);
   for (uint32_t k = 0; k < owner->nfriendFunctions; ++k)
     if (strcmp(owner->friendFunctions[k], name) == 0) return 1;

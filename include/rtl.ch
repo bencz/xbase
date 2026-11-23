@@ -18,7 +18,8 @@
 //   FOLD      calls with constant arguments are evaluated at compile time
 //   ARGS      reads the arguments the function calling it received: that function keeps them in its frame
 //   PARAMS    ARGS, and reads and writes that function's parameters: it keeps them in its frame slots
-//   PRIVATES  creates PRIVATEs of the function calling it, which ends them when it returns
+//   PRIVATES  creates PRIVATEs of the function calling it, which ends them when it returns, or acts on those its
+//             activation created (RELEASE ALL): that function is an activation of its own (never inlined)
 //   RESULT t  the type of what a call that raises no error returns: NIL, LOGICAL, INTEGER (RANGE lo TO hi: within
 //             those), DOUBLE, NUMERIC (an integer or a double), STRING, DATE, ARRAY, HASH, BLOCK, OBJECT, SYMBOL,
 //             joined by | (each named once), or ANY alone (any value); a parameter's `AS t` is the type of what it
@@ -409,7 +410,7 @@ EXTERN FUNCTION __LanguageTexts( cId ) NATIVE
 EXTERN FUNCTION __MemClear() NATIVE
 EXTERN FUNCTION __MemNamesInUse( [lLetGo] ) NATIVE
 EXTERN FUNCTION __MemRelease( ... ) NATIVE
-EXTERN FUNCTION __MemReleaseAll( cSkeleton, lLike ) NATIVE
+EXTERN FUNCTION __MemReleaseAll( cSkeleton, lLike ) NATIVE PRIVATES
 EXTERN FUNCTION __MemRestore( cFile, [lAdditive] ) NATIVE PRIVATES
 EXTERN FUNCTION __MemSave( cFile, [cSkeleton], [lLike] ) NATIVE
 EXTERN FUNCTION __Quit() NATIVE

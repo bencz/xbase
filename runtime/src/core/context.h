@@ -276,10 +276,46 @@ static inline void xb_frame_pop(xb_ctx *ctx, const xb_frame *f) { ctx->frames = 
 
 /* The xb_proc of a runtime function that shows on the call stack: its name,
  * no parameters in its frame, `flags`, no source file. */
-#define XB_RUNTIME_PROC(name, flags) {name, 0, flags, NULL}
+#define XB_RUNTIME_PROC(name, flags) {name, 0, flags, NULL, NULL}
 
-/* Whether the call stack (ProcName(), the "Called from" lines) shows a frame. */
-static inline int xb_frame_shown(const xb_frame *f) { return f->proc && !(f->proc->flags & XB_PROC_HIDDEN); }
+/* Whether the call stack (ProcName(), the "Called from" lines) shows a function. */
+static inline int xb_proc_shown(const xb_proc *p) { return p && !(p->flags & XB_PROC_HIDDEN); }
+
+/* The call stack as the program sees it: each frame of the chain, and before
+ * its own function the bodies inlined into it that run there (xbrt.h,
+ * XB_LINE_INLINE), innermost first. `frame` is the frame the activation runs
+ * in; `proc` and `line` what it shows. */
+typedef struct xb_activation {
+  const xb_frame *frame;
+  const xb_proc *proc;
+  uint32_t line;
+  uint32_t outer; /* the line of the code it was inlined into, in the same frame, when `inlined` */
+  int inlined;
+} xb_activation;
+static inline void xb_activation_at(xb_activation *a, const xb_frame *f, uint32_t line) {
+  a->frame = f;
+  if (f && (line & XB_LINE_INLINE)) {
+    const xb_inline_pos *p = &f->proc->inlines[line & ~XB_LINE_INLINE];
+    a->proc = p->proc;
+    a->line = p->line;
+    a->outer = p->caller;
+    a->inlined = 1;
+  } else {
+    a->proc = f ? f->proc : NULL;
+    a->line = line;
+    a->outer = 0;
+    a->inlined = 0;
+  }
+}
+/* The innermost activation of the chain from `f` (NULL: none, `frame` NULL). */
+static inline void xb_activation_first(xb_activation *a, const xb_frame *f) {
+  xb_activation_at(a, f, f ? f->line : 0);
+}
+/* The activation below `a`: the code its body was inlined into, else the next frame's. */
+static inline void xb_activation_next(xb_activation *a) {
+  if (a->inlined) xb_activation_at(a, a->frame, a->outer);
+  else xb_activation_first(a, a->frame->prev);
+}
 
 /* Where the call stack ends (the frame after its last, NULL for the bottom): in a task, below the task's own calls. */
 static inline const xb_frame *xb_stack_end(const xb_ctx *ctx) { return ctx->task_depth ? ctx->task_base : NULL; }

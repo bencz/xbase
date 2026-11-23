@@ -540,7 +540,9 @@ void xb_stack_overflow(xb_ctx *ctx) {
   const char *limit = ctx->stack_limit;
   if (limit == ctx->stack_low + XB_STACK_FLOOR) xb_gc_fatal("stack overflow");
   ctx->stack_limit = ctx->stack_low + XB_STACK_FLOOR;
-  const char *name = ctx->frames && ctx->frames->proc ? ctx->frames->proc->name : "";
+  xb_activation a;
+  xb_activation_first(&a, ctx->frames);
+  const char *name = a.frame && a.proc ? a.proc->name : "";
   xb_error_described(ctx, NULL, EG_LIMIT, 0, "Stack overflow", name, 0, 0, NULL);
   ctx->stack_limit = limit;
 }

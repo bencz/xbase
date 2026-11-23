@@ -315,7 +315,7 @@ the value of an argument written `@x`. An xBase function always receives the ref
 | `CHOOSES` | (`NATIVE`, with a `RESULT`) a call that raises no error returns one of its arguments as it received it (`Max`, `Min`; `ExternDecl::chooses`, `xir::Callee::chooses`): its result has their types, within the `RESULT` type, and its integers their ranges' hull (`argumentTypes` and `computeRange` in `xir/Types.cpp`; any type for a spread argument or one passed by reference); the declarations test checks it |
 | `ARGS` | the function reads the arguments the function calling it received (`PCount()`): that function (or codeblock) keeps them in its frame (`FuncDecl::readsArgs`, `BlockExpr::readsArgs`, `xir::Function::readsArgs`; `args` in the xIR listing), as does one that runs a macro (`Sema::keepsArgs`) |
 | `PARAMS` | `ARGS`, and the function reads and writes the parameters of the function calling it (`PValue()`): that function keeps them in its frame slots, as written (no parameter versioning, no SSA values; `FuncDecl::readsParams`, `BlockExpr::readsParams`, `xir::Function::readsParams`); a function or codeblock that runs a macro is taken as calling one (the text may call `PValue()`) |
-| `PRIVATES` | the function creates PRIVATEs of the function calling it (`RESTORE`): that function (or codeblock) takes a PRIVATE mark and ends them when it returns (`FuncDecl::callsPrivates`, `BlockExpr::callsPrivates`, `xir::Function::callsPrivates`; `privates` in the xIR listing) |
+| `PRIVATES` | the function creates PRIVATEs of the function calling it (`RESTORE`), or acts on those its activation created (`RELEASE ALL`): that function (or codeblock) takes a PRIVATE mark, ends them when it returns, and is never inlined, an activation of its own (`FuncDecl::callsPrivates`, `BlockExpr::callsPrivates`, `xir::Function::callsPrivates`; `privates` in the xIR listing) |
 
 `sema/Calls.*` resolves every call before the other passes. A function the module defines comes first (a name that is
 not `RESERVED` may be redefined); otherwise the call goes to the declaration with that name, or that it abbreviates; a
@@ -838,32 +838,42 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   way in stored the same line into the same frame last, and a block that starts so stores none for its calls of that
   line (`Fib( n - 1 ) + Fib( n - 2 )` stores its line once; only the function's own code writes its frames' lines, and a
   frame's link, which writes line 0, counts as a store); not in the frame of a function of the runtime, which shows line
-  0 (`showsLines`: the innermost frame's function). The fast paths of operations thus store nothing; their slow paths
-  and calls do. Before `call.forward`, the function versioned for references clears its own `proc`: the other body shows
-  instead. `inline.enter` links a frame without slots that shows the inlined function (an `alloca` of the entry block,
-  one per nesting depth: bodies open at once are at different depths, and the copies of a body share it), after storing
-  the line of the call it replaces in the frame below (unless that frame is a function of the runtime's); until the
-  matching `inline.leave`, which links the frame below again, calls take it as the caller's frame and their lines are
-  stored in it. A body that reads the arguments it received gets them in consecutive slots of the frame (a group, as a
-  call's: `inline.enter`'s operands, kept until the body's last instruction, `FramePlan::extendArgumentGroups`), which
-  the inlined frame's `argv` and `argc` give; `PCount()` and `PValue()` inside an inlined body call the runtime, which
-  reads that frame. Any other body holds its arguments in place: each argument's value that has a slot of its own lives
-  to the body's last instruction (`FramePlan::heldArgs_`, extended with the groups), as the callee's parameters would
-  hold it until it returns; a `frame.release` of a parameter's `LOCAL` in the body lets go of that argument there unless
-  the caller still uses it or another parameter, of that body or of an outer one, holds it too (a value so held keeps a
-  slot of its own: no block parameter shares it, no direct call or group it is passed to while the body runs lets go of
-  it, and a load of it is not served by its variable, which the body may write); a codeblock literal is passed as `NIL`
-  (folding may leave it unmade), and so is an array literal whose element reads `fold-constants` replaced, when its
-  elements' lifetimes cannot be seen ([xir.md](xir.md#passes)). Once that release is on every path, later ones let go of
-  the argument where it is dead (a copy kept it). A body that reads its arguments as received keeps them as received, as
-  the function called would. A `frame.release` of the function's own parameter that no load reads any more (its `move`
-  gone) clears the parameter's slot. The bodies open where each block starts are those of the `inline.enter`s on the way
-  to it (`openInlineBodies` in `xir/Analysis`: an inlined body is entered at its start and left at its end). That store
-  of the line counts as one `placeLines` made. `inline.leave` first sets to `NIL` the slots of the body's values that
-  are dead there and that no live value holds (`FramePlan::clearsAt`: the units of each body's values, argument lists
-  and received arguments, found by a forward walk with one set per open body, `walkBodies`): as when a callee returns,
-  an object only they held can be collected (and its destructor run). A body left without a frame (nothing in it can see
-  the call stack) has no `inline.leave` and clears nothing there: its values are like the function's own.
+  0 (`showsLines`: the innermost frame's function), but in a function with inlined bodies, where every call stores what
+  its level shows, 0 too (none of a body's positions is left for a later call to show). The fast paths of operations
+  thus store nothing; their slow paths and calls do. Before `call.forward`, the function versioned for references clears
+  its own `proc`: the other body shows instead. An inlined body links no frame: the lines its calls store in the frame
+  below it are positions (`lineValue`): the index of an entry of that frame's `xb_proc.inlines`, with `XB_LINE_INLINE`,
+  which tells the inlined function, the line in it (0 in a function of the runtime's, which still stores its position:
+  the code it was inlined into shows its own line) and the line of the code it was inlined into there (a plain line of
+  the frame's function, or the position of the body around it), made the first time a call needs it and emitted with the
+  function's proc once the function is lowered (`finishProcs`). `inline.enter` and `inline.leave` cost nothing then
+  (`method_call_overhead`: 0.64 of the time). A body that reads the arguments it received as received (`PCount()`), or
+  an `ASYNC` function's entry (`xb_async_new` fuses its first step with the `AWAIT` of the call when the entry's frame
+  is the innermost, over the `AWAIT`'s), links a frame without slots that shows the inlined function (an `alloca` of the
+  entry block, one per nesting depth, after storing the line of the call it replaces in the frame below), with a proc of
+  its own for the positions of the bodies inlined into it in turn; until the matching `inline.leave`, which links the
+  frame below again, calls take it as the caller's frame and their lines are stored in it. A body that reads the
+  arguments it received gets them in consecutive slots of the frame (a group, as a call's: `inline.enter`'s operands,
+  kept until the body's last instruction, `FramePlan::extendArgumentGroups`), which the inlined frame's `argv` and
+  `argc` give; `PCount()` and `PValue()` inside an inlined body call the runtime, which reads that frame. Any other body
+  holds its arguments in place: each argument's value that has a slot of its own lives to the body's last instruction
+  (`FramePlan::heldArgs_`, extended with the groups), as the callee's parameters would hold it until it returns; a
+  `frame.release` of a parameter's `LOCAL` in the body lets go of that argument there unless the caller still uses it or
+  another parameter, of that body or of an outer one, holds it too (a value so held keeps a slot of its own: no block
+  parameter shares it, no direct call or group it is passed to while the body runs lets go of it, and a load of it is
+  not served by its variable, which the body may write); a codeblock literal is passed as `NIL` (folding may leave it
+  unmade), and so is an array literal whose element reads `fold-constants` replaced, when its elements' lifetimes cannot
+  be seen ([xir.md](xir.md#passes)). Once that release is on every path, later ones let go of the argument where it is
+  dead (a copy kept it). A body that reads its arguments as received keeps them as received, as the function called
+  would. A `frame.release` of the function's own parameter that no load reads any more (its `move` gone) clears the
+  parameter's slot. The bodies open where each block starts are those of the `inline.enter`s on the way to it
+  (`openInlineInstances`, as `openInlineBodies` in `xir/Analysis` finds their functions: an inlined body is entered at
+  its start and left at its end; where copies of a body meet, the first way's). The store of the call's line that a
+  linked frame makes counts as one `placeLines` made. `inline.leave` first sets to `NIL` the slots of the body's values
+  that are dead there and that no live value holds (`FramePlan::clearsAt`: the units of each body's values, argument
+  lists and received arguments, found by a forward walk with one set per open body, `walkBodies`): as when a callee
+  returns, an object only they held can be collected (and its destructor run). A body left without a frame (nothing in
+  it can see the call stack) has no `inline.leave` and clears nothing there: its values are like the function's own.
 - After every operation that can fail, and on every loop's back edge (a branch to a block no later in reverse postorder,
   `pollOnBackEdge`), the generated code loads `ctx->pending` (an atomic monotonic load: other threads set it, and the
   load stays in a loop without calls instead of leaving it; the loads carry the metadata `xb.poll`, on a back edge, or
@@ -1138,23 +1148,22 @@ items again; the lowering names the class in the module (`xb.item.tbaa`).
 Frames set up where they are needed (`sinkFrameSetup` in `codegen/FrameSetup.*`), last: the entry of a direct entry
 writes its frame's slots (the parameters, `NIL` in the others) and header, links it into the context's chain and tests
 the stack's limit, but nothing needs that before the first instruction that touches the frame, touches the chain (an
-inlined body links a frame of its own) or calls a function (anything may collect, raise an error or walk the chain). The
-setup moves to that instruction on every path (the first of a block that no other such block dominates), behind a flag
-the entry makes false and a setup true (the simplification turns it into PHIs and folds the tests a setup dominates): it
-writes the slots with the values they had on entry, which nothing touched before, and the unlink at the exit stores the
-caller's frame, which the chain still holds when nothing was linked. When some way returns without a setup (an early
-return), the exit unlinks only a frame linked (behind the same flag), storing the caller's frame read back from the
-frame's link: that way leaves the chain as it found it and keeps nothing for the way out (no saved register, no stack),
-and no register keeps the caller's frame while the body runs. (Where every way sets the frame up, the flag would only
-stay live to the exit, through the function's loops.) An entry that needs the frame itself (a mark of PRIVATEs) is left
-as it is. Then,
-when the part of the function that runs before any setup on its ways to a return reads memory but writes only its
-result and its own locals and can return (at most `kMaxLeafEntry` instructions), the function becomes that part, a small
-entry whose ways into a setup, or into code that returns only after one, call a copy of the whole function with the
-same arguments (the copy does the part again: nothing it did was seen), marked `alwaysinline`: its callers then take a
-leaf's early return in place, without a call. `fib`'s `n < 2` is one: its calls take 47% fewer cycles and 26% fewer
-instructions (perf stat, x86-64); so is `Ack`'s `m == 0`, whose other ways (the recursive calls) go to the copy at
-once: `ackermann` 19% fewer instructions.
+inlined body that links a frame of its own) or calls a function (anything may collect, raise an error or walk the
+chain). The setup moves to that instruction on every path (the first of a block that no other such block dominates),
+behind a flag the entry makes false and a setup true (the simplification turns it into PHIs and folds the tests a setup
+dominates): it writes the slots with the values they had on entry, which nothing touched before, and the unlink at the
+exit stores the caller's frame, which the chain still holds when nothing was linked. When some way returns without a
+setup (an early return), the exit unlinks only a frame linked (behind the same flag), storing the caller's frame read
+back from the frame's link: that way leaves the chain as it found it and keeps nothing for the way out (no saved
+register, no stack), and no register keeps the caller's frame while the body runs. (Where every way sets the frame up,
+the flag would only stay live to the exit, through the function's loops.) An entry that needs the frame itself (a mark
+of PRIVATEs) is left as it is. Then, when the part of the function that runs before any setup on its ways to a return
+reads memory but writes only its result and its own locals and can return (at most `kMaxLeafEntry` instructions), the
+function becomes that part, a small entry whose ways into a setup, or into code that returns only after one, call a copy
+of the whole function with the same arguments (the copy does the part again: nothing it did was seen), marked
+`alwaysinline`: its callers then take a leaf's early return in place, without a call. `fib`'s `n < 2` is one: its calls
+take 47% fewer cycles and 26% fewer instructions (perf stat, x86-64); so is `Ack`'s `m == 0`, whose other ways (the
+recursive calls) go to the copy at once: `ackermann` 19% fewer instructions.
 
 Repeated tests of the pending requests (`skipRepeatedTests` in `codegen/LoopPolls.*`), after the small entries are
 inlined: a test that serves a safepoint (`xb.safepoint`) where no call ran since the last test that found nothing to

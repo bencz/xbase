@@ -189,33 +189,34 @@ result. Implemented (`xir/passes/`):
   substitution would (a check narrows it), and `Len()` of it stays a call.
 
 - Inlining (`Inline.cpp`), first of the passes on each function: a call runs its callee's body in place, between
-  `inline.enter` (which names the callee: the call stack shows it, as its call would) and `inline.leave`; each `ret`
-  becomes `inline.leave` and a branch passing the result to the rest of the caller's block. The callee's parameters and
-  `LOCAL`s become frame variables of the function, stored directly on every entry (the arguments, `NIL` past the last
-  and for the `LOCAL`s) and set to `NIL` before each `inline.leave` (as its frame would be gone: what they held is no
-  longer kept): a call starts with fresh variables, and a shared one gets a fresh cell when a block captures it, the
-  store having replaced the cell an earlier entry left. A codeblock's captures are the variables it captured; the
-  module's `STATIC`s stay. When an argument is a reference (`@x`, `@a[i]`), the variables of its parameters are marked
-  `param` (they keep reading and writing through what they hold), and so do the callee's variables marked so already
-  (the parameters of a body inlined in it before). The arguments are `inline.enter`'s operands, which hold them while
-  the body runs, as the callee's parameters would until it returns (a `frame.release` of a parameter's `LOCAL` in the
-  body lets go of its argument there unless the caller still uses it; a value whose hold nothing can see, a constant or
-  a codeblock literal, which folding may leave unmade, is passed as `NIL`: `heldUnseen` in `Transform`), and the inlined
-  frame's arguments for a callee that reads them as received (`readsArgs`: `PCount()`), all of them until no call of an
-  `ARGS` function in its body is left (`Callee::readsCallerArgs`). A body in which nothing can see the call stack any
-  more (no call, nothing that can fail or run code, no loop, whose back edge polls and may run destructors, no body
-  inlined in it: what folding leaves of `Mul( 2, 3 )`) needs no frame: its `inline.enter` and `inline.leave` go
+  `inline.enter` (which names the callee: the call stack shows it, as its call would, from a position of the caller's
+  frame, [compiler.md](compiler.md#xir-to-llvm)) and `inline.leave`; each `ret` becomes `inline.leave` and a branch
+  passing the result to the rest of the caller's block. The callee's parameters and `LOCAL`s become frame variables of
+  the function, stored directly on every entry (the arguments, `NIL` past the last and for the `LOCAL`s) and set to
+  `NIL` before each `inline.leave` (as its frame would be gone: what they held is no longer kept): a call starts with
+  fresh variables, and a shared one gets a fresh cell when a block captures it, the store having replaced the cell an
+  earlier entry left. A codeblock's captures are the variables it captured; the module's `STATIC`s stay. When an
+  argument is a reference (`@x`, `@a[i]`), the variables of its parameters are marked `param` (they keep reading and
+  writing through what they hold), and so do the callee's variables marked so already (the parameters of a body inlined
+  in it before). The arguments are `inline.enter`'s operands, which hold them while the body runs, as the callee's
+  parameters would until it returns (a `frame.release` of a parameter's `LOCAL` in the body lets go of its argument
+  there unless the caller still uses it; a value whose hold nothing can see, a constant or a codeblock literal, which
+  folding may leave unmade, is passed as `NIL`: `heldUnseen` in `Transform`), and the arguments of the frame such a body
+  links for a callee that reads them as received (`readsArgs`: `PCount()`), all of them until no call of an `ARGS`
+  function in its body is left (`Callee::readsCallerArgs`). A body in which nothing can see the call stack any more (no
+  call, nothing that can fail or run code, no loop, whose back edge polls and may run destructors, no body inlined in
+  it: what folding leaves of `Mul( 2, 3 )`) needs nothing of them: its `inline.enter` and `inline.leave` go
   (`trimInlinedBodies`, at the start of `inline-functions`; a leave several bodies reach keeps them all). A body is
   inlined only at a call without `...`, and only when the callee reads no parameters in its frame slots (`readsParams`:
-  `PValue()`; the inlined frame has none), creates no `PRIVATE` (nor calls a function that creates its caller's: it
-  would be the function's, released later), and has no unwind block, no `...` and no `YIELD`; nothing is inlined into a
-  generator, nor into a function that has grown past 3000 instructions. The body is copied with `copyBlocks`, its
-  constants made anew in the function. At a call in a `BEGIN SEQUENCE` (or a `FOR EACH` with a cleanup), the body's
-  blocks unwind to a block that leaves its frame (`inline.leave`) and goes on to the handler, as the call would return
-  with the error (`unwindBody` in `Transform`: one such block for each set of bodies a copied block ends with open, the
-  callee's own inlined bodies first); the block that enters the body unwinds there too and the one that leaves it to the
-  handler, so that each unwind block starts with the bodies the end of every block reaching it has open. -
-  `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
+  `PValue()`; an inlined body has none), creates no `PRIVATE` (nor calls a `PRIVATES` function, which creates or
+  releases its caller's: they would be the function's), and has no unwind block, no `...` and no `YIELD`; nothing is
+  inlined into a generator, nor into a function that has grown past 3000 instructions. The body is copied with
+  `copyBlocks`, its constants made anew in the function. At a call in a `BEGIN SEQUENCE` (or a `FOR EACH` with a
+  cleanup), the body's blocks unwind to a block that leaves the body (`inline.leave`) and goes on to the handler, as the
+  call would return with the error (`unwindBody` in `Transform`: one such block for each set of bodies a copied block
+  ends with open, the callee's own inlined bodies first); the block that enters the body unwinds there too and the one
+  that leaves it to the handler, so that each unwind block starts with the bodies the end of every block reaching it has
+  open. - `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
   (`Module::library`, below; a method too, which `resolve-sends` made a call of), not an `INIT` or `EXIT` procedure, a
   generator, nor one that calls itself, of at most 30 instructions, or 200 when the call passes a codeblock literal
   (which the body may then run in place too). A function versioned for references runs, for arguments without a

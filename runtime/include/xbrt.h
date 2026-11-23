@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 65u
+#define XB_ABI_VERSION 66u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -214,15 +214,29 @@ struct xb_array {
  * from" lines): its name, "(b)NAME" for a codeblock of NAME; its number of
  * parameters, the first slots of its frame when it keeps its arguments
  * (XB_PROC_ARGS; a typed copy may keep a parameter out of its frame); its
- * flags; and the name of its
- * source file, without directories (ProcFile(); NULL for the runtime's
- * functions). Compiled code emits one constant per function. */
+ * flags; the name of its source file, without directories (ProcFile(); NULL
+ * for the runtime's functions); and the positions in the bodies inlined into
+ * it (NULL: none). Compiled code emits one constant per function.
+ *
+ * A body inlined into a function links no frame of its own: where it runs,
+ * the frame's `line` is XB_LINE_INLINE with the index of a position, whose
+ * entry tells the inlined function and its line, and `caller`, the line of the
+ * code it was inlined into there (a plain line of the frame's function, or
+ * another position, for bodies inlined into inlined bodies). */
+typedef struct xb_inline_pos xb_inline_pos;
 typedef struct xb_proc {
   const char *name;
   uint32_t nparams;
   uint32_t flags;
   const char *file;
+  const xb_inline_pos *inlines;
 } xb_proc;
+struct xb_inline_pos {
+  const xb_proc *proc;
+  uint32_t line;
+  uint32_t caller;
+};
+#define XB_LINE_INLINE 0x80000000u
 
 /* xb_proc.flags. XB_PROC_ARGS: the frame's `argc` and `argv` hold the
  * arguments received; only a function or codeblock that calls PCount() or

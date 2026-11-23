@@ -1,0 +1,6 @@
+
+3 LEVELS(31) WHERE(25) MIDDLE(22) OUTER(19) MAIN(7) inline_call_stack.prg
+2 LEVELS(31) WHERE(25) (b)MAIN(8) MAIN(8) (0) inline_call_stack.prg
+3 3 LEVELS(31) WHERE(25) COUNTED(36) MAIN(9) (0) inline_call_stack.prg
+error:       1081 +
+LEVELS(31) (b)MAIN(10) ADDING(42) FAILING(39) MAIN(11) inline_call_stack.prg

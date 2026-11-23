@@ -169,11 +169,15 @@ shown. A runtime function shows only while what it does can be seen, with a fram
 0 (`xb_frame_push`, `xb_frame_pop` in `core/context.h`): `AScan` and `ASort` while they call blocks (one written in
 xBase, such as `AEval`, shows its own frame, also with line 0: [Functions written in
 xBase](#functions-written-in-xbase)), and a function or message whose error raises the error block (`xb_error_in` names
-it: `SUBSTR`, `ERROR:FOO` for a message to an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block).
-Compiled code links a frame without slots too, over the function's own, while the body of a function or codeblock it
-runs in place (inlined, [xir.md](xir.md#passes)) runs: the call stack shows the callee as its call would. Operators and
-statements show nothing of their own. `ProcName( [nLevel] )`, `ProcLine( [nLevel] )` and `ProcFile( [nLevel] )` read it:
-level 0 is the function calling them, a non-numeric level is 0, a negative one gives `PROCNAME`, line 0 and `""`, a
+it: `SUBSTR`, `ERROR:FOO` for a message to an object, `FOO` without an object, `(b)EVAL` for `Eval` of a non-block). The
+body of a function or codeblock compiled code runs in place (inlined, [xir.md](xir.md#passes)) shows as its call would,
+without a frame: where it runs, the frame's `line` is `XB_LINE_INLINE` with the index of a position in `xb_proc.inlines`
+(`xb_inline_pos`: the inlined function's `xb_proc`, its line, and `caller`, the line of the code it was inlined into,
+which may be another position); the walks of the stack go through the activations (`xb_activation_first` and
+`xb_activation_next` in `core/context.h`: each position of a frame, innermost first, then the frame's function). A body
+that reads its arguments as received, or an `ASYNC` function's entry, links a frame without slots of its own. Operators
+and statements show nothing of their own. `ProcName( [nLevel] )`, `ProcLine( [nLevel] )` and `ProcFile( [nLevel] )` read
+it: level 0 is the function calling them, a non-numeric level is 0, a negative one gives `PROCNAME`, line 0 and `""`, a
 level past the end `""`, 0 and `""`. In a task the stack ends with the task's own calls (`task_base`, the frames when
 its step began): the same whether the step runs on a worker or inline, on the thread of its caller (an asynchronous
 function's first step) or of a waiter, so an error a task fails with keeps its own calls only. `ProcFile` gives the name

@@ -594,6 +594,13 @@ void CodeGen::genFunction(const xir::Function &f) {
   blocks_.clear();
   blockOrder_.clear();
   inlineFrames_.clear();
+  inlineFrame_.clear();
+  inlineCaller_.clear();
+  inlineTables_.clear();
+  inlineTableOf_.clear();
+  inlinesBodies_ = false;
+  for (auto &b : f.blocks)
+    for (auto &i : b->insts) inlinesBodies_ = inlinesBodies_ || i->op == xir::Op::InlineEnter;
   callFrame_.clear();
   values_.clear();
   fusedTruth_.clear();
@@ -651,6 +658,7 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnSelf_->setName("self");
   }
   pushFrame(plan.frameSize(), f.numParams, argc, argv, procOf(f), f.readsArgs && argc);
+  inlineTables_.push_back({dyn_cast<GlobalVariable>(procOf(f)), {}, {}});
   // A function without the direct entry keeps its arguments (it reads them as received, forwards them, or is the
   // other body of one that does): a loan of them ends here, so that no call it makes with them takes them.
   if (f.kind == xir::Function::Kind::Program && !fnDirect_) endLend();
@@ -675,7 +683,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   b_.SetInsertPoint(entry);
   checkStack(fnFrame_, fnExit_, nullptr); // the frame is linked: the function returns through its exit
   b_.CreateBr(blocks_.at(f.entry()));
-  xir::openInlineBodies(plan.cfg(), inlineAt_); // verified: they nest
+  openInlineInstances(plan.cfg());
   for (xir::BasicBlock *xb : plan.cfg().order()) {
     b_.SetInsertPoint(blocks_.at(xb));
     unwind_ = xb->unwind ? blocks_.at(xb->unwind) : fnExit_;
@@ -695,6 +703,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   line_ = 0;
   emitting_ = nullptr;
   inlineOpen_.clear();
+  finishProcs();
   b_.SetInsertPoint(fnExit_);
   if (fnMark_) b_.CreateCall(rtMvRelease_, {fnCtx_, fnMark_});
   unlinkFrame(fnFrame_, fnPrev_);
@@ -716,38 +725,99 @@ StructType *CodeGen::frameType(uint32_t nslots) {
 }
 
 // The function's xb_proc, or null when the call stack does not show it.
+// The function's xb_proc (xbrt.h), made once, without positions of inlined bodies (finishProcs adds them); null for a
+// function the call stack does not show.
 Constant *CodeGen::procOf(const xir::Function &f) {
   if (f.stackName.empty()) return ConstantPointerNull::get(ptrTy_);
   if (auto it = procs_.find(&f); it != procs_.end()) return it->second;
+  auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_, ptrTy_, ptrTy_});
   Constant *name = b_.CreateGlobalString(f.stackName, ".xb.procname", 0, &mod_);
-  auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_, ptrTy_});
   Constant *nparams = ConstantInt::get(i32_, f.numParams);
   Constant *flags = ConstantInt::get(i32_, (f.readsArgs ? XB_PROC_ARGS : 0) | (f.hidden ? XB_PROC_HIDDEN : 0) |
                                                (f.method ? XB_PROC_METHOD : 0));
-  auto *proc = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage,
-                                  ConstantStruct::get(ty, {name, nparams, flags,
-                                                           f.runtime ? ConstantPointerNull::get(ptrTy_) : file_}),
-                                  ".xb.proc");
+  Constant *file = f.runtime ? ConstantPointerNull::get(ptrTy_) : file_;
+  Constant *init = ConstantStruct::get(ty, {name, nparams, flags, file, ConstantPointerNull::get(ptrTy_)});
+  auto *proc = new GlobalVariable(mod_, init->getType(), true, GlobalValue::PrivateLinkage, init, ".xb.proc");
   proc->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   procs_[&f] = proc;
   return proc;
 }
 
+// The inline.enter of the bodies open where each block starts (as xir::openInlineBodies finds the functions: the
+// verifier checked that they nest); where ways from different copies of a body meet, the first way's.
+void CodeGen::openInlineInstances(const xir::CFG &cfg) {
+  inlineAt_.clear();
+  for (const xir::BasicBlock *b : cfg.order()) {
+    std::vector<const xir::Instruction *> open = inlineAt_[b];
+    for (auto &i : b->insts) {
+      if (i->op == xir::Op::InlineEnter) open.push_back(i.get());
+      else if (i->op == xir::Op::InlineLeave && !open.empty()) open.pop_back();
+    }
+    for (size_t k = 0; k < b->numSuccessors(); ++k) inlineAt_.try_emplace(b->successor(k), open);
+  }
+}
+
+// The line the frame below the code at `depth` (0: the function's own, k: the k-th body open) shows there: `line` of
+// the frame's own code; in a body inlined into it without a frame of its own, the position of that body and line in
+// the frame's table (made on first use), whose caller is the line of the code the body is in.
+uint32_t CodeGen::lineValue(size_t depth, uint32_t line) {
+  size_t owner = depth;
+  while (owner > 0 && !inlineFrame_.count(inlineOpen_[owner - 1])) --owner;
+  if (owner == depth) return line;
+  InlineTable &t = inlineTables_[owner == 0 ? 0 : inlineTableOf_.at(inlineOpen_[owner - 1])];
+  if (!t.proc) return 0; // a frame that shows no function
+  const xir::Instruction *body = inlineOpen_[depth - 1];
+  auto [it, fresh] = t.index.try_emplace({body, line}, (uint32_t)t.entries.size());
+  if (fresh) {
+    auto *ty = StructType::get(ctx_, {ptrTy_, i32_, i32_});
+    t.entries.push_back(ConstantStruct::get(ty, {procOf(*body->blockFn), ConstantInt::get(i32_, line),
+                                                 ConstantInt::get(i32_, inlineCaller_.at(body))}));
+  }
+  return XB_LINE_INLINE | it->second;
+}
+
+// The tables of positions into their procs, once the function is lowered.
+void CodeGen::finishProcs() {
+  for (InlineTable &t : inlineTables_) {
+    if (!t.proc || t.entries.empty()) continue;
+    auto *ty = ArrayType::get(t.entries.front()->getType(), t.entries.size());
+    auto *table = new GlobalVariable(mod_, ty, true, GlobalValue::PrivateLinkage, ConstantArray::get(ty, t.entries),
+                                     ".xb.inlines");
+    t.proc->setInitializer(withInlines(t.proc->getInitializer(), table));
+  }
+}
+
+// An xb_proc constant with its positions of inlined bodies replaced.
+Constant *CodeGen::withInlines(Constant *proc, Constant *inlines) {
+  auto *s = cast<ConstantStruct>(proc);
+  std::vector<Constant *> fields;
+  for (unsigned k = 0; k < s->getNumOperands(); ++k) fields.push_back(s->getOperand(k));
+  fields.back() = inlines;
+  return ConstantStruct::get(s->getType(), fields);
+}
+
 // Whether the innermost frame of the code being lowered shows lines: not one of a function of the runtime, whose
 // frames show line 0 (its module's, or a function of a carried runtime source inlined or copied in).
 bool CodeGen::showsLines() const {
-  return !(inlineOpen_.empty() ? fnShown_->runtime : inlineOpen_.back()->runtime);
+  return !(inlineOpen_.empty() ? fnShown_->runtime : inlineOpen_.back()->blockFn->runtime);
 }
 
+// The line (or the position of an inlined body: lineValue) a call stores, in the innermost frame. In a function with
+// inlined bodies, every call stores what its level shows, line 0 too (a body inlined without a frame shows its
+// position, and the code around it shows its own again after it: none is left behind for a later call to show).
 void CodeGen::markLine(Instruction *i) {
-  if (!line_ || !showsLines() || !isa<CallInst>(i)) return;
-  i->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, line_))));
-  if (!inlineOpen_.empty()) callFrame_[i] = innermostFrame();
+  if (!isa<CallInst>(i)) return;
+  if (!inlinesBodies_ && (!line_ || !showsLines())) return;
+  uint32_t value = lineValue(inlineOpen_.size(), showsLines() ? line_ : 0);
+  i->setMetadata(lineKind_, MDNode::get(ctx_, ConstantAsMetadata::get(ConstantInt::get(i32_, value))));
+  if (innermostFrame() != fnFrame_) callFrame_[i] = innermostFrame();
 }
 
-// The innermost frame of the code being lowered: the function's, or that of the inlined body it is in.
+// The innermost frame of the code being lowered: the function's, or that of the innermost inlined body that links one.
 Value *CodeGen::innermostFrame() const {
-  return inlineOpen_.empty() ? fnFrame_ : inlineFrames_.at(inlineOpen_.size() - 1);
+  for (auto it = inlineOpen_.rbegin(); it != inlineOpen_.rend(); ++it)
+    if (auto f = inlineFrame_.find(*it); f != inlineFrame_.end()) return f->second;
+  return fnFrame_;
 }
 
 // The frame's line, stored right before each call that can see the call stack

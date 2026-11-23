@@ -59,14 +59,15 @@ static void write_report(void *p) {
   fflush(stdout);
   fprintf(stderr, "\nUnrecoverable error %d: %s", r->code, r->text);
   uint32_t shown = 0;
-  for (const xb_frame *f = r->ctx->frames; f; f = f->prev) {
-    if (!xb_frame_shown(f)) continue;
+  xb_activation a;
+  for (xb_activation_first(&a, r->ctx->frames); a.frame; xb_activation_next(&a)) {
+    if (!xb_proc_shown(a.proc)) continue;
     if (shown++ == XB_CALLS_SHOWN) {
       fprintf(stderr, "\n%s", XB_CALLS_NOT_SHOWN);
       break;
     }
-    fprintf(stderr, "\nCalled from %s(%u)", f->proc->name, (unsigned)f->line);
-    if (f->proc->file) fprintf(stderr, " in %s", f->proc->file);
+    fprintf(stderr, "\nCalled from %s(%u)", a.proc->name, (unsigned)a.line);
+    if (a.proc->file) fprintf(stderr, " in %s", a.proc->file);
   }
   fputc('\n', stderr);
   xb_output_unlock();
@@ -315,18 +316,19 @@ void xb_error_call_lines(xb_ctx *ctx, const xb_item *error, xb_item *out) {
   xb_buffer b = {local, 0, sizeof local, 0};
   const xb_frame *end = xb_stack_end(ctx);
   uint32_t n = 0;
-  for (const xb_frame *f = ctx->frames; f && f != end; f = f->prev) {
-    if (!xb_frame_shown(f)) continue;
+  xb_activation a;
+  for (xb_activation_first(&a, ctx->frames); a.frame && a.frame != end; xb_activation_next(&a)) {
+    if (!xb_proc_shown(a.proc)) continue;
     if (n++ == XB_CALLS_SHOWN) {
       xb_buffer_put(&b, further, sizeof further - 1);
       break;
     }
     char line[32];
-    int len = snprintf(line, sizeof line, "(%u)  ", (unsigned)f->line);
+    int len = snprintf(line, sizeof line, "(%u)  ", (unsigned)a.line);
     xb_buffer_put(&b, "\n", 1);
     if (n == 1 && fromTask) xb_buffer_put(&b, waited, sizeof waited - 1);
     else xb_buffer_put(&b, called, sizeof called - 1);
-    xb_buffer_put(&b, f->proc->name, strlen(f->proc->name));
+    xb_buffer_put(&b, a.proc->name, strlen(a.proc->name));
     xb_buffer_put(&b, line, (size_t)len);
   }
   xb_set_str(out, xb_str_new(b.p, b.len));

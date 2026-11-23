@@ -109,6 +109,9 @@ private:
   void markLine(llvm::Instruction *i);
   llvm::Value *innermostFrame() const;
   bool showsLines() const;
+  uint32_t lineValue(size_t depth, uint32_t line);
+  void openInlineInstances(const xir::CFG &cfg);
+  void finishProcs();
   void placeLines();
   // `prev`: the frame the chain has now, when known (else it is read from the context).
   void linkFrame(llvm::Value *frame, llvm::Value *nslots, llvm::Value *proc, llvm::Value *prev = nullptr);
@@ -406,14 +409,29 @@ private:
   // the function being generated
   llvm::Function *fn_ = nullptr;
   llvm::Value *fnCtx_ = nullptr, *fnRet_ = nullptr, *fnBase_ = nullptr, *fnSelf_ = nullptr, *fnFrame_ = nullptr;
-  // Inlined bodies (inline.enter, inline.leave): their frames, by depth; the functions of the bodies open where each
-  // block starts, innermost last; those open where the code being lowered is (the innermost frame shows its line);
-  // the frame each call (or the line store of an inline.enter) stores its line in, when not the function's own
-  // (placeLines).
-  const xir::Function *fnShown_ = nullptr;  // the function being lowered
-  std::vector<llvm::Value *> inlineFrames_; // by depth: bodies open at once are at different depths
-  xir::InlineBodies inlineAt_;
-  std::vector<const xir::Function *> inlineOpen_;
+  // Inlined bodies (inline.enter, inline.leave): the inline.enter of each body open where each block starts, innermost
+  // last; those open where the code being lowered is. A body that reads its arguments as received (PCount()), or an
+  // ASYNC function's entry, links a frame of its own (by depth: bodies open at once are at different depths); another
+  // links none, and where it runs the frame below it holds a position of its proc's table (xb_inline_pos in xbrt.h,
+  // lineValue) as its line. The frame each call (or the line store of a link) stores its line in, when not the
+  // function's own (placeLines).
+  const xir::Function *fnShown_ = nullptr; // the function being lowered
+  std::vector<llvm::Value *> inlineFrames_;
+  std::unordered_map<const xir::BasicBlock *, std::vector<const xir::Instruction *>> inlineAt_;
+  std::vector<const xir::Instruction *> inlineOpen_;
+  std::unordered_map<const xir::Instruction *, llvm::Value *> inlineFrame_; // the frame of a body that links one
+  std::unordered_map<const xir::Instruction *, uint32_t> inlineCaller_;    // the line of the code a body is in
+  // The positions of the bodies inlined into each frame of the function (the function's own, or a linked body's: its
+  // inline.enter's in inlineTableOf_), the proc that holds them, and each one's index by its body and line.
+  struct InlineTable {
+    llvm::GlobalVariable *proc = nullptr;
+    std::vector<llvm::Constant *> entries;
+    std::map<std::pair<const xir::Instruction *, uint32_t>, uint32_t> index;
+  };
+  std::vector<InlineTable> inlineTables_; // the function's own first
+  std::unordered_map<const xir::Instruction *, size_t> inlineTableOf_;
+  bool inlinesBodies_ = false; // the function has inlined bodies: every call stores what its level shows
+  llvm::Constant *withInlines(llvm::Constant *proc, llvm::Constant *inlines);
   std::unordered_map<llvm::Instruction *, llvm::Value *> callFrame_;
   std::unordered_map<const xir::Function *, llvm::Constant *> procs_; // procOf's, made once each
   llvm::Value *fnMark_ = nullptr; // the PRIVATE mark of an activation that may create PRIVATEs (xb_mv_mark), or null

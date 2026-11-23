@@ -83,21 +83,23 @@ void xbf___GCMEMORY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* The call stack level `n` (0: the function calling, 1: its caller, ...)
  * from argument 0; a level below 0 is the asking function itself. */
-static const xb_frame *stack_level(const xb_ctx *ctx, uint32_t argc, const xb_item *argv, int64_t *n) {
+static xb_activation stack_level(const xb_ctx *ctx, uint32_t argc, const xb_item *argv, int64_t *n) {
   *n = argc && xb_is_number(&argv[0]) ? xb_num_to_i64(&argv[0]) : 0;
   int64_t k = *n;
   const xb_frame *end = xb_stack_end(ctx);
-  for (const xb_frame *f = ctx->frames; f && f != end; f = f->prev)
-    if (xb_frame_shown(f) && k-- == 0) return f;
-  return NULL;
+  xb_activation a;
+  for (xb_activation_first(&a, ctx->frames); a.frame && a.frame != end; xb_activation_next(&a))
+    if (xb_proc_shown(a.proc) && k-- == 0) return a;
+  a.frame = NULL;
+  return a;
 }
 
 /* ProcName( [nLevel] ): the name of the function at that level of the call
  * stack ("(b)NAME" for a codeblock of NAME), "" past its end. */
 void xbf_PROCNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int64_t n;
-  const xb_frame *f = stack_level(ctx, argc, argv, &n);
-  const char *name = n < 0 ? "PROCNAME" : f ? f->proc->name : "";
+  xb_activation a = stack_level(ctx, argc, argv, &n);
+  const char *name = n < 0 ? "PROCNAME" : a.frame ? a.proc->name : "";
   xb_set_str(ret, xb_str_new(name, strlen(name)));
 }
 
@@ -106,8 +108,8 @@ void xbf_PROCNAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * for a runtime function. */
 void xbf_PROCFILE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int64_t n;
-  const xb_frame *f = stack_level(ctx, argc, argv, &n);
-  const char *file = n >= 0 && f && f->proc->file ? f->proc->file : "";
+  xb_activation a = stack_level(ctx, argc, argv, &n);
+  const char *file = n >= 0 && a.frame && a.proc->file ? a.proc->file : "";
   xb_set_str(ret, xb_str_new(file, strlen(file)));
 }
 
@@ -115,8 +117,8 @@ void xbf_PROCFILE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * end of the stack or in a runtime function. */
 void xbf_PROCLINE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int64_t n;
-  const xb_frame *f = stack_level(ctx, argc, argv, &n);
-  xb_set_int(ret, n >= 0 && f ? f->line : 0);
+  xb_activation a = stack_level(ctx, argc, argv, &n);
+  xb_set_int(ret, n >= 0 && a.frame ? a.line : 0);
 }
 
 /* The frame of the function calling: the innermost one the call stack shows
