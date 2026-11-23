@@ -22,14 +22,16 @@ Constant *copyConstant(Function &f, const Constant &c) {
 }
 
 
-BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k) {
+BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k) { return splitBefore(f, b, k + 1); }
+
+BasicBlock *splitBefore(Function &f, BasicBlock *b, size_t k) {
   BasicBlock *tail = f.addBlock(b->name);
   tail->unwind = b->unwind;
-  for (size_t j = k + 1; j < b->insts.size(); ++j) {
+  for (size_t j = k; j < b->insts.size(); ++j) {
     b->insts[j]->parent = tail;
     tail->insts.push_back(std::move(b->insts[j]));
   }
-  b->insts.resize(k + 1);
+  b->insts.resize(k);
   Builder builder(&f);
   builder.setBlock(b);
   builder.br(tail);
@@ -255,8 +257,8 @@ BasicBlock *unwindBody(Function &f, const Function &callee, const BlockCopy &cop
   return padFor({});
 }
 
-void joinDefinitions(Function &f, const std::vector<Definitions> &defs,
-                     const std::unordered_set<const BasicBlock *> &inside) {
+std::vector<BlockParam *> joinDefinitions(Function &f, const std::vector<Definitions> &defs,
+                                         const std::unordered_set<const BasicBlock *> &inside) {
   CFG now(f);
   Predecessors preds;
   for (auto &[b, terms] : predecessorTerminators(f))
@@ -276,6 +278,8 @@ void joinDefinitions(Function &f, const std::vector<Definitions> &defs,
       if (done.insert(u).second) up.rewriteUse(u, orig);
   }
   removeTrivialParams(placed, preds);
+  placed.erase(std::remove(placed.begin(), placed.end(), nullptr), placed.end());
+  return placed;
 }
 
 } // namespace xb::xir

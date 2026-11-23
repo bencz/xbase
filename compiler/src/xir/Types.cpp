@@ -189,6 +189,14 @@ IntRange arithmeticRange(BinOp op, IntRange a, IntRange b, bool *fits) {
 
 constexpr int64_t kExactDoubles = int64_t(1) << XB_DBL_EXACT_BITS; // the integers a double holds exactly
 
+// The types a guard (subst.check with a mask) lets on, of an operation's result or of a block parameter: every other
+// use is past it.
+TypeSet guardMask(const Value &v) {
+  for (const Instruction *u : v.users())
+    if (u->op == Op::SubstCheck && u->imm != 0) return (TypeSet)u->imm;
+  return kAnyType;
+}
+
 } // namespace
 
 TypeInfo::TypeInfo(const CFG &cfg, Substitution substitution,
@@ -204,6 +212,7 @@ TypeInfo::TypeInfo(const CFG &cfg, Substitution substitution,
   // types again with those ranges, which only shrink.
   for (int round = 0; round < kNarrowRounds; ++round) narrow();
   types_.clear();
+  passed_.clear();
   infer(false);
   for (BasicBlock *b : cfg.order())
     for (auto &i : b->insts)
@@ -246,6 +255,10 @@ void TypeInfo::infer(bool withRanges) {
             const BlockParam *p = tg.block->params[k].get();
             if (p->type() != Type::Item) continue;
             TypeSet t = of(tg.args[k]);
+            if (TypeSet mask = guardMask(*p); mask != kAnyType) {
+              passed_[p] |= t;
+              t &= mask;
+            }
             TypeSet &cur = types_[p];
             if ((cur | t) != cur) {
               cur |= t;
@@ -366,6 +379,16 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
       return {f->paramTypes[v->index] & kAnyType, false};
     return {kAnyType, false};
   }
+  case Op::SubstValue: // a checked value of other types: in a copy that joins the original again (`imm`), an
+                       // operation's own result, unless an error substituted it, or what the branches pass to a
+                       // guarded block parameter; any type in a copy that runs to the end (its code stays generic)
+    if (i.imm == 0) return {kAnyType, false};
+    if (const BlockParam *p = asParam(i.operand(0))) return {t.passed(*p), false};
+    if (const auto *c = dynamic_cast<const Instruction *>(i.operand(0))) {
+      OwnResult r = ownResult(*c, t);
+      if (!r.substitutable) return {r.types, false};
+    }
+    return {kAnyType, false};
   default: return {kAnyType, false}; // read from memory, or made by the runtime
   }
 }
@@ -378,15 +401,7 @@ bool checked(const Instruction &i) {
   return false;
 }
 
-// The types a guard (subst.check with a mask) lets on: every other use is past it.
-TypeSet guardMask(const Instruction &i) {
-  for (const Instruction *u : i.users())
-    if (u->op == Op::SubstCheck && u->imm != 0) return (TypeSet)u->imm;
-  return kAnyType;
-}
-
 } // namespace
-
 
 TypeSet returnTypes(const Function &f) {
   CFG cfg(f);

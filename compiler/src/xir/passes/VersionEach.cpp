@@ -91,7 +91,7 @@ void version(Function &f, Instruction *enter, size_t k, std::vector<BasicBlock *
              const std::vector<xb_type> &types, std::unordered_set<const Instruction *> &done) {
   BasicBlock *b = enter->parent;
   Value *coll = enter->operand(1);
-  BasicBlock *start = splitAfter(f, b, k - 1);
+  BasicBlock *start = splitBefore(f, b, k);
   region.insert(region.begin(), start);
   std::unordered_set<const BasicBlock *> inside(region.begin(), region.end());
 

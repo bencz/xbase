@@ -315,10 +315,13 @@ private:
     case Op::SeqResume: expect(i, 2, {Type::I64, Type::Item}); break;
     case Op::EachKey: expect(i, 2, {Type::Item, Type::I64}); break;
     case Op::EachSource: expect(i, 2, {Type::Item, Type::Bool}); break;
-    case Op::SubstCheck: { // nothing between the operation, its check and the subst.value its branch leads to
+    case Op::SubstCheck: { // nothing between the operation (or the block's parameter a guard tests, first in the
+                           // block), its check and the subst.value its branch leads to
       expect(i, 1, {Type::Item});
       const auto &insts = i.parent->insts;
-      if (pos == 0 || i.operand(0) != insts[pos - 1].get()) fail("subst.check does not follow its operation");
+      bool param = i.operand(0)->kind() == Value::Kind::Param;
+      if (param ? i.parent->paramGuard() != &i : pos == 0 || i.operand(0) != insts[pos - 1].get())
+        fail("subst.check does not follow its operation");
       const Instruction *br = pos + 1 < insts.size() ? insts[pos + 1].get() : nullptr;
       const BasicBlock *to = br && br->op == Op::CondBr && br->operand(0) == &i ? br->targets[0].block : nullptr;
       if (!to || !br->targets[0].args.empty() || to->insts.empty() || to->insts[0]->op != Op::SubstValue ||

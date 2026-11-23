@@ -197,6 +197,18 @@ std::unique_ptr<Instruction> BasicBlock::takeTerminator() {
   return t;
 }
 
+size_t BasicBlock::indexOf(const Instruction *i) const {
+  size_t k = 0;
+  while (insts[k].get() != i) ++k;
+  return k;
+}
+
+const Instruction *BasicBlock::paramGuard() const {
+  if (insts.empty() || insts.front()->op != Op::SubstCheck || insts.front()->imm == 0) return nullptr;
+  const BlockParam *p = asParam(insts.front()->operand(0));
+  return p && p->block == this ? insts.front().get() : nullptr;
+}
+
 Instruction *BasicBlock::terminator() const {
   if (insts.empty() || !isTerminator(insts.back()->op)) return nullptr;
   return insts.back().get();

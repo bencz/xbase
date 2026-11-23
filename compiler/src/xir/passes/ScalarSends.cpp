@@ -87,7 +87,7 @@ struct Link {
 // receiver's type (one of `types`, a mask) and of its class: in the copy that runs when the runtime's class answers,
 // each send of `chain` calls its method.
 void version(Function &f, BasicBlock *b, size_t first, size_t last, TypeSet types, const std::vector<Link> &chain) {
-  BasicBlock *region = splitAfter(f, b, first - 1);
+  BasicBlock *region = splitBefore(f, b, first);
   splitAfter(f, region, last - first);
   BlockCopy copy = copyBlocks(f, {region}, ".runtime");
   BasicBlock *direct = copy.blocks.at(region);

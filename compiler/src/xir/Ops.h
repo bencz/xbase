@@ -87,8 +87,9 @@ enum class Op : uint8_t {
   SeqSuspend,     // -> I64: in an unwind block, the requests to unwind, set aside (ALWAYS runs without them)
   SeqResume,      // I64, Item: those requests and the BREAK value back, unless ALWAYS made a request of its own
   SubstCheck,     // operation -> Bool: right after it, its result is not of the types it gives itself (an error's
-                  // block substituted it); with a mask (`imm`), a guard: the value is not of those types
-  SubstValue,     // operation -> Item: that result, at the start of the block the check leads to
+                  // block substituted it); with a mask (`imm`), a guard: the value is not of those types (also of a
+                  // block parameter, first in its block)
+  SubstValue,     // operation -> Item: that value, at the start of the block the check leads to
   HasOperator,    // Item; message (XB_OPERATOR_*) -> Bool: the value is an object whose class overloads that operator
   ScalarPlain,    // Item; index: a mask of types -> Bool: the value is of one of those types, whose own class of the
                   // runtime answers its messages, no class of the program before it (xb_scalar_replaced): a method of

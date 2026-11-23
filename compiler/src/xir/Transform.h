@@ -19,6 +19,8 @@ class Builder;
 // Moves the instructions after position `k` of `b` into a new block (named like `b`, unwinding where `b` does) that `b`
 // jumps to, and returns it.
 BasicBlock *splitAfter(Function &f, BasicBlock *b, size_t k);
+// The same with the instructions from position `k` on (`b` then holds the first `k` and the jump; its parameters stay).
+BasicBlock *splitBefore(Function &f, BasicBlock *b, size_t k);
 
 // A copy of blocks into function `f` (theirs, or another): each block's copy is named with `suffix`, takes parameters
 // of the same types, and holds copies of its instructions, whose operands and targets are the copies of the originals;
@@ -106,9 +108,9 @@ BasicBlock *unwindBody(Function &f, const Function &callee, const BlockCopy &cop
 
 // SSA form again for values that copies of blocks define once more: each entry lists one value's definitions with
 // their blocks, the original first. Its reachable uses outside the blocks in `inside` (the original and copied blocks)
-// take the definition that reaches them, through block parameters where they meet (SSAUpdater).
+// take the definition that reaches them, through block parameters where they meet (SSAUpdater), which it returns.
 using Definitions = std::vector<std::pair<const BasicBlock *, Value *>>;
-void joinDefinitions(Function &f, const std::vector<Definitions> &defs,
-                     const std::unordered_set<const BasicBlock *> &inside);
+std::vector<BlockParam *> joinDefinitions(Function &f, const std::vector<Definitions> &defs,
+                                         const std::unordered_set<const BasicBlock *> &inside);
 
 } // namespace xb::xir

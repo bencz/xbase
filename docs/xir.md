@@ -125,12 +125,14 @@ are settled together at the end (`refineCopies`, `specialize-calls` below). The 
 errors cannot substitute the call's result (an error inside it substitutes the failed operation's, and the type
 inference of its `ret`s counts that), and a call it never enters (the stack's end) unwinds.
 
-The error block may substitute a value of any type for the result of an operation that fails ([Control flow for
-errors and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that may fail may produce any type:
+The error block may substitute a value of any type for the result of an operation that fails ([Control flow for errors
+and exceptions](#control-flow-for-errors-and-exceptions)), so an operation that may fail may produce any type:
 `binaryMayFail` tells when operands can make a `binary` fail (an operand type pair it does not take, a divisor that may
 be zero: not a non-zero constant), `unary` and `switch.check` fail for types they do not take. An operation that
-`subst.check` follows gives only its own types, and a value a guard checks (`subst.check` with a mask) only the types
-of the mask (see `typed-continuations` in [Passes](#passes)).
+`subst.check` follows gives only its own types, and a value a guard checks (`subst.check` with a mask: an operation's
+result, or a block parameter) only the types of the mask; `subst.value` gives any type, but in a region's copy
+(`joined`) the types of the operation's own result unless an error substituted it, or the types the branches pass to the
+guarded parameter (see `typed-continuations` in [Passes](#passes)).
 `Substitution::None` types every operation as if no error block substituted anything.
 
 Integer ranges (`IntRange`, the values an item holds when it is an integer) grow with the types in the same optimistic
@@ -302,7 +304,8 @@ result. Implemented (`xir/passes/`):
   one that can fail in general (`truth`) but not with these operands.
 - `simplify-cfg`: a block holding only `br` whose parameters nothing else uses is skipped by its predecessors; two
   branches to one block differing only in a `true`/`false` argument become a jump passing the condition; a block
-  whose single predecessor jumps to it joins it; unreachable blocks go. The steps repeat until nothing changes.
+  whose single predecessor jumps to it joins it (not one that opens with the guard of its parameter, which tests the
+  value it receives); unreachable blocks go. The steps repeat until nothing changes.
 - `remove-dead-code`: instructions whose result is unused and that cannot fail and write nothing (the effects in
   `Ops.*`; a `block` nothing uses too: the variables it would move into cells are reached through the cell test), and
   unused block parameters with their arguments, by a worklist; then the frame variables (not parameters) no instruction
@@ -329,20 +332,33 @@ result. Implemented (`xir/passes/`):
   loop whose error may substitute its result, whose own types hold no heap reference (numbers, logicals, dates) or are a
   single type (a string concatenation: a constant tag), and that another operation computes with (an index too) or a
   branch passes on, ends its block with `subst.check` (its result is not of its own types: only a substituted value can
-  be) and a `cond_br` to a block that takes the value with `subst.value` and enters a generic copy of the function right
-  after the copy of the operation. The copy is made once per function, of at most 500 instructions (a larger one doubles
-  code that LLVM unrolls and splits again), with at most 64 checks, those of the most nested loops (`Loops` in
-  `Analysis`); not in a function with unwind blocks, which take no parameters. The checks are chosen first with the
-  types as if every operation were checked (`Substitution::None`), then again, up to 4 more rounds while one adds any,
-  with the types where only those chosen so far are (`TypeInfo`'s assumed checks): an operation not chosen may still
-  give any type, and what takes it (a `TOTAL` call whose argument it is, an operator) may then fail too (`Asc( SubStr(
-  c, i, 1 ) )`: `SubStr` is not computed with, so `Asc` is checked); a sum that a loop carries stays unchecked where its
-  operands are. The values that reach the copy are joined to its own by block parameters, built on demand from the uses
-  (Braun et al.), and parameters that receive one value only are removed. The copy's operations keep giving any type, so
-  a substituted value of any type runs correctly, while the original code keeps registers and constant type tags. The
-  lowering reads the item's real tag for `subst.check` and weights its branch unlikely; between the operation and
-  `subst.value` the result may sit in a home the collector does not see, which holds because the pending test after such
-  an operation calls `xb_pending`, which never collects nor parks the thread for another thread's collection (the
+  be) and a `cond_br` to a block that takes the value with `subst.value` and enters a generic copy right after the copy
+  of the operation. A function of at most 500 instructions without unwind blocks is copied whole, once, and the copy
+  runs to its end. Another is copied by regions, one at a time in the control flow's order, the checks chosen again for
+  what is not copied yet: a loop nest (its outermost loop), or a guard outside every loop with the code from it up to
+  the first loop it is for; regions that share a block are one, and one of more than 500 instructions, or with a block
+  that unwinds (unwind blocks take no parameters), is not copied. A region's copy leaves it where the region does, and
+  the values that live on are joined there to the original's by block parameters; its `subst.value`s are `joined`, typed
+  with the operation's own types (a speculation's overflow is a double, not any type), so a join keeps the types of both
+  sides (`pi`'s brainfuck function, of 2000 instructions: a loop nest after another, its cell index an integer or a
+  double throughout, ran 1.41 times as long when its joins were of any type). A join that a later loop follows gets a
+  guard against the types its original side gives (the joins it comes through counted), the first operation of its
+  block, so the code after it is typed again and the next region starts there; a second join of the block is passed on
+  to the block after the first guard as a parameter of that block, and guarded there (the copy entered from the first
+  guard takes it unchecked). A whole function's copy, which never joins the original again, stays generic: its
+  `subst.value`s are of any type (typed, its values took registers from the typed code: `levenshtein` and
+  `spectral_norm` ran 1.08 and 1.15 times as long). A copy has at most 64 checks, those of the most nested loops
+  (`Loops` in `Analysis`); a larger copy doubles code that LLVM unrolls and splits again. The checks are chosen first
+  with the types as if every operation were checked (`Substitution::None`), then again, up to 4 more rounds while one
+  adds any, with the types where only those chosen so far are (`TypeInfo`'s assumed checks): an operation not chosen may
+  still give any type, and what takes it (a `TOTAL` call whose argument it is, an operator) may then fail too (`Asc(
+  SubStr( c, i, 1 ) )`: `SubStr` is not computed with, so `Asc` is checked); a sum that a loop carries stays unchecked
+  where its operands are. The values that reach the copy are joined to its own by block parameters, built on demand from
+  the uses (Braun et al.), and parameters that receive one value only are removed. The copy's operations keep giving any
+  type, so a substituted value of any type runs correctly, while the original code keeps registers and constant type
+  tags. The lowering reads the item's real tag for `subst.check` and weights its branch unlikely; between the operation
+  and `subst.value` the result may sit in a home the collector does not see, which holds because the pending test after
+  such an operation calls `xb_pending`, which never collects nor parks the thread for another thread's collection (the
   request waits for the next poll), and not `xb_pending_gc`. The same pass guards the values that enter a loop with a
   type the code would not know there (with substitutions counted: a parameter, a variable, a call's result, an operation
   whose error may substitute it) when the loop takes them as numbers (a `FOR`'s start or limit, an operand of `-`, `*`,
@@ -350,11 +366,14 @@ result. Implemented (`xir/passes/`):
   integer for `Max()` of integers, both when it gives none) right after the value, into the same copy otherwise, so the
   loop keeps its values typed and out of the frame. The guarded value itself keeps a home the collector sees
   (`TypeInfo::guardNeedsHome`) when until its check it may hold anything (a substituted error, a value read from memory:
-  the pending test after a call may collect). It also speculates: in a loop, `+`, `-` and `*` of two values that are
-  integers once the speculations hold (the greatest set of the loops' values that are integers, `+ - *` or `Int( x / k
-  )` of such, or block parameters all of whose arguments are) and whose ranges may overflow get a guard against the
-  integers alone (`subst.check` with the integer mask; an overflow's double goes on in the copy), so the loop computes
-  with integers in registers; one whose ranges cannot overflow (`fits`) needs none.
+  the pending test after a call may collect). A block parameter is guarded the same way, first in its block (a value
+  carried into loops, a region's join); its home is its types' (nothing runs between the branch and the check, and the
+  check reads the tag the item holds), and its `subst.value` has the types the branches pass (`TypeInfo::passed`). It
+  also speculates: in a loop, `+`, `-` and `*` of two values that are integers once the speculations hold (the greatest
+  set of the loops' values that are integers, `+ - *` or `Int( x / k )` of such, or block parameters all of whose
+  arguments are) and whose ranges may overflow get a guard against the integers alone (`subst.check` with the integer
+  mask; an overflow's double goes on in the copy), so the loop computes with integers in registers; one whose ranges
+  cannot overflow (`fits`) needs none.
 - `resolve-sends`, after `fold-constants`: a `send` (without `...`, not one an AWAIT fuses) to an object whose class
   `ClassInfo` knows, and a `Super` send of a method to its own `Self` that reaches a method (its parameter 0, which only
   loads read, `onlyLoaded`: the runtime finds a `Super` member from the method's class alone, `Self` being of it or of a
@@ -567,16 +586,16 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   types of a mask whose classes of the runtime answer its messages: `resolve-scalar-sends`), `object.is` (an object of a
   class of the module, exactly: `speculate-sends`), `has.operator` (an object whose class overloads an operator: the
   left side of `.AND.` and `.OR.`, `Generator::genLogic`, which gives the operator the right side's value, evaluated
-  in a block both ways share; `fold-constants` makes it false where the value cannot be an object, and the plain
-  logic is then all that is left), `subst.check` and `subst.value` for typed continuations (the
-  verifier keeps the check right after its operation and the value first in the block only the check leads to), and for
-  parameter versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call
-  with the function's own arguments, as received), `inline.enter` (naming a function or block function) and
-  `inline.leave`, around an inlined body: the call stack shows that function in between, and `frame.release`, right
-  after `x := NIL` to a local or a parameter: the frame slots of the values dead there are set to `NIL` (the store
-  itself may go as a dead store, but the program let go of what x held); after the `LOCAL` standing for a parameter
-  (`frame.release param k of NAME`), also the parameter's own slot, or in the body of NAME inlined, the argument its
-  `inline.enter` holds, which nothing else lets go of before the function returns.
+  in a block both ways share; `fold-constants` makes it false where the value cannot be an object, and the plain logic
+  is then all that is left), `subst.check` and `subst.value` for typed continuations (the verifier keeps the check right
+  after its operation, or first in the block whose parameter a guard tests, and the value first in the block only the
+  check leads to), and for parameter versioning `params.ref` (whether parameters hold references their caller passed)
+  and `call.forward` (a call with the function's own arguments, as received), `inline.enter` (naming a function or block
+  function) and `inline.leave`, around an inlined body: the call stack shows that function in between, and
+  `frame.release`, right after `x := NIL` to a local or a parameter: the frame slots of the values dead there are set to
+  `NIL` (the store itself may go as a dead store, but the program let go of what x held); after the `LOCAL` standing for
+  a parameter (`frame.release param k of NAME`), also the parameter's own slot, or in the body of NAME inlined, the
+  argument its `inline.enter` holds, which nothing else lets go of before the function returns.
 - An operation that fails, or leaves another pending request that asks to unwind, goes to its block's unwind block,
   or makes the function return (see [Control flow for errors and exceptions](#control-flow-for-errors-and-exceptions)).
 - Terminators: `br`, `cond_br` (with block arguments), `gen.yield`, `async.suspend`, `ret`.

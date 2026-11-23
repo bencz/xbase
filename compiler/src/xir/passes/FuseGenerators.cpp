@@ -315,8 +315,7 @@ void fuse(Function &f, const EachLoop &l, Function &r, const Body &body) {
   Instruction *saved = nullptr;
   {
     BasicBlock *b = l.enter->parent;
-    size_t k = 0;
-    while (b->insts[k].get() != l.enter) ++k;
+    size_t k = b->indexOf(l.enter);
     auto load = std::make_unique<Instruction>(Op::Load, Type::Item, b);
     load->loc = l.enter->loc;
     load->var = l.var;

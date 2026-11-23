@@ -194,6 +194,9 @@ private:
     case Op::SubstCheck:
       if (i.imm != 0) out_ += " guard " + std::to_string((uint32_t)i.imm); // the types it lets on (TypeSet)
       break;
+    case Op::SubstValue:
+      if (i.imm != 0) out_ += " joined"; // its copy joins the original again: of the operation's own types
+      break;
     case Op::Call: case Op::FuncRef:
       out_ += " " + (i.callee.function ? i.callee.function->name : calleeName(i.callee));
       break;

@@ -98,7 +98,8 @@ bool mergeBlocks(Function &f) {
       Instruction *t = a->terminator();
       if (!t || t->op != Op::Br) break;
       BasicBlock *next = t->targets[0].block;
-      if (next == a || next == f.entry() || edges[next] != 1 || next->unwind != a->unwind) break;
+      // A block that opens with the guard of a parameter keeps it (the guard tests the value it receives).
+      if (next == a || next == f.entry() || edges[next] != 1 || next->unwind != a->unwind || next->paramGuard()) break;
       std::vector<Value *> args = t->targets[0].args;
       a->takeTerminator();
       for (size_t k = 0; k < args.size(); ++k) next->params[k]->replaceAllUsesWith(args[k]);

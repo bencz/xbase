@@ -224,7 +224,8 @@ public:
   // so its slot keeps the value until that LOCAL is set to NIL (FramePlan::pinMovedParams).
   bool moves = false;
   IntPred pred = IntPred::Eq;
-  double imm = 0.0;                   // NumDefaultDec; SubstCheck: the types a guard expects (0: none)
+  double imm = 0.0;                   // NumDefaultDec; SubstCheck: the types a guard expects (0: none); SubstValue: 1
+                                      // in a copy that joins the original again (its types are the operation's)
   Var *var = nullptr;                 // Load, Store, Barrier, Each*, RefVar
   Access access = Access::Direct;     // Load, Store, Barrier
   Callee callee;                      // Call
@@ -297,6 +298,9 @@ public:
     eraseParam(k);
   }
   Instruction *terminator() const;
+  size_t indexOf(const Instruction *i) const; // the position of `i`, one of the block's instructions
+  // The guard (subst.check with a mask) of one of the block's parameters that opens it, or null.
+  const Instruction *paramGuard() const;
   std::unique_ptr<Instruction> takeTerminator(); // removed with its uses undone
   size_t numSuccessors() const; // the targets of the terminator, then the unwind block, without allocating
   BasicBlock *successor(size_t k) const;

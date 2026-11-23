@@ -114,9 +114,7 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   const Function &callee = *in.callee;
   std::vector<Value *> args = operandsFrom(*call, in.firstArg);
   BasicBlock *at = call->parent;
-  size_t k = 0;
-  while (at->insts[k].get() != call) ++k;
-  BasicBlock *tail = splitAfter(f, at, k);
+  BasicBlock *tail = splitAfter(f, at, at->indexOf(call));
   BlockParam *result = tail->addParam(Type::Item);
 
   // The callee's variables (bodyVars), and the body, copied with constants of the function's own, using them; each

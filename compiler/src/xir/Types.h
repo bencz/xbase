@@ -98,6 +98,11 @@ public:
   // + - * whose integer operands' ranges keep the result within int64: of two integers, an integer (the lowering still
   // tests the overflow, a form LLVM simplifies best).
   bool fits(const Instruction &i) const { return fits_.count(&i) != 0; }
+  // The types the branches pass to block parameter `p`, before a guard's mask.
+  TypeSet passed(const BlockParam &p) const {
+    auto it = passed_.find(&p);
+    return it == passed_.end() ? 0 : it->second;
+  }
 
 private:
   // A test whose branch `edge` (0 true, 1 false) to `body` bounds two numbers: `x op y` holds on it. A FOR test's
@@ -123,6 +128,7 @@ private:
   Substitution substitution_;
   const std::unordered_set<const Instruction *> *assumedChecks_;
   std::unordered_map<const Value *, TypeSet> types_;
+  std::unordered_map<const BlockParam *, TypeSet> passed_; // of the guarded block parameters
   std::unordered_map<const Value *, IntRange> ranges_;
   // The bounds of each value (as `x` or `y`) whose branch is the only way into its block from outside it: they hold
   // where it dominates; at most kMaxBoundsPerValue of each value, the first in reverse postorder (a value compared in

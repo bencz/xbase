@@ -230,10 +230,9 @@ in the phases of [concurrency.md](concurrency.md#phases).
 - A call writes its destination only once it succeeds (today the destination is cleared first, so under a
   `BEGIN SEQUENCE` handler its result is not computed into a variable); a pass that moves or merges operations must
   respect that an operation that fails runs the error block; a store and its write barrier move together.
-- Typed continuations ([xir.md](xir.md#passes)) check operations in loops of functions of at most 500 instructions;
-  elsewhere, and in functions with `BEGIN SEQUENCE` or `FOR EACH` cleanups, an operation that may fail still gives
-  any type. A copy per checked loop nest instead of per function, compiled for size (outlined as a cold function),
-  would lift the limit.
+- Typed continuations ([xir.md](xir.md#passes)) copy a loop nest of more than 500 instructions, or one with a
+  `BEGIN SEQUENCE` or `FOR EACH` cleanup inside, nowhere: its operations that may fail still give any type. A copy
+  compiled for size (outlined as a cold function) would lift the limit.
 - `promote-variables` in functions with `BEGIN SEQUENCE`: the variables the handlers do not read.
 - Verifier: no parameters on the entry block and no branches to it, the access kind of a variable, the captures of a
   `block`; linear cost.
@@ -273,7 +272,9 @@ one design, in this order, each step measured over every benchmark before it is 
    (which can check an operation a later guard makes safe: a `FOR` counter that starts from a guarded value) and the
    limits of 500 instructions and 64 checks a function go. The typed copy's values are machine words: integers,
    doubles (with their decimals), logicals; the frame holds items that may refer to heap objects only, so a value the
-   loop does not use takes no register from it and fewer slots are cleared at the entry.
+   loop does not use takes no register from it and fewer slots are cleared at the entry. Done: copies by regions in
+   functions too large to copy whole or with unwind blocks, joined at their ways out and guarded again after them
+   (`typed-continuations` in [xir.md](xir.md#passes)); the rest of this step is to do.
 2. One calling convention. Functions, methods and codeblocks all get the direct entry functions have now (the
    arguments' words in registers, the caller's frame passed), and the generic entry becomes a thunk that reads `argv`;
    the parameters are values, not frame slots, so the frame is set up only on the paths that call or allocate (as for
