@@ -75,7 +75,7 @@ private:
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayData = 2 };
   enum ObjectField : unsigned { ObjectCls = 0, ObjectVars = 2 }; // xb_object
   enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
-  enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 5 };           // xb_hash
+  enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 6 };           // xb_hash
   enum HEntryField : unsigned { HEntryKey = 0, HEntryValue = 1 };                     // xb_hentry
   enum StrField : unsigned { StrFlags = 0, StrHash = 1, StrLen = 2, StrBytes = 3 }; // xb_str
   enum StrBufField : unsigned { StrBufBytes = 2 };                                    // xb_strbuf
@@ -332,7 +332,7 @@ private:
   llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, data } (its items follow)
   llvm::StructType *objectTy_ = nullptr;    // xb_object: { cls, nvars, vars }
   llvm::StructType *refTy_ = nullptr;       // xb_ref: { coll, index, value, key, loop }
-  llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, entries, hashes, index, tree }
+  llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, hint, entries }
   llvm::StructType *hentryTy_ = nullptr;    // xb_hentry: { key, value }
   llvm::StructType *ctxHeadTy_ = nullptr; // the first fields of xb_ctx: pending, decimals, frames, stack limit, lent
   llvm::GlobalVariable *nilItem_ = nullptr; // a NIL item: missing arguments

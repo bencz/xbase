@@ -62,7 +62,7 @@ void CodeGen::initTypes() {
   arrayTy_ = StructType::create(ctx_, {intPtrTy_, intPtrTy_, ptrTy_}, "xb_array"); // size_t is pointer-sized
   refTy_ = StructType::create(ctx_, {itemTy_, i64_, itemTy_, itemTy_, i32_}, "xb_ref");
   objectTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(itemTy_, 0)}, "xb_object");
-  hashTy_ = StructType::create(ctx_, {i32_, i32_, i32_, i32_, i32_, ptrTy_, ptrTy_, ptrTy_, ptrTy_}, "xb_hash");
+  hashTy_ = StructType::create(ctx_, {i32_, i32_, i32_, i32_, i32_, i32_, ptrTy_}, "xb_hash");
   hentryTy_ = StructType::create(ctx_, {itemTy_, itemTy_}, "xb_hentry");
   MDBuilder md(ctx_);
   MDNode *root = md.createTBAARoot("xbase");

@@ -108,7 +108,7 @@ symbols:
 # The module file of the xbase library CLI, written by xbc (docs/projects.md).
 format = 1
 library = CLI
-abi = 63
+abi = 64
 level = 1
 target = x86_64-redhat-linux-gnu
 archive = libcli.a

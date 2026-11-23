@@ -106,10 +106,10 @@ static uint32_t fold(uint64_t x) {
 
 /* A key's hash in a keyed table: SipHash of its bytes, of an integer's 8 bytes, of a date's or a double's 8 bytes
  * and a byte that tells which (little-endian whatever the target). */
-static uint32_t keyed_hash(const xb_hash *h, const xb_item *k) {
+static uint32_t keyed_hash(uint32_t flags, const xb_item *k) {
   const uint64_t *key = keyed_key();
   if (k->type == XB_T_STRING) {
-    return sip_hash(key, xb_str_data(k->v.s), k->v.s->len, (h->flags & XB_HASH_IGNORECASE) != 0);
+    return sip_hash(key, xb_str_data(k->v.s), k->v.s->len, (flags & XB_HASH_IGNORECASE) != 0);
   }
   int64_t i;
   uint64_t bits;
@@ -129,11 +129,11 @@ static uint32_t keyed_hash(const xb_hash *h, const xb_item *k) {
   return sip_hash(key, bytes, sizeof bytes, 0);
 }
 
-static uint32_t key_hash(const xb_hash *h, const xb_item *k) {
-  if (h->flags & XB_HASH_KEYED) return keyed_hash(h, k);
+static uint32_t key_hash(uint32_t flags, const xb_item *k) {
+  if (flags & XB_HASH_KEYED) return keyed_hash(flags, k);
   if (k->type == XB_T_STRING) {
     xb_str *s = k->v.s;
-    if (h->flags & XB_HASH_IGNORECASE) return xb_hash_bytes_as(xb_str_data(s), s->len, 1);
+    if (flags & XB_HASH_IGNORECASE) return xb_hash_bytes_as(xb_str_data(s), s->len, 1);
     return xb_str_hash(s);
   }
   if (k->type == XB_T_DATE) return fold((uint64_t)k->v.i ^ UINT64_C(0xd6e8feb86659fd93));
@@ -144,13 +144,13 @@ static uint32_t key_hash(const xb_hash *h, const xb_item *k) {
   return fold(bits);
 }
 
-static int key_equal(const xb_hash *h, const xb_item *a, const xb_item *b) {
+static XB_NOINLINE int key_equal(uint32_t flags, const xb_item *a, const xb_item *b) {
   if (a->type == XB_T_STRING || b->type == XB_T_STRING) {
     if (a->type != b->type) return 0;
     const xb_str *x = a->v.s, *y = b->v.s;
     if (x == y) return 1; /* the same string: a literal key, or a key read back from the hash */
     if (x->len != y->len) return 0;
-    if (!(h->flags & XB_HASH_IGNORECASE)) return memcmp(xb_str_data(x), xb_str_data(y), x->len) == 0;
+    if (!(flags & XB_HASH_IGNORECASE)) return memcmp(xb_str_data(x), xb_str_data(y), x->len) == 0;
     for (size_t i = 0; i < x->len; ++i)
       if (xb_ascii_upper(xb_str_data(x)[i]) != xb_ascii_upper(xb_str_data(y)[i])) return 0;
     return 1;
@@ -170,7 +170,7 @@ int xb_hash_key_order(const xb_hash *h, const xb_item *a, const xb_item *b) {
   if (ka == 1) return (a->v.i > b->v.i) - (a->v.i < b->v.i);
   if (ka == 0) {
     if (a->type == XB_T_INT && b->type == XB_T_INT) return (a->v.i > b->v.i) - (a->v.i < b->v.i);
-    return key_equal(h, a, b) ? 0 : xb_order_double(xb_num_value(a), xb_num_value(b));
+    return key_equal(h->flags, a, b) ? 0 : xb_order_double(xb_num_value(a), xb_num_value(b));
   }
   const xb_str *x = a->v.s, *y = b->v.s;
   size_t n = x->len < y->len ? x->len : y->len;
@@ -185,21 +185,103 @@ int xb_hash_key_order(const xb_hash *h, const xb_item *a, const xb_item *b) {
   return (x->len > y->len) - (x->len < y->len);
 }
 
-/* The index slot of `key`: its entry's, or the free slot where it would go. */
-static uint32_t slot_of(const xb_hash *h, const xb_item *key, uint32_t hv) {
+/* The store's tables after its `cap` entries (the hash's, or one being filled). */
+static inline uint32_t *hashes_in(xb_hentry *entries, uint32_t cap) { return (uint32_t *)(entries + cap); }
+static inline uint32_t *tree_in(xb_hentry *entries, uint32_t cap) { return hashes_in(entries, cap) + cap; }
+static inline uint32_t *index_in(xb_hentry *entries, uint32_t cap) { return tree_in(entries, cap) + cap; }
+static inline uint32_t *hashes_of(const xb_hash *h) { return hashes_in(h->entries, h->cap); }
+static inline uint32_t *tree_of(const xb_hash *h) { return tree_in(h->entries, h->cap); }
+static inline uint32_t *index_of(const xb_hash *h) { return index_in(h->entries, h->cap); }
+
+/* The index slots - 1 of a store of `cap` entries; 0: none (a small store). */
+static inline uint32_t imask_for(uint32_t cap) { return cap > XB_HASH_SMALL ? 2 * cap - 1 : 0; }
+
+/* Whether two keys are one by their items alone: the same string, or equal bits of one type of number or date (which
+ * key_equal agrees with). A hole's NIL never is: its type is no key's. */
+static inline int same_key(const xb_item *a, const xb_item *b) {
+  if (a->type != b->type) return 0;
+  return a->type == XB_T_STRING ? a->v.s == b->v.s : a->v.i == b->v.i;
+}
+
+/* key_equal, the common cases inline: two integers; two doubles (equal values are one key, integral or not: 0 and
+ * -0 are the integer 0; other ones whose bits are equal too, NaNs among them: the rule of integral_key and key_equal,
+ * which this must follow); two strings by bytes. */
+static inline int key_equal_fast(uint32_t flags, const xb_item *a, const xb_item *b) {
+  if (a->type == XB_T_INT && b->type == XB_T_INT) return a->v.i == b->v.i;
+  if (a->type == XB_T_DOUBLE && b->type == XB_T_DOUBLE) return a->v.d == b->v.d || a->v.i == b->v.i;
+  if (a->type == XB_T_STRING && b->type == XB_T_STRING && !(flags & XB_HASH_IGNORECASE)) {
+    const xb_str *x = a->v.s, *y = b->v.s;
+    return x == y || (x->len == y->len && memcmp(xb_str_data(x), xb_str_data(y), x->len) == 0);
+  }
+  return key_equal(flags, a, b);
+}
+
+/* The index slot of `key` (an indexed store): its entry's, or the free slot where it would go. A slot holds an entry
+ * number; the entry's hash, in the dense array of hashes (an eighth of the entries' size, which caches keep when they
+ * cannot keep the entries), tells which entries' keys to compare. */
+static inline uint32_t slot_of(const xb_hash *h, const xb_item *key, uint32_t hv) {
+  const uint32_t *index = index_of(h), *hashes = hashes_of(h);
   for (uint32_t i = hv & h->imask;; i = (i + 1) & h->imask) {
-    uint32_t e = h->index[i];
-    if (!e || (h->hashes[e - 1] == hv && key_equal(h, &h->entries[e - 1].key, key))) return i;
+    uint32_t e = index[i];
+    if (!e || (hashes[e - 1] == hv && key_equal_fast(h->flags, &h->entries[e - 1].key, key))) return i;
   }
 }
 
+/* The entry of `key` in a small store, or -1, found by its hash. */
+static XB_NOINLINE int64_t small_find(const xb_hash *h, const xb_item *key, uint32_t hv) {
+  const xb_hentry *entries = h->entries;
+  const uint32_t *hashes = hashes_of(h);
+  for (uint32_t e = 0; e < h->used; ++e)
+    if (hashes[e] == hv && entries[e].key.type != XB_T_NIL && key_equal(h->flags, &entries[e].key, key)) return e;
+  return -1;
+}
+
+#define NO_SLOT UINT32_MAX
+
+/* The entry of `key` (with `hv` its hash), or -1; `*slot`: its index slot, or the free one where it would go (NO_SLOT
+ * in a small store). */
+static inline int64_t probe(const xb_hash *h, const xb_item *key, uint32_t hv, uint32_t *slot) {
+  if (!h->imask) {
+    *slot = NO_SLOT;
+    return small_find(h, key, hv);
+  }
+  *slot = slot_of(h, key, hv);
+  return (int64_t)index_of(h)[*slot] - 1;
+}
+
+static inline int64_t find_hashed(const xb_hash *h, const xb_item *key, uint32_t hv) {
+  uint32_t slot;
+  return probe(h, key, hv, &slot);
+}
+
+static void clear_index(xb_hash *h) {
+  if (h->imask) memset(index_of(h), 0, ((size_t)h->imask + 1) * sizeof(uint32_t));
+}
+
+/* The entry of `key` found without its hash: the hint's (the entry a lookup found last: `k $ h` then `h[k] += x`
+ * looks up one key three times), or in a small store one of the same item; -1 when neither is. */
+static inline int64_t find_same(const xb_hash *h, const xb_item *key) {
+  uint32_t t = h->hint;
+  if (t && t <= h->used) {
+    const xb_item *k = &h->entries[t - 1].key;
+    if (k->type != XB_T_NIL && key_equal_fast(h->flags, k, key)) return t - 1; /* a hole's NIL never is a key */
+  }
+  if (!h->imask)
+    for (uint32_t e = 0; e < h->used; ++e)
+      if (same_key(&h->entries[e].key, key)) return e;
+  return -1;
+}
+
 static void index_entries(xb_hash *h) {
-  memset(h->index, 0, ((size_t)h->imask + 1) * sizeof *h->index);
+  if (!h->imask) return;
+  uint32_t *index = index_of(h);
+  const uint32_t *hashes = hashes_of(h);
+  clear_index(h);
   for (uint32_t e = 0; e < h->used; ++e) {
     if (h->entries[e].key.type == XB_T_NIL) continue;
-    uint32_t i = h->hashes[e] & h->imask;
-    while (h->index[i]) i = (i + 1) & h->imask;
-    h->index[i] = e + 1;
+    uint32_t i = hashes[e] & h->imask;
+    while (index[i]) i = (i + 1) & h->imask;
+    index[i] = e + 1;
   }
 }
 
@@ -209,46 +291,50 @@ static void index_entries(xb_hash *h) {
 static uint32_t lowbit(uint32_t i) { return i & (0u - i); }
 
 static void tree_build(xb_hash *h) {
-  uint32_t *t = h->index + h->imask + 1;
+  uint32_t *t = tree_of(h);
   for (uint32_t i = 0; i < h->cap; ++i) t[i] = i < h->used && h->entries[i].key.type != XB_T_NIL;
   for (uint32_t i = 1; i <= h->cap; ++i)
     if (i + lowbit(i) <= h->cap) t[i + lowbit(i) - 1] += t[i - 1];
-  h->tree = t;
+  h->flags |= XB_HASH_TREE;
 }
 
 /* Entry `e` became live, or a hole. */
 static void tree_update(xb_hash *h, uint32_t e, int live) {
+  uint32_t *t = tree_of(h);
   for (uint32_t i = e + 1; i <= h->cap; i += lowbit(i)) {
-    if (live) ++h->tree[i - 1];
-    else --h->tree[i - 1];
+    if (live) ++t[i - 1];
+    else --t[i - 1];
   }
 }
 
 /* The entry at position `pos` (1 .. len). */
 static uint32_t tree_find(const xb_hash *h, uint32_t pos) {
+  const uint32_t *t = tree_of(h);
   uint32_t at = 0;
   for (uint32_t step = h->cap; step; step >>= 1)
-    if (at + step <= h->cap && h->tree[at + step - 1] < pos) {
+    if (at + step <= h->cap && t[at + step - 1] < pos) {
       at += step;
-      pos -= h->tree[at - 1];
+      pos -= t[at - 1];
     }
   return at;
 }
 
 /* The position of the live entry `e`: the live entries up to it. */
 static uint32_t tree_position(const xb_hash *h, uint32_t e) {
+  const uint32_t *t = tree_of(h);
   uint32_t n = 0;
-  for (uint32_t i = e + 1; i; i -= lowbit(i)) n += h->tree[i - 1];
+  for (uint32_t i = e + 1; i; i -= lowbit(i)) n += t[i - 1];
   return n;
 }
 
 void xb_hash_compact(xb_hash *h) {
   if (h->used == h->len) return;
+  uint32_t *hashes = hashes_of(h);
   uint32_t to = 0;
   for (uint32_t e = 0; e < h->used; ++e) {
     if (h->entries[e].key.type == XB_T_NIL) continue;
     h->entries[to] = h->entries[e];
-    h->hashes[to] = h->hashes[e];
+    hashes[to] = hashes[e];
     ++to;
   }
   for (uint32_t e = to; e < h->used; ++e) {
@@ -256,14 +342,14 @@ void xb_hash_compact(xb_hash *h) {
     xb_set_nil(&h->entries[e].value);
   }
   h->used = to;
-  h->tree = NULL;
+  h->flags &= ~XB_HASH_TREE;
   index_entries(h);
 }
 
 /* A store for `cap` entries: NIL items, free slots; `fallible`: NULL when it is past the largest hash or no memory
  * holds it (a size the program chose). */
 static xb_hentry *new_store_of(uint64_t cap, int fallible) {
-  uint64_t slots = 2 * cap;
+  uint64_t slots = cap > XB_HASH_SMALL ? 2 * cap : 0;
   /* computed in 64 bits and checked before it is narrowed to size_t (32-bit hosts) */
   uint64_t size = cap * (sizeof(xb_hentry) + 2 * sizeof(uint32_t)) + slots * sizeof(uint32_t);
   if (cap > XB_HASH_MAX_LEN || size > XB_STR_MAX_LEN) {
@@ -280,21 +366,19 @@ static xb_hentry *new_store(uint32_t cap) { return new_store_of(cap, 0); }
 
 /* The live entries moved into `entries`, a new store for `cap` of them; nothing allocates. */
 static void move_into(xb_hash *h, xb_hentry *entries, uint32_t cap) {
-  uint32_t slots = 2 * cap;
-  uint32_t *hashes = (uint32_t *)(entries + cap);
+  uint32_t *hashes = hashes_in(entries, cap);
+  const uint32_t *was = h->cap ? hashes_of(h) : NULL;
   uint32_t n = 0;
   for (uint32_t e = 0; e < h->used; ++e) {
     if (h->entries[e].key.type == XB_T_NIL) continue;
     entries[n] = h->entries[e];
-    hashes[n] = h->hashes[e];
+    hashes[n] = was[e];
     ++n;
   }
   h->entries = entries;
-  h->hashes = hashes;
-  h->index = hashes + cap;
-  h->tree = NULL;
+  h->flags &= ~XB_HASH_TREE;
   h->cap = cap;
-  h->imask = slots - 1;
+  h->imask = imask_for(cap);
   h->used = n;
   index_entries(h);
   xb_gc_write(h);
@@ -312,13 +396,15 @@ void xb_hash_reserve(xb_hash *h, uint32_t n) {
 
 /* The live entries of `src` into `dst`, empty with room for them; nothing allocates. */
 static void copy_into(xb_hash *dst, const xb_hash *src) {
-  dst->flags = src->flags;
+  dst->flags = src->flags & ~XB_HASH_TREE;
   if (!src->len) return;
+  uint32_t *hashes = hashes_of(dst);
+  const uint32_t *from = hashes_of(src);
   uint32_t n = 0;
   for (uint32_t e = 0; e < src->used; ++e) {
     if (src->entries[e].key.type == XB_T_NIL) continue;
     dst->entries[n] = src->entries[e];
-    dst->hashes[n] = src->hashes[e];
+    hashes[n] = from[e];
     ++n;
   }
   dst->len = dst->used = n;
@@ -339,85 +425,111 @@ static void make_room(xb_hash *h) {
   else xb_hash_reserve(h, h->cap ? h->cap * 2 : MIN_CAPACITY);
 }
 
-/* A new key, room made for it; a probe past FLOOD_PROBE slots turns the table keyed. */
-static void add_entry(xb_hash *h, const xb_item *key, const xb_item *value, uint32_t hv) {
+/* A new key, room made for it, at index slot `i` of an indexed store when the caller found it (else NO_SLOT); a probe
+ * past FLOOD_PROBE slots turns the table keyed. */
+static void add_entry(xb_hash *h, const xb_item *key, const xb_item *value, uint32_t hv, uint32_t i) {
   uint32_t e = h->used++;
   h->entries[e].key = *key;
   h->entries[e].value = *value;
-  h->hashes[e] = hv;
-  uint32_t slot = slot_of(h, key, hv);
-  h->index[slot] = e + 1;
+  hashes_of(h)[e] = hv;
   ++h->len;
-  if (h->tree) tree_update(h, e, 1);
+  if (h->flags & XB_HASH_TREE) tree_update(h, e, 1);
   xb_gc_write(h);
-  if (((slot - hv) & h->imask) > FLOOD_PROBE && !(h->flags & XB_HASH_KEYED)) {
+  if (!h->imask) return;
+  if (i == NO_SLOT) i = slot_of(h, key, hv);
+  index_of(h)[i] = e + 1;
+  if (((i - hv) & h->imask) > FLOOD_PROBE && !(h->flags & XB_HASH_KEYED)) {
     h->flags |= XB_HASH_KEYED;
     xb_hash_reindex(h);
   }
 }
 
-int64_t xb_hash_find(const xb_hash *h, const xb_item *key) {
+int64_t xb_hash_find(xb_hash *h, const xb_item *key) {
   if (!h->len) return -1;
-  uint32_t e = h->index[slot_of(h, key, key_hash(h, key))];
-  return e ? (int64_t)e - 1 : -1;
+  int64_t e = find_same(h, key);
+  if (e < 0) e = find_hashed(h, key, key_hash(h->flags, key));
+  if (e >= 0) h->hint = (uint32_t)e + 1;
+  return e;
 }
 
 void xb_hash_set(xb_hash *h, const xb_item *key, const xb_item *value) {
-  uint32_t hv = key_hash(h, key);
   if (h->len) {
-    uint32_t e = h->index[slot_of(h, key, hv)];
-    if (e) {
-      h->entries[e - 1].value = *value;
+    int64_t e = find_same(h, key);
+    if (e >= 0) {
+      h->entries[e].value = *value;
       xb_gc_write(h);
       return;
     }
   }
-  make_room(h);
-  add_entry(h, key, value, hv);
+  uint32_t hv = key_hash(h->flags, key);
+  uint32_t i = NO_SLOT;
+  if (h->len) {
+    int64_t e = probe(h, key, hv, &i);
+    if (e >= 0) {
+      h->hint = (uint32_t)e + 1;
+      h->entries[e].value = *value;
+      xb_gc_write(h);
+      return;
+    }
+  }
+  if (h->used == h->cap) { /* a store compacted or grown: its index is another */
+    make_room(h);
+    i = NO_SLOT;
+  }
+  add_entry(h, key, value, hv, i);
 }
 
 /* Frees index slot `i`, moving back the slots after it that probing would no
  * longer reach (deletion without tombstones). */
 static void free_slot(xb_hash *h, uint32_t i) {
-  for (uint32_t j = (i + 1) & h->imask; h->index[j]; j = (j + 1) & h->imask) {
-    uint32_t home = h->hashes[h->index[j] - 1] & h->imask;
+  uint32_t *index = index_of(h);
+  const uint32_t *hashes = hashes_of(h);
+  for (uint32_t j = (i + 1) & h->imask; index[j]; j = (j + 1) & h->imask) {
+    uint32_t home = hashes[index[j] - 1] & h->imask;
     int reachable = i <= j ? (home > i && home <= j) : (home > i || home <= j);
     if (reachable) continue;
-    h->index[i] = h->index[j];
+    index[i] = index[j];
     i = j;
   }
-  h->index[i] = 0;
+  index[i] = 0;
 }
 
-static void remove_entry(xb_hash *h, uint32_t slot) {
-  uint32_t e = h->index[slot] - 1;
+/* Live entry `e`, in index slot `i` of an indexed store, becomes a hole. */
+static void remove_entry(xb_hash *h, uint32_t e, uint32_t i) {
+  if (h->imask) free_slot(h, i);
+  h->hint = 0;
   xb_set_nil(&h->entries[e].key);
   xb_set_nil(&h->entries[e].value);
-  free_slot(h, slot);
   --h->len;
-  if (h->tree) tree_update(h, e, 0);
+  if (h->flags & XB_HASH_TREE) tree_update(h, e, 0);
   if (e + 1 == h->used) --h->used; /* the last entry: no hole */
 }
 
 int xb_hash_del(xb_hash *h, const xb_item *key) {
   if (!h->len) return 0;
-  uint32_t slot = slot_of(h, key, key_hash(h, key));
-  if (!h->index[slot]) return 0;
-  remove_entry(h, slot);
-  return 1;
+  uint32_t hv = key_hash(h->flags, key);
+  if (!h->imask) {
+    int64_t e = small_find(h, key, hv);
+    if (e >= 0) remove_entry(h, (uint32_t)e, 0);
+    return e >= 0;
+  }
+  uint32_t i = slot_of(h, key, hv);
+  uint32_t e = index_of(h)[i];
+  if (e) remove_entry(h, e - 1, i);
+  return e != 0;
 }
 
 xb_hentry *xb_hash_at(xb_hash *h, int64_t pos) {
   if (pos < 1 || (uint64_t)pos > h->len) return NULL;
   if (h->used == h->len) return &h->entries[pos - 1];
-  if (!h->tree) tree_build(h);
+  if (!(h->flags & XB_HASH_TREE)) tree_build(h);
   return &h->entries[tree_find(h, (uint32_t)pos)];
 }
 
 int64_t xb_hash_pos(xb_hash *h, const xb_item *key) {
   int64_t e = xb_hash_find(h, key);
   if (e < 0 || h->used == h->len) return e + 1;
-  if (!h->tree) tree_build(h);
+  if (!(h->flags & XB_HASH_TREE)) tree_build(h);
   return tree_position(h, (uint32_t)e);
 }
 
@@ -439,17 +551,16 @@ void xb_hash_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *kv) {
 void xb_hash_del_at(xb_hash *h, int64_t pos) {
   xb_hentry *e = xb_hash_at(h, pos);
   if (!e) return;
-  uint32_t hv = h->hashes[e - h->entries];
-  remove_entry(h, slot_of(h, &e->key, hv));
+  uint32_t at = (uint32_t)(e - h->entries);
+  remove_entry(h, at, h->imask ? slot_of(h, &e->key, hashes_of(h)[at]) : 0);
 }
 
 /* Emptied: a store larger than SHRINK_CAP entries is dropped (the next key makes a small one), so clearing costs what
  * the hash holds now and a peak's room goes back; a small one is kept, emptied. */
 void xb_hash_clear(xb_hash *h) {
-  h->tree = NULL;
+  h->flags &= ~XB_HASH_TREE;
   if (h->cap > SHRINK_CAP) {
     h->entries = NULL;
-    h->hashes = h->index = NULL;
     h->cap = h->imask = 0;
     h->len = h->used = 0;
     xb_gc_write(h);
@@ -460,36 +571,42 @@ void xb_hash_clear(xb_hash *h) {
     xb_set_nil(&h->entries[e].value);
   }
   h->len = h->used = 0;
-  if (h->cap) memset(h->index, 0, ((size_t)h->imask + 1) * sizeof *h->index);
+  clear_index(h);
 }
 
 void xb_hash_set_flags(xb_hash *h, uint32_t flags) {
-  if (h->flags == flags) return;
-  h->flags = flags;
+  flags &= ~XB_HASH_TREE;
+  if ((h->flags & ~XB_HASH_TREE) == flags) return;
+  h->flags = flags; /* the tree too: the merges below leave holes it would not count */
   if (!h->cap) return;
-  h->tree = NULL; /* the merges below leave holes it would not count */
-  memset(h->index, 0, ((size_t)h->imask + 1) * sizeof *h->index);
-  for (uint32_t e = 0; e < h->used; ++e) {
+  uint32_t *hashes = hashes_of(h);
+  uint32_t used = h->used;
+  clear_index(h);
+  for (uint32_t e = 0; e < used; ++e) {
     xb_hentry *entry = &h->entries[e];
+    h->used = e; /* the entries before it, among which it is looked up */
     if (entry->key.type == XB_T_NIL) continue;
-    uint32_t hv = key_hash(h, &entry->key);
-    h->hashes[e] = hv;
-    uint32_t i = slot_of(h, &entry->key, hv);
-    if (!h->index[i]) {
-      h->index[i] = e + 1;
+    uint32_t hv = key_hash(h->flags, &entry->key), slot;
+    int64_t same = probe(h, &entry->key, hv, &slot);
+    hashes[e] = hv;
+    if (same < 0) {
+      if (slot != NO_SLOT) index_of(h)[slot] = e + 1;
       continue;
     }
-    h->entries[h->index[i] - 1].value = entry->value; /* keys that became one: the last value wins */
+    h->entries[same].value = entry->value; /* keys that became one: the last value wins */
     xb_set_nil(&entry->key);
     xb_set_nil(&entry->value);
     --h->len;
   }
+  h->used = used;
   xb_hash_compact(h);
 }
 
 void xb_hash_reindex(xb_hash *h) {
-  for (uint32_t e = 0; e < h->used; ++e) h->hashes[e] = key_hash(h, &h->entries[e].key);
-  if (h->cap) index_entries(h);
+  if (!h->cap) return;
+  uint32_t *hashes = hashes_of(h);
+  for (uint32_t e = 0; e < h->used; ++e) hashes[e] = key_hash(h->flags, &h->entries[e].key);
+  index_entries(h);
 }
 
 /* Shared hashes (core/shared.h): every operation that changes one runs under the hash's lock, and so do the reads of
@@ -524,7 +641,7 @@ int xb_hash_get(xb_hash *h, const xb_item *key, xb_item *value) { return xb_hash
  * of them the lookup is made under the lock, which hands itself over to a reader writers keep overtaking. The stores a
  * writer replaces stay in memory meanwhile: no collection runs while this reads (no safepoint). */
 #define LOOKUP_TRIES 8
-static XB_NOINLINE int lookup_shared(const xb_hash *h, const xb_item *key, xb_item *stored, xb_item *value) {
+static XB_NOINLINE int lookup_shared(xb_hash *h, const xb_item *key, xb_item *stored, xb_item *value) {
   for (unsigned tries = 0;; ++tries) {
     if (tries == LOOKUP_TRIES) {
       xb_seq_lock(h);
@@ -536,29 +653,38 @@ static XB_NOINLINE int lookup_shared(const xb_hash *h, const xb_item *key, xb_it
     }
     uint32_t seq = xb_seq_read_begin(h);
     uint32_t len = xb_atomic_load32(&h->len, XB_ACQUIRE), cap = xb_atomic_load32(&h->cap, XB_ACQUIRE);
-    uint32_t imask = xb_atomic_load32(&h->imask, XB_ACQUIRE);
+    uint32_t imask = xb_atomic_load32(&h->imask, XB_ACQUIRE), used = xb_atomic_load32(&h->used, XB_ACQUIRE);
+    uint32_t flags = xb_atomic_load32(&h->flags, XB_ACQUIRE); /* the rules of its keys as this read sees them */
     xb_hentry *entries = xb_atomic_loadptr((void *const *)&h->entries, XB_ACQUIRE);
-    const uint32_t *hashes = xb_atomic_loadptr((void *const *)&h->hashes, XB_ACQUIRE);
-    const uint32_t *index = xb_atomic_loadptr((void *const *)&h->index, XB_ACQUIRE);
     if (!xb_seq_read_valid(h, seq)) continue;
     if (!len || !entries) return 0;
-    uint32_t hv = key_hash(h, key);
+    const uint32_t *hashes = hashes_in(entries, cap);
+    const uint32_t *index = index_in(entries, cap);
+    uint32_t hv = key_hash(flags, key);
     int found = 0, torn = 0;
     xb_item k, v;
-    for (uint32_t i = hv & imask, n = 0; n <= imask; i = (i + 1) & imask, ++n) {
-      uint32_t e = xb_atomic_load32(&index[i], XB_ACQUIRE);
-      if (!e) break;
-      if (e > cap) { /* an index a writer is changing */
-        torn = 1;
-        break;
+    for (uint32_t i = hv & imask, n = 0;; i = (i + 1) & imask, ++n) {
+      uint32_t e; /* the next entry + 1 whose hash is the key's: the index's, or a small store's in order */
+      if (imask) {
+        if (n > imask) break;
+        e = xb_atomic_load32(&index[i], XB_ACQUIRE);
+        if (!e) break;
+        if (e > cap) { /* an index a writer is changing */
+          torn = 1;
+          break;
+        }
+        if (xb_atomic_load32(&hashes[e - 1], XB_ACQUIRE) != hv) continue;
+      } else {
+        if (n >= used || n >= cap) break;
+        e = n + 1;
+        if (xb_atomic_load32(&hashes[n], XB_ACQUIRE) != hv) continue;
       }
-      if (xb_atomic_load32(&hashes[e - 1], XB_ACQUIRE) != hv) continue;
       xb_seq_load(&k, &entries[e - 1].key);
       if (!xb_seq_read_valid(h, seq)) {
         torn = 1;
         break;
       }
-      if (key_equal(h, &k, key)) {
+      if (k.type != XB_T_NIL && key_equal(flags, &k, key)) {
         xb_seq_load(&v, &entries[e - 1].value);
         found = 1;
         break;
@@ -704,10 +830,10 @@ void xb_hash_put(xb_ctx *ctx, xb_hash *h, const xb_item *key, const xb_item *val
   uint32_t room = 0;
   for (;;) {
     xb_seq_lock(h);
-    uint32_t hv = key_hash(h, key); /* under the lock: the letter case rule may change */
-    uint32_t e = h->len ? h->index[slot_of(h, key, hv)] : 0;
-    if (e) {
-      h->entries[e - 1].value = *value;
+    uint32_t hv = key_hash(h->flags, key); /* under the lock: the letter case rule may change */
+    int64_t e = h->len ? find_hashed(h, key, hv) : -1;
+    if (e >= 0) {
+      h->entries[e].value = *value;
       xb_gc_write(h);
     } else {
       if (h->used == h->cap && !(h->cap && h->used - h->len >= h->cap / 4)) { /* holes enough to compact: no store */
@@ -722,7 +848,7 @@ void xb_hash_put(xb_ctx *ctx, xb_hash *h, const xb_item *key, const xb_item *val
         move_into(h, spare.v.p, room);
       }
       make_room(h); /* a compaction at most */
-      add_entry(h, key, value, hv);
+      add_entry(h, key, value, hv, NO_SLOT);
     }
     xb_seq_unlock(h);
     break;

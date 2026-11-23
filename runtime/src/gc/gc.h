@@ -14,7 +14,7 @@ typedef enum xb_gc_kind {
   XB_GC_REF,                /* xb_ref, the target of an XB_T_REF item */
   XB_GC_OBJECT,             /* xb_object */
   XB_GC_HASH,               /* xb_hash */
-  XB_GC_HSTORE,             /* the entries, hashes, index and tree of a hash */
+  XB_GC_HSTORE,             /* the entries, hashes, tree and index of a hash */
   XB_GC_VIEW,               /* a string that is a view (XB_STR_VIEW): its buffer's address after the header */
   XB_GC_STRBUF,             /* xb_strbuf, the bytes of views: no references; its bytes past the tip change */
 } xb_gc_kind;

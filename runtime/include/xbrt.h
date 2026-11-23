@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 63u
+#define XB_ABI_VERSION 64u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -352,11 +352,9 @@ typedef struct xb_hash {
   uint32_t used;      /* entries taken, holes included */
   uint32_t cap;       /* entries that fit */
   uint32_t flags;
-  uint32_t imask;     /* index slots - 1 */
-  xb_hentry *entries; /* the store; NULL while cap is 0 */
-  uint32_t *hashes;   /* in the store, after the entries */
-  uint32_t *index;    /* in the store, after the hashes */
-  uint32_t *tree;     /* in the store, after the index; NULL while not in use */
+  uint32_t imask;     /* index slots - 1; 0: no index (a small store, searched in order) */
+  uint32_t hint;      /* the entry a lookup found last, plus one (0: none), tried first */
+  xb_hentry *entries; /* the store (its other tables follow the entries); NULL while cap is 0 */
 } xb_hash;
 
 /* [ABI] A codeblock: its function and the cells of the variables it captured.
@@ -377,7 +375,7 @@ int32_t  xb_pending_gc(xb_ctx *ctx);
 /* The layout the module was compiled for: offsets of xb_str.bytes,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
  * xb_ctx.stack_limit, xb_ctx.lent, xb_array.data (after len and cap), xb_ref.value (after coll and index),
- * xb_hash.entries (after its five counts), xb_object.vars (after cls and nvars)
+ * xb_hash.entries (after its six counts), xb_object.vars (after cls and nvars)
  * and xb_strbuf.bytes (after cap and used). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,

@@ -1639,16 +1639,7 @@ static int trace(xb_gc_hdr *h) {
       break;
     case XB_GC_HASH: {
       xb_hash *hs = obj;
-      if (hs->entries) { /* the tables live in the entries' store: they move with it */
-        char *before = (char *)hs->entries;
-        REACH(hs->entries, &young);
-        ptrdiff_t moved = (char *)hs->entries - before;
-        if (moved) {
-          hs->hashes = (uint32_t *)((char *)hs->hashes + moved);
-          hs->index = (uint32_t *)((char *)hs->index + moved);
-          if (hs->tree) hs->tree = (uint32_t *)((char *)hs->tree + moved);
-        }
-      }
+      if (hs->entries) REACH(hs->entries, &young); /* the other tables follow the entries in their store */
       for (uint32_t i = 0; i < hs->used; ++i) {
         young |= mark_item(&hs->entries[i].key);
         young |= mark_item(&hs->entries[i].value);

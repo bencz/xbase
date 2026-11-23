@@ -351,19 +351,23 @@ const char *xb_message_text(char buf[XB_MESSAGE_TEXT_SIZE], const char *cls, con
 
 /* Hashes: keys (strings, numbers, dates) to values, in insertion order. The
  * entries sit in one array, in the order they came, with a hash of each key;
- * an index of open addressing (linear probing, at most half full, entry + 1
- * per slot, 0 when free) finds them. A deleted entry leaves a hole (its key
- * NIL) until the array is compacted, when it fills up with enough holes.
- * Positions count live entries: without holes a position is an entry; with
- * holes a Fenwick tree of the live entries (`tree`, built when a position is
- * first needed, kept up to date until the next compaction) finds one in
- * O(log cap). Entries, hashes, index and tree are one XB_GC_HSTORE object,
+ * a store of more than XB_HASH_SMALL entries has an index of open addressing
+ * (linear probing, at most half full; each slot an entry + 1, 0 when free)
+ * that finds them, a smaller one is searched in order. A
+ * deleted entry leaves a hole (its key NIL) until the array is compacted,
+ * when it fills up with enough holes. Positions count live entries: without
+ * holes a position is an entry; with holes a Fenwick tree of the live entries
+ * (XB_HASH_TREE: built when a position is first needed, kept up to date until
+ * the next compaction) finds one in O(log cap). Entries, hashes, tree and
+ * index are one XB_GC_HSTORE object, in that order,
  * which the hash's tracing marks; `cap` is a power of two. A number key that
  * equals an integer is that integer (1 and 1.0 are one key); strings compare
  * by bytes, or letter case aside. */
 #define XB_HASH_IGNORECASE 0x1u
 /* Keyed hashes (types/hash.c): the table met keys chosen to collide, and hashes them with a key of the process. */
 #define XB_HASH_KEYED 0x2u
+#define XB_HASH_TREE 0x4u /* the store's tree counts the live entries */
+#define XB_HASH_SMALL 8u  /* entries a store without an index holds, at most */
 #define XB_HASH_MAX_LEN (UINT32_C(1) << 30) /* entries; the index has twice as many slots */
 /* xb_hentry and xb_hash: xbrt.h. */
 
@@ -374,8 +378,8 @@ int      xb_hash_key_ok(const xb_item *key);
 /* The order of two keys of `h` (-1, 0, 1), as HSort() sorts them: numbers by value, then dates, then strings byte by
  * byte (a prefix first), ASCII letter case aside when `h` ignores it; 0 only for keys that are one key. */
 int      xb_hash_key_order(const xb_hash *h, const xb_item *a, const xb_item *b);
-/* The entry of `key` (a valid key), or -1. */
-int64_t  xb_hash_find(const xb_hash *h, const xb_item *key);
+/* The entry of `key` (a valid key), or -1; a found one becomes `h`'s hint (a local hash, or under its lock). */
+int64_t  xb_hash_find(xb_hash *h, const xb_item *key);
 /* Sets `key` (a valid key) to `value`, adding it last when new; `h` must be
  * reachable, `key` and `value` too (rooted). */
 void     xb_hash_set(xb_hash *h, const xb_item *key, const xb_item *value);

@@ -318,16 +318,16 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   each, and a block whose lines are nearly all in use may hold little more than half its bytes alive. The old place
   keeps the address of the copy (`XB_GC_HDR_MOVED`; the address is stored past a string's flags, which stay readable,
   since a string is tested for `XB_STR_STATIC` before its header: a literal has none), every reference the collection
-  sees is set to the copy (roots, fields, an array's own elements, a hash's tables inside its entry store, a codeblock's
-  cells, the collector's own lists), and the emptied blocks become free. When the heap is about to grow (no free or
-  recyclable block left, no block a chunk never handed out: taking a given-back block from the system again is growing
-  too), at least a young budget was allocated since the last full collection, and a quarter of the heap is free bytes of
-  blocks such a collection may empty, it runs first instead, on a thread that may move objects. A size class's blocks
-  are compacted too: for each class, its blocks by how full they are, the sparsest ones (at most half their slots taken)
-  whose objects all fit the free slots of the fuller ones are emptied into them (no new memory, and only when at least
-  16 blocks are emptied: fewer would not pay for the move's stack scan), so a class whose objects died but one in many
-  gives its blocks back. Large objects and objects too small to hold the copy's address (on 32-bit targets, a codeblock
-  without cells or an object without variables) never move.
+  sees is set to the copy (roots, fields, an array's own elements, a hash's entry store (its other tables follow the
+  entries in it), a codeblock's cells, the collector's own lists), and the emptied blocks become free. When the heap is
+  about to grow (no free or recyclable block left, no block a chunk never handed out: taking a given-back block from the
+  system again is growing too), at least a young budget was allocated since the last full collection, and a quarter of
+  the heap is free bytes of blocks such a collection may empty, it runs first instead, on a thread that may move
+  objects. A size class's blocks are compacted too: for each class, its blocks by how full they are, the sparsest ones
+  (at most half their slots taken) whose objects all fit the free slots of the fuller ones are emptied into them (no new
+  memory, and only when at least 16 blocks are emptied: fewer would not pay for the move's stack scan), so a class whose
+  objects died but one in many gives its blocks back. Large objects and objects too small to hold the copy's address (on
+  32-bit targets, a codeblock without cells or an object without variables) never move.
 - Pinning: compiled code and C code keep object addresses in registers and on the machine stack, where the collector
   cannot update them. Before moving anything, the collector saves its registers on its stack
   (`xb_platform_with_registers`) and scans every thread's stack up to its end (the system's bounds of the stack,
@@ -431,8 +431,16 @@ counter ([Threads and synchronization](#threads-and-synchronization)).
   `"b"`); other doubles are equal when their bits are. Strings compare byte for byte, or with ASCII letter case aside
   when the hash ignores case. A date never equals a number.
 - Layout: one store (`XB_GC_HSTORE`) holds the entries (key and value items) in insertion order, then their 32-bit key
-  hashes, then an index of twice as many slots holding entry numbers plus one (0 is free), then a Fenwick tree with a
-  counter per entry. Lookups probe the index linearly from the key hash; the index is at most half full. Deleting an
+  hashes, then a Fenwick tree with a counter per entry, then, for a store of more than `XB_HASH_SMALL` (8) entries, an
+  index of twice as many slots holding entry numbers plus one (0 is free); the hash finds those tables from `entries`
+  and `cap` (`imask`, the index's slots less one, is 0 without one). Lookups probe the index linearly from the key
+  hash, comparing the dense array of hashes (an eighth of the entries' size, which caches keep when they cannot keep
+  the entries) before an entry's key; the index is at most half full. A store without an index is searched in order:
+  first for the same key item (the same string, as a literal key is, or an equal number of the same type), then by
+  hash. A local hash keeps the entry a lookup found last (`hint`, plus one), and its lookups and assignments try it
+  first, so `k $ h` followed by `h[k] += 1` finds the key once; a deletion clears it, and it is compared by key, so a
+  store moved or compacted meanwhile only makes it miss (a shared hash's lock-free lookups neither read nor set it; a
+  deletion searches by hash). An insertion takes the free slot the lookup before it found. Deleting an
   entry frees its index slot by moving back the slots after it that probing would no longer reach (no tombstones) and
   leaves a hole (a `NIL` key) in the store. A full store whose holes are a quarter of it is compacted (the live
   entries move down in order); otherwise it doubles. A new hash has no store; the first holds 8 entries, the largest

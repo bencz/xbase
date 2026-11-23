@@ -6,8 +6,11 @@
  * doubles), HDel(), remove by position, HSort(), HFill(), HCopy() into it, HAllocate(), HCaseMatch(), HValueAt() and
  * test pairs ($) while readers look keys up and take entries by position: a reader never sees an integer of a double's
  * bits or a tiny double (an item read torn), nor a value of another type, and in the end each key is there once, at
- * its position. Last, one thread sorts the hash over and over while another sets its values: no sort brings an older
- * value back. */
+ * its position. Then one thread sorts the hash over and over while another sets its values: no sort brings an older
+ * value back. Last, a small hash (a store without an index, searched in order) of four keys that never change, while
+ * a writer adds and deletes four others (holes, compactions), turns its letter case rule off and on (every hash
+ * computed again), then adds keys past the small store's size (the store becomes one with an index): readers find
+ * the four keys at every lookup, and the others with their values or not at all. */
 #include "check.h"
 #include "core/shared.h"
 #include "xbrt_int.h"
@@ -32,6 +35,9 @@ void xbf_HCASEMATCH(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 #define MIXES 20000u
 #define KEYS 64u
 #define BASE_KEYS 32u /* in the hash before the putters start: every lookup finds them */
+#define FIXED_KEYS 4u  /* in the small hash throughout */
+#define CHURNS 40000u
+#define GROWN_KEYS 24u
 
 static xb_item shared;
 static uint32_t bad, busy;
@@ -98,7 +104,14 @@ static void reader(void *arg) {
   int mixed = (int)(size_t)arg;
   for (uint32_t n = 0; xb_atomic_load32(&busy, XB_ACQUIRE); ++n) {
     w.args[0] = shared;
-    if (!mixed) {
+    if (mixed == 2) {
+      key(&w.args[1], "f", n % FIXED_KEYS);
+      if (!xb_hash_get(shared.v.p, &w.args[1], &w.ret) || w.ret.type != XB_T_INT ||
+          w.ret.v.i != (int64_t)(n % FIXED_KEYS))
+        xb_atomic_add32(&bad, 1, XB_RELAXED);
+      key(&w.args[1], "x", n % FIXED_KEYS);
+      if (xb_hash_get(shared.v.p, &w.args[1], &w.ret) && w.ret.type != XB_T_INT) xb_atomic_add32(&bad, 1, XB_RELAXED);
+    } else if (!mixed) {
       uint32_t k = n % (PUTTERS * PUTS);
       key(&w.args[1], "k", k);
       if (xb_hash_get(shared.v.p, &w.args[1], &w.ret) && !(w.ret.type == XB_T_INT && w.ret.v.i == (int64_t)k))
@@ -122,6 +135,33 @@ static void reader(void *arg) {
     }
     poll(&w, n);
   }
+  end(&w);
+}
+
+/* The writer of the small hash: HSet and HDel of keys "x0" to "x3", HCaseMatch off and on, then keys past the small
+ * store's size. */
+static void churner(void *arg) {
+  worker w;
+  begin(&w, &arg);
+  for (uint32_t j = 0; j < CHURNS + GROWN_KEYS; ++j) {
+    w.args[0] = shared;
+    if (j >= CHURNS) {
+      key(&w.args[1], "g", j - CHURNS);
+      xb_set_int(&w.args[2], (int64_t)j);
+      xbf_HSET(w.ctx, &w.ret, 3, w.args);
+    } else if (j % 512u == 0) {
+      xb_set_logical(&w.args[1], (j / 512u) % 2 == 0);
+      xbf_HCASEMATCH(w.ctx, &w.ret, 2, w.args);
+    } else {
+      key(&w.args[1], "x", j % FIXED_KEYS);
+      xb_set_int(&w.args[2], (int64_t)j);
+      xbf_HSET(w.ctx, &w.ret, 3, w.args);
+      key(&w.args[1], "x", (j + 2) % FIXED_KEYS);
+      xbf_HDEL(w.ctx, &w.ret, 2, w.args);
+    }
+    poll(&w, j);
+  }
+  xb_atomic_add32(&busy, (uint32_t)-1, XB_RELEASE);
   end(&w);
 }
 
@@ -313,6 +353,25 @@ int main(void) {
   CHECK(bad == 0);
   integrity();
   last_values();
+  xb_gc_thread_attach(&base);
+  ctx = xb_ctx_new();
+  xb_set_nil(&k);
+  xb_set_nil(&v);
+  xb_gc_root_push(ctx, &k);
+  xb_gc_root_push(ctx, &v);
+  xb_set_hash(&shared, xb_hash_alloc());
+  for (uint32_t n = 0; n < FIXED_KEYS; ++n) {
+    key(&k, "f", n);
+    xb_set_int(&v, (int64_t)n);
+    xb_hash_set(shared.v.p, &k, &v);
+  }
+  xb_share(&shared);
+  xb_gc_root_pop(ctx, 2);
+  xb_ctx_free(ctx);
+  xb_gc_thread_detach();
+  run(churner, 1, 2);
+  CHECK(bad == 0);
+  CHECK(xb_hash_length(shared.v.p) == FIXED_KEYS + 2 + GROWN_KEYS);
   puts("shared_hashes ok");
   return 0;
 }
