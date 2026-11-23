@@ -75,7 +75,7 @@ add_library(xbrt STATIC
 # file, below, gives them to xbc's link step).
 if(WIN32)
   target_sources(xbrt PRIVATE src/platform/win32/platform.c)
-  set(XB_RUNTIME_SYSTEM_LIBS shell32) # CommandLineToArgvW
+  set(XB_RUNTIME_SYSTEM_LIBS shell32 synchronization) # CommandLineToArgvW; WaitOnAddress
 else()
   target_sources(xbrt PRIVATE src/platform/posix/platform.c)
   find_package(Threads REQUIRED)

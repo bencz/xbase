@@ -264,6 +264,18 @@ int xb_platform_path_id(const char *path, xb_file_id *id, int32_t *err);
 /* Lets other threads and processes run for about `ms` milliseconds (0: gives up the rest of the time slice). */
 void xb_platform_sleep_ms(uint32_t ms);
 
+/* The system's own wait on an address (Linux's futex, Windows' WaitOnAddress), where it has one: XB_PLATFORM_ADDR_WAIT
+ * is 1 there, and the parking lot (core/sync.c) sleeps on it; elsewhere on condition variables. xb_platform_addr_wait
+ * sleeps while the 32-bit value at `addr` is `expected`, until xb_platform_addr_wake of the address wakes the threads
+ * sleeping on it, or `ns` nanoseconds (ns < 0: no limit), or for no reason: the caller tests its condition again. */
+#if defined(__linux__) || defined(_WIN32)
+#define XB_PLATFORM_ADDR_WAIT 1
+void xb_platform_addr_wait(const uint32_t *addr, uint32_t expected, int64_t ns);
+void xb_platform_addr_wake(const uint32_t *addr);
+#else
+#define XB_PLATFORM_ADDR_WAIT 0
+#endif
+
 /* Deletes a file (not a directory: 5). */
 int xb_platform_file_erase(const char *path, int32_t *err);
 

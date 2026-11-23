@@ -1,7 +1,7 @@
 /* The POSIX interfaces this file uses (clock_gettime, localtime_r, threads,
  * files, directories), which a strict C11 build declares only on request;
  * 64-bit file offsets on 32-bit systems too; on macOS, the case sensitivity
- * of a volume (pathconf); on Linux, the thread's processor affinity and stack. */
+ * of a volume (pathconf); on Linux, the thread's processor affinity and stack, and the futex. */
 #define _POSIX_C_SOURCE 200809L
 #if defined(__linux__)
 #define _GNU_SOURCE
@@ -36,6 +36,10 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach/mach.h>
+#endif
+#if defined(__linux__)
+#include <linux/futex.h>
+#include <sys/syscall.h>
 #endif
 #if defined(__GLIBC__) /* defined by the headers above */
 #include <malloc.h>
@@ -584,6 +588,18 @@ void xb_platform_sleep_ms(uint32_t ms) {
   while (nanosleep(&t, &t) != 0 && errno == EINTR) {
   }
 }
+
+#if defined(__linux__)
+void xb_platform_addr_wait(const uint32_t *addr, uint32_t expected, int64_t ns) {
+  if (ns > XB_WAIT_NS_MAX) ns = XB_WAIT_NS_MAX;
+  struct timespec in = {(time_t)(ns / XB_NS_PER_SEC), (long)(ns % XB_NS_PER_SEC)}; /* relative: CLOCK_MONOTONIC's */
+  syscall(SYS_futex, addr, FUTEX_WAIT_PRIVATE, expected, ns < 0 ? NULL : &in, NULL, 0); /* any return: tested again */
+}
+
+void xb_platform_addr_wake(const uint32_t *addr) {
+  syscall(SYS_futex, addr, FUTEX_WAKE_PRIVATE, INT_MAX, NULL, NULL, 0);
+}
+#endif
 
 int xb_os_file_truncate(xb_file f, int64_t size, int32_t *err) {
   if ((off_t)size != size) {

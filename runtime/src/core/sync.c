@@ -34,16 +34,20 @@ int xb_flow_outer(uint64_t owner) {
   return 0;
 }
 
-/* The parking lot: a waiter queues in the bucket of its address, in arrival order, and sleeps on a condition of its
- * own, so that a wake reaches exactly the waiters it marks. Buckets are made when first used (a bucket's state: 0
- * none, 1 being made, 2 ready), since the lot serves xb_once itself. */
+/* The parking lot: a waiter queues in the bucket of its address, in arrival order, and sleeps on a word of its own
+ * (`woken`, through the system's wait on an address: XB_PLATFORM_ADDR_WAIT) or else on a condition of its own, so that
+ * a wake reaches exactly the waiters it marks; the waker marks and wakes it under the bucket's lock, which the waiter
+ * takes again before it leaves (its record, on its stack, lives until then). Buckets are made when first used (a
+ * bucket's state: 0 none, 1 being made, 2 ready), since the lot serves xb_once itself. */
 #define PARK_BUCKETS 256u
 #define PARK_YIELDS 64u /* tries that yield before those that sleep, while another thread makes a bucket */
 
 typedef struct parked {
   const uint32_t *addr;
+#if !XB_PLATFORM_ADDR_WAIT
   xb_cond wake;
-  int woken;
+#endif
+  uint32_t woken; /* 1 once woken (atomic where the waiter sleeps on it) */
   struct parked *next;
 } parked;
 
@@ -79,20 +83,35 @@ static bucket *bucket_of(const uint32_t *addr) {
 static int park_wait(const uint32_t *addr, uint32_t expected, const uint32_t *stop, uint32_t mask, int64_t ns) {
   bucket *b = bucket_of(addr);
   int64_t deadline = ns < 0 ? 0 : xb_platform_monotonic_ns() + (ns < XB_WAIT_NS_MAX ? ns : XB_WAIT_NS_MAX);
-  parked me = {addr, NULL, 0, NULL};
+  parked me;
+  me.addr = addr;
+  me.woken = 0;
+  me.next = NULL;
+#if !XB_PLATFORM_ADDR_WAIT
   if (!xb_cond_init(&me.wake)) abort();
+#endif
   xb_mutex_lock(&b->lock);
   xb_atomic_add32(&b->waiting, 1, XB_SEQ_CST); /* before the value is read: a waker that changed it sees this */
   if (xb_atomic_load32(addr, XB_SEQ_CST) != expected || (stop && (xb_atomic_load32(stop, XB_SEQ_CST) & mask))) {
     xb_atomic_add32(&b->waiting, (uint32_t)-1, XB_RELAXED);
     xb_mutex_unlock(&b->lock);
+#if !XB_PLATFORM_ADDR_WAIT
     xb_cond_destroy(&me.wake);
+#endif
     return 1;
   }
   if (b->tail) b->tail->next = &me;
   else b->head = &me;
   b->tail = &me;
   int64_t left = 1;
+#if XB_PLATFORM_ADDR_WAIT
+  xb_mutex_unlock(&b->lock);
+  while (!xb_atomic_load32(&me.woken, XB_ACQUIRE) && left > 0) { /* the deadline decides, as below */
+    if (ns >= 0) left = deadline - xb_platform_monotonic_ns();
+    if (left > 0) xb_platform_addr_wait(&me.woken, 0, ns < 0 ? -1 : left);
+  }
+  xb_mutex_lock(&b->lock);
+#else
   while (!me.woken && left > 0) { /* the deadline decides, not what a timed wait reports */
     if (ns < 0) {
       xb_cond_wait(&me.wake, &b->lock);
@@ -101,6 +120,7 @@ static int park_wait(const uint32_t *addr, uint32_t expected, const uint32_t *st
       if (left > 0) xb_cond_wait_ns(&me.wake, &b->lock, left);
     }
   }
+#endif
   parked *prev = NULL;
   for (parked *w = b->head; w != &me; w = w->next) prev = w;
   if (prev) prev->next = me.next;
@@ -108,7 +128,9 @@ static int park_wait(const uint32_t *addr, uint32_t expected, const uint32_t *st
   if (b->tail == &me) b->tail = prev;
   xb_atomic_add32(&b->waiting, (uint32_t)-1, XB_RELAXED);
   xb_mutex_unlock(&b->lock);
+#if !XB_PLATFORM_ADDR_WAIT
   xb_cond_destroy(&me.wake);
+#endif
   return me.woken || left > 0;
 }
 
@@ -122,8 +144,13 @@ uint32_t xb_park_wake(const uint32_t *addr, int all) {
   xb_mutex_lock(&b->lock);
   for (parked *w = b->head; w && (all || !n); w = w->next) {
     if (w->addr != addr || w->woken) continue;
+#if XB_PLATFORM_ADDR_WAIT
+    xb_atomic_store32(&w->woken, 1, XB_RELEASE);
+    xb_platform_addr_wake(&w->woken);
+#else
     w->woken = 1;
     xb_cond_signal(&w->wake);
+#endif
     ++n;
   }
   xb_mutex_unlock(&b->lock);

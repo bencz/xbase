@@ -233,13 +233,19 @@ void xb_cond_destroy(xb_cond *c) { free(*c); }
 void xb_cond_wait(xb_cond *c, xb_mutex *m) { SleepConditionVariableSRW(&(*c)->c, &(*m)->lock, INFINITE, 0); }
 
 /* The system waits in whole milliseconds, rounded up so that the wait is never shorter than asked, and for less than
- * INFINITE: a longer wait that ends is no timeout (the waiter tests its condition, and waits again). */
-int xb_cond_wait_ns(xb_cond *c, xb_mutex *m, int64_t ns) {
+ * INFINITE (`*cut`: cut there): a longer wait that ends is no timeout (the waiter tests its condition, and waits
+ * again). */
+static DWORD wait_ms(int64_t ns, int *cut) {
   if (ns > XB_WAIT_NS_MAX) ns = XB_WAIT_NS_MAX;
   int64_t ms = ns <= 0 ? 0 : (ns + XB_NS_PER_MS - 1) / XB_NS_PER_MS;
-  int cut = ms >= INFINITE;
-  if (cut) ms = INFINITE - 1;
-  return SleepConditionVariableSRW(&(*c)->c, &(*m)->lock, (DWORD)ms, 0) || cut || GetLastError() != ERROR_TIMEOUT;
+  *cut = ms >= INFINITE;
+  return *cut ? INFINITE - 1 : (DWORD)ms;
+}
+
+int xb_cond_wait_ns(xb_cond *c, xb_mutex *m, int64_t ns) {
+  int cut;
+  DWORD ms = wait_ms(ns, &cut);
+  return SleepConditionVariableSRW(&(*c)->c, &(*m)->lock, ms, 0) || cut || GetLastError() != ERROR_TIMEOUT;
 }
 
 void xb_cond_signal(xb_cond *c) { WakeConditionVariable(&(*c)->c); }
@@ -523,6 +529,14 @@ int xb_os_path_id(const char *path, xb_file_id *id, int32_t *err) {
 }
 
 void xb_platform_sleep_ms(uint32_t ms) { Sleep(ms); }
+
+void xb_platform_addr_wait(const uint32_t *addr, uint32_t expected, int64_t ns) {
+  int cut;
+  DWORD ms = ns < 0 ? INFINITE : wait_ms(ns, &cut);
+  WaitOnAddress((volatile VOID *)addr, &expected, sizeof expected, ms); /* any return: tested again */
+}
+
+void xb_platform_addr_wake(const uint32_t *addr) { WakeByAddressAll((PVOID)addr); }
 
 int xb_os_file_truncate(xb_file f, int64_t size, int32_t *err) {
   LARGE_INTEGER zero, here, to;
