@@ -307,7 +307,9 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   sharing bit. The collector's vectors (the stack, the remembered set, the lists of survivors, aged and retained
   objects, the threads' lists) give back what they grew past 64 K entries when a collection uses a quarter of it at
   most. Marking an object gives the lines it covers the collection's epoch, and making it old (a full collection, a
-  promotion) makes them old lines. A line is then free when it is not old and no object reached by this collection
+  promotion) makes them old lines. A run of items (an array's, a slice's, a dirty card's) prefetches the object an item
+  refers to eight items before marking it (the compiler's `__builtin_prefetch`, nothing where it has none): its header
+  is a cache miss most of the time. A line is then free when it is not old and no object reached by this collection
   covers it: sweeping reads a block's line marks, never its objects, and makes the lists of free and recyclable blocks.
   A young collection sweeps only the blocks that received objects or hold aged ones since their last sweep; old lines
   stay until a full collection, which clears every block's (a free block has none). When the epoch (8 bits) wraps, every
