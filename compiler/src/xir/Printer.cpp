@@ -188,6 +188,9 @@ private:
       out_ += buf;
       break;
     }
+    case Op::Truth:
+      if (i.index) out_ += " of.not";
+      break;
     case Op::SubstCheck:
       if (i.imm != 0) out_ += " guard " + std::to_string((uint32_t)i.imm); // the types it lets on (TypeSet)
       break;
@@ -199,6 +202,7 @@ private:
       if (i.classIndex >= 0) out_ += std::string(i.superSend ? " super " : " from ") + std::to_string(i.classIndex);
       break;
     case Op::MvGet: case Op::MvField: case Op::MvSet: case Op::MvRef: case Op::MvPrivate: case Op::MvPublic:
+    case Op::HasOperator:
       out_ += " " + i.message;
       break;
     case Op::FieldGet: case Op::FieldSet:

@@ -277,6 +277,7 @@ private:
                    llvm::Value *&pos, llvm::Value *&state);
   void emitIndex(const xir::Instruction &i);
   void emitTableIndex(const xir::Instruction &i);
+  void emitNot(const xir::Instruction &i);
   llvm::Value *indexPosition(llvm::Value *idx, llvm::Value *idxType, llvm::Value *ok, llvm::BasicBlock *slow);
   // bools: a fused truth test's answers (the logical's path writes no item into d then)
   void emitCompactRead(bool logical, llvm::Value *d, llvm::Value *array, llvm::Value *pos, llvm::BasicBlock *compact,
@@ -303,7 +304,7 @@ private:
   llvm::FunctionCallee binaryOp(const xir::Instruction &i);
   llvm::Value *dest(const xir::Instruction &i);
   llvm::Value *value(const xir::Value *v);
-  llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind, llvm::Value *type);
+  llvm::Value *testTruth(llvm::Value *item, llvm::BasicBlock *unwind, llvm::Value *type, bool ofNot);
   llvm::Value *logicalValue(llvm::Value *item);
   llvm::Value *operandGroup(const xir::Instruction &i);
   void withRest(const xir::Instruction &i, llvm::Value *group,
@@ -342,10 +343,12 @@ private:
   uint64_t unionSize_ = 0;
 
   // runtime entry points
+  llvm::FunctionCallee rtCondNot_; // xb_cond_not
   llvm::FunctionCallee rtCondError_, rtForTest_, rtAbiCheck_, rtStackOverflow_, rtStackDeep_;
   llvm::FunctionCallee rtStrLeft_, rtStrRight_, rtStrSub_; // typed substrings: xb_str_left, ... (xbrt.h)
   llvm::FunctionCallee rtInc_, rtDec_, rtNeg_, rtNot_, rtBitNot_, rtAppend_, rtNumDefaultDec_, rtPending_,
       rtPendingGc_;
+  llvm::FunctionCallee rtHasOperator_; // xb_class_has_operator
   llvm::FunctionCallee rtSeqCatch_, rtSeqValue_, rtSeqWith_, rtSeqRestore_, rtSeqSuspend_, rtSeqResume_;
   llvm::FunctionCallee rtHashNew_, rtEachKey_;
   llvm::FunctionCallee rtArgsRest_;

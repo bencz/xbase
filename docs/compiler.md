@@ -190,16 +190,17 @@ Statements:
   declare class variables; `FRIEND CLASS name, ...` and `FRIEND FUNCTION name, ...`; `DESTRUCTOR name[()]` (one per
   class, implemented as a procedure: `METHOD PROCEDURE name CLASS ...` or `DESTRUCTOR name CLASS ...`; a method
   implementation may also be written `METHOD FUNCTION name`); `METHOD name[( params )] [AS type] [OPERATOR "op"]
-  [CONSTRUCTOR] [INLINE expr, ...] [scope]` (with `OPERATOR`, the method answers the operator); `OPERATOR "op" [ARG |
-  ARGS name, ...] INLINE expr, ... [scope]`; `ACCESS name [INLINE expr, ...]` and `ASSIGN name( param ) [INLINE expr,
-  ...]` (an `INLINE` list is evaluated in order and returns its last value). A method is implemented with `METHOD name[(
-  params )] [CLASS name]` (also `ACCESS name CLASS ...` and `ASSIGN name( param ) CLASS ...`; without `CLASS`, the last
-  class declared before it in the preprocessed source, an included file's too) and a body, like a function. In a method,
-  `Self` is the object, `::name` is `Self:name`, and `Super:name` (when no variable named `Super` is declared there) or
-  `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super` are ordinary names. `SCALAR CLASS
-  type` declares the class of a built-in type's values (its name is the type's as `ClassName()` gives it; no class
-  function, no instance variables, nor inherited ones from a class of the module: an error; from a class of another
-  module, the runtime's `BASE/3005` at its first message).
+  [CONSTRUCTOR] [INLINE expr, ...] [scope]` (with `OPERATOR`, the method answers the operator); `OPERATOR "op" [UNARY]
+  [ARG | ARGS name, ...] INLINE expr, ... [scope]` (`"-" UNARY` is unary minus; the operators a class may overload are
+  listed in [runtime.md](runtime.md#classes), `Parser::operatorMessage`); `ACCESS name [INLINE expr, ...]` and `ASSIGN
+  name( param ) [INLINE expr, ...]` (an `INLINE` list is evaluated in order and returns its last value). A method is
+  implemented with `METHOD name[( params )] [CLASS name]` (also `ACCESS name CLASS ...` and `ASSIGN name( param ) CLASS
+  ...`; without `CLASS`, the last class declared before it in the preprocessed source, an included file's too) and a
+  body, like a function. In a method, `Self` is the object, `::name` is `Self:name`, and `Super:name` (when no variable
+  named `Super` is declared there) or `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super`
+  are ordinary names. `SCALAR CLASS type` declares the class of a built-in type's values (its name is the type's as
+  `ClassName()` gives it; no class function, no instance variables, nor inherited ones from a class of the module: an
+  error; from a class of another module, the runtime's `BASE/3005` at its first message).
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
   other arguments (an element, a variable in parentheses, an expression) by value. `DO &name [WITH args]` (also
   `&name.suffix` and `&( expr )`, which the reference lacks) calls the procedure the text names when it runs, as
@@ -442,9 +443,14 @@ item values and block parameters when `--dump-xir-types` is given too ([xir.md](
   value until the function returns): `frame.release param k`, `FramePlan::pinMovedParams`), and otherwise `call.forward`
   passes the arguments as received to the other body, `NAME.byref` (internal), which reaches the parameters through
   their references. Codeblocks inside are generated with each body.
-- `.AND.`, `.OR.` and `IIF` branch; their results are block parameters. Conditions are `truth` tests of items. The
-  left side of `.AND.`/`.OR.` must be logical; when it does not settle the result, the right side's value is the
-  result as it is, whatever its type (`.T. .AND. 5` is 5, as in Clipper), and only a condition tests it.
+- `.AND.`, `.OR.` and `IIF` branch; their results are block parameters. Conditions are `truth` tests of items. The left
+  side of `.AND.`/`.OR.` must be logical; when it does not settle the result, the right side's value is the result as it
+  is, whatever its type (`.T. .AND. 5` is 5, as in Clipper), and only a condition tests it. A left side that is no
+  condition by its form may be an object whose class overloads the operator (`has.operator`, `Generator::genLogic`,
+  [xir.md](xir.md)), which then receives the right side's value; `!x` in a condition is the negated `truth` of `x`
+  marked as a `.NOT.`'s operand (`Builder::truthOfNot`): an `x` that is no logical calls `xb_cond_not`, which an
+  object's class's `.NOT.` answers; that call comes back into the loop, a cold edge `LoopSplit` counts, so an element
+  read fused with such a test tests its paths of items and of the runtime in one block (`emitIndex`).
 - `DO CASE` becomes an `IF`/`ELSEIF` chain. `SWITCH` evaluates its value once, checks it (`switch.check`; a `SWITCH`
   without arms accepts anything) and compares it with each `CASE` constant in order (`switch.match`); the arm bodies
   follow each other so that control falls through.
@@ -1034,7 +1040,9 @@ on the functions that changed, optimizes them as fast loops: values keep the typ
 can leave them (the loop again computes what it hoisted in its preheader, after the generic iteration's calls). A loop
 of more than 3000 instructions or 256 cold edges is left as it is, and the copies grow a function by at most twice its
 own size (`kMaxLoopInstructions`, `kMaxColdEdges`; the `pi` benchmark's function, a nest of Brainfuck loops, then
-compiles in 5.9 s instead of 3.6 s). The module is verified after the split (an invalid module is an internal error).
+compiles in 5.9 s instead of 3.6 s; a nest at the limit, as `dijkstra`'s at 255, runs slower past it, split loop by
+loop, while `md5_sha1`'s, past it, runs slower split whole). The module is verified after the split (an invalid module
+is an internal error).
 
 Loop polls (`codegen/LoopPolls.*`), on the loops the splitting left (its fast loops among them): a back edge's poll is a
 load and a branch on every pass, which in a loop of a few instructions costs as much as its work. A loop where a test

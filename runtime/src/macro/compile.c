@@ -35,6 +35,8 @@
  *   MO_UNARY u, MO_BINARY b, MO_STEP inc   operators (macro.h)
  *   MO_JUMP t, MO_JUMP_FALSE t, MO_JUMP_TRUE t   t a code offset; the
  *                           conditional ones pop a condition
+ *   MO_OPERATOR_JUMP k t    a jump to t when the top is an object whose class
+ *                           overloads operator k (a string), popping nothing
  *   MO_POP, MO_PICK n (push a copy of the item n below the top), MO_INSERT n
  *                           (move the top n places down)
  *   MO_ARRAY n, MO_HASH n (n pairs), MO_INDEX, MO_INDEX_SET (pops base,
@@ -881,10 +883,21 @@ static void gen_list(gen *g, fn *f, node *const *list, uint32_t n) {
   for (uint32_t k = 0; k < n; ++k) gen_expr(g, f, list[k]);
 }
 
+/* A left side of .AND. or .OR. that is a condition by its form (a comparison, a negation, a logical literal, another
+ * .AND. or .OR.), never asked for the operator: the compiler's rule (Generator::logicalForm). */
+static int logical_form(const node *n) {
+  switch (n->kind) {
+  case N_TRUE: case N_FALSE: case N_AND: case N_OR: return 1;
+  case N_UNARY: return n->op == MU_NOT;
+  case N_BINARY: return n->op >= MB_EQ && n->op <= MB_IN;
+  default: return 0;
+  }
+}
+
 /* A condition: jumps to the returned patch point when it is `when` (the
- * compiler's genCond: .NOT. and lists see through, a literal decides
- * alone; anything else is a value that must be logical). Returns SIZE_MAX
- * when it never jumps. */
+ * compiler's genCond: lists see through, a literal decides alone; anything
+ * else, a .NOT. too, whose class may overload it, is a value that must be
+ * logical). Returns SIZE_MAX when it never jumps. */
 static size_t gen_cond(gen *g, fn *f, const node *n, int when) {
   switch (n->kind) {
   case N_TRUE:
@@ -897,10 +910,7 @@ static size_t gen_cond(gen *g, fn *f, const node *n, int when) {
       emit(f, MO_POP, 1, 0);
     }
     return gen_cond(g, f, n->list[n->n - 1], when);
-  case N_UNARY:
-    if (n->op == MU_NOT) return gen_cond(g, f, n->a, !when);
-    break;
-  default:
+  default: /* .NOT. too: a class may overload it, whose result is then tested */
     break;
   }
   gen_expr(g, f, n);
@@ -1511,6 +1521,28 @@ static void gen_expr(gen *g, fn *f, const node *n) {
   case N_AND:
   case N_OR: { /* the left side decides; the right side's value is the result as it is */
     int isAnd = n->kind == N_AND;
+    if (!logical_form(n->a)) { /* an object of a class with the operator receives the right side's value */
+      uint32_t message = add_string(f, isAnd ? XB_OPERATOR_AND : XB_OPERATOR_OR,
+                                    strlen(isAnd ? XB_OPERATOR_AND : XB_OPERATOR_OR));
+      gen_expr(g, f, n->a);
+      emit1(f, MO_OPERATOR_JUMP, message, 0, 0);
+      size_t object = f->len;
+      word(f, 0);
+      size_t decided = emit_jump(f, isAnd ? MO_JUMP_FALSE : MO_JUMP_TRUE);
+      gen_expr(g, f, n->b);
+      size_t end = emit_jump(f, MO_JUMP);
+      patch(f, decided);
+      f->depth -= 1; /* the other path */
+      emit(f, isAnd ? MO_FALSE : MO_TRUE, 0, 1);
+      size_t end2 = emit_jump(f, MO_JUMP);
+      patch(f, object); /* the object still on the stack (the depth the other path leaves): its argument above it */
+      gen_expr(g, f, n->b);
+      emit1(f, MO_SEND, message, 2, 1);
+      word(f, 2);
+      patch(f, end);
+      patch(f, end2);
+      return;
+    }
     size_t decided = gen_cond(g, f, n->a, !isAnd);
     gen_expr(g, f, n->b);
     if (decided == SIZE_MAX) return;

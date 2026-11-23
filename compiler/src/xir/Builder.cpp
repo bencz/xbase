@@ -134,6 +134,12 @@ Instruction *Builder::macro(Op op, Value *text, const std::vector<Value *> &more
 }
 
 Instruction *Builder::truth(Value *a) { return make(Op::Truth, Type::Bool, {a}); }
+
+Instruction *Builder::truthOfNot(Value *a) {
+  Instruction *i = truth(a);
+  i->index = 1;
+  return i;
+}
 Instruction *Builder::fromBool(Value *b) { return make(Op::FromBool, Type::Item, {b}); }
 
 Instruction *Builder::call(Callee c, const std::vector<Value *> &args) {
@@ -224,6 +230,12 @@ Instruction *Builder::seqResume(Value *requests, Value *value) {
 }
 Instruction *Builder::substCheck(Value *checked) { return make(Op::SubstCheck, Type::Bool, {checked}); }
 Instruction *Builder::substValue(Value *checked) { return make(Op::SubstValue, Type::Item, {checked}); }
+
+Instruction *Builder::hasOperator(Value *v, std::string message) {
+  Instruction *i = make(Op::HasOperator, Type::Bool, {v});
+  i->message = std::move(message);
+  return i;
+}
 
 Instruction *Builder::scalarPlain(Value *v, uint32_t types) {
   Instruction *i = make(Op::ScalarPlain, Type::Bool, {v});

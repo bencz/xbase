@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 61u
+#define XB_ABI_VERSION 62u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -461,6 +461,14 @@ void     xb_num_default_dec(xb_ctx *ctx, xb_item *r, double value);
 
 /* Non-logical value used as a condition: raises the error, returns 0. */
 int32_t  xb_cond_error(xb_ctx *ctx, const xb_item *a);
+/* [ABI] The truth of the operand `a` of a .NOT. in a condition, `a` no
+ * logical: an object whose class overloads .NOT. gives the negation of its
+ * result's truth, 0 or 1 (the caller negates it back); a result that is no
+ * logical, and anything but such an object, raise the condition's error:
+ * XB_COND_NOT_FAILED, after which the caller unwinds, as after
+ * xb_cond_error. */
+#define XB_COND_NOT_FAILED 2
+int32_t  xb_cond_not(xb_ctx *ctx, const xb_item *a);
 
 /* Arrays (1-based). xb_array_new copies `n` items (consecutive frame slots). */
 void     xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems);
@@ -762,7 +770,10 @@ void     xb_classes_register(xb_class_def *defs, uint32_t n, uint32_t level);
 void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
 /* The messages of the operators a class overloads (OPERATOR "+" ...): an
  * object that is the left (or only) operand receives the right operand as its
- * argument; [] receives the index, and the value when it assigns. */
+ * argument; [] receives the index, and the value when it assigns. "u-" is
+ * unary minus (OPERATOR "-" UNARY); .AND. and .OR. receive the right side's
+ * value, which they evaluate only for an object with the operator. None is a
+ * name a method can have. */
 #define XB_OPERATOR_ADD      "+"
 #define XB_OPERATOR_SUB      "-"
 #define XB_OPERATOR_MUL      "*"
@@ -781,6 +792,19 @@ void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
 #define XB_OPERATOR_INC      "++"
 #define XB_OPERATOR_DEC      "--"
 #define XB_OPERATOR_INDEX    "[]"
+#define XB_OPERATOR_NEG      "u-"
+#define XB_OPERATOR_AND      ".AND."
+#define XB_OPERATOR_OR       ".OR."
+#define XB_OPERATOR_BITAND   "&"
+#define XB_OPERATOR_BITOR    "|"
+#define XB_OPERATOR_BITXOR   "^^"
+#define XB_OPERATOR_SHL      "<<"
+#define XB_OPERATOR_SHR      ">>"
+#define XB_OPERATOR_BITNOT   "~"
+/* [ABI] Whether `a` is an object whose class (as a cast shows it) overloads
+ * operator `op` (an XB_OPERATOR_* message): .AND. and .OR. test it on their
+ * left side before anything else. */
+int      xb_class_has_operator(const xb_item *a, const char *op);
 /* [ABI] A message sent by compiled code: from a method of class `from` (its
  * scope decides what the method may reach, and a variable is first the one
  * `from` sees), or from elsewhere (NULL); with `super`, the method or variable
@@ -1150,7 +1174,8 @@ static inline int64_t xb_bit_apply(xb_bit_op op, int64_t a, int64_t b) {
 }
 
 /* Each bit operation: the name of its function (upper-cased, as calls are
- * resolved; NULL without one), the symbol of its operator (NULL without one),
+ * resolved; NULL without one), the symbol of its operator (NULL without one;
+ * the message a class's overload of it answers, XB_OPERATOR_*),
  * its operand count and the BASE error code of both (xbase's own codes start
  * at 9001). Indexed by xb_bit_op; the runtime's functions and operators and
  * the compiler's folding and inline code read this table. */
@@ -1164,10 +1189,10 @@ typedef struct xb_bit_function {
 #define XB_BIT_OP_COUNT (XB_BIT_SAR + 1)
 static inline const xb_bit_function *xb_bit_function_of(xb_bit_op op) {
   static const xb_bit_function table[XB_BIT_OP_COUNT] = {
-      {XB_BIT_AND, "BITAND", "&", 2, 9001},  {XB_BIT_OR, "BITOR", "|", 2, 9002},
-      {XB_BIT_XOR, "BITXOR", "^^", 2, 9003}, {XB_BIT_NOR, "BITNOR", NULL, 2, 9004},
-      {XB_BIT_NOT, "BITNOT", "~", 1, 9005},  {XB_BIT_SHL, "BITSHL", "<<", 2, 9006},
-      {XB_BIT_SHR, "BITSHR", NULL, 2, 9007}, {XB_BIT_SAR, NULL, ">>", 2, 9008},
+      {XB_BIT_AND, "BITAND", XB_OPERATOR_BITAND, 2, 9001}, {XB_BIT_OR, "BITOR", XB_OPERATOR_BITOR, 2, 9002},
+      {XB_BIT_XOR, "BITXOR", XB_OPERATOR_BITXOR, 2, 9003}, {XB_BIT_NOR, "BITNOR", NULL, 2, 9004},
+      {XB_BIT_NOT, "BITNOT", XB_OPERATOR_BITNOT, 1, 9005}, {XB_BIT_SHL, "BITSHL", XB_OPERATOR_SHL, 2, 9006},
+      {XB_BIT_SHR, "BITSHR", NULL, 2, 9007},               {XB_BIT_SAR, NULL, XB_OPERATOR_SHR, 2, 9008},
   };
   return &table[op];
 }

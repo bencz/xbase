@@ -321,7 +321,7 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   else callItemOp(binaryOp(i), d, {a, bv});
   checkPending(unwind_);
   if (fused) { // a logical, unless an error's handler substituted something else
-    Value *r = testTruth(d, unwind_, itemType(d));
+    Value *r = testTruth(d, unwind_, itemType(d), i.users().front()->index != 0);
     bools.push_back({r, b_.GetInsertBlock()});
   }
   b_.CreateBr(join);
@@ -333,8 +333,25 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   }
 }
 
+// .NOT. of a logical inline; any other value (an object whose class may overload it, an error) through the runtime.
+void CodeGen::emitNot(const xir::Instruction &i) {
+  Value *a = addr(i.operand(0));
+  Value *d = dest(i);
+  BasicBlock *logical = newBlock("not.logical"), *slow = newBlock("op"), *join = newBlock("join");
+  branchLikely(b_.CreateICmpEQ(typeOf(i.operand(0), a), ConstantInt::get(i32_, XB_T_LOGICAL)), logical, slow);
+  b_.SetInsertPoint(logical);
+  storeLogical(d, b_.CreateNot(logicalValue(a)));
+  b_.CreateBr(join);
+  b_.SetInsertPoint(slow);
+  callItemOp(rtNot_, d, {a});
+  checkPending(unwind_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
 // Unary minus: an integer other than INT64_MIN, and a double (keeping its
-// decimals), are negated in place, as xb_op_neg does; anything else calls it.
+// decimals), are negated in place, as xb_op_neg does; anything else calls it
+// (an object's class may overload it).
 void CodeGen::emitNeg(const xir::Instruction &i) {
   Value *a = addr(i.operand(0));
   Value *d = dest(i);
@@ -818,21 +835,33 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
   bool rows = onlyIndexed(i), logical = readAsLogical(i), fused = fusedComparisons_.count(&i) != 0;
   BasicBlock *compact = rows ? nullptr : newBlock("index.compact");
   std::vector<std::pair<Value *, BasicBlock *>> bools; // fused: the truth test's answer on each path
-  auto test = [&] { // the item read into d, tested as the truth test would
-    if (fused) bools.push_back({testTruth(d, unwind_, typeOf(&i, d)), b_.GetInsertBlock()});
+  // A .NOT.'s operand is tested once, after the paths of items and of the runtime: its test's other side comes back
+  // into a loop (xb_cond_not), each such edge a cold one LoopSplit counts.
+  bool ofNot = fused && i.users().front()->index != 0;
+  BasicBlock *tested = ofNot ? newBlock("index.test") : nullptr;
+  auto test = [&] { // the item read into d, tested as the truth test would, then the end
+    if (ofNot) {
+      b_.CreateBr(tested);
+      return;
+    }
+    if (fused) bools.push_back({testTruth(d, unwind_, typeOf(&i, d), false), b_.GetInsertBlock()});
+    b_.CreateBr(join);
   };
   // base and idx are read before d is written
   inlineIndex(i, base, idx, slow, items, compact, logical ? XB_ELEMS_LOGICAL : XB_ELEMS_INT, array, pos, state);
   b_.SetInsertPoint(items);
   copyItem(d, arrayElement(array, pos));
   test();
-  b_.CreateBr(join);
   if (!rows) emitCompactRead(logical, fused ? nullptr : d, array, pos, compact, slow, join, fused ? &bools : nullptr);
   b_.SetInsertPoint(slow);
   callItemOp(rtIndex_, d, {base, idx});
   checkPending(unwind_);
   test();
-  b_.CreateBr(join);
+  if (ofNot) {
+    b_.SetInsertPoint(tested);
+    bools.push_back({testTruth(d, unwind_, typeOf(&i, d), true), b_.GetInsertBlock()});
+    b_.CreateBr(join);
+  }
   b_.SetInsertPoint(join);
   if (fused) {
     PHINode *phi = b_.CreatePHI(b_.getInt1Ty(), (unsigned)bools.size(), "elem.true");

@@ -546,7 +546,10 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   operations (`async.new`, `async.restore`, `await.ready`, `await.value`, `await.wait`, `await.fuse`, `await.fused`, the
   terminator `async.suspend`), `append` (`var := var + value`, `xb_op_append`), `scalar.plain` (a value of one of the
   types of a mask whose classes of the runtime answer its messages: `resolve-scalar-sends`), `object.is` (an object of a
-  class of the module, exactly: `speculate-sends`), `subst.check` and `subst.value` for typed continuations (the
+  class of the module, exactly: `speculate-sends`), `has.operator` (an object whose class overloads an operator: the
+  left side of `.AND.` and `.OR.`, `Generator::genLogic`, which gives the operator the right side's value, evaluated
+  in a block both ways share; `fold-constants` makes it false where the value cannot be an object, and the plain
+  logic is then all that is left), `subst.check` and `subst.value` for typed continuations (the
   verifier keeps the check right after its operation and the value first in the block only the check leads to), and for
   parameter versioning `params.ref` (whether parameters hold references their caller passed) and `call.forward` (a call
   with the function's own arguments, as received), `inline.enter` (naming a function or block function) and

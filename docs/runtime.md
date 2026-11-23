@@ -751,13 +751,22 @@ first time it is used (its class function, or a subclass):
   `BASE/0`), `ObjSend( x, cMessage, ... )` (`x:cMessage( ... )` from outside the class; `_NAME` assigns). The
   runtime's own classes answer with their variables and no methods.
 - Operators (`OPERATOR "op"`, `METHOD name OPERATOR "op"`): a method whose message is the operator (`XB_OPERATOR_*` in
-  `xbrt.h`: `+ - * / % ^ = == != < <= > >= $ ! ++ -- []`; the compiler maps `**`, `<>`, `#` and `.NOT.` to them). The
-  runtime's operator functions ask the class of the left (or only) operand when it is an object, before anything else
-  (`xb_class_operator`; `==` too, even for the same object; for a cast, the class it shows): the method receives the
-  right operand; `[]` receives the index, and the value when it assigns (`o[i] += x` reads, then assigns). Compiled fast
-  paths never see objects, so they are unchanged. As in the reference, the right operand's class is not asked, and
-  `.AND.`, `.OR.` and unary minus cannot be overloaded (the compiler rejects `.AND.` and `.OR.`, which the reference
-  accepts and never calls).
+  `xbrt.h`: `+ - * / % ^ = == != < <= > >= $ ! ++ -- []`; the compiler maps `**`, `<>`, `#` and `.NOT.` to them), and
+  xbase's own: unary minus (`"-" UNARY`, the message `u-`), the bit operators `& | ^^ << >> ~` (the bit table's symbols,
+  `xb_bit_function`) and `.AND.` and `.OR.`. The runtime's operator functions ask the class of the left (or only)
+  operand when it is an object, before anything else (`xb_class_operator`; `==` too, even for the same object; for a
+  cast, the class it shows): the method receives the right operand; `[]` receives the index, and the value when it
+  assigns (`o[i] += x` reads, then assigns). `.AND.` and `.OR.` first test their left side (`xb_class_has_operator`,
+  the xIR's `has.operator`, a macro's `MO_OPERATOR_JUMP`): an object whose class overloads the operator receives the
+  right side's value, evaluated then, once; any other left side decides as before (a logical alone, the right side
+  evaluated only when it does not settle the result; anything else the condition's error 1066). In a condition the
+  operator's result is tested as a condition. A left side that is a condition by its form (a comparison, `!` or
+  `.NOT.`, a logical literal, another `.AND.` or `.OR.`) is tested as a condition without that test
+  (`Generator::logicalForm`, the macro's `logical_form`): its own operator runs (a class's `.NOT.` too, in a condition
+  as in a value: `xb_cond_not`) and its result must be logical; the conditions of loops keep their booleans. A
+  comparison an overload makes into an object (a query being built) is kept in a variable, or sent its operator by
+  name, to be combined with `.AND.`. Compiled fast paths never see objects, so they are unchanged. As in the
+  reference, the right operand's class is not asked.
 - Built-in types as classes: a `SCALAR CLASS type` (`XB_CLASS_SCALAR`, named as `ClassName()` names the type: `ARRAY`,
   `CHARACTER`, `HASH`, `NUMERIC`, `DATE`, `BLOCK`, ...; it has no class function and no instance variables, nor
   inherited ones: the compiler rejects those of a class of the module, and a class of another module's makes its first

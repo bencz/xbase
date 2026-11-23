@@ -51,6 +51,7 @@ public:
   Instruction *memvarParam(const std::string &name, uint32_t index);
   Instruction *macro(Op op, Value *text, const std::vector<Value *> &more = {}); // MacroGet, MacroSet, ...
   Instruction *truth(Value *a);
+  Instruction *truthOfNot(Value *a); // the truth of a .NOT.'s operand, which the caller negates (Op::Truth, index 1)
   Instruction *fromBool(Value *b);
   Instruction *call(Callee c, const std::vector<Value *> &args);
   Instruction *send(std::string message, Value *object, const std::vector<Value *> &args);
@@ -94,6 +95,7 @@ public:
   Instruction *substCheck(Value *checked);
   Instruction *substValue(Value *checked);
   Instruction *scalarPlain(Value *v, uint32_t types);
+  Instruction *hasOperator(Value *v, std::string message);
   Instruction *objectIs(Value *v, int32_t classIndex);
   Instruction *forTest(Value *counter, Value *limit, Value *step);
   Instruction *enumLen(Value *coll);

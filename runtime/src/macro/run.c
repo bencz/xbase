@@ -288,6 +288,12 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
       if (FAILED()) goto out;
       break;
     case MO_JUMP: pc = ops + word(&pc); break;
+    case MO_OPERATOR_JUMP: {
+      const char *message = xb_str_data(xb_array_items(fa)[word(&pc)].v.s);
+      uint32_t to = word(&pc);
+      if (xb_class_has_operator(&s[sp], message)) pc = ops + to;
+      break;
+    }
     case MO_JUMP_FALSE:
     case MO_JUMP_TRUE: {
       uint32_t to = word(&pc);

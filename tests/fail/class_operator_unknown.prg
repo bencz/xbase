@@ -1,4 +1,4 @@
-// .AND. cannot be overloaded (the reference accepts it and never calls it).
+// := is no operator a class can overload: an assignment stores into a variable, an element or a member.
 CLASS TFoo
-   OPERATOR ".AND." ARG x INLINE .T.
+   OPERATOR ":=" ARG x INLINE .T.
 ENDCLASS

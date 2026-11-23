@@ -586,7 +586,8 @@ void Parser::parseInline(ClassMethodDecl &m) {
 }
 
 // The operator a string names, as the message the runtime sends for it (XB_OPERATOR_* in xbrt.h); the
-// reference's other spellings name the same operators. An unknown one is reported (and kept as written).
+// reference's other spellings name the same operators, and "-" followed by UNARY is unary minus. An unknown one is
+// reported (and kept as written).
 std::string Parser::operatorMessage() {
   static const std::pair<const char *, const char *> operators[] = {
       {"+", XB_OPERATOR_ADD},  {"-", XB_OPERATOR_SUB},       {"*", XB_OPERATOR_MUL},   {"/", XB_OPERATOR_DIV},
@@ -594,11 +595,19 @@ std::string Parser::operatorMessage() {
       {"==", XB_OPERATOR_EXACT_EQ}, {"!=", XB_OPERATOR_NE}, {"<>", XB_OPERATOR_NE},   {"#", XB_OPERATOR_NE},
       {"<", XB_OPERATOR_LT},   {"<=", XB_OPERATOR_LE},       {">", XB_OPERATOR_GT},    {">=", XB_OPERATOR_GE},
       {"$", XB_OPERATOR_IN},   {"!", XB_OPERATOR_NOT},       {".NOT.", XB_OPERATOR_NOT}, {"++", XB_OPERATOR_INC},
-      {"--", XB_OPERATOR_DEC}, {"[]", XB_OPERATOR_INDEX}};
+      {"--", XB_OPERATOR_DEC}, {"[]", XB_OPERATOR_INDEX}, {".AND.", XB_OPERATOR_AND}, {".OR.", XB_OPERATOR_OR},
+      {"&", XB_OPERATOR_BITAND}, {"|", XB_OPERATOR_BITOR}, {"^^", XB_OPERATOR_BITXOR}, {"<<", XB_OPERATOR_SHL},
+      {">>", XB_OPERATOR_SHR}, {"~", XB_OPERATOR_BITNOT}};
   std::string text = cur().text;
   SourceLoc loc = cur().loc;
   advance();
   std::string upper = upperCase(text);
+  if (at(Tok::Ident) && cur().upper == "UNARY") {
+    advance();
+    if (upper == "-") return XB_OPERATOR_NEG;
+    diag_.error(loc, "UNARY names unary minus: \"-\" UNARY");
+    return text;
+  }
   for (const auto &[spelling, message] : operators)
     if (upper == spelling) return message;
   diag_.error(loc, "'" + text + "' is not an operator a class can overload");

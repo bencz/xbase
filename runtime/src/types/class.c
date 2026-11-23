@@ -778,14 +778,22 @@ uint32_t xb_class_names(const xb_object *o, int methods, const char **out) {
   return n;
 }
 
-int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a, const xb_item *b,
-                      const xb_item *c) {
+/* The method of operator `op` of the class object `a` is seen as (a cast: the class it shows), or NULL. */
+static const member *operator_method(const xb_item *a, const char *op) {
+  if (a->type != XB_T_OBJECT) return NULL;
   const xb_object *o = a->v.p;
   cls *k = o->cls->compiled;
-  if (!k) return 0;
-  if (a->width && a->width < k->nline) k = runtime_of(k->line[a->width]); /* a cast: the class it is seen as */
+  if (!k) return NULL;
+  if (a->width && a->width < k->nline) k = runtime_of(k->line[a->width]);
   const member *m = lookup(k, op);
-  if (!m || m->kind != XB_MK_METHOD) return 0;
+  return m && m->kind == XB_MK_METHOD ? m : NULL;
+}
+
+int xb_class_has_operator(const xb_item *a, const char *op) { return operator_method(a, op) != NULL; }
+
+int xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_item *a, const xb_item *b,
+                      const xb_item *c) {
+  if (!operator_method(a, op)) return 0;
   xb_item argv[3] = {*a};
   uint32_t argc = 1;
   if (b) argv[argc++] = *b;

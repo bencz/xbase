@@ -84,6 +84,8 @@ void CodeGen::initTypes() {
                                 "xb.nil");
   nilItem_->setAlignment(itemAlign_);
   rtCondError_ = rt("xb_cond_error", i32_, {ptrTy_, ptrTy_});
+  rtCondNot_ = rt("xb_cond_not", i32_, {ptrTy_, ptrTy_});
+  if (auto *f = dyn_cast<Function>(rtCondNot_.getCallee())) f->addFnAttr(Attribute::Cold); // an error's path, nearly
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtAbiCheck_ = rt("xb_abi_check", voidTy,
                    {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
@@ -103,6 +105,7 @@ void CodeGen::initTypes() {
     f->setNoSync();
   }
   rtNeg_ = rt("xb_op_neg", voidTy, {ptrTy_, ptrTy_, ptrTy_});
+  rtHasOperator_ = rt("xb_class_has_operator", i32_, {ptrTy_, ptrTy_});
   rtNot_ = rt("xb_op_not", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtBitNot_ = rt("xb_op_bitnot", voidTy, {ptrTy_, ptrTy_, ptrTy_});
   rtInc_ = rt("xb_op_inc", voidTy, {ptrTy_, ptrTy_, ptrTy_});

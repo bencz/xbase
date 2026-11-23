@@ -15,7 +15,8 @@ enum class Op : uint8_t {
   Append,         // var, access; value: var := var + value, a string growing in place [may fail]
   Unary,          // unop; a -> Item                        [may fail]
   Binary,         // binop; a, b -> Item                    [may fail]
-  Truth,          // a -> Bool: .T./.F., anything else fails [may fail]
+  Truth,          // a -> Bool: .T./.F., anything else fails [may fail]; index 1: the operand of a .NOT., whose
+                  // class's .NOT. answers for an object (xb_cond_not)
   FromBool,       // Bool -> Item: .T. or .F.
   Call,           // callee; args... -> Item                [may fail]
   Send,           // message; object, args... -> Item       [may fail]
@@ -81,6 +82,7 @@ enum class Op : uint8_t {
   SubstCheck,     // operation -> Bool: right after it, its result is not of the types it gives itself (an error's
                   // block substituted it); with a mask (`imm`), a guard: the value is not of those types
   SubstValue,     // operation -> Item: that result, at the start of the block the check leads to
+  HasOperator,    // Item; message (XB_OPERATOR_*) -> Bool: the value is an object whose class overloads that operator
   ScalarPlain,    // Item; index: a mask of types -> Bool: the value is of one of those types, whose own class of the
                   // runtime answers its messages, no class of the program before it (xb_scalar_replaced): a method of
                   // that class may be called directly

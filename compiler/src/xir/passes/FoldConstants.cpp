@@ -185,6 +185,11 @@ Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
   case Op::FromBool:
     if (const Constant *c = asBool(ops[0])) return b.logical(c->logical);
     return nullptr;
+  case Op::HasOperator: { // a value that is no object has no class (types none yet: not known)
+    TypeSet t = types.of(ops[0]);
+    if (t && !(t & typeBit(XB_T_OBJECT))) return b.boolean(false);
+    return nullptr;
+  }
   case Op::Truth: // a logical cannot fail the test
     if (const Constant *c = asConstant(ops[0]); c && c->lit == Constant::Lit::Logical) return b.boolean(c->logical);
     if (const Instruction *made = producedBy(ops[0], Op::FromBool)) return made->operand(0);

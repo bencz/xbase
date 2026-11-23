@@ -3,6 +3,8 @@
 
 #include "opt/Fold.h"
 
+#include "xbrt.h" // XB_OPERATOR_*
+
 namespace xb::xir {
 
 namespace {
@@ -83,7 +85,7 @@ Value *Generator::genExpr(const Expr &e) {
     return b.binary(bin.op, l, r);
   }
   case ExprKind::And:
-  case ExprKind::Or: return genLogic(static_cast<const LogicExpr &>(e));
+  case ExprKind::Or: return genLogic(static_cast<const LogicExpr &>(e), false);
   case ExprKind::Assign: return genAssign(static_cast<const AssignExpr &>(e));
   case ExprKind::IncDec: return genIncDec(static_cast<const IncDecExpr &>(e));
   case ExprKind::IIf: return genIIf(static_cast<const IIfExpr &>(e));
@@ -169,28 +171,16 @@ Value *Generator::genCond(const Expr &e) {
   switch (e.kind) {
   case ExprKind::Logical: return b.boolean(static_cast<const LogicalExpr &>(e).value);
   case ExprKind::And:
-  case ExprKind::Or: {
-    auto &l = static_cast<const LogicExpr &>(e);
-    bool isAnd = e.kind == ExprKind::And;
-    Value *lv = genCond(*l.lhs);
-    BasicBlock *rhs = cur_.fn->addBlock(isAnd ? "and.rhs" : "or.rhs");
-    BasicBlock *join = cur_.fn->addBlock(isAnd ? "and.end" : "or.end");
-    Value *result = join->addParam(Type::Bool);
-    if (isAnd) b.condBr(lv, rhs, join, {}, {b.boolean(false)});
-    else b.condBr(lv, join, rhs, {b.boolean(true)}, {});
-    b.setBlock(rhs);
-    b.br(join, {genCond(*l.rhs)});
-    b.setBlock(join);
-    return result;
-  }
+  case ExprKind::Or: return genLogic(static_cast<const LogicExpr &>(e), true);
   case ExprKind::List: {
     auto &l = static_cast<const ListExpr &>(e);
     for (size_t k = 0; k + 1 < l.exprs.size(); ++k) genDiscard(*l.exprs[k]);
     return genCond(*l.exprs.back());
   }
-  case ExprKind::Unary:
-    if (static_cast<const UnaryExpr &>(e).op == UnOp::Not)
-      return b.boolNot(genCond(*static_cast<const UnaryExpr &>(e).operand));
+  case ExprKind::Unary: // .NOT.: of a condition by its form, its negation; of anything else, the negated truth of the
+                        // operand, whose class may overload .NOT. (truthOfNot: the operator's result is then tested)
+    if (auto &u = static_cast<const UnaryExpr &>(e); u.op == UnOp::Not)
+      return b.boolNot(logicalForm(*u.operand) ? genCond(*u.operand) : b.truthOfNot(genExpr(*u.operand)));
     break;
   default:
     break;
@@ -438,20 +428,67 @@ Value *Generator::genFieldAssign(const FieldExpr &target, const AssignExpr *assi
   return incdec && !incdec->prefix ? old : now;
 }
 
-// .AND. and .OR. as a value: the left side decides (it must be logical) and,
-// when it does not settle the result, the right side's value is the result as
-// it is, whatever its type, as in Clipper (`.T. .AND. 5` is 5).
-Value *Generator::genLogic(const LogicExpr &l) {
+// A left side of .AND. or .OR. that is a condition by its form (a comparison, a negation, a logical literal, another
+// .AND. or .OR.): it is tested as one, never asked for the operator.
+bool Generator::logicalForm(const Expr &e) {
+  switch (e.kind) {
+  case ExprKind::Logical: case ExprKind::And: case ExprKind::Or: return true;
+  case ExprKind::Unary: return static_cast<const UnaryExpr &>(e).op == UnOp::Not;
+  case ExprKind::Binary: {
+    BinOp op = static_cast<const BinaryExpr &>(e).op;
+    return op == BinOp::Eq || op == BinOp::ExactEq || op == BinOp::NotEq || op == BinOp::Lt || op == BinOp::Le ||
+           op == BinOp::Gt || op == BinOp::Ge || op == BinOp::In;
+  }
+  default: return false;
+  }
+}
+
+// .AND. and .OR.: the left side decides (it must be logical) and, when it does not settle the result, the right side's
+// value is the result as it is, whatever its type, as in Clipper (`.T. .AND. 5` is 5). A left side that is no
+// logicalForm and is an object whose class overloads the operator (has.operator, which folding removes where the left
+// side cannot be an object) receives the right side's value instead, evaluated once: the right side's block is shared,
+// and the test, made before, says where its value goes. As a condition (`cond`), each value is tested where it is
+// made (the right side's truth test right after it, as a logical element read wants: CodeGen's readAsLogical) and the
+// result is a boolean.
+Value *Generator::genLogic(const LogicExpr &l, bool cond) {
   Builder &b = *cur_.b;
   bool isAnd = l.kind == ExprKind::And;
-  Value *lv = genCond(*l.lhs);
+  if (logicalForm(*l.lhs)) { // the left side settles it or not; the right side's value otherwise
+    Value *decides = genCond(*l.lhs);
+    BasicBlock *rhs = cur_.fn->addBlock(isAnd ? "and.rhs" : "or.rhs");
+    BasicBlock *join = cur_.fn->addBlock(isAnd ? "and.end" : "or.end");
+    Value *result = join->addParam(cond ? Type::Bool : Type::Item);
+    Value *settled = cond ? b.boolean(!isAnd) : b.logical(!isAnd);
+    if (isAnd) b.condBr(decides, rhs, join, {}, {settled});
+    else b.condBr(decides, join, rhs, {settled}, {});
+    b.setBlock(rhs);
+    b.br(join, {cond ? genCond(*l.rhs) : genExpr(*l.rhs)});
+    b.setBlock(join);
+    return result;
+  }
+  const char *op = isAnd ? XB_OPERATOR_AND : XB_OPERATOR_OR;
+  Value *lv = genExpr(*l.lhs);
+  Value *has = b.hasOperator(lv, op);
+  BasicBlock *test = cur_.fn->addBlock(isAnd ? "and.test" : "or.test");
   BasicBlock *rhs = cur_.fn->addBlock(isAnd ? "and.rhs" : "or.rhs");
+  BasicBlock *plain = cur_.fn->addBlock(isAnd ? "and.plain" : "or.plain");
+  BasicBlock *object = cur_.fn->addBlock(isAnd ? "and.object" : "or.object");
   BasicBlock *join = cur_.fn->addBlock(isAnd ? "and.end" : "or.end");
-  Value *result = join->addParam(Type::Item);
-  if (isAnd) b.condBr(lv, rhs, join, {}, {b.logical(false)});
-  else b.condBr(lv, join, rhs, {b.logical(true)}, {});
+  Value *result = join->addParam(cond ? Type::Bool : Type::Item);
+  auto settled = [&](bool v) -> Value * { return cond ? b.boolean(v) : b.logical(v); };
+  auto as = [&](Value *v) { return cond ? b.truth(v) : v; };
+  b.condBr(has, rhs, test);
+  b.setBlock(test);
+  Value *decides = b.truth(lv);
+  if (isAnd) b.condBr(decides, rhs, join, {}, {settled(false)});
+  else b.condBr(decides, join, rhs, {settled(true)}, {});
   b.setBlock(rhs);
-  b.br(join, {genExpr(*l.rhs)});
+  Value *rv = genExpr(*l.rhs);
+  b.condBr(has, object, plain);
+  b.setBlock(plain);
+  b.br(join, {as(rv)});
+  b.setBlock(object);
+  b.br(join, {as(b.send(op, lv, {rv}))});
   b.setBlock(join);
   return result;
 }

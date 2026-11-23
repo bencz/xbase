@@ -308,6 +308,10 @@ private:
       break;
     }
     case Op::ScalarPlain: expect(i, 1, {Type::Item}); break;
+    case Op::HasOperator:
+      expect(i, 1, {Type::Item});
+      if (i.message.empty()) fail("has.operator without an operator");
+      break;
     case Op::ObjectIs: expect(i, 1, {Type::Item}); break;
     case Op::SubstValue: // first in a block reached only from the operation's check
       expect(i, 1, {Type::Item});

@@ -219,16 +219,33 @@ void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
 
 // .T. or .F.; any other value is an error (the function leaves). `type` is
 // the item's type (a constant when it is known).
-Value *CodeGen::testTruth(Value *item, BasicBlock *unwind, Value *type) {
+Value *CodeGen::testTruth(Value *item, BasicBlock *unwind, Value *type, bool ofNot) {
   BasicBlock *ok = newBlock("cond.ok");
   BasicBlock *bad = newBlock("cond.bad");
   MDBuilder md(ctx_);
   b_.CreateCondBr(b_.CreateICmpEQ(type, ConstantInt::get(i32_, XB_T_LOGICAL)), ok, bad, md.createLikelyBranchWeights());
   b_.SetInsertPoint(bad);
-  b_.CreateCall(rtCondError_, {fnCtx_, callArg(item, 0)});
-  b_.CreateBr(unwind);
+  if (!ofNot) {
+    b_.CreateCall(rtCondError_, {fnCtx_, callArg(item, 0)});
+    b_.CreateBr(unwind);
+    b_.SetInsertPoint(ok);
+    return logicalValue(item);
+  }
+  // The operand of a .NOT.: an object's class may overload it (xb_cond_not), else the same error and unwinding.
+  Value *answer = b_.CreateCall(rtCondNot_, {fnCtx_, callArg(item, 0)});
+  BasicBlock *answered = newBlock("cond.not"), *join = newBlock("cond.join");
+  b_.CreateCondBr(b_.CreateICmpEQ(answer, ConstantInt::get(i32_, XB_COND_NOT_FAILED)), unwind, answered);
+  b_.SetInsertPoint(answered);
+  Value *operatorTruth = b_.CreateICmpNE(answer, ConstantInt::get(i32_, 0));
+  b_.CreateBr(join);
   b_.SetInsertPoint(ok);
-  return logicalValue(item);
+  Value *plain = logicalValue(item);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+  PHINode *phi = b_.CreatePHI(b_.getInt1Ty(), 2, "cond");
+  phi->addIncoming(plain, ok);
+  phi->addIncoming(operatorTruth, answered);
+  return phi;
 }
 
 // The boolean of a logical item: its i32 starts the value word (read whole,
@@ -334,9 +351,7 @@ void CodeGen::emit(const xir::Instruction &i) {
       emitNeg(i);
       break;
     }
-    Value *a = addr(ops[0]);
-    callItemOp(rtNot_, dest(i), {a});
-    checkPending(unwind_);
+    emitNot(i);
     break;
   }
   case Op::Binary: emitBinary(i); break;
@@ -346,7 +361,7 @@ void CodeGen::emit(const xir::Instruction &i) {
       values_[&i] = fused->second;
     } else {
       Value *item = addr(ops[0]);
-      values_[&i] = testTruth(item, unwind_, typeOf(ops[0], item));
+      values_[&i] = testTruth(item, unwind_, typeOf(ops[0], item), i.index != 0);
     }
     break;
   }
@@ -695,6 +710,23 @@ void CodeGen::emit(const xir::Instruction &i) {
     auto *flag = cast<LoadInst>(loadFrom(i8_, at, Mem::Unknown, "scalar.replaced"));
     flag->setAtomic(AtomicOrdering::Unordered);
     values_[&i] = b_.CreateAnd(inMask, b_.CreateICmpEQ(flag, ConstantInt::get(i8_, 0)));
+    break;
+  }
+  case Op::HasOperator: { // an object (a test of its tag), then its class's operator (the runtime's look-up)
+    Value *item = addr(ops[0]);
+    Value *isObject = b_.CreateICmpEQ(typeOf(ops[0], item), ConstantInt::get(i32_, XB_T_OBJECT));
+    BasicBlock *from = b_.GetInsertBlock(), *object = newBlock("has.operator"), *done = newBlock("has.operator.done");
+    b_.CreateCondBr(isObject, object, done);
+    b_.SetInsertPoint(object);
+    Value *found = b_.CreateCall(rtHasOperator_, {callArg(item, 0), messageName(i.message)});
+    Value *has = b_.CreateICmpNE(found, ConstantInt::get(i32_, 0));
+    BasicBlock *at = b_.GetInsertBlock();
+    b_.CreateBr(done);
+    b_.SetInsertPoint(done);
+    PHINode *phi = b_.CreatePHI(b_.getInt1Ty(), 2, "has.operator");
+    phi->addIncoming(b_.getFalse(), from);
+    phi->addIncoming(has, at);
+    values_[&i] = phi;
     break;
   }
   case Op::ObjectIs: { // an object whose class is the module's class `classIndex`: its xb_class_def's `runtime`

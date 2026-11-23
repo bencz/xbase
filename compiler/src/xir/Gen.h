@@ -71,7 +71,8 @@ private:
   Value *genSendAssign(const SendExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);
   Value *genMacroAssign(const MacroExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);
   Value *genFieldAssign(const FieldExpr &target, const AssignExpr *assign, const IncDecExpr *incdec);
-  Value *genLogic(const LogicExpr &l);
+  Value *genLogic(const LogicExpr &l, bool cond);
+  static bool logicalForm(const Expr &e);
   Value *genIIf(const IIfExpr &e);
   Value *genCodeblock(const BlockExpr &b);
   bool capturesValue(uint32_t slot) const;

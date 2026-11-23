@@ -165,6 +165,7 @@ void xb_op_pow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) {
 }
 
 void xb_op_neg(xb_ctx *ctx, xb_item *r, const xb_item *a) {
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, XB_OPERATOR_NEG, a, NULL, NULL)) return;
   if (a->type == XB_T_INT && a->v.i != INT64_MIN) {
     xb_set_int(r, -a->v.i);
   } else if (xb_is_number(a)) {
@@ -186,6 +187,7 @@ void xb_op_not(xb_ctx *ctx, xb_item *r, const xb_item *a) {
  * operator, with the code of its operation. `b` is NULL for ~. */
 static void bit_op(xb_ctx *ctx, xb_item *r, xb_bit_op op, const xb_item *a, const xb_item *b) {
   const xb_bit_function *f = xb_bit_function_of(op);
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, r, f->symbol, a, b, NULL)) return; /* its message */
   if (!xb_is_number(a) || (b && !xb_is_number(b))) {
     if (b) arg_error2(ctx, r, f->code, f->symbol, a, b);
     else xb_arg_error(ctx, r, f->code, f->symbol, 1, a);
@@ -351,6 +353,22 @@ int32_t xb_cond_error(xb_ctx *ctx, const xb_item *a) {
 static int32_t substituted_truth(xb_ctx *ctx, const xb_item *v) {
   if (v->type == XB_T_LOGICAL) return v->v.l != 0;
   return xb_cond_error(ctx, v);
+}
+
+int32_t xb_cond_not(xb_ctx *ctx, const xb_item *a) {
+  xb_item r;
+  xb_set_nil(&r);
+  xb_gc_root_push(ctx, &r);
+  int32_t answer = XB_COND_NOT_FAILED;
+  if (a->type == XB_T_OBJECT && xb_class_operator(ctx, &r, XB_OPERATOR_NOT, a, NULL, NULL) &&
+      !(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
+    if (r.type == XB_T_LOGICAL) answer = r.v.l == 0;
+    else xb_cond_error(ctx, &r);
+  } else if (!(xb_pending_get(ctx) & XB_PENDING_UNWIND)) {
+    xb_cond_error(ctx, a);
+  }
+  xb_gc_root_pop(ctx, 1);
+  return answer;
 }
 
 /* FOR test: a non-negative step loops while counter <= limit, that is until
