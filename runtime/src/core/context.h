@@ -65,6 +65,11 @@ typedef struct xb_env {
   uint8_t  parked;          /* suspended now (else running: its context's) */
   uint8_t  recent;          /* in a thread's recent list (or the orphans): young collections scan it */
   uint8_t  ended;           /* its function ended while a recent list held it: the collector frees it */
+  /* An asynchronous function's environment borrows its caller's settings and bindings (xb_env_inherit) without a
+   * reference while it runs on the caller's thread, the caller waiting for it: it takes one when it first parks (the
+   * caller then goes on and may change them in place), and copies them when it changes them (xb_settings_own,
+   * bindings_own) before either. */
+  uint8_t  borrowsSettings, borrowsBindings;
 } xb_env;
 
 /* A thread's context: what compiled code reaches (the [ABI] head), the state of the code running on the thread now

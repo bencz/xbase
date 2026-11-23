@@ -1,0 +1,10 @@
+
+at once: callee saw (caller sees EXACT OFF dd/mm/yyyy caller) then has ON yyyy.mm.dd callee; caller sees EXACT OFF dd/mm/yyyy caller
+nested: inner has ON inner; outer has OFF dd/mm/yyyy caller; caller sees EXACT OFF dd/mm/yyyy caller
+cleared: callee cleared: no cP; caller sees EXACT OFF dd/mm/yyyy caller
+read only: callee read dd/mm/yyyy caller; caller sees EXACT OFF dd/mm/yyyy caller
+suspended: after the caller's change the callee has OFF dd/mm/yyyy, then yy/mm/dd; caller sees EXACT OFF dd/mm/yyyy caller
+suspended variables: U changed by the caller; caller sees EXACT OFF dd/mm/yyyy changed by the caller
+inner suspends: inner after its wait has OFF dd/mm/yyyy caller; outer has ON outer; caller sees EXACT OFF dd/mm/yyyy caller
+task from a first step: task sees yyyy/mm/dd; caller sees EXACT OFF dd/mm/yyyy caller
+century: callee ON, caller .F.

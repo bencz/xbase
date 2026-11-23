@@ -30,11 +30,13 @@ static void settings_release(xb_settings *s) {
 }
 
 xb_settings *xb_settings_own(xb_ctx *ctx) {
-  xb_settings *s = ctx->env->settings;
-  if (xb_atomic_load32(&s->refs, XB_ACQUIRE) == 1) return s;
+  xb_env *env = ctx->env;
+  xb_settings *s = env->settings;
+  if (!env->borrowsSettings && xb_atomic_load32(&s->refs, XB_ACQUIRE) == 1) return s;
   xb_settings *mine = settings_new(s, s->date_format, strlen(s->date_format));
-  ctx->env->settings = mine;
-  settings_release(s);
+  env->settings = mine;
+  if (env->borrowsSettings) env->borrowsSettings = 0;
+  else settings_release(s);
   return mine;
 }
 
@@ -52,12 +54,13 @@ static xb_env *env_take(xb_ctx *ctx) {
   return env;
 }
 
-static xb_env *env_new(xb_ctx *ctx) {
+/* A new environment; `fresh`: with Clipper's settings, else none yet (the caller's to set). */
+static xb_env *env_new(xb_ctx *ctx, int fresh) {
   xb_env *env = env_take(ctx);
   memset(env, 0, sizeof *env);
   xb_set_nil(&env->error_block);
   xb_set_nil(&env->language);
-  env->settings = settings_new(NULL, "mm/dd/yy", 8);
+  if (fresh) env->settings = settings_new(NULL, "mm/dd/yy", 8);
   env->areaCurrent = 1;
   return env;
 }
@@ -73,8 +76,9 @@ static void env_free(xb_ctx *ctx, xb_env *env) {
   if (env->areas) free(env->areas);
   env->privates = NULL;
   env->areas = NULL;
-  settings_release(env->settings);
+  if (!env->borrowsSettings) settings_release(env->settings);
   env->settings = NULL;
+  env->borrowsSettings = 0;
   unlist(env);
   /* the last this thread listed (a function that suspended and ended on the same thread): spare again */
   if (env->recent && ctx && ctx->recentLen && ctx->recent[ctx->recentLen - 1] == env) {
@@ -127,16 +131,19 @@ void xb_env_capture(xb_ctx *ctx, xb_item *r) {
   xb_gc_root_pop(ctx, 1);
 }
 
-void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
-  xb_env *env = ctx->env;
+/* The snapshot's settings, new: the environment's own. */
+static void restore_settings(xb_ctx *ctx, xb_env *env, const xb_item *snapshot) {
   xb_item it;
   env_sets sets;
   xb_array_get(snapshot->v.p, SNAP_SETS, &it);
   memcpy(&sets, xb_str_data(it.v.s), sizeof sets);
   ctx->set_decimals = sets.decimals;
   xb_array_get(snapshot->v.p, SNAP_DATE_FORMAT, &it);
-  xb_ctx_set_date_format(ctx, xb_str_data(it.v.s), it.v.s->len); /* settings of the environment's own */
-  xb_settings *st = env->settings;
+  xb_settings *old = env->settings;
+  xb_settings *st = settings_new(old, xb_str_data(it.v.s), it.v.s->len);
+  if (old && !env->borrowsSettings) settings_release(old);
+  env->settings = st;
+  env->borrowsSettings = 0;
   st->epoch = sets.epoch;
   st->set_exact = sets.exact;
   st->set_fixed = sets.fixed;
@@ -147,6 +154,12 @@ void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
   st->set_unique = sets.unique;
   st->codepage = sets.codepage;
   st->rddDefault = sets.rddDefault;
+}
+
+void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
+  xb_env *env = ctx->env;
+  xb_item it;
+  restore_settings(ctx, env, snapshot);
   xb_array_get(snapshot->v.p, SNAP_ERROR_BLOCK, &env->error_block);
   xb_array_get(snapshot->v.p, SNAP_LANGUAGE, &env->language);
   xb_array_get(snapshot->v.p, SNAP_MEMVARS, &it);
@@ -154,7 +167,7 @@ void xb_env_restore(xb_ctx *ctx, const xb_item *snapshot) {
 }
 
 void xb_env_enter(xb_ctx *ctx, const xb_item *snapshot) {
-  xb_env *env = env_new(ctx);
+  xb_env *env = env_new(ctx, 0); /* the settings: the snapshot's (xb_env_restore) */
   env->outer = ctx->env;
   env->outerDecimals = ctx->set_decimals;
   ctx->env = env;
@@ -163,9 +176,9 @@ void xb_env_enter(xb_ctx *ctx, const xb_item *snapshot) {
 
 xb_env *xb_env_inherit(xb_ctx *ctx) {
   xb_env *from = ctx->env, *env = env_take(ctx);
-  *env = *from; /* the settings (shared), ErrorBlock(), the language; the rest below */
-  xb_atomic_add32(&env->settings->refs, 1, XB_RELAXED);
-  env->bindings = NULL;
+  *env = *from; /* the settings (borrowed), ErrorBlock(), the language; the rest below */
+  env->borrowsSettings = 1;
+  env->borrowsBindings = from->bindings != NULL;
   env->privates = NULL;
   env->privateLen = env->privateCap = 0;
   env->file_error = 0;
@@ -177,7 +190,6 @@ xb_env *xb_env_inherit(xb_ctx *ctx) {
   env->parkedPrev = env->parkedNext = NULL;
   env->listed = env->recent = env->parked = env->ended = 0;
   env->parkedScans = 0;
-  xb_memvar_inherit(env, from);
   env->outer = from;
   env->outerDecimals = ctx->set_decimals;
   ctx->env = env;
@@ -240,6 +252,14 @@ static void push_env(xb_env ***list, uint32_t *len, uint32_t *cap, xb_env *env) 
 }
 
 void xb_env_park(xb_ctx *ctx, xb_env *env, void *task) {
+  if (env->borrowsSettings) { /* its caller goes on: the settings and bindings it used are its own now too */
+    xb_atomic_add32(&env->settings->refs, 1, XB_RELAXED);
+    env->borrowsSettings = 0;
+  }
+  if (env->borrowsBindings) {
+    xb_memvar_bindings_take(env);
+    env->borrowsBindings = 0;
+  }
   env->parkedDecimals = ctx->set_decimals;
   ctx->env = env->outer;
   ctx->set_decimals = env->outerDecimals;
@@ -431,7 +451,7 @@ xb_ctx *xb_ctx_new(void) {
   xb_shared_init();
   xb_ctx *ctx = calloc(1, sizeof *ctx);
   if (!ctx) xb_gc_fatal("out of memory");
-  ctx->env = env_new(NULL);
+  ctx->env = env_new(NULL, 1);
   ctx->set_decimals = 2;
   xb_set_nil(&ctx->break_value);
   for (uint32_t i = 0; i < 2 * XB_MACRO_CACHE; ++i) xb_set_nil(&ctx->macro_cache[i]);
@@ -533,7 +553,8 @@ void xb_exit_code_set(int32_t code) { xb_atomic_store32((uint32_t *)&exitCode, (
 void xb_ctx_set_date_format(xb_ctx *ctx, const char *s, size_t len) {
   xb_settings *old = ctx->env->settings;
   ctx->env->settings = settings_new(old, s, len); /* `s` may be the old picture: copied first */
-  settings_release(old);
+  if (ctx->env->borrowsSettings) ctx->env->borrowsSettings = 0;
+  else settings_release(old);
 }
 
 /* Slow paths of the pending test (xbrt.h). xb_pending never collects and never parks the thread for another's

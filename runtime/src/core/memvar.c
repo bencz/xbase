@@ -335,19 +335,20 @@ static bslot *bindings_at(xb_env *e, uint32_t id) {
 static xb_bindings *bindings_own(xb_env *e) {
   xb_bindings *b = e->bindings;
   if (!b) return e->bindings = bindings_new(8);
-  int alone = xb_atomic_load32(&b->users, XB_ACQUIRE) == 1;
+  int alone = !e->borrowsBindings && xb_atomic_load32(&b->users, XB_ACQUIRE) == 1;
   if (alone && 2 * (b->count + 1) <= b->mask + 1) return b;
   uint32_t cap = b->mask + 1;
   while (2 * (b->count + 1) > cap) cap *= 2;
   xb_bindings *c = bindings_copy(b, cap);
-  bindings_release(b);
+  if (e->borrowsBindings) e->borrowsBindings = 0;
+  else bindings_release(b);
   return e->bindings = c;
 }
 
 /* The binding of `id` in the environment's own bindings (new and NIL when it had none): valid until they change. */
 static xb_item *bindings_put(xb_env *e, uint32_t id) {
   xb_bindings *b = e->bindings;
-  if (b && xb_atomic_load32(&b->users, XB_ACQUIRE) == 1) { /* its own, the entry there already: the usual case */
+  if (b && !e->borrowsBindings && xb_atomic_load32(&b->users, XB_ACQUIRE) == 1) { /* its own, the entry there: usual */
     bslot *s = bindings_at(e, id);
     if (s) return &s->cell;
   }
@@ -389,7 +390,8 @@ void xb_memvar_bindings_each(xb_env *e, void (*fn)(xb_item *it, void *data), voi
 }
 
 void xb_memvar_bindings_free(xb_env *e) {
-  bindings_release(e->bindings);
+  if (!e->borrowsBindings) bindings_release(e->bindings); /* borrowed: its caller's, not released */
+  e->borrowsBindings = 0;
   e->bindings = NULL;
 }
 
@@ -808,9 +810,8 @@ void xb_memvar_capture(xb_ctx *ctx, xb_item *r) {
   }
 }
 
-void xb_memvar_inherit(xb_env *to, const xb_env *from) {
-  to->bindings = from->bindings;
-  if (to->bindings) xb_atomic_add32(&to->bindings->users, 1, XB_RELAXED);
+void xb_memvar_bindings_take(xb_env *e) {
+  if (e->bindings) xb_atomic_add32(&e->bindings->users, 1, XB_RELAXED);
 }
 
 void xb_memvar_restore(xb_ctx *ctx, const xb_item *pairs) {
