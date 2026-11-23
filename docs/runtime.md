@@ -207,19 +207,18 @@ buffer's bytes past its tip change as views of it are appended to, never while a
 (size, kind, state, flags) precedes each one, so object pointers are what the rest of the runtime and compiled code use.
 The compiler's mirror of the layouts, a buffer's among them, is checked as the program starts (`xb_abi_check`).
 
-- Heap: objects up to 256 bytes (header included) live in blocks of 32 KB, aligned to their size and divided into
-  lines of 128 bytes. A block's first lines hold its metadata: per line, the epoch of the last collection that reached
-  an object covering it and whether an old object covers it, and a bit per 8 bytes where an object starts
-  (`xb_hblock`). Larger objects, up to the largest size class (four slots to a block, close to 8 KB), live in blocks of
-  one size class each: the classes are computed at start-up, each the largest slot that fits its number of slots in a
-  block, and each at least an eighth larger than the one before. A class's block takes its objects' slots from a free
-  list, and a dead object's slot serves the next object of its class, where holes of many lines would fragment the
-  heap; a class's block left empty becomes a free block of lines. Blocks come from chunks of 32 blocks, each a mapping
-  of its own from the system (`xb_platform_pages_map`, aligned to a block); a chunk's blocks are in use, never handed
-  out yet (their pages untouched, so not resident), or given back (below), as two bit masks of the chunk say
-  (`xb_chunk`), never the block's own metadata. A new block is a free one, else the first spare block of the lowest
-  chunk that has one (made usable again, `xb_platform_pages_recommit`, when it was given back), else one of a new
-  chunk: the heap's chunks stay few and low.
+- Heap: objects up to 256 bytes (header included) live in blocks of 32 KB, aligned to their size and divided into lines
+  of 128 bytes. A block's first lines hold its metadata: per line, the epoch of the last collection that reached an
+  object covering it and whether an old object covers it (`xb_hblock`). Larger objects, up to the largest size class
+  (four slots to a block, close to 8 KB), live in blocks of one size class each: the classes are computed at start-up,
+  each the largest slot that fits its number of slots in a block, and each at least an eighth larger than the one
+  before. A class's block takes its objects' slots from a free list, and a dead object's slot serves the next object of
+  its class, where holes of many lines would fragment the heap; a class's block left empty becomes a free block of
+  lines. Blocks come from chunks of 32 blocks, each a mapping of its own from the system (`xb_platform_pages_map`,
+  aligned to a block); a chunk's blocks are in use, never handed out yet (their pages untouched, so not resident), or
+  given back (below), as two bit masks of the chunk say (`xb_chunk`), never the block's own metadata. A new block is a
+  free one, else the first spare block of the lowest chunk that has one (made usable again,
+  `xb_platform_pages_recommit`, when it was given back), else one of a new chunk: the heap's chunks stay few and low.
 - Large objects (`XB_GC_HDR_LARGE`), above the largest size class, take whole units of 4 KB: a run of them in chunks of
   large objects (1 MB mappings, first fit from the lowest address, `xb_lchunk` with its bit maps of units taken and
   given back), or, from 512 KB, a mapping of their own (`xb_large`: the bytes it takes, whether it is its own mapping,
@@ -258,12 +257,16 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   registered with `xb_gc_add_root` (the modules' `STATIC`s).
 - Generations: marks are sticky. An object marked by a collection stays marked and is *old*; new objects are young. A
   young collection marks from the roots and the remembered set, stops at old objects instead of traversing them, and
-  frees only the young objects it did not reach. A full collection clears every mark and traces the whole heap; it runs
-  when the old generation has grown by half the live data the previous full one found (at least 8 MB), and also when
-  eight times that live data (at least 8 MB) was allocated since, when 30 seconds passed with a young budget allocated,
-  or when 1024 objects with destructors became old (or half as many as were old already, when more): old objects that
-  died, and the resources their destructors free (files, connections), are never kept long by a program whose old
-  generation stopped growing.
+  frees only the young objects it did not reach. A full collection traces the whole heap without clearing any mark
+  first: it marks what it reaches with a flag of the header (`XB_GC_HDR_FULL`) whose meaning each full collection turns
+  around (a polarity: what the last one reached, and what was made since, has the old one), and sets the state of each
+  object it reaches anew (old, in no remembered set nor aged list); a dead object keeps a stale mark no one looks at,
+  and a size class's slot or a large object that a full collection does not reach goes with it. It runs when the old
+  generation has grown by half the live data the previous full one found (at least 8 MB), and also when eight times that
+  live data (at least 8 MB) was allocated since, when 30 seconds passed with a young budget allocated, or when 1024
+  objects with destructors became old (or half as many as were old already, when more): old objects that died, and the
+  resources their destructors free (files, connections), are never kept long by a program whose old generation stopped
+  growing.
 - Aging: a young object reached by a young collection ages, and is promoted by the next one that reaches it, so
   objects that die soon after a collection (a table whose entries are replaced) die young. An object that is old
   after a young collection and still refers to a young one stays in the remembered set (an array keeps the card
@@ -301,18 +304,17 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
 - Collection: marking uses an explicit stack; an array of more than 4096 items is traced a slice of 4096 at a time
   (`xb_slice`), so the stack holds a slice's children, not a long array's all. An array of a compact form refers to no
   object: its storage is marked, its elements are not read. A collection keeps an object's form bits, as it keeps its
-  sharing bit. The collector's vectors (the stack, the
-  remembered set, the lists of survivors, aged, pinned and retained objects, the threads' lists) give back what they
-  grew past 64 K entries when a collection uses a quarter of it at most. Marking an object gives the lines it covers the
-  collection's epoch, and making it old (a full collection, a promotion) makes them old lines. A line is then free when
-  it is not old and no object reached by this collection covers it: sweeping reads a block's line marks, never its
-  objects, and makes the lists of free and recyclable blocks. A young collection sweeps only the blocks that received
-  objects or hold aged ones since their last sweep; old lines stay until a full collection, which clears every line and
-  walks the objects through the start bits to clear their marks (a free block holds none alive and is skipped). When the
-  epoch (8 bits) wraps, every line mark is cleared. The blocks of size classes are swept slot by slot (their dead
-  objects' slots return to the free list). The system's lack of memory for a block or a large object makes a full
-  collection first (once for that allocation), and ends the program only when it still has none, or, for a size the
-  program chose, raises `BASE/9032 Memory low` (see the rules below).
+  sharing bit. The collector's vectors (the stack, the remembered set, the lists of survivors, aged and retained
+  objects, the threads' lists) give back what they grew past 64 K entries when a collection uses a quarter of it at
+  most. Marking an object gives the lines it covers the collection's epoch, and making it old (a full collection, a
+  promotion) makes them old lines. A line is then free when it is not old and no object reached by this collection
+  covers it: sweeping reads a block's line marks, never its objects, and makes the lists of free and recyclable blocks.
+  A young collection sweeps only the blocks that received objects or hold aged ones since their last sweep; old lines
+  stay until a full collection, which clears every block's (a free block has none). When the epoch (8 bits) wraps, every
+  line mark is cleared. The blocks of size classes are swept slot by slot (their dead objects' slots return to the free
+  list). The system's lack of memory for a block or a large object makes a full collection first (once for that
+  allocation), and ends the program only when it still has none, or, for a size the program chose, raises `BASE/9032
+  Memory low` (see the rules below).
 - Evacuation: dead objects spread over many blocks leave holes that objects of several lines may not fit, and the heap
   would grow instead. A full collection defragments when it can: it picks the emptiest blocks of lines (at most three
   quarters of their bytes live), as many as the free blocks and a reserve of new ones (a sixteenth of the heap's blocks)
@@ -338,13 +340,13 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   (`xb_platform_with_registers`) and scans every thread's stack up to its end (the system's bounds of the stack,
   `xb_platform_stack_bounds`, else the address the thread attached with): its own from there, a parked thread's from
   where it parked or entered its blocking operation (its registers saved on the stack above that point); the slots of
-  the compiled code's frames are left out (they are precise roots). An object of the blocks being emptied that a word
-  points into (to its header, anywhere inside it or just past it) is pinned (`XB_GC_HDR_PINNED`) and stays. The object
-  that a C root's address lies in is pinned too. A collection moves nothing when a thread's stack is unknown, when the
-  collecting thread is not attached, while a thread is in a blocking operation it entered alone (below), or while C
-  code holds the collector. A pointer below an object's start (such as
-  `items - 1` for 1-based indexing) does not pin it: C code keeps the object's address, or one inside it, across a call
-  that may allocate.
+  the compiled code's frames are left out (they are precise roots). A block being emptied that a word points into
+  (anywhere past its metadata, or just past its end: the end of its last object) stays whole, none of its objects moved
+  (the pin costs that block's evacuation, and no one needs to know where objects start). The block a C root's address
+  lies in stays too. A collection moves nothing when a thread's stack is unknown, when the collecting thread is not
+  attached, while a thread is in a blocking operation it entered alone (below), or while C code holds the collector. A
+  pointer below an object's start (such as `items - 1` for 1-based indexing) may lie in its block's metadata, which
+  keeps nothing in place: C code keeps the object's address, or one inside it, across a call that may allocate.
 - Frame temporaries are not cleared after each statement, so a value a temporary held stays alive until its slot is
   reused or the function returns.
 - A size the program chose (`Space`, `Replicate`, `PadL`/`PadR`/`PadC`, `StrTran`'s result, `Array`, `ASize`,

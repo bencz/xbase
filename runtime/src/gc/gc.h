@@ -23,15 +23,17 @@ typedef struct xb_gc_hdr {
   uint32_t size;            /* object bytes: the lines a block object covers, statistics (saturates for large) */
   uint8_t  kind;            /* xb_gc_kind */
   uint8_t  state;           /* XB_GC_MARKED | XB_GC_REMEMBERED | ... | XB_GC_SHARED */
-  uint16_t flags;           /* XB_GC_HDR_LARGE, XB_GC_HDR_PINNED, XB_GC_HDR_MOVED */
+  uint16_t flags;           /* XB_GC_HDR_LARGE, XB_GC_HDR_MOVED, XB_GC_HDR_FULL */
 } xb_gc_hdr;
 
-/* xb_gc_hdr.flags: allocated on its own, not in a block (never moves); pinned by the collection in progress (a word of
- * the stack, or a C root's address, points into it: it does not move); moved by it (the object holds the copy's
- * address, see gc.c). */
+/* xb_gc_hdr.flags: allocated on its own, not in a block (never moves); moved by the collection in progress (the object
+ * holds the copy's address, see gc.c). */
 #define XB_GC_HDR_LARGE 1u
-#define XB_GC_HDR_PINNED 2u
 #define XB_GC_HDR_MOVED 4u
+/* The full collections' mark, whose meaning alternates (gc.c, reached_full): during a full collection, equal to its
+ * polarity when it reached the object; between full collections, the last one's polarity on what it reached and on
+ * what was made since (a new object has it). */
+#define XB_GC_HDR_FULL 8u
 
 /* Marked by the last collection that saw it, i.e. old (marks are sticky). */
 #define XB_GC_MARKED     XB_GC_STATE_OLD
