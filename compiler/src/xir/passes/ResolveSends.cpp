@@ -102,7 +102,8 @@ bool newByInit(const ClassModel &model, int32_t c, BasicBlock *b, size_t k, bool
 // The classes a test of the receiver may take for a send, at most this many (a test each).
 constexpr size_t kMaxSpeculated = 8;
 
-// The classes of the module (not SCALAR ones, whose values are no objects) that answer send `i` by resolving it to
+// The classes of the module that make objects of their own (not SCALAR ones, whose values are no objects, nor ABSTRACT
+// ones and interfaces) that answer send `i` by resolving it to
 // what `*member` is set to: a method all of them reach, or an instance variable of the one class that reaches it;
 // none when the classes answering reach different members, or too many of them do.
 std::vector<int32_t> answering(const Module &m, const ClassModel &model, const Instruction &i,
@@ -110,7 +111,8 @@ std::vector<int32_t> answering(const Module &m, const ClassModel &model, const I
   std::vector<int32_t> out;
   const Function *fn = nullptr;
   for (int32_t c = 0; c < (int32_t)m.classes.size(); ++c) {
-    if (m.classes[(size_t)c].scalar) continue;
+    if (m.classes[(size_t)c].scalar || (m.classes[(size_t)c].kind & (XB_CLASS_ABSTRACT | XB_CLASS_INTERFACE)))
+      continue; // no objects of its own
     std::optional<xb_member> reached = model.resolve(c, i.classIndex, false, i.message);
     if (!reached) continue;
     const Function *g = reached->kind == XB_MK_METHOD ? model.method(*reached) : nullptr;

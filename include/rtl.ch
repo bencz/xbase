@@ -75,6 +75,7 @@ EXTERN FUNCTION Enumerable() NATIVE
 EXTERN FUNCTION ClassAssociate( oObject, cType ) NATIVE
 EXTERN FUNCTION ObjHasMethod( oObject, cName ) NATIVE
 EXTERN FUNCTION ObjHasVar( oObject, cName ) NATIVE
+EXTERN FUNCTION ObjImplements( oObject, cInterface ) NATIVE RESULT LOGICAL TOTAL
 EXTERN FUNCTION ObjIsKindOf( oObject, cClass ) NATIVE
 EXTERN FUNCTION ObjMethods( oObject ) NATIVE
 EXTERN FUNCTION ObjSend( xValue, cMessage, ... ) NATIVE
@@ -333,6 +334,7 @@ EXTERN FUNCTION RLock() NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION SDF() NATIVE
 EXTERN FUNCTION Select( [xAlias] ) NATIVE RESERVED CHECKED ABBREV 4
 EXTERN FUNCTION Used() NATIVE
+EXTERN FUNCTION __AbstractMethod( cMember ) NATIVE
 EXTERN FUNCTION __AreaEval( xArea, bBlock ) NATIVE
 EXTERN FUNCTION __dbApp( cFile, [aFields], [bFor], [bWhile], [nNext], [nRecord], [lRest], [cDriver], [nConnection], ;
    [cCodePage], [xDelimiter] ) NATIVE

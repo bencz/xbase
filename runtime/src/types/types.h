@@ -340,6 +340,9 @@ int      xb_class_operator(xb_ctx *ctx, xb_item *r, const char *op, const xb_ite
  * the order of its table, stored in `out` when it is not NULL, their count
  * returned. */
 int      xb_class_kind_of(const xb_object *o, const char *name);
+/* Whether a class of its line implements interface `name` (upper-cased), or one that inherits it. */
+#define XB_INTERFACE_SEEN 64 /* the interfaces it goes through, at most */
+int      xb_class_implements(const xb_object *o, const char *name);
 int      xb_class_has(const xb_object *o, const char *message, int method);
 uint32_t xb_class_names(const xb_object *o, int methods, const char **out);
 /* "CLASS:MESSAGE" in `buf`, cut to fit: how an error names a message to an object. */

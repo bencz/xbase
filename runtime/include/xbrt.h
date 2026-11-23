@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 62u
+#define XB_ABI_VERSION 63u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -694,18 +694,30 @@ void     xb_mv_field(xb_ctx *ctx, xb_item *r, const xb_memvar *m, xb_field_cache
  * the class variables, evaluated once, the first time the class is used; each
  * new object gets its own copy of an array or a hash, each subclass the value
  * itself. `destructor` (a method of no arguments) runs once an object of the
- * class, or of a subclass, is unreachable. `runtime` is the runtime's, NULL
- * until then. */
+ * class, or of a subclass, is unreachable. `interfaces` names the interfaces
+ * the class implements (IMPLEMENTS; their `def` the module's own, else NULL):
+ * an interface is a def of XB_CLASS_INTERFACE whose methods (no `fn`) are the
+ * messages it requires and whose parents are the interfaces it inherits.
+ * XB_MEMBER_ABSTRACT marks a method declared without a body (its `fn` raises
+ * the error), XB_MEMBER_FINAL one no subclass may declare again. A class makes
+ * objects when it is not ABSTRACT and breaks none of those rules
+ * (xb_class_check, xbclass.h). `runtime` is the runtime's, NULL until then. */
 #define XB_SCOPE_EXPORTED   0u
 #define XB_SCOPE_PROTECTED  1u  /* the class's methods and its subclasses' */
 #define XB_SCOPE_HIDDEN     2u  /* the class's own methods */
 #define XB_SCOPE_MASK       3u
 #define XB_MEMBER_READONLY  4u
 #define XB_MEMBER_SHARED    8u  /* a class variable whose subclasses share it */
+#define XB_MEMBER_ABSTRACT  16u /* a method without a body: a subclass that makes objects implements it */
+#define XB_MEMBER_FINAL     32u /* a method no subclass declares again */
 #define XB_CLASS_STATIC     1u  /* xb_class_def flags: STATIC CLASS */
 #define XB_CLASS_SCALAR     2u  /* SCALAR CLASS: the class of the values of a type, named as ClassName() names it */
 #define XB_CLASS_RUNTIME    4u  /* a class of the runtime (xbc --runtime): a program's SCALAR CLASS of a type answers
                                    first, whatever order the modules register in */
+#define XB_CLASS_ABSTRACT   8u  /* ABSTRACT CLASS: it makes no objects (its subclasses do) */
+#define XB_CLASS_FINAL      16u /* FINAL CLASS: no class inherits from it */
+#define XB_CLASS_INTERFACE  32u /* INTERFACE: the messages a class that IMPLEMENTS it answers; no objects, no
+                                   parent of a class */
 /* What ClassName() gives for values that are not objects: the names of the types' classes (SCALAR CLASS). */
 #define XB_TYPE_NAME_NIL       "NIL"
 #define XB_TYPE_NAME_LOGICAL   "LOGICAL"
@@ -761,7 +773,9 @@ typedef struct xb_class_def {
   uint32_t nfriendFunctions;
   xb_func init;             /* NULL: every variable starts as NIL */
   xb_func destructor;       /* DESTRUCTOR, or NULL */
-  uint32_t flags;           /* XB_CLASS_STATIC, XB_CLASS_SCALAR, XB_CLASS_RUNTIME */
+  const xb_class_parent *interfaces; /* IMPLEMENTS */
+  uint32_t ninterfaces;
+  uint32_t flags;           /* XB_CLASS_* */
   void *runtime;
 } xb_class_def;
 void     xb_classes_register(xb_class_def *defs, uint32_t n, uint32_t level);

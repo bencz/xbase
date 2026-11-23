@@ -32,6 +32,24 @@ void xbf_OBJISKINDOF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, yes);
 }
 
+/* ObjImplements( oObject, cInterface ): whether a class of the object's line implements cInterface (IMPLEMENTS), or an
+ * interface that inherits it. */
+void xbf_OBJIMPLEMENTS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  const xb_object *o = object_arg(argc, argv);
+  char buf[NAME_SIZE];
+  char *name = argc > 1 ? upper_name(&argv[1], buf) : NULL;
+  int yes = o && name && o->cls->compiled && xb_class_implements(o, name);
+  if (name) xb_name_upper_free(name, buf);
+  xb_set_logical(ret, yes);
+}
+
+/* __AbstractMethod( cMember ): the body of an ABSTRACT method ("CLASS:MESSAGE"), reached through Super: its error. */
+void xbf___ABSTRACTMETHOD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  const char *member = argc && argv[0].type == XB_T_STRING ? xb_str_data(argv[0].v.s) : "";
+  xb_error_described(ctx, ret, EG_NOMETHOD, 0, "ABSTRACT method called", member, 0, 0, NULL);
+}
+
 static void has(xb_item *ret, uint32_t argc, xb_item *argv, int method) {
   const xb_object *o = object_arg(argc, argv);
   char buf[NAME_SIZE];

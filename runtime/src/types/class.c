@@ -34,6 +34,7 @@
 #include "rtl/collections.h"
 #include "xbclass.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -69,6 +70,8 @@ typedef struct cls {
   member className;         /* ClassName without a member (XB_MK_CLASS_NAME) */
   uint32_t state;           /* cls_state; ready is published (release) after everything else */
   int finalized;            /* a class of its line has a destructor */
+  char *broken;             /* the rule of FINAL, ABSTRACT or IMPLEMENTS it breaks (xb_class_check): no objects */
+  const char *refused;      /* why it makes no objects (`broken`, or it is ABSTRACT), else NULL: one test per object */
   uint32_t initsBefore;     /* C_LINE: the INIT evaluations in progress when it began */
 } cls;
 
@@ -176,6 +179,7 @@ static const char *setter_of(const char *name) {
 /* Tables a member (xb_line_members' order: the first one of a message stays). */
 static int table_member(void *data, const char *name, int setter, const member *m) {
   cls *c = data;
+  if (m->kind == XB_MK_METHOD && !m->fn) return 0; /* a message an interface requires (in a line by mistake) */
   if (!setter) {
     table(c, name, m);
     return 0;
@@ -312,6 +316,31 @@ static xb_class_def **linearize(xb_ctx *ctx, xb_class_def *def, uint32_t *count)
 
 static void set_state(cls *c, cls_state state) { xb_atomic_store32(&c->state, state, XB_RELEASE); }
 
+/* An interface registered by that name, for xb_class_check. */
+static const xb_class_def *interface_named(void *data, const char *name) {
+  (void)data;
+  uint32_t id;
+  if (!xb_names_find(&names, name, strlen(name), &id)) return NULL;
+  return byId[id]->flags & XB_CLASS_INTERFACE ? byId[id] : NULL;
+}
+
+/* The rule the class breaks, kept for the objects it would make (xb_class_instance's error): its own, else one a class
+ * of its line breaks (prepared before it: a FINAL method declared again by a parent after the FINAL one's class). */
+static void check_rules(cls *c) {
+  char why[512];
+  if (!xb_class_check((const xb_class_def *const *)c->line, c->nline, interface_named, NULL, 1, why, sizeof why)) {
+    const cls *broken = NULL;
+    for (uint32_t k = 1; k < c->nline && !broken; ++k)
+      if (runtime_of(c->line[k]) && runtime_of(c->line[k])->broken) broken = runtime_of(c->line[k]);
+    if (!broken) return;
+    snprintf(why, sizeof why, "%s inherits from %s, which breaks a rule: %s", c->def->name, broken->def->name,
+             broken->broken);
+  }
+  c->broken = malloc(strlen(why) + 1);
+  if (!c->broken) xb_gc_fatal("out of memory");
+  strcpy(c->broken, why);
+}
+
 static const member *lookup_of(void *data, const xb_class_def *c, const char *message);
 static int friend_of(const xb_ctx *ctx, const xb_class_def *owner, const xb_class_def *from);
 
@@ -355,6 +384,8 @@ static cls *prepare_locked(xb_ctx *ctx, xb_class_def *def) {
     }
     build_tables(c);
     make_answers(ctx, c);
+    check_rules(c);
+    c->refused = c->broken ? c->broken : def->flags & XB_CLASS_ABSTRACT ? "an ABSTRACT class makes no objects" : NULL;
   }
   set_state(c, C_INIT);
   int ok = call_init(ctx, c);
@@ -386,6 +417,10 @@ static cls *prepare(xb_ctx *ctx, xb_class_def *def) {
 void xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def) {
   cls *c = prepare(ctx, def);
   if (!c) return;
+  if (c->refused) { /* no object: an ABSTRACT class's, or one breaking a rule */
+    xb_error_described(ctx, NULL, EG_ARG, 0, c->refused, def->name, 0, 0, NULL);
+    return;
+  }
   uint32_t n = c->base.nvars;
   xb_object *o = xb_gc_alloc(XB_GC_OBJECT, offsetof(xb_object, vars) + n * sizeof(xb_item));
   o->cls = &c->base;
@@ -671,6 +706,10 @@ int xb_class_scalar_send(xb_ctx *ctx, xb_item *r, const char *message, xb_class_
     if (!def) continue;
     cls *own = prepare(ctx, def);
     if (!own) return 1; /* the error is pending */
+    if (own->broken) { /* a rule of a class of another module it inherits from, which the compiler could not see */
+      xb_error_described(ctx, r, EG_ARG, 0, own->broken, def->name, 0, argc, argv);
+      return 1;
+    }
     if (own->base.nvars) { /* inherited from a class of another module, which the compiler could not see */
       xb_class_scalar_vars_error(ctx, r, def->name, argc, argv);
       return 1;
@@ -752,6 +791,35 @@ int xb_class_kind_of(const xb_object *o, const char *name) {
   const cls *c = o->cls->compiled;
   for (uint32_t k = 0; k < c->nline; ++k)
     if (strcmp(c->line[k]->name, name) == 0) return 1;
+  return 0;
+}
+
+/* The interfaces xb_class_implements has gone through, at most XB_INTERFACE_SEEN of them (a cycle of interfaces
+ * inheriting from one another is gone through once). */
+typedef struct seen_interfaces {
+  const xb_class_def *def[XB_INTERFACE_SEEN];
+  uint32_t n;
+} seen_interfaces;
+
+/* Whether interface `def` (found by `iname` when NULL) is `name` or inherits it. */
+static int interface_is(const char *iname, const xb_class_def *def, const char *name, seen_interfaces *seen) {
+  if (!def) def = interface_named(NULL, iname);
+  if (!def || !(def->flags & XB_CLASS_INTERFACE) || seen->n == XB_INTERFACE_SEEN) return 0;
+  for (uint32_t k = 0; k < seen->n; ++k)
+    if (seen->def[k] == def) return 0;
+  seen->def[seen->n++] = def;
+  if (strcmp(def->name, name) == 0) return 1;
+  for (uint32_t p = 0; p < def->nparents; ++p)
+    if (interface_is(def->parents[p].name, def->parents[p].def, name, seen)) return 1;
+  return 0;
+}
+
+int xb_class_implements(const xb_object *o, const char *name) {
+  const cls *c = o->cls->compiled;
+  seen_interfaces seen = {{0}, 0};
+  for (uint32_t k = 0; k < c->nline; ++k)
+    for (uint32_t i = 0; i < c->line[k]->ninterfaces; ++i)
+      if (interface_is(c->line[k]->interfaces[i].name, c->line[k]->interfaces[i].def, name, &seen)) return 1;
   return 0;
 }
 

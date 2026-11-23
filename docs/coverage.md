@@ -16,7 +16,8 @@ Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar
 `ALWAYS`), **TRY** (an xbase statement), **WITH OBJECT**, **USING** (an xbase statement), **YIELD** (generators;
 asynchronous ones in `ASYNC` functions), **ASYNC FUNCTION**, **ASYNC PROCEDURE**, **ASYNC METHOD**, the **AWAIT**
 operator and **AWAIT FOR EACH** (xbase's own), **DECLARE**, **EXTERNAL** (Clipper's name list), **ANNOUNCE**, **CLASS
-... ENDCLASS** and **METHOD** (xbase's classes)
+... ENDCLASS** and **METHOD** (xbase's classes, with **ABSTRACT**, **FINAL**, **INTERFACE ... ENDINTERFACE** and
+**IMPLEMENTS**)
 
 ## Commands (std.ch)
 
@@ -183,4 +184,5 @@ workers alive, its target and its most), **TaskYield** (the `Task` object's `Res
 
 Objects ([runtime.md](runtime.md#classes)): **ClassAssociate** (`ASSOCIATE CLASS`), **Enumerable** (the class
 collections inherit; the built-in types' classes are `SCALAR CLASS`es), **ObjHasMethod**, **ObjHasVar**,
-**ObjIsKindOf**, **ObjMethods**, **ObjSend**, **ObjVars**.
+**ObjImplements**, **ObjIsKindOf**, **ObjMethods**, **ObjSend**, **ObjVars**; the interfaces `IEnumerable`,
+`IEnumerator` and `IDisposable`.

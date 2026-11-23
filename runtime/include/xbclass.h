@@ -89,6 +89,24 @@ uint32_t xb_member_scope(const xb_member *m);
  * reaches it (the runtime's check). */
 int xb_member_scope_ok(const xb_member *m, const xb_class_def *from, int inside);
 
+/* Whether the runtime answers `message` by itself to an object of any class: New, Init and ClassName (class.c's
+ * dispatch), which an interface may require. */
+int xb_member_by_runtime(const char *message);
+
+/* An interface of the name, as the caller knows them (NULL: not known). */
+typedef const xb_class_def *(*xb_interface_find)(void *data, const char *name);
+
+/* The first rule of FINAL, ABSTRACT and IMPLEMENTS that class line[0] (its line `n` classes long) breaks, written to
+ * `out` (`size` bytes) as an error's description: 1, or 0 when it breaks none. A class of its line after it that is
+ * FINAL (it inherits from one) or an interface; a FINAL method of a class of its line that a class before it in the
+ * line declares again (a method or a variable answering its message); and when the class makes objects (neither
+ * ABSTRACT nor SCALAR): a message its line answers with an ABSTRACT method, or one an interface of a class of its
+ * line requires (or one that interface inherits) that its line answers with nothing or an ABSTRACT method (an interface
+ * that inherits from a class is the error too). An interface `find` does not know is the error with `strict` (the
+ * runtime), and left alone without (the compiler, which knows its own module's alone). */
+int xb_class_check(const xb_class_def *const *line, uint32_t n, xb_interface_find find, void *data, int strict,
+                   char *out, size_t size);
+
 #ifdef __cplusplus
 }
 #endif

@@ -65,7 +65,8 @@ void ClassResolver::run(Module &m) {
         diag_.error(c->loc, "SCALAR CLASS " + c->name + ": not the name of a type as ClassName() gives it");
       if (!c->vars.empty()) diag_.error(c->vars[0].loc, "a SCALAR CLASS has no instance variables");
     } else if (functions.count(c->name)) {
-      diag_.error(c->loc, "class " + c->name + " has the name of a function");
+      diag_.error(c->loc,
+                  std::string(c->isInterface ? "interface " : "class ") + c->name + " has the name of a function");
     }
     std::set<std::string> messages; // a variable answers NAME and _NAME
     for (const auto *vars : {&c->vars, &c->classVars})
@@ -75,19 +76,32 @@ void ClassResolver::run(Module &m) {
         messages.insert("_" + v.name);
       }
     bool destructor = false;
+    if (c->isAbstract && c->isFinal) diag_.error(c->loc, "class " + c->name + " is ABSTRACT or FINAL, not both");
     for (const ClassMethodDecl &d : c->methods) {
       if (!messages.insert(d.message()).second)
-        diag_.error(d.loc, "'" + d.name + "' is declared twice in class " + c->name);
+        diag_.error(d.loc, "'" + d.name + "' is declared twice in " + (c->isInterface ? "interface " : "class ") +
+                               c->name);
       if (d.destructor && destructor) diag_.error(d.loc, "class " + c->name + " has a second DESTRUCTOR");
       destructor = destructor || d.destructor;
+      bool abstract = (d.flags & XB_MEMBER_ABSTRACT) != 0;
+      if (abstract && (d.flags & XB_MEMBER_FINAL))
+        diag_.error(d.loc, "'" + d.name + "' is ABSTRACT or FINAL, not both");
+      if (abstract && d.inlineBody && !c->isInterface) // an interface's: the parser's error
+        diag_.error(d.loc, "'" + d.name + "' is ABSTRACT: it has no body (INLINE)");
+      if (abstract && !c->isAbstract && !c->isInterface)
+        diag_.error(d.loc, "'" + d.name + "' is ABSTRACT, so class " + c->name + " must be an ABSTRACT CLASS");
     }
   }
   for (auto &c : m.classes) {
     std::set<const ClassDecl *> seen;
     if (inherits(*c, *c, byName, seen)) {
-      diag_.error(c->loc, "class " + c->name + " inherits from itself");
+      diag_.error(c->loc, std::string(c->isInterface ? "interface " : "class ") + c->name + " inherits from itself");
       continue;
     }
+    for (const std::string &p : c->isInterface ? c->parents : c->interfaces) // the module's own: an interface each
+      if (auto it = byName.find(p); it != byName.end() && !it->second->isInterface)
+        diag_.error(c->loc, std::string(c->isInterface ? "interface " + c->name + " inherits from " : "IMPLEMENTS ") +
+                                p + ", which is a class");
     seen.clear();
     // A value of a type has no area for variables: nor its class's own nor inherited ones (a class of another module
     // the runtime checks when the class first answers).
@@ -116,6 +130,11 @@ void ClassResolver::run(Module &m) {
       diag_.error(f->loc, "'" + f->name + "' of class " + cls->name + " is implemented twice");
       continue;
     }
+    if (decl->flags & XB_MEMBER_ABSTRACT) {
+      diag_.error(f->loc, "'" + f->name + "' of " + (cls->isInterface ? "interface " : "class ") + cls->name +
+                              " is ABSTRACT: it has no body");
+      continue;
+    }
     if (decl->async != f->async)
       diag_.error(f->loc, "'" + f->name + "' of class " + cls->name + (decl->async ? " is" : " is not") +
                               " declared ASYNC: its implementation must match");
@@ -126,8 +145,25 @@ void ClassResolver::run(Module &m) {
     decl->impl = f.get();
   }
   for (auto &c : m.classes) {
+    if (c->isInterface) continue; // messages alone: no bodies, no objects
     for (ClassMethodDecl &d : c->methods) {
-      if (d.inlineBody && !d.impl) { // INLINE: a function returning its expression
+      if ((d.flags & XB_MEMBER_ABSTRACT) && !d.impl) { // its body raises the error: reached through Super only
+        auto f = std::make_unique<FuncDecl>();
+        f->loc = d.loc;
+        f->name = memberName(*c, d);
+        f->isStatic = true;
+        f->member = d.kind;
+        f->ofClass = c.get();
+        f->params = d.params;
+        f->variadic = d.variadic;
+        f->async = d.async; // as an implementation's would be
+        withSelf(*f, d.loc);
+        auto call = std::make_unique<CallExpr>(d.loc, "__ABSTRACTMETHOD");
+        call->args.push_back(std::make_unique<StringExpr>(d.loc, f->name));
+        f->body.push_back(std::make_unique<ReturnStmt>(d.loc, std::move(call)));
+        d.impl = f.get();
+        made.push_back(std::move(f));
+      } else if (d.inlineBody && !d.impl) { // INLINE: a function returning its expression
         auto f = std::make_unique<FuncDecl>();
         f->loc = d.loc;
         f->name = memberName(*c, d);

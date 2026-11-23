@@ -1,0 +1,7 @@
+// IMPLEMENTS names interfaces.
+
+CLASS TBase
+ENDCLASS
+
+CLASS TChild IMPLEMENTS TBase
+ENDCLASS

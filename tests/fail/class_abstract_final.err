@@ -1,0 +1,1 @@
+class TFOO is ABSTRACT or FINAL, not both

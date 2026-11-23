@@ -1,6 +1,7 @@
 /* The rules of compiled classes, shared by the runtime and the compiler (xbclass.h). */
 #include "xbclass.h"
 
+#include <stdio.h>
 #include <string.h>
 
 void xb_line_members(const xb_class_def *const *line, uint32_t n, xb_member_visit visit, void *data) {
@@ -103,4 +104,102 @@ uint32_t xb_member_scope(const xb_member *m) {
 int xb_member_scope_ok(const xb_member *m, const xb_class_def *from, int inside) {
   uint32_t scope = xb_member_scope(m);
   return !((scope == XB_SCOPE_HIDDEN && from != m->owner) || (scope == XB_SCOPE_PROTECTED && !inside));
+}
+
+/* Whether class `x` declares something answering `message` (a method, or a variable or class variable read or
+ * assigned). */
+static int declares(const xb_class_def *x, const char *message) {
+  for (uint32_t i = 0; i < x->nmethods; ++i)
+    if (strcmp(x->methods[i].message, message) == 0) return 1;
+  int setter = message[0] == '_';
+  for (uint32_t i = 0; i < x->nvars; ++i)
+    if (strcmp(x->vars[i].name, message + setter) == 0) return 1;
+  for (uint32_t i = 0; i < x->nclassVars; ++i)
+    if (strcmp(x->classVars[i].name, message + setter) == 0) return 1;
+  return 0;
+}
+
+int xb_member_by_runtime(const char *message) {
+  return strcmp(message, "NEW") == 0 || strcmp(message, "INIT") == 0 || strcmp(message, "CLASSNAME") == 0;
+}
+
+/* Whether the line answers `message` with a member that is no ABSTRACT method, or the runtime does by itself. */
+static int answers(const xb_class_def *const *line, uint32_t n, const char *message) {
+  xb_member m;
+  if (!xb_line_lookup(line, n, message, &m)) return xb_member_by_runtime(message);
+  return !(m.kind == XB_MK_METHOD && (m.flags & XB_MEMBER_ABSTRACT));
+}
+
+/* The interfaces xb_class_check goes through, at most (an interface's parents may form a cycle). */
+#define CHECK_SEEN 64
+
+typedef struct check {
+  const xb_class_def *const *line;
+  uint32_t n;
+  xb_interface_find find;
+  void *data;
+  int strict;
+  char *out;
+  size_t size;
+  const xb_class_def *seen[CHECK_SEEN];
+  uint32_t nseen;
+} check;
+
+/* Interface `name` (its def when the module knows it), and those it inherits, against the line: 1 when one breaks. */
+static int check_interface(check *c, const char *name, const xb_class_def *def) {
+  if (!def) def = c->find(c->data, name);
+  if (!def) {
+    if (!c->strict) return 0;
+    snprintf(c->out, c->size, "IMPLEMENTS %s, which is no interface", name);
+    return 1;
+  }
+  if (!(def->flags & XB_CLASS_INTERFACE)) {
+    snprintf(c->out, c->size, "%s %s, which is a class", c->nseen ? "an interface inherits from" : "IMPLEMENTS", name);
+    return 1;
+  }
+  for (uint32_t k = 0; k < c->nseen; ++k)
+    if (c->seen[k] == def) return 0; /* gone through: interfaces inheriting from one another require each other's */
+  if (c->nseen == CHECK_SEEN) return 0;  /* as many as that: what is past them is not checked */
+  c->seen[c->nseen++] = def;
+  for (uint32_t i = 0; i < def->nmethods; ++i)
+    if (!answers(c->line, c->n, def->methods[i].message)) {
+      snprintf(c->out, c->size, "%s does not implement %s:%s", c->line[0]->name, def->name, def->methods[i].message);
+      return 1;
+    }
+  for (uint32_t p = 0; p < def->nparents; ++p)
+    if (check_interface(c, def->parents[p].name, def->parents[p].def)) return 1;
+  return 0;
+}
+
+int xb_class_check(const xb_class_def *const *line, uint32_t n, xb_interface_find find, void *data, int strict,
+                   char *out, size_t size) {
+  for (uint32_t k = 1; k < n; ++k) {
+    if (line[k]->flags & (XB_CLASS_FINAL | XB_CLASS_INTERFACE)) {
+      snprintf(out, size, "%s inherits from %s, %s", line[0]->name, line[k]->name,
+               line[k]->flags & XB_CLASS_FINAL ? "a FINAL class" : "an interface (IMPLEMENTS names interfaces)");
+      return 1;
+    }
+    for (uint32_t i = 0; i < line[k]->nmethods; ++i) {
+      if (!(line[k]->methods[i].flags & XB_MEMBER_FINAL)) continue;
+      for (uint32_t j = 0; j < k; ++j)
+        if (declares(line[j], line[k]->methods[i].message)) {
+          snprintf(out, size, "%s:%s overrides the FINAL method of %s", line[j]->name, line[k]->methods[i].message,
+                   line[k]->name);
+          return 1;
+        }
+    }
+  }
+  if (line[0]->flags & (XB_CLASS_ABSTRACT | XB_CLASS_SCALAR | XB_CLASS_INTERFACE)) return 0;
+  for (uint32_t k = 0; k < n; ++k)
+    for (uint32_t i = 0; i < line[k]->nmethods; ++i)
+      if ((line[k]->methods[i].flags & XB_MEMBER_ABSTRACT) && !answers(line, n, line[k]->methods[i].message)) {
+        snprintf(out, size, "%s does not implement the ABSTRACT method %s:%s", line[0]->name, line[k]->name,
+                 line[k]->methods[i].message);
+        return 1;
+      }
+  check c = {line, n, find, data, strict, out, size, {0}, 0};
+  for (uint32_t k = 0; k < n; ++k)
+    for (uint32_t i = 0; i < line[k]->ninterfaces; ++i)
+      if (check_interface(&c, line[k]->interfaces[i].name, line[k]->interfaces[i].def)) return 1;
+  return 0;
 }

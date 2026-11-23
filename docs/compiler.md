@@ -182,23 +182,28 @@ Statements:
   `std.ch` builds `SYNCHRONIZED` and `AWAIT SYNCHRONIZED` (`USING AWAIT oMutex:HoldAsync()`, the operand of `USING`
   an awaited value) on it ([concurrency.md](concurrency.md#threads)).
 - `EXTERN FUNCTION name( params ) [attributes]` at file level, before or between functions (see [Calls](#calls))
-- Classes ([runtime.md](runtime.md#classes)), at file level: `[STATIC | CREATE | SCALAR] CLASS name [INHERIT | FROM
-  parent, ...]`, then members, then `ENDCLASS` (or `END [CLASS]`): `EXPORTED:` (`EXPORT:`, `VISIBLE:`), `PROTECTED:` and
-  `HIDDEN:` set the scope of the members after them; `VAR | DATA name, ... [AS | TYPE type] [INIT | ASSIGN expr] [scope]
-  [READONLY | RO]` (the type is accepted and ignored; each name gets the INIT expression; `scope` is `EXPORTED`,
-  `VISIBLE`, `PROTECTED` or `HIDDEN`); `CLASSVAR`, `CLASSDATA`, `CLASS VAR` or `CLASS DATA`, as `VAR` with `SHARED` too,
-  declare class variables; `FRIEND CLASS name, ...` and `FRIEND FUNCTION name, ...`; `DESTRUCTOR name[()]` (one per
-  class, implemented as a procedure: `METHOD PROCEDURE name CLASS ...` or `DESTRUCTOR name CLASS ...`; a method
-  implementation may also be written `METHOD FUNCTION name`); `METHOD name[( params )] [AS type] [OPERATOR "op"]
-  [CONSTRUCTOR] [INLINE expr, ...] [scope]` (with `OPERATOR`, the method answers the operator); `OPERATOR "op" [UNARY]
-  [ARG | ARGS name, ...] INLINE expr, ... [scope]` (`"-" UNARY` is unary minus; the operators a class may overload are
-  listed in [runtime.md](runtime.md#classes), `Parser::operatorMessage`); `ACCESS name [INLINE expr, ...]` and `ASSIGN
-  name( param ) [INLINE expr, ...]` (an `INLINE` list is evaluated in order and returns its last value). A method is
-  implemented with `METHOD name[( params )] [CLASS name]` (also `ACCESS name CLASS ...` and `ASSIGN name( param ) CLASS
-  ...`; without `CLASS`, the last class declared before it in the preprocessed source, an included file's too) and a
-  body, like a function. In a method, `Self` is the object, `::name` is `Self:name`, and `Super:name` (when no variable
-  named `Super` is declared there) or `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super`
-  are ordinary names. `SCALAR CLASS type` declares the class of a built-in type's values (its name is the type's as
+- Classes ([runtime.md](runtime.md#classes)), at file level: `[STATIC | CREATE | SCALAR | ABSTRACT | FINAL ...] CLASS
+  name [INHERIT | FROM parent, ...] [IMPLEMENTS interface, ...]` (an `ABSTRACT CLASS` makes no objects, a `FINAL CLASS`
+  has no subclasses, not both), then members, then `ENDCLASS` (or `END [CLASS]`); an interface is `INTERFACE name
+  [INHERIT | FROM interface, ...]`, then `METHOD name[( params )]`, `ACCESS name`, `ASSIGN name( param )` and `VAR name,
+  ...` (the messages `NAME` and `_NAME`) declarations without bodies, then `ENDINTERFACE` (or `END [INTERFACE]`). A
+  class's members: `EXPORTED:` (`EXPORT:`, `VISIBLE:`), `PROTECTED:` and `HIDDEN:` set the scope of the members after
+  them; `VAR | DATA name, ... [AS | TYPE type] [INIT | ASSIGN expr] [scope] [READONLY | RO]` (the type is accepted and
+  ignored; each name gets the INIT expression; `scope` is `EXPORTED`, `VISIBLE`, `PROTECTED` or `HIDDEN`); `CLASSVAR`,
+  `CLASSDATA`, `CLASS VAR` or `CLASS DATA`, as `VAR` with `SHARED` too, declare class variables; `FRIEND CLASS name,
+  ...` and `FRIEND FUNCTION name, ...`; `DESTRUCTOR name[()]` (one per class, implemented as a procedure: `METHOD
+  PROCEDURE name CLASS ...` or `DESTRUCTOR name CLASS ...`; a method implementation may also be written `METHOD FUNCTION
+  name`); `METHOD name[( params )] [AS type] [OPERATOR "op"] [CONSTRUCTOR] [ABSTRACT | FINAL] [INLINE expr, ...]
+  [scope]` (with `OPERATOR`, the method answers the operator; an `ABSTRACT` method has no body and makes its class an
+  `ABSTRACT CLASS`, a `FINAL` one no subclass declares again); `OPERATOR "op" [UNARY] [ARG | ARGS name, ...] INLINE
+  expr, ... [scope]` (`"-" UNARY` is unary minus; the operators a class may overload are listed in
+  [runtime.md](runtime.md#classes), `Parser::operatorMessage`); `ACCESS name [INLINE expr, ...]` and `ASSIGN name( param
+  ) [INLINE expr, ...]` (an `INLINE` list is evaluated in order and returns its last value). A method is implemented
+  with `METHOD name[( params )] [CLASS name]` (also `ACCESS name CLASS ...` and `ASSIGN name( param ) CLASS ...`;
+  without `CLASS`, the last class declared before it in the preprocessed source, an included file's too) and a body,
+  like a function. In a method, `Self` is the object, `::name` is `Self:name`, and `Super:name` (when no variable named
+  `Super` is declared there) or `::Super:name` the member of its class's ancestors. Elsewhere `Self` and `Super` are
+  ordinary names. `SCALAR CLASS type` declares the class of a built-in type's values (its name is the type's as
   `ClassName()` gives it; no class function, no instance variables, nor inherited ones from a class of the module: an
   error; from a class of another module, the runtime's `BASE/3005` at its first message).
 - `DO name [WITH args]`; empty arguments pass `NIL`. A variable written alone is passed by reference, as in Clipper;
@@ -773,9 +778,13 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   outer loops' counters take registers there).
 - Classes ([runtime.md](runtime.md#classes)): a module emits an `xb_class_def` per class (`xb.module.classes`: its name,
   its parents (each one's name, and its entry when the module has the class), its variables with their flags, its
-  methods with their functions and flags, its INIT function, `XB_CLASS_STATIC` for a `STATIC CLASS`) and registers them
-  (`xb_classes_register`) with the module, with the class variables, the friends' names and the destructor. Every `send`
-  calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed `xb_send_cache`:
+  methods with their functions and flags, its INIT function, `XB_CLASS_STATIC` for a `STATIC CLASS`,
+  `XB_CLASS_ABSTRACT`, `XB_CLASS_FINAL`, its interfaces) and an interface as one of `XB_CLASS_INTERFACE` (its methods
+  the messages it requires, with no function) and registers them (`xb_classes_register`) with the module, with the class
+  variables, the friends' names and the destructor; the driver checks each class whose line the module holds whole
+  against the rules of `ABSTRACT`, `FINAL` and interfaces (`ClassModel::check`, [runtime.md](runtime.md#classes)), and
+  `resolve-sends` speculates on the classes that make objects of their own only (not `ABSTRACT` ones nor interfaces).
+  Every `send` calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed `xb_send_cache`:
   `XB_SEND_CACHE_WORDS` pointer-sized words) and, from a method or one of its codeblocks (`classIndex`, `superSend`),
   its class's descriptor (else a null one). Before that call, a send without `...` performs the cache's newest way in
   place when it holds the class of the object sent to (`sendInPlace`, as `perform` does on a hit): the object as itself

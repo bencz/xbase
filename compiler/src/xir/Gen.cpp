@@ -52,15 +52,22 @@ void Generator::declareClasses(const xb::Module &ast) {
     cls.name = c->name;
     cls.isStatic = c->isStatic;
     cls.scalar = c->scalar;
+    cls.kind = (c->isAbstract ? XB_CLASS_ABSTRACT : 0u) | (c->isFinal ? XB_CLASS_FINAL : 0u) |
+               (c->isInterface ? XB_CLASS_INTERFACE : 0u);
     for (const std::string &p : c->parents) {
       auto it = local.find(p);
       cls.parents.push_back({p, it == local.end() ? -1 : it->second});
+    }
+    for (const std::string &p : c->interfaces) {
+      auto it = local.find(p);
+      cls.interfaces.push_back({p, it == local.end() ? -1 : it->second});
     }
     for (const ClassVarDecl &v : c->vars) cls.vars.push_back({v.name, v.flags});
     for (const ClassVarDecl &v : c->classVars) cls.classVars.push_back({v.name, v.flags});
     cls.friendClasses = c->friendClasses;
     cls.friendFunctions = c->friendFunctions;
     for (const ClassMethodDecl &m : c->methods) {
+      if (c->isInterface) cls.methods.push_back({m.message(), nullptr, m.flags});
       if (!m.impl) continue;
       if (m.destructor) cls.destructor = funcs_.at(m.impl->name);
       else cls.methods.push_back({m.message(), funcs_.at(m.impl->name), m.flags});

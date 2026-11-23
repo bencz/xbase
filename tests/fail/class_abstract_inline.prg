@@ -1,0 +1,5 @@
+// An ABSTRACT method has no body.
+
+ABSTRACT CLASS TFoo
+   METHOD Area() ABSTRACT INLINE 1
+ENDCLASS

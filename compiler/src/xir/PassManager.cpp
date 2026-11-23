@@ -74,7 +74,8 @@ std::vector<Function *> calleesFirst(const Module &m) {
   // The classes' methods first: a send resolved to one of them then calls (or inlines) it optimized.
   std::vector<Function *> roots;
   for (const Module::Class &c : m.classes)
-    for (const Module::Class::Method &mt : c.methods) roots.push_back(mt.fn);
+    for (const Module::Class::Method &mt : c.methods)
+      if (mt.fn) roots.push_back(mt.fn);
   for (auto &f : m.functions) roots.push_back(f.get());
   for (Function *root : roots) {
     if (!seen.insert(root).second) continue;

@@ -13,6 +13,7 @@
 #include "sema/Calls.h"
 #include "sema/Classes.h"
 #include "sema/Sema.h"
+#include "xir/ClassModel.h"
 #include "xir/Gen.h"
 #include "xir/PassManager.h"
 #include "xir/Printer.h"
@@ -718,6 +719,12 @@ static int compile(int argc, char **argv) {
     }
     if (!astDump.empty()) astText += xb::printAst(*s.ast);
     s.xir = xb::xir::Generator(runtimeLibrary).run(*s.ast);
+    { // FINAL, ABSTRACT and IMPLEMENTS on the hierarchies the module knows whole (the runtime checks the rest)
+      xb::xir::ClassModel model(*s.xir);
+      for (size_t k = 0; k < s.xir->classes.size(); ++k)
+        if (std::string why = model.check((int32_t)k); !why.empty()) diag.error(s.ast->classes[k]->loc, why);
+      if (diag.errorCount()) return 1;
+    }
     if (runtimeLibrary) { // its stamp: a program that ran a body of it in place requires the same text
       auto text = llvm::MemoryBuffer::getFile(s.path, /*IsText=*/false, /*RequiresNullTerminator=*/false);
       if (!text) {

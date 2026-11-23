@@ -389,7 +389,7 @@ void CodeGen::genClasses(const xir::Module &m) {
   auto *varTy = StructType::get(ctx_, {ptrTy_, i32_});
   auto *methodTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_});
   auto *defTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_,
-                                       ptrTy_, i32_, ptrTy_, ptrTy_, i32_, ptrTy_});
+                                       ptrTy_, i32_, ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
   auto *ty = ArrayType::get(defTy, m.classes.size());
   classTable_ = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, nullptr, "xb.module.classes");
   auto name = [&](const std::string &s) { return b_.CreateGlobalString(s, ".xb.classname", 0, &mod_); };
@@ -401,23 +401,24 @@ void CodeGen::genClasses(const xir::Module &m) {
   };
   std::vector<Constant *> defs;
   for (const xir::Module::Class &c : m.classes) {
-    std::vector<Constant *> parents, vars, classVars, methods, friendClasses, friendFunctions;
-    for (const auto &p : c.parents) {
-      Constant *def = p.local >= 0 ? classDef(p.local) : ConstantPointerNull::get(ptrTy_);
-      parents.push_back(ConstantStruct::get(parentTy, {name(p.name), def}));
-    }
+    std::vector<Constant *> parents, interfaces, vars, classVars, methods, friendClasses, friendFunctions;
+    for (const auto *list : {&c.parents, &c.interfaces})
+      for (const auto &p : *list) {
+        Constant *def = p.local >= 0 ? classDef(p.local) : ConstantPointerNull::get(ptrTy_);
+        (list == &c.parents ? parents : interfaces).push_back(ConstantStruct::get(parentTy, {name(p.name), def}));
+      }
     for (const auto &v : c.vars)
       vars.push_back(ConstantStruct::get(varTy, {name(v.name), ConstantInt::get(i32_, v.flags)}));
     for (const auto &v : c.classVars)
       classVars.push_back(ConstantStruct::get(varTy, {name(v.name), ConstantInt::get(i32_, v.flags)}));
     for (const std::string &f : c.friendClasses) friendClasses.push_back(name(f));
     for (const std::string &f : c.friendFunctions) friendFunctions.push_back(name(f));
-    for (const auto &mt : c.methods)
-      methods.push_back(ConstantStruct::get(
-          methodTy, {name(mt.message), functions_.at(mt.fn), ConstantInt::get(i32_, mt.flags)}));
     auto fnOrNull = [&](xir::Function *f) -> Constant * {
       return f ? static_cast<Constant *>(functions_.at(f)) : ConstantPointerNull::get(ptrTy_);
     };
+    for (const auto &mt : c.methods) // an interface's: no function
+      methods.push_back(
+          ConstantStruct::get(methodTy, {name(mt.message), fnOrNull(mt.fn), ConstantInt::get(i32_, mt.flags)}));
     defs.push_back(ConstantStruct::get(
         defTy, {name(c.name), table(parentTy, parents, "xb.class.parents"), ConstantInt::get(i32_, parents.size()),
                 table(varTy, vars, "xb.class.vars"), ConstantInt::get(i32_, vars.size()),
@@ -425,9 +426,10 @@ void CodeGen::genClasses(const xir::Module &m) {
                 table(varTy, classVars, "xb.class.classvars"), ConstantInt::get(i32_, classVars.size()),
                 table(ptrTy_, friendClasses, "xb.class.friends"), ConstantInt::get(i32_, friendClasses.size()),
                 table(ptrTy_, friendFunctions, "xb.class.friends"), ConstantInt::get(i32_, friendFunctions.size()),
-                fnOrNull(c.init), fnOrNull(c.destructor),
+                fnOrNull(c.init), fnOrNull(c.destructor), table(parentTy, interfaces, "xb.class.interfaces"),
+                ConstantInt::get(i32_, interfaces.size()),
                 ConstantInt::get(i32_, (c.isStatic ? XB_CLASS_STATIC : 0u) | (c.scalar ? XB_CLASS_SCALAR : 0u) |
-                                            (runtimeLibrary_ ? XB_CLASS_RUNTIME : 0u)),
+                                            (runtimeLibrary_ ? XB_CLASS_RUNTIME : 0u) | c.kind),
                 ConstantPointerNull::get(ptrTy_)}));
   }
   classTable_->setInitializer(ConstantArray::get(ty, defs));

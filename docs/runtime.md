@@ -693,6 +693,26 @@ first time it is used (its class function, or a subclass):
   reference keeps one, the first ancestor's). A class met again while its line is built, with no INIT values
   evaluated meanwhile, inherits from itself (`BASE/0` `Class inherits from itself`, the class's name as the operation;
   the compiler reports it within a module).
+- `ABSTRACT`, `FINAL` and interfaces (`xb_class_check`, one of those shared rules): when its tables are made, a class
+  is checked against them, and one that breaks a rule makes no objects (its class function gives `BASE/0` with the
+  rule as the description and the class's name as the operation; an `ABSTRACT CLASS` the same, `an ABSTRACT class
+  makes no objects`; a `SCALAR CLASS` that breaks one, its values' messages): a class of its line after it that is
+  `FINAL`, or an interface (`XB_CLASS_INTERFACE`: a def whose methods, without functions, are the messages it
+  requires, never tabled, and whose parents are the interfaces it inherits); a `FINAL` method (`XB_MEMBER_FINAL`) a
+  class before it in the line declares again (a method, a variable or a class variable answering its message); and,
+  for a class that is neither `ABSTRACT` nor `SCALAR`, a message its line answers with an `ABSTRACT` method
+  (`XB_MEMBER_ABSTRACT`) or one an interface of a class of its line requires (with those that interface inherits, each
+  once: interfaces may inherit from one another) that its line answers with nothing or an `ABSTRACT` method (`New`,
+  `Init` and `ClassName`, which the runtime answers by itself, count as answered: `xb_member_by_runtime`); an
+  interface not registered under the name it `IMPLEMENTS`, or one inheriting from a class, is the error too. A class
+  whose line holds a class that breaks one breaks it as well (a `FINAL` method declared again by a parent after the
+  `FINAL` one's class, which the class's own line orders after it). The compiler applies the same check to the classes
+  whose line and interfaces its module holds whole, as errors (`ClassModel::check`); the rest the runtime finds. An
+  `ABSTRACT` method's function raises `ABSTRACT method called` (`__AbstractMethod`, `BASE/0`, `CLASS:MESSAGE` the
+  operation): reached through `Super:` only, since an object of a class answering with one is never made.
+  `ObjImplements( o, cInterface )` tells whether a class of the object's line implements the interface, or one
+  inheriting it. The runtime declares `IEnumerable` (`GetEnumerator`), `IEnumerator` (`MoveNext`, `Current`, `Reset`)
+  and `IDisposable` (`Dispose`): what `FOR EACH` and `USING` send, for classes to name with `IMPLEMENTS`.
 - The messages it answers are tabled: for each class of the line in order, its methods, then its variables (`NAME`
   reads, `_NAME` assigns), then its class variables; the first class that has a message takes it. These rules (the line,
   the table's order, what a message from a method or `Super:` reaches, the scope a sender needs) are one implementation,

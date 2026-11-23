@@ -451,12 +451,12 @@ static inline xb_dd xb_math_exp_fast_parts(double x, int *q) {
 /* 2^-51, the factor of |x| (Exp) and |x - 1| (Log) in the first steps' bounds near the table's row of 1. */
 #define XB_MATH_NEAR_ROW1_ERR 4.440892098500626e-16
 
-/* The first step's bound for |x| below 0.005, where k is 0: r is x exactly (a = x, e = 0) and the table's value is
- * 1, so v = 1 + (x + t) with only x + t rounded (half a unit of it: below 1.003 2^-53 |x|, t below 0.51 x^2), t's own rounding (below 2^-51
- * of t) and the terms left out (below |x|^8 / 8!, 2^-67 of |x|): all below 2^-52 |x| of v (v above 0.99), which
- * XB_MATH_NEAR_ROW1_ERR bounds twice over. Far tighter than 2^-58 for small x, whose e^x lies near 1, where a value
- * near a rounding boundary would otherwise take the full form at every call; tried only when 2^-58 cannot settle it
- * (no cost on the usual path). */
+/* The first step's bound for |x| below 0.005, where k is 0: r is x exactly (a = x, e = 0) and the table's value is 1,
+ * so v = 1 + (x + t) with only x + t rounded (half a unit of it: below 1.003 2^-53 |x|, t below 0.51 x^2), t's own
+ * rounding (below 2^-51 of t) and the terms left out (below |x|^8 / 8!, 2^-67 of |x|): all below 2^-52 |x| of v (v
+ * above 0.99), which XB_MATH_NEAR_ROW1_ERR bounds twice over. Far tighter than 2^-58 for small x, whose e^x lies near
+ * 1, where a value near a rounding boundary would otherwise take the full form at every call; tried only when 2^-58
+ * cannot settle it (no cost on the usual path). */
 #define XB_MATH_EXP_ROW1 0.005
 static inline int xb_math_exp_near_row1(double x) { return fabs(x) < XB_MATH_EXP_ROW1; }
 static inline double xb_math_exp_near_row1_err(double x) { return fabs(x) * XB_MATH_NEAR_ROW1_ERR; }

@@ -376,11 +376,12 @@ public:
     std::string name;
     bool isStatic = false;                          // STATIC CLASS: not registered by name
     bool scalar = false;                            // SCALAR CLASS: the class of a type's values
+    uint32_t kind = 0;                              // XB_CLASS_ABSTRACT, XB_CLASS_FINAL, XB_CLASS_INTERFACE
     struct Parent {
       std::string name;
       int32_t local = -1;                           // the module's class of the name, or -1: found by name
     };
-    std::vector<Parent> parents;
+    std::vector<Parent> parents, interfaces;        // INHERIT, IMPLEMENTS
     struct Variable {
       std::string name;
       uint32_t flags;
@@ -389,7 +390,7 @@ public:
     std::vector<std::string> friendClasses, friendFunctions;
     struct Method {
       std::string message;
-      Function *fn;
+      Function *fn;                                 // null: a message an interface requires
       uint32_t flags;
     };
     std::vector<Method> methods;

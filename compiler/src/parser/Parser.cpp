@@ -164,11 +164,18 @@ bool Parser::atAsyncStart(size_t at) const {
   return isKw(n, "FUNCTION") || isKw(n, "PROCEDURE") || isKw(n, "METHOD");
 }
 
-// CLASS name, CREATE CLASS name, STATIC CLASS name or SCALAR CLASS name.
+// CLASS name, preceded by CREATE, STATIC, SCALAR, ABSTRACT or FINAL (two of them: STATIC ABSTRACT CLASS name), or
+// INTERFACE name.
 bool Parser::atClassStart() const {
-  if (atStmtKw("CLASS")) return ahead().kind == Tok::Ident;
-  if (!atStmtKw("CREATE") && !atStmtKw("STATIC") && !atStmtKw("SCALAR")) return false;
-  return ahead().kind == Tok::Ident && isKw(ahead(), "CLASS") && ahead(2).kind == Tok::Ident;
+  if (atStmtKw("CLASS") || atStmtKw("INTERFACE")) return ahead().kind == Tok::Ident;
+  auto prefix = [&](const Token &t) {
+    return isKw(t, "CREATE") || isKw(t, "STATIC") || isKw(t, "SCALAR") || isKw(t, "ABSTRACT") || isKw(t, "FINAL");
+  };
+  if (!atStmtKw("CREATE") && !atStmtKw("STATIC") && !atStmtKw("SCALAR") && !atStmtKw("ABSTRACT") && !atStmtKw("FINAL"))
+    return false;
+  size_t k = 1;
+  if (prefix(ahead(k))) ++k;
+  return ahead(k).kind == Tok::Ident && isKw(ahead(k), "CLASS") && ahead(k + 1).kind == Tok::Ident;
 }
 
 // METHOD, ACCESS or ASSIGN name ...: a method's implementation, outside a CLASS.
@@ -367,45 +374,73 @@ static int scopeWord(const std::string &w, bool label) {
   return -1;
 }
 
-// [STATIC | CREATE] CLASS name [INHERIT | FROM parent, ...], its members, then ENDCLASS (or END [CLASS]):
+// [STATIC | CREATE | SCALAR | ABSTRACT | FINAL ...] CLASS name [INHERIT | FROM parent, ...] [IMPLEMENTS iface, ...],
+// its members, then ENDCLASS (or END [CLASS]); INTERFACE name [INHERIT | FROM interface, ...], its METHOD, ACCESS,
+// ASSIGN and VAR declarations (messages, no bodies), then ENDINTERFACE (or END [INTERFACE]):
 //   EXPORTED: | EXPORT: | VISIBLE: | PROTECTED: | HIDDEN:    the scope of the members that follow
 //   VAR | DATA name, ... [AS | TYPE type] [INIT | ASSIGN expr] [scope] [READONLY | RO]
 //   CLASSVAR | CLASSDATA | CLASS VAR | CLASS DATA name, ... (as VAR) [SHARED]
 //   FRIEND CLASS name, ... | FRIEND FUNCTION name, ...
 //   DESTRUCTOR name[()]
-//   METHOD name[( params )] [AS type] [CONSTRUCTOR] [INLINE expr, ...] [scope]
+//   METHOD name[( params )] [AS type] [CONSTRUCTOR] [ABSTRACT | FINAL] [INLINE expr, ...] [scope]
 //   ACCESS name [INLINE expr, ...] [scope], ASSIGN name( param ) [INLINE expr, ...] [scope]
 std::unique_ptr<ClassDecl> Parser::parseClass() {
   auto cls = std::make_unique<ClassDecl>();
   cls->loc = cur().loc;
-  if (atKw("STATIC")) cls->isStatic = true;
-  if (atKw("SCALAR")) cls->scalar = true;
-  if (!atKw("CLASS")) advance(); // STATIC, CREATE or SCALAR
+  while (!atKw("CLASS") && !atKw("INTERFACE")) { // the prefixes
+    if (atKw("STATIC")) cls->isStatic = true;
+    if (atKw("SCALAR")) cls->scalar = true;
+    if (atKw("ABSTRACT")) cls->isAbstract = true;
+    if (atKw("FINAL")) cls->isFinal = true;
+    advance();
+  }
+  cls->isInterface = atKw("INTERFACE");
+  const char *what = cls->isInterface ? "INTERFACE" : "CLASS";
   advance();
   cls->name = cur().upper;
-  lastClass_ = cls->name;
+  if (!cls->isInterface) lastClass_ = cls->name;
   advance();
-  if (at(Tok::Ident) && (isKw(cur(), "INHERIT") || isKw(cur(), "FROM"))) {
+  auto nameList = [&](std::vector<std::string> &out, const char *expected) {
     advance();
     do {
       if (!at(Tok::Ident)) {
-        expect(Tok::Ident, "a parent class");
+        expect(Tok::Ident, expected);
         break;
       }
-      cls->parents.push_back(cur().upper);
+      out.push_back(cur().upper);
       advance();
     } while (accept(Tok::Comma));
+  };
+  for (bool more = true; more;) { // INHERIT and IMPLEMENTS, in either order
+    more = false;
+    if (at(Tok::Ident) && (isKw(cur(), "INHERIT") || isKw(cur(), "FROM")) && cls->parents.empty()) {
+      nameList(cls->parents, cls->isInterface ? "an interface" : "a parent class");
+      more = true;
+    }
+    if (!cls->isInterface && at(Tok::Ident) && isKw(cur(), "IMPLEMENTS") && cls->interfaces.empty()) {
+      nameList(cls->interfaces, "an interface");
+      more = true;
+    }
   }
   endOfStmt();
   uint32_t scope = XB_SCOPE_EXPORTED;
-  // Trailing scope words; READONLY for a variable, SHARED for a class variable.
+  // ABSTRACT and FINAL of a method, wherever they come among its trailing words.
+  auto modifiers = [&](uint32_t &flags) {
+    bool any = false;
+    for (; at(Tok::Ident) && (cur().upper == "ABSTRACT" || cur().upper == "FINAL"); advance(), any = true)
+      flags |= cur().upper == "ABSTRACT" ? XB_MEMBER_ABSTRACT : XB_MEMBER_FINAL;
+    return any;
+  };
+  // Trailing scope words; READONLY for a variable, SHARED for a class variable, ABSTRACT and FINAL for a method (kept
+  // with `flags`' own).
   auto memberScope = [&](uint32_t &flags, bool var, bool classVar) {
-    flags = scope;
+    flags = scope | (flags & (XB_MEMBER_ABSTRACT | XB_MEMBER_FINAL));
     while (at(Tok::Ident)) {
       int s = scopeWord(cur().upper, false);
       if (s >= 0) flags = (flags & ~XB_SCOPE_MASK) | (uint32_t)s;
       else if (var && (cur().upper == "READONLY" || cur().upper == "RO")) flags |= XB_MEMBER_READONLY;
       else if (classVar && cur().upper == "SHARED") flags |= XB_MEMBER_SHARED;
+      else if (!var && !classVar && modifiers(flags)) continue;
       else break;
       advance();
     }
@@ -419,10 +454,12 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
   while (true) {
     skipBlankStmts();
     if (at(Tok::Eof)) {
-      diag_.error(cls->loc, "CLASS " + cls->name + " is not closed by ENDCLASS");
+      diag_.error(cls->loc, std::string(what) + " " + cls->name + " is not closed by END" + what);
       break;
     }
-    if (atStmtKw("ENDCLASS") || atStmtKw("END")) { // END CLASS: std.ch's END rule leaves the END
+    // END CLASS and END INTERFACE: std.ch's END rule leaves the END
+    if ((!cls->isInterface && atStmtKw("ENDCLASS")) || (cls->isInterface && atStmtKw("ENDINTERFACE")) ||
+        atStmtKw("END")) {
       advance();
       endOfStmt();
       break;
@@ -437,7 +474,28 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
     }
     bool classVar = atStmtKw("CLASSVAR") || atStmtKw("CLASSDATA") ||
                     (atStmtKw("CLASS") && (isKw(ahead(), "VAR") || isKw(ahead(), "DATA")));
-    if (atStmtKw("VAR") || atStmtKw("DATA") || classVar) {
+    if (cls->isInterface && (atStmtKw("VAR") || atStmtKw("DATA"))) { // VAR name: the messages NAME and _NAME
+      advance();
+      do {
+        if (!at(Tok::Ident)) {
+          expect(Tok::Ident, "variable name");
+          break;
+        }
+        for (auto kind : {FuncDecl::Member::Access, FuncDecl::Member::Assign}) {
+          ClassMethodDecl m;
+          m.loc = cur().loc;
+          m.name = cur().upper;
+          m.kind = kind;
+          m.flags = XB_MEMBER_ABSTRACT;
+          cls->methods.push_back(std::move(m));
+        }
+        advance();
+      } while (accept(Tok::Comma));
+      asType();
+      endOfStmt();
+      continue;
+    }
+    if (!cls->isInterface && (atStmtKw("VAR") || atStmtKw("DATA") || classVar)) {
       if (atKw("CLASS")) advance();
       advance();
       std::vector<ClassVarDecl> &vars = classVar ? cls->classVars : cls->vars;
@@ -465,10 +523,17 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
         }
         pos_ = after;
       }
-      uint32_t flags;
+      uint32_t flags = 0;
       memberScope(flags, true, classVar);
       for (size_t k = first; k < vars.size(); ++k) vars[k].flags = flags;
       endOfStmt();
+      continue;
+    }
+    if (cls->isInterface && !atStmtKw("METHOD") && !atStmtKw("ACCESS") && !atStmtKw("ASSIGN")) {
+      diag_.error(loc, "expected a METHOD, ACCESS, ASSIGN or VAR declaration, or ENDINTERFACE, in INTERFACE " +
+                           cls->name);
+      skipToEndOfStmt();
+      accept(Tok::EndOfStmt);
       continue;
     }
     if (atStmtKw("DESTRUCTOR") && ahead().kind == Tok::Ident) { // DESTRUCTOR name[()]
@@ -517,11 +582,14 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
         m.op = operatorMessage();
       }
       if (at(Tok::Ident) && cur().upper == "CONSTRUCTOR") advance();
+      modifiers(m.flags);
       if (at(Tok::Ident) && cur().upper == "INLINE") {
         if (m.async) diag_.error(cur().loc, "an INLINE method cannot be ASYNC: its expression cannot AWAIT");
+        if (cls->isInterface) diag_.error(cur().loc, "an interface's method has no body: INLINE");
         parseInline(m);
       }
       memberScope(m.flags, false, false);
+      if (cls->isInterface) m.flags |= XB_MEMBER_ABSTRACT;
       cls->methods.push_back(std::move(m));
       endOfStmt();
       continue;

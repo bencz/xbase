@@ -1,0 +1,16 @@
+
+circle 3.14 .T. .T. .F.
+square 4.00 .T. .T. .F.
+inherited: drawing circle .T. .F. .T.
+final: id of circle pong labelled
+cycle: a b .T. .F. TNAMED final foo
+runtime interfaces:          6 .T. .T. .F. 321 disposed 
+error: an ABSTRACT class makes no objects TSHAPE
+error: ABSTRACT method called TSHAPE:AREA
+error: TSEALEDCHILD inherits from TSEALED, a FINAL class TSEALEDCHILD
+error: TLACKING does not implement the ABSTRACT method TOTHERBASE:NEED TLACKING
+error: TNOPING does not implement IOTHER:PING TNOPING
+error: TREFIX:FIXED overrides the FINAL method of TFINALMETHOD TREFIX
+error: TLACKING does not implement the ABSTRACT method TOTHERBASE:NEED TLACKING
+error: TFINC inherits from TFINB, which breaks a rule: TFINB:FOO overrides the FINAL method of TFINBASE TFINC
+error: DATE inherits from IOTHER, an interface (IMPLEMENTS names interfaces) DATE

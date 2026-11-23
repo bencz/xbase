@@ -15,6 +15,8 @@ ClassModel::ClassModel(const Module &m) : module_(m), classes_(m.classes.size())
     for (const auto &v : from.vars) c.vars.push_back({v.name.c_str(), v.flags});
     for (const auto &v : from.classVars) c.classVars.push_back({v.name.c_str(), v.flags});
     for (const auto &mt : from.methods) c.methods.push_back({mt.message.c_str(), nullptr, mt.flags});
+    for (const auto &p : from.interfaces)
+      c.interfaces.push_back({p.name.c_str(), p.local >= 0 ? &classes_[(size_t)p.local].def : nullptr});
     c.def.name = from.name.c_str();
     c.def.parents = c.parents.data();
     c.def.nparents = (uint32_t)c.parents.size();
@@ -24,6 +26,9 @@ ClassModel::ClassModel(const Module &m) : module_(m), classes_(m.classes.size())
     c.def.nmethods = (uint32_t)c.methods.size();
     c.def.classVars = c.classVars.data();
     c.def.nclassVars = (uint32_t)c.classVars.size();
+    c.def.interfaces = c.interfaces.data();
+    c.def.ninterfaces = (uint32_t)c.interfaces.size();
+    c.def.flags = from.kind | (from.scalar ? XB_CLASS_SCALAR : 0u);
   }
   std::vector<int32_t> visiting;
   for (size_t k = 0; k < classes_.size(); ++k) buildLine((int32_t)k, visiting);
@@ -56,6 +61,16 @@ void ClassModel::buildLine(int32_t k, std::vector<int32_t> &visiting) {
   visiting.pop_back();
   if (known) c.line = std::move(line);
   c.known = known;
+}
+
+std::string ClassModel::check(int32_t k) const {
+  const std::vector<const xb_class_def *> *l = line(k);
+  if (!l || (classes_[(size_t)k].def.flags & XB_CLASS_INTERFACE)) return "";
+  // The module's own interfaces have their defs already (Generator); another module's are the runtime's to check.
+  auto find = [](void *, const char *) -> const xb_class_def * { return nullptr; };
+  char why[512];
+  if (!xb_class_check(l->data(), (uint32_t)l->size(), find, nullptr, 0, why, sizeof why)) return "";
+  return why;
 }
 
 const std::vector<const xb_class_def *> *ClassModel::line(int32_t k) const {

@@ -6,8 +6,26 @@
 // sequence (Select, Where, Take, Skip, TakeWhile, SkipWhile, SelectMany, Concat, Zip, Distinct, Reverse) are
 // generators: they run as the result is gone through.
 
+// The interfaces of the enumeration model, as .NET's: what FOR EACH asks of a collection (GetEnumerator) and of an
+// object that is its own enumerator (MoveNext, Current and Reset, which FOR EACH sends first), and what USING asks of
+// the value it disposes of. A class says it answers them with IMPLEMENTS (checked as any interface); FOR EACH and
+// USING send the messages to whatever answers them.
+INTERFACE IEnumerable
+   METHOD GetEnumerator()
+ENDINTERFACE
+
+INTERFACE IEnumerator
+   METHOD MoveNext()
+   ACCESS Current
+   METHOD Reset()
+ENDINTERFACE
+
+INTERFACE IDisposable
+   METHOD Dispose()
+ENDINTERFACE
+
 // The methods of every collection. A class that inherits it only needs GetEnumerator() (a method with YIELD is
-// the simplest one).
+// the simplest one; IMPLEMENTS IEnumerable has that checked).
 CLASS Enumerable
    METHOD Select( bMap )
    METHOD Where( bTest )

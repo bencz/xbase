@@ -1,0 +1,1 @@
+interface ISHAPE inherits from TBASE, which is a class

@@ -20,6 +20,9 @@ public:
   ClassModel(const ClassModel &) = delete;
   ClassModel &operator=(const ClassModel &) = delete;
 
+  // The rule of FINAL, ABSTRACT or IMPLEMENTS class `k` breaks (xb_class_check, as the runtime applies it), as far as
+  // the module knows its line and interfaces: empty when none (or the line is not known).
+  std::string check(int32_t k) const;
   // The line of class `k` (the class, then its ancestors), or null when it is not known.
   const std::vector<const xb_class_def *> *line(int32_t k) const;
   // What `message` reaches in an object of class `k` (whose line is known), as `lookup` finds it, or nothing.
@@ -44,6 +47,7 @@ private:
     std::vector<xb_class_parent> parents;
     std::vector<xb_class_var_def> vars, classVars;
     std::vector<xb_class_method_def> methods;
+    std::vector<xb_class_parent> interfaces;
     std::vector<const xb_class_def *> line;
     bool known = false;
   };

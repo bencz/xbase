@@ -488,7 +488,7 @@ struct ClassMethodDecl {
   SourceLoc loc;
   std::string name;              // upper-cased, as declared
   FuncDecl::Member kind = FuncDecl::Member::Method;
-  uint32_t flags = 0;            // XB_SCOPE_*
+  uint32_t flags = 0;            // XB_SCOPE_*, XB_MEMBER_ABSTRACT, XB_MEMBER_FINAL
   std::vector<Param> params;
   bool variadic = false;
   std::string op;                // OPERATOR: its message (XB_OPERATOR_*), else empty
@@ -506,7 +506,11 @@ struct ClassDecl {
   std::string name;              // upper-cased
   bool isStatic = false;         // STATIC CLASS: its class function is the module's own
   bool scalar = false;           // SCALAR CLASS type: the class of the values of a type; no class function
+  bool isAbstract = false;       // ABSTRACT CLASS: it makes no objects (its subclasses do)
+  bool isFinal = false;          // FINAL CLASS: no class inherits from it
+  bool isInterface = false;      // INTERFACE: messages a class that IMPLEMENTS it answers; no class function
   std::vector<std::string> parents;
+  std::vector<std::string> interfaces; // IMPLEMENTS, upper-cased
   std::vector<ClassVarDecl> vars;
   std::vector<ClassVarDecl> classVars;   // CLASSVAR: one value for the class (and its subclasses when SHARED)
   std::vector<ClassMethodDecl> methods;
