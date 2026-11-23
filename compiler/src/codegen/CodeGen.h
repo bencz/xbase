@@ -227,6 +227,7 @@ private:
   void findFusedComparisons(const xir::BasicBlock &b);
   static llvm::CmpInst::Predicate llvmPredicate(xir::IntPred p);
   void emitBinary(const xir::Instruction &i);
+  void emitJoin(const xir::Instruction &i);
   void emitDivMod(const xir::Instruction &i, llvm::Value *a, llvm::Value *b, llvm::Value *d);
   llvm::Value *doubleRemainder(llvm::Value *x, llvm::Value *y);
   // trunc( v ) without a call: what llvm.trunc gives, which a target without the instruction (x86-64 before
@@ -374,6 +375,7 @@ private:
   llvm::FunctionCallee rtMacroPublic_, rtMacroText_;
   std::map<BinOp, llvm::FunctionCallee> rtBin_;
   llvm::FunctionCallee rtAddGrow_; // xb_op_add_grow: a Binary add that `grows`
+  llvm::FunctionCallee rtJoin_;    // xb_op_join: a JoinStep's slow path, a JoinEnd
 
   // state of the object (every module added)
   std::unordered_map<const xir::Function *, llvm::Function *> functions_;
@@ -445,6 +447,7 @@ private:
   std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
   std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
+  llvm::AllocaInst *joinPieces_ = nullptr; // the pieces' addresses of an xb_op_join call (emitJoin)
   llvm::AllocaInst *blockTemp_ = nullptr;  // a codeblock while its cells are made (a C root then)
   std::string moduleName_;                                                  // the module's (librarySymbol)
   std::string library_;                                                     // setLibrary's name ("": none)

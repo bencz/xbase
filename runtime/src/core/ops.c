@@ -50,6 +50,51 @@ void xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { ad
 
 void xb_op_add_grow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b) { add(ctx, r, a, b, 1); }
 
+/* The mark's whole header word, as compiled code tests it. */
+static int join_pending(const xb_item *it) {
+  return it->type == XB_T_NIL && it->width == XB_JOIN_PENDING && it->dec == 0;
+}
+
+/* The first `n` pieces, strings, as one new string. The allocation may move them: their items are read after it
+ * (their homes: frame slots and variables, which the collector updates, or constants). */
+static xb_str *join_strings(uint32_t n, const xb_item *const *pieces) {
+  uint64_t len = 0;
+  for (uint32_t k = 0; k < n; ++k) len += pieces[k]->v.s->len;
+  if (len <= 1) {
+    for (uint32_t k = 0; k < n; ++k)
+      if (pieces[k]->v.s->len) return xb_str_new(xb_str_data(pieces[k]->v.s), 1);
+    return xb_str_new("", 0);
+  }
+  xb_str *s = xb_str_alloc(len); /* past the longest string: out of memory, as a `+` of two of them */
+  char *to = xb_str_buffer(s);
+  for (uint32_t k = 0; k < n; ++k) {
+    const xb_str *p = pieces[k]->v.s;
+    xb_copy(to, xb_str_data(p), p->len);
+    to += p->len;
+  }
+  return s;
+}
+
+void xb_op_join(xb_ctx *ctx, xb_item *r, const xb_item *prev, uint32_t n, const xb_item *const *pieces,
+                uint32_t last) {
+  const xb_item *x = pieces[n - 1];
+  int pending = prev ? join_pending(prev) : pieces[0]->type == XB_T_STRING;
+  if (pending && x->type == XB_T_STRING) {
+    if (last) xb_set_str(r, join_strings(n, pieces));
+    else xb_put(r, xb_header_word(XB_T_NIL, XB_JOIN_PENDING, 0), 0);
+    return;
+  }
+  if (!pending || n == 2) { /* the sum so far is a value (an operand, or what a `+` gave) */
+    xb_op_add(ctx, r, pending || !prev ? pieces[0] : prev, x);
+    return;
+  }
+  xb_item sum;
+  xb_set_str(&sum, join_strings(n - 1, pieces));
+  xb_gc_root_push(ctx, &sum);
+  xb_op_add(ctx, r, &sum, x);
+  xb_gc_root_pop(ctx, 1);
+}
+
 void xb_op_append(xb_ctx *ctx, xb_item *var, const xb_item *b) {
   if (var->type != XB_T_STRING || b->type != XB_T_STRING) {
     if (var->type == XB_T_STRING) xb_str_share(var->v.s); /* the error's arguments see it */

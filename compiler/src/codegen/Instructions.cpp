@@ -355,6 +355,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::Binary: emitBinary(i); break;
+  case Op::JoinStep: case Op::JoinEnd: emitJoin(i); break;
   case Op::Truth: {
     auto fused = fusedTruth_.find(&i);
     if (fused != fusedTruth_.end()) {

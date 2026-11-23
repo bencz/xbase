@@ -211,6 +211,25 @@ private:
       if (i.index > 1) fail("macro send neither reads nor assigns");
       break;
     case Op::ArrayLit: allItems(i); break;
+    case Op::JoinStep: case Op::JoinEnd: // the first step: two pieces; another: the step before (or a parameter a typed
+                                         // continuation passes it through) and three pieces or more
+      allItems(i);
+      if (i.operands().size() < (i.op == Op::JoinStep ? 2u : 4u) || i.operands().size() == 3)
+        fail(std::string(opName(i.op)) + " of too few pieces");
+      else if (i.operands().size() > kMaxJoinPieces + 1)
+        fail(std::string(opName(i.op)) + " of too many pieces");
+      else if (i.operands().size() > 2) {
+        const Value *before = i.operand(0);
+        const Instruction *step = asInstruction(before, Op::JoinStep);
+        if (!step && before->kind() != Value::Kind::Param) fail(std::string(opName(i.op)) + " after no step");
+        size_t first = step && step->operands().size() > 2 ? 1 : 0; // where the step before's pieces begin
+        if (step && step->operands().size() - first != i.operands().size() - 2)
+          fail(std::string(opName(i.op)) + " not one piece past the step before");
+        for (size_t k = first; step && k < step->operands().size(); ++k)
+          if (step->operand(k) != i.operand(k - first + 1))
+            fail(std::string(opName(i.op)) + " of pieces other than the step before's");
+      }
+      break;
     case Op::ClassNew: expect(i, 0, {}); break;
     case Op::ObjectGet: expect(i, 1, {Type::Item}); break;
     case Op::ObjectSet: expect(i, 2, {Type::Item, Type::Item}); break;

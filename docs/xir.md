@@ -311,6 +311,21 @@ result. Implemented (`xir/passes/`):
 - `unshare-variables`, after it: a frame variable (not a parameter) that nothing captures or passes by reference any
   more (the block that did is gone: inlined, or dead code) loses its cell (`shared`); its accesses become direct and
   their barriers go, so `promote-variables` takes it in the next round.
+- `join-strings`, once after the others, before `typed-continuations` (whose checks would split the chains): `a + b +
+  c + ...`, three pieces or more, each sum used only as the left operand of the next `+` (no `add.one` nor
+  `add.grow`), whose pieces may all be strings (their types include it) and one of which is a string for sure, and
+  whose sum no `append` appends (`split-appends` appends those pieces without a sum). Each `+` becomes a join in its
+  own place, so the pieces are computed, and a failing `+` fails, in the order they were: the first `join.step` takes
+  pieces 0 and 1, each later one the step before and pieces 0 to k, the last `+` is `join.end` of the step before and
+  every piece (a piece that is the sum of another chain is that chain's `join.end`). A join holds at most
+  `kMaxJoinPieces` (16) pieces: a longer chain is joined in parts, each part's sum the first piece of the next, so its
+  operands stay linear in its length. `join.end`'s own types are those of the `+`s one after the other (a substituted
+  sum is what its check finds). Code generation tests inline that the step before is the pending mark (the first: that
+  piece 0 is a string) and that its piece is a string, then gives the mark (`XB_JOIN_PENDING`: no string made); else,
+  and for `join.end`, it calls `xb_op_join` with the pieces' addresses (one array of the function, filled before each
+  call), which joins the strings in one allocation or makes the `+` of the sum so far and the piece
+  ([runtime.md](runtime.md#values)). A chain of seven short strings costs one allocation, not six (string_concatenation:
+  half the time).
 - `typed-continuations`, once after the others (then `simplify-cfg` and `remove-dead-code` again): an operation in a
   loop whose error may substitute its result, whose own types hold no heap reference (numbers, logicals, dates) or are a
   single type (a string concatenation: a constant tag), and that another operation computes with (an index too) or a
@@ -522,7 +537,8 @@ Phase 1 replaced the code generator without changing behavior or speed; the late
   `binary add` or `sub` of 1 marked `byOne`, printed `add.one`: the same fast paths, and an error that is theirs,
   `xb_op_inc`/`xb_op_dec`; the adds of `x += y`, and of `x := x + y + ...` written out on the same variable, element or
   instance variable, are marked `grows`, printed `add.grow`: the same fast paths, and `xb_op_add_grow`, whose long
-  string results are views that later appends grow in place, see [runtime.md](runtime.md#values)), memory variables by
+  string results are views that later appends grow in place, see [runtime.md](runtime.md#values); `join.step` and
+  `join.end` are the `+`s of a chain that `join-strings` joins), memory variables by
   name (`mv.get`, `mv.set`, `mv.ref`, `mv.private`, `mv.public`, `mv.param`; read and written as the heap is, since any
   call may create, change or end one; `mv.field` reads an undeclared name, a field of the current work area first),
   fields of work areas (`field.get` and `field.set`, by name, with the alias's name in the instruction or its item as

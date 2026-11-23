@@ -47,6 +47,7 @@ constexpr unsigned kMaxRounds = 8;
 // inlined elsewhere is copied before): typed continuations copy the function,
 // and the cleanup passes tidy what the copy joined.
 constexpr Pass kFinal[] = {
+    {"join-strings", onFunction<joinStrings>}, // before typed-continuations, whose checks split the chains
     {"typed-continuations", onFunction<typedContinuations>},
     {"split-appends", onFunction<splitAppends>},  // after the checks, which tell the pieces' types
     {"peel-for-types", onFunction<peelForTypes>}, // after the checks, which narrow what the loops carry

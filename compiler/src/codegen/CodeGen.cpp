@@ -212,6 +212,7 @@ void CodeGen::initTypes() {
   };
   for (auto &[op, name] : bins) rtBin_[op] = rt(name, voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtAddGrow_ = rt("xb_op_add_grow", voidTy, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
+  rtJoin_ = rt("xb_op_join", voidTy, {ptrTy_, ptrTy_, ptrTy_, i32_, ptrTy_, i32_});
 }
 
 // Some ABIs (s390x, PowerPC 64, RISC-V, LoongArch, ...) require 32-bit
@@ -604,6 +605,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   localItems_.clear();
   heapItems_.clear();
   scratch_.clear();
+  joinPieces_ = nullptr;
   blockTemp_ = nullptr;
 
   BasicBlock *entry = BasicBlock::Create(ctx_, "entry", fn_);

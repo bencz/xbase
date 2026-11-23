@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 64u
+#define XB_ABI_VERSION 65u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -398,6 +398,14 @@ void     xb_op_add(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
  * except that a long string result is a view with room to grow (xb_str_add, types/types.h): such appends copy O(n)
  * bytes in all, not O(n^2). xb_op_add gives a string of the exact size. */
 void     xb_op_add_grow(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
+/* A step of a chain of `+` (a + b + c ...: the compiler's join-strings), each in the place of its `+`: `pieces` are the
+ * chain's first n operands, `prev` the step before (NULL for the first: pieces 0 and 1). While the pieces are strings
+ * a step gives the pending mark (a NIL of width XB_JOIN_PENDING: no string made) and the `last` one the sum, one new
+ * string; a step whose piece is no string is the `+` of the sum so far and that piece (xb_op_add, its error included),
+ * and so is every step after it. The mark is only ever a step's operand. */
+#define XB_JOIN_PENDING 0xFFFFu
+void     xb_op_join(xb_ctx *ctx, xb_item *r, const xb_item *prev, uint32_t n, const xb_item *const *pieces,
+                    uint32_t last);
 void     xb_op_sub(xb_ctx *ctx, xb_item *r, const xb_item *a, const xb_item *b);
 /* ++ and -- (also the step of a FOR without STEP): a + 1 and a - 1 for a
  * number or a date; anything else is their own argument error (1086, 1087),

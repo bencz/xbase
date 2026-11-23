@@ -168,6 +168,50 @@ static Value *doubleCompare(IRBuilderBase &b, xir::IntPred pred, Value *x, Value
   return nullptr;
 }
 
+// A step of a chain of `+` (join-strings): inline, the pending mark while its pieces are strings (their types tested,
+// unless known); else, and for the chain's last step, xb_op_join with the pieces' addresses (their homes: frame slots
+// the collector updates, constants, a variable's item), in one array of the function (joinPieces), filled before
+// each call.
+void CodeGen::emitJoin(const xir::Instruction &i) {
+  const auto &ops = i.operands();
+  bool end = i.op == xir::Op::JoinEnd, first = ops.size() == 2;
+  size_t from = first ? 0 : 1;
+  auto n = static_cast<uint32_t>(ops.size() - from);
+  Value *d = dest(i);
+  Constant *mark = headerWord(XB_T_NIL, XB_JOIN_PENDING, 0);
+  BasicBlock *done = nullptr;
+  if (!end) {
+    auto isString = [&](const xir::Value *v) -> Value * {
+      if (plan_->types().of(v) == xir::typeBit(XB_T_STRING)) return b_.getTrue();
+      return b_.CreateICmpEQ(typeOf(v, addr(v)), ConstantInt::get(i32_, XB_T_STRING));
+    };
+    Value *pending = first ? isString(ops[0]) : b_.CreateICmpEQ(loadHeader(addr(ops[0])), mark);
+    BasicBlock *fast = newBlock("join.pending"), *slow = newBlock("join.slow");
+    done = newBlock("join.done");
+    branchLikely(b_.CreateAnd(pending, isString(ops.back())), fast, slow);
+    b_.SetInsertPoint(fast);
+    storeWords(d, mark, ConstantInt::get(i64_, 0));
+    b_.CreateBr(done);
+    b_.SetInsertPoint(slow);
+  }
+  if (!joinPieces_) {
+    IRBuilder<> entry(&fn_->getEntryBlock(), fn_->getEntryBlock().begin());
+    joinPieces_ = entry.CreateAlloca(ptrTy_, ConstantInt::get(i32_, xir::kMaxJoinPieces), "join.pieces");
+  }
+  Value *list = joinPieces_;
+  for (uint32_t k = 0; k < n; ++k)
+    b_.CreateStore(callArg(addr(ops[from + k]), k + 2), b_.CreateConstInBoundsGEP1_32(ptrTy_, list, k));
+  Value *prev = first ? static_cast<Value *>(ConstantPointerNull::get(ptrTy_)) : callArg(addr(ops[0]), 1);
+  CallResult r = callResult(d, 0);
+  b_.CreateCall(rtJoin_, {fnCtx_, r.arg, prev, ConstantInt::get(i32_, n), list, ConstantInt::get(i32_, end)});
+  callDone(r);
+  checkPending(unwind_);
+  if (done) {
+    b_.CreateBr(done);
+    b_.SetInsertPoint(done);
+  }
+}
+
 // +, -, * and the comparisons: two integers (no overflow) and two numbers of
 // which one is a double are done here, with xb_op_add's, xb_op_sub's,
 // xb_op_mul's and xb_compare's rules; everything else calls the operator.

@@ -6,6 +6,10 @@ namespace xb::xir {
 
 // The operations of xIR and what each one does (one row per operation in
 // Ops.cpp): the catalog passes consult instead of switching on operations.
+// The pieces of one join (JoinStep, JoinEnd), at most: join-strings splits a longer chain, so that its steps' operands
+// and the array of their addresses stay small.
+constexpr unsigned kMaxJoinPieces = 16;
+
 enum class Op : uint8_t {
   // values
   NumDefaultDec,  // f64 immediate -> Item with SET DECIMALS decimals
@@ -15,6 +19,9 @@ enum class Op : uint8_t {
   Append,         // var, access; value: var := var + value, a string growing in place [may fail]
   Unary,          // unop; a -> Item                        [may fail]
   Binary,         // binop; a, b -> Item                    [may fail]
+  JoinStep,       // pieces 0 and 1, or the step before and pieces 0 to k -> Item: a `+` of a chain (join-strings,
+                  // xb_op_join): while the pieces are strings the pending mark, else the sum so far [may fail]
+  JoinEnd,        // the step before, every piece -> Item: the chain's last `+`, its strings joined in one [may fail]
   Truth,          // a -> Bool: .T./.F., anything else fails [may fail]; index 1: the operand of a .NOT., whose
                   // class's .NOT. answers for an object (xb_cond_not)
   FromBool,       // Bool -> Item: .T. or .F.

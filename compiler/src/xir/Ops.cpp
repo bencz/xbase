@@ -17,6 +17,8 @@ constexpr OpInfo kOps[] = {
     {Op::Append, "append", ReadsVar | WritesVar | WritesHeap | Fails | Substitutes | ReadsState | Allocates},
     {Op::Unary, "unary", Fails | Substitutes},
     {Op::Binary, "binary", Fails | Substitutes | ReadsState | Allocates},
+    {Op::JoinStep, "join.step", Fails | Substitutes | ReadsState | Allocates},
+    {Op::JoinEnd, "join.end", Fails | Substitutes | ReadsState | Allocates},
     {Op::Truth, "truth", Fails},
     {Op::FromBool, "from_bool", 0},
     {Op::Call, "call", Fails | RunsCode | Allocates | ReadsHeap | WritesHeap | ReadsState},

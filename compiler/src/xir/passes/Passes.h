@@ -51,6 +51,8 @@ bool resolveScalarSends(Module &m, Function &f);
 // becomes one `append`, whose string grows in place (AppendInPlace.cpp).
 bool appendInPlace(Function &f);
 bool splitAppends(Function &f);
+// `a + b + c ...` whose pieces may be strings becomes join steps, each in its `+`'s place: the strings are joined once.
+bool joinStrings(Function &f);
 
 // mem2reg: LOCALs reached only by direct loads and stores (not shared, not
 // parameters, not FOR EACH variables) become SSA values, with block

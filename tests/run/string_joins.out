@@ -1,0 +1,18 @@
+
+strings: ab-cd abcde       1201
+empty and one byte: [] z .T.
+in order: 1234 1234
+fails in place:       1081 + C:a- N:5  an
+substituted: Scd anE1081c
+object first: a1b2c3
+inlined piece: <i7.>i8. <i12.>i13.
+unknown types: pqr!          6 sum
+appended: 1,1;2,4;3,9;
+macro: m-X1
+dates: 20240104/20240104
+last piece:       1081 C:ab N:5 
+last piece substituted: CNpq
+date piece:       1081 C D <x
+loop: <a>14 <bb>25 <ccc>36 #>43 
+grown: (((()1)2)3)4
+long:       4920 c3d3e3f3g3h3

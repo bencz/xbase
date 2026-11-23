@@ -45,6 +45,11 @@ typedef struct xb_item {
   `Left()`, `Right()` and `SubStr()` in bytes are `xb_str_left`, `xb_str_right` and `xb_str_sub` (`rtl/strings.c`), of a
   string and integers, which raise no error: the functions call them, and so does compiled code that knows its
   arguments' types.
+- A chain of `+` whose pieces may be strings (`a + "-" + b + ...`, `join-strings` in [xir.md](xir.md#passes)) makes
+  one string: each `+` is a step of `xb_op_join` in its own place, which gives the pending mark (a `NIL` of width
+  `XB_JOIN_PENDING`, only ever a step's operand) while the pieces so far are strings, and at the last step one new
+  string of all of them; a step whose piece is no string is the `+` of the sum so far (the strings before it joined)
+  and that piece, its error included, and so is every step after it. The result is the pairwise `+`s' to the byte.
 - A string `+` gives a plain string of the exact size (`xb_str_concat`), unless it appends: its result goes back where
   its left operand came from, `x += y` or `x := x + y + ...` written out on the same variable, element (an index that is
   the same variable or literal) or instance variable, which the compiler marks (`grows` in

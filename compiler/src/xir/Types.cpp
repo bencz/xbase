@@ -315,6 +315,17 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
     TypeSet r = equality && (a & kObject) ? kAnyType : binaryResult(i.binop, a, b);
     return {r, binaryMayFail(i.binop, a, b, !nonZero)};
   }
+  case Op::JoinEnd: { // the last `+` of its chain: what the `+`s give one after the other, unless one failed (its error
+                      // may substitute the sum the chain goes on from)
+    TypeSet sum = t.of(i.operand(1));
+    bool fails = false;
+    for (size_t k = 2; k < i.operands().size(); ++k) {
+      TypeSet piece = t.of(i.operand(k));
+      fails = fails || binaryMayFail(BinOp::Add, sum, piece, false);
+      sum = binaryResult(BinOp::Add, sum, piece);
+    }
+    return {sum, fails};
+  }
   case Op::Unary: {
     TypeSet a = t.of(i.operand(0));
     if (i.unop == UnOp::Not) return {kLogical, (a & ~kLogical) != 0};
