@@ -590,14 +590,38 @@ void xb_platform_sleep_ms(uint32_t ms) {
 }
 
 #if defined(__linux__)
+/* The futex's timeout (relative: CLOCK_MONOTONIC's) as the kernel reads it, whatever the C library's time_t: a 32-bit
+ * system has futex_time64 (Linux 5.1), of two 64-bit fields, and on an older kernel (ENOSYS) the futex of two longs
+ * (a newer 32-bit system has only the first); a 64-bit system (and x32) only the futex, of its struct timespec. Any
+ * return: the caller tests its condition again. */
 void xb_platform_addr_wait(const uint32_t *addr, uint32_t expected, int64_t ns) {
   if (ns > XB_WAIT_NS_MAX) ns = XB_WAIT_NS_MAX;
-  struct timespec in = {(time_t)(ns / XB_NS_PER_SEC), (long)(ns % XB_NS_PER_SEC)}; /* relative: CLOCK_MONOTONIC's */
-  syscall(SYS_futex, addr, FUTEX_WAIT_PRIVATE, expected, ns < 0 ? NULL : &in, NULL, 0); /* any return: tested again */
+  int64_t sec = ns / XB_NS_PER_SEC, nsec = ns % XB_NS_PER_SEC;
+#if defined(SYS_futex_time64)
+  struct {
+    int64_t sec, nsec;
+  } in64 = {sec, nsec};
+  if (syscall(SYS_futex_time64, addr, FUTEX_WAIT_PRIVATE, expected, ns < 0 ? NULL : &in64, NULL, 0) == 0 ||
+      errno != ENOSYS)
+    return;
+#if defined(SYS_futex)
+  struct {
+    long sec, nsec;
+  } in32 = {(long)sec, (long)nsec}; /* XB_WAIT_NS_MAX's seconds fit */
+  syscall(SYS_futex, addr, FUTEX_WAIT_PRIVATE, expected, ns < 0 ? NULL : &in32, NULL, 0);
+#endif
+#else
+  struct timespec in = {(time_t)sec, (long)nsec};
+  syscall(SYS_futex, addr, FUTEX_WAIT_PRIVATE, expected, ns < 0 ? NULL : &in, NULL, 0);
+#endif
 }
 
-void xb_platform_addr_wake(const uint32_t *addr) {
-  syscall(SYS_futex, addr, FUTEX_WAKE_PRIVATE, INT_MAX, NULL, NULL, 0);
+void xb_platform_addr_wake(const uint32_t *addr) { /* the one thread that sleeps on the word (core/sync.c) */
+#if defined(SYS_futex)
+  syscall(SYS_futex, addr, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+#else
+  syscall(SYS_futex_time64, addr, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+#endif
 }
 #endif
 

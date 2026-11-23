@@ -126,10 +126,10 @@ libraries it uses, `system` the system libraries it needs, and one `function` li
 has `library = XBRT`, the archive, and how programs link: `linker` (the C compiler that built the runtime, a full path
 in the build tree and its name in an install, or with `XB_BUNDLE_TOOLCHAIN` its path from the module file's folder in
 the toolchain installed with the runtime; `link` for the MSVC tools), `style` (`gnu` or `msvc`), `flags` and `system`
-(`m`, the threads library, `atomic` where needed; `shell32` on Windows). Its `flags` are the target's C flags
-(`XB_TARGET_C_FLAGS`, and `--target` for a toolchain given a target); in the build tree also the toolchain's own
-(`CMAKE_C_FLAGS`, `CMAKE_EXE_LINKER_FLAGS`, the sysroot), so that programs link like the build's (a sanitizer's
-runtime). Without `target`, it is the runtime of `xbc`'s default target.
+(`m`, the threads library, `atomic` where needed; `shell32` and `synchronization` on Windows). Its `flags` are the
+target's C flags (`XB_TARGET_C_FLAGS`, and `--target` for a toolchain given a target); in the build tree also the
+toolchain's own (`CMAKE_C_FLAGS`, `CMAKE_EXE_LINKER_FLAGS`, the sysroot), so that programs link like the build's (a
+sanitizer's runtime). Without `target`, it is the runtime of `xbc`'s default target.
 
 `--lib=<name>` looks for `<name>.xbm` (lower case), then `<name>/<name>.xbm`, in the `-L` folders and `libdirs` in
 order, then in the install's modules folder, by the path from `xbc`'s folder (`XB_MODULES_FROM_BIN`: `../libs` in a
