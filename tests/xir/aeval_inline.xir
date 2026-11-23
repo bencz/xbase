@@ -42,59 +42,55 @@ seq.exit.5.inline:
 endif.4.inline.3:
   inline.leave
   %34 = binary add.one %18, 1:w0
-  %35 = subst.check %34
-  cond_br %35, endif.4.inline.3.subst, for.test.inline(%34, %28)
+  br for.test.inline(%34, %28)
 entry.3:
-  %37 = binary exacteq %3, 0:w10
-  %38 = truth %37
-  cond_br %38, seq.exit.3.inline, endif.3.inline
-entry.2.any(%40: item):
-  ret %40
+  %36 = binary exacteq %3, 0:w10
+  %37 = truth %36
+  cond_br %37, seq.exit.3.inline, endif.3.inline
+entry.2.any(%39: item):
+  ret %39
 endif.3.inline.any:
-  %42 = call LEN native %0
-  %43 = binary sub %42, %78
-  %44 = binary add %43, 1:w10
-  %45 = call __RANGECOUNT native %44, nil
-  %46 = binary add %78, %45
-  %47 = binary sub %46, 1:w10
-  br for.test.inline.any(%78, 0:w10, %0, %47)
+  %41 = call LEN native %0
+  %42 = binary sub %41, %75
+  %43 = binary add %42, 1:w10
+  %44 = call __RANGECOUNT native %43, nil
+  %45 = binary add %75, %44
+  %46 = binary sub %45, 1:w10
+  br for.test.inline.any(%75, 0:w10, %0, %46)
 seq.exit.3.inline.any:
   inline.leave
   br entry.2.any(0:w10)
-for.test.inline.any(%51: item, %52: item, %53: item, %54: item):
-  %55 = for.test %51, %54, 1:w0
-  cond_br %55, for.body.inline.any, seq.exit.5.inline.any
+for.test.inline.any(%50: item, %51: item, %52: item, %53: item):
+  %54 = for.test %50, %53, 1:w0
+  cond_br %54, for.body.inline.any, seq.exit.5.inline.any
 for.body.inline.any:
-  %57 = call LEN native %53
-  %58 = binary gt %51, %57
-  %59 = truth %58
-  cond_br %59, seq.exit.5.inline.any, endif.4.inline.any
+  %56 = call LEN native %52
+  %57 = binary gt %50, %56
+  %58 = truth %57
+  cond_br %58, seq.exit.5.inline.any, endif.4.inline.any
 endif.4.inline.any:
-  %61 = index %53, %51
-  inline.enter MAIN.block1 %61, %51
-  %63 = binary add.grow %52, %61
-  br endif.4.inline.3.any(%51, %53, %54, %63)
+  %60 = index %52, %50
+  inline.enter MAIN.block1 %60, %50
+  %62 = binary add.grow %51, %60
+  br endif.4.inline.3.any(%50, %52, %53, %62)
 seq.exit.5.inline.any:
   inline.leave
-  br entry.2.any(%52)
-endif.4.inline.3.any(%67: item, %68: item, %69: item, %70: item):
+  br entry.2.any(%51)
+endif.4.inline.3.any(%66: item, %67: item, %68: item, %69: item):
   inline.leave
-  %72 = binary add.one %67, 1:w0
-  br for.test.inline.any(%72, %70, %68, %69)
+  %71 = binary add.one %66, 1:w0
+  br for.test.inline.any(%71, %69, %67, %68)
 endif.4.inline.subst:
-  %74 = subst.value %28
-  br endif.4.inline.3.any(%18, %0, %13, %74)
-endif.4.inline.3.subst:
-  %76 = subst.value %34
-  br for.test.inline.any(%76, %28, %0, %13)
+  %73 = subst.value %28
+  br endif.4.inline.3.any(%18, %0, %13, %73)
 entry.subst:
-  %78 = subst.value %3
-  %79 = binary exacteq %78, 0:w10
-  %80 = truth %79
-  cond_br %80, seq.exit.3.inline.any, endif.3.inline.any
+  %75 = subst.value %3
+  %76 = binary exacteq %75, 0:w10
+  %77 = truth %76
+  cond_br %77, seq.exit.3.inline.any, endif.3.inline.any
 endif.3.inline.subst:
-  %82 = subst.value %13
-  br for.test.inline.any(%3, 0:w10, %0, %82)
+  %79 = subst.value %13
+  br for.test.inline.any(%3, 0:w10, %0, %79)
 }
 
 block MAIN.block1 internal params 1 {

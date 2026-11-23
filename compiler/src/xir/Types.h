@@ -82,18 +82,22 @@ struct IntRange {
 class TypeInfo {
 public:
   // The function the CFG was built for; `assumedChecks` (with Substitution::Any): operations taken as if subst.check
-  // followed each (the checks passes/TypedContinuations.cpp has chosen so far).
+  // followed each, and `assumedGuards` values as if a guard with that mask did (what passes/TypedContinuations.cpp
+  // has chosen so far).
+  using Guards = std::unordered_map<const Value *, TypeSet>;
   explicit TypeInfo(const CFG &cfg, Substitution s = Substitution::Any,
-                    const std::unordered_set<const Instruction *> *assumedChecks = nullptr);
+                    const std::unordered_set<const Instruction *> *assumedChecks = nullptr,
+                    const Guards *assumedGuards = nullptr);
   TypeSet of(const Value *v) const;
   // The operation may fail with an error whose block may substitute its result.
   bool maySubstitute(const Instruction &i) const;
   // Never refers to a heap object: the collector need not see it.
   bool noHeap(const Value *v) const { return (of(v) & kHeapTypes) == 0; }
   // A value a guard (subst.check with a mask) checks that may refer to a heap object until its check, across a
-  // safepoint (a call's pending test may collect): one its operation may give another type to (an error substituted,
-  // a value read from memory), which keeps a home the collector sees; + - * of two integers, guarded against an
-  // overflow's double, never does.
+  // safepoint: one its operation may give another type to (a value read from memory, a call of the program's), which
+  // keeps a home the collector sees. Not the result of an operation whose error may substitute it (its pending test
+  // never collects while the result waits in a home the collector does not see: CodeGen::checkPending), as for a
+  // check after it.
   bool guardNeedsHome(const Instruction &i) const;
   // + - * whose integer operands' ranges keep the result within int64: of two integers, an integer (the lowering still
   // tests the overflow, a form LLVM simplifies best).
@@ -118,6 +122,7 @@ private:
   void infer(bool withRanges);
   void narrow();
   TypeSet compute(const Instruction &i) const;
+  TypeSet guarded(const Value &v) const; // the mask of the value's guard, or of the one assumed (kAnyType: none)
   IntRange computeRange(const Instruction &i) const;
   IntRange rangeOf(const Value *v, const BasicBlock *at) const;
   IntRange bounded(IntRange r, const Bound &b, const Value *v) const; // r of v, where b holds
@@ -127,6 +132,7 @@ private:
   const CFG *cfg_; // while the constructor runs, then null
   Substitution substitution_;
   const std::unordered_set<const Instruction *> *assumedChecks_;
+  const Guards *assumedGuards_;
   std::unordered_map<const Value *, TypeSet> types_;
   std::unordered_map<const BlockParam *, TypeSet> passed_; // of the guarded block parameters
   std::unordered_map<const Value *, IntRange> ranges_;

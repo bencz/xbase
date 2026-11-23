@@ -348,32 +348,35 @@ result. Implemented (`xir/passes/`):
   guard takes it unchecked). A whole function's copy, which never joins the original again, stays generic: its
   `subst.value`s are of any type (typed, its values took registers from the typed code: `levenshtein` and
   `spectral_norm` ran 1.08 and 1.15 times as long). A copy has at most 64 checks, those of the most nested loops
-  (`Loops` in `Analysis`); a larger copy doubles code that LLVM unrolls and splits again. The checks are chosen first
-  with the types as if every operation were checked (`Substitution::None`), then again, up to 4 more rounds while one
-  adds any, with the types where only those chosen so far are (`TypeInfo`'s assumed checks): an operation not chosen may
-  still give any type, and what takes it (a `TOTAL` call whose argument it is, an operator) may then fail too (`Asc(
-  SubStr( c, i, 1 ) )`: `SubStr` is not computed with, so `Asc` is checked); a sum that a loop carries stays unchecked
-  where its operands are. The values that reach the copy are joined to its own by block parameters, built on demand from
-  the uses (Braun et al.), and parameters that receive one value only are removed. The copy's operations keep giving any
-  type, so a substituted value of any type runs correctly, while the original code keeps registers and constant type
-  tags. The lowering reads the item's real tag for `subst.check` and weights its branch unlikely; between the operation
-  and `subst.value` the result may sit in a home the collector does not see, which holds because the pending test after
-  such an operation calls `xb_pending`, which never collects nor parks the thread for another thread's collection (the
-  request waits for the next poll), and not `xb_pending_gc`. The same pass guards the values that enter a loop with a
-  type the code would not know there (with substitutions counted: a parameter, a variable, a call's result, an operation
-  whose error may substitute it) when the loop takes them as numbers (a `FOR`'s start or limit, an operand of `-`, `*`,
-  `/`, `%`, `^`, a comparison, a negation): `subst.check` with a mask (`imm`: the number types it gives itself, as an
-  integer for `Max()` of integers, both when it gives none) right after the value, into the same copy otherwise, so the
-  loop keeps its values typed and out of the frame. The guarded value itself keeps a home the collector sees
-  (`TypeInfo::guardNeedsHome`) when until its check it may hold anything (a substituted error, a value read from memory:
-  the pending test after a call may collect). A block parameter is guarded the same way, first in its block (a value
-  carried into loops, a region's join); its home is its types' (nothing runs between the branch and the check, and the
-  check reads the tag the item holds), and its `subst.value` has the types the branches pass (`TypeInfo::passed`). It
-  also speculates: in a loop, `+`, `-` and `*` of two values that are integers once the speculations hold (the greatest
-  set of the loops' values that are integers, `+ - *` or `Int( x / k )` of such, or block parameters all of whose
-  arguments are) and whose ranges may overflow get a guard against the integers alone (`subst.check` with the integer
-  mask; an overflow's double goes on in the copy), so the loop computes with integers in registers; one whose ranges
-  cannot overflow (`fits`) needs none.
+  (`Loops` in `Analysis`); a larger copy doubles code that LLVM unrolls and splits again. The guards (below) are chosen
+  first; then the checks, with the guards assumed (`TypeInfo`'s assumed guards: an operation a guard makes safe needs no
+  check, as the next value of a `FOR` counter whose start is guarded), first with the types as if every operation were
+  checked (`Substitution::None`), then again, up to 4 more rounds while one adds any, with the types where only those
+  chosen so far are (`TypeInfo`'s assumed checks): an operation not chosen may still give any type, and what takes it (a
+  `TOTAL` call whose argument it is, an operator) may then fail too (`Asc( SubStr( c, i, 1 ) )`: `SubStr` is not
+  computed with, so `Asc` is checked); a sum that a loop carries stays unchecked where its operands are. The values that
+  reach the copy are joined to its own by block parameters, built on demand from the uses (Braun et al.), and parameters
+  that receive one value only are removed. The copy's operations keep giving any type, so a substituted value of any
+  type runs correctly, while the original code keeps registers and constant type tags. The lowering reads the item's
+  real tag for `subst.check` and weights its branch unlikely; between the operation and `subst.value` the result may sit
+  in a home the collector does not see, which holds because the pending test after such an operation calls `xb_pending`,
+  which never collects nor parks the thread for another thread's collection (the request waits for the next poll), and
+  not `xb_pending_gc`. The same pass guards the values that enter a loop with a type the code would not know there (with
+  substitutions counted: a parameter, a variable, a call's result, an operation whose error may substitute it) when the
+  loop takes them as numbers (a `FOR`'s start or limit, an operand of `-`, `*`, `/`, `%`, `^`, a comparison, a
+  negation): `subst.check` with a mask (`imm`: the number types it gives itself, as an integer for `Max()` of integers,
+  both when it gives none) right after the value, into the same copy otherwise, so the loop keeps its values typed and
+  out of the frame. The guarded value itself keeps a home the collector sees (`TypeInfo::guardNeedsHome`) when until its
+  check it may hold a heap object across a pending test that may collect (a value read from memory, a call of the
+  program's function); the result of an operation whose error may substitute it does not, as for a check after it (its
+  pending test never collects while the result waits in a home the collector does not see). A block parameter is guarded
+  the same way, first in its block (a value carried into loops, a region's join); its home is its types' (nothing runs
+  between the branch and the check, and the check reads the tag the item holds), and its `subst.value` has the types the
+  branches pass (`TypeInfo::passed`). It also speculates: in a loop, `+`, `-` and `*` of two values that are integers
+  once the speculations hold (the greatest set of the loops' values that are integers, `+ - *` or `Int( x / k )` of
+  such, or block parameters all of whose arguments are) and whose ranges may overflow get a guard against the integers
+  alone (`subst.check` with the integer mask; an overflow's double goes on in the copy), so the loop computes with
+  integers in registers; one whose ranges cannot overflow (`fits`) needs none.
 - `resolve-sends`, after `fold-constants`: a `send` (without `...`, not one an AWAIT fuses) to an object whose class
   `ClassInfo` knows, and a `Super` send of a method to its own `Self` that reaches a method (its parameter 0, which only
   loads read, `onlyLoaded`: the runtime finds a `Super` member from the method's class alone, `Self` being of it or of a

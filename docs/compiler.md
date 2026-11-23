@@ -668,20 +668,21 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   a double once, `s := 0` then `s := s + x` of doubles, and each entry of the loop would leave it) or a call's result
   (its loop makes the call: there is no fast loop to keep, only code to add); the comparisons of two numbers (integers
   exactly, others as doubles with IEEE 754's comparisons, as `xb_compare` and `xb_order_is` make them); `for.test` with
-  an integer counter, limit and step; `index` and `index.set` of a local array with an index within it, an integer or a
-  truncated double below 2^63 (the array's `len` and `data`, `xb_array` in `xbrt.h`). One test of the array's state byte
-  (`isLocalItems`: neither shared nor of a compact form, the usual case) leads to the path of items, where the store
-  calls `xb_gc_write_item` only for a value of a heap type (`xb_type_is_heap`) into an array that is old and not
-  recorded (`needsRecord`, `xb_gc_needs_record` on the state byte, read again once the value's type is a heap one: kept
-  live from before the store, it cost loops a register), and makes no test at all when type inference finds the value
-  refers to no heap object (`mayReferToHeap`; so do `object.set` and a send's in-place write, `storeObjectVariable`); a
-  shared array's items are the runtime's to read and write whole, and an index out of bounds calls the runtime, which
-  raises the error (`indexPosition` makes the position of an integer or a double index for both `index` and
-  `table.index`). `table.index` reads a table `STATIC`'s elements, emitted once as an array of `xb_item` constants
-  (`tableData`, private, from the literal items' header fields and value words), at a position within it while the table
-  holds; any other index loads the `STATIC` and calls the runtime's `xb_op_index`, whose error gives the array to code
-  that may change it, so that path first breaks the table (`tableData`'s flag, a byte read and written relaxed: a change
-  on another thread reaches a reader through the synchronization that orders them). A local array of a compact form
+  an integer counter and step, and a limit that is an integer or a double (compared as a double, as `xb_compare` does);
+  `index` and `index.set` of a local array with an index within it, an integer or a truncated double below 2^63 (the
+  array's `len` and `data`, `xb_array` in `xbrt.h`). One test of the array's state byte (`isLocalItems`: neither shared
+  nor of a compact form, the usual case) leads to the path of items, where the store calls `xb_gc_write_item` only for a
+  value of a heap type (`xb_type_is_heap`) into an array that is old and not recorded (`needsRecord`,
+  `xb_gc_needs_record` on the state byte, read again once the value's type is a heap one: kept live from before the
+  store, it cost loops a register), and makes no test at all when type inference finds the value refers to no heap
+  object (`mayReferToHeap`; so do `object.set` and a send's in-place write, `storeObjectVariable`); a shared array's
+  items are the runtime's to read and write whole, and an index out of bounds calls the runtime, which raises the error
+  (`indexPosition` makes the position of an integer or a double index for both `index` and `table.index`). `table.index`
+  reads a table `STATIC`'s elements, emitted once as an array of `xb_item` constants (`tableData`, private, from the
+  literal items' header fields and value words), at a position within it while the table holds; any other index loads
+  the `STATIC` and calls the runtime's `xb_op_index`, whose error gives the array to code that may change it, so that
+  path first breaks the table (`tableData`'s flag, a byte read and written relaxed: a change on another thread reaches a
+  reader through the synchronization that orders them). A local array of a compact form
   ([runtime.md](runtime.md#values)) has paths of its own, after a branch that is no cold path (`kFormTest`, below), for
   one form each, which one test of the form (a compact form is a local array's) selects: a read inlines the logicals'
   when a condition or `.NOT.` tests the element (`readAsLogical`), the integers' otherwise, and gives an item of that

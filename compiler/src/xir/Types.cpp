@@ -200,8 +200,8 @@ TypeSet guardMask(const Value &v) {
 } // namespace
 
 TypeInfo::TypeInfo(const CFG &cfg, Substitution substitution,
-                   const std::unordered_set<const Instruction *> *assumedChecks)
-    : cfg_(&cfg), substitution_(substitution), assumedChecks_(assumedChecks) {
+                   const std::unordered_set<const Instruction *> *assumedChecks, const Guards *assumedGuards)
+    : cfg_(&cfg), substitution_(substitution), assumedChecks_(assumedChecks), assumedGuards_(assumedGuards) {
   findBounds();
   findThresholds();
   // Types and ranges together, from nothing (optimistic): a value found an integer of a range gives one to what is
@@ -255,7 +255,7 @@ void TypeInfo::infer(bool withRanges) {
             const BlockParam *p = tg.block->params[k].get();
             if (p->type() != Type::Item) continue;
             TypeSet t = of(tg.args[k]);
-            if (TypeSet mask = guardMask(*p); mask != kAnyType) {
+            if (TypeSet mask = guarded(*p); mask != kAnyType) {
               passed_[p] |= t;
               t &= mask;
             }
@@ -418,7 +418,7 @@ TypeSet returnTypes(const Function &f) {
 bool TypeInfo::maySubstitute(const Instruction &i) const { return ownResult(i, *this).substitutable; }
 
 bool TypeInfo::guardNeedsHome(const Instruction &i) const {
-  if (guardMask(i) == kAnyType) return false;
+  if (guardMask(i) == kAnyType || (i.effects() & Substitutes)) return false;
   OwnResult r = ownResult(i, *this);
   return r.substitutable || (r.types & kHeapTypes) != 0;
 }
@@ -430,10 +430,17 @@ TypeSet TypeInfo::compute(const Instruction &i) const {
     r.types = binaryResult(i.binop, a, b & ~kIntType) | binaryResult(i.binop, a & ~kIntType, b & kIntType) |
               ((a & kIntType) && (b & kIntType) ? kIntType : 0);
   }
-  if (intCall(i) && intQuotient(i, nullptr)) return kIntType & guardMask(i); // a number: no error
+  if (intCall(i) && intQuotient(i, nullptr)) return kIntType & guarded(i); // a number: no error
   bool any = r.substitutable && substitution_ == Substitution::Any && !checked(i) &&
              !(assumedChecks_ && assumedChecks_->count(&i));
-  return (r.types | (any ? kAnyType : 0)) & guardMask(i);
+  return (r.types | (any ? kAnyType : 0)) & guarded(i);
+}
+
+TypeSet TypeInfo::guarded(const Value &v) const {
+  TypeSet m = guardMask(v);
+  if (assumedGuards_)
+    if (auto it = assumedGuards_->find(&v); it != assumedGuards_->end()) m &= it->second;
+  return m;
 }
 
 IntRange TypeInfo::bounded(IntRange r, const Bound &b, const Value *v) const {

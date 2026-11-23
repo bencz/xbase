@@ -760,17 +760,31 @@ void CodeGen::emitDivMod(const xir::Instruction &i, Value *a, Value *bv, Value *
   b_.SetInsertPoint(join);
 }
 
-// FOR's test with an integer counter, limit and step: a negative step counts
-// down (xb_for_test).
+// FOR's test: a negative step counts down (xb_for_test). An integer counter, limit and step inline; past it, an
+// integer counter and step with a double limit, compared as doubles (as xb_compare does: a NaN ends the loop), on a
+// branch of its own, so the integers' loop keeps the shape LLVM analyses; xb_for_test for the rest.
 void CodeGen::emitForTest(const xir::Instruction &i) {
   Value *counter = addr(i.operand(0)), *limit = addr(i.operand(1)), *step = addr(i.operand(2));
-  BasicBlock *fast = newBlock("int"), *slow = newBlock("op"), *join = newBlock("join");
-  branchLikely(b_.CreateAnd(b_.CreateAnd(isInt(counter), isInt(limit)), isInt(step)), fast, slow);
+  BasicBlock *fast = newBlock("int"), *other = newBlock("for.other"), *dbl = newBlock("double");
+  BasicBlock *slow = newBlock("op"), *join = newBlock("join");
+  Value *limitType = typeOf(i.operand(1), limit);
+  Value *ints = b_.CreateAnd(isInt(counter), isInt(step));
+  branchLikely(b_.CreateAnd(ints, isIntType(limitType)), fast, other);
   b_.SetInsertPoint(fast);
   Value *c = intValue(counter), *l = intValue(limit);
   Value *down = b_.CreateICmpSLT(intValue(step), ConstantInt::get(i64_, 0));
   Value *fastGo = b_.CreateSelect(down, b_.CreateICmpSGE(c, l), b_.CreateICmpSLE(c, l));
   BasicBlock *fastEnd = b_.GetInsertBlock();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(other);
+  b_.CreateCondBr(b_.CreateAnd(ints, b_.CreateICmpEQ(limitType, ConstantInt::get(i32_, XB_T_DOUBLE))), dbl, slow);
+  b_.SetInsertPoint(dbl);
+  Value *cd = b_.CreateSIToFP(intValue(counter), b_.getDoubleTy());
+  Value *ld = b_.CreateBitCast(intValue(limit), b_.getDoubleTy());
+  Value *dblBack = b_.CreateICmpSLT(intValue(step), ConstantInt::get(i64_, 0));
+  Value *dblGo = b_.CreateSelect(dblBack, doubleCompare(b_, xir::IntPred::Ge, cd, ld),
+                                 doubleCompare(b_, xir::IntPred::Le, cd, ld));
+  BasicBlock *dblEnd = b_.GetInsertBlock();
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   Value *go = b_.CreateCall(rtForTest_, {fnCtx_, callArg(counter, 0), callArg(limit, 1), callArg(step, 2)});
@@ -779,8 +793,9 @@ void CodeGen::emitForTest(const xir::Instruction &i) {
   BasicBlock *slowEnd = b_.GetInsertBlock();
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
-  PHINode *phi = b_.CreatePHI(b_.getInt1Ty(), 2, "go");
+  PHINode *phi = b_.CreatePHI(b_.getInt1Ty(), 3, "go");
   phi->addIncoming(fastGo, fastEnd);
+  phi->addIncoming(dblGo, dblEnd);
   phi->addIncoming(slowGo, slowEnd);
   values_[&i] = phi;
 }

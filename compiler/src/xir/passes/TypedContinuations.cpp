@@ -279,29 +279,10 @@ std::vector<Check> chooseChecks(Function &f, const std::unordered_set<const Basi
   TypeInfo types(cfg, Substitution::None), seen(cfg);
   Loops loops(cfg);
   std::unordered_set<const Value *> ints = speculatedIntegers(f, cfg, seen, loops);
-  std::unordered_set<const Instruction *> chosen;
-  auto found = [&](const TypeInfo &view) {
-    std::vector<const Instruction *> list;
-    for (BasicBlock *b : cfg.order())
-      if (!done.count(b))
-        for (auto &i : b->insts)
-          if (!chosen.count(i.get()) && worthChecking(*i, types, view, loops)) list.push_back(i.get());
-    return list;
-  };
-  for (const Instruction *i : found(types)) chosen.insert(i);
-  for (int round = 0; round < kCheckRounds; ++round) {
-    std::vector<const Instruction *> list = found(TypeInfo(cfg, Substitution::Any, &chosen));
-    // Of those, the ones that may fail even with all of them checked: one found only because another of this round
-    // gives any type (a product of Asc()'s result, while Asc() is unchecked) cannot fail once that one is checked.
-    std::unordered_set<const Instruction *> all = chosen;
-    all.insert(list.begin(), list.end());
-    TypeInfo with(cfg, Substitution::Any, &all);
-    bool grew = false;
-    for (const Instruction *i : list)
-      if (with.maySubstitute(*i)) grew = chosen.insert(i).second;
-    if (!grew) break;
-  }
+  // The guards first (values entering loops, speculations, joins), then the checks, chosen with the guards assumed:
+  // an operation a guard makes safe (a FOR counter's next value, once its start is guarded) needs none.
   std::vector<Check> checks;
+  TypeInfo::Guards guards;
   for (BasicBlock *b : cfg.order()) {
     if (done.count(b)) continue;
     for (auto &p : b->params) {
@@ -314,14 +295,48 @@ std::vector<Check> chooseChecks(Function &f, const std::unordered_set<const Basi
     for (auto &i : b->insts) {
       if (worthSpeculating(*i, seen, ints)) { // a guard against fewer types than a check's
         checks.push_back({i.get(), b, nullptr, kIntType});
-      } else if (chosen.count(i.get())) {
-        checks.push_back({i.get(), b});
       } else if (worthGuarding(*i, seen, loops)) { // against the numbers it gives itself (Max() of integers: one)
         TypeSet own = types.of(i.get()) & kNumberTypes;
         checks.push_back({i.get(), b, nullptr, own ? own : kNumberTypes});
       }
     }
   }
+  for (const Check &c : checks) guards[c.value] = c.guard;
+  std::unordered_set<const Instruction *> chosen;
+  auto found = [&](const TypeInfo &view) {
+    std::vector<const Instruction *> list;
+    for (BasicBlock *b : cfg.order())
+      if (!done.count(b))
+        for (auto &i : b->insts)
+          if (!chosen.count(i.get()) && !guards.count(i.get()) && worthChecking(*i, types, view, loops))
+            list.push_back(i.get());
+    return list;
+  };
+  for (const Instruction *i : found(TypeInfo(cfg, Substitution::None, nullptr, &guards))) chosen.insert(i);
+  for (int round = 0; round < kCheckRounds; ++round) {
+    std::vector<const Instruction *> list = found(TypeInfo(cfg, Substitution::Any, &chosen, &guards));
+    // Of those, the ones that may fail even with all of them checked: one found only because another of this round
+    // gives any type (a product of Asc()'s result, while Asc() is unchecked) cannot fail once that one is checked.
+    std::unordered_set<const Instruction *> all = chosen;
+    all.insert(list.begin(), list.end());
+    TypeInfo with(cfg, Substitution::Any, &all, &guards);
+    bool grew = false;
+    for (const Instruction *i : list)
+      if (with.maySubstitute(*i)) grew = chosen.insert(i).second;
+    if (!grew) break;
+  }
+  for (BasicBlock *b : cfg.order())
+    if (!done.count(b))
+      for (auto &i : b->insts)
+        if (chosen.count(i.get())) checks.push_back({i.get(), b});
+  // In the code's order: a block's guarded parameters, then its operations as they come.
+  std::unordered_map<const BasicBlock *, size_t> rpo;
+  for (BasicBlock *b : cfg.order()) rpo.emplace(b, rpo.size());
+  auto at = [&](const Check &c) {
+    const auto *i = dynamic_cast<const Instruction *>(c.value);
+    return std::make_pair(rpo.at(c.block), i ? c.block->indexOf(i) + 1 : 0);
+  };
+  std::stable_sort(checks.begin(), checks.end(), [&](const Check &x, const Check &y) { return at(x) < at(y); });
   return checks;
 }
 

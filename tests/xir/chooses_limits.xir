@@ -25,7 +25,7 @@ for.test(%13: item, %14: item):
 for.body:
   %18 = binary sub %13, %10
   %19 = call MAX native 1:w10, %18
-  %20 = subst.check %19
+  %20 = subst.check guard 12 %19
   cond_br %20, for.body.subst, for.test.2(%19, %14)
 for.incr:
   %22 = binary add.one %13, 1:w0
@@ -113,7 +113,7 @@ for.test(%9: item, %10: item):
 for.body:
   %15 = binary sub %9, %6
   %16 = call MAX native 1:w10, %15
-  %17 = subst.check %16
+  %17 = subst.check guard 12 %16
   cond_br %17, for.body.subst, for.test.2(%16, %10)
 for.incr:
   %19 = binary add.one %9, 1:w0

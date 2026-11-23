@@ -1,0 +1,9 @@
+
+remainder: 9/10 3/4
+quotient: 2/3 1/2 5/-2
+equal: 3/4 2/1 1/2 1/2
+literals: 4 3
+infinite: 0/1 0/3
+nan: 0/1 0/3
+large: 3 3
+not a number:       1075 >
