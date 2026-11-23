@@ -4,28 +4,6 @@
 
 #include "xbrt.h"
 
-/* Garbage-collected objects. An 8-byte header precedes every object. */
-typedef enum xb_gc_kind {
-  XB_GC_STRING = 1,
-  XB_GC_ARRAY,
-  XB_GC_BLOCK,
-  XB_GC_CELL,
-  XB_GC_ITEMS,              /* the items of an array that outgrew its own storage */
-  XB_GC_REF,                /* xb_ref, the target of an XB_T_REF item */
-  XB_GC_OBJECT,             /* xb_object */
-  XB_GC_HASH,               /* xb_hash */
-  XB_GC_HSTORE,             /* the entries, hashes, tree and index of a hash */
-  XB_GC_VIEW,               /* a string that is a view (XB_STR_VIEW): its buffer's address after the header */
-  XB_GC_STRBUF,             /* xb_strbuf, the bytes of views: no references; its bytes past the tip change */
-} xb_gc_kind;
-
-typedef struct xb_gc_hdr {
-  uint32_t size;            /* object bytes: the lines a block object covers, statistics (saturates for large) */
-  uint8_t  kind;            /* xb_gc_kind */
-  uint8_t  state;           /* XB_GC_MARKED | XB_GC_REMEMBERED | ... | XB_GC_SHARED */
-  uint16_t flags;           /* XB_GC_HDR_LARGE, XB_GC_HDR_MOVED, XB_GC_HDR_FULL */
-} xb_gc_hdr;
-
 /* xb_gc_hdr.flags: allocated on its own, not in a block (never moves); moved by the collection in progress (the object
  * holds the copy's address, see gc.c). */
 #define XB_GC_HDR_LARGE 1u

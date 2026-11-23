@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 66u
+#define XB_ABI_VERSION 67u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -284,6 +284,43 @@ struct xb_frame {
 };
 #endif
 
+/* [ABI] Garbage-collected objects (gc/gc.c). An 8-byte header precedes every object: its size in bytes (saturating),
+ * kind, state byte (xb_gc_write below) and flags (XB_GC_HDR_*, gc/gc.h). */
+typedef enum xb_gc_kind {
+  XB_GC_STRING = 1,
+  XB_GC_ARRAY,
+  XB_GC_BLOCK,
+  XB_GC_CELL,
+  XB_GC_ITEMS,              /* the items of an array that outgrew its own storage */
+  XB_GC_REF,                /* xb_ref, the target of an XB_T_REF item */
+  XB_GC_OBJECT,             /* xb_object */
+  XB_GC_HASH,               /* xb_hash */
+  XB_GC_HSTORE,             /* the entries, hashes, tree and index of a hash */
+  XB_GC_VIEW,               /* a string that is a view (XB_STR_VIEW): its buffer's address after the header */
+  XB_GC_STRBUF,             /* xb_strbuf, the bytes of views: no references; its bytes past the tip change */
+} xb_gc_kind;
+typedef struct xb_gc_hdr {
+  uint32_t size;            /* object bytes: the lines a block object covers, statistics (saturates for large) */
+  uint8_t  kind;            /* xb_gc_kind */
+  uint8_t  state;           /* XB_GC_STATE_* below and the collector's own bits (gc/gc.h) */
+  uint16_t flags;           /* XB_GC_HDR_LARGE, XB_GC_HDR_MOVED, XB_GC_HDR_FULL */
+} xb_gc_hdr;
+/* Objects are XB_GC_ALIGN-aligned; one of at most XB_GC_SMALL_MAX bytes, header included, may take its place in the
+ * thread's hole (xb_tlab), larger ones go to the runtime. */
+#define XB_GC_ALIGN 8u
+#define XB_GC_SMALL_MAX 256u
+
+/* [ABI] The hole the thread allocates in (gc/gc.c): an object of `total` bytes (its header and its size rounded up to
+ * XB_GC_ALIGN, at most XB_GC_SMALL_MAX) takes the bytes at `cursor` when `limit - cursor` is at least that, moves
+ * `cursor` past them and adds them to `allocated`; its header is {size, kind, 0, birth} (`birth`: the flags a new
+ * object takes, the full collections' polarity). Compiled code allocates so through the context's `tlab` (NULL: the
+ * thread allocates through the runtime alone), with no call; the runtime moves the hole when it is full. */
+typedef struct xb_tlab {
+  char *cursor, *limit;
+  size_t allocated;
+  uint16_t birth;
+} xb_tlab;
+
 /* [ABI] A thread's context (core/context.h). Compiled code uses its first
  * fields, which the context starts with in this order: `uint32_t pending`
  * (requests tested after every operation that can fail), `int32_t
@@ -297,7 +334,8 @@ struct xb_frame {
  * has parameters for, sets them to NIL and `lent` to NULL, so that it alone
  * holds what only they held; one without a direct entry ends the loan. Runtime
  * code may pass the argv it received on whole only if it reads none of it after
- * the call, as a send does; otherwise it sets `lent` to NULL first). */
+ * the call, as a send does; otherwise it sets `lent` to NULL first), `xb_tlab
+ * *tlab` (the thread's hole, above). */
 typedef struct xb_ctx xb_ctx;
 
 /* [ABI] dynamic calling convention used by every xBase-callable function:
@@ -388,14 +426,14 @@ int32_t  xb_pending_gc(xb_ctx *ctx);
 
 /* The layout the module was compiled for: offsets of xb_str.bytes,
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
- * xb_ctx.stack_limit, xb_ctx.lent, xb_array.data (after len and cap), xb_ref.value (after coll and index),
+ * xb_ctx.stack_limit, xb_ctx.lent, xb_ctx.tlab, xb_array.data, xb_array.inline_items (after len and cap), xb_ref.value (after coll and index),
  * xb_hash.entries (after its six counts), xb_object.vars (after cls and nvars)
  * and xb_strbuf.bytes (after cap and used). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
                       uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
-                      uint32_t ctx_stack_limit_offset, uint32_t ctx_lent_offset, uint32_t array_data_offset,
-                      uint32_t ref_value_offset, uint32_t hash_entries_offset, uint32_t object_vars_offset,
-                      uint32_t strbuf_bytes_offset);
+                      uint32_t ctx_stack_limit_offset, uint32_t ctx_lent_offset, uint32_t ctx_tlab_offset,
+                      uint32_t array_data_offset, uint32_t array_items_offset, uint32_t ref_value_offset,
+                      uint32_t hash_entries_offset, uint32_t object_vars_offset, uint32_t strbuf_bytes_offset);
 /* A frame (its address) below the context's stack_limit: xb_stack_deep gives
  * 1 when that limit was only the mark of a deep stack (core/ctx.c), whose
  * pages go back to the system once it is shallow again, and the frame lies
@@ -797,7 +835,22 @@ typedef struct xb_class_def {
   uint32_t ninterfaces;
   uint32_t flags;           /* XB_CLASS_* */
   void *runtime;
+  void *make;               /* an xb_class_make once compiled code may make the class's objects itself, else NULL */
 } xb_class_def;
+/* [ABI] How a new object of a class is made, which the runtime publishes (a release store into xb_class_def.make)
+ * once the class is ready, when making one takes nothing but memory (no destructor, not ABSTRACT, no rule broken, and
+ * every initial value that each object copies an empty array): an object (XB_GC_OBJECT) whose `cls` is `cls`, `nvars`
+ * `nvars`, and variables a copy of the `nvars` items at `model`, but for the `nempty` slots at `empty`, which each
+ * hold a new empty array (XB_ELEMS_NIL) while the model's array there is empty still (an INIT value the program may
+ * hold and fill: the runtime copies what it holds then). Compiled code reads it (an acquire load) and makes the object
+ * and its arrays in the thread's hole (xb_tlab) when they fit, else calls xb_class_instance, which does the rest. */
+typedef struct xb_class_make {
+  const struct xb_class *cls;
+  const xb_item *model;
+  uint32_t nvars;
+  uint32_t nempty;
+  const uint32_t *empty;
+} xb_class_make;
 void     xb_classes_register(xb_class_def *defs, uint32_t n, uint32_t level);
 /* The class function NAME(): a new object of the class, its variables at their
  * initial values (:New() then initializes it). */

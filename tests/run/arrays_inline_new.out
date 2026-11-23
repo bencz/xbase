@@ -1,0 +1,14 @@
+
+kept:        200   10100592 s1000 .T.
+integers:          1 x          3          2          1
+mixed:          1.5          3          1          4
+14 items:         14 a         14
+large:         18          1.5 b .T. NIL         15
+rest:          4          1
+INIT {}:          1          2          0 .F. bag
+grown after collections:         40         40          0
+object and arrays past 256 bytes:          0 eight          9          0
+subclass:          0          1          0 TSUBBAG
+INIT held and filled:          0          1 held .F.
+INIT of elements:          3          2
+threads:      80000

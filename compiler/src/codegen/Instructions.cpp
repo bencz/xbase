@@ -406,14 +406,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   case Op::MvParam: // argument `index` of those received, NIL past them
     b_.CreateCall(rtMvParam_, {fnCtx_, memvars_.at(i.message), argItem(fn_->getArg(2), fn_->getArg(3), i.index)});
     break;
-  case Op::ClassNew: {
-    CallResult r = callResult(dest(i), 0);
-    setNil(r.arg);
-    b_.CreateCall(rtClassInstance_, {fnCtx_, r.arg, classDef(i.classIndex)});
-    callDone(r);
-    checkPending(unwind_);
-    break;
-  }
+  case Op::ClassNew: emitClassNew(i); break;
   case Op::MacroGet:
   case Op::MacroRef:
     callItemOp(i.op == Op::MacroGet ? rtMacroGet_ : rtMacroRef_, dest(i), {addr(ops[0])});
@@ -527,6 +520,7 @@ void CodeGen::emit(const xir::Instruction &i) {
     break;
   }
   case Op::ArrayLit: {
+    if (emitArrayLiteral(i)) break;
     Value *elems = operandGroup(i);
     Value *d = dest(i);
     auto make = [&](Value *n, Value *items) { b_.CreateCall(rtArrayNew_, {fnCtx_, d, n, items}); };
@@ -738,10 +732,9 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.SetInsertPoint(object);
     Value *cls = loadFrom(ptrTy_, b_.CreateStructGEP(objectTy_, itemPointer(item, "obj"), ObjectCls),
                           Mem::ObjectHeader, "cls");
-    auto *defTy = cast<StructType>(cast<ArrayType>(classTable_->getValueType())->getElementType());
-    // `runtime`, the last field: written once, when the class is prepared (before any object of it exists)
-    auto *runtime = cast<LoadInst>(loadFrom(ptrTy_, b_.CreateStructGEP(defTy, classDef(i.classIndex),
-                                                                       defTy->getNumElements() - 1),
+    // `runtime`: written once, when the class is prepared (before any object of it exists)
+    auto *runtime = cast<LoadInst>(loadFrom(ptrTy_, b_.CreateStructGEP(classDefTy_, classDef(i.classIndex),
+                                                                       ClassDefRuntime),
                                             Mem::Unknown, "class.runtime"));
     runtime->setAtomic(AtomicOrdering::Unordered);
     // Written once: a value read before (null) only fails the test, which the send then answers.
@@ -935,6 +928,182 @@ void CodeGen::emit(const xir::Instruction &i) {
     b_.CreateBr(fnExit_);
     break;
   }
+}
+
+// An object of the module's class `i.classIndex`: made here, in the thread's hole, when the class publishes how
+// (xb_class_make in xbrt.h: an object that takes nothing but its memory) and the object fits; else by
+// xb_class_instance, which prepares the class (its first object), runs what an object takes, or allocates elsewhere.
+// Nothing collects between the allocation and the store of the object into its home.
+void CodeGen::emitClassNew(const xir::Instruction &i) {
+  Value *def = classDef(i.classIndex);
+  BasicBlock *ready = newBlock("new.ready"), *slow = newBlock("new.call"), *done = newBlock("new.done");
+  auto *make = b_.CreateLoad(ptrTy_, b_.CreateStructGEP(classDefTy_, def, ClassDefMake), "class.make");
+  make->setAtomic(AtomicOrdering::Acquire);
+  make->setAlignment(Align(dl_.getPointerABIAlignment(0)));
+  branchLikely(b_.CreateIsNotNull(make), ready, slow);
+  b_.SetInsertPoint(ready);
+  Value *nvars = loadFrom(i32_, b_.CreateStructGEP(classMakeTy_, make, ClassMakeVars), Mem::Unknown, "nvars");
+  // A count the compiler knows makes the copy of the model one of known size, inline; the published one must agree.
+  if (uint32_t known = classVarCounts_.at(size_t(i.classIndex))) {
+    BasicBlock *agrees = newBlock("new.count");
+    Value *count = ConstantInt::get(i32_, known);
+    branchLikely(b_.CreateICmpEQ(nvars, count), agrees, slow);
+    b_.SetInsertPoint(agrees);
+    nvars = count;
+  }
+  uint64_t varsAt = dl_.getStructLayout(objectTy_)->getElementOffset(ObjectVars);
+  Value *bytes = b_.CreateMul(b_.CreateZExt(nvars, intPtrTy_), ConstantInt::get(intPtrTy_, itemSize_));
+  Value *size = b_.CreateAdd(bytes, ConstantInt::get(intPtrTy_, varsAt), "object.size");
+  // Each slot that holds a new empty array takes one, made right after the object in the same bump, while the model's
+  // array there is empty still (an INIT value the program may hold and fill: the runtime copies what it holds then).
+  Value *empties = loadFrom(i32_, b_.CreateStructGEP(classMakeTy_, make, ClassMakeEmpties), Mem::Unknown, "nempty");
+  Value *model = loadFrom(ptrTy_, b_.CreateStructGEP(classMakeTy_, make, ClassMakeModel), Mem::Unknown, "model");
+  Value *list = loadFrom(ptrTy_, b_.CreateStructGEP(classMakeTy_, make, ClassMakeEmpty), Mem::Unknown, "empty");
+  {
+    BasicBlock *pre = b_.GetInsertBlock(), *check = newBlock("new.check"), *next = newBlock("new.check.next");
+    BasicBlock *alloc = newBlock("new.alloc");
+    b_.CreateCondBr(b_.CreateICmpNE(empties, ConstantInt::get(i32_, 0)), check, alloc);
+    b_.SetInsertPoint(check);
+    PHINode *j = b_.CreatePHI(i32_, 2, "j");
+    j->addIncoming(ConstantInt::get(i32_, 0), pre);
+    Value *slotNo = loadFrom(i32_, b_.CreateGEP(i32_, list, j), Mem::Unknown, "slot");
+    Value *held = itemPointer(b_.CreateGEP(itemTy_, model, slotNo), "model.array");
+    Value *len = loadFrom(intPtrTy_, b_.CreateStructGEP(arrayTy_, held, ArrayLen), Mem::ArrayHeader, "model.len");
+    branchLikely(b_.CreateICmpEQ(len, ConstantInt::get(intPtrTy_, 0)), next, slow);
+    b_.SetInsertPoint(next);
+    Value *after = b_.CreateAdd(j, ConstantInt::get(i32_, 1));
+    j->addIncoming(after, next);
+    b_.CreateCondBr(b_.CreateICmpULT(after, empties), check, alloc);
+    b_.SetInsertPoint(alloc);
+  }
+  uint64_t hdr = dl_.getTypeAllocSize(gcHdrTy_), itemsAt = arrayItemsOffset();
+  uint64_t emptyBytes = hdr + alignTo(itemsAt, XB_GC_ALIGN);
+  Value *extra = b_.CreateMul(b_.CreateZExt(empties, intPtrTy_), ConstantInt::get(intPtrTy_, emptyBytes));
+  Value *birth = nullptr;
+  Value *obj = allocateInHole(size, XB_GC_OBJECT, 0, slow, extra, &birth);
+  Value *cls = loadFrom(ptrTy_, b_.CreateStructGEP(classMakeTy_, make, ClassMakeCls), Mem::Unknown, "cls");
+  tag(b_.CreateStore(cls, b_.CreateStructGEP(objectTy_, obj, ObjectCls)), Mem::ObjectHeader);
+  tag(b_.CreateStore(nvars, b_.CreateStructGEP(objectTy_, obj, ObjectNvars)), Mem::ObjectHeader);
+  Value *vars = b_.CreateStructGEP(objectTy_, obj, ObjectVars);
+  b_.CreateMemCpy(vars, itemAlign_, model, itemAlign_, bytes);
+  BasicBlock *arrays = newBlock("new.arrays"), *made = newBlock("new.made");
+  BasicBlock *from = b_.GetInsertBlock();
+  b_.CreateCondBr(b_.CreateICmpNE(empties, ConstantInt::get(i32_, 0)), arrays, made);
+  b_.SetInsertPoint(arrays);
+  PHINode *k = b_.CreatePHI(i32_, 2, "k");
+  k->addIncoming(ConstantInt::get(i32_, 0), from);
+  Value *first = b_.CreateGEP(i8_, obj, roundToAlign(size));
+  Value *offset = b_.CreateMul(b_.CreateZExt(k, intPtrTy_), ConstantInt::get(intPtrTy_, emptyBytes));
+  Value *at = b_.CreateGEP(i8_, first, offset);
+  writeGcHeader(at, ConstantInt::get(intPtrTy_, itemsAt), XB_GC_ARRAY, uint8_t(XB_ELEMS_NIL << XB_GC_STATE_ELEMS_SHIFT),
+                birth);
+  Value *a = b_.CreateConstInBoundsGEP1_64(i8_, at, hdr, "empty.array");
+  Value *zero = ConstantInt::get(intPtrTy_, 0);
+  tag(b_.CreateStore(zero, b_.CreateStructGEP(arrayTy_, a, ArrayLen)), Mem::ArrayHeader);
+  tag(b_.CreateStore(zero, b_.CreateStructGEP(arrayTy_, a, ArrayCap)), Mem::ArrayHeader);
+  tag(b_.CreateStore(b_.CreateConstInBoundsGEP1_64(i8_, a, itemsAt), b_.CreateStructGEP(arrayTy_, a, ArrayData)),
+      Mem::ArrayHeader);
+  Value *slotNo = loadFrom(i32_, b_.CreateGEP(i32_, list, k), Mem::Unknown, "slot");
+  storeTagged(b_.CreateGEP(itemTy_, vars, slotNo), XB_T_ARRAY, a);
+  Value *next = b_.CreateAdd(k, ConstantInt::get(i32_, 1));
+  k->addIncoming(next, b_.GetInsertBlock());
+  b_.CreateCondBr(b_.CreateICmpULT(next, empties), arrays, made);
+  b_.SetInsertPoint(made);
+  storeTagged(dest(i), XB_T_OBJECT, obj);
+  b_.CreateBr(done);
+  b_.SetInsertPoint(slow);
+  CallResult r = callResult(dest(i), 0);
+  setNil(r.arg);
+  b_.CreateCall(rtClassInstance_, {fnCtx_, r.arg, def});
+  callDone(r);
+  checkPending(unwind_);
+  b_.CreateBr(done);
+  b_.SetInsertPoint(done);
+}
+
+// An array literal whose form the types of its elements tell (xb_array_new's rule: an empty one holds NILs, one with
+// an element that is surely neither NIL, a logical nor an integer holds items), made in the thread's hole when it fits:
+// false when it is left to xb_array_new. Nothing collects between the allocation and the store into its home.
+bool CodeGen::emitArrayLiteral(const xir::Instruction &i) {
+  const auto &ops = i.operands();
+  if (i.hasRest()) return false;
+  constexpr xir::TypeSet compact =
+      xir::typeBit(XB_T_NIL) | xir::typeBit(XB_T_LOGICAL) | xir::typeBit(XB_T_INT);
+  bool items = std::any_of(ops.begin(), ops.end(), [&](const xir::Value *v) {
+    xir::TypeSet t = plan_->types().of(v);
+    return t != 0 && (t & compact) == 0;
+  });
+  if (!ops.empty() && !items) return false;
+  uint64_t itemsAt = arrayItemsOffset();
+  uint64_t bytes = ops.size() * itemSize_;
+  if (dl_.getTypeAllocSize(gcHdrTy_) + alignTo(itemsAt + bytes, XB_GC_ALIGN) > XB_GC_SMALL_MAX) return false;
+  Value *elems = operandGroup(i);
+  BasicBlock *slow = newBlock("array.call"), *done = newBlock("array.done");
+  uint32_t form = ops.empty() ? XB_ELEMS_NIL : XB_ELEMS_ITEMS;
+  Value *a = allocateInHole(ConstantInt::get(intPtrTy_, itemsAt + bytes), XB_GC_ARRAY,
+                            uint8_t(form << XB_GC_STATE_ELEMS_SHIFT), slow);
+  Value *len = ConstantInt::get(intPtrTy_, ops.size());
+  tag(b_.CreateStore(len, b_.CreateStructGEP(arrayTy_, a, ArrayLen)), Mem::ArrayHeader);
+  tag(b_.CreateStore(len, b_.CreateStructGEP(arrayTy_, a, ArrayCap)), Mem::ArrayHeader);
+  Value *data = b_.CreateConstInBoundsGEP1_64(i8_, a, itemsAt, "inline.items");
+  tag(b_.CreateStore(data, b_.CreateStructGEP(arrayTy_, a, ArrayData)), Mem::ArrayHeader);
+  if (!ops.empty()) b_.CreateMemCpy(data, itemAlign_, elems, itemAlign_, bytes);
+  storeTagged(dest(i), XB_T_ARRAY, a);
+  b_.CreateBr(done);
+  b_.SetInsertPoint(slow);
+  b_.CreateCall(rtArrayNew_, {fnCtx_, dest(i), ConstantInt::get(i32_, ops.size()), elems});
+  b_.CreateBr(done);
+  b_.SetInsertPoint(done);
+  return true;
+}
+
+// Where an array's own items start (xb_array.inline_items, after len, cap and data).
+uint64_t CodeGen::arrayItemsOffset() const {
+  return alignTo(dl_.getTypeAllocSize(arrayTy_), itemAlign_.value());
+}
+
+// `size` rounded up to the collector's alignment, as the hole takes an object (xbrt.h).
+Value *CodeGen::roundToAlign(Value *size) {
+  return b_.CreateAnd(b_.CreateAdd(size, ConstantInt::get(intPtrTy_, XB_GC_ALIGN - 1)),
+                      ConstantInt::getSigned(intPtrTy_, -int64_t(XB_GC_ALIGN)));
+}
+
+// The header of an object of `size` bytes at `at`: {size, kind, state, birth} (xb_gc_hdr in xbrt.h).
+void CodeGen::writeGcHeader(Value *at, Value *size, xb_gc_kind kind, uint8_t state, Value *birth) {
+  tag(b_.CreateStore(b_.CreateTrunc(size, i32_), b_.CreateStructGEP(gcHdrTy_, at, GcHdrSize)), Mem::GcState);
+  tag(b_.CreateStore(ConstantInt::get(i8_, kind), b_.CreateStructGEP(gcHdrTy_, at, GcHdrKind)), Mem::GcState);
+  tag(b_.CreateStore(ConstantInt::get(i8_, state), b_.CreateStructGEP(gcHdrTy_, at, GcHdrState)), Mem::GcState);
+  tag(b_.CreateStore(birth, b_.CreateStructGEP(gcHdrTy_, at, GcHdrFlags)), Mem::GcState);
+}
+
+// `size` bytes of an object of `kind` taken from the thread's hole (xb_tlab in xbrt.h), its state byte `state`: its
+// address, past the header written there; a branch to `slow` when the thread has no hole, the object is too large for
+// one, or the hole has no room left for it. `extra` (header and alignment included) is taken right after it too, in
+// the same bump, for the caller's objects there (`birth`: the flags their headers take).
+Value *CodeGen::allocateInHole(Value *size, xb_gc_kind kind, uint8_t state, BasicBlock *slow, Value *extra,
+                               Value **birth) {
+  uint64_t hdr = dl_.getTypeAllocSize(gcHdrTy_);
+  Value *own = b_.CreateAdd(roundToAlign(size), ConstantInt::get(intPtrTy_, hdr), "object.total");
+  Value *total = extra ? b_.CreateAdd(own, extra) : own;
+  Value *tlab = loadFrom(ptrTy_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxTlab), Mem::Ctx, "tlab");
+  BasicBlock *have = newBlock("hole"), *fits = newBlock("hole.fits");
+  Value *small = b_.CreateICmpULE(own, ConstantInt::get(intPtrTy_, XB_GC_SMALL_MAX));
+  branchLikely(b_.CreateAnd(b_.CreateIsNotNull(tlab), small), have, slow);
+  b_.SetInsertPoint(have);
+  Value *cursorAt = b_.CreateStructGEP(tlabTy_, tlab, TlabCursor);
+  Value *cursor = loadFrom(ptrTy_, cursorAt, Mem::Ctx, "cursor");
+  Value *limit = loadFrom(ptrTy_, b_.CreateStructGEP(tlabTy_, tlab, TlabLimit), Mem::Ctx, "limit");
+  Value *room = b_.CreateSub(b_.CreatePtrToInt(limit, intPtrTy_), b_.CreatePtrToInt(cursor, intPtrTy_));
+  branchLikely(b_.CreateICmpUGE(room, total), fits, slow);
+  b_.SetInsertPoint(fits);
+  tag(b_.CreateStore(b_.CreateGEP(i8_, cursor, total), cursorAt), Mem::Ctx);
+  Value *allocatedAt = b_.CreateStructGEP(tlabTy_, tlab, TlabAllocated);
+  Value *allocated = loadFrom(intPtrTy_, allocatedAt, Mem::Ctx, "allocated");
+  tag(b_.CreateStore(b_.CreateAdd(allocated, total), allocatedAt), Mem::Ctx);
+  Value *flags = loadFrom(i16_, b_.CreateStructGEP(tlabTy_, tlab, TlabBirth), Mem::Ctx, "birth");
+  if (birth) *birth = flags;
+  writeGcHeader(cursor, size, kind, state, flags);
+  return b_.CreateGEP(i8_, cursor, ConstantInt::get(intPtrTy_, hdr), "object");
 }
 
 // block: the block made first, into an item of its own (blockTemp_) kept as a C root while its cells are obtained, each

@@ -275,14 +275,17 @@ one design, in this order, each step measured over every benchmark before it is 
    loop does not use takes no register from it and fewer slots are cleared at the entry. Done: copies by regions in
    functions too large to copy whole or with unwind blocks, joined at their ways out and guarded again after them
    (`typed-continuations` in [xir.md](xir.md#passes)); the rest of this step is to do.
-2. One calling convention. Functions, methods and codeblocks all get the direct entry functions have now (the
-   arguments' words in registers, the caller's frame passed), and the generic entry becomes a thunk that reads `argv`;
-   the parameters are values, not frame slots, so the frame is set up only on the paths that call or allocate (as for
-   a leaf function today), also for the frames of inlined bodies; the send cache keeps the method's direct entry and a
+2. One calling convention. Functions, methods and codeblocks all get the direct entry functions have now (the arguments'
+   words in registers, the caller's frame passed), and the generic entry becomes a thunk that reads `argv`; the
+   parameters are values, not frame slots, so the frame is set up only on the paths that call or allocate (as for a leaf
+   function today), also for the frames of inlined bodies; the send cache keeps the method's direct entry and a
    codeblock its own (`xb_block`), so compiled sends and `Eval`s call them; methods and codeblocks get a body for
-   arguments passed by reference, as functions have.
+   arguments passed by reference, as functions have. Done: inlined bodies link no frame (their positions in the
+   caller's, [compiler.md](compiler.md#xir-to-llvm)).
 3. Inline allocation: a context reaches its thread's allocation buffer, and compiled code bumps it for array and hash
-   literals, objects of a known class, cells and codeblocks, the frame set up only on the slow path.
+   literals, objects of a known class, cells and codeblocks, the frame set up only on the slow path. Done: objects of a
+   class whose objects take nothing but memory (empty arrays for `INIT {}` included), array literals whose form is
+   known; the rest (hash literals, other values an object copies, cells and codeblocks) to do.
 4. Dispatch: messages interned to numbers when classes are registered, one class table for the runtime's classes and
    the program's, sends to values of the built-in types cached as those to objects.
 

@@ -621,13 +621,14 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
 - Alias information (TBAA): every load and store of generated code whose memory is known is tagged with its class,
   classes that never overlap (`CodeGen::Mem`): items outside the heap (an `alloca` or a global of the module: frames,
   `Local` and scratch items, `STATIC` storage, literals), items in the heap (addresses from `heapItem`: elements, cells,
-  reference targets), array headers, codeblocks' cell pointers, the context's head, frame links, the collector's state
-  bytes, strings and their buffers (lengths, flags and bytes, which compiled code reads, a view's through its buffer's
-  address, and the flags, where it clears `XB_STR_APPEND`), objects' class pointers (`xb_object.cls`, which a send's
-  in-place path reads) and a `FOR EACH` reference's position (`xb_ref.index`, which `each.move` writes: a string's
-  length and bytes stay in registers across it). An address that may be either kind (a variable reached through a
-  possible reference, an argument such as `argv` or the result pointer) is not tagged. LLVM then knows that a store into
-  an element changes no frame slot and no array header; by itself this changes little in the code today, and it is the
+  reference targets), array headers, codeblocks' cell pointers, the context's head and the thread's allocation hole
+  (`xb_tlab`, which only compiled code and the collector's own unit touch), frame links, the collector's state bytes,
+  strings and their buffers (lengths, flags and bytes, which compiled code reads, a view's through its buffer's address,
+  and the flags, where it clears `XB_STR_APPEND`), objects' class pointers (`xb_object.cls`, which a send's in-place
+  path reads) and a `FOR EACH` reference's position (`xb_ref.index`, which `each.move` writes: a string's length and
+  bytes stay in registers across it). An address that may be either kind (a variable reached through a possible
+  reference, an argument such as `argv` or the result pointer) is not tagged. LLVM then knows that a store into an
+  element changes no frame slot and no array header; by itself this changes little in the code today, and it is the
   ground for moving array headers out of fast loops.
 - Items are stored and copied as two 8-byte words, the header (type, width, decimals; `headerWord`, in the target's byte
   order, as `xb_header_word` in `xbrt.h`) and the value, and fields are read out of the header word (their bit positions
@@ -803,7 +804,19 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   followed by the barrier), and call `xb_op_object_get` and `xb_op_object_set` for a shared one. Object variables are
   read as `copyItem` copies an item (its value word not merged with the header's into one 16-byte load) and written with
   two 8-byte stores, so that a read after an assignment is forwarded from its stores. `send.macro` calls `xb_macro_send`
-  the same way, without a cache. `class.new` calls `xb_class_instance`.
+  the same way, without a cache. `class.new` makes the object in the thread's hole (`emitClassNew`, `allocateInHole`)
+  when its class has published how (`xb_class_def.make`, an acquire load: [runtime.md](runtime.md#classes)) and the
+  object fits (at most `XB_GC_SMALL_MAX` bytes with its header, room left in the hole the context's `tlab` points to):
+  it moves the hole's cursor, adds to its `allocated`, writes the header (the hole's `birth` as its flags) and the
+  object's class, count and variables (a copy of the model: of a size the compiler knows when the class's line is the
+  module's alone and single, `classVarCounts_`, the count published agreeing, else through `memcpy` of the count
+  published), and a new empty array (the form of `NIL`s) for each slot whose initial value is one, right after the
+  object in the same bump (`INIT {}`), once it has seen the model's arrays there are empty still; else it calls
+  `xb_class_instance`, which prepares the class (its first object) and makes the others (a destructor to register, other
+  values to copy, a new hole). An array literal whose form its elements' types tell (`emitArrayLiteral`: an empty one
+  holds `NIL`s, one with an element that is surely no `NIL`, logical or integer holds items; `xb_array_new`'s rule) is
+  made in the hole too, its elements copied from their group, when it fits; else `xb_array_new` makes it. Nothing
+  collects between the allocation and the store of the object into its home (`short_lived_objects`: 0.71 of the time).
 - Memory variables ([runtime.md](runtime.md#memory-variables)): a module emits one `xb_memvar` per name its
   functions use (`xb.module.memvars`, numbered by the runtime when the module registers), and the `mv.*` operations
   call the runtime with it. A function (or codeblock) whose xIR may create a PRIVATE (`mv.set`, `mv.private`,

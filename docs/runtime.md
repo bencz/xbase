@@ -250,11 +250,16 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   the system within about 5 seconds (resident memory 1645 MB to 8 MB), with no `__GcCollect()`.
 - Allocation: every thread fills a hole, a run of free lines, by bumping a cursor, without locking (and takes the slots
   of a size class from a block of its own). That bump is `xb_gc_alloc`'s only inline path, which makes no call (no
-  frame, no saved registers) and writes the header as one store; everything else is `alloc_other`'s. When the object
-  does not fit, it takes the block's next hole, then a recyclable block (free lines among live ones), then a free block.
-  An object above one line that does not fit the hole goes to an overflow run of the thread instead (holes large enough
-  for it, from the same recyclable blocks, then free ones; a recyclable block without one leaves the list until the next
-  sweep), so no hole is given up for it and the free lines of recyclable blocks serve objects of every size.
+  frame, no saved registers) and writes the header as one store; everything else is `alloc_other`'s. The hole is an ABI
+  struct (`xb_tlab` in `xbrt.h`: `cursor`, `limit`, the bytes `allocated` since the thread last reported them, and
+  `birth`, the flags of a new object), which the context's head points to (`tlab`, set when the context registers, NULL
+  once its thread detaches): compiled code makes objects in it too, with the same rule and header (`xb_gc_kind`,
+  `xb_gc_hdr`, `XB_GC_ALIGN` and `XB_GC_SMALL_MAX` are in `xbrt.h`), and calls the runtime when the object does not fit.
+  When the object does not fit, it takes the block's next hole, then a recyclable block (free lines among live ones),
+  then a free block. An object above one line that does not fit the hole goes to an overflow run of the thread instead
+  (holes large enough for it, from the same recyclable blocks, then free ones; a recyclable block without one leaves the
+  list until the next sweep), so no hole is given up for it and the free lines of recyclable blocks serve objects of
+  every size.
 - Roots: the frames and temporary C roots (`xb_gc_root_push`, a vector of the context that grows as C calls nest, and
   halves at a collection while it is past 1024 entries and three quarters empty, so a deep nesting's peak does not
   stay; also compiled code's, while it makes a codeblock's cells) of every registered context, and global item arrays
@@ -741,9 +746,14 @@ first time it is used (its class function, or a subclass):
   knows ([xir.md](xir.md#classes)). The INIT values are evaluated then, once per class (`CLS:(INIT)`); each new object
   gets them, an array or a hash copied for each object (`xb_clone_deep`): once they are known the class keeps a new
   object's variables in the object's order (`model`, a root of the collector, and the slots to copy, `deep`), which
-  `xb_class_instance` copies whole into the object it allocates. When evaluating them fails, the class is not usable yet
-  and they are evaluated again the next time it is used; INIT values that need an object of their own class, or of a
-  subclass being prepared, are `BASE/0` `Class used by its own initial values`.
+  `xb_class_instance` copies whole into the object it allocates. Once the class is ready, when a new object takes
+  nothing but memory (no destructor in its line, not `ABSTRACT`, no rule broken, and every value to copy for each object
+  an empty array), the class publishes how one is made (`xb_class_make`: its `xb_class`, the model, the number of
+  variables and the slots that each take a new empty array while the model's is empty still, since an INIT value the
+  program holds may be filled later; a release store into `xb_class_def.make`), and compiled code makes its objects
+  itself ([compiler.md](compiler.md#xir-to-llvm)). When evaluating them fails, the class is not usable yet and they are
+  evaluated again the next time it is used; INIT values that need an object of their own class, or of a subclass being
+  prepared, are `BASE/0` `Class used by its own initial values`.
 - Threads prepare classes one at a time, under one lock for every class (`xb_rlock`, taken again by the thread that
   holds it as a preparation nests into parents and INIT values); a class is published ready (an atomic store of its
   state after everything else) and from then on used without the lock. The part a preparation makes is never freed: a
@@ -1111,18 +1121,18 @@ which inline `/` and `%` read), `xb_frame *frames`, `const char *stack_limit` ([
 whose `argv` they are reads the items it has parameters for, Self included, sets them to `NIL` and the field to `NULL`,
 so that it alone holds what only they held; one without a direct entry ends the loan in its prologue). Runtime code
 passes the `argv` it received on whole only where it reads none of it after the call (a send's dispatch, `Dispose`, an
-enumerable message of a generator); code that would read it sets the field to `NULL` first. `pending` holds
-requests. The runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`,
-`XB_PENDING_FINALIZE` when there are objects to destroy, `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro
-operator](#macro-operator), and `XB_PENDING_FAIL` when a task fails: an error the default handler gave up on in a task,
-its value in the `BREAK` value's place, which no `BEGIN SEQUENCE` takes and the task's end does, see [Threads and
+enumerable message of a generator); code that would read it sets the field to `NULL` first; and `xb_tlab *tlab`, the
+thread's hole, where compiled code allocates ([Garbage collector](#garbage-collector)). `pending` holds requests. The
+runtime sets bits there (`XB_PENDING_BREAK`, `XB_PENDING_QUIT`, `XB_PENDING_SAFEPOINT`, `XB_PENDING_FINALIZE` when there
+are objects to destroy, `XB_PENDING_TRAP` while `Type()` evaluates, see [Macro operator](#macro-operator), and
+`XB_PENDING_FAIL` when a task fails: an error the default handler gave up on in a task, its value in the `BREAK` value's
+place, which no `BEGIN SEQUENCE` takes and the task's end does, see [Threads and
 synchronization](#threads-and-synchronization)). Compiled code tests the field after each fallible call (not where no
-call ran since a test that found nothing to unwind for: [compiler.md](compiler.md#object-emission)); when it is set
-the code calls `xb_pending_gc` (or `xb_pending`, which never collects nor parks the thread, where a substituted result
-waits unseen: see [compiler.md](compiler.md#xir-to-llvm)), which serves a collection another thread makes (the thread
-parks: a safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a
-`BEGIN SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)); a
-loop
+call ran since a test that found nothing to unwind for: [compiler.md](compiler.md#object-emission)); when it is set the
+code calls `xb_pending_gc` (or `xb_pending`, which never collects nor parks the thread, where a substituted result waits
+unseen: see [compiler.md](compiler.md#xir-to-llvm)), which serves a collection another thread makes (the thread parks: a
+safepoint) and destructors ([Classes](#classes)) and returns non-zero when the function must unwind: to a `BEGIN
+SEQUENCE` handler of the function, or to its caller ([xir.md](xir.md#control-flow-for-errors-and-exceptions)); a loop
 tests the field the same way on its back edge, once every 1024 passes in an innermost loop without calls
 ([compiler.md](compiler.md#object-emission)), and the macro evaluator after each operation that can fail (with
 `xb_pending_gc`: its values are all in its frame). Other threads set bits there, so every change is an atomic

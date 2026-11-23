@@ -72,6 +72,7 @@ typedef struct cls {
   int finalized;            /* a class of its line has a destructor */
   char *broken;             /* the rule of FINAL, ABSTRACT or IMPLEMENTS it breaks (xb_class_check): no objects */
   const char *refused;      /* why it makes no objects (`broken`, or it is ABSTRACT), else NULL: one test per object */
+  xb_class_make make;       /* published in def->make when compiled code may make its objects itself (xbrt.h) */
   uint32_t initsBefore;     /* C_LINE: the INIT evaluations in progress when it began */
 } cls;
 
@@ -401,6 +402,15 @@ static cls *prepare_locked(xb_ctx *ctx, xb_class_def *def) {
       xb_share(&c->classValues[k]);
   }
   set_state(c, C_READY);
+  int empties = 1; /* every value each object copies an empty array, which compiled code makes itself */
+  for (uint32_t k = 0; k < c->ndeep && empties; ++k) {
+    const xb_item *v = &c->model[c->deep[k]];
+    empties = v->type == XB_T_ARRAY && ((const xb_array *)v->v.p)->len == 0;
+  }
+  if (!c->refused && !c->finalized && empties) {
+    c->make = (xb_class_make){&c->base, c->model, c->base.nvars, c->ndeep, c->deep};
+    xb_atomic_storeptr(&def->make, &c->make, XB_RELEASE);
+  }
   return c;
 }
 

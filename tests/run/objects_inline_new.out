@@ -1,0 +1,11 @@
+
+kept:        200       1200 point     200000
+own copy: changed point point
+subclass:          1          2          7 point T3D
+copied INIT:          1          0
+destructors ran: .T.
+abstract: an ABSTRACT class makes no objects
+other module's parent: TLOCAL remote          3 remote
+no variables: TEMPTY O TEMPTY
+too large for the hole:          1 last set
+threads:     200000

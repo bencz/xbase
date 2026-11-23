@@ -125,7 +125,7 @@
 #define XB_GC_BLOCK_SIZE ((size_t)32 << 10)
 #define XB_GC_LINE_SIZE ((size_t)128)
 #define XB_GC_LINES (XB_GC_BLOCK_SIZE / XB_GC_LINE_SIZE)
-#define XB_GC_SMALL_MAX (2 * XB_GC_LINE_SIZE)     /* largest object in lines, header included */
+_Static_assert(XB_GC_SMALL_MAX == 2 * XB_GC_LINE_SIZE, "largest object in lines, header included (xbrt.h)");
 #define XB_GC_CLASS_MIN_SLOTS 4u                  /* slots of the largest size class's block */
 #define XB_GC_CLASS_STEP 8u                       /* a class is at least 1/8 larger than the one before */
 #define XB_GC_CLASSES_MAX 64u
@@ -164,7 +164,6 @@
 #define XB_GC_TRIM_NS (5 * XB_NS_PER_SEC)        /* the idle time before its first collection */
 #define XB_GC_TRIM_MAX_NS (320 * XB_NS_PER_SEC)  /* its longest */
 #define XB_GC_TRIM_STACK ((size_t)256 << 10)     /* the trimmer's stack: the collection's stacks are vectors */
-#define XB_GC_ALIGN 8u
 #define XB_GC_DEFRAG_RESERVE 16u      /* new blocks a defragmentation may take: the heap's blocks / this */
 #define XB_GC_DEFRAG_LIVE_NUM 3u      /* a block a full collection may empty: at most 3/4 of its bytes live */
 #define XB_GC_DEFRAG_LIVE_DEN 4u
@@ -265,14 +264,14 @@ typedef struct xb_tlh {     /* a mutator thread's own part of the heap (xb_gc_th
   /* Old objects it recorded with the write barrier since the last collection (merged then into the remembered set). */
   xb_gc_hdr **remembered;
   size_t rememberedLen, rememberedCap;
-  char *cursor, *limit;     /* the hole being filled */
+  xb_tlab lab;              /* the hole being filled (cursor, limit), the bytes it allocated since it last reported
+                             * to the global count, and the flags of a new object: the full collections' polarity
+                             * (heap.polarity). Compiled code allocates in it too (xbrt.h). */
   xb_hblock *block;          /* its block */
   /* The overflow run: objects above a line that do not fit the hole, in holes large enough for them. */
   char *overCursor, *overLimit;
   xb_hblock *overBlock;
   xb_hblock *cls[XB_GC_CLASSES_MAX]; /* the block each size class takes slots from */
-  size_t allocated;         /* bytes since it last reported to the global count */
-  uint16_t birth;           /* the flags of a new object: the full collections' polarity (heap.polarity) */
 } xb_tlh;
 
 static struct {
@@ -588,7 +587,7 @@ void xb_gc_thread_attach(const void *base) {
   t->stackBase = xb_platform_stack_bounds(&low, &high) ? high : base; /* the system's end of the stack, when it tells */
   lock_between_collections(); /* not attached yet: it waits unparked, and no collection counts it */
   if (heap.threadCount == 1 && !xb_atomic_load32(&xb_storage_shared, XB_RELAXED)) publish(); /* a second thread */
-  t->birth = heap.polarity;
+  t->lab.birth = heap.polarity;
   t->next = heap.threads;
   heap.threads = t;
   xb_atomic_add32(&heap.threadCount, 1, XB_RELAXED);
@@ -614,7 +613,10 @@ void xb_gc_thread_detach(void) {
     }
   xb_atomic_add32(&heap.threadCount, (uint32_t)-1, XB_RELAXED);
   for (xb_ctx *ctx = heap.contexts; ctx; ctx = ctx->gcNext)
-    if (ctx->gcThread == t) ctx->gcThread = NULL; /* still registered: asked like an unattached thread's from now on */
+    if (ctx->gcThread == t) { /* still registered: asked like an unattached thread's from now on */
+      ctx->gcThread = NULL;
+      ctx->tlab = NULL;
+    }
   xb_mutex_unlock(&heap.lock);
   free(t->remembered);
   free(t);
@@ -622,9 +624,9 @@ void xb_gc_thread_detach(void) {
 }
 
 static void report_allocation(xb_tlh *t) {
-  heap.allocated += t->allocated;
-  heap.allocatedEver += t->allocated;
-  t->allocated = 0;
+  heap.allocated += t->lab.allocated;
+  heap.allocatedEver += t->lab.allocated;
+  t->lab.allocated = 0;
 }
 
 /* Appends to one of the collector's pointer stacks, growing it. */
@@ -803,8 +805,8 @@ static XB_NOINLINE xb_gc_hdr *alloc_slow(xb_tlh *t, size_t total) {
   xb_gc_safepoint(); /* a collection another thread asked for: an allocation is a safepoint */
   int medium = total > XB_GC_LINE_SIZE, collected = 0;
   for (;;) {
-    char **cursor = medium && total > room(t->cursor, t->limit) ? &t->overCursor : &t->cursor;
-    char **limit = cursor == &t->cursor ? &t->limit : &t->overLimit;
+    char **cursor = medium && total > room(t->lab.cursor, t->lab.limit) ? &t->overCursor : &t->lab.cursor;
+    char **limit = cursor == &t->lab.cursor ? &t->lab.limit : &t->overLimit;
     if (total <= room(*cursor, *limit)) {
       xb_gc_hdr *h = (xb_gc_hdr *)*cursor;
       *cursor += total;
@@ -1140,12 +1142,12 @@ static XB_NOINLINE void *alloc_other(xb_gc_kind kind, size_t size) {
   if (total <= XB_GC_SMALL_MAX) {
     xb_tlh *t = thread_heap();
     h = alloc_slow(t, total);
-    t->allocated += total;
+    t->lab.allocated += total;
   } else if (total <= heap.classMax) {
     xb_tlh *t = thread_heap();
     unsigned c = heap.classOf[(total - XB_GC_SMALL_MAX - 1) / XB_GC_ALIGN];
     h = alloc_class(t, c);
-    t->allocated += heap.classSize[c];
+    t->lab.allocated += heap.classSize[c];
   } else {
     return labeled(alloc_large(size, 0), kind, size);
   }
@@ -1158,12 +1160,12 @@ static XB_NOINLINE void *alloc_other(xb_gc_kind kind, size_t size) {
 void *xb_gc_alloc(xb_gc_kind kind, size_t size) {
   xb_tlh *t = tlh;
   size_t total = object_total(size);
-  if (size > XB_GC_SMALL_MAX - sizeof(xb_gc_hdr) || !t || total > room(t->cursor, t->limit))
+  if (size > XB_GC_SMALL_MAX - sizeof(xb_gc_hdr) || !t || total > room(t->lab.cursor, t->lab.limit))
     return alloc_other(kind, size);
-  xb_gc_hdr *h = (xb_gc_hdr *)t->cursor;
-  t->cursor += total;
-  t->allocated += total;
-  set_header(h, kind, size, t->birth);
+  xb_gc_hdr *h = (xb_gc_hdr *)t->lab.cursor;
+  t->lab.cursor += total;
+  t->lab.allocated += total;
+  set_header(h, kind, size, t->lab.birth);
   return h + 1;
 }
 
@@ -1210,6 +1212,7 @@ int xb_gc_finalizing(int start) {
 void xb_gc_register(xb_ctx *ctx) {
   lock_between_collections();
   ctx->gcThread = tlh;
+  ctx->tlab = tlh ? &tlh->lab : NULL;
   ctx->gcPrev = NULL;
   ctx->gcNext = heap.contexts;
   if (heap.contexts) heap.contexts->gcPrev = ctx;
@@ -2231,14 +2234,14 @@ static void collect(int full, int due) {
   for (xb_tlh *t = heap.threads; t; t = t->next) { /* the threads' holes end: blocks are swept anew */
     report_allocation(t);
     merge_remembered(t);
-    t->cursor = t->limit = t->overCursor = t->overLimit = NULL;
+    t->lab.cursor = t->lab.limit = t->overCursor = t->overLimit = NULL;
     t->block = t->overBlock = NULL;
     memset(t->cls, 0, sizeof t->cls);
   }
   heap.full = full;
   if (full) {
     begin_full();
-    for (xb_tlh *t = heap.threads; t; t = t->next) t->birth = heap.polarity;
+    for (xb_tlh *t = heap.threads; t; t = t->next) t->lab.birth = heap.polarity;
   }
   next_epoch();
   heap.markedBytes = 0;
@@ -2448,7 +2451,7 @@ size_t xb_gc_heap_bytes(void) {
 
 uint64_t xb_gc_allocated_bytes(void) {
   xb_mutex_lock(&heap.lock);
-  uint64_t bytes = heap.allocatedEver + (tlh ? tlh->allocated : 0); /* this thread's not reported yet too */
+  uint64_t bytes = heap.allocatedEver + (tlh ? tlh->lab.allocated : 0); /* this thread's not reported yet too */
   xb_mutex_unlock(&heap.lock);
   return bytes;
 }

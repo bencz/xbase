@@ -79,7 +79,14 @@ void CodeGen::initTypes() {
   }
   mod_.getOrInsertNamedMetadata(kItemTagName)->addOperand(tbaa_[(size_t)Mem::Item]); // TagItemMemsets
   // the [ABI] fields of xb_ctx
-  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, ptrTy_, ptrTy_}, "xb_ctx_head");
+  ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, ptrTy_, ptrTy_, ptrTy_}, "xb_ctx_head");
+  tlabTy_ = StructType::create(ctx_, {ptrTy_, ptrTy_, intPtrTy_, i16_}, "xb_tlab");
+  classMakeTy_ = StructType::create(ctx_, {ptrTy_, ptrTy_, i32_, i32_, ptrTy_}, "xb_class_make");
+  gcHdrTy_ = StructType::create(ctx_, {i32_, i8_, i8_, i16_}, "xb_gc_hdr");
+  classDefTy_ = StructType::create(ctx_,
+                                   {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_,
+                                    ptrTy_, i32_, ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_, ptrTy_},
+                                   "xb_class_def");
   nilItem_ = new GlobalVariable(mod_, itemTy_, true, GlobalValue::InternalLinkage, Constant::getNullValue(itemTy_),
                                 "xb.nil");
   nilItem_->setAlignment(itemAlign_);
@@ -88,7 +95,7 @@ void CodeGen::initTypes() {
   if (auto *f = dyn_cast<Function>(rtCondNot_.getCallee())) f->addFnAttr(Attribute::Cold); // an error's path, nearly
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtAbiCheck_ = rt("xb_abi_check", voidTy,
-                   {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
+                   {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
   rtStackOverflow_ = rt("xb_stack_overflow", voidTy, {ptrTy_});
   rtStackDeep_ = rt("xb_stack_deep", i32_, {ptrTy_, intPtrTy_});
   if (auto *f = dyn_cast<Function>(rtStackDeep_.getCallee())) { // it reads and writes the context alone (core/ctx.c)
@@ -389,8 +396,7 @@ void CodeGen::genClasses(const xir::Module &m) {
   auto *parentTy = StructType::get(ctx_, {ptrTy_, ptrTy_});
   auto *varTy = StructType::get(ctx_, {ptrTy_, i32_});
   auto *methodTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_});
-  auto *defTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_,
-                                       ptrTy_, i32_, ptrTy_, ptrTy_, ptrTy_, i32_, i32_, ptrTy_});
+  auto *defTy = classDefTy_;
   auto *ty = ArrayType::get(defTy, m.classes.size());
   classTable_ = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, nullptr, "xb.module.classes");
   auto name = [&](const std::string &s) { return b_.CreateGlobalString(s, ".xb.classname", 0, &mod_); };
@@ -400,6 +406,19 @@ void CodeGen::genClasses(const xir::Module &m) {
     auto *aty = ArrayType::get(ety, elems.size());
     return new GlobalVariable(mod_, aty, true, GlobalValue::PrivateLinkage, ConstantArray::get(aty, elems), label);
   };
+  classVarCounts_.assign(m.classes.size(), 0);
+  for (size_t k = 0; k < m.classes.size(); ++k) {
+    uint32_t n = 0;
+    const xir::Module::Class *c = &m.classes[k];
+    for (size_t depth = 0; c && depth <= m.classes.size(); ++depth) {
+      n += uint32_t(c->vars.size());
+      if (c->parents.empty()) {
+        classVarCounts_[k] = n;
+        break;
+      }
+      c = c->parents.size() == 1 && c->parents[0].local >= 0 ? &m.classes[size_t(c->parents[0].local)] : nullptr;
+    }
+  }
   std::vector<Constant *> defs;
   for (const xir::Module::Class &c : m.classes) {
     std::vector<Constant *> parents, interfaces, vars, classVars, methods, friendClasses, friendFunctions;
@@ -431,7 +450,7 @@ void CodeGen::genClasses(const xir::Module &m) {
                 ConstantInt::get(i32_, interfaces.size()),
                 ConstantInt::get(i32_, (c.isStatic ? XB_CLASS_STATIC : 0u) | (c.scalar ? XB_CLASS_SCALAR : 0u) |
                                             (runtimeLibrary_ ? XB_CLASS_RUNTIME : 0u) | c.kind),
-                ConstantPointerNull::get(ptrTy_)}));
+                ConstantPointerNull::get(ptrTy_), ConstantPointerNull::get(ptrTy_)}));
   }
   classTable_->setInitializer(ConstantArray::get(ty, defs));
 }
@@ -1026,6 +1045,7 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t ctxDecimals = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxDecimals);
   uint64_t ctxStackLimit = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxStackLimit);
   uint64_t ctxLent = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxLent);
+  uint64_t ctxTlab = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxTlab);
   uint64_t arrayData = dl_.getStructLayout(arrayTy_)->getElementOffset(ArrayData);
   uint64_t refValue = dl_.getStructLayout(refTy_)->getElementOffset(RefValue);
   uint64_t hashEntries = dl_.getStructLayout(hashTy_)->getElementOffset(HashEntries);
@@ -1035,8 +1055,8 @@ void CodeGen::genEntry(const xir::Function &start) {
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
                               ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
                               ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, ctxStackLimit),
-                              ConstantInt::get(i32_, ctxLent),
-                              ConstantInt::get(i32_, arrayData),
+                              ConstantInt::get(i32_, ctxLent), ConstantInt::get(i32_, ctxTlab),
+                              ConstantInt::get(i32_, arrayData), ConstantInt::get(i32_, arrayItemsOffset()),
                               ConstantInt::get(i32_, refValue), ConstantInt::get(i32_, hashEntries),
                               ConstantInt::get(i32_, objectVars), ConstantInt::get(i32_, strBufBytes)});
   b_.CreateCall(rtProgramRun_, {ctx, functions_.at(&start), fn->getArg(1), fn->getArg(2)});

@@ -71,9 +71,26 @@ private:
     FrameArgc = 5,
     FrameSlots = 6
   };
-  enum CtxField : unsigned { CtxPending = 0, CtxDecimals = 1, CtxFrames = 2, CtxStackLimit = 3, CtxLent = 4 };
+  enum CtxField : unsigned {
+    CtxPending = 0,
+    CtxDecimals = 1,
+    CtxFrames = 2,
+    CtxStackLimit = 3,
+    CtxLent = 4,
+    CtxTlab = 5
+  };
+  enum TlabField : unsigned { TlabCursor = 0, TlabLimit = 1, TlabAllocated = 2, TlabBirth = 3 }; // xb_tlab
+  enum ClassDefField : unsigned { ClassDefRuntime = 18, ClassDefMake = 19 };                   // xb_class_def
+  enum ClassMakeField : unsigned { // xb_class_make
+    ClassMakeCls = 0,
+    ClassMakeModel = 1,
+    ClassMakeVars = 2,
+    ClassMakeEmpties = 3,
+    ClassMakeEmpty = 4
+  };
+  enum GcHdrField : unsigned { GcHdrSize = 0, GcHdrKind = 1, GcHdrState = 2, GcHdrFlags = 3 }; // xb_gc_hdr
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayData = 2 };
-  enum ObjectField : unsigned { ObjectCls = 0, ObjectVars = 2 }; // xb_object
+  enum ObjectField : unsigned { ObjectCls = 0, ObjectNvars = 1, ObjectVars = 2 }; // xb_object
   enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
   enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 6 };           // xb_hash
   enum HEntryField : unsigned { HEntryKey = 0, HEntryValue = 1 };                     // xb_hentry
@@ -82,7 +99,8 @@ private:
   // Classes of memory compiled code reaches, which never overlap (TBAA):
   // items outside the heap (frames, Local and scratch items, STATIC storage,
   // literals), items in the heap (elements, cells, reference targets), array
-  // headers, codeblocks' cell pointers, the context's head, frame links, the
+  // headers, codeblocks' cell pointers, the context's head and the thread's
+  // allocation hole, frame links, the
   // collector's state bytes, strings and views' buffers (compiled code reads
   // them, and writes the strings an `append` grows: bytes, length, flags,
   // room), objects' class pointers, and FOR EACH references' positions.
@@ -289,6 +307,13 @@ private:
                        std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> *bools = nullptr);
   void emitIndexSet(const xir::Instruction &i);
   void emitMakeBlock(const xir::Instruction &i);
+  void emitClassNew(const xir::Instruction &i);
+  bool emitArrayLiteral(const xir::Instruction &i);
+  llvm::Value *allocateInHole(llvm::Value *size, xb_gc_kind kind, uint8_t state, llvm::BasicBlock *slow,
+                              llvm::Value *extra = nullptr, llvm::Value **birth = nullptr);
+  llvm::Value *roundToAlign(llvm::Value *size);
+  void writeGcHeader(llvm::Value *at, llvm::Value *size, xb_gc_kind kind, uint8_t state, llvm::Value *birth);
+  uint64_t arrayItemsOffset() const;
 
   // Instructions.cpp
   void emit(const xir::Instruction &i);
@@ -335,6 +360,10 @@ private:
   llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, ncells, cells[] }
   llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, data } (its items follow)
   llvm::StructType *objectTy_ = nullptr;    // xb_object: { cls, nvars, vars }
+  llvm::StructType *tlabTy_ = nullptr;      // xb_tlab: { cursor, limit, allocated, birth }
+  llvm::StructType *classDefTy_ = nullptr;  // xb_class_def
+  llvm::StructType *classMakeTy_ = nullptr; // xb_class_make: { cls, model, nvars, nempty, empty }
+  llvm::StructType *gcHdrTy_ = nullptr;     // xb_gc_hdr: { size, kind, state, flags }
   llvm::StructType *refTy_ = nullptr;       // xb_ref: { coll, index, value, key, loop }
   llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, hint, entries }
   llvm::StructType *hentryTy_ = nullptr;    // xb_hentry: { key, value }
@@ -373,6 +402,9 @@ private:
   llvm::FunctionCallee rtAwaitFuse_, rtAwaitFused_;
   llvm::GlobalVariable *classTable_ = nullptr; // the module's xb_class_def array, or null
   void genClasses(const xir::Module &m);
+  // The variables an object of each class of the module has, when its line is the module's alone and single (each
+  // class of at most one parent: the sum along it), else 0: class.new copies a model of that many at once.
+  std::vector<uint32_t> classVarCounts_;
   llvm::Constant *classDef(int32_t index);
   llvm::FunctionCallee rtMacroGet_, rtMacroSet_, rtMacroCall_, rtMacroSend_, rtMacroRef_, rtMacroPrivate_;
   llvm::FunctionCallee rtMacroPublic_, rtMacroText_;
