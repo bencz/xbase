@@ -276,8 +276,8 @@ the benchmarks it moves, so that each one is of use on its own and no step waits
 2. Calls and objects: the cost of a call and of a send (frames, arguments, the send cache), `FINAL` classes and
    methods that the compiler calls directly, interfaces checked when the class is compiled, `ABSTRACT` methods and
    classes, and `USING` over an interface of disposal, as in .NET. Done: `ABSTRACT`, `FINAL`, `INTERFACE` and
-   `IMPLEMENTS` with their checks (compiled and at run time), `IDisposable`; planned: direct calls to `FINAL`
-   methods.
+   `IMPLEMENTS` with their checks (compiled and at run time), `IDisposable`, direct calls of a method's sends to its
+   own `Self` in a `FINAL` class or of `FINAL` methods.
 3. Machine types, shared by FFI and the optimizer: signed and unsigned integers of 8 to 64 bits, pointer-sized
    integers, `FLOAT`, `DOUBLE`, `BOOL`, pointers to a type, structures and unions with nested structures, arrays
    inside them, pointer fields, arrays of structures and function pointers, laid out by the target's data layout;

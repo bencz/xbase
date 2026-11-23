@@ -10,7 +10,9 @@
 // place), the other keeps the send (`dispatched`). A class's members are fixed once it is prepared, so an object of
 // the class, exactly, reaches them whatever made it. A method's sends to its own Self are left alone: its body stays as
 // small as it was, to be inlined where its class is known (resolve-sends there, or its copy typed for it) or not (its
-// sends are then the caller's, which this versions).
+// sends are then the caller's, which this versions). But for two, which reach one thing whatever the object's class
+// (the method's or a subclass of it): every send to Self in a method of a FINAL class, which has no subclass, and a
+// send to Self that reaches a FINAL method, which no subclass that makes objects declares again (xb_class_check).
 #include "xir/passes/Passes.h"
 
 #include "xir/Analysis.h"
@@ -34,6 +36,14 @@ namespace {
 // A read of the method's own Self (its parameter 0), which nothing in it assigns (onlyLoaded): a Super send to it
 // reaches the parent's method of the method's class, which the runtime finds from that class alone (a value that is
 // no object included: runtime.md). A variable's slot is the object's class's (the runtime's to find).
+// Whether send `i` to its method's own Self reaches one thing whatever the object's class: the method's class is FINAL,
+// or the message reaches a FINAL method from it.
+bool sealed(const Module &m, const ClassModel &model, const Instruction &i) {
+  if (m.classes[(size_t)i.classIndex].kind & XB_CLASS_FINAL) return true;
+  std::optional<xb_member> member = model.resolve(i.classIndex, i.classIndex, false, i.message);
+  return member && member->kind == XB_MK_METHOD && (member->flags & XB_MEMBER_FINAL);
+}
+
 bool readsOwnSelf(const Function &f, const Value *v) {
   const Instruction *load = asInstruction(v, Op::Load);
   const Var *self = load ? load->var : nullptr;
@@ -176,10 +186,14 @@ bool resolveSends(Module &m, Function &f) {
       int32_t c = classes.of(i.operand(0));
       bool fromMethod = c == kNoClass && i.superSend && i.classIndex >= 0 && readsOwnSelf(f, i.operand(0));
       if (fromMethod) c = i.classIndex;
+      bool toSelf = c == kNoClass && !i.superSend && i.classIndex >= 0 &&
+                    !m.classes[(size_t)i.classIndex].scalar && readsOwnSelf(f, i.operand(0));
+      if (toSelf && sealed(m, model, i)) c = i.classIndex;
+      else if (toSelf) continue;
       if (c == kNoClass) continue;
       std::optional<xb_member> member = model.resolve(c, i.classIndex, i.superSend, i.message);
       bool erased = false;
-      if (!member && !i.superSend && !fromMethod && newByInit(model, c, b, k, erased, removed)) {
+      if (!member && !i.superSend && !fromMethod && !toSelf && newByInit(model, c, b, k, erased, removed)) {
         if (erased) --k; // the next instruction is at k now (unsigned: wraps, then back to 0)
         changed = true;
         continue;

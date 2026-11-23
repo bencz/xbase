@@ -1,0 +1,5 @@
+
+base:          8 base/secret2
+child:         12 child/secret3         12
+other module's child:         16 other/secret4
+final class:         18         15         15
