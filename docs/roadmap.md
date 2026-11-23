@@ -256,6 +256,35 @@ in the phases of [concurrency.md](concurrency.md#phases).
   3. Runtime functions as xIR operations, inlining of xBase functions, string appends in place, direct calls with
      fixed arity.
 
+### Typed values, calls, frames and allocation (planned, next)
+
+The open items of the measured plan cross: a value's home (an item in a frame slot, or a machine word in a register),
+the calling convention, when a frame exists, what the collector sees and how objects are allocated. They are done as
+one design, in this order, each step measured over every benchmark before it is kept.
+
+1. Typed values. An operation is typed before it runs, not checked after: a guard (`subst.check` with a mask, as the
+   guards of values entering loops are now) tests the types its operands must have for its fast form, right where each
+   operand is made, or before the loop for one the loop does not change; a guard that fails enters a generic copy of
+   the region alone (the innermost loop nest that holds the guard, or the stretch of straight code between two loops),
+   not of the whole function, its live values joined there by block parameters, and both copies leave the region by
+   the same exits, where the values that live on are items again. With its operands typed, an operation cannot fail
+   with an error a handler substitutes (but for the errors that remain: a zero divisor, an index out of bounds, which
+   keep a check after them into the same region copy), so the checks after operations, the rounds that choose them
+   (which can check an operation a later guard makes safe: a `FOR` counter that starts from a guarded value) and the
+   limits of 500 instructions and 64 checks a function go. The typed copy's values are machine words: integers,
+   doubles (with their decimals), logicals; the frame holds items that may refer to heap objects only, so a value the
+   loop does not use takes no register from it and fewer slots are cleared at the entry.
+2. One calling convention. Functions, methods and codeblocks all get the direct entry functions have now (the
+   arguments' words in registers, the caller's frame passed), and the generic entry becomes a thunk that reads `argv`;
+   the parameters are values, not frame slots, so the frame is set up only on the paths that call or allocate (as for
+   a leaf function today), also for the frames of inlined bodies; the send cache keeps the method's direct entry and a
+   codeblock its own (`xb_block`), so compiled sends and `Eval`s call them; methods and codeblocks get a body for
+   arguments passed by reference, as functions have.
+3. Inline allocation: a context reaches its thread's allocation buffer, and compiled code bumps it for array and hash
+   literals, objects of a known class, cells and codeblocks, the frame set up only on the slow path.
+4. Dispatch: messages interned to numbers when classes are registered, one class table for the runtime's classes and
+   the program's, sends to values of the built-in types cached as those to objects.
+
 ### Runtime
 
 - The ABI check for every module, not only the start module.
@@ -266,7 +295,8 @@ in the phases of [concurrency.md](concurrency.md#phases).
   rounds them through a double (to decide).
 - `Array()` with more than 64 dimensions; one substring search and one byte comparison helper; shared one-byte and
   empty strings instead of allocating them.
-- GC pauses: mark epochs instead of clearing every mark, a stack watermark for young collections.
+- GC pauses: a stack watermark for young collections (full collections clear no marks any more: their polarity
+  turns around, [runtime.md](runtime.md#garbage-collector)).
 
 ## Order of the work
 
