@@ -1555,6 +1555,38 @@ static int mark_item(xb_item *it) {
   }
 }
 
+/* How far ahead of the item it marks a run of items prefetches what an item refers to: the object whose header the
+ * mark reads (a miss, most of the time, in a large array of objects made at different times). */
+#define PREFETCH_AHEAD 8u
+
+/* A hint that the object at `p` (its header) will be read soon: the compiler's prefetch where it offers one, else
+ * nothing (a hint changes no result). */
+static inline void prefetch(const void *p) {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_prefetch)
+  __builtin_prefetch(p);
+#define XB_GC_PREFETCHES
+#endif
+#endif
+#if !defined(XB_GC_PREFETCHES)
+  (void)p;
+#endif
+}
+
+/* Marks items [from, to) of `items`, each one's object prefetched PREFETCH_AHEAD items before; whether some of what
+ * they refer to stays young. */
+static int mark_items(xb_item *items, size_t from, size_t to) {
+  int young = 0;
+  for (size_t i = from; i < to; ++i) {
+    if (i + PREFETCH_AHEAD < to) {
+      const xb_item *ahead = &items[i + PREFETCH_AHEAD];
+      if (xb_type_is_heap(ahead->type)) prefetch(xb_gc_header(ahead->v.p));
+    }
+    young |= mark_item(&items[i]);
+  }
+  return young;
+}
+
 /* The items under the dirty cards of an old array, eight cards per step. A
  * card whose items still refer to young objects stays dirty; returns whether
  * any did. */
@@ -1574,8 +1606,7 @@ static int trace_cards(xb_array *a) {
     if (cards[c]) {
       size_t from = c << XB_ARRAY_CARD_SHIFT, to = from + ((size_t)1 << XB_ARRAY_CARD_SHIFT);
       if (to > a->len) to = a->len;
-      int keep = 0;
-      for (size_t i = from; i < to; ++i) keep |= mark_item(&((xb_item *)a->data)[i]);
+      int keep = to > from ? mark_items(a->data, from, to) : 0;
       heap.scannedRefs += to > from ? to - from : 0;
       cards[c] = (uint8_t)keep;
       young |= keep;
@@ -1594,8 +1625,7 @@ static int trace(xb_gc_hdr *h) {
     case XB_GC_ARRAY: {
       xb_array *a = obj;
       if (a->data != a->inline_items) REACH(a->data, &young);
-      if (xb_array_elems(a) == XB_ELEMS_ITEMS) /* a compact form holds no object */
-        for (size_t i = 0; i < a->len; ++i) young |= mark_item(&((xb_item *)a->data)[i]);
+      if (xb_array_elems(a) == XB_ELEMS_ITEMS) young |= mark_items(a->data, 0, a->len); /* a compact form: none */
       uint8_t *cards = xb_array_cards(a); /* everything was scanned */
       if (cards) memset(cards, 0, xb_array_card_count(a->cap));
       break;
@@ -1686,7 +1716,7 @@ static void trace_slice(void) {
   xb_slice *s = &heap.slices[heap.slicesLen - 1];
   xb_array *a = (xb_array *)(s->h + 1);
   size_t end = s->next + XB_GC_SLICE < a->len ? s->next + XB_GC_SLICE : a->len;
-  for (size_t i = s->next; i < end; ++i) s->young |= mark_item(&((xb_item *)a->data)[i]);
+  s->young |= mark_items(a->data, s->next, end);
   s->next = end;
   if (end < a->len) return;
   uint8_t *cards = xb_array_cards(a); /* everything was scanned */
