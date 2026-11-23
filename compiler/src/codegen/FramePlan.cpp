@@ -596,34 +596,72 @@ void FramePlan::placeClears() {
   }
 }
 
-// The units of each loop (values and argument groups of its blocks), cleared where it exits.
+// Whether value `v` is live into block `b`: a use is reached from b's start without passing v's definition (the walk
+// of computeLiveness, for one value).
+bool FramePlan::liveInto(const Value *v, const BasicBlock *b) const {
+  const BasicBlock *def = definingBlock(v);
+  if (b == def) return false;
+  std::unordered_set<const BasicBlock *> seen;
+  std::vector<const BasicBlock *> work;
+  auto useIn = [&](const BasicBlock *u) {
+    if (u != def && seen.insert(u).second) work.push_back(u);
+  };
+  for (const Instruction *user : v->users()) useIn(user->parent);
+  if (auto r = sourceReaders_.find(v); r != sourceReaders_.end())
+    for (const Instruction *user : r->second) useIn(user->parent);
+  while (!work.empty()) {
+    const BasicBlock *x = work.back();
+    work.pop_back();
+    if (x == b) return true;
+    for (const BasicBlock *p : cfg_.preds(x)) useIn(p);
+  }
+  return false;
+}
+
+// The units of each loop (values and argument groups of its blocks), cleared where it exits; and those of the values
+// made before the loop that it uses and that are dead where it exits (the collection of a FOR EACH, say), whose slots
+// would otherwise keep what they hold through the code that follows (the call, in a loop around it, that makes the
+// next one).
 void FramePlan::placeLoopClears() {
   xir::Loops loops(cfg_);
   for (auto &loop : loops.all()) {
     std::unordered_set<uint32_t> units;
-    auto add = [&](const Value *v) {
-      if (auto u = unit_.find(v); u != unit_.end() && !units_[u->second].pinned) units.insert(u->second);
+    auto unitOfValue = [&](const Value *v) -> std::optional<uint32_t> {
+      if (auto u = unit_.find(v); u != unit_.end() && !units_[u->second].pinned) return u->second;
+      return std::nullopt;
     };
+    auto add = [&](const Value *v) {
+      if (auto u = unitOfValue(v)) units.insert(*u);
+    };
+    std::vector<const Value *> before; // made before the loop, used in it
+    std::unordered_set<const Value *> seenBefore;
     for (const BasicBlock *b : loop->blocks) {
       for (auto &p : b->params) add(p.get());
       for (auto &i : b->insts) {
         add(i.get());
         if (auto g = groupUnit_.find(i.get()); g != groupUnit_.end()) units.insert(g->second);
+        for (const Value *op : i->operands()) {
+          const BasicBlock *def = op->kind() == Value::Kind::Constant ? nullptr : definingBlock(op);
+          if (def && !loop->contains(def) && unitOfValue(op) && seenBefore.insert(op).second) before.push_back(op);
+        }
       }
     }
     for (const BasicBlock *b : loop->blocks)
       for (size_t k = 0; k < b->numSuccessors(); ++k) {
         const BasicBlock *exit = b->successor(k);
         if (loop->contains(exit)) continue;
+        std::unordered_set<uint32_t> here = units;
+        for (const Value *v : before)
+          if (!liveInto(v, exit)) here.insert(*unitOfValue(v));
         const std::vector<BasicBlock *> &preds = cfg_.preds(exit);
         bool onlyLoop = std::all_of(preds.begin(), preds.end(), [&](const BasicBlock *p) { return loop->contains(p); });
         const xir::Instruction *leave = b->terminator();
         bool branch = leave && (leave->op == xir::Op::Br || leave->op == xir::Op::CondBr) &&
                       k < leave->targets.size(); // not the unwind edge, which no branch takes
         if (!onlyLoop && branch) // a branch's edge may get a block of its own
-          addClears(edgeClears_[{b, exit}], units, start_.at(exit));
+          addClears(edgeClears_[{b, exit}], here, start_.at(exit));
         else
-          addClears(blockClears_[exit], units, start_.at(exit));
+          addClears(blockClears_[exit], here, start_.at(exit));
       }
   }
 }

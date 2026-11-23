@@ -130,6 +130,7 @@ private:
   void findBodyUnits();
   void placeClears();
   void placeLoopClears();
+  bool liveInto(const xir::Value *v, const xir::BasicBlock *b) const;
   void holdSlots(std::unordered_set<uint32_t> &held, uint32_t u) const; // the slots of unit u, into `held`
   void addClears(std::vector<uint32_t> &slots, const std::unordered_set<uint32_t> &units, uint32_t at) const;
   uint32_t unitOf(const xir::Value *v);

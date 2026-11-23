@@ -563,12 +563,13 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
 - Frame: `FramePlan` gives every live item value a frame slot (a GC root): each value's liveness is found by walking
   from its uses back to its definition, slots are assigned by linear scan and reused once free. A dead value's slot
   keeps what it held until another value takes it, so where a loop exits, the block it goes to first sets to `NIL` the
-  slots of the loop's values that are dead there and that no live value holds (`clearsAtStart`; see `inline.leave` below
-  for an inlined body): what only they held can be collected, and its destructor run. When other blocks reach that block
-  too (the header of a loop that follows, say), the loop's branches to it clear them on their edge instead
-  (`clearsOnEdge`), so the clears run once per exit, not on every pass of the next loop. `x := NIL` to a local or a
-  parameter (the program lets go of what x held: an array, an object whose destructor should run) is followed by a
-  `frame.release` (`Generator::genAssign`), which sets to `NIL` the slots of every value written before it and dead
+  slots of the loop's values, and of the values made before the loop that it uses and that are not live into that block
+  (the collection of a `FOR EACH`: `liveInto`), that are dead there and that no live value holds (`clearsAtStart`; see
+  `inline.leave` below for an inlined body): what only they held can be collected, and its destructor run. When other
+  blocks reach that block too (the header of a loop that follows, say), the loop's branches to it clear them on their
+  edge instead (`clearsOnEdge`), so the clears run once per exit, not on every pass of the next loop. `x := NIL` to a
+  local or a parameter (the program lets go of what x held: an array, an object whose destructor should run) is followed
+  by a `frame.release` (`Generator::genAssign`), which sets to `NIL` the slots of every value written before it and dead
   there, by precise liveness (`liveAtRelease_`: a use after it in its block, or the value live into a successor), not by
   the intervals, which span the blocks laid out between a definition and its last use; a slot an argument group holds is
   kept while that group's call is being made, or while its inlined body is open (`walkBodies`), not along the body's
