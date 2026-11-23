@@ -158,6 +158,14 @@ v`), never from messages sent to the loop variable. Generators produce enumerato
 classes that inherit `Enumerable` (LINQ-like methods, the lazy ones written with `YIELD`), and `AEval` and `AScan` go
 through collection objects.
 
+Queries (LINQ), in layers. Done: the interfaces `IEnumerable`, `IEnumerator`, `IOrderedEnumerable`, and ordered
+sequences (`OrderBy` with `ThenBy`). *(Planned)*: `IQueryable` and `IQueryProvider`, a `Queryable` whose operators
+add nodes to an expression tree that its provider runs; the compiler capturing a codeblock literal as an expression
+tree (from its syntax tree, its captured variables as parameters) where a parameter declared `AS EXPRESSION` takes it;
+providers that run a tree in memory, over a table of the RDDs (an index's `SEEK` and scope, a filter, the rest in
+memory) and in SQL with bound parameters (after the SQLite RDD and FFI); and a query syntax as a `#command` of
+`std.ch` (`FROM x IN source WHERE ... ORDER BY ... SELECT ...`) that becomes the chain of methods.
+
 ### Generators
 
 Done: a function that contains `YIELD expr` returns an enumerator; `FOR EACH x IN Gen( ... )` runs it step by step.

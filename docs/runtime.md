@@ -818,13 +818,15 @@ first time it is used (its class function, or a subclass):
   n )`, `TakeWhile( bTest )`, `SkipWhile( bTest )`, `SelectMany( bMap )`, `Concat( xOther )`, `Zip( xOther, [bCombine]
   )`, `Distinct( [bKey] )` (equal by `==`; numbers, strings and dates found through a hash) and `Reverse()` are
   generators (the sequence is made as it is gone through, so they chain); `OrderBy( [bKey] )` and `OrderByDescending(
-  [bKey] )` give an array ordered as `ASort` orders values (the primitive `__ValueLess`), equal keys in their order;
-  `GroupBy( bKey )` gives a hash of each key to the array of its elements, `ToHash( bKey, [bValue] )` a hash; and
-  `ToArray()`, `Count( [bTest] )`, `Any( [bTest] )`, `All( bTest )`, `First( [bTest] )`, `Last( [bTest] )`, `Contains( x
-  )`, `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )`, `Min( [bValue] )`, `Max( [bValue] )`, `Average( [bValue] )` (the
-  last three NIL without elements) and `ForEach( bBlock )` go through it at once. A class that inherits `Enumerable`
-  only needs `GetEnumerator()`; a generator's enumerator answers `Enumerable`'s messages too (`xb_class_send_as`).
-  `ClassName()` and `ValType()` of the values stay Clipper's.
+  [bKey] )` give an ordered sequence (`OrderedEnumerable`, which implements `IOrderedEnumerable`), ordered as `ASort`
+  orders values (the primitive `__ValueLess`) each time it is gone through, as its source is then, equal keys in their
+  order: `ThenBy( bKey )` and `ThenByDescending( bKey )` order the elements its keys found equal by one more key (a new
+  sequence), and `[]` reads the element at a position; `GroupBy( bKey )` gives a hash of each key to the array of its
+  elements, `ToHash( bKey, [bValue] )` a hash; and `ToArray()`, `Count( [bTest] )`, `Any( [bTest] )`, `All( bTest )`,
+  `First( [bTest] )`, `Last( [bTest] )`, `Contains( x )`, `Aggregate( bFunc, [xSeed] )`, `Sum( [bValue] )`, `Min(
+  [bValue] )`, `Max( [bValue] )`, `Average( [bValue] )` (the last three NIL without elements) and `ForEach( bBlock )` go
+  through it at once. A class that inherits `Enumerable` only needs `GetEnumerator()`; a generator's enumerator answers
+  `Enumerable`'s messages too (`xb_class_send_as`). `ClassName()` and `ValType()` of the values stay Clipper's.
 - Scalar classes: `ASSOCIATE CLASS name WITH TYPE type` (`std.ch`, `ClassAssociate( name(), "type" )`; a type as
   `ClassName()` names it: `ARRAY`, `BLOCK`, `CHARACTER`, `DATE`, `HASH`, `LOGICAL`, `NIL`, `NUMERIC`) makes values of
   the type answer the class's methods and class variables, the value as `Self`; `ClassName()` is the class's, and its

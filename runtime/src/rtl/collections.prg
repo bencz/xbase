@@ -24,6 +24,12 @@ INTERFACE IDisposable
    METHOD Dispose()
 ENDINTERFACE
 
+// An ordered sequence (OrderBy, OrderByDescending): ThenBy orders the elements its keys found equal by one more.
+INTERFACE IOrderedEnumerable INHERIT IEnumerable
+   METHOD ThenBy( bKey )
+   METHOD ThenByDescending( bKey )
+ENDINTERFACE
+
 // The methods of every collection. A class that inherits it only needs GetEnumerator() (a method with YIELD is
 // the simplest one; IMPLEMENTS IEnumerable has that checked).
 CLASS Enumerable
@@ -195,14 +201,14 @@ METHOD Reverse() CLASS Enumerable
    NEXT
 RETURN
 
-// An array of the elements ordered by bKey( element ) (by themselves without bKey), as ASort orders values; elements
-// with equal keys keep their order.
+// The elements ordered by bKey( element ) (by themselves without bKey), as ASort orders values; elements with equal
+// keys keep their order. An ordered sequence (OrderedEnumerable): ordered when it is gone through, ThenBy adds keys.
 METHOD OrderBy( bKey ) CLASS Enumerable
-RETURN Ordered( Self, bKey, .F. )
+RETURN OrderedEnumerable():New( Self, { { bKey, .F. } } )
 
 // The same, from the greatest key to the smallest.
 METHOD OrderByDescending( bKey ) CLASS Enumerable
-RETURN Ordered( Self, bKey, .T. )
+RETURN OrderedEnumerable():New( Self, { { bKey, .T. } } )
 
 // A hash of bKey( element ) to the array of the elements with that key, in the order they come.
 METHOD GroupBy( bKey ) CLASS Enumerable
@@ -351,22 +357,66 @@ STATIC FUNCTION Extreme( oCollection, bValue, lGreatest )
    NEXT
 RETURN xBest
 
-// The elements of oCollection in an array, ordered by bKey( element ) (by themselves without bKey) as ASort orders
-// values, or from the greatest key with lDescending; equal keys keep their order (ASort is stable).
-STATIC FUNCTION Ordered( oCollection, bKey, lDescending )
-   LOCAL aPairs := {}, x, i
-   FOR EACH x IN oCollection
-      AAdd( aPairs, { IIF( bKey == NIL, x, Eval( bKey, x ) ), x } )
+// An ordered sequence: the elements of its source ordered by its keys ({ bKey, lDescending }, the first one first, each
+// next one between elements the ones before found equal; a NIL bKey: the element itself) as ASort orders values;
+// elements whose keys are all equal keep their order (ASort is stable). Ordered each time it is gone through, as its
+// source is then; ThenBy and ThenByDescending make another with one more key. [] reads the element at a position
+// (ordering the elements, as ToArray()).
+CLASS OrderedEnumerable INHERIT Enumerable IMPLEMENTS IOrderedEnumerable
+   VAR oSource
+   VAR aKeys
+   METHOD New( oSource, aKeys ) INLINE ::oSource := oSource, ::aKeys := aKeys, Self
+   METHOD ThenBy( bKey ) INLINE OrderedEnumerable():New( ::oSource, KeysWith( ::aKeys, bKey, .F. ) )
+   METHOD ThenByDescending( bKey ) INLINE OrderedEnumerable():New( ::oSource, KeysWith( ::aKeys, bKey, .T. ) )
+   METHOD GetEnumerator()
+   METHOD ToArray()
+   METHOD Element( nPos ) OPERATOR "[]"
+ENDCLASS
+
+METHOD GetEnumerator() CLASS OrderedEnumerable
+   LOCAL x
+   FOR EACH x IN ::ToArray()
+      YIELD x
    NEXT
-   IF lDescending
-      ASort( aPairs, , , {| a, b | __ValueLess( b[ 1 ], a[ 1 ] ) } )
-   ELSE
-      ASort( aPairs, , , {| a, b | __ValueLess( a[ 1 ], b[ 1 ] ) } )
-   ENDIF
-   FOR i := 1 TO Len( aPairs )
-      aPairs[ i ] := aPairs[ i ][ 2 ]
+RETURN
+
+// The elements in their order, in a new array: each with its keys, sorted, the keys dropped.
+METHOD ToArray() CLASS OrderedEnumerable
+   LOCAL aRows := {}, x, i, aKeys := ::aKeys, nKeys := Len( ::aKeys ), aRow, k
+   FOR EACH x IN ::oSource
+      aRow := Array( nKeys + 1 )
+      FOR k := 1 TO nKeys
+         aRow[ k ] := IIF( aKeys[ k ][ 1 ] == NIL, x, Eval( aKeys[ k ][ 1 ], x ) )
+      NEXT
+      aRow[ nKeys + 1 ] := x
+      AAdd( aRows, aRow )
    NEXT
-RETURN aPairs
+   ASort( aRows, , , {| a, b | KeysBefore( a, b, aKeys ) } )
+   FOR i := 1 TO Len( aRows )
+      aRows[ i ] := aRows[ i ][ nKeys + 1 ]
+   NEXT
+RETURN aRows
+
+METHOD Element( nPos ) CLASS OrderedEnumerable
+RETURN ::ToArray()[ nPos ]
+
+// A copy of the keys aKeys with one more after them.
+STATIC FUNCTION KeysWith( aKeys, bKey, lDescending )
+   LOCAL a := AClone( aKeys )
+   AAdd( a, { bKey, lDescending } )
+RETURN a
+
+// Whether the row of keys a comes before b: the first key that tells them apart decides, each in its direction.
+STATIC FUNCTION KeysBefore( a, b, aKeys )
+   LOCAL k
+   FOR k := 1 TO Len( aKeys )
+      IF __ValueLess( a[ k ], b[ k ] )
+         RETURN ! aKeys[ k ][ 2 ]
+      ELSEIF __ValueLess( b[ k ], a[ k ] )
+         RETURN aKeys[ k ][ 2 ]
+      ENDIF
+   NEXT
+RETURN .F.
 
 // Arrays: the array functions as messages; Self changes in place and comes back where that reads naturally.
 SCALAR CLASS ARRAY INHERIT Enumerable

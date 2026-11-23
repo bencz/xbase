@@ -1,9 +1,11 @@
 // The query methods of Enumerable on arrays, strings and generators: TakeWhile, SkipWhile, SelectMany, Concat, Zip,
 // Distinct (by value or key, hashable or not), Reverse, OrderBy and OrderByDescending (stable, by key), GroupBy,
-// ToHash, Last, Min, Max and Average (NIL without elements; with a block the collection stays as it was), a lazy
+// ToHash, Last, Min, Max and Average (NIL without elements; with a block the collection stays as it was), ordered
+// sequences (OrderBy gives one: ThenBy and ThenByDescending order ties by more keys, [] reads a position, it is ordered
+// as its source is when gone through, and it implements IOrderedEnumerable), a lazy
 // chain over an endless generator (YIELD ++n), and a variable named yield, which ++ still increments.
 PROCEDURE Main()
-   LOCAL a := { 5, 3, 8, 1, 3, 9, 2 }, p := { { "ana", 30 }, { "bia", 25 }, { "caio", 30 }, { "duda", 25 } }, h
+   LOCAL a := { 5, 3, 8, 1, 3, 9, 2 }, p := { { "ana", 30 }, { "bia", 25 }, { "caio", 30 }, { "duda", 25 } }, h, o
    ? "takewhile:", Show( a:TakeWhile( {| x | x > 2 } ) ), "skipwhile:", Show( a:SkipWhile( {| x | x > 2 } ) )
    ? "selectmany:", Show( { "ab", "cd" }:SelectMany( {| s | s } ) ), "concat:", Show( { 1, 2 }:Concat( { 3 } ) )
    ? "zip:", Show( { 1, 2, 3 }:Zip( { "a", "b" }, {| n, s | s + LTrim( Str( n ) ) } ) ), ;
@@ -14,6 +16,12 @@ PROCEDURE Main()
    ? "orderby:", Show( a:OrderBy() ), Show( a:OrderByDescending() ), ;
       Show( p:OrderBy( {| r | r[ 2 ] } ):Select( {| r | r[ 1 ] } ) ), ;
       Show( p:OrderByDescending( {| r | r[ 2 ] } ):Select( {| r | r[ 1 ] } ) )
+   o := p:OrderBy( {| r | r[ 2 ] } ):ThenByDescending( {| r | r[ 1 ] } )
+   ? "thenby:", Show( o:Select( {| r | r[ 1 ] } ) ), o[ 1 ][ 1 ], o:Count(), ObjImplements( o, "IORDEREDENUMERABLE" ), ;
+      Show( p:OrderByDescending( {| r | r[ 2 ] } ):ThenBy( {| r | Len( r[ 1 ] ) } ):Select( {| r | r[ 1 ] } ) )
+   AAdd( p, { "abe", 20 } )
+   ? "ordered when gone through:", o[ 1 ][ 1 ], o:Count()
+   ASize( p, 4 )
    h := p:GroupBy( {| r | r[ 2 ] } )
    ? "groupby:", Len( h ), Len( h[ 30 ] ), h[ 25 ][ 2 ][ 1 ], h:Keys()[ 1 ]
    h := p:ToHash( {| r | r[ 1 ] }, {| r | r[ 2 ] } )
