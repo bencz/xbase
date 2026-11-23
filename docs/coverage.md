@@ -183,6 +183,6 @@ workers alive, its target and its most), **TaskYield** (the `Task` object's `Res
 `IsCanceled`, `Error`, `ContinueWith`).
 
 Objects ([runtime.md](runtime.md#classes)): **ClassAssociate** (`ASSOCIATE CLASS`), **Enumerable** (the class
-collections inherit; the built-in types' classes are `SCALAR CLASS`es), **ObjHasMethod**, **ObjHasVar**,
-**ObjImplements**, **ObjIsKindOf**, **ObjMethods**, **ObjSend**, **ObjVars**; the interfaces `IEnumerable`,
-`IEnumerator` and `IDisposable`.
+collections inherit; the built-in types' classes are `SCALAR CLASS`es), **OrderedEnumerable** (the class of
+`OrderBy`'s ordered sequences), **ObjHasMethod**, **ObjHasVar**, **ObjImplements**, **ObjIsKindOf**, **ObjMethods**,
+**ObjSend**, **ObjVars**; the interfaces `IEnumerable`, `IEnumerator`, `IOrderedEnumerable` and `IDisposable`.
