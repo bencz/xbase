@@ -99,17 +99,18 @@ typedef struct xb_item {
   times as long (`sieve` takes 59% fewer cycles). An array of the program starts as `XB_ELEMS_NIL`: `Array( n )` of one
   dimension (with more, every level holds items: the rows' first stores, one per row, would each go to the runtime, and
   the loops that fill them row by row on to their generic copies), and a literal, which takes the form that holds its
-  elements (`{}` and literals of `NIL`s that of `NIL`s); the first value stored makes it logical, integer or items.
-  Storing a value the form does not hold turns the array into items first, in place, from its last element down (an item
-  covers only the places of the elements at or past its own): no allocation, so it may happen anywhere; nothing turns an
-  array back. The runtime's own arrays (frames, task lists, `Directory()`'s rows, ...) are made as items
-  (`xb_array_alloc`), and so is every array other threads may reach: `xb_share` turns one before it can be reached, so
-  only a local array changes form, and only its own thread changes its state byte while it runs (a load and a store; a
-  publication, which turns the arrays of the program's storage, runs while the other threads are stopped). C code reads
-  and writes elements in place through `xb_array_items`, which turns an array of another form first, or handles the
-  forms itself: `xb_array_get`, `xb_array_put`, `xb_array_last`, `xb_array_append`, `AIns`/`ADel`, resizing and
-  `xb_array_snapshot` (whose copy keeps the form) in `types/array.c`, and the collector. `AClone` copies the form; the
-  other array functions (`ASort`, `AScan`, `AEval`, ...) read through `xb_array_items` or `xb_array_get`.
+  elements (`{}` that of `NIL`s, a literal of `NIL`s alone items: placeholders, read on the path of items); the first
+  value stored makes it logical, integer or items. Storing a value the form does not hold turns the array into items
+  first, in place, from its last element down (an item covers only the places of the elements at or past its own): no
+  allocation, so it may happen anywhere; nothing turns an array back. The runtime's own arrays (frames, task lists,
+  `Directory()`'s rows, ...) are made as items (`xb_array_alloc`), and so is every array other threads may reach:
+  `xb_share` turns one before it can be reached, so only a local array changes form, and only its own thread changes its
+  state byte while it runs (a load and a store; a publication, which turns the arrays of the program's storage, runs
+  while the other threads are stopped). C code reads and writes elements in place through `xb_array_items`, which turns
+  an array of another form first, or handles the forms itself: `xb_array_get`, `xb_array_put`, `xb_array_last`,
+  `xb_array_append`, `AIns`/`ADel`, resizing and `xb_array_snapshot` (whose copy keeps the form) in `types/array.c`, and
+  the collector. `AClone` copies the form; the other array functions (`ASort`, `AScan`, `AEval`, ...) read through
+  `xb_array_items` or `xb_array_get`.
 - Compiled code reads `len`, `data` and the state byte to access elements in place: one test of the byte tells a
   local array of items, the usual one, from the others, and the paths of the compact forms follow
   ([compiler.md](compiler.md#xir-to-llvm)); a store whose value the form does not hold, and the first one into an

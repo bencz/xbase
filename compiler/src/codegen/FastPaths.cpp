@@ -1,6 +1,6 @@
 // Inline fast paths of operators, of element access and of the bit
 // functions: the number cases of xb_op_add, xb_op_sub, xb_op_mul, xb_op_div,
-// xb_op_mod, xb_op_neg, the bit operators, the comparisons and xb_for_test
+// xb_op_mod, xb_op_neg, the bit operators, the comparisons (with NIL too) and xb_for_test
 // (core/ops.c), xb_op_index and xb_op_index_set (types/array.c) and
 // xb_bit_apply, done in place; every other case, an integer overflow and an
 // index out of bounds included, calls the runtime, which raises the errors.
@@ -9,6 +9,7 @@
 #include "codegen/LoopSplit.h"
 
 #include "common/BitFunctions.h"
+#include "opt/Fold.h"
 
 #include "xbrt.h" // constants only (type tags)
 
@@ -361,6 +362,24 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   }
 
   b_.SetInsertPoint(slow);
+  if (equality && (typesA == xir::typeBit(XB_T_NIL) || typesB == xir::typeBit(XB_T_NIL))) {
+    // =, == or != with NIL (x == NIL, x != NIL: an operand surely NIL; one that may be NIL among other types is left to
+    // the call, whose path stays a call where loops keep it cold) and the left one no object (whose class may define
+    // the operator): the rule of constants (compareNil, xb_fold_nil), as the runtime has it, without the call.
+    BasicBlock *nil = newBlock("nil"), *call = newBlock("op");
+    Value *aNil = b_.CreateICmpEQ(ta, ConstantInt::get(i32_, XB_T_NIL));
+    Value *bNil = b_.CreateICmpEQ(tb, ConstantInt::get(i32_, XB_T_NIL));
+    Value *notObject = b_.CreateICmpNE(ta, ConstantInt::get(i32_, XB_T_OBJECT));
+    b_.CreateCondBr(b_.CreateAnd(b_.CreateOr(aNil, bNil), notObject), nil, call);
+    b_.SetInsertPoint(nil);
+    auto result = [&](bool x, bool y) { return b_.getInt1(compareNil(i.binop, x, y).value_or(false)); };
+    Value *r = b_.CreateSelect(aNil, b_.CreateSelect(bNil, result(true, true), result(true, false)),
+                               result(false, true));
+    if (!fused) storeLogical(d, r);
+    bools.push_back({r, b_.GetInsertBlock()});
+    b_.CreateBr(join);
+    b_.SetInsertPoint(call);
+  }
   if (i.byOne) callItemOp(i.binop == BinOp::Add ? rtInc_ : rtDec_, d, {a}); // ++ or --: their own error
   else callItemOp(binaryOp(i), d, {a, bv});
   checkPending(unwind_);

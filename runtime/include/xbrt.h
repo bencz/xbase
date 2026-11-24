@@ -186,9 +186,12 @@ enum {
  * integer other than XB_ELEMS_INT_NIL. A store of any other value turns the
  * array into one of items first, in place (the room is there: it allocates
  * nothing); nothing turns it back. A new array of the program (Array( n )
- * of one dimension, a literal) starts as XB_ELEMS_NIL, which the first value
- * stored in it makes logical, integer or items; the runtime's own arrays, and every array other threads may reach,
- * hold items. Compiled code reads `len`, `data` and the state byte to access
+ * of one dimension, an empty literal) starts as XB_ELEMS_NIL, which the first
+ * value stored in it makes logical, integer or items; a literal of logicals or
+ * integers (NILs among them) starts in their form, one of NILs alone and any
+ * other in items (xb_array_new, and compiled code's literals made in place);
+ * the runtime's own arrays, and every array other threads may reach, hold
+ * items. Compiled code reads `len`, `data` and the state byte to access
  * elements in place: one test of the byte tells a local array of items (the
  * usual one) from all the others. */
 enum {

@@ -52,9 +52,8 @@ static inline uint8_t *xb_array_cards(const xb_array *a) {
   return a->cap >= XB_ARRAY_CARD_MIN ? (uint8_t *)((xb_item *)a->data + a->cap) : NULL;
 }
 
-/* The forms of an array's elements (xb_array in xbrt.h), bits of its state byte. An array of the program starts as
- * XB_ELEMS_NIL;
- * xb_array_items gives the elements of any array as items, turning one of a compact form into one of items first, in
+/* The forms of an array's elements (xb_array in xbrt.h, where the form each new array starts in is told), bits of its
+ * state byte; xb_array_items gives the elements of any array as items, turning one of a compact form into one of items first, in
  * place (it allocates nothing, so it may run anywhere). C code reads and writes elements in place through it, unless
  * it handles the forms itself (types/array.c, the collector). A shared array always holds items (xb_share turns it
  * before another thread can reach it), so only a local one ever changes form. */

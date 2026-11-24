@@ -473,11 +473,14 @@ xb_array *xb_array_try_alloc(uint64_t len, uint32_t elems) { return array_alloc(
 
 void xb_set_array(xb_item *it, xb_array *a) { xb_set_ptr(it, XB_T_ARRAY, a); }
 
-/* A literal: the form that holds its elements. */
+/* A literal: the form that holds its elements; one of NILs alone holds items (placeholders, as the nodes of a tree:
+ * read as items they need no other path), an empty one NILs (its first store gives it a form). Compiled code makes a
+ * literal by the same rule from its elements' types (CodeGen::emitArrayLiteral). */
 void xb_array_new(xb_ctx *ctx, xb_item *r, uint32_t n, const xb_item *elems) {
   XB_UNUSED(ctx);
   uint32_t form = XB_ELEMS_NIL;
   for (uint32_t k = 0; k < n && form != XB_ELEMS_ITEMS; ++k) form = form_with(form, &elems[k]);
+  if (form == XB_ELEMS_NIL && n > 0) form = XB_ELEMS_ITEMS;
   xb_array *a = array_alloc(n, 0, form == XB_ELEMS_ITEMS ? XB_ELEMS_ITEMS : XB_ELEMS_NIL); /* elems: in a frame */
   if (form == XB_ELEMS_ITEMS) {
     if (n) memcpy(a->data, elems, n * sizeof(xb_item));

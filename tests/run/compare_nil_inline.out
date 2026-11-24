@@ -1,0 +1,10 @@
+
+values: U11000110 N00111001 N00111001 C00111001 C00111001 L00111001 L00111001 A00111001 A00111001 H00111001 B00111001 D00111001 S00111001 O00111001 
+conditions: nNvvvcvcvvvvvvvvv
+unknown type: 11000110 00111001 11000110 00111001
+operators: .T. .T. .T. .T. .T. .F. .T.          5
+surely NIL: .T. .T. .T. .F. .T. .F. .F. .T.          6
+literal of NILs:          3 .T. U NIL
+written:          5 .T. NIL s          4
+large:         20 NIL NIL         20
+trees:      20440

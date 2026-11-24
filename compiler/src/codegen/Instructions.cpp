@@ -1057,8 +1057,9 @@ void CodeGen::emitClassNew(const xir::Instruction &i) {
   b_.SetInsertPoint(done);
 }
 
-// An array literal whose form the types of its elements tell (xb_array_new's rule: an empty one holds NILs, one with
-// an element that is surely neither NIL, a logical nor an integer holds items), made in the thread's hole when it fits:
+// An array literal whose form the types of its elements tell (xb_array_new's rule: an empty one holds NILs, one of
+// elements all surely NIL holds items, NIL ones, and so does one with an element that is surely neither NIL, a logical
+// nor an integer), made in the thread's hole when it fits:
 // false when it is left to xb_array_new. Nothing collects between the allocation and the store into its home.
 bool CodeGen::emitArrayLiteral(const xir::Instruction &i) {
   const auto &ops = i.operands();
@@ -1069,7 +1070,9 @@ bool CodeGen::emitArrayLiteral(const xir::Instruction &i) {
     xir::TypeSet t = plan_->types().of(v);
     return t != 0 && (t & compact) == 0;
   });
-  if (!ops.empty() && !items) return false;
+  bool nils = std::all_of(ops.begin(), ops.end(),
+                          [&](const xir::Value *v) { return plan_->types().of(v) == xir::typeBit(XB_T_NIL); });
+  if (!items && !nils) return false;
   uint64_t itemsAt = arrayItemsOffset();
   uint64_t bytes = ops.size() * itemSize_;
   if (dl_.getTypeAllocSize(gcHdrTy_) + alignTo(itemsAt + bytes, XB_GC_ALIGN) > XB_GC_SMALL_MAX) return false;
