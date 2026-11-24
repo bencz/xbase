@@ -23,7 +23,8 @@ bool isGroupUser(const Instruction &i) {
 
 bool returnsWords(const Function &f) {
   TypeSet r = f.returnTypes & kAnyType;
-  return hasDirectEntry(f) && (r & kHeapTypes) == 0 && (r & ~typeBit(XB_T_NIL)) != 0;
+  return hasDirectEntry(f) && f.kind == Function::Kind::Program && (r & kHeapTypes) == 0 &&
+         (r & ~typeBit(XB_T_NIL)) != 0;
 }
 
 FramePlan::FramePlan(const Function &f) : f_(f), cfg_(f), types_(cfg_) {

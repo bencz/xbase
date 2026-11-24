@@ -16,7 +16,7 @@ namespace xb {
 // returns never refer to a heap object (Function::returnTypes), so on its way back the result needs no item the
 // collector sees, and are not all NIL (a procedure's NIL, which its callers seldom read, gains nothing so; it changes
 // how a large body's registers are allocated). Any other direct entry writes its result into the caller's item, which
-// it receives (`ret`).
+// it receives (`ret`), a codeblock's always (its callers reach it through the block, xb_block.direct).
 bool returnsWords(const xir::Function &f);
 
 // Where an item value of an xIR function lives (docs/xir.md, phase 1).

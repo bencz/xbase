@@ -37,7 +37,7 @@ static void graph(void) {
   xb_set_str(&key, xb_str_new("key", 3)); /* longer than a byte: a string of one byte is static */
   xb_set_str(&val, xb_str_new("value", 5));
   xb_hash_set(h.v.p, &key, &val);
-  xb_block_new(ctx, &blk, NULL, 1);
+  xb_block_new(ctx, &blk, NULL, NULL, 0, 1);
   xb_item var;
   xb_set_int(&var, 7);
   xb_cell *cell = xb_cell_move(ctx, &var, 0); /* `var` now holds the cell: the block's from here on */

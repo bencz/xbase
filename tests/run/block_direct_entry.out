@@ -1,0 +1,25 @@
+
+written:          3          1
+by reference:          3          2
+fewer: q nil more:          3 exact:          3
+no parameters:         10         10
+captured parameter:        101        101        102        102
+captured variable:         15         20         20
+extended:         13          6.0
+ASort:          9          7          5          3          1
+AScan:          4
+AEval one:         25
+AEval two:  9 1 7 2 5 3 3 4 1 5
+HEval:          5
+Eval by macro:         42 set set
+by macro, fewer and more: U          2          5          1
+nested 8 deep:          9
+collections:          1 1xxxx          1 30000
+error:       1081 +
+levels: (b)MAIN 2 MAIN
+all shared, by reference:         20         20        200        200        200
+mixed, first by reference:         13          2         10         14          3         10
+mixed, second by reference:         15          3         11         16          3         12         12
+five arguments, one parameter:          8         15
+other module:         15         18          8         24
+threads:  800400000

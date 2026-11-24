@@ -101,8 +101,10 @@ size_t instructionCount(const Function &f);
 // module has a public MAIN (the driver's choice), so a pass never removes it, whatever calls it.
 const Function *firstProgramFunction(const Module &m);
 
-// A function of the program that reads no arguments as received (readsArgs, `...`) and is not the body versioned for
-// references: calls of its module pass the parameters' items in registers to its direct entry (codegen).
+// A function or codeblock (with parameters) of the program that reads no arguments as received (readsArgs, `...`) and
+// is not the body versioned for references: calls of its module pass the parameters' items in registers to its direct
+// entry (codegen; a codeblock's, through the block, xb_block.direct). A codeblock with a body for arguments without
+// references (`plainTwin`) has none: that body's entry is the block's.
 bool hasDirectEntry(const Function &f);
 // A call that goes to a direct entry: to such a function, without `...` (it then needs no argument slots).
 bool isDirectCall(const Instruction &i);
@@ -331,6 +333,11 @@ public:
   bool hidden = false;            // the call stack does not show it (a STATIC function or codeblock of the runtime)
   bool method = false;            // a method: its first parameter is Self, which PCount() and PValue() skip
   bool byRefBody = false;         // the body versioned for references (NAME.byref), reached by call.forward
+  // A codeblock's body for arguments that hold no reference (NAME.plain): its parameters, but those shared, stand as
+  // LOCALs moved from them at its start; only its direct entry runs it (xb_block.direct, which no reference reaches),
+  // so it has no dynamic entry. The codeblock's own body (`plainTwin` set) reaches them through what it is given.
+  bool plainBody = false;
+  Function *plainTwin = nullptr;
   bool usesRest = false;          // has an args.rest (`...`)
   // Of a carried runtime source's module (Module::library): compiled in the runtime, where a program reaches it by its
   // library symbol (XB_LIBRARY_FUNC_PREFIX), through its xBase-callable entry (its direct one is the runtime's own).

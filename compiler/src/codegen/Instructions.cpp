@@ -13,6 +13,13 @@ using namespace llvm;
 
 namespace xb {
 
+namespace {
+
+// The most arguments an Eval may give for its block's direct entry to take fewer (one call per count it may take).
+constexpr uint32_t kEvalFewerArgs = 4;
+
+} // namespace
+
 // The address of an item value.
 Value *CodeGen::addr(const xir::Value *v) {
   const Home &h = plan_->home(v);
@@ -196,18 +203,17 @@ void CodeGen::withRest(const xir::Instruction &i, Value *group, function_ref<voi
 void CodeGen::emitDirectCall(const xir::Instruction &i, Value *d) {
   const xir::Function &callee = *i.callee.function;
   bool words = returnsWords(callee);
-  std::vector<Value *> args{fnCtx_};
-  if (!words) args.push_back(d);
-  args.push_back(innermostFrame()); // the chain's frame at a call is the caller's
+  std::vector<Words> passed;
   for (uint32_t k = 0; k < callee.numParams; ++k) {
     if (k >= i.operands().size()) {
-      args.insert(args.end(), {headerWord(XB_T_NIL, 0, 0), ConstantInt::get(i64_, 0)});
+      passed.push_back({headerWord(XB_T_NIL, 0, 0), ConstantInt::get(i64_, 0)});
       continue;
     }
     Value *item = addr(i.operand(k));
-    args.push_back(loadHeader(item));        // the cached header when there is one
-    args.push_back(loadWords(item).payload); // a pointer is read where it is
+    passed.push_back({loadHeader(item), loadWords(item).payload}); // the cached header; a pointer read where it is
   }
+  // the chain's frame at a call is the caller's
+  std::vector<Value *> args = directArgs(false, words ? nullptr : d, innermostFrame(), nullptr, passed);
   // An argument this call uses last: its slot let go (the callee copies it into its own before anything can collect),
   // so a callee that sets its parameter to NIL frees what only it then holds.
   for (size_t k = 0; k < i.operands().size() && k < callee.numParams; ++k)
@@ -448,16 +454,47 @@ void CodeGen::emit(const xir::Instruction &i) {
     xir::TypeSet first = xir::isEvalCall(i) ? plan_->types().of(ops[0]) : 0;
     if (first & xir::typeBit(XB_T_BLOCK)) { // Eval( block, ... ): the block's function called here, as xb_block_call
                                             // does (a block ends the loan of its arguments itself); else Eval()
+      bool values = std::none_of(ops.begin() + 1, ops.end(), xir::isReference); // its direct entry takes none
       bool surely = first == xir::typeBit(XB_T_BLOCK);
       BasicBlock *block = newBlock("eval.block"), *other = surely ? nullptr : newBlock("eval.call");
       BasicBlock *done = newBlock("eval.done");
       if (surely) b_.CreateBr(block);
       else branchLikely(b_.CreateICmpEQ(typeOf(ops[0], argv), ConstantInt::get(i32_, XB_T_BLOCK)), block, other);
       b_.SetInsertPoint(block);
+      // With no argument a reference, its direct entry when it has one and takes as many arguments as given, or fewer
+      // (those past its parameters, which it cannot read, left out) when few are given: the words of those it takes
+      // in registers. Else its function.
       Value *self = itemPointer(argv, "block");
-      Value *fn = loadFrom(ptrTy_, b_.CreateStructGEP(blockTy_, self, 0), Mem::Unknown, "block.fn");
+      uint32_t argc = uint32_t(ops.size() - 1);
+      BasicBlock *byItems = newBlock("eval.fn");
+      if (values && argc > 0) { // a block with a direct entry has parameters
+        Value *direct = loadFrom(ptrTy_, b_.CreateStructGEP(blockTy_, self, BlockDirect), Mem::Unknown, "block.direct");
+        BasicBlock *byWords = newBlock("eval.direct");
+        branchLikely(b_.CreateIsNotNull(direct), byWords, byItems);
+        b_.SetInsertPoint(byWords);
+        Value *nparams = loadFrom(i32_, b_.CreateStructGEP(blockTy_, self, BlockParams), Mem::Unknown, "block.params");
+        uint32_t fewest = argc <= kEvalFewerArgs ? 1 : argc;
+        SwitchInst *arity = b_.CreateSwitch(nparams, byItems, argc - fewest + 1);
+        for (uint32_t n = fewest; n <= argc; ++n) {
+          BasicBlock *taking = newBlock("eval.direct.args");
+          arity->addCase(b_.getInt32(n), taking);
+          b_.SetInsertPoint(taking);
+          std::vector<Words> passed;
+          for (uint32_t k = 1; k <= n; ++k)
+            passed.push_back(loadWords(b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k)));
+          std::vector<Value *> args = directArgs(true, d, innermostFrame(), self, passed);
+          std::vector<Type *> types;
+          for (Value *a : args) types.push_back(a->getType());
+          b_.CreateCall(FunctionType::get(Type::getVoidTy(ctx_), types, false), direct, args);
+          b_.CreateBr(done);
+        }
+      } else {
+        b_.CreateBr(byItems);
+      }
+      b_.SetInsertPoint(byItems);
+      Value *fn = loadFrom(ptrTy_, b_.CreateStructGEP(blockTy_, self, BlockFn), Mem::Unknown, "block.fn");
       Value *rest = b_.CreateConstInBoundsGEP1_32(itemTy_, argv, 1);
-      b_.CreateCall(blockFnTy_, fn, {fnCtx_, d, ConstantInt::get(i32_, ops.size() - 1), rest, self});
+      b_.CreateCall(blockFnTy_, fn, {fnCtx_, d, ConstantInt::get(i32_, argc), rest, self});
       b_.CreateBr(done);
       if (other) {
         b_.SetInsertPoint(other);
@@ -1114,7 +1151,14 @@ Value *CodeGen::allocateInHole(Value *size, xb_gc_kind kind, uint8_t state, Basi
 void CodeGen::emitMakeBlock(const xir::Instruction &i) {
   if (!blockTemp_) blockTemp_ = entryAlloca("block.tmp");
   size_t ncells = i.valueCells.empty() ? i.captures.size() : i.valueCells.size();
-  b_.CreateCall(rtBlockNew_, {fnCtx_, blockTemp_, functions_.at(i.blockFn), ConstantInt::get(i32_, ncells)});
+  // Its direct entry (its body for arguments without references, when it has one) and the arguments it takes
+  // (xb_block in xbrt.h).
+  auto direct = direct_.find(i.blockFn->plainTwin ? i.blockFn->plainTwin : i.blockFn);
+  Value *entry = direct != direct_.end() ? static_cast<Value *>(direct->second) : ConstantPointerNull::get(ptrTy_);
+  auto fn = blockEntries_.find(i.blockFn);
+  Value *function = fn != blockEntries_.end() ? fn->second : functions_.at(i.blockFn);
+  b_.CreateCall(rtBlockNew_, {fnCtx_, blockTemp_, function, entry,
+                              ConstantInt::get(i32_, i.blockFn->numParams), ConstantInt::get(i32_, ncells)});
   b_.CreateCall(rtRootPush_, {fnCtx_, blockTemp_});
   size_t var = 0, value = 0;
   for (uint32_t k = 0; k < ncells; ++k) {

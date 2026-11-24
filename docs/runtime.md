@@ -115,8 +115,8 @@ typedef struct xb_item {
   ([compiler.md](compiler.md#xir-to-llvm)); a store whose value the form does not hold, and the first one into an
   array of `NIL`s, go through `xb_op_index_set`, which gives the array the form that holds it.
 - Hashes (`xb_hash` in `types/types.h`) map keys to values in insertion order; see [Hashes](#hashes).
-- Codeblocks (`xb_block`: function, captured cells) and cells (`xb_cell`: one item at offset 0) are described in
-  [Codeblocks](#codeblocks), objects in [Objects and messages](#objects-and-messages).
+- Codeblocks (`xb_block`: function, direct entry, captured cells) and cells (`xb_cell`: one item at offset 0) are
+  described in [Codeblocks](#codeblocks), objects in [Objects and messages](#objects-and-messages).
 
 ## Frames
 
@@ -528,11 +528,19 @@ reference already holds its caller's). `xb_cell_of` returns the cell a codeblock
 that holds the reference of a `FOR EACH` loop it returns a new cell holding the current element, and the variable stays
 the loop's. The function and every block that captured it share the cell, which outlives the function. `xb_cell_new`
 makes a cell holding a copy of a value: a block's capture of a variable by its value (one nothing assigns after the
-block is made, [compiler.md](compiler.md#ast-passes)), which the block alone refers to. A codeblock is a
-compiled function `(ctx, ret, argc, argv, self)` plus the captured cells (`self->cells[]`); `xb_block_new` creates it
-and the compiled code stores the cells. `Eval( bBlock, ... )` and `xb_block_call` run it (compiled code calls the
-function of a codeblock it passes `Eval` itself, as `xb_block_call` does, and `Eval` for anything else); the caller sets
-the result to `NIL` first.
+block is made, [compiler.md](compiler.md#ast-passes)), which the block alone refers to. A codeblock is a compiled
+function `(ctx, ret, argc, argv, self)` plus the captured cells (`self->cells[]`); `xb_block_new` creates it and the
+compiled code stores the cells. A compiled block with parameters also has a direct entry (`xb_block.direct`, `NULL` for
+a macro's block, a `MemVarBlock()` one, a block without parameters and one that reads its arguments as received) taking
+the context, the result's item, the two words of each of exactly `nparams` arguments, the caller's frame (the context's
+chain head) and the block (`xbrt.h`); none is a reference when the block has a body for arguments without references
+([compiler.md](compiler.md#syntax-tree-to-xir)), whose entry it is then. `Eval( bBlock, ... )` and `xb_block_call` run
+the block's function, the caller having set the result to `NIL`. That function, for a compiled block with a direct
+entry, is a thunk: it reads the arguments (`NIL` past `argc`; those past the parameters left out) and calls the direct
+entry, or, for a block with a body for arguments without references when one of them is a reference, the block's own
+body. Compiled code calls the block of an `Eval` itself: its direct entry when no operand is a reference and the block
+takes as many parameters as arguments, or fewer when at most four arguments are given, else its function; `Eval` for
+anything else.
 
 ## Function references
 

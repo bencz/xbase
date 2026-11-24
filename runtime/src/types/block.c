@@ -67,10 +67,13 @@ xb_cell *xb_cell_new(xb_ctx *ctx, const xb_item *value) {
   return c;
 }
 
-xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, uint32_t ncells) {
+xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, xb_block_direct direct, uint32_t nparams,
+                       uint32_t ncells) {
   XB_UNUSED(ctx);
   xb_block *b = xb_gc_alloc(XB_GC_BLOCK, sizeof(xb_block) + ncells * sizeof(xb_cell *));
   b->fn = fn;
+  b->direct = direct;
+  b->nparams = nparams;
   b->ncells = ncells;
   for (uint32_t i = 0; i < ncells; ++i) b->cells[i] = NULL; /* filled by the caller */
   xb_set_ptr(r, XB_T_BLOCK, b);

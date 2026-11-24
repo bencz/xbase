@@ -754,7 +754,7 @@ void xbf_MEMVARBLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (!xb_memvar_exists_named(ctx, xb_str_data(argv[0].v.s), argv[0].v.s->len)) return;
   uint32_t id;
   int permanent = xb_memvar_permanent(xb_str_data(argv[0].v.s), argv[0].v.s->len, &id);
-  xb_block *b = xb_block_new(ctx, ret, memvar_block, 1);
+  xb_block *b = xb_block_new(ctx, ret, memvar_block, NULL, 0, 1);
   xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell)); /* the block is rooted in `ret` */
   xb_set_nil(&c->value);
   b->cells[0] = c;

@@ -52,10 +52,35 @@ bool dropReferenceBodies(Module &m) {
     work.pop_back();
     for (auto &b : g->blocks)
       for (auto &i : b->insts)
-        if (i->op == Op::MakeBlock && i->blockFn && dropped.insert(i->blockFn).second) work.push_back(i->blockFn);
+        if (i->op == Op::MakeBlock && i->blockFn && dropped.insert(i->blockFn).second) {
+          work.push_back(i->blockFn);
+          if (Function *twin = i->blockFn->plainTwin; twin && dropped.insert(twin).second) work.push_back(twin);
+        }
   }
   std::erase_if(m.functions, [&](const std::unique_ptr<Function> &f) { return dropped.count(f.get()) != 0; });
   return true;
+}
+
+bool dropUnmadePlainBodies(Module &m) {
+  // Until none is left: a plain body dropped may have made the only blocks of others.
+  std::unordered_set<const Function *> dropped;
+  for (bool more = true; more;) {
+    std::unordered_set<const Function *> made;
+    for (auto &g : m.functions)
+      if (!dropped.count(g.get()))
+        for (auto &b : g->blocks)
+          for (auto &i : b->insts)
+            if (i->op == Op::MakeBlock) made.insert(i->blockFn);
+    more = false;
+    for (auto &f : m.functions)
+      if (f->plainTwin && !made.count(f.get())) {
+        dropped.insert(f->plainTwin);
+        f->plainTwin = nullptr;
+        more = true;
+      }
+  }
+  return std::erase_if(m.functions, [&](const std::unique_ptr<Function> &f) { return dropped.count(f.get()) != 0; }) >
+         0;
 }
 
 } // namespace xb::xir

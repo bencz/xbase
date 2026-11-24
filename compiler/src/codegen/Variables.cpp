@@ -20,7 +20,7 @@ Value *CodeGen::staticAddress(uint32_t idx) {
 }
 
 Value *CodeGen::capturedCellAddress(Value *block, uint32_t index) {
-  return b_.CreateInBoundsGEP(blockTy_, block, {b_.getInt32(0), b_.getInt32(2), b_.getInt32(index)});
+  return b_.CreateInBoundsGEP(blockTy_, block, {b_.getInt32(0), b_.getInt32(BlockCells), b_.getInt32(index)});
 }
 
 // The cell of a codeblock's capture. A cell's value is at offset 0, so the

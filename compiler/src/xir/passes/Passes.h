@@ -16,6 +16,9 @@ namespace xb::xir {
 // A STATIC FUNCTION whose calls in the module pass no reference never runs its body versioned for references
 // (`NAME.byref`): its versioning test becomes false and that body leaves the module (Versioning.cpp).
 bool dropReferenceBodies(Module &m);
+// The NAME.plain bodies (Function::plainTwin) of codeblocks that no `block` instruction makes any more (inlined where
+// they were evaluated): only a block's direct entry runs one.
+bool dropUnmadePlainBodies(Module &m);
 
 // When no call of `f` passes a reference: its versioning test becomes false and the branch to its body versioned for
 // references goes; that body, which only the test reached, is returned (null without a test) for the caller to remove

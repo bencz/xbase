@@ -148,6 +148,10 @@ std::string optimize(Module &m, bool final) {
     for (auto &f : m.functions)
       if (std::string report = verify(m, *f); !report.empty() && bad.empty())
         bad = "after dropping copied functions: " + report;
+  if (bad.empty() && dropUnmadePlainBodies(m))
+    for (auto &f : m.functions)
+      if (std::string report = verify(m, *f); !report.empty() && bad.empty())
+        bad = "after dropping unmade plain bodies: " + report;
   if (final) // on the functions inlining copied in too (optimized where they come from)
     for (auto &f : m.functions)
       for (const Pass &p : kFinal)

@@ -104,10 +104,26 @@ entry:
   ret %1
 }
 
+block MAIN.block1.plain internal params 1 {
+  $f0 = frame 0 "E"
+entry:
+  %0 = load $f0 move
+  %1 = call BREAK native %0
+  ret %1
+}
+
 block MAIN.block2 internal params 1 {
   $f0 = frame 0 "E"
 entry:
   %0 = load $f0 maybe_ref
+  %1 = call BREAK native %0
+  ret %1
+}
+
+block MAIN.block2.plain internal params 1 {
+  $f0 = frame 0 "E"
+entry:
+  %0 = load $f0 move
   %1 = call BREAK native %0
   ret %1
 }

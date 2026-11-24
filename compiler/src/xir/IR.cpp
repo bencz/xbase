@@ -36,7 +36,11 @@ const Function *firstProgramFunction(const Module &m) {
 }
 
 bool hasDirectEntry(const Function &f) {
-  return f.kind == Function::Kind::Program && !f.readsArgs && !f.byRefBody && !f.usesRest && !f.carried;
+  // A codeblock with a NAME.plain body has none (that body's direct entry is the block's); one without parameters
+  // gains nothing from one (no words to pass), and its function would become a thunk.
+  if (f.kind == Function::Kind::Block && (f.plainTwin || f.numParams == 0)) return false;
+  return (f.kind == Function::Kind::Program || f.kind == Function::Kind::Block) && !f.readsArgs && !f.byRefBody &&
+         !f.usesRest && !f.carried;
 }
 
 bool isEvalCall(const Instruction &i) {

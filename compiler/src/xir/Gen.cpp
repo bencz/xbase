@@ -286,8 +286,34 @@ void Generator::genModuleInit(const xb::Module &ast) {
 
 // A codeblock is a function of its own: its frame holds its parameters, and
 // the variables it uses from enclosing functions or blocks are its captures.
+// One with a direct entry and parameters a reference may reach that it does
+// not share (not captured, never passed on by reference) gets a second body
+// (NAME.plain, Function::plainTwin) where those stand as LOCALs, for its direct
+// entry, which no reference reaches. The blocks inside that body are those of
+// the first (a block captures no parameter that is not shared), so that each
+// level of nested blocks does not double their number.
 Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
+  if (inPlainBody_ > 0)
+    if (auto made = blockFunctions_.find(&blk); made != blockFunctions_.end()) return made->second;
   std::string name = cur_.scope + ".block" + std::to_string(++blockCount_);
+  Function *fn = genCodeblockBody(blk, name, false);
+  blockFunctions_[&blk] = fn;
+  bool plain = false;
+  for (uint32_t s = 0; s < blk.params.size(); ++s) plain = plain || !sharedParam(blk, s);
+  if (plain && hasDirectEntry(*fn)) {
+    ++inPlainBody_;
+    fn->plainTwin = genCodeblockBody(blk, name + ".plain", true);
+    --inPlainBody_;
+    fn->plainTwin->plainBody = true;
+  }
+  return fn;
+}
+
+bool Generator::sharedParam(const BlockExpr &blk, uint32_t slot) {
+  return slot < blk.boxed.size() && blk.boxed[slot];
+}
+
+Function *Generator::genCodeblockBody(const BlockExpr &blk, const std::string &name, bool plainParams) {
   mod_->functions.push_back(std::make_unique<Function>(Function::Kind::Block, name));
   Function *fn = mod_->functions.back().get();
   fn->internal = true;
@@ -298,7 +324,7 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   for (uint32_t s = 0; s < blk.numLocals; ++s) { // the parameters, then an extended codeblock's LOCALs
     Var *v = fn->addVar(Var::Kind::Frame, s, s < fn->numParams ? blk.params[s].name : "");
     v->param = s < fn->numParams;
-    v->shared = s < blk.boxed.size() && blk.boxed[s];
+    v->shared = sharedParam(blk, s);
   }
   for (uint32_t k = 0; k < blk.captures.size(); ++k) fn->addVar(Var::Kind::Capture, k, "");
 
@@ -315,6 +341,17 @@ Function *Generator::genCodeblockFunction(const BlockExpr &blk) {
   b.setLine(outer.b->line()); // the line of the statement defining the block
   b.setBlock(fn->addBlock("entry"));
   b.setLoc(blk.loc);
+  uint32_t slot = blk.numLocals;
+  if (plainParams) // each parameter not shared moved once into the LOCAL that stands for it (nothing reads it after)
+    for (uint32_t s = 0; s < fn->numParams; ++s) {
+      if (sharedParam(blk, s)) continue;
+      Var *param = frameVar(s);
+      Var *local = fn->addVar(Var::Kind::Frame, slot++, param->name);
+      Instruction *moved = b.load(param, Access::Direct);
+      moved->moves = true;
+      b.store(local, Access::Direct, moved);
+      cur_.paramLocals[s] = local;
+    }
   Value *result = nullptr;
   for (size_t i = 0; i < blk.body.size(); ++i) {
     if (i + 1 < blk.body.size()) genDiscard(*blk.body[i]);

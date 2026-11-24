@@ -58,7 +58,7 @@ void CodeGen::initTypes() {
   xbFuncTy_ = FunctionType::get(voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_}, false);
   blockFnTy_ = FunctionType::get(voidTy, {ptrTy_, ptrTy_, i32_, ptrTy_, ptrTy_}, false);
   initFnTy_ = FunctionType::get(voidTy, {ptrTy_}, false);
-  blockTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(ptrTy_, 0)}, "xb_block");
+  blockTy_ = StructType::create(ctx_, {ptrTy_, ptrTy_, i32_, i32_, ArrayType::get(ptrTy_, 0)}, "xb_block");
   arrayTy_ = StructType::create(ctx_, {intPtrTy_, intPtrTy_, ptrTy_}, "xb_array"); // size_t is pointer-sized
   refTy_ = StructType::create(ctx_, {itemTy_, i64_, itemTy_, itemTy_, i32_}, "xb_ref");
   objectTy_ = StructType::create(ctx_, {ptrTy_, i32_, ArrayType::get(itemTy_, 0)}, "xb_object");
@@ -95,7 +95,8 @@ void CodeGen::initTypes() {
   if (auto *f = dyn_cast<Function>(rtCondNot_.getCallee())) f->addFnAttr(Attribute::Cold); // an error's path, nearly
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtAbiCheck_ = rt("xb_abi_check", voidTy,
-                   {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_});
+                   {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_,
+                    i32_});
   rtStackOverflow_ = rt("xb_stack_overflow", voidTy, {ptrTy_});
   rtStackDeep_ = rt("xb_stack_deep", i32_, {ptrTy_, intPtrTy_});
   if (auto *f = dyn_cast<Function>(rtStackDeep_.getCallee())) { // it reads and writes the context alone (core/ctx.c)
@@ -140,7 +141,7 @@ void CodeGen::initTypes() {
   rtWriteItems_ = rt("xb_gc_write_items", voidTy, {ptrTy_, intPtrTy_, intPtrTy_});
   rtCellOf_ = rt("xb_cell_of", ptrTy_, {ptrTy_, ptrTy_, i32_});
   rtCellNew_ = rt("xb_cell_new", ptrTy_, {ptrTy_, ptrTy_});
-  rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, i32_});
+  rtBlockNew_ = rt("xb_block_new", ptrTy_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_, i32_, i32_});
   rtRootPush_ = rt("xb_gc_root_push", voidTy, {ptrTy_, ptrTy_});
   rtRootPop_ = rt("xb_gc_root_pop", voidTy, {ptrTy_, i32_});
   rtEnumLen_ = rt("xb_enum_len", i64_, {ptrTy_, ptrTy_});
@@ -377,12 +378,15 @@ void CodeGen::run(const xir::Module &m) {
   for (const xir::Module *l : m.library)
     for (auto &f : l->functions) carriedModule_[f.get()] = l->name;
   stampSources(m);
-  for (auto &f : m.functions) functions_[f.get()] = declare(*f);
+  for (auto &f : m.functions)
+    if (!f->plainBody) functions_[f.get()] = declare(*f); // a NAME.plain body has its direct entry alone
   genClasses(m);
   directEntries(m);
   for (auto &f : m.functions) genFunction(*f);
-  for (auto &f : m.functions)
-    if (direct_.count(f.get())) genThunk(*f);
+  for (auto &f : m.functions) {
+    if (direct_.count(f.get()) && !f->plainBody) genThunk(*f);
+    if (blockEntries_.count(f.get())) genBlockEntry(*f);
+  }
   genModuleRegistration(m); // its public functions go into the symbol table
   genRequests(m);
 }
@@ -516,16 +520,21 @@ void CodeGen::directEntries(const xir::Module &m) {
   for (auto &f : m.functions) {
     if (!xir::hasDirectEntry(*f)) continue;
     bool words = returnsWords(*f);
-    std::vector<Type *> params{ptrTy_, ptrTy_}; // the context, then the result's item unless it returns words
-    if (words) params.pop_back();
-    params.push_back(ptrTy_); // the caller's frame
-    for (uint32_t k = 0; k < f->numParams; ++k) params.insert(params.end(), {i64_, i64_});
+    std::vector<Type *> params;
+    for (DirectArg a : directLayout(f->kind == xir::Function::Kind::Block, !words, f->numParams))
+      params.push_back(a.kind == DirectArg::Header || a.kind == DirectArg::Value ? static_cast<Type *>(i64_) : ptrTy_);
     Type *result = words ? static_cast<Type *>(StructType::get(ctx_, {i64_, i64_})) : Type::getVoidTy(ctx_);
     Function *fn = Function::Create(FunctionType::get(result, params, false),
                                     GlobalValue::InternalLinkage, "xb.direct." + f->name, mod_);
     addAbiAttributes(fn);
     direct_[f.get()] = fn;
   }
+  for (auto &f : m.functions)
+    if (f->plainTwin && direct_.count(f->plainTwin)) {
+      Function *fn = Function::Create(blockFnTy_, GlobalValue::InternalLinkage, "xb.entry." + f->name, mod_);
+      addAbiAttributes(fn);
+      blockEntries_[f.get()] = fn;
+    }
 }
 
 // The dynamic entry of a function with a direct one: the parameters' items
@@ -540,17 +549,86 @@ void CodeGen::genThunk(const xir::Function &f) {
   fnCtx_ = thunk->getArg(0);
   Value *frames = loadFrom(ptrTy_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames), Mem::Ctx, "frames");
   bool words = returnsWords(f);
-  std::vector<Value *> args{fnCtx_};
-  if (!words) args.push_back(thunk->getArg(1));
-  args.push_back(frames);
-  for (uint32_t k = 0; k < f.numParams; ++k) {
-    Words w = loadWords(argItem(argc, argv, k));
-    args.insert(args.end(), {w.header, w.payload});
-  }
-  takeLent(f, thunk, argc, argv);
+  bool block = f.kind == xir::Function::Kind::Block;
+  std::vector<Words> passed;
+  for (uint32_t k = 0; k < f.numParams; ++k) passed.push_back(loadWords(argItem(argc, argv, k)));
+  std::vector<Value *> args =
+      directArgs(block, words ? nullptr : thunk->getArg(1), frames, block ? thunk->getArg(4) : nullptr, passed);
+  if (!block) takeLent(f, thunk, argc, argv); // no caller lends a codeblock its arguments
   CallInst *result = b_.CreateCall(body, args);
   if (words) storeWords(thunk->getArg(1), b_.CreateExtractValue(result, 0), b_.CreateExtractValue(result, 1));
   else result->setTailCall();
+  b_.CreateRetVoid();
+}
+
+// The arguments of a direct entry, in order: the context and the result's item (unless it returns words); for a
+// function, the caller's frame, then each parameter's words (the header, then the value); for a codeblock, the
+// parameters' words, then the caller's frame and the block. A block's words come first so that two parameters' take
+// registers where six arguments do: on the stack, the callee reads a pair at once to copy it, which the caller's two
+// stores of it cannot forward (a stall), while a pointer is one store and one load.
+std::vector<CodeGen::DirectArg> CodeGen::directLayout(bool block, bool ret, uint32_t nparams) {
+  std::vector<DirectArg> layout{{DirectArg::Ctx, 0}};
+  if (ret) layout.push_back({DirectArg::Ret, 0});
+  if (!block) layout.push_back({DirectArg::Frame, 0});
+  for (uint32_t k = 0; k < nparams; ++k) layout.insert(layout.end(), {{DirectArg::Header, k}, {DirectArg::Value, k}});
+  if (block) layout.insert(layout.end(), {{DirectArg::Frame, 0}, {DirectArg::Self, 0}});
+  return layout;
+}
+
+std::vector<Value *> CodeGen::directArgs(bool block, Value *ret, Value *frame, Value *self,
+                                         const std::vector<Words> &words) {
+  std::vector<Value *> args;
+  for (DirectArg a : directLayout(block, ret != nullptr, uint32_t(words.size()))) {
+    switch (a.kind) {
+    case DirectArg::Ctx: args.push_back(fnCtx_); break;
+    case DirectArg::Ret: args.push_back(ret); break;
+    case DirectArg::Frame: args.push_back(frame); break;
+    case DirectArg::Self: args.push_back(self); break;
+    case DirectArg::Header: args.push_back(words[a.param].header); break;
+    case DirectArg::Value: args.push_back(words[a.param].payload); break;
+    }
+  }
+  return args;
+}
+
+// The argument of the direct entry being generated (fn_ for fnShown_) that is `kind` (of parameter `param`).
+Argument *CodeGen::directArg(DirectArg::Kind kind, uint32_t param) {
+  std::vector<DirectArg> layout =
+      directLayout(fnShown_->kind == xir::Function::Kind::Block, !fnWords_, fnShown_->numParams);
+  for (unsigned k = 0; k < layout.size(); ++k)
+    if (layout[k].kind == kind && layout[k].param == param) return fn_->getArg(k);
+  report_fatal_error("xbc: no such argument of a direct entry");
+}
+
+// The function of a codeblock with a body for arguments without references (xb_block.fn, blockEntries_): when none of
+// the arguments given for the parameters that body has as LOCALs (those not shared) is a reference, that body's direct
+// entry with their words (NIL's past argc; those past its parameters left out), else its own body, which reaches them
+// through what it is given. The runtime's calls of a block (xb_block_call) get here.
+void CodeGen::genBlockEntry(const xir::Function &f) {
+  Function *entry = blockEntries_.at(&f);
+  entry->setUWTableKind(UWTableKind::Async);
+  b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", entry));
+  fnCtx_ = entry->getArg(0);
+  Value *ret = entry->getArg(1), *argc = entry->getArg(2), *argv = entry->getArg(3), *self = entry->getArg(4);
+  Value *frames = loadFrom(ptrTy_, b_.CreateStructGEP(ctxHeadTy_, fnCtx_, CtxFrames), Mem::Ctx, "frames");
+  std::vector<bool> shared(f.numParams, false);
+  for (auto &v : f.vars)
+    if (v->param && v->index < f.numParams) shared[v->index] = v->shared;
+  Value *reference = b_.getFalse();
+  std::vector<Words> passed;
+  for (uint32_t k = 0; k < f.numParams; ++k) {
+    Value *item = argItem(argc, argv, k);
+    if (!shared[k]) reference = b_.CreateOr(reference, holdsRef(item));
+    passed.push_back(loadWords(item));
+  }
+  std::vector<Value *> args = directArgs(true, ret, frames, self, passed);
+  BasicBlock *values = BasicBlock::Create(ctx_, "values", entry), *refs = BasicBlock::Create(ctx_, "refs", entry);
+  branchLikely(b_.CreateNot(reference), values, refs);
+  b_.SetInsertPoint(values);
+  b_.CreateCall(direct_.at(f.plainTwin), args)->setTailCall();
+  b_.CreateRetVoid();
+  b_.SetInsertPoint(refs);
+  b_.CreateCall(blockFnTy_, functions_.at(&f), {fnCtx_, ret, argc, argv, self})->setTailCall();
   b_.CreateRetVoid();
 }
 
@@ -605,6 +683,7 @@ void CodeGen::endLend() {
 void CodeGen::genFunction(const xir::Function &f) {
   auto direct = direct_.find(&f);
   fnDirect_ = direct != direct_.end();
+  if (f.plainBody && !fnDirect_) report_fatal_error("xbc: a codeblock's NAME.plain body without a direct entry");
   fn_ = fnDirect_ ? direct->second : functions_.at(&f);
   fn_->setUWTableKind(UWTableKind::Async); // backtraces / profilers
   FramePlan plan(f);
@@ -665,15 +744,16 @@ void CodeGen::genFunction(const xir::Function &f) {
     fnRet_->setName("ret");
   }
   // The caller's frame, which the context's chain has at the call.
-  fnPrev_ = fnDirect_ ? fn_->getArg(fnWords_ ? 1 : 2) : nullptr;
+  fnPrev_ = fnDirect_ ? directArg(DirectArg::Frame) : nullptr;
+  bool block = f.kind == xir::Function::Kind::Block;
   if (f.kind != xir::Function::Kind::ModuleInit && !fnDirect_) {
     argc = fn_->getArg(2);
     argv = fn_->getArg(3);
     argc->setName("argc");
     argv->setName("argv");
   }
-  if (f.kind == xir::Function::Kind::Block) {
-    fnSelf_ = fn_->getArg(4);
+  if (block) { // last in either entry
+    fnSelf_ = fnDirect_ ? directArg(DirectArg::Self) : fn_->getArg(4);
     fnSelf_->setName("self");
   }
   pushFrame(plan.frameSize(), f.numParams, argc, argv, procOf(f), f.readsArgs && argc);
@@ -917,14 +997,11 @@ void CodeGen::pushFrame(uint32_t nslots, uint32_t nparams, Value *argc, Value *a
   BasicBlock &entry = fn_->getEntryBlock(); // a static alloca, whatever block the frame is linked in
   AllocaInst *frame = IRBuilder<>(&entry, entry.getFirstInsertionPt()).CreateAlloca(ty, nullptr, "frame");
   fnBase_ = b_.CreateConstInBoundsGEP2_32(ty, frame, 0, FrameSlots, "slots");
-  // In a direct body, the items in registers follow the context, the result's item (unless it returns words) and the
-  // caller's frame.
-  unsigned first = fnWords_ ? 2 : 3;
   for (uint32_t k = 0; k < nparams; ++k) {
     const xir::Var *v = plan_->param(k);
     if (!v) report_fatal_error("xbc: a parameter has no variable");
     Value *dst = rawAddress(*v); // its slot, or its item out of the frame (FramePlan::inRegisters)
-    if (fnDirect_) storeWords(dst, fn_->getArg(first + 2 * k), fn_->getArg(first + 1 + 2 * k));
+    if (fnDirect_) storeWords(dst, directArg(DirectArg::Header, k), directArg(DirectArg::Value, k));
     else copyItem(dst, argItem(argc, argv, k));
   }
   uint32_t inFrame = plan_->paramSlots();
@@ -1039,7 +1116,8 @@ void CodeGen::genEntry(const xir::Function &start) {
   b_.SetInsertPoint(BasicBlock::Create(ctx_, "entry", fn));
   Value *ctx = fn->getArg(0);
   uint64_t strHdr = dl_.getStructLayout(strType(ArrayType::get(i8_, 0)))->getElementOffset(StrBytes);
-  uint64_t blockCells = dl_.getStructLayout(blockTy_)->getElementOffset(2);
+  uint64_t blockParams = dl_.getStructLayout(blockTy_)->getElementOffset(BlockParams);
+  uint64_t blockCells = dl_.getStructLayout(blockTy_)->getElementOffset(BlockCells);
   uint64_t frameSlots = dl_.getStructLayout(frameType(0))->getElementOffset(FrameSlots);
   uint64_t ctxFrames = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxFrames);
   uint64_t ctxDecimals = dl_.getStructLayout(ctxHeadTy_)->getElementOffset(CtxDecimals);
@@ -1052,7 +1130,8 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t objectVars = dl_.getStructLayout(objectTy_)->getElementOffset(ObjectVars);
   uint64_t strBufBytes = dl_.getStructLayout(strBufType())->getElementOffset(StrBufBytes);
   b_.CreateCall(rtAbiCheck_, {ConstantInt::get(i32_, XB_ABI_VERSION), ConstantInt::get(i32_, itemSize_),
-                              ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockCells),
+                              ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockParams),
+                              ConstantInt::get(i32_, blockCells),
                               ConstantInt::get(i32_, frameSlots), ConstantInt::get(i32_, ctxFrames),
                               ConstantInt::get(i32_, ctxDecimals), ConstantInt::get(i32_, ctxStackLimit),
                               ConstantInt::get(i32_, ctxLent), ConstantInt::get(i32_, ctxTlab),

@@ -91,6 +91,7 @@ private:
   enum GcHdrField : unsigned { GcHdrSize = 0, GcHdrKind = 1, GcHdrState = 2, GcHdrFlags = 3 }; // xb_gc_hdr
   enum ArrayField : unsigned { ArrayLen = 0, ArrayCap = 1, ArrayData = 2 };
   enum ObjectField : unsigned { ObjectCls = 0, ObjectNvars = 1, ObjectVars = 2 }; // xb_object
+  enum BlockField : unsigned { BlockFn = 0, BlockDirect = 1, BlockParams = 2, BlockCells = 4 }; // xb_block
   enum RefField : unsigned { RefColl = 0, RefIndex = 1, RefValue = 2, RefKey = 3 };     // xb_ref
   enum HashField : unsigned { HashLen = 0, HashUsed = 1, HashEntries = 6 };           // xb_hash
   enum HEntryField : unsigned { HEntryKey = 0, HEntryValue = 1 };                     // xb_hentry
@@ -117,6 +118,7 @@ private:
                  bool keepArgs);
   void directEntries(const xir::Module &m);
   void genThunk(const xir::Function &f);
+  void genBlockEntry(const xir::Function &f);
   void takeLent(const xir::Function &f, llvm::Function *thunk, llvm::Value *argc, llvm::Value *argv);
   bool lends(const xir::Instruction &i, size_t first) const;
   void lend(llvm::Value *argv);
@@ -169,6 +171,14 @@ private:
   };
   Words loadWords(llvm::Value *item);
   Words itemWords(llvm::Value *item);
+  struct DirectArg {
+    enum Kind { Ctx, Ret, Frame, Self, Header, Value } kind;
+    uint32_t param; // of a Header or Value
+  };
+  static std::vector<DirectArg> directLayout(bool block, bool ret, uint32_t nparams);
+  std::vector<llvm::Value *> directArgs(bool block, llvm::Value *ret, llvm::Value *frame, llvm::Value *self,
+                                        const std::vector<Words> &words);
+  llvm::Argument *directArg(DirectArg::Kind kind, uint32_t param = 0);
   void copyItem(llvm::Value *dst, llvm::Value *src);
   void setNil(llvm::Value *dst);
   void storeTagged(llvm::Value *dst, uint32_t tag, llvm::Value *v);
@@ -357,7 +367,7 @@ private:
   llvm::FunctionType *xbFuncTy_ = nullptr;
   llvm::FunctionType *blockFnTy_ = nullptr;
   llvm::FunctionType *initFnTy_ = nullptr;
-  llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, ncells, cells[] }
+  llvm::StructType *blockTy_ = nullptr;     // xb_block: { fn, direct, nparams, ncells, cells[] }
   llvm::StructType *arrayTy_ = nullptr;     // xb_array: { len, cap, data } (its items follow)
   llvm::StructType *objectTy_ = nullptr;    // xb_object: { cls, nvars, vars }
   llvm::StructType *tlabTy_ = nullptr;      // xb_tlab: { cursor, limit, allocated, birth }
@@ -415,8 +425,12 @@ private:
   // state of the object (every module added)
   std::unordered_map<const xir::Function *, llvm::Function *> functions_;
   // Functions with a direct entry (directEntries): their body, which takes the parameters as items in registers
-  // (header and value word of each); functions_ holds their dynamic entry, a thunk (genThunk).
+  // (header and value word of each); functions_ holds their dynamic entry, a thunk (genThunk), but for a NAME.plain
+  // body, which has none.
   std::unordered_map<const xir::Function *, llvm::Function *> direct_;
+  // Codeblocks with a body for arguments without references (Function::plainTwin): their function (xb_block.fn),
+  // which goes to that body's direct entry or to their own body (genBlockEntry).
+  std::unordered_map<const xir::Function *, llvm::Function *> blockEntries_;
 
   llvm::GlobalVariable *statics_ = nullptr;   // the STATICs of the module being added
   llvm::Constant *scalarReplaced_ = nullptr; // xb_scalar_replaced (xbrt.h)

@@ -380,7 +380,7 @@ static void run(xb_ctx *ctx, xb_item *ret, const xb_item *code, uint32_t argc, x
     case MO_BLOCK: { /* its function in cell 0, then the cells of the variables it captures */
       const xb_item *child = &xb_array_items(fa)[word(&pc)];
       uint32_t ncap = word(&pc);
-      xb_block_new(ctx, r, block_fn, 1 + ncap);
+      xb_block_new(ctx, r, block_fn, NULL, 0, 1 + ncap);
       ++sp; /* the block, rooted, while its cells are made (read again after each: a collection may move it) */
       xb_cell *c = xb_gc_alloc(XB_GC_CELL, sizeof(xb_cell));
       c->value = *child;

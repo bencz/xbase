@@ -463,7 +463,9 @@ result. Implemented (`xir/passes/`):
   fewer instructions, `tak` 19% (perf stat, x86-64). Last, a `STATIC FUNCTION` its copies replaced, which no root
   reaches any more, leaves the module with its body versioned for references, and so does a copy nothing reaches any
   more (`dropCopiedFunctions`; the module's first function, which may be the program's start, `firstProgramFunction`,
-  stays).
+  stays). Then the body for arguments without references (`NAME.plain`, [compiler.md](compiler.md#syntax-tree-to-xir))
+  of a codeblock that no `block` instruction makes any more, inlined where it was evaluated, leaves the module
+  (`dropUnmadePlainBodies`, `Versioning.cpp`; again while one dropped made the only blocks of others).
 - `peel-for-types`, after `typed-continuations`: a small innermost loop (at most 80 instructions, in a function of at
   most 600; up to 4 loops) without a suspension point or an inlined body's frame, one of whose header's parameters gets
   one number type from the loop's passes and another number type from outside (a sum that starts at the integer 0 and

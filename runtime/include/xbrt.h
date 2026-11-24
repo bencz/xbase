@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 67u
+#define XB_ABI_VERSION 68u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -409,13 +409,22 @@ typedef struct xb_hash {
   xb_hentry *entries; /* the store (its other tables follow the entries); NULL while cap is 0 */
 } xb_hash;
 
-/* [ABI] A codeblock: its function and the cells of the variables it captured.
- * The block function receives the block itself. */
+/* [ABI] A codeblock: its function, its direct entry, and the cells of the variables it captured. The block function
+ * receives the block itself. The direct entry (NULL: none; a macro's block, one without parameters or that reads its
+ * arguments as received) takes exactly `nparams` arguments as the two words of each item (its first 8 bytes, then its
+ * value's 8): void direct(xb_ctx *ctx, xb_item *ret, uint64_t header0, uint64_t value0, ..., xb_frame *caller,
+ * xb_block *self), `caller` the frame the context's chain has at the call, `ret` set to NIL by the caller; none is a
+ * reference (XB_T_CELL, XB_T_REF) when the block's parameters are not all shared.
+ * Compiled code's Eval calls it when it fits; the function of a compiled block with one does the same for any other
+ * caller. */
 typedef struct xb_block xb_block;
 typedef void (*xb_block_fn)(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self);
+typedef void (*xb_block_direct)(void); /* opaque: its signature depends on nparams */
 #ifndef __cplusplus
 struct xb_block {
   xb_block_fn fn;
+  xb_block_direct direct;
+  uint32_t nparams;
   uint32_t ncells;
   xb_cell *cells[];
 };
@@ -424,16 +433,16 @@ struct xb_block {
 int32_t  xb_pending(xb_ctx *ctx);
 int32_t  xb_pending_gc(xb_ctx *ctx);
 
-/* The layout the module was compiled for: offsets of xb_str.bytes,
- * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals,
- * xb_ctx.stack_limit, xb_ctx.lent, xb_ctx.tlab, xb_array.data, xb_array.inline_items (after len and cap), xb_ref.value (after coll and index),
- * xb_hash.entries (after its six counts), xb_object.vars (after cls and nvars)
- * and xb_strbuf.bytes (after cap and used). */
-void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_cells_offset,
-                      uint32_t frame_slots_offset, uint32_t ctx_frames_offset, uint32_t ctx_decimals_offset,
-                      uint32_t ctx_stack_limit_offset, uint32_t ctx_lent_offset, uint32_t ctx_tlab_offset,
-                      uint32_t array_data_offset, uint32_t array_items_offset, uint32_t ref_value_offset,
-                      uint32_t hash_entries_offset, uint32_t object_vars_offset, uint32_t strbuf_bytes_offset);
+/* The layout the module was compiled for: offsets of xb_str.bytes, xb_block.nparams (after fn and direct),
+ * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals, xb_ctx.stack_limit, xb_ctx.lent, xb_ctx.tlab,
+ * xb_array.data, xb_array.inline_items (after len and cap), xb_ref.value (after coll and index), xb_hash.entries
+ * (after its six counts), xb_object.vars (after cls and nvars) and xb_strbuf.bytes (after cap and used). */
+void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_params_offset,
+                      uint32_t block_cells_offset, uint32_t frame_slots_offset, uint32_t ctx_frames_offset,
+                      uint32_t ctx_decimals_offset, uint32_t ctx_stack_limit_offset, uint32_t ctx_lent_offset,
+                      uint32_t ctx_tlab_offset, uint32_t array_data_offset, uint32_t array_items_offset,
+                      uint32_t ref_value_offset, uint32_t hash_entries_offset, uint32_t object_vars_offset,
+                      uint32_t strbuf_bytes_offset);
 /* A frame (its address) below the context's stack_limit: xb_stack_deep gives
  * 1 when that limit was only the mark of a deep stack (core/ctx.c), whose
  * pages go back to the system once it is shallow again, and the frame lies
@@ -1030,8 +1039,10 @@ void     xb_macro_text(xb_ctx *ctx, xb_item *r, const xb_item *text);
 
 /* Codeblocks. xb_block_new stores the new block in `r` and returns it; the
  * caller fills cells[0 .. ncells-1] (xb_cell_of of each captured variable,
- * obtained first) before anything else can allocate. */
-xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, uint32_t ncells);
+ * obtained first) before anything else can allocate. `direct` and `nparams`:
+ * the block function's direct entry (NULL: none) and the arguments it takes. */
+xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, xb_block_direct direct, uint32_t nparams,
+                       uint32_t ncells);
 void     xb_block_call(xb_ctx *ctx, xb_item *ret, const xb_item *block, uint32_t argc, xb_item *argv);
 /* FOR ... TO ... STEP test: 1 = keep looping. */
 int32_t  xb_for_test(xb_ctx *ctx, const xb_item *counter, const xb_item *limit, const xb_item *step);

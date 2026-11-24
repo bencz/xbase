@@ -41,9 +41,9 @@ textual IR is written (except with the debugging options `--dump-xir` and `--dum
 - The compiler never hard-codes sizes or offsets. Runtime structures are described as LLVM types and laid out by the
   target `DataLayout`, which gives the same layout the C compiler gives the runtime for that target.
 - Every program checks the ABI at startup (`xb_abi_check`): ABI version, item size, string header size, and the offsets
-  of a codeblock's cells, a frame's slots, a context's frame chain, SET DECIMALS, stack limit, lent arguments and
-  allocation hole, an array's items and the items in its own allocation, a reference's value, a hash's entries, an
-  object's variables and a string buffer's bytes.
+  of a codeblock's parameter count and cells, a frame's slots, a context's frame chain, SET DECIMALS, stack limit, lent
+  arguments and allocation hole, an array's items and the items in its own allocation, a reference's value, a hash's
+  entries, an object's variables and a string buffer's bytes.
 - On-disk formats (DBF and NTX are little-endian; CDX keys are big-endian) are read and written only through explicit
   byte-order helpers, never by copying structures. *(planned)*
 - Objects have been produced and their layout inspected for x86-64, i686, AArch64, ARMv7, RISC-V 64, LoongArch64,

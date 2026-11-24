@@ -30,6 +30,8 @@ private:
   void genResumable(const FuncDecl &f, Function *fn);
   void genModuleInit(const xb::Module &ast);
   Function *genCodeblockFunction(const BlockExpr &b);
+  Function *genCodeblockBody(const BlockExpr &b, const std::string &name, bool plainParams);
+  static bool sharedParam(const BlockExpr &b, uint32_t slot);
   Var *frameVar(uint32_t slot);
   Var *hiddenVar();
   Var *varOf(const VarExpr &v);
@@ -81,6 +83,8 @@ private:
   std::unique_ptr<Module> mod_;
   std::unordered_map<std::string, Function *> funcs_; // the module's program functions
   unsigned blockCount_ = 0;
+  std::unordered_map<const BlockExpr *, Function *> blockFunctions_; // each codeblock's function (genCodeblockFunction)
+  unsigned inPlainBody_ = 0;                                         // generating a codeblock's NAME.plain body
 
   // The function being generated (saved while a codeblock's is generated).
   struct Loop {

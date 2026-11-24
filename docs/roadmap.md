@@ -281,7 +281,8 @@ one design, in this order, each step measured over every benchmark before it is 
    function today), also for the frames of inlined bodies; the send cache keeps the method's direct entry and a
    codeblock its own (`xb_block`), so compiled sends and `Eval`s call them; methods and codeblocks get a body for
    arguments passed by reference, as functions have. Done: inlined bodies link no frame (their positions in the
-   caller's, [compiler.md](compiler.md#xir-to-llvm)).
+   caller's, [compiler.md](compiler.md#xir-to-llvm)); codeblocks' direct entries, with a body for arguments without
+   references, which compiled `Eval`s and `xb_block_call` take ([runtime.md](runtime.md#codeblocks)).
 3. Inline allocation: a context reaches its thread's allocation buffer, and compiled code bumps it for array and hash
    literals, objects of a known class, cells and codeblocks, the frame set up only on the slow path. Done: objects of a
    class whose objects take nothing but memory (empty arrays for `INIT {}` included), array literals whose form is

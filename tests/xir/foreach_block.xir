@@ -222,11 +222,31 @@ entry:
   ret %2
 }
 
+block MAIN.block1.plain internal params 1 {
+  $f0 = frame 0 "K"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $f0 move
+  %1 = load $c0 maybe_ref
+  %2 = binary mul %0, %1
+  ret %2
+}
+
 block MAIN.block2 internal params 1 {
   $f0 = frame 0 "K"
   $c0 = capture 0 "N"
 entry:
   %0 = load $f0 maybe_ref
+  %1 = load $c0 maybe_ref
+  %2 = binary mul %0, %1
+  ret %2
+}
+
+block MAIN.block2.plain internal params 1 {
+  $f0 = frame 0 "K"
+  $c0 = capture 0 "N"
+entry:
+  %0 = load $f0 move
   %1 = load $c0 maybe_ref
   %2 = binary mul %0, %1
   ret %2

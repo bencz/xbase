@@ -447,7 +447,14 @@ item values and block parameters when `--dump-xir-types` is given too ([xir.md](
   at a later release where it is dead (one that release is on every path to; where it is not, the parameter holds the
   value until the function returns): `frame.release param k`, `FramePlan::pinMovedParams`), and otherwise `call.forward`
   passes the arguments as received to the other body, `NAME.byref` (internal), which reaches the parameters through
-  their references. Codeblocks inside are generated with each body.
+  their references. Codeblocks inside are generated with each body. A codeblock with a direct entry (below) is
+  versioned the same way when it has a parameter it does not share: its body `NAME.plain` (`Function::plainBody`, the
+  block's `plainTwin`) moves those parameters into LOCALs at its start. Only the block's direct entry runs it (below),
+  and no reference reaches that entry, so the body has no test and no dynamic entry. The block's own body, which its
+  function runs (any argument count, references), is unchanged. The blocks inside `NAME.plain` are those of the own
+  body (`Generator::blockFunctions_`): a block captures no parameter that is not shared, so each level of nesting does
+  not double the blocks. `dropReferenceBodies` drops a dropped block's plain body with it, and after optimization
+  `dropUnmadePlainBodies` drops those of blocks that no `block` instruction makes any more (inlined where evaluated).
 - `.AND.`, `.OR.` and `IIF` branch; their results are block parameters. Conditions are `truth` tests of items. The left
   side of `.AND.`/`.OR.` must be logical; when it does not settle the result, the right side's value is the result as it
   is, whatever its type (`.T. .AND. 5` is 5, as in Clipper), and only a condition tests it. A left side that is no
@@ -582,7 +589,8 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   direct one (`CodeGen::takeLent`) reads the words of its parameters' arguments (Self included), sets those items to
   `NIL` and ends the loan, its parameters then holding them until it returns; a function without one (it reads its
   arguments as received, passes `...` on, or is a `NAME.byref` body) ends it in its prologue and keeps them, as natives
-  and codeblocks do (a codeblock's arguments are its caller's: `Eval()` passes them on). At -O0 a caller's `LOCAL` is a
+  do. No caller lends a codeblock its arguments: they are its caller's (`Eval()` passes them on, and compiled code
+  calls a block's function or direct entry with the operands' own items). At -O0 a caller's `LOCAL` is a
   frame variable and keeps what it holds while the function runs; at -O1 and above one that mem2reg made a value is let
   go once it is dead, as any value (a destructor may then run earlier than at -O0, inside the callee that drops it). The
   parameters take slots 0 to n-1 (the prologue copies them there), but in a typed copy with a direct entry and no loop a
@@ -753,25 +761,37 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   object never clash. A call, a send or an array literal with `...` (`withRest`) passes the count and the items of a
   frame built for it on the stack ([runtime.md](runtime.md#calling-convention)); the inline calls and the bit functions
   leave such calls alone.
-- Direct entries (`directEntries`, `xir::hasDirectEntry`): a function of the program that does not read its arguments as
-  received (its frame keeps none, `readsArgs`, and it has no `...`, `usesRest`) and is not the body versioned for
-  references (`byRefBody`) gets its body in an internal function, `xb.direct.NAME`, taking the context, the result slot,
-  the caller's frame (the context's chain has it at the call: linking needs no load of it, so a call does not wait for
-  the store of the one before) and each parameter's item as two words (header and value) in registers. Calls of the
-  module go there (`emitDirectCall`, `xir::isDirectCall`) with no `argc` or `argv` and no argument slots in the frame
-  plan: each operand is read where it is and passed as words; a parameter not passed gets `NIL`, and arguments past the
-  parameters are evaluated and left out, since nothing reads them. A function whose `RETURN`s give no value that refers
-  to a heap object (numbers, logicals, dates, `NIL`: `Function::returnTypes`, [xir.md](xir.md#types); `returnsWords`
-  in `FramePlan.h`), and not only `NIL` (a procedure's, which its callers seldom read, gains nothing so), takes no
-  result slot: it returns its result's two words in registers (`{i64, i64}`), `NIL` when it
-  unwinds, and the caller stores them into the call's home (in registers too when that is `Local`) before its pending
-  test. Its call is computed straight into a variable only in a block that does not unwind (above), where nothing reads
-  the variable again when the call unwinds. Any other result may refer to an object that only it holds, which the
-  collector must see on the way back: the callee writes it into the caller's item. The function's symbol is a thunk
-  (`genThunk`) that reads the items from `argv` (`argItem`), calls the direct entry and writes a result returned as
-  words to its `ret`: the runtime, `Do()` and other modules call it. The body still tests its parameters for references,
-  and its `call.forward` passes its parameters' slots as the arguments. Measured against calls through `argv`
-  (callgrind, x86-64): `fib` 8% fewer instructions.
+- Direct entries (`directEntries`, `xir::hasDirectEntry`): a function or codeblock (with parameters: one without has no
+  words to pass) of the program that does not read its arguments as received (its frame keeps none, `readsArgs`, and it
+  has no `...`, `usesRest`) and is not the body versioned for references (`byRefBody`) gets its body in an internal
+  function, `xb.direct.NAME`, taking the context, the result slot, the caller's frame (the context's chain has it at the
+  call: linking needs no load of it, so a call does not wait for the store of the one before) and each parameter's item
+  as two words (header and value) in registers. Calls of the module go there (`emitDirectCall`, `xir::isDirectCall`)
+  with no `argc` or `argv` and no argument slots in the frame plan: each operand is read where it is and passed as
+  words; a parameter not passed gets `NIL`, and arguments past the parameters are evaluated and left out, since nothing
+  reads them. A function whose `RETURN`s give no value that refers to a heap object (numbers, logicals, dates, `NIL`:
+  `Function::returnTypes`, [xir.md](xir.md#types); `returnsWords` in `FramePlan.h`), and not only `NIL` (a procedure's,
+  which its callers seldom read, gains nothing so), takes no result slot: it returns its result's two words in registers
+  (`{i64, i64}`), `NIL` when it unwinds, and the caller stores them into the call's home (in registers too when that is
+  `Local`) before its pending test. Its call is computed straight into a variable only in a block that does not unwind
+  (above), where nothing reads the variable again when the call unwinds. Any other result may refer to an object that
+  only it holds, which the collector must see on the way back: the callee writes it into the caller's item. The
+  function's symbol is a thunk (`genThunk`) that reads the items from `argv` (`argItem`), calls the direct entry and
+  writes a result returned as words to its `ret`: the runtime, `Do()` and other modules call it. The body still tests
+  its parameters for references, and its `call.forward` passes its parameters' slots as the arguments. Measured against
+  calls through `argv` (callgrind, x86-64): `fib` 8% fewer instructions. A codeblock's direct entry (its `NAME.plain`
+  body's, when it has one) takes the caller's frame and the block after the words (`directArgs`: so the words of two
+  parameters take registers where six arguments do; on the stack, a pair the callee copies at once is two stores of the
+  caller's that cannot be forwarded, a stall) and always writes its result into the caller's item; the block holds it
+  (`xb_block.direct`, with its parameter count, [runtime.md](runtime.md#codeblocks)), given to `xb_block_new`. The
+  `Eval` of a block (`Op::Call` of `EVAL`, operand 0 possibly a block) with no operand a reference calls it when the
+  block has one, switching on its parameter count. It takes as many parameters as arguments, or fewer when at most four
+  arguments are given (`kEvalFewerArgs`, one call per count; the arguments past them, which the block cannot read, are
+  left out). Else it calls the block's function through `argv`. For any other caller (`xb_block_call`), the function of
+  a block with a `NAME.plain` body is a thunk (`genBlockEntry`, `xb.entry.NAME`) that tests the arguments for references
+  and calls that body's direct entry or the block's own body; that of a block with another direct entry is its
+  `genThunk` ([runtime.md](runtime.md#codeblocks)). Against the block's function alone: blocks evaluated in loops
+  (`codeblock_callback`) take 0.66 of the time, `ASort` with a block (`asort`, `asort_codeblock`) 0.97.
 - Values held in frame slots (`Home::Kind::Slot`) keep their header and value words in registers, read once right
   after their definition (`cacheWords`; for a block parameter, at the start of its block): the frame is linked into
   the context, so LLVM must reload a slot after every call, though a slot keeps its value unchanged while the value

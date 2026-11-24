@@ -271,7 +271,7 @@ int main(void) {
   static xb_item handler;
   xb_set_nil(&handler);
   xb_gc_add_root(&handler, 1);
-  xb_block_new(ctx, &handler, count_error, 0);
+  xb_block_new(ctx, &handler, count_error, NULL, 0, 0);
   ctx->env->error_block = handler;
 
   FILE *f = fopen(XB_TEST_RTL_CH, "rb");
