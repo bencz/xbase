@@ -81,6 +81,7 @@ private:
   };
   enum TlabField : unsigned { TlabCursor = 0, TlabLimit = 1, TlabAllocated = 2, TlabBirth = 3 }; // xb_tlab
   enum ClassDefField : unsigned { ClassDefRuntime = 18, ClassDefMake = 19 };                   // xb_class_def
+  enum MethodDefField : unsigned { MethodDefDirect = 4 }; // xb_class_method_def
   enum ClassMakeField : unsigned { // xb_class_make
     ClassMakeCls = 0,
     ClassMakeModel = 1,
@@ -179,6 +180,9 @@ private:
   std::vector<llvm::Value *> directArgs(bool block, llvm::Value *ret, llvm::Value *frame, llvm::Value *self,
                                         const std::vector<Words> &words);
   llvm::Argument *directArg(DirectArg::Kind kind, uint32_t param = 0);
+  void callDirect(llvm::Value *entry, bool words, llvm::Value *d, const std::vector<llvm::Value *> &args);
+  llvm::StructType *wordsType();
+  void clearArgs(llvm::Value *argv, uint32_t n);
   void copyItem(llvm::Value *dst, llvm::Value *src);
   void setNil(llvm::Value *dst);
   void storeTagged(llvm::Value *dst, uint32_t tag, llvm::Value *v);
@@ -264,8 +268,12 @@ private:
   // trunc( v ) without a call: what llvm.trunc gives, which a target without the instruction (x86-64 before
   // SSE4.1) makes a call of the C library.
   llvm::Value *truncDouble(llvm::Value *v);
-  void sendInPlace(const xir::Instruction &i, llvm::Value *argv, llvm::Value *d, llvm::GlobalVariable *cache,
+  void sendInPlace(const xir::Instruction &i, llvm::Value *argv, llvm::Value *d, llvm::GlobalVariable *cache, bool lent,
                    const std::function<void()> &slowSend);
+  llvm::Function *sendWay();
+  void sendCompact(const xir::Instruction &i, llvm::Value *argv, llvm::Value *d, llvm::GlobalVariable *cache,
+                   const std::function<void()> &slowSend);
+  llvm::Function *sendWay_ = nullptr; // the object's, every module added (sendWay)
   llvm::Value *objectVariable(llvm::Value *obj, llvm::Value *slot, llvm::BasicBlock *shared, llvm::Value *&state);
   void storeObjectVariable(llvm::Value *obj, llvm::Value *var, llvm::Value *state, const xir::Value *v,
                            const Words &value);
@@ -373,6 +381,7 @@ private:
   llvm::StructType *tlabTy_ = nullptr;      // xb_tlab: { cursor, limit, allocated, birth }
   llvm::StructType *classDefTy_ = nullptr;  // xb_class_def
   llvm::StructType *classMakeTy_ = nullptr; // xb_class_make: { cls, model, nvars, nempty, empty }
+  llvm::StructType *methodDefTy_ = nullptr; // xb_class_method_def: { message, fn, flags, nparams, direct, direct_kind }
   llvm::StructType *gcHdrTy_ = nullptr;     // xb_gc_hdr: { size, kind, state, flags }
   llvm::StructType *refTy_ = nullptr;       // xb_ref: { coll, index, value, key, loop }
   llvm::StructType *hashTy_ = nullptr;      // xb_hash: { len, used, cap, flags, imask, hint, entries }

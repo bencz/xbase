@@ -282,13 +282,17 @@ one design, in this order, each step measured over every benchmark before it is 
    codeblock its own (`xb_block`), so compiled sends and `Eval`s call them; methods and codeblocks get a body for
    arguments passed by reference, as functions have. Done: inlined bodies link no frame (their positions in the
    caller's, [compiler.md](compiler.md#xir-to-llvm)); codeblocks' direct entries, with a body for arguments without
-   references, which compiled `Eval`s and `xb_block_call` take ([runtime.md](runtime.md#codeblocks)).
+   references, which compiled `Eval`s and `xb_block_call` take ([runtime.md](runtime.md#codeblocks)); the send cache
+   keeps a method's direct entry when it takes the send's arguments, which compiled sends call
+   ([compiler.md](compiler.md#xir-to-llvm)); methods have their body for references as functions do. To do: frames
+   set up only where needed.
 3. Inline allocation: a context reaches its thread's allocation buffer, and compiled code bumps it for array and hash
    literals, objects of a known class, cells and codeblocks, the frame set up only on the slow path. Done: objects of a
    class whose objects take nothing but memory (empty arrays for `INIT {}` included), array literals whose form is
    known; the rest (hash literals, other values an object copies, cells and codeblocks) to do.
 4. Dispatch: messages interned to numbers when classes are registered, one class table for the runtime's classes and
-   the program's, sends to values of the built-in types cached as those to objects.
+   the program's, sends to values of the built-in types cached as those to objects. Done: compiled sends perform every
+   way of their cache in place, not only the newest (`virtual_dispatch` 0.77 of the cycles).
 
 ### Runtime
 

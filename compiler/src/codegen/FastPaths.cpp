@@ -512,14 +512,161 @@ bool CodeGen::emitBitCall(const xir::Instruction &i) {
   return true;
 }
 
-// A send whose inline cache's most recent way holds the class of the object it goes to performs the member in place,
-// as the runtime does on that hit (xb_op_send_from; perform in types/class.c): an object sent to as itself (type
-// XB_T_OBJECT, width 0: no cast), the way read under the cache's sequence lock (an odd or changed version, another
-// class: the runtime). An instance variable read (XB_SEND_GET) or written (XB_SEND_SET, with one argument) of a
-// local object is copied in place, a write followed by the barrier; a method (XB_SEND_METHOD) is called, unless an
-// AWAIT fused the send (the runtime then tells the method to the AWAIT: xb_fuse_target). Anything else, and every
-// miss, makes the call (`slowSend`), which fills the cache.
-void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, GlobalVariable *cache,
+// A send whose inline cache holds the class of the object it goes to performs the member in place, as the runtime
+// does on that hit (xb_op_send_from; perform in types/class.c): an object sent to as itself (type XB_T_OBJECT, width
+// 0: no cast), the ways compared newest first and the one found read under the cache's sequence lock (an odd or
+// changed version, a class none holds: the runtime). An instance variable read (XB_SEND_GET) or written
+// (XB_SEND_SET, with one argument) of a local object is copied in place, a write followed by the barrier; a method is
+// called, unless an AWAIT fused the send (the runtime then tells the method to the AWAIT: xb_fuse_target): through
+// its function (XB_SEND_METHOD), or its direct entry (XB_SEND_DIRECT, XB_SEND_DIRECT_WORDS: as many parameters as the
+// send's arguments, which it tests for references itself) with the arguments' words, which ends a loan (`lent`) as
+// the function would (takeLent). Anything else, and every miss, makes the call (`slowSend`), which fills the cache. A
+// `dispatched` send is compact (sendCompact).
+void CodeGen::sendInPlace(const xir::Instruction &i, Value *argv, Value *d, GlobalVariable *cache, bool lent,
+                          const std::function<void()> &slowSend) {
+  if (i.dispatched) { // the cache was made compact (Op::Send)
+    sendCompact(i, argv, d, cache, slowSend);
+    return;
+  }
+  bool fused = fusedSends_.count(&i) != 0;
+  size_t argc = i.operands().size();
+  BasicBlock *object = newBlock("send.object"), *hit = newBlock("send.hit");
+  BasicBlock *slow = newBlock("send.slow"), *join = newBlock("send.done");
+  // A written value's words are read before the cache's acquiring loads, past which they could not be forwarded from
+  // the stores that just made them (the copy would then wait for those stores to reach memory).
+  Value *arg = argc == 2 ? b_.CreateConstInBoundsGEP1_32(itemTy_, argv, 1) : nullptr;
+  Words value = arg ? loadWords(arg) : Words{nullptr, nullptr};
+
+  uint64_t typeAndWidth = (0xFFFFFFFFull << headerShift(FType)) | (0xFFFFull << headerShift(FWidth));
+  Value *mask = ConstantInt::get(i64_, typeAndWidth);
+  Value *asSelf = b_.CreateICmpEQ(b_.CreateAnd(loadHeader(argv), mask),
+                                  b_.CreateAnd(headerWord(XB_T_OBJECT, 0, 0), mask));
+  branchLikely(asSelf, object, slow);
+
+  b_.SetInsertPoint(object);
+  Value *obj = itemPointer(argv, "obj");
+  Value *cls = b_.CreatePtrToInt(loadFrom(ptrTy_, b_.CreateStructGEP(objectTy_, obj, ObjectCls), Mem::ObjectHeader),
+                                 intPtrTy_, "cls");
+  auto word = [&](Value *k, AtomicOrdering order, const char *name) {
+    auto *w = b_.CreateAlignedLoad(intPtrTy_, b_.CreateInBoundsGEP(intPtrTy_, cache, k), dl_.getABITypeAlign(intPtrTy_),
+                                   name);
+    w->setAtomic(order);
+    return w;
+  };
+  auto at = [&](uint64_t k) { return ConstantInt::get(intPtrTy_, k); };
+  Value *version = word(at(0), AtomicOrdering::Acquire, "version");
+  Value *even = b_.CreateICmpEQ(b_.CreateAnd(version, at(1)), at(0));
+  // Way `k` read whole, then the version again: whether the cache was even and unchanged meanwhile.
+  auto readWay = [&](Value *k, Value *ways[3]) {
+    ways[0] = word(b_.CreateAdd(k, at(XB_SEND_CACHE_KIND)), AtomicOrdering::Monotonic, "way.kind");
+    ways[1] = word(b_.CreateAdd(k, at(XB_SEND_CACHE_SLOT)), AtomicOrdering::Monotonic, "way.slot");
+    ways[2] = word(b_.CreateAdd(k, at(XB_SEND_CACHE_FN)), AtomicOrdering::Monotonic, "way.fn");
+    b_.CreateFence(AtomicOrdering::Acquire);
+    return b_.CreateAnd(even, b_.CreateICmpEQ(word(at(0), AtomicOrdering::Monotonic, "version"), version));
+  };
+  // The newest way here, its test one branch (a send that sees one class hits at once); the others out of line
+  // (sendWay), the way found read then.
+  Value *newest[3], *older[3];
+  Value *newestCls = word(at(XB_SEND_CACHE_CLS), AtomicOrdering::Monotonic, "way.cls");
+  Value *steady = readWay(at(0), newest);
+  BasicBlock *fromNewest = b_.GetInsertBlock(), *others = newBlock("send.ways"), *olderWay = newBlock("send.way");
+  branchLikely(b_.CreateAnd(b_.CreateICmpEQ(newestCls, cls), steady), hit, others);
+  b_.SetInsertPoint(others);
+  Value *index = b_.CreateCall(sendWay(), {cache, cls}, "way");
+  b_.CreateCondBr(b_.CreateICmpULT(index, at(XB_SEND_CACHE_WAYS)), olderWay, slow);
+  b_.SetInsertPoint(olderWay);
+  Value *olderSteady = readWay(index, older);
+  BasicBlock *fromOlder = b_.GetInsertBlock();
+  b_.CreateCondBr(olderSteady, hit, slow);
+
+  b_.SetInsertPoint(hit);
+  Value *way[3];
+  const char *names[3] = {"kind", "slot", "fn"};
+  for (int f = 0; f < 3; ++f) {
+    PHINode *phi = b_.CreatePHI(intPtrTy_, 2, names[f]);
+    phi->addIncoming(newest[f], fromNewest);
+    phi->addIncoming(older[f], fromOlder);
+    way[f] = phi;
+  }
+  Value *kind = way[0], *slot = way[1], *fn = way[2];
+  SwitchInst *sw = b_.CreateSwitch(kind, slow, 5);
+  // Weighted: a variable, a few instructions, kept on the straight path; a method, a call already, laid out after; the
+  // default (a member the runtime performs) is the cold call.
+  std::vector<uint32_t> weights{1};
+  auto when = [&](uint64_t k, const char *name) {
+    BasicBlock *bb = newBlock(name);
+    sw->addCase(cast<ConstantInt>(at(k)), bb);
+    weights.push_back(k == XB_SEND_GET || k == XB_SEND_SET ? 1000 : 100);
+    b_.SetInsertPoint(bb);
+  };
+  Value *state = nullptr;
+  when(XB_SEND_GET, "send.get");
+  copyObjectVariable(d, objectVariable(obj, slot, slow, state)); // arguments are ignored, as the runtime does
+  b_.CreateBr(join);
+  if (argc == 2 && !xir::isReference(i.operand(1))) { // a reference's value: the runtime's (xb_args_values)
+    when(XB_SEND_SET, "send.set");
+    Value *var = objectVariable(obj, slot, slow, state);
+    storeObjectVariable(obj, var, state, i.operand(1), value);
+    storeWords(d, value.header, value.payload);
+    b_.CreateBr(join);
+  }
+  if (!fused) {
+    when(XB_SEND_METHOD, "send.method");
+    b_.CreateCall(xbFuncTy_, b_.CreateIntToPtr(fn, ptrTy_), {fnCtx_, d, ConstantInt::get(i32_, argc), argv});
+    b_.CreateBr(join);
+    for (bool words : {false, true}) { // its direct entry tests its parameters for references itself
+      when(words ? XB_SEND_DIRECT_WORDS : XB_SEND_DIRECT, "send.direct");
+      std::vector<Words> passed;
+      for (uint32_t k = 0; k < argc; ++k) passed.push_back(loadWords(b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k)));
+      if (lent) { // the method alone holds what only they held, as its function's takeLent leaves them
+        endLend();
+        clearArgs(argv, uint32_t(argc));
+      }
+      callDirect(b_.CreateIntToPtr(fn, ptrTy_), words, d,
+                 directArgs(false, words ? nullptr : d, innermostFrame(), nullptr, passed));
+      b_.CreateBr(join);
+    }
+  }
+
+  sw->setMetadata(LLVMContext::MD_prof, MDBuilder(ctx_).createBranchWeights(weights));
+
+  b_.SetInsertPoint(slow);
+  slowSend();
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// The object's function that finds, among a send cache's ways past the newest, the first that holds class `cls`: its
+// index, or XB_SEND_CACHE_WAYS (each way's class read alone, as sendInPlace reads the newest: its caller then reads the
+// way and checks the cache's version).
+Function *CodeGen::sendWay() {
+  if (sendWay_) return sendWay_;
+  sendWay_ = Function::Create(FunctionType::get(intPtrTy_, {ptrTy_, intPtrTy_}, false), GlobalValue::InternalLinkage,
+                              "xb.send.way", mod_);
+  sendWay_->addFnAttr(Attribute::NoInline);
+  sendWay_->addFnAttr(Attribute::NoUnwind);
+  IRBuilder<> b(BasicBlock::Create(ctx_, "entry", sendWay_));
+  Value *cache = sendWay_->getArg(0), *cls = sendWay_->getArg(1);
+  BasicBlock *none = BasicBlock::Create(ctx_, "none", sendWay_);
+  for (uint64_t k = 1; k < XB_SEND_CACHE_WAYS; ++k) {
+    auto *w = b.CreateAlignedLoad(intPtrTy_, b.CreateConstInBoundsGEP1_64(intPtrTy_, cache, XB_SEND_CACHE_CLS + k),
+                                  dl_.getABITypeAlign(intPtrTy_), "way.cls");
+    w->setAtomic(AtomicOrdering::Monotonic);
+    BasicBlock *here = BasicBlock::Create(ctx_, "found", sendWay_);
+    BasicBlock *next = k + 1 < XB_SEND_CACHE_WAYS ? BasicBlock::Create(ctx_, "way", sendWay_) : none;
+    b.CreateCondBr(b.CreateICmpEQ(w, cls), here, next);
+    b.SetInsertPoint(here);
+    b.CreateRet(ConstantInt::get(intPtrTy_, k));
+    b.SetInsertPoint(next);
+  }
+  b.CreateRet(ConstantInt::get(intPtrTy_, XB_SEND_CACHE_WAYS));
+  return sendWay_;
+}
+
+// A compact send (xb_send_cache.flags, XB_SEND_COMPACT): the newest way alone, a method through its function. A send
+// a version on its receiver's class left for the other classes (`dispatched`) is one: the code the full form adds
+// would sit in the guarded loop it leaves, whose registers it changes (a few percent of the time measured).
+void CodeGen::sendCompact(const xir::Instruction &i, Value *argv, Value *d, GlobalVariable *cache,
                           const std::function<void()> &slowSend) {
   bool fused = fusedSends_.count(&i) != 0;
   size_t argc = i.operands().size();

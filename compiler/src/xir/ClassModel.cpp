@@ -14,7 +14,7 @@ ClassModel::ClassModel(const Module &m) : module_(m), classes_(m.classes.size())
       c.parents.push_back({p.name.c_str(), p.local >= 0 ? &classes_[(size_t)p.local].def : nullptr});
     for (const auto &v : from.vars) c.vars.push_back({v.name.c_str(), v.flags});
     for (const auto &v : from.classVars) c.classVars.push_back({v.name.c_str(), v.flags});
-    for (const auto &mt : from.methods) c.methods.push_back({mt.message.c_str(), nullptr, mt.flags});
+    for (const auto &mt : from.methods) c.methods.push_back({mt.message.c_str(), nullptr, mt.flags, 0, nullptr, 0});
     for (const auto &p : from.interfaces)
       c.interfaces.push_back({p.name.c_str(), p.local >= 0 ? &classes_[(size_t)p.local].def : nullptr});
     c.def.name = from.name.c_str();

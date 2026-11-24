@@ -519,7 +519,8 @@ _Static_assert(sizeof(xb_send_cache) == XB_SEND_CACHE_WORDS * sizeof(void *), "t
 _Static_assert(offsetof(xb_send_cache, cls) == XB_SEND_CACHE_CLS * sizeof(void *) &&
                    offsetof(xb_send_cache, slot) == XB_SEND_CACHE_SLOT * sizeof(void *) &&
                    offsetof(xb_send_cache, kind) == XB_SEND_CACHE_KIND * sizeof(void *) &&
-                   offsetof(xb_send_cache, fn) == XB_SEND_CACHE_FN * sizeof(void *),
+                   offsetof(xb_send_cache, fn) == XB_SEND_CACHE_FN * sizeof(void *) &&
+                   offsetof(xb_send_cache, flags) == XB_SEND_CACHE_FLAGS * sizeof(void *),
                "the word positions the compiler reads (xbrt.h)");
 
 /* The send caches are shared by every thread (xbrt.h): a sequence lock. A writer makes the version odd, changes the
@@ -542,19 +543,33 @@ static int cache_find(xb_send_cache *cache, const void *c, member **m, size_t *s
   return 0;
 }
 
-/* What compiled code may do in place for member `m` (XB_SEND_* in xbrt.h). */
-static size_t inline_kind(const member *m) {
+/* What compiled code may do in place for member `m` reached by a send of `argc` arguments (XB_SEND_* in xbrt.h), and
+ * for a method what it calls (`fn`): its direct entry when that takes as many parameters and the send is not compact,
+ * else its function. */
+static size_t inline_kind(const member *m, uint32_t argc, int compact, size_t *fn) {
+  *fn = 0;
   switch (m->kind) {
     case XB_MK_GET: return XB_SEND_GET;
     case XB_MK_SET: return XB_SEND_SET;
-    case XB_MK_METHOD: return XB_SEND_METHOD;
+    case XB_MK_METHOD: {
+      const xb_class_method_def *d = &m->owner->methods[m->index];
+      if (d->direct && d->nparams == argc && !compact) {
+        *fn = (size_t)(uintptr_t)d->direct;
+        return d->direct_kind;
+      }
+      *fn = (size_t)(uintptr_t)m->fn;
+      return XB_SEND_METHOD;
+    }
     default: return XB_SEND_OTHER;
   }
 }
 
-/* The member a message reached for class `c`, first in the cache; the oldest of a full cache goes. A runtime class's
- * (`m` NULL) keeps its member in `slot` (xb_runtime_member), and compiled code nothing in place (XB_SEND_OTHER). */
-static void cache_put(xb_send_cache *cache, const void *c, const member *m, size_t slot) {
+/* The member a message of `argc` arguments reached for class `c`, first in the cache; the oldest of a full cache goes.
+ * A runtime class's (`m` NULL) keeps its member in `slot` (xb_runtime_member), and compiled code nothing in place
+ * (XB_SEND_OTHER). A send compiled code performs in place passes as many arguments each time. */
+static void cache_put(xb_send_cache *cache, const void *c, const member *m, size_t slot, uint32_t argc) {
+  size_t fn = 0;
+  size_t kind = m ? inline_kind(m, argc, (cache->flags & XB_SEND_COMPACT) != 0, &fn) : XB_SEND_OTHER;
   size_t version = xb_atomic_loadsz(&cache->version, XB_RELAXED);
   if ((version & 1) || !xb_atomic_cassz(&cache->version, &version, version + 1, XB_ACQUIRE)) return;
   xb_atomic_fence(XB_RELEASE); /* the odd version is seen before any way changes */
@@ -568,8 +583,8 @@ static void cache_put(xb_send_cache *cache, const void *c, const member *m, size
   xb_atomic_storeptr(&cache->cls[0], (void *)(uintptr_t)c, XB_RELAXED);
   xb_atomic_storeptr(&cache->member[0], (void *)(uintptr_t)m, XB_RELAXED);
   xb_atomic_storesz(&cache->slot[0], slot, XB_RELAXED);
-  xb_atomic_storesz(&cache->kind[0], m ? inline_kind(m) : XB_SEND_OTHER, XB_RELAXED);
-  xb_atomic_storesz(&cache->fn[0], m && m->kind == XB_MK_METHOD ? (size_t)(uintptr_t)m->fn : 0, XB_RELAXED);
+  xb_atomic_storesz(&cache->kind[0], kind, XB_RELAXED);
+  xb_atomic_storesz(&cache->fn[0], fn, XB_RELAXED);
   xb_atomic_storesz(&cache->version, version + 2, XB_RELEASE);
 }
 
@@ -652,14 +667,14 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
      * sending method's class (a cast's view, Super). */
     int same = cache && object && !view && !super;
     if (strcmp(message, "CLASSNAME") == 0) { /* a cast's is the class it sees; Super:ClassName() the parent's */
-      if (same) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &c->className, 0);
+      if (same) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &c->className, 0, argc);
       const char *name = view ? c->line[view]->name : super && f->nline > 1 ? f->line[1]->name : c->def->name;
       xb_set_str(r, xb_str_new(name, strlen(name)));
       return;
     }
     if (strcmp(message, "NEW") == 0) { /* New: Init with the arguments, as the class's own method sends it */
       if (same && c->construct.kind == XB_MK_NEW) {
-        cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &c->construct, 0);
+        cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &c->construct, 0, argc);
         perform(ctx, r, &c->construct, 0, argc, argv);
         return;
       }
@@ -673,7 +688,7 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
     }
     if (strcmp(message, "INIT") == 0) {
       static const member none = {XB_MK_NEW, 0, NULL, 0, NULL};
-      if (same) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &none, 0);
+      if (same) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, &none, 0, argc);
       *r = argv[0];
       return;
     }
@@ -692,7 +707,7 @@ static void dispatch(xb_ctx *ctx, xb_item *r, cls *c, const char *message, xb_cl
   } else if (m->kind != XB_MK_METHOD) {
     slot = c->area[position(c, m->owner)] + m->index;
   }
-  if (cache && object && !view) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, m, slot);
+  if (cache && object && !view) cache_put(cache, ((const xb_object *)argv[0].v.p)->cls, m, slot, argc);
   perform(ctx, r, m, slot, argc, argv);
 }
 
@@ -790,7 +805,7 @@ void xb_op_send_from(xb_ctx *ctx, xb_item *r, const char *message, xb_class_def 
       return;
     }
     if (!super && xb_runtime_member(o->cls, message, &slot)) { /* a runtime class's: kept for the next time */
-      if (cache) cache_put(cache, o->cls, NULL, slot);
+      if (cache) cache_put(cache, o->cls, NULL, slot, argc);
       xb_runtime_perform(ctx, r, slot, argc, argv);
       return;
     }

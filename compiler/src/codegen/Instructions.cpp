@@ -482,10 +482,7 @@ void CodeGen::emit(const xir::Instruction &i) {
           std::vector<Words> passed;
           for (uint32_t k = 1; k <= n; ++k)
             passed.push_back(loadWords(b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k)));
-          std::vector<Value *> args = directArgs(true, d, innermostFrame(), self, passed);
-          std::vector<Type *> types;
-          for (Value *a : args) types.push_back(a->getType());
-          b_.CreateCall(FunctionType::get(Type::getVoidTy(ctx_), types, false), direct, args);
+          callDirect(direct, false, d, directArgs(true, d, innermostFrame(), self, passed));
           b_.CreateBr(done);
         }
       } else {
@@ -530,7 +527,9 @@ void CodeGen::emit(const xir::Instruction &i) {
     GlobalVariable *cache = nullptr;
     if (i.op == xir::Op::Send) { // the send's own inline cache (xb_send_cache: pointer-sized words the runtime fills)
       auto *cacheTy = ArrayType::get(intPtrTy_, XB_SEND_CACHE_WORDS);
-      cache = new GlobalVariable(mod_, cacheTy, false, GlobalValue::PrivateLinkage, ConstantAggregateZero::get(cacheTy),
+      std::vector<Constant *> words(XB_SEND_CACHE_WORDS, ConstantInt::get(intPtrTy_, 0));
+      if (i.dispatched) words[XB_SEND_CACHE_FLAGS] = ConstantInt::get(intPtrTy_, XB_SEND_COMPACT); // sendCompact
+      cache = new GlobalVariable(mod_, cacheTy, false, GlobalValue::PrivateLinkage, ConstantArray::get(cacheTy, words),
                                  "xb.send.cache");
     }
     auto send = [&](Value *n, Value *items) {
@@ -543,7 +542,7 @@ void CodeGen::emit(const xir::Instruction &i) {
       bool macro = i.op == xir::Op::SendMacro; // the text, then the object: the method receives them past the text
       bool lent = lends(i, macro ? 2 : 1);
       if (lent) lend(macro ? b_.CreateConstInBoundsGEP1_32(itemTy_, argv, 1) : argv);
-      if (cache) sendInPlace(i, argv, d, cache, [&] { send(ConstantInt::get(i32_, ops.size()), argv); });
+      if (cache) sendInPlace(i, argv, d, cache, lent, [&] { send(ConstantInt::get(i32_, ops.size()), argv); });
       else send(ConstantInt::get(i32_, ops.size()), argv);
       if (lent) endLend();
     }

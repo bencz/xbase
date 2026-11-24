@@ -717,8 +717,9 @@ environment).
 ## Classes
 
 Classes compiled from xBase (`types/class.c`, `xb_class_def` in `xbrt.h`) are described by their module and
-registered with it by name (a `STATIC CLASS` is not: it is known to its module only); the runtime prepares a class the
-first time it is used (its class function, or a subclass):
+registered with it by name (a `STATIC CLASS` is not: it is known to its module only); each method by its message, its
+function and, when it has one, its direct entry with the parameters it takes and how it returns
+(`xb_class_method_def`). The runtime prepares a class the first time it is used (its class function, or a subclass):
 
 - A parent is the module's own class of that name when there is one, else the class registered under the name (an
   unknown one is error 1001, as its class function would give). The class's line is the class, then each parent's
@@ -880,8 +881,11 @@ first time it is used (its class function, or a subclass):
   class is tabled): `New` (the class's `Init` with the arguments, then the object; the object alone without an `Init`),
   `Init` of none and `ClassName`; not `New` whose `Init` is not a method the class's scope reaches (an error each time),
   nor through `Super`. Messages to casts and to values of scalar classes always look up. Each way also tells compiled
-  code what the member is (`kind`: `XB_SEND_GET`, `XB_SEND_SET`, `XB_SEND_METHOD` with the method's function in `fn`, or
-  `XB_SEND_OTHER`), so that it performs the newest way in place ([compiler.md](compiler.md#xir-to-llvm)). Threads share
+  code what the member is (`kind`: `XB_SEND_GET`, `XB_SEND_SET`, `XB_SEND_METHOD` with the method's function in `fn`,
+  `XB_SEND_DIRECT` or `XB_SEND_DIRECT_WORDS` with its direct entry there when that takes as many parameters as the
+  message's arguments, Self first, or `XB_SEND_OTHER`), so that it performs a way in place
+  ([compiler.md](compiler.md#xir-to-llvm)); a send compiled code performs in place passes as many arguments each time,
+  and one whose cache's `flags` hold `XB_SEND_COMPACT` gets a method's function, never its direct entry. Threads share
   the caches: each one is a sequence lock (`version`, odd while a thread changes it). A reader that finds the version
   odd, or changed once it has read a way, does the full lookup instead (nothing torn is used, nothing is tried again),
   and a writer that finds another one at work leaves the cache as it is; 20,000,000 messages to objects of two classes
@@ -1103,7 +1107,8 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
   the `runtime.declarations` test checks that the declarations and the `xbf_` definitions match.
 - This is the convention of every function's symbol: the runtime, `Do()`, codeblocks and other modules call through
   it. Within a module, compiled code calls a function's direct entry, passing the parameters' items in registers
-  ([compiler.md](compiler.md#xir-to-llvm)).
+  ([compiler.md](compiler.md#xir-to-llvm)); a send calls a method's, of any module, through its send cache
+  ([Objects and messages](#objects-and-messages)).
 - The caller evaluates the arguments into consecutive slots of its own frame and sets `ret` to `NIL`; a callee that
   returns nothing leaves it untouched. Compiled code always writes `ret` when it returns (`NIL` for no value), so a call
   to a direct entry within the module does not clear it first (when the callee unwinds, the result is not read); a
@@ -1127,7 +1132,8 @@ void xbf_NAME(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 which inline `/` and `%` read), `xb_frame *frames`, `const char *stack_limit` ([Frames](#frames)) and `xb_item *lent`
 (the arguments a compiled caller lends for the call it makes, `NULL` after it: a compiled function with a direct entry
 whose `argv` they are reads the items it has parameters for, Self included, sets them to `NIL` and the field to `NULL`,
-so that it alone holds what only they held; one without a direct entry ends the loan in its prologue). Runtime code
+so that it alone holds what only they held; one without a direct entry ends the loan in its prologue; a send that
+calls a method's direct entry does the same itself before the call). Runtime code
 passes the `argv` it received on whole only where it reads none of it after the call (a send's dispatch, `Dispose`, an
 enumerable message of a generator); code that would read it sets the field to `NULL` first; and `xb_tlab *tlab`, the
 thread's hole, where compiled code allocates ([Garbage collector](#garbage-collector)). `pending` holds requests. The

@@ -1,0 +1,13 @@
+
+ten classes:       1243.5        156 shapeseconds nthtenth
+fewer and more arguments:         -5        12        16
+variables at different slots:        400          6        106
+by reference:         11         11         12         11
+by reference again: 14         14
+mixed: 3 no c 100 s3 3 3 3 3 3 -1 3 no c 100 s3 3 3 3 3 3 -1 3 no c 100 s3 3 3 3 3 3 -1 
+Super, cast, ...:         18         9         6        12
+PCount:          0          1          2
+let go inside: 3          3
+error:       1081 + TSHAPE:FAILING/MAIN
+other module:         16         25 far
+threads:    1732000.0

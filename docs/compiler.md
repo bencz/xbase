@@ -809,14 +809,25 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   `resolve-sends` speculates on the classes that make objects of their own only (not `ABSTRACT` ones nor interfaces).
   Every `send` calls `xb_op_send_from` with its own inline cache (`xb.send.cache`, a private zeroed `xb_send_cache`:
   `XB_SEND_CACHE_WORDS` pointer-sized words) and, from a method or one of its codeblocks (`classIndex`, `superSend`),
-  its class's descriptor (else a null one). Before that call, a send without `...` performs the cache's newest way in
-  place when it holds the class of the object sent to (`sendInPlace`, as `perform` does on a hit): the object as itself
-  (type `XB_T_OBJECT`, width 0) and the way read under the cache's sequence lock (an odd version, or one changed
-  meanwhile, misses); an instance variable of a local object is read (`XB_SEND_GET`) or, for a send with one argument,
-  written (`XB_SEND_SET`, followed by the write barrier on the object's state byte, read once as `xb_object_put` does),
-  and a method (`XB_SEND_METHOD`) is called through its function, unless an AWAIT fused the send (the runtime then hands
-  the method to the AWAIT). The written value's words are read before the cache's acquiring loads, which would keep them
-  from being forwarded from the stores that made them. Anything else, a shared object and every miss call
+  its class's descriptor (else a null one). Before that call, a send without `...` performs in place the way of the
+  cache that holds the class of the object sent to (`sendInPlace`, as `perform` does on a hit): the object as itself
+  (type `XB_T_OBJECT`, width 0), the newest way compared there and the older ones by the object's one function
+  `xb.send.way` (`sendWay`: kept out of line, so that the compares take no registers from the code around a send that
+  sees one class), and the way found read under the cache's sequence lock (an odd version, or one changed meanwhile,
+  misses); an instance variable of a local object is read (`XB_SEND_GET`) or, for a send with one argument, written
+  (`XB_SEND_SET`, followed by the write barrier on the object's state byte, read once as `xb_object_put` does), and a
+  method is called, unless an AWAIT fused the send (the runtime then hands the method to the AWAIT): through its
+  function (`XB_SEND_METHOD`), or its direct entry (`XB_SEND_DIRECT`, `XB_SEND_DIRECT_WORDS`, the runtime's when it
+  takes as many parameters as the send passes: [runtime.md](runtime.md#objects-and-messages)) with the arguments' words,
+  which first ends a loan of them as the method's `takeLent` would (the loan ended, the items set to `NIL`). Each
+  method's descriptor holds its direct entry, made before the classes (`directEntries`, then `genClasses`). A compact
+  send (`sendCompact`, `XB_SEND_COMPACT` in its cache's `flags`, which the runtime then fills with methods' functions)
+  performs the newest way alone, a method through its function: a send a version on its receiver's class left for the
+  other classes (`dispatched`, [xir.md](xir.md#classes)), whose added code would sit in the guarded loop and change its
+  registers (`property_access` and `method_call_overhead` took 4% to 10% more cycles so). Against the newest way alone
+  and the method's function: `virtual_dispatch` (a send that sees six classes) 0.77 of the cycles, `inheritance_depth`
+  0.94, `object_creation` 0.93. The written value's words are read before the cache's acquiring loads, which would keep
+  them from being forwarded from the stores that made them. Anything else, a shared object and every miss call
   `xb_op_send_from`, which fills the cache. `xb_object` is part of the ABI for this (`cls` and `vars`, checked by
   `xb_abi_check`). A send with an argument by reference is not written in place (the runtime assigns the value it
   designates). `object.get` and `object.set` (a send resolved for the object's known class) read and write a local

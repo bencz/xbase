@@ -67,7 +67,7 @@ xb_cell *xb_cell_new(xb_ctx *ctx, const xb_item *value) {
   return c;
 }
 
-xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, xb_block_direct direct, uint32_t nparams,
+xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, xb_direct direct, uint32_t nparams,
                        uint32_t ncells) {
   XB_UNUSED(ctx);
   xb_block *b = xb_gc_alloc(XB_GC_BLOCK, sizeof(xb_block) + ncells * sizeof(xb_cell *));

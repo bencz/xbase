@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define XB_ABI_VERSION 68u
+#define XB_ABI_VERSION 69u
 
 /* [ABI] item type tags */
 typedef enum xb_type {
@@ -343,6 +343,15 @@ typedef struct xb_ctx xb_ctx;
  * written to `ret`, which the caller sets to NIL before the call. */
 typedef void (*xb_func)(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv);
 
+/* [ABI] A direct entry of compiled code: the parameters' items passed as the two words of each (its first 8 bytes,
+ * then its value's 8), none past its parameters, its result into `ret` (set to NIL by the caller), `caller` the frame
+ * the context's chain has at the call. Only compiled code calls one, through the pointer: opaque here, its signature
+ * depends on what it takes. A function's (a method's, Self its first parameter): void direct(xb_ctx *ctx,
+ * xb_item *ret, xb_frame *caller, uint64_t header0, uint64_t value0, ...), or, returning its result's words (a
+ * result that refers to no heap object), {uint64_t header, uint64_t value} direct(xb_ctx *ctx, xb_frame *caller,
+ * ...); a codeblock's below (xb_block). */
+typedef void (*xb_direct)(void);
+
 /* [ABI] Symbols of xBase-callable functions: the upper-cased name with a
  * prefix. The runtime's functions (declared with EXTERN FUNCTION) and those of
  * the program get different prefixes, so a program may define a function of
@@ -410,20 +419,18 @@ typedef struct xb_hash {
 } xb_hash;
 
 /* [ABI] A codeblock: its function, its direct entry, and the cells of the variables it captured. The block function
- * receives the block itself. The direct entry (NULL: none; a macro's block, one without parameters or that reads its
- * arguments as received) takes exactly `nparams` arguments as the two words of each item (its first 8 bytes, then its
- * value's 8): void direct(xb_ctx *ctx, xb_item *ret, uint64_t header0, uint64_t value0, ..., xb_frame *caller,
- * xb_block *self), `caller` the frame the context's chain has at the call, `ret` set to NIL by the caller; none is a
- * reference (XB_T_CELL, XB_T_REF) when the block's parameters are not all shared.
+ * receives the block itself. The direct entry (xb_direct; NULL: none, a macro's block, one without parameters or that
+ * reads its arguments as received) takes exactly `nparams` arguments: void direct(xb_ctx *ctx, xb_item *ret,
+ * uint64_t header0, uint64_t value0, ..., xb_frame *caller, xb_block *self); none is a reference (XB_T_CELL,
+ * XB_T_REF) when the block's parameters are not all shared.
  * Compiled code's Eval calls it when it fits; the function of a compiled block with one does the same for any other
  * caller. */
 typedef struct xb_block xb_block;
 typedef void (*xb_block_fn)(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv, xb_block *self);
-typedef void (*xb_block_direct)(void); /* opaque: its signature depends on nparams */
 #ifndef __cplusplus
 struct xb_block {
   xb_block_fn fn;
-  xb_block_direct direct;
+  xb_direct direct;
   uint32_t nparams;
   uint32_t ncells;
   xb_cell *cells[];
@@ -436,13 +443,14 @@ int32_t  xb_pending_gc(xb_ctx *ctx);
 /* The layout the module was compiled for: offsets of xb_str.bytes, xb_block.nparams (after fn and direct),
  * xb_block.cells, xb_frame.slots, xb_ctx.frames, xb_ctx.set_decimals, xb_ctx.stack_limit, xb_ctx.lent, xb_ctx.tlab,
  * xb_array.data, xb_array.inline_items (after len and cap), xb_ref.value (after coll and index), xb_hash.entries
- * (after its six counts), xb_object.vars (after cls and nvars) and xb_strbuf.bytes (after cap and used). */
+ * (after its six counts), xb_object.vars (after cls and nvars), xb_strbuf.bytes (after cap and used) and
+ * xb_class_method_def.direct (after message, fn, flags and nparams). */
 void     xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, uint32_t block_params_offset,
                       uint32_t block_cells_offset, uint32_t frame_slots_offset, uint32_t ctx_frames_offset,
                       uint32_t ctx_decimals_offset, uint32_t ctx_stack_limit_offset, uint32_t ctx_lent_offset,
                       uint32_t ctx_tlab_offset, uint32_t array_data_offset, uint32_t array_items_offset,
                       uint32_t ref_value_offset, uint32_t hash_entries_offset, uint32_t object_vars_offset,
-                      uint32_t strbuf_bytes_offset);
+                      uint32_t strbuf_bytes_offset, uint32_t method_direct_offset);
 /* A frame (its address) below the context's stack_limit: xb_stack_deep gives
  * 1 when that limit was only the mark of a deep stack (core/ctx.c), whose
  * pages go back to the system once it is shallow again, and the frame lies
@@ -819,6 +827,9 @@ typedef struct xb_class_method_def {
   const char *message;      /* upper-cased; "_NAME" for an ASSIGN */
   xb_func fn;
   uint32_t flags;
+  uint32_t nparams;         /* those `direct` takes, Self first */
+  xb_direct direct;         /* the method's direct entry, or NULL */
+  uint32_t direct_kind;     /* how `direct` returns: XB_SEND_DIRECT (into `ret`) or XB_SEND_DIRECT_WORDS */
 } xb_class_method_def;
 typedef struct xb_class_parent {
   const char *name;         /* upper-cased */
@@ -901,36 +912,45 @@ void     xb_class_instance(xb_ctx *ctx, xb_item *r, xb_class_def *def);
  * operator `op` (an XB_OPERATOR_* message): .AND. and .OR. test it on their
  * left side before anything else. */
 int      xb_class_has_operator(const xb_item *a, const char *op);
-/* [ABI] A message sent by compiled code: from a method of class `from` (its
- * scope decides what the method may reach, and a variable is first the one
- * `from` sees), or from elsewhere (NULL); with `super`, the method or variable
- * of `from`'s ancestors (Super:message). `cache` (NULL: none) is the send's
- * own, zeroed storage, which the runtime fills: the members the message
- * reached for the classes (xb_object.cls) of the last XB_SEND_CACHE_WAYS objects of different
- * classes it went to, the most recent first (a polymorphic inline cache), so
- * that the next message to an object of one of those classes skips the lookup
- * and the checks. Threads share it: `version` is odd while one changes it (a
- * sequence lock, types/class.c). Every field is pointer-sized: the compiler
- * emits it as XB_SEND_CACHE_WORDS words. For compiled code, which performs
- * the most recent way in place for an object sent to as itself (an item width
- * of 0: no cast), `kind` tells what the member is: XB_SEND_GET reads instance
- * variable `slot` and XB_SEND_SET writes it (with the argument) when the object
- * is local (not shared), XB_SEND_METHOD calls `fn`; XB_SEND_OTHER is left to
- * the runtime. XB_SEND_CACHE_* are the word positions of each array's first way. */
+/* [ABI] A message sent by compiled code: from a method of class `from` (its scope decides what the method may reach,
+ * and a variable is first the one `from` sees), or from elsewhere (NULL); with `super`, the method or variable of
+ * `from`'s ancestors (Super:message). `cache` (NULL: none) is the send's own, zeroed storage, which the runtime fills:
+ * the members the message reached for the classes (xb_object.cls) of the last XB_SEND_CACHE_WAYS objects of different
+ * classes it went to, the most recent first (a polymorphic inline cache), so that the next message to an object of
+ * one of those classes skips the lookup and the checks. Threads share it: `version` is odd while one changes it (a
+ * sequence lock, types/class.c). Every field is pointer-sized: the compiler emits it as XB_SEND_CACHE_WORDS words.
+ * For compiled code, which performs a way in place for an object sent to as itself (an item width of 0: no cast),
+ * `kind` tells what the member is: XB_SEND_GET reads instance variable `slot` and XB_SEND_SET writes it (with the
+ * argument) when the object is local (not shared); XB_SEND_METHOD calls `fn`, the method's function; XB_SEND_DIRECT
+ * and XB_SEND_DIRECT_WORDS call `fn`, the method's direct entry (xb_direct), which takes as many parameters as the
+ * send passes arguments (a send performed in place passes as many each time; one with `...` is never), and returns
+ * into `ret` or its words; XB_SEND_OTHER is left to the runtime. `flags`, which the compiler sets: XB_SEND_COMPACT,
+ * a send that performs the newest way only and calls a method through its function (the runtime then keeps
+ * XB_SEND_METHOD for it). XB_SEND_CACHE_* are the word positions of each array's first way and of `flags`. */
 #define XB_SEND_CACHE_WAYS 8
-#define XB_SEND_CACHE_WORDS (1 + 5 * XB_SEND_CACHE_WAYS)
+#define XB_SEND_CACHE_WORDS (2 + 5 * XB_SEND_CACHE_WAYS)
 #define XB_SEND_CACHE_CLS 1
 #define XB_SEND_CACHE_SLOT (1 + 2 * XB_SEND_CACHE_WAYS)
 #define XB_SEND_CACHE_KIND (1 + 3 * XB_SEND_CACHE_WAYS)
 #define XB_SEND_CACHE_FN (1 + 4 * XB_SEND_CACHE_WAYS)
-enum { XB_SEND_OTHER = 0, XB_SEND_GET = 1, XB_SEND_SET = 2, XB_SEND_METHOD = 3 };
+#define XB_SEND_CACHE_FLAGS (1 + 5 * XB_SEND_CACHE_WAYS)
+#define XB_SEND_COMPACT 1u
+enum {
+  XB_SEND_OTHER = 0,
+  XB_SEND_GET = 1,
+  XB_SEND_SET = 2,
+  XB_SEND_METHOD = 3,
+  XB_SEND_DIRECT = 4,
+  XB_SEND_DIRECT_WORDS = 5
+};
 typedef struct xb_send_cache {
   size_t version;
   void *cls[XB_SEND_CACHE_WAYS];
   void *member[XB_SEND_CACHE_WAYS];
   size_t slot[XB_SEND_CACHE_WAYS];
   size_t kind[XB_SEND_CACHE_WAYS];
-  size_t fn[XB_SEND_CACHE_WAYS]; /* an xb_func as an integer (uintptr_t) */
+  size_t fn[XB_SEND_CACHE_WAYS]; /* an xb_func or xb_direct as an integer (uintptr_t) */
+  size_t flags;
 } xb_send_cache;
 
 /* [ABI] Instance variable `slot` of object `obj` (an XB_T_OBJECT item), read into `r`, or assigned `v` (the value
@@ -1041,7 +1061,7 @@ void     xb_macro_text(xb_ctx *ctx, xb_item *r, const xb_item *text);
  * caller fills cells[0 .. ncells-1] (xb_cell_of of each captured variable,
  * obtained first) before anything else can allocate. `direct` and `nparams`:
  * the block function's direct entry (NULL: none) and the arguments it takes. */
-xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, xb_block_direct direct, uint32_t nparams,
+xb_block *xb_block_new(xb_ctx *ctx, xb_item *r, xb_block_fn fn, xb_direct direct, uint32_t nparams,
                        uint32_t ncells);
 void     xb_block_call(xb_ctx *ctx, xb_item *ret, const xb_item *block, uint32_t argc, xb_item *argv);
 /* FOR ... TO ... STEP test: 1 = keep looping. */

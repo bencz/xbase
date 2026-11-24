@@ -586,7 +586,7 @@ void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, u
                   uint32_t ctx_decimals_offset, uint32_t ctx_stack_limit_offset, uint32_t ctx_lent_offset,
                   uint32_t ctx_tlab_offset, uint32_t array_data_offset, uint32_t array_items_offset,
                   uint32_t ref_value_offset, uint32_t hash_entries_offset, uint32_t object_vars_offset,
-                  uint32_t strbuf_bytes_offset) {
+                  uint32_t strbuf_bytes_offset, uint32_t method_direct_offset) {
   if (version != XB_ABI_VERSION || item_size != sizeof(xb_item) || str_hdr_size != offsetof(xb_str, bytes) ||
       block_params_offset != offsetof(xb_block, nparams) || block_cells_offset != offsetof(xb_block, cells) ||
       frame_slots_offset != offsetof(xb_frame, slots) ||
@@ -596,16 +596,18 @@ void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, u
       array_items_offset != offsetof(xb_array, inline_items) ||
       ref_value_offset != offsetof(xb_ref, value) ||
       hash_entries_offset != offsetof(xb_hash, entries) || object_vars_offset != offsetof(xb_object, vars) ||
-      strbuf_bytes_offset != offsetof(xb_strbuf, bytes)) {
+      strbuf_bytes_offset != offsetof(xb_strbuf, bytes) ||
+      method_direct_offset != offsetof(xb_class_method_def, direct)) {
     char why[640];
     snprintf(why, sizeof why,
              "ABI mismatch (module v%u item=%u str=%u block=%u/%u frame=%u ctx=%u/%u/%u/%u/%u array=%u/%u ref=%u "
-             "hash=%u object=%u strbuf=%u, runtime v%u item=%u str=%u block=%u/%u frame=%u ctx=%u/%u/%u/%u/%u "
-             "array=%u/%u ref=%u hash=%u object=%u strbuf=%u)",
+             "hash=%u object=%u strbuf=%u method=%u, runtime v%u item=%u str=%u block=%u/%u frame=%u "
+             "ctx=%u/%u/%u/%u/%u array=%u/%u ref=%u hash=%u object=%u strbuf=%u method=%u)",
              version, item_size, str_hdr_size, block_params_offset, block_cells_offset, frame_slots_offset,
              ctx_frames_offset,
              ctx_decimals_offset, ctx_stack_limit_offset, ctx_lent_offset, ctx_tlab_offset, array_data_offset,
              array_items_offset, ref_value_offset, hash_entries_offset, object_vars_offset, strbuf_bytes_offset,
+             method_direct_offset,
              XB_ABI_VERSION, (unsigned)sizeof(xb_item), (unsigned)offsetof(xb_str, bytes),
              (unsigned)offsetof(xb_block, nparams), (unsigned)offsetof(xb_block, cells),
              (unsigned)offsetof(xb_frame, slots),
@@ -614,7 +616,8 @@ void xb_abi_check(uint32_t version, uint32_t item_size, uint32_t str_hdr_size, u
              (unsigned)offsetof(xb_ctx, tlab), (unsigned)offsetof(xb_array, data),
              (unsigned)offsetof(xb_array, inline_items),
              (unsigned)offsetof(xb_ref, value), (unsigned)offsetof(xb_hash, entries),
-             (unsigned)offsetof(xb_object, vars), (unsigned)offsetof(xb_strbuf, bytes));
+             (unsigned)offsetof(xb_object, vars), (unsigned)offsetof(xb_strbuf, bytes),
+             (unsigned)offsetof(xb_class_method_def, direct));
     xb_gc_fatal(why);
   }
 }

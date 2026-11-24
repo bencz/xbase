@@ -82,6 +82,7 @@ void CodeGen::initTypes() {
   ctxHeadTy_ = StructType::create(ctx_, {i32_, i32_, ptrTy_, ptrTy_, ptrTy_, ptrTy_}, "xb_ctx_head");
   tlabTy_ = StructType::create(ctx_, {ptrTy_, ptrTy_, intPtrTy_, i16_}, "xb_tlab");
   classMakeTy_ = StructType::create(ctx_, {ptrTy_, ptrTy_, i32_, i32_, ptrTy_}, "xb_class_make");
+  methodDefTy_ = StructType::create(ctx_, {ptrTy_, ptrTy_, i32_, i32_, ptrTy_, i32_}, "xb_class_method_def");
   gcHdrTy_ = StructType::create(ctx_, {i32_, i8_, i8_, i16_}, "xb_gc_hdr");
   classDefTy_ = StructType::create(ctx_,
                                    {ptrTy_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_, ptrTy_, i32_,
@@ -96,7 +97,7 @@ void CodeGen::initTypes() {
   rtForTest_ = rt("xb_for_test", i32_, {ptrTy_, ptrTy_, ptrTy_, ptrTy_});
   rtAbiCheck_ = rt("xb_abi_check", voidTy,
                    {i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_, i32_,
-                    i32_});
+                    i32_, i32_});
   rtStackOverflow_ = rt("xb_stack_overflow", voidTy, {ptrTy_});
   rtStackDeep_ = rt("xb_stack_deep", i32_, {ptrTy_, intPtrTy_});
   if (auto *f = dyn_cast<Function>(rtStackDeep_.getCallee())) { // it reads and writes the context alone (core/ctx.c)
@@ -380,8 +381,8 @@ void CodeGen::run(const xir::Module &m) {
   stampSources(m);
   for (auto &f : m.functions)
     if (!f->plainBody) functions_[f.get()] = declare(*f); // a NAME.plain body has its direct entry alone
+  directEntries(m); // before the classes, whose methods' descriptors hold them
   genClasses(m);
-  directEntries(m);
   for (auto &f : m.functions) genFunction(*f);
   for (auto &f : m.functions) {
     if (direct_.count(f.get()) && !f->plainBody) genThunk(*f);
@@ -399,7 +400,7 @@ void CodeGen::genClasses(const xir::Module &m) {
   if (m.classes.empty()) return;
   auto *parentTy = StructType::get(ctx_, {ptrTy_, ptrTy_});
   auto *varTy = StructType::get(ctx_, {ptrTy_, i32_});
-  auto *methodTy = StructType::get(ctx_, {ptrTy_, ptrTy_, i32_});
+  auto *methodTy = methodDefTy_;
   auto *defTy = classDefTy_;
   auto *ty = ArrayType::get(defTy, m.classes.size());
   classTable_ = new GlobalVariable(mod_, ty, false, GlobalValue::InternalLinkage, nullptr, "xb.module.classes");
@@ -440,9 +441,16 @@ void CodeGen::genClasses(const xir::Module &m) {
     auto fnOrNull = [&](xir::Function *f) -> Constant * {
       return f ? static_cast<Constant *>(functions_.at(f)) : ConstantPointerNull::get(ptrTy_);
     };
-    for (const auto &mt : c.methods) // an interface's: no function
-      methods.push_back(
-          ConstantStruct::get(methodTy, {name(mt.message), fnOrNull(mt.fn), ConstantInt::get(i32_, mt.flags)}));
+    for (const auto &mt : c.methods) { // an interface's: no function
+      auto direct = mt.fn ? direct_.find(mt.fn) : direct_.end();
+      bool has = direct != direct_.end();
+      uint32_t kind = has ? (returnsWords(*mt.fn) ? XB_SEND_DIRECT_WORDS : XB_SEND_DIRECT) : 0;
+      methods.push_back(ConstantStruct::get(
+          methodTy, {name(mt.message), fnOrNull(mt.fn), ConstantInt::get(i32_, mt.flags),
+                     ConstantInt::get(i32_, has ? mt.fn->numParams : 0),
+                     has ? static_cast<Constant *>(direct->second) : ConstantPointerNull::get(ptrTy_),
+                     ConstantInt::get(i32_, kind)}));
+    }
     defs.push_back(ConstantStruct::get(
         defTy, {name(c.name), table(parentTy, parents, "xb.class.parents"), ConstantInt::get(i32_, parents.size()),
                 table(varTy, vars, "xb.class.vars"), ConstantInt::get(i32_, vars.size()),
@@ -523,7 +531,7 @@ void CodeGen::directEntries(const xir::Module &m) {
     std::vector<Type *> params;
     for (DirectArg a : directLayout(f->kind == xir::Function::Kind::Block, !words, f->numParams))
       params.push_back(a.kind == DirectArg::Header || a.kind == DirectArg::Value ? static_cast<Type *>(i64_) : ptrTy_);
-    Type *result = words ? static_cast<Type *>(StructType::get(ctx_, {i64_, i64_})) : Type::getVoidTy(ctx_);
+    Type *result = words ? static_cast<Type *>(wordsType()) : Type::getVoidTy(ctx_);
     Function *fn = Function::Create(FunctionType::get(result, params, false),
                                     GlobalValue::InternalLinkage, "xb.direct." + f->name, mod_);
     addAbiAttributes(fn);
@@ -591,6 +599,24 @@ std::vector<Value *> CodeGen::directArgs(bool block, Value *ret, Value *frame, V
   return args;
 }
 
+// A call through `entry`, a direct entry (directLayout's `args`): its result into `d`, which it writes itself unless
+// it returns its words (`words`).
+void CodeGen::callDirect(Value *entry, bool words, Value *d, const std::vector<Value *> &args) {
+  std::vector<Type *> types;
+  for (Value *a : args) types.push_back(a->getType());
+  Type *result = words ? static_cast<Type *>(wordsType()) : Type::getVoidTy(ctx_);
+  CallInst *call = b_.CreateCall(FunctionType::get(result, types, false), entry, args);
+  if (words) storeWords(d, b_.CreateExtractValue(call, 0), b_.CreateExtractValue(call, 1));
+}
+
+// The result of a direct entry that returns its words.
+StructType *CodeGen::wordsType() { return StructType::get(ctx_, {i64_, i64_}); }
+
+// Sets the first `n` items of `argv`, lent arguments once their words are read, to NIL (takeLent).
+void CodeGen::clearArgs(Value *argv, uint32_t n) {
+  for (uint32_t k = 0; k < n; ++k) setNil(b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k));
+}
+
 // The argument of the direct entry being generated (fn_ for fnShown_) that is `kind` (of parameter `param`).
 Argument *CodeGen::directArg(DirectArg::Kind kind, uint32_t param) {
   std::vector<DirectArg> layout =
@@ -645,7 +671,7 @@ void CodeGen::takeLent(const xir::Function &f, Function *thunk, Value *argc, Val
   tag(b_.CreateStore(ConstantPointerNull::get(ptrTy_), at), Mem::Ctx);
   b_.CreateCondBr(b_.CreateICmpUGE(argc, ConstantInt::get(i32_, f.numParams)), all, some);
   b_.SetInsertPoint(all);
-  for (uint32_t k = 0; k < f.numParams; ++k) setNil(b_.CreateConstInBoundsGEP1_32(itemTy_, argv, k));
+  clearArgs(argv, f.numParams);
   b_.CreateBr(call);
   b_.SetInsertPoint(some); // fewer arguments than parameters: those given
   for (uint32_t k = 0; k < f.numParams; ++k) {
@@ -1129,6 +1155,7 @@ void CodeGen::genEntry(const xir::Function &start) {
   uint64_t hashEntries = dl_.getStructLayout(hashTy_)->getElementOffset(HashEntries);
   uint64_t objectVars = dl_.getStructLayout(objectTy_)->getElementOffset(ObjectVars);
   uint64_t strBufBytes = dl_.getStructLayout(strBufType())->getElementOffset(StrBufBytes);
+  uint64_t methodDirect = dl_.getStructLayout(methodDefTy_)->getElementOffset(MethodDefDirect);
   b_.CreateCall(rtAbiCheck_, {ConstantInt::get(i32_, XB_ABI_VERSION), ConstantInt::get(i32_, itemSize_),
                               ConstantInt::get(i32_, strHdr), ConstantInt::get(i32_, blockParams),
                               ConstantInt::get(i32_, blockCells),
@@ -1137,7 +1164,8 @@ void CodeGen::genEntry(const xir::Function &start) {
                               ConstantInt::get(i32_, ctxLent), ConstantInt::get(i32_, ctxTlab),
                               ConstantInt::get(i32_, arrayData), ConstantInt::get(i32_, arrayItemsOffset()),
                               ConstantInt::get(i32_, refValue), ConstantInt::get(i32_, hashEntries),
-                              ConstantInt::get(i32_, objectVars), ConstantInt::get(i32_, strBufBytes)});
+                              ConstantInt::get(i32_, objectVars), ConstantInt::get(i32_, strBufBytes),
+                              ConstantInt::get(i32_, methodDirect)});
   b_.CreateCall(rtProgramRun_, {ctx, functions_.at(&start), fn->getArg(1), fn->getArg(2)});
   b_.CreateRetVoid();
 }
