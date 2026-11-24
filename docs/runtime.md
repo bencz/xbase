@@ -107,10 +107,10 @@ typedef struct xb_item {
   `xb_share` turns one before it can be reached, so only a local array changes form, and only its own thread changes its
   state byte while it runs (a load and a store; a publication, which turns the arrays of the program's storage, runs
   while the other threads are stopped). C code reads and writes elements in place through `xb_array_items`, which turns
-  an array of another form first, or handles the forms itself: `xb_array_get`, `xb_array_put`, `xb_array_last`,
-  `xb_array_append`, `AIns`/`ADel`, resizing and `xb_array_snapshot` (whose copy keeps the form) in `types/array.c`, and
-  the collector. `AClone` copies the form; the other array functions (`ASort`, `AScan`, `AEval`, ...) read through
-  `xb_array_items` or `xb_array_get`.
+  an array of another form first, or handles the forms itself: `xb_array_get`, `xb_array_put`, `xb_array_fill`,
+  `xb_array_last`, `xb_array_append`, `AIns`/`ADel`, resizing and `xb_array_snapshot` (whose copy keeps the form) in
+  `types/array.c`, and the collector. `AClone` copies the form; the other array functions (`ASort`, `AScan`, `AEval`,
+  ...) read through `xb_array_items` or `xb_array_get`.
 - Compiled code reads `len`, `data` and the state byte to access elements in place: one test of the byte tells a
   local array of items, the usual one, from the others, and the paths of the compact forms follow
   ([compiler.md](compiler.md#xir-to-llvm)); a store whose value the form does not hold, and the first one into an
@@ -1451,8 +1451,10 @@ Conventions:
 - `AFill( a, xValue, [nStart], [nCount] )` stores `xValue` in `nCount` elements from `nStart` and returns the array;
   `nStart` follows `ASort`'s rule, `nCount` missing or reaching past the end means the rest, 0 fills nothing, a
   negative one the rest from the first element and nothing from another (Clipper's rule), and a missing `xValue`
-  nothing. Anything but an array is an argument error (`BASE/6004`). Each store goes
-  through the write barrier.
+  nothing. Anything but an array is an argument error (`BASE/6004`). The range is written at once
+  (`xb_array_fill`, through `__ArrayFill`): the array takes the form that holds the value first, an array of logicals
+  gets its bytes in one pass, the write barrier covers the range when the value refers to an object, and a shared
+  array's elements are each stored under its lock.
 - `ASort( a, [nStart], [nCount], [bOrder] )` sorts in place and returns the array (`NIL` for anything else). `nStart` 0,
   missing or not a number is 1, one past the end or negative sorts nothing (`xb_range_start`, which `AFill` shares);
   `nCount` missing, 0, negative or reaching past the end means the rest. The sort is stable (a merge sort of positions:

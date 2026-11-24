@@ -90,7 +90,7 @@ RETURN 0
 // without it; none when it is 0; a negative count, as in Clipper, is the rest from the first element and nothing from
 // another) takes the value; without a value nothing changes. Returns aTarget; anything but an array is BASE/6004.
 FUNCTION AFill( aTarget, xValue, nStart, nCount )
-   LOCAL i, nLast
+   LOCAL nLast
    IF ValType( aTarget ) != "A"
       RETURN __ArgError( 6004 )
    ENDIF
@@ -110,9 +110,7 @@ FUNCTION AFill( aTarget, xValue, nStart, nCount )
          nLast := Min( nLast, nStart + Int( nCount ) - 1 )
       ENDIF
    ENDIF
-   FOR i := nStart TO nLast
-      aTarget[ i ] := xValue
-   NEXT
+   __ArrayFill( aTarget, xValue, nStart, nLast )
 RETURN aTarget
 
 // ACopy( aSource, aTarget, [nStart], [nCount], [nTargetPos] ): copies the range of aSource into aTarget from

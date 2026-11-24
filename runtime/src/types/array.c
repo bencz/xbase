@@ -75,13 +75,16 @@ static inline void read_elem(const xb_array *a, uint32_t elems, size_t i, xb_ite
   }
 }
 
+/* The byte of an array of logicals holding `v`, a logical or NIL. */
+static inline uint8_t logical_byte(const xb_item *v) {
+  return v->type == XB_T_NIL ? 0 : v->v.l ? XB_ELEMS_TRUE : XB_ELEMS_FALSE;
+}
+
 /* `v` into element `i` (below the room) of a local array whose form, `elems`, holds it. */
 static inline void write_elem(xb_array *a, uint32_t elems, size_t i, const xb_item *v) {
   switch (elems) {
     case XB_ELEMS_ITEMS: ((xb_item *)a->data)[i] = *v; return;
-    case XB_ELEMS_LOGICAL:
-      ((uint8_t *)a->data)[i] = v->type == XB_T_NIL ? 0 : v->v.l ? XB_ELEMS_TRUE : XB_ELEMS_FALSE;
-      return;
+    case XB_ELEMS_LOGICAL: ((uint8_t *)a->data)[i] = logical_byte(v); return;
     case XB_ELEMS_INT: {
       int64_t n = v->type == XB_T_NIL ? XB_ELEMS_INT_NIL : v->v.i;
       memcpy((char *)a->data + i * sizeof n, &n, sizeof n);
@@ -248,6 +251,25 @@ int xb_array_put(xb_array *a, size_t i, const xb_item *v) {
   store(a, i, v);
   xb_gc_write_item(a, i);
   return 1;
+}
+
+/* The form that holds `v` taken once, then the elements written in one pass (a logical's bytes at once), the range's
+ * barrier only for a value that refers to a heap object; a shared array's each under its lock. */
+void xb_array_fill(xb_array *a, size_t from, size_t to, const xb_item *v) {
+  if (xb_is_shared(a)) {
+    for (size_t i = from; i < to && put_shared(a, i, v); ++i) continue;
+    return;
+  }
+  if (to > a->len) to = a->len;
+  if (from >= to) return;
+  uint32_t form = form_with(xb_array_elems(a), v);
+  retarget(a, form);
+  if (form == XB_ELEMS_LOGICAL) {
+    memset((uint8_t *)a->data + from, logical_byte(v), to - from);
+    return;
+  }
+  for (size_t i = from; i < to; ++i) write_elem(a, form, i, v);
+  if (xb_type_is_heap(v->type)) xb_gc_write_items(a, from, to);
 }
 
 /* Storage for `cap` items, its cards clean; `fallible`: NULL when there is no memory for it (xb_gc_try_alloc). */

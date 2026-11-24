@@ -416,6 +416,7 @@ EXTERN FUNCTION __MemSave( cFile, [cSkeleton], [lLike] ) NATIVE
 EXTERN FUNCTION __Quit() NATIVE
 EXTERN FUNCTION __Split( cText, cSeparator ) NATIVE
 EXTERN FUNCTION __Affix( cText, cPart, lEnd ) NATIVE
+EXTERN FUNCTION __ArrayFill( aTarget, xValue, nFirst, nLast ) NATIVE
 EXTERN FUNCTION __RangeCount( nRest, [nCount] ) NATIVE
 EXTERN FUNCTION __RangeStart( nLen, [nStart] ) NATIVE
 EXTERN FUNCTION __ScanValue( xTarget, xSearch, nStart, nCount ) NATIVE

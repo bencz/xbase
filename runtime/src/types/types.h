@@ -109,6 +109,8 @@ int       xb_array_resize_try(xb_ctx *ctx, xb_array *a, uint64_t len);
 size_t    xb_array_length(const xb_array *a);
 int       xb_array_get(const xb_array *a, size_t i, xb_item *dst);
 int       xb_array_put(xb_array *a, size_t i, const xb_item *v);
+/* `v` into elements `from` .. `to` - 1 of `a` (those past its length left out): AFill. */
+void      xb_array_fill(xb_array *a, size_t from, size_t to, const xb_item *v);
 /* The last element into *dst, 0 when there is none, in one read (ATail). */
 int       xb_array_last(const xb_array *a, xb_item *dst);
 /* A new local array of the elements, all of them as one read saw them (an array other threads change is copied again

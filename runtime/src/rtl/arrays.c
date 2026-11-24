@@ -283,6 +283,17 @@ void xbf___VALUELESS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, argc > 1 && xb_value_less(ctx, &argv[0], &argv[1]));
 }
 
+/* __ArrayFill( aTarget, xValue, nFirst, nLast ): xValue into elements nFirst .. nLast (1-based, within the array:
+ * AFill made them so) at once (xb_array_fill). For the runtime's xBase code. */
+void xbf___ARRAYFILL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  xb_set_nil(ret);
+  if (argc < 4 || argv[0].type != XB_T_ARRAY || !xb_is_number(&argv[2]) || !xb_is_number(&argv[3])) return;
+  int64_t first = xb_num_to_i64(&argv[2]), last = xb_num_to_i64(&argv[3]);
+  if (first < 1 || last < first) return;
+  xb_array_fill(argv[0].v.p, (size_t)(first - 1), (size_t)last, &argv[1]);
+}
+
 /* __RangeStart( nLen, [nStart] ): where the range of a collection of nLen
  * items starts, as the collection functions take nStart (xb_range_start): 1
  * by default, 0 when the range is empty. For the runtime's xBase code. */

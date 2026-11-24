@@ -1,0 +1,10 @@
+
+logicals: .T. .T. L
+partial: .T. .F. .F. .T. .T.
+then a number: .T. .F.          7
+integers:          3          3 NIL NIL
+a double:          3          2.5          3
+items:          1 s s
+negative start:          1 s
+old array, new strings:       5000 old v10 109 old .T.          9
+shared:          4          2          2
