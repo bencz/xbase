@@ -342,7 +342,7 @@ static inline xb_dd xb_math_log_quick(double x) {
   xb_dd f = xb_dd_quick(t.hi - 1.0, t.lo); /* exact: t.hi within a factor 2 of 1; t.lo below its half unit */
   double a = f.hi;
   double tail = a * a * a *
-                (1.0 / 3 + a * (-1.0 / 4 + a * (1.0 / 5 + a * (-1.0 / 6 + a * (1.0 / 7 + a * (-1.0 / 8 + a / 9))))));
+                (1.0 / 3 + a * (-1.0 / 4 + a * (1.0 / 5 + a * (-1.0 / 6 + a * (1.0 / 7 + a * (-1.0 / 8 + a * (1.0 / 9)))))));
   xb_dd half = xb_dd_mul(f, f);
   xb_dd sq = {-0.5 * half.hi, -0.5 * half.lo}, tl = {tail, 0.0};
   xb_dd lnr = {-row->ln.hi, -row->ln.lo};
@@ -373,7 +373,7 @@ static inline xb_dd xb_math_exp_parts(xb_dd y, int quick, int *q) {
   xb_dd sum;
   if (quick) {
     double a = r.hi;
-    double tail = a * a * (0.5 + a * (1.0 / 6 + a * (1.0 / 24 + a * (1.0 / 120 + a * (1.0 / 720 + a / 5040)))));
+    double tail = a * a * (0.5 + a * (1.0 / 6 + a * (1.0 / 24 + a * (1.0 / 120 + a * (1.0 / 720 + a * (1.0 / 5040))))));
     xb_dd tl = {tail + a * r.lo, 0.0};
     sum = xb_dd_add(one, xb_dd_add(r, tl));
   } else {
@@ -442,7 +442,7 @@ static inline xb_dd xb_math_exp_fast_parts(double x, int *q) {
   double r = x - k * l[0]; /* exact: k l1 has 49 bits, and r is far smaller than x or k l1 */
   xb_dd s = xb_dd_sum(r, -k * l[1]);
   double a = s.hi, e = s.lo;
-  double t = a * a * (0.5 + a * (1.0 / 6 + a * (1.0 / 24 + a * (1.0 / 120 + a * (1.0 / 720 + a / 5040)))));
+  double t = a * a * (0.5 + a * (1.0 / 6 + a * (1.0 / 24 + a * (1.0 / 120 + a * (1.0 / 720 + a * (1.0 / 5040))))));
   xb_dd tj = xb_math_exp2_64[xb_math_exp_index(k, q)];
   xb_dd tr = xb_dd_prod(tj.hi, a);
   return xb_dd_quick(tj.hi, tr.hi + (tr.lo + tj.hi * (t + e) + tj.lo * (1.0 + a)));
@@ -490,7 +490,7 @@ static inline xb_dd xb_math_log_fast(double x) {
   const struct xb_math_log_row *row = xb_math_log_reduce(x, &e, &m);
   xb_dd t = xb_dd_prod(m, row->r);
   double a = t.hi - 1.0, lo = t.lo; /* exact: t.hi within a factor 2 of 1 */
-  double tail = 1.0 / 5 + a * (-1.0 / 6 + a * (1.0 / 7 + a * (-1.0 / 8 + a / 9)));
+  double tail = 1.0 / 5 + a * (-1.0 / 6 + a * (1.0 / 7 + a * (-1.0 / 8 + a * (1.0 / 9))));
   double terms = a * a * (-0.5 + a * (1.0 / 3 + a * (-1.0 / 4 + a * tail)));
   xb_dd le = xb_dd_mul_d(xb_math_ln2, (double)e);
   xb_dd s1 = xb_dd_sum(le.hi, -row->ln.hi), s2 = xb_dd_sum(s1.hi, a);
