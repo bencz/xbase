@@ -1,0 +1,12 @@
+
+integers:         40          3        120 NIL         41 NIL
+the mark of NIL:         42 .T. NIL        120
+a double:          2          2.5          7          4
+own width:         10.50         10.50          3
+logicals:         21 .F. .T. NIL .T.          1 .T.          1
+items:         33 s         30         31          9          5          5
+by reference:          5          6
+an element:          2          2 e
+old array, new strings:       3100        100 old 10 109
+shared:       2000       2000
+not an array:       1123 AADD

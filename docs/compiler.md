@@ -755,6 +755,11 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   the function's own `argc` (less `Self` in a method), and `PValue( n )` with an integer `n` copies the parameter's slot
   or the argument as passed (`NIL` outside 1 .. `argc`); `ValType()` of a value is the shared one-byte string of its
   tag's letter (`XB_TYPE_LETTERS`, the runtime's table too; a memo field's value, `XB_STR_MEMO`, calls the function);
+  `AAdd( a, x )` into a local array with room (`len` below `cap`) writes the element past the length, then the length,
+  as `xb_array_append`'s local path does: an array of items takes any value, then the element barrier
+  (`elementBarrier`, shared with element stores), and one of the compact form the value's types choose
+  (`compactFormFor`: logicals when they are a logical and perhaps `NIL`, else integers) takes a value it holds
+  (`storeCompact`, shared with element stores); the value is copied back only when the result is read;
   anything else calls the function, which raises the errors, and so does a `PValue()` of an argument that is a
   reference. A call whose only argument is `...`, to a function that takes references, in a function with no other `...`
   and no `PCount()`/`PValue()`, passes the arguments where they are instead of copying them (`forwardInPlace_`).

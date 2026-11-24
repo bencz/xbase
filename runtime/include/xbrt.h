@@ -193,7 +193,8 @@ enum {
  * the runtime's own arrays, and every array other threads may reach, hold
  * items. Compiled code reads `len`, `data` and the state byte to access
  * elements in place: one test of the byte tells a local array of items (the
- * usual one) from all the others. */
+ * usual one) from all the others; AAdd() into a local array within `cap`
+ * writes the element past `len`, then `len`, as xb_array_append does. */
 enum {
   XB_ELEMS_ITEMS   = 0,
   XB_ELEMS_NIL     = 1,

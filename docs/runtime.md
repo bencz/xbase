@@ -114,7 +114,9 @@ typedef struct xb_item {
 - Compiled code reads `len`, `data` and the state byte to access elements in place: one test of the byte tells a
   local array of items, the usual one, from the others, and the paths of the compact forms follow
   ([compiler.md](compiler.md#xir-to-llvm)); a store whose value the form does not hold, and the first one into an
-  array of `NIL`s, go through `xb_op_index_set`, which gives the array the form that holds it.
+  array of `NIL`s, go through `xb_op_index_set`, which gives the array the form that holds it. `AAdd()` into a local
+  array also reads `cap`: within the room, compiled code writes the element past `len`, then `len`, as
+  `xb_array_append` does; past it, or with a value the form does not hold, it calls `AAdd()`.
 - Hashes (`xb_hash` in `types/types.h`) map keys to values in insertion order; see [Hashes](#hashes).
 - Codeblocks (`xb_block`: function, direct entry, captured cells) and cells (`xb_cell`: one item at offset 0) are
   described in [Codeblocks](#codeblocks), objects in [Objects and messages](#objects-and-messages).

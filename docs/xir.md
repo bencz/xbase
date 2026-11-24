@@ -522,8 +522,8 @@ Planned, in layers, each pass with its own tests:
 - Loops: loop-invariant code motion, unswitching of type tests, strength reduction, bounds-check elimination for
   loops over arrays (1-based), unrolling and runtime unrolling when trip counts are known.
 - Calls: inlining of xBase functions and of more runtime intrinsics (`AScan`, `At`, ...; `Len`, `Asc`, `Chr`,
-  one-byte `SubStr`, `Int`, `Abs`, `Max`, `Min`, `Round`, `Sqrt`, `Exp`, `Log` and `Mod` are done), tail recursion
-  elimination, call ordering for argument evaluation.
+  one-byte `SubStr`, `Int`, `Abs`, `Max`, `Min`, `Round`, `Sqrt`, `Exp`, `Log`, `Mod` and `AAdd` are done), tail
+  recursion elimination, call ordering for argument evaluation.
 - Objects: escape analysis with scalar replacement of arrays and codeblocks that do not escape, regions.
 
 LLVM then does instruction selection, register allocation and its own vectorization.

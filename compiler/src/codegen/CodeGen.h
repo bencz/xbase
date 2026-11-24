@@ -221,6 +221,12 @@ private:
   llvm::Value *elemsOf(llvm::Value *state);
   llvm::LoadInst *objectState(llvm::Value *obj, bool fromItem = true);
   void recordIfOld(llvm::Value *obj, llvm::Value *state);
+  void elementBarrier(const xir::Value *value, llvm::Value *v, llvm::Value *array, llvm::Value *pos0);
+  uint8_t compactFormFor(const xir::Value *value);
+  void branchOnForm(llvm::Value *state, uint8_t form, llvm::BasicBlock *items, llvm::BasicBlock *compact,
+                    llvm::BasicBlock *slow);
+  void storeCompact(uint8_t form, llvm::Value *v, llvm::Value *array, llvm::Value *pos0, llvm::BasicBlock *put,
+                    llvm::BasicBlock *slow);
   llvm::Value *needsRecord(llvm::Value *state);
   bool mayReferToHeap(const xir::Value *v);
   llvm::Value *isLocal(llvm::Value *obj, bool fromItem = true);

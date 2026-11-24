@@ -1,10 +1,12 @@
 // Calls to a few runtime functions done in place when their arguments allow
-// it, with the functions' own rules (rtl/lang.c, rtl/strings.c, rtl/numbers.c):
+// it, with the functions' own rules (rtl/lang.c, rtl/strings.c, rtl/numbers.c, types/array.c):
 // Len() of a string or an array, Asc() of a string, Chr() of a number and
 // SubStr( c, n, 1 ) with n within c, n and 1 any numbers (both give the shared one-byte string,
 // xb_str_bytes), Asc( SubStr( c, n, 1 ) ) right after each other (the byte
 // itself, without a string), and the number functions Int, Abs, Max, Min,
-// Round, Sqrt, Exp, Log and Mod of numbers (Max and Min of dates too).
+// Round, Sqrt, Exp, Log and Mod of numbers (Max and Min of dates too), and
+// AAdd() into a local array with room for the element, of items or of a
+// compact form that holds the value.
 // Anything else calls the function, which raises the errors. Also shareString,
 // which ends the in-place growth of a string an `append` made.
 #include "codegen/CodeGen.h"
@@ -26,7 +28,7 @@ namespace {
 
 enum class Inline {
   None, Len, Asc, Chr, SubStr, SubStrFrom, Left, Right, PCount, PValue, Int, ValType, Abs, Max, Min, Round, Sqrt, Exp,
-  Log, Mod
+  Log, Mod, AAdd
 };
 
 // The powers of ten Round() scales by, exact as doubles up to 10^22 (pow( 10, n ) gives the same).
@@ -45,7 +47,7 @@ Inline inlineKind(const xir::Instruction &i) {
       {"INT", 1, Inline::Int},       {"VALTYPE", 1, Inline::ValType}, {"ABS", 1, Inline::Abs},
       {"MAX", 2, Inline::Max},       {"MIN", 2, Inline::Min},          {"ROUND", 2, Inline::Round},
       {"SQRT", 1, Inline::Sqrt},     {"EXP", 1, Inline::Exp},          {"LOG", 1, Inline::Log},
-      {"MOD", 2, Inline::Mod},
+      {"MOD", 2, Inline::Mod},       {"AADD", 2, Inline::AAdd},
   };
   for (const auto &e : table)
     if (i.callee.name == e.name && i.operands().size() == e.argc) return e.kind;
@@ -695,6 +697,42 @@ bool CodeGen::emitInlineCall(const xir::Instruction &i) {
                                        b_.CreateFCmpOGT(base, zero));
     Value *move = b_.CreateAnd(b_.CreateFCmpUNE(r, zero), otherSign);
     storeDouble(d, b_.CreateSelect(move, b_.CreateFAdd(r, base), r), setDecimals());
+    break;
+  }
+  case Inline::AAdd: { // the element past the length, then the length (xb_array_append's local path); the value back
+    BasicBlock *arr = newBlock("aadd.array"), *ofItems = newBlock("aadd.items.local");
+    BasicBlock *ofCompact = newBlock("aadd.compact.local"), *items = newBlock("aadd.items");
+    BasicBlock *compact = newBlock("aadd.compact"), *put = newBlock("aadd.put");
+    branchLikely(isType(argType(0), XB_T_ARRAY), arr, slow);
+    b_.SetInsertPoint(arr);
+    Value *array = itemPointer(arg(0), "arr");
+    uint8_t form = compactFormFor(i.operand(1));
+    branchOnForm(objectState(array), form, ofItems, ofCompact, slow);
+    auto room = [&](BasicBlock *to) { // read past the test: a shared array's length is the runtime's to read
+      Value *len = arrayLength(array);
+      Value *cap = loadFrom(intPtrTy_, b_.CreateStructGEP(arrayTy_, array, ArrayCap), Mem::ArrayHeader, "cap");
+      branchLikely(b_.CreateICmpULT(len, b_.CreateZExtOrTrunc(cap, i64_)), to, slow);
+      return len;
+    };
+    auto grow = [&](Value *len) {
+      Value *next = b_.CreateAdd(len, ConstantInt::get(i64_, 1), "len.next");
+      tag(b_.CreateStore(b_.CreateZExtOrTrunc(next, intPtrTy_), b_.CreateStructGEP(arrayTy_, array, ArrayLen)),
+          Mem::ArrayHeader);
+    };
+    b_.SetInsertPoint(ofItems);
+    Value *len = room(items);
+    b_.SetInsertPoint(items);
+    copyItem(arrayElement(array, len), arg(1));
+    grow(len);
+    elementBarrier(i.operand(1), arg(1), array, len);
+    if (!i.users().empty()) copyItem(d, arg(1)); // mostly a statement: the value back only when it is read
+    b_.CreateBr(join);
+    b_.SetInsertPoint(ofCompact);
+    len = room(compact);
+    b_.SetInsertPoint(compact);
+    storeCompact(form, arg(1), array, len, put, slow);
+    grow(len);
+    if (!i.users().empty()) copyItem(d, arg(1));
     break;
   }
   case Inline::None: break;

@@ -1019,21 +1019,26 @@ void CodeGen::inlineIndex(const xir::Instruction &i, Value *base, Value *idx, Ba
     branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), items, slow);
     return;
   }
-  // The path of items is the likely one, for the layout and the registers; but an array of a compact form is no cold
-  // path (kFormTest: splitColdLoopPaths does not leave the fast loop for it, a loop on an invariant array keeps one
-  // path, LoopSplit.h).
-  BasicBlock *other = newBlock("index.not.items");
-  MDBuilder md(ctx_);
-  CondBranch *test = b_.CreateCondBr(isLocalItems(state), ofItems, other, md.createLikelyBranchWeights());
-  test->setMetadata(kFormTest, MDNode::get(ctx_, {}));
+  BasicBlock *local = newBlock("index.compact.local");
+  branchOnForm(state, form, ofItems, local, slow);
   b_.SetInsertPoint(ofItems);
   branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), items, slow); // 1 <= idx <= len
-  // A shared array holds items: a compact form is a local array's, so one test of the form says both.
-  b_.SetInsertPoint(other);
-  BasicBlock *local = newBlock("index.compact.local");
-  branchLikely(b_.CreateICmpEQ(elemsOf(state), ConstantInt::get(i8_, form)), local, slow);
   b_.SetInsertPoint(local);
   branchLikely(b_.CreateICmpULT(pos, arrayLength(array)), compact, slow);
+}
+
+// The test of an array's state byte `state` before its elements are accessed in place: to `items` for a local array of
+// items, to `compact` for one of compact form `form`, else to `slow`. A shared array holds items: a compact form is a
+// local array's, so one test of the form says both. The path of items is the likely one, for the layout and the
+// registers; but an array of a compact form is no cold path (kFormTest: splitColdLoopPaths does not leave the fast loop
+// for it, a loop on an invariant array keeps one path, LoopSplit.h).
+void CodeGen::branchOnForm(Value *state, uint8_t form, BasicBlock *items, BasicBlock *compact, BasicBlock *slow) {
+  BasicBlock *other = newBlock("not.items");
+  MDBuilder md(ctx_);
+  CondBranch *test = b_.CreateCondBr(isLocalItems(state), items, other, md.createLikelyBranchWeights());
+  test->setMetadata(kFormTest, MDNode::get(ctx_, {}));
+  b_.SetInsertPoint(other);
+  branchLikely(b_.CreateICmpEQ(elemsOf(state), ConstantInt::get(i8_, form)), compact, slow);
 }
 
 // Whether element read `i` is tested as a logical (a condition, .NOT.).
@@ -1164,52 +1169,69 @@ void CodeGen::emitIndexSet(const xir::Instruction &i) {
   BasicBlock *items = newBlock("index.set.items"), *compact = newBlock("index.set.compact");
   BasicBlock *put = newBlock("index.set.put");
   Value *array, *pos, *state;
-  xir::TypeSet t = plan_->types().of(i.operand(2));
-  xir::TypeSet logicals = xir::typeBit(XB_T_LOGICAL) | xir::typeBit(XB_T_NIL);
-  bool logical = t != 0 && (t & ~logicals) == 0 && (t & xir::typeBit(XB_T_LOGICAL));
-  inlineIndex(i, base, idx, slow, items, compact, logical ? XB_ELEMS_LOGICAL : XB_ELEMS_INT, array, pos, state);
+  uint8_t form = compactFormFor(i.operand(2));
+  inlineIndex(i, base, idx, slow, items, compact, form, array, pos, state);
   b_.SetInsertPoint(compact);
-  Value *header = loadHeader(v);
-  Value *isNil = b_.CreateICmpEQ(header, headerWord(XB_T_NIL, 0, 0));
-  if (logical) {
-    branchLikely(b_.CreateOr(isNil, b_.CreateICmpEQ(header, headerWord(XB_T_LOGICAL, 0, 0))), put, slow);
-    b_.SetInsertPoint(put);
-    Value *byte = b_.CreateSelect(isNil, ConstantInt::get(i8_, 0),
-                                  b_.CreateSelect(logicalValue(v), ConstantInt::get(i8_, XB_ELEMS_TRUE),
-                                                  ConstantInt::get(i8_, XB_ELEMS_FALSE)));
-    tag(b_.CreateStore(byte, compactElement(array, i8_, pos)), Mem::HeapItem);
-  } else {
-    Value *n = intValue(v);
-    Value *fits = b_.CreateAnd(b_.CreateICmpEQ(header, headerWord(XB_T_INT, 0, 0)),
-                               b_.CreateICmpNE(n, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL)));
-    branchLikely(b_.CreateOr(isNil, fits), put, slow);
-    b_.SetInsertPoint(put);
-    Value *word = b_.CreateSelect(isNil, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL), n);
-    tag(b_.CreateStore(word, compactElement(array, i64_, pos)), Mem::HeapItem);
-  }
+  storeCompact(form, v, array, pos, put, slow);
   b_.CreateBr(join);
 
-  // The barrier (xb_gc_write_item) for a heap value stored into an old array not recorded whole yet: the value's type
-  // first, then the state byte read again there (cache-hot; the one read before the store, kept live this far, cost the
-  // loop a register); none when the value's types refer to no heap object.
   b_.SetInsertPoint(items);
   copyItem(arrayElement(array, pos), v);
-  if (mayReferToHeap(i.operand(2))) {
-    Value *type = typeOf(i.operand(2), v);
-    Value *heap = b_.CreateICmpULE(b_.CreateSub(type, ConstantInt::get(i32_, XB_T_HEAP_FIRST)),
-                                   ConstantInt::get(i32_, XB_T_HEAP_LAST - XB_T_HEAP_FIRST));
-    BasicBlock *heapJoin = beginUnlikely(heap, "barrier.heap");
-    BasicBlock *barrierJoin = beginUnlikely(needsRecord(objectState(array, false)), "barrier");
-    b_.CreateCall(rtWriteItem_, {array, b_.CreateZExtOrTrunc(pos, intPtrTy_)});
-    endUnlikely(barrierJoin);
-    endUnlikely(heapJoin);
-  }
+  elementBarrier(i.operand(2), v, array, pos);
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   b_.CreateCall(rtIndexSet_, {fnCtx_, callArg(base, 0), callArg(idx, 1), callArg(v, 2)});
   checkPending(unwind_);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
+}
+
+// The compact form a store of `value` tries when the array has one: logicals when its types are a logical and perhaps
+// NIL, integers otherwise.
+uint8_t CodeGen::compactFormFor(const xir::Value *value) {
+  xir::TypeSet t = plan_->types().of(value);
+  xir::TypeSet logicals = xir::typeBit(XB_T_LOGICAL) | xir::typeBit(XB_T_NIL);
+  bool logical = t != 0 && (t & ~logicals) == 0 && (t & xir::typeBit(XB_T_LOGICAL));
+  return logical ? XB_ELEMS_LOGICAL : XB_ELEMS_INT;
+}
+
+// Item `v` into element `pos0` of a local array of compact form `form` (XB_ELEMS_LOGICAL or XB_ELEMS_INT), in block
+// `put`, when the form holds it (NIL, or a value of the form: an integer not XB_ELEMS_INT_NIL); else on to `slow`.
+void CodeGen::storeCompact(uint8_t form, Value *v, Value *array, Value *pos0, BasicBlock *put, BasicBlock *slow) {
+  Value *header = loadHeader(v);
+  Value *isNil = b_.CreateICmpEQ(header, headerWord(XB_T_NIL, 0, 0));
+  if (form == XB_ELEMS_LOGICAL) {
+    branchLikely(b_.CreateOr(isNil, b_.CreateICmpEQ(header, headerWord(XB_T_LOGICAL, 0, 0))), put, slow);
+    b_.SetInsertPoint(put);
+    Value *byte = b_.CreateSelect(isNil, ConstantInt::get(i8_, 0),
+                                  b_.CreateSelect(logicalValue(v), ConstantInt::get(i8_, XB_ELEMS_TRUE),
+                                                  ConstantInt::get(i8_, XB_ELEMS_FALSE)));
+    tag(b_.CreateStore(byte, compactElement(array, i8_, pos0)), Mem::HeapItem);
+    return;
+  }
+  Value *n = intValue(v);
+  Value *fits = b_.CreateAnd(b_.CreateICmpEQ(header, headerWord(XB_T_INT, 0, 0)),
+                             b_.CreateICmpNE(n, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL)));
+  branchLikely(b_.CreateOr(isNil, fits), put, slow);
+  b_.SetInsertPoint(put);
+  Value *word = b_.CreateSelect(isNil, ConstantInt::get(i64_, (uint64_t)XB_ELEMS_INT_NIL), n);
+  tag(b_.CreateStore(word, compactElement(array, i64_, pos0)), Mem::HeapItem);
+}
+
+// The barrier (xb_gc_write_item) after `value` (in item `v`) was stored into element `pos0` of a local array of items,
+// within its length: for a heap value stored into an old array not recorded whole yet, the value's type first, then
+// the state byte read again there (cache-hot; the one read before the store, kept live this far, cost the loop a
+// register); none when the value's types refer to no heap object.
+void CodeGen::elementBarrier(const xir::Value *value, Value *v, Value *array, Value *pos0) {
+  if (!mayReferToHeap(value)) return;
+  Value *type = typeOf(value, v);
+  Value *heap = b_.CreateICmpULE(b_.CreateSub(type, ConstantInt::get(i32_, XB_T_HEAP_FIRST)),
+                                 ConstantInt::get(i32_, XB_T_HEAP_LAST - XB_T_HEAP_FIRST));
+  BasicBlock *heapJoin = beginUnlikely(heap, "barrier.heap");
+  BasicBlock *barrierJoin = beginUnlikely(needsRecord(objectState(array, false)), "barrier");
+  b_.CreateCall(rtWriteItem_, {array, b_.CreateZExtOrTrunc(pos0, intPtrTy_)});
+  endUnlikely(barrierJoin);
+  endUnlikely(heapJoin);
 }
 
 // The frame of a local enumerator `gen` (its object) whose length is at least savedSize (every step after the first
