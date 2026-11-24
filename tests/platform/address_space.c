@@ -2,6 +2,9 @@
  * POSIX systems a limit lowered on the process (RLIMIT_AS, set to 64 GiB, or 1 GiB for 32-bit pointers, when it was
  * higher) is what xb_platform_address_space tells, and SIZE_MAX with none or with one past what size_t holds; on
  * Windows, the process's virtual space, at least 1 GiB. */
+/* 64-bit limits on 32-bit systems too, as the runtime reads them: a limit past 32 bits (a hard one set outside) then
+ * reads as itself, and is written back as itself. */
+#define _FILE_OFFSET_BITS 64
 #include "check.h"
 #include "platform/platform.h"
 

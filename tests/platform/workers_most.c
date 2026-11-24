@@ -2,6 +2,9 @@
  * process may map. On POSIX systems, with the limit lowered before the pool is made (RLIMIT_AS: 2 GiB, 1 GiB for
  * 32-bit pointers, when it was higher), the most is that quarter's worth of stacks; on any system it is at least one,
  * at most 1024, at least the number of workers that run at once, and no worker is alive before a task. */
+/* 64-bit limits on 32-bit systems too, as the runtime reads them: a limit past 32 bits (a hard one set outside) then
+ * reads as itself, and is written back as itself. */
+#define _FILE_OFFSET_BITS 64
 #include "check.h"
 #include "core/sched.h"
 #include "platform/platform.h"
