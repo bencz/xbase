@@ -518,6 +518,8 @@ private:
   std::unordered_map<const xir::Value *, llvm::AllocaInst *> locals_;       // Local homes
   std::unordered_map<const xir::Var *, llvm::AllocaInst *> paramItems_;    // parameters out of the frame
   std::unordered_set<const llvm::Value *> localItems_;                      // their addresses
+  std::unordered_set<const llvm::Value *> unrootedItems_; // those of unrooted values (FramePlan::unrooted)
+  std::vector<llvm::Value *> rootsHeld_;                  // root slots a call being made uses (callDone clears them)
   std::unordered_set<const llvm::Value *> heapItems_;                       // addresses of items in the heap
   std::vector<llvm::AllocaInst *> scratch_;                                 // runtime call operands
   llvm::AllocaInst *joinPieces_ = nullptr; // the pieces' addresses of an xb_op_join call (emitJoin)

@@ -41,6 +41,7 @@ Value *CodeGen::addr(const xir::Value *v) {
     if (!a) {
       a = entryAlloca("local");
       localItems_.insert(a);
+      if (plan_->unrooted(v)) unrootedItems_.insert(a);
     }
     return a;
   }
@@ -67,6 +68,12 @@ Value *CodeGen::scratchItem(unsigned k) {
 // item in registers only while nothing but loads and stores reach it. An
 // operand goes through scratch item `k`.
 Value *CodeGen::callArg(Value *item, unsigned k) {
+  if (unrootedItems_.count(item)) { // one that may refer to a heap object: through a root slot
+    Value *s = slot(plan_->rootSlot(k));
+    copyItem(s, item);
+    rootsHeld_.push_back(s);
+    return s;
+  }
   if (!localItems_.count(item)) return item;
   Value *s = scratchItem(k);
   copyItem(s, item);
@@ -76,12 +83,20 @@ Value *CodeGen::callArg(Value *item, unsigned k) {
 // The item a runtime call writes: a Local home receives it through scratch
 // item `k`, copied back by callDone right after the call.
 CodeGen::CallResult CodeGen::callResult(Value *item, unsigned k) {
+  if (unrootedItems_.count(item)) { // seen by the collector during the call
+    rootsHeld_.push_back(slot(plan_->rootSlot(k)));
+    return {rootsHeld_.back(), item};
+  }
   if (!localItems_.count(item)) return {item, nullptr};
   return {scratchItem(k), item};
 }
 
+// After the call: the result into its Local home, and the root slots it used set to NIL, so that they keep nothing
+// alive past it.
 void CodeGen::callDone(const CallResult &r) {
   if (r.local) copyItem(r.local, r.arg);
+  for (Value *s : rootsHeld_) setNil(s);
+  rootsHeld_.clear();
 }
 
 // fn( ctx, result, operands... ), the shape of the runtime's operators.

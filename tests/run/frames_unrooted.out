@@ -1,0 +1,6 @@
+
+operator: .T. .F. .F.         -7          5          1
+in a loop:        100        203          7
+substituted:        101          3
+leaf: nil N C
+made, gone in the loop: .T.          3

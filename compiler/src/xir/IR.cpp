@@ -48,6 +48,11 @@ bool isEvalCall(const Instruction &i) {
          !i.operands().empty();
 }
 
+bool makesCall(const Instruction &i) {
+  return i.op == Op::Call || i.op == Op::CallForward || i.op == Op::Send || i.op == Op::SendMacro ||
+         i.op == Op::MacroCall;
+}
+
 bool isDirectCall(const Instruction &i) {
   return i.op == Op::Call && i.callee.function && hasDirectEntry(*i.callee.function) && !i.hasRest();
 }

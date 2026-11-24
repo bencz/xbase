@@ -734,6 +734,7 @@ void CodeGen::genFunction(const xir::Function &f) {
   locals_.clear();
   paramItems_.clear();
   localItems_.clear();
+  unrootedItems_.clear();
   heapItems_.clear();
   scratch_.clear();
   joinPieces_ = nullptr;
@@ -1339,10 +1340,11 @@ void CodeGen::checkPending(BasicBlock *unwind, bool collects) {
   MDBuilder md(ctx_);
   b_.CreateCondBr(isSet, slow, cont, md.createUnlikelyBranchWeights());
   b_.SetInsertPoint(slow);
-  // A result the error block may have substituted, in a home the collector does not see: the test must not collect
-  // (xbrt.h), so destructors wait for a later one.
-  bool held = !collects && emitting_ && (emitting_->effects() & xir::Substitutes) &&
-              plan_->home(emitting_).kind == Home::Kind::Local;
+  // A result the error block may have substituted, or one that may refer to a heap object (FramePlan::unrooted), in a
+  // home the collector does not see: the test must not collect (xbrt.h), so destructors wait for a later one.
+  bool held = !collects && emitting_ &&
+              (((emitting_->effects() & xir::Substitutes) && plan_->home(emitting_).kind == Home::Kind::Local) ||
+               plan_->unrooted(emitting_));
   // What the loop polls pass (LoopPolls.h) sees: a back edge's poll, or a test that serves a safepoint.
   if (collects || !held)
     cast<LoadInst>(pending)->setMetadata(collects ? kPollMetadata : kSafepointMetadata, MDNode::get(ctx_, {}));

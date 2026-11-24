@@ -110,6 +110,8 @@ bool hasDirectEntry(const Function &f);
 bool isDirectCall(const Instruction &i);
 // A call of the runtime's Eval() with its operands (no `...`): of a codeblock, it runs the block's function.
 bool isEvalCall(const Instruction &i);
+// A call of any kind: a function's (call, call.forward), a message's (send, send.macro) or a macro's (macro.call).
+bool makesCall(const Instruction &i);
 
 // Whether two values are always the same: the same value, or equal constants
 // (each use of a literal may be its own Constant).

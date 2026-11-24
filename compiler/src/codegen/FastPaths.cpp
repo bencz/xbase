@@ -269,9 +269,9 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
     BasicBlock *mixed = newBlock("mixed");
     Value *doubles = b_.CreateAnd(b_.CreateICmpEQ(ta, isDouble), b_.CreateICmpEQ(tb, isDouble));
     auto flowing = [](const xir::Value *v) {
-      return xir::asParam(v) || xir::asInstruction(v, xir::Op::Call) || xir::asInstruction(v, xir::Op::Send) ||
-             xir::asInstruction(v, xir::Op::SendMacro) || xir::asInstruction(v, xir::Op::MacroCall) ||
-             xir::asInstruction(v, xir::Op::CallForward);
+      const auto *made =
+          v->kind() == xir::Value::Kind::Instruction ? static_cast<const xir::Instruction *>(v) : nullptr;
+      return xir::asParam(v) || (made && xir::makesCall(*made));
     };
     if (mayInt && !mayStrings && !flowing(i.operand(0)) && !flowing(i.operand(1))) branchLikely(doubles, dblBB, mixed);
     else b_.CreateCondBr(doubles, dblBB, mixed);

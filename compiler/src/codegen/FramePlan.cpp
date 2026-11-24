@@ -2,6 +2,8 @@
 // assignment by linear scan (see FramePlan.h).
 #include "codegen/FramePlan.h"
 
+#include <llvm/Support/ErrorHandling.h>
+
 #include <algorithm>
 
 namespace xb {
@@ -263,6 +265,20 @@ void FramePlan::chooseHomes() {
       if (isItemResult(i.get()) && !homes_.count(i.get()) && !unit_.count(i.get()) && types_.noHeap(i.get()) &&
           !types_.guardNeedsHome(*i))
         homes_[i.get()] = {Home::Kind::Local, 0, nullptr};
+  // An element read whose one use is the operator right after it (a comparison, arithmetic): nothing between them can
+  // collect, so it is Local even when it may refer to a heap object (unrooted), and a leaf's test of an element sets
+  // up no frame. The runtime calls that write or read it on the two operations' slow paths take it through slots of
+  // the frame (rootSlot), and the pending test after its read collects nothing (CodeGen::checkPending).
+  for (BasicBlock *b : cfg_.order())
+    for (size_t k = 0; k + 1 < b->insts.size(); ++k) {
+      const Instruction &i = *b->insts[k];
+      const Instruction *next = b->insts[k + 1].get();
+      if (i.op != Op::Index || homes_.count(&i) || unit_.count(&i) || !i.hasOneUse() || i.users().front() != next ||
+          (next->op != Op::Binary && next->op != Op::Unary) || types_.guardNeedsHome(i))
+        continue;
+      homes_[&i] = {Home::Kind::Local, 0, nullptr};
+      unrooted_.insert(&i);
+    }
   // Every other item value gets a slot of its own.
   for (BasicBlock *b : cfg_.order()) {
     for (auto &p : b->params)
@@ -285,6 +301,9 @@ void FramePlan::computeLiveness() {
   for (const BasicBlock *b : order)
     for (auto &i : b->insts)
       if (i->op == Op::FrameRelease) releases.push_back(i.get());
+  std::vector<const BasicBlock *> headers;
+  xir::Loops loops(cfg_);
+  for (auto &loop : loops.all()) headers.push_back(loop->header);
   for (auto &[v, u] : unit_) {
     ++stamp;
     const BasicBlock *def = definingBlock(v);
@@ -319,6 +338,8 @@ void FramePlan::computeLiveness() {
     Unit &unit = units_[u];
     unit.start = std::min(unit.start, start);
     unit.end = std::max(unit.end, end);
+    for (const BasicBlock *h : headers) // a block with a use is live-in (but the definition's)
+      if (liveIn[blockIndex_.at(h)] == stamp) liveIntoHeader_[h].insert(u);
     // Live at a frame.release: not defined after it in its block, and used after it there or live into a successor.
     for (const Instruction *r : releases) {
       const BasicBlock *b = r->parent;
@@ -343,7 +364,8 @@ void FramePlan::computeLiveness() {
 // value computed into its loop parameter's slot) are one unit already;
 // otherwise a result never shares a slot with an operand of the same
 // instruction (calls clear their result first).
-// Shadow slots come last, in a run of their own (none is live across a call or a yield), after the temporaries.
+// Shadow slots come last, in a run of their own (none is live across a call or a yield), after the temporaries; then
+// the root slots (rootSlot).
 void FramePlan::allocate() {
   std::unordered_set<uint32_t> shadowUnits;
   for (auto &[v, u] : unit_)
@@ -358,6 +380,10 @@ void FramePlan::allocate() {
   savedSize_ = xir::isResumable(f_) ? numVarSlots_ : numVarSlots_ + tempSlots;
   frameSize_ = numVarSlots_ + tempSlots;
   frameSize_ += scan(shadows, frameSize_);
+  if (!unrooted_.empty()) { // the root slots last (rootSlot)
+    rootBase_ = frameSize_;
+    frameSize_ += kRootSlots;
+  }
   for (auto &[user, u] : groupUnit_) groupBase_[user] = units_[u].slot;
   for (auto &[v, u] : unit_) {
     if (units_[u].pinned) continue; // served by its parameter's slot (a Place)
@@ -622,9 +648,22 @@ bool FramePlan::liveInto(const Value *v, const BasicBlock *b) const {
 // The units of each loop (values and argument groups of its blocks), cleared where it exits; and those of the values
 // made before the loop that it uses and that are dead where it exits (the collection of a FOR EACH, say), whose slots
 // would otherwise keep what they hold through the code that follows (the call, in a loop around it, that makes the
-// next one).
+// next one). A loop that makes calls clears some where it is entered too (placeEntryClears).
 void FramePlan::placeLoopClears() {
   xir::Loops loops(cfg_);
+  // The inline.enters whose bodies are open where each block starts: at a loop's header, their argument groups and the
+  // arguments they hold stay, as at a frame.release.
+  std::unordered_map<const BasicBlock *, std::unordered_set<const Instruction *>> openAtStart;
+  xir::walkBodies<const Instruction *>(cfg_, [&](const BasicBlock &b, auto &open) {
+    bool changed = false;
+    for (auto &enters : open)
+      for (const Instruction *e : enters) changed |= openAtStart[&b].insert(e).second;
+    for (auto &i : b.insts) {
+      if (i->op == Op::InlineEnter) open.push_back({i.get()});
+      else if (i->op == Op::InlineLeave) open.pop_back();
+    }
+    return changed;
+  });
   for (auto &loop : loops.all()) {
     std::unordered_set<uint32_t> units;
     auto unitOfValue = [&](const Value *v) -> std::optional<uint32_t> {
@@ -636,10 +675,12 @@ void FramePlan::placeLoopClears() {
     };
     std::vector<const Value *> before; // made before the loop, used in it
     std::unordered_set<const Value *> seenBefore;
+    bool calls = false;
     for (const BasicBlock *b : loop->blocks) {
       for (auto &p : b->params) add(p.get());
       for (auto &i : b->insts) {
         add(i.get());
+        calls = calls || xir::makesCall(*i);
         if (auto g = groupUnit_.find(i.get()); g != groupUnit_.end()) units.insert(g->second);
         for (const Value *op : i->operands()) {
           const BasicBlock *def = op->kind() == Value::Kind::Constant ? nullptr : definingBlock(op);
@@ -647,6 +688,7 @@ void FramePlan::placeLoopClears() {
         }
       }
     }
+    if (calls) placeEntryClears(*loop, openAtStart[loop->header]);
     for (const BasicBlock *b : loop->blocks)
       for (size_t k = 0; k < b->numSuccessors(); ++k) {
         const BasicBlock *exit = b->successor(k);
@@ -665,6 +707,61 @@ void FramePlan::placeLoopClears() {
           addClears(blockClears_[exit], here, start_.at(exit));
       }
   }
+}
+
+// Where a loop that makes calls is entered (its edges from outside), the slots of the results of calls made before it
+// (in blocks that reach its header), once per entry: one dead in the loop (the result of its first pass's call, peeled
+// off it, whose next passes make its successor) would otherwise be kept through all of its passes. Only those: each
+// clear costs on every entry, an inner loop's on every pass of the outer one, and a call is what makes a structure.
+// Kept: the slots of the values live into the header (precisely, by computeLiveness's walk: the intervals span the
+// blocks laid out between a definition and its last use), of its parameters (their arguments are copied on the edge
+// before its clears), of an argument group being filled around it, and of the argument groups and held arguments of the
+// inlined bodies open there (`open`).
+void FramePlan::placeEntryClears(const xir::Loop &loop, const std::unordered_set<const Instruction *> &open) {
+  const BasicBlock *header = loop.header;
+  std::unordered_set<uint32_t> held;
+  if (auto live = liveIntoHeader_.find(header); live != liveIntoHeader_.end())
+    for (uint32_t u : live->second) holdSlots(held, u);
+  for (auto &p : header->params)
+    if (auto u = unit_.find(p.get()); u != unit_.end()) holdSlots(held, u->second);
+  uint32_t at = start_.at(header);
+  for (auto &[user, u] : groupUnit_)
+    if (user->op == Op::InlineEnter ? open.count(user) != 0 : units_[u].start <= at && at <= units_[u].end)
+      holdSlots(held, u);
+  for (const Instruction *e : open)
+    if (auto h = heldArgs_.find(e); h != heldArgs_.end())
+      for (auto [k, u] : h->second) holdSlots(held, u);
+  std::unordered_set<const BasicBlock *> reaching; // the blocks that reach the header
+  std::vector<const BasicBlock *> work{header};
+  while (!work.empty()) {
+    const BasicBlock *b = work.back();
+    work.pop_back();
+    for (const BasicBlock *p : cfg_.preds(b))
+      if (reaching.insert(p).second) work.push_back(p);
+  }
+  std::vector<uint32_t> slots;
+  for (auto &[v, u] : unit_) {
+    const auto *made = v->kind() == Value::Kind::Instruction ? static_cast<const Instruction *>(v) : nullptr;
+    if (!made || units_[u].pinned || !xir::makesCall(*made) || loop.contains(made->parent) ||
+        !reaching.count(made->parent))
+      continue;
+    for (uint32_t s = 0; s < units_[u].size; ++s)
+      if (held.insert(units_[u].slot + s).second) slots.push_back(units_[u].slot + s);
+  }
+  std::sort(slots.begin(), slots.end());
+  for (const BasicBlock *from : cfg_.preds(header)) {
+    const Instruction *enter = from->terminator();
+    if (loop.contains(from) || !enter || (enter->op != Op::Br && enter->op != Op::CondBr)) continue;
+    std::vector<uint32_t> &clears = edgeClears_[{from, header}];
+    clears.insert(clears.end(), slots.begin(), slots.end());
+    std::sort(clears.begin(), clears.end());
+    clears.erase(std::unique(clears.begin(), clears.end()), clears.end());
+  }
+}
+
+uint32_t FramePlan::rootSlot(unsigned k) const {
+  if (unrooted_.empty() || k >= kRootSlots) llvm::report_fatal_error("xbc: no root slot for an unrooted value");
+  return rootBase_ + k;
 }
 
 const std::vector<uint32_t> &FramePlan::clearsOnEdge(const BasicBlock *from, const BasicBlock *to) const {

@@ -27,8 +27,8 @@ struct Home {
     Slot,     // a frame slot (a GC root)
     Place,    // the item of a variable: an elided load, or a value computed into the variable of the store using it
     Ret,      // the caller's result slot: the value returned by the `ret` using it
-    Local,    // an item of its own outside the frame: a value that never refers to a heap object, which the
-              // collector need not see (LLVM keeps it in registers)
+    Local,    // an item of its own outside the frame: a value that never refers to a heap object, or one nothing
+              // can collect while it lives (unrooted), which the collector need not see (LLVM keeps it in registers)
   };
   Kind kind = Kind::None;
   uint32_t slot = 0;                       // Slot
@@ -58,7 +58,8 @@ struct Home {
 // heap or grows an array; the object does not move meanwhile, since the
 // collector pins what the machine stack and registers point into. A value
 // that never refers to a heap object (xir::TypeInfo) and is not computed in
-// place is Local: it takes no slot.
+// place is Local: it takes no slot; so is an element read used by the operator
+// right after it (unrooted: nothing collects in between).
 class FramePlan {
 public:
   explicit FramePlan(const xir::Function &f);
@@ -72,6 +73,11 @@ public:
   bool inRegisters(const xir::Var &v) const { return registerParams_.count(&v) != 0; }
   const xir::Var *param(uint32_t k) const { return params_.at(k); } // the variable of parameter k
   uint32_t paramSlots() const { return paramSlots_; } // the parameters in the frame: its first slots
+  // A Local value that may refer to a heap object (nothing collects while it lives): a runtime call takes it through
+  // root slot k, a slot of the frame the collector sees (k: 0 the result, then the operands).
+  bool unrooted(const xir::Value *v) const { return unrooted_.count(v) != 0; }
+  static constexpr uint32_t kRootSlots = 3;
+  uint32_t rootSlot(unsigned k) const;
   const Home &home(const xir::Value *v) const;
   uint32_t groupBase(const xir::Instruction *user) const { return groupBase_.at(user); }
   bool inGroup(const xir::Instruction *user, size_t operand) const; // computed straight into its group slot
@@ -87,7 +93,8 @@ public:
   // value's slot otherwise keeps what it held until another value takes the slot, and what only it holds would not be
   // collected (nor its destructor run).
   // A loop exit that other blocks reach too (the header of the loop after it, say) clears them on the loop's edges to
-  // it instead, which run once per exit: clearsOnEdge.
+  // it instead, which run once per exit: clearsOnEdge, which also holds the clears where a loop that makes calls is
+  // entered (placeEntryClears).
   const std::vector<uint32_t> &clearsAtStart(const xir::BasicBlock *b) const;
   // The slot of `v` when `user` is its last use and the slot is its own (no later position uses its unit, and no loop
   // carries it): a direct call clears the slot once it read the value, which the callee then holds alone, and a group
@@ -124,6 +131,7 @@ private:
   void findUnwritten();
   void findEachLoads();
   void computeLiveness();
+  void placeEntryClears(const xir::Loop &loop, const std::unordered_set<const xir::Instruction *> &open);
   void allocate();
   uint32_t scan(std::vector<uint32_t> order, uint32_t base);
   void extendArgumentGroups();
@@ -160,12 +168,16 @@ private:
   std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> heldIn_;
   std::unordered_set<const xir::Var *> loadedParams_; // parameters a load still reads (pinned or not)
   std::unordered_set<const xir::Instruction *> forwardedStores_;
+  std::unordered_set<const xir::Value *> unrooted_; // Local values that may refer to a heap object
+  uint32_t rootBase_ = 0;
   std::unordered_set<const xir::Instruction *> shadowed_;               // elided loads that need a shadow slot
   std::unordered_map<const xir::Instruction *, uint32_t> shadowSlot_;
   std::vector<Unit> units_;
   std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> bodyUnits_; // inline.leave -> units
   // frame.release -> the units of the values live there (a use after it, in its block or past it, on some path)
   std::unordered_map<const xir::Instruction *, std::unordered_set<uint32_t>> liveAtRelease_;
+  // loop header -> the units of the values live into it (computeLiveness), for the clears where a loop is entered
+  std::unordered_map<const xir::BasicBlock *, std::unordered_set<uint32_t>> liveIntoHeader_;
   std::unordered_map<const xir::Instruction *, std::vector<uint32_t>> clears_; // inline.leave, frame.release -> slots
   std::unordered_map<const xir::BasicBlock *, std::vector<uint32_t>> blockClears_;       // loop exit -> slots
   std::map<std::pair<const xir::BasicBlock *, const xir::BasicBlock *>, std::vector<uint32_t>> edgeClears_;
