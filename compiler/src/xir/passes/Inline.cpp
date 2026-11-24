@@ -85,6 +85,7 @@ struct Inlined {
   size_t firstArg;
   std::vector<Var *> captures;
   std::vector<std::pair<size_t, Value *>> captured;
+  std::vector<Value *> startArgs; // the start's block parameters' arguments: constants (a versioning test's edge)
 };
 
 // The public function `name` of a carried runtime source, and its module; null when none has one.
@@ -165,7 +166,9 @@ void inlineCall(Function &f, Instruction *call, const Inlined &in) {
   builder.inlineEnter(in.callee, callee.readsArgs ? args : held(builder, args));
   enterBody(builder, callee, vars, args);
   for (const auto &c : in.captured) builder.store(captures[c.first], Access::Direct, c.second);
-  builder.br(body.blocks.at(in.start));
+  std::vector<Value *> startArgs; // the callee's constants, copied as the body's are
+  for (const Value *v : in.startArgs) startArgs.push_back(copyConstant(f, *asConstant(v)));
+  builder.br(body.blocks.at(in.start), startArgs);
   call->replaceAllUsesWith(result);
   eraseInstruction(call);
 }
@@ -268,7 +271,7 @@ std::optional<Inlined> blockOf(const Function &f, const Instruction &call,
   if (blk == &f) return std::nullopt; // a block that runs itself (a call inlined in it made it)
   std::vector<BasicBlock *> body = allBlocks(*blk);
   if (!inlinable(*blk, body, kMaxBlockInstructions)) return std::nullopt;
-  if (mk->valueCells.empty()) return Inlined{blk, std::move(body), blk->entry(), 1, mk->captures, {}};
+  if (mk->valueCells.empty()) return Inlined{blk, std::move(body), blk->entry(), 1, mk->captures, {}, {}};
   std::vector<Var *> cells;
   std::vector<std::pair<size_t, Value *>> captured;
   size_t var = 0, value = 0;
@@ -276,7 +279,7 @@ std::optional<Inlined> blockOf(const Function &f, const Instruction &call,
     if (byValue) captured.push_back({cells.size(), mk->operand(value++)});
     cells.push_back(byValue ? nullptr : mk->captures[var++]);
   }
-  return Inlined{blk, std::move(body), blk->entry(), 1, std::move(cells), std::move(captured)};
+  return Inlined{blk, std::move(body), blk->entry(), 1, std::move(cells), std::move(captured), {}};
 }
 
 // A call of a function of the module, or of a public function of a carried runtime source (`from` its module): what
@@ -292,6 +295,7 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
     return std::nullopt;
   std::vector<BasicBlock *> body;
   BasicBlock *start = callee->entry();
+  std::vector<Value *> startArgs;
   if (const Instruction *test = versioning(*callee)) {
     BasicBlock *forward = test->targets[0].block;
     if (anyReference(operandsFrom(call, 0))) {
@@ -300,7 +304,14 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
       body = allBlocks(*callee);
       start = callee->entry();
     } else {
-      start = test->targets[1].block;
+      // The test's way on, which the simplification may have merged into the block after it (a loop's header: the
+      // edge then passes its parameters' first values); constants alone, as nothing of the entry is copied.
+      const Target &on = test->targets[1];
+      if (!std::all_of(on.args.begin(), on.args.end(),
+                       [](const Value *v) { return v->kind() == Value::Kind::Constant; }))
+        return std::nullopt;
+      start = on.block;
+      startArgs.assign(on.args.begin(), on.args.end());
       for (auto &b : callee->blocks)
         if (b.get() != callee->entry() && b.get() != forward) body.push_back(b.get());
     }
@@ -312,7 +323,7 @@ std::optional<Inlined> functionOf(const Module &m, const Function &f, const Inst
   if (!inlinable(*callee, body, passesBlock ? kMaxFunctionWithBlockInstructions : kMaxFunctionInstructions) ||
       ((from || callee->carried) && !selfContained(body)))
     return std::nullopt;
-  return Inlined{callee, std::move(body), start, 0, {}, {}};
+  return Inlined{callee, std::move(body), start, 0, {}, {}, std::move(startArgs)};
 }
 
 // Inlines the calls found while the function stays within kMaxCallerInstructions (an Eval's block that nothing else
