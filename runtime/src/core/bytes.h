@@ -2,6 +2,8 @@
 #ifndef XB_BYTES_H
 #define XB_BYTES_H
 
+#include "xbrt.h" /* xb_le64 */
+
 #include <stdint.h>
 #include <string.h>
 
@@ -59,11 +61,7 @@ static inline uint32_t xb_get_be32(const unsigned char *p) {
 static inline void xb_put_le64(unsigned char *p, uint64_t v) {
   for (int i = 0; i < 8; ++i) p[i] = (unsigned char)(v >> 8 * i);
 }
-static inline uint64_t xb_get_le64(const unsigned char *p) {
-  uint64_t v = 0;
-  for (int i = 0; i < 8; ++i) v |= (uint64_t)p[i] << 8 * i;
-  return v;
-}
+static inline uint64_t xb_get_le64(const unsigned char *p) { return xb_le64((const char *)p); }
 
 /* An IEEE double as its 8 bytes, little-endian. */
 static inline void xb_put_le_double(unsigned char *p, double d) {

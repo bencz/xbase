@@ -1415,9 +1415,13 @@ Conventions:
   replaces nothing, a negative `nCount` replaces every occurrence from `nStart`. The text between matches is copied
   whole.
 - Searching bytes in bytes (`At`, `RAt`, `$`, `StrTran`, `Split`: `xb_bytes_find`, `xbrt.h`) is linear whatever the
-  texts: a needle of up to 16 bytes is looked for with `memchr` and `memcmp` (its length bounds the work at each
-  place), a longer one with the two-way search (Crochemore and Perrin's critical factorization: no needle and haystack
-  make it quadratic), the last occurrence as the first one of the reversed strings.
+  texts. A needle of up to 16 bytes (its length bounds the work at each place) is looked for forward with `memchr` of
+  its first byte, each place tested in place (first and last bytes, then the rest); where `memchr` comes back within
+  `XB_FIND_SPARSE` bytes (a common first byte, as in text) the next `XB_FIND_STRETCH` places are looked at eight at a
+  time (`xb_find_places8`: the places where its first byte and, `len - 1` further, its last byte stand, from two
+  little-endian words, `xb_le64`), then `memchr` again; backward, eight places at a time throughout. A longer needle
+  is looked for with the two-way search (Crochemore and Perrin's critical factorization: no needle and haystack make
+  it quadratic), the last occurrence as the first one of the reversed strings.
 - `CHARACTER:Split` is one pass in C (`__Split`), `StartsWith` and `EndsWith` compare in place (`__Affix`).
 - `Stuff( c, nStart, nDelete, cInsert )`: `nStart` 0 is 1; a negative `nStart` or `nDelete` counts as past the end.
 - Trimming from the left, `Val` and `Empty` skip blanks, tabs, carriage returns and line feeds (`xb_is_blank`); trimming

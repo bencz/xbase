@@ -1224,14 +1224,20 @@ static inline uint64_t xb_hash_mix64(uint64_t x) {
   x ^= x >> 33;
   return x;
 }
-/* Bytes p[0] .. p[n - 1] (n at most 8) as a little-endian word; with `upper`, ASCII letters upper-cased. Eight bytes
- * without `upper` are a fixed pattern compilers make one load (and a byte swap on a big-endian target). */
+/* Bytes p[0] .. p[7] as a little-endian word: one load, and on a big-endian host its bytes swapped (shifts compilers
+ * make one byte-swap instruction; xb_little_endian folds). */
+static inline uint64_t xb_le64(const char *p) {
+  uint64_t w;
+  memcpy(&w, p, sizeof w);
+  if (xb_little_endian()) return w;
+  w = w >> 32 | w << 32;
+  w = (w & UINT64_C(0xFFFF0000FFFF0000)) >> 16 | (w & UINT64_C(0x0000FFFF0000FFFF)) << 16;
+  return (w & UINT64_C(0xFF00FF00FF00FF00)) >> 8 | (w & UINT64_C(0x00FF00FF00FF00FF)) << 8;
+}
+/* Bytes p[0] .. p[n - 1] (n at most 8) as a little-endian word; with `upper`, ASCII letters upper-cased. */
 static inline uint64_t xb_hash_word(const char *p, size_t n, int upper) {
+  if (n == 8 && !upper) return xb_le64(p);
   uint64_t w = 0;
-  if (n == 8 && !upper) {
-    for (size_t i = 0; i < 8; ++i) w |= (uint64_t)(unsigned char)p[i] << (8 * i);
-    return w;
-  }
   for (size_t i = 0; i < n; ++i) {
     unsigned char c = (unsigned char)(upper ? xb_ascii_upper(p[i]) : p[i]);
     w |= (uint64_t)c << (8 * i);
@@ -1547,10 +1553,54 @@ static inline size_t xb_find_two_way(const char *x, size_t lx, const char *y, si
   return (size_t)-1;
 }
 
+/* Whether the bytes of a short needle x (lx >= 1 bytes) between its first and its last are at p + 1; and whether all
+ * of it is at p, its first and last bytes first (the filter's). */
+static inline int xb_find_rest(const char *p, const char *x, size_t lx) {
+  return lx <= 2 || memcmp(p + 1, x + 1, lx - 2) == 0;
+}
+static inline int xb_find_here(const char *p, const char *x, size_t lx) {
+  return p[0] == x[0] && p[lx - 1] == x[lx - 1] && xb_find_rest(p, x, lx);
+}
+
+/* The places among p .. p + 7 that may hold a short needle of lx bytes: where the byte there is its first one and the
+ * byte lx - 1 further its last one (`first`, `last`: each byte repeated eight times). Bit 8k + 7 marks place p + k:
+ * the zero bytes of (p's eight bytes ^ first) | (the eight lx - 1 further ^ last), read as little-endian words so that
+ * the order of the bits is the order of the places on every target. The shorter test of whether there is a zero byte
+ * comes first (most words have none); each one is then found exactly (no carry crosses a byte). */
+#define XB_FIND_ONES UINT64_C(0x0101010101010101)
+#define XB_FIND_LOW7 (XB_FIND_ONES * 0x7F)
+static inline uint64_t xb_find_places8(const char *p, size_t lx, uint64_t first, uint64_t last) {
+  uint64_t v = (xb_le64(p) ^ first) | (xb_le64(p + lx - 1) ^ last);
+  if (!((v - XB_FIND_ONES) & ~v & ~XB_FIND_LOW7)) return 0;
+  return ~(((v & XB_FIND_LOW7) + XB_FIND_LOW7) | v | XB_FIND_LOW7);
+}
+/* The place of the lowest mark of xb_find_places8: its bit alone, moved to bit 8k, times bytes 7, 6, .., 0 puts k in
+ * the top byte. And of the highest. */
+static inline size_t xb_find_first_place(uint64_t m) {
+  return (size_t)((((m & (~m + 1)) >> 7) * UINT64_C(0x0001020304050607)) >> 56);
+}
+static inline size_t xb_find_last_place(uint64_t m) {
+  size_t k = 0;
+  if (m >> 32) {
+    k += 4;
+    m >>= 32;
+  }
+  if (m >> 16) {
+    k += 2;
+    m >>= 16;
+  }
+  return m >> 8 ? k + 1 : k;
+}
+
 /* Where the bytes x occur in y: the 1-based position of the first occurrence (`last`: of the last one), 0 when
- * nowhere or x is empty (At(), RAt(), `$`, StrTran()). A short needle is looked for with memchr and memcmp (fastest
- * for it, and a short needle bounds the work at each place); a longer one with the two-way search. */
+ * nowhere or x is empty (At(), RAt(), `$`, StrTran()). A short needle is looked for forward with memchr of its first
+ * byte (far fastest where that byte is rare), each place it gives tested in place; where it comes back within
+ * XB_FIND_SPARSE bytes (a common first byte, as in text) the next XB_FIND_STRETCH places go eight at a time
+ * (xb_find_places8: its first and last bytes together, which in text rarely meet where the needle is not), then memchr
+ * again. Backward, eight places at a time throughout. A longer needle is looked for with the two-way search. */
 #define XB_FIND_SHORT 16u
+#define XB_FIND_SPARSE 64
+#define XB_FIND_STRETCH 512
 static inline size_t xb_bytes_find(const char *x, size_t lx, const char *y, size_t ly, int last) {
   if (lx == 0 || lx > ly) return 0;
   if (lx > XB_FIND_SHORT) {
@@ -1558,16 +1608,35 @@ static inline size_t xb_bytes_find(const char *x, size_t lx, const char *y, size
     if (at == (size_t)-1) return 0;
     return last ? ly - lx - at + 1 : at + 1;
   }
-  const char *end = y + ly - lx + 1; /* candidates are before `end` */
+  const char *end = y + ly - lx + 1; /* places are before `end`; one at p reads up to p + lx - 1 */
+  uint64_t first = XB_FIND_ONES * (unsigned char)x[0], lastByte = XB_FIND_ONES * (unsigned char)x[lx - 1];
   if (last) {
-    for (const char *p = end; p-- > y;)
-      if (*p == *x && memcmp(p + 1, x + 1, lx - 1) == 0) return (size_t)(p - y) + 1;
+    const char *p = end;
+    for (; p - y >= 8;) {
+      p -= 8;
+      for (uint64_t m = xb_find_places8(p, lx, first, lastByte); m;) {
+        size_t k = xb_find_last_place(m);
+        if (xb_find_rest(p + k, x, lx)) return (size_t)(p + k - y) + 1;
+        m &= ~((uint64_t)0x80 << (8 * k));
+      }
+    }
+    while (p-- > y)
+      if (xb_find_here(p, x, lx)) return (size_t)(p - y) + 1;
     return 0;
   }
-  for (const char *p = y; p < end; ++p) {
-    p = (const char *)memchr(p, *x, (size_t)(end - p));
-    if (!p) return 0;
-    if (memcmp(p + 1, x + 1, lx - 1) == 0) return (size_t)(p - y) + 1;
+  for (const char *p = y; p < end;) {
+    const char *q = (const char *)memchr(p, *x, (size_t)(end - p));
+    if (!q) return 0;
+    if (xb_find_here(q, x, lx)) return (size_t)(q - y) + 1;
+    int sparse = q - p >= XB_FIND_SPARSE;
+    p = q + 1;
+    if (sparse) continue;
+    const char *stop = end - p > XB_FIND_STRETCH ? p + XB_FIND_STRETCH : end;
+    for (; stop - p >= 8; p += 8)
+      for (uint64_t m = xb_find_places8(p, lx, first, lastByte); m; m &= m - 1) {
+        size_t k = xb_find_first_place(m);
+        if (xb_find_rest(p + k, x, lx)) return (size_t)(p + k - y) + 1;
+      }
   }
   return 0;
 }
