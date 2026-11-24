@@ -128,11 +128,14 @@ static void retarget(xb_array *a, uint32_t elems) {
 
 void xb_array_to_items(xb_array *a) { retarget(a, XB_ELEMS_ITEMS); }
 
-/* `v` into element `i` (below the room) of a local array, which takes the form that holds it first. */
-static void store(xb_array *a, size_t i, const xb_item *v) {
-  uint32_t form = form_with(xb_array_elems(a), v);
-  retarget(a, form);
+/* `v` into element `i` (below the room) of a local array, which takes the form that holds it first; then the barrier,
+ * which only a value that refers to an object needs. */
+static inline void store(xb_array *a, size_t i, const xb_item *v) {
+  uint32_t was = xb_array_elems(a);
+  uint32_t form = form_with(was, v);
+  if (form != was) retarget(a, form);
   write_elem(a, form, i, v);
+  if (xb_type_is_heap(v->type)) xb_gc_write_item(a, i);
 }
 
 /* The state byte of an array: whether it is shared, its form. */
@@ -249,7 +252,6 @@ int xb_array_put(xb_array *a, size_t i, const xb_item *v) {
   if (xb_is_shared(a)) return put_shared(a, i, v);
   if (i >= a->len) return 0;
   store(a, i, v);
-  xb_gc_write_item(a, i);
   return 1;
 }
 
@@ -318,11 +320,8 @@ static int resize_shared(xb_ctx *ctx, xb_array *a, size_t len, int fallible) {
   return 1;
 }
 
-/* Room for `len` items in a local array, made in place: the allocation is a safepoint, where the program's storage
- * may become shared (publication, docs/concurrency.md) and this array with it, so it is tested again after it: 0
- * then, nothing changed, for the shared path to take over. */
-static int local_room(xb_array *a, size_t len, int fallible) {
-  if (len <= a->cap) return !xb_is_shared(a);
+/* local_room past the room: a function of its own, so that appends within the room need no frame. */
+static XB_NOINLINE int local_grow(xb_array *a, size_t len, int fallible) {
   size_t cap = grown_cap(a->cap, len);
   xb_item *items = storage_of(cap, fallible); /* `a` is reachable */
   if (!items) return -1; /* no memory: only when fallible */
@@ -332,6 +331,13 @@ static int local_room(xb_array *a, size_t len, int fallible) {
   a->cap = cap;
   xb_gc_write(a); /* new storage: the whole array is traced */
   return 1;
+}
+
+/* Room for `len` items in a local array, made in place: the allocation is a safepoint, where the program's storage
+ * may become shared (publication, docs/concurrency.md) and this array with it, so it is tested again after it: 0
+ * then, nothing changed, for the shared path to take over. */
+static inline int local_room(xb_array *a, size_t len, int fallible) {
+  return len <= a->cap ? !xb_is_shared(a) : local_grow(a, len, fallible);
 }
 
 /* A local array shrunk to `len` items, a quarter of its room or less (of XB_ARRAY_SHRINK_MIN items at least): a peak's
@@ -382,7 +388,6 @@ void xb_array_append(xb_ctx *ctx, xb_array *a, const xb_item *v) {
   if (!xb_is_shared(a) && local_room(a, a->len + 1, 0)) {
     store(a, a->len, v); /* within the room, past the elements its form may turn */
     a->len++;
-    xb_gc_write_item(a, a->len - 1);
     return;
   }
   xb_share(v);
