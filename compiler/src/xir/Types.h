@@ -91,6 +91,9 @@ public:
   TypeSet of(const Value *v) const;
   // The operation may fail with an error whose block may substitute its result.
   bool maySubstitute(const Instruction &i) const;
+  // An operator (binary, unary) that cannot fail nor run code: its operands' types are known, hold no object (whose
+  // class may define the operator: its method runs code) and give no error (two numbers added, compared).
+  bool cannotFail(const Instruction &i) const;
   // Never refers to a heap object: the collector need not see it.
   bool noHeap(const Value *v) const { return (of(v) & kHeapTypes) == 0; }
   // A value a guard (subst.check with a mask) checks that may refer to a heap object until its check, across a

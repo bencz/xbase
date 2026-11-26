@@ -417,6 +417,15 @@ TypeSet returnTypes(const Function &f) {
 
 bool TypeInfo::maySubstitute(const Instruction &i) const { return ownResult(i, *this).substitutable; }
 
+bool TypeInfo::cannotFail(const Instruction &i) const {
+  if (i.op != Op::Binary && i.op != Op::Unary) return false;
+  for (const Value *v : i.operands()) {
+    TypeSet t = of(v);
+    if (t == 0 || (t & typeBit(XB_T_OBJECT))) return false; // no types: not reached, any
+  }
+  return !ownResult(i, *this).substitutable;
+}
+
 bool TypeInfo::guardNeedsHome(const Instruction &i) const {
   if (guardMask(i) == kAnyType || (i.effects() & Substitutes)) return false;
   OwnResult r = ownResult(i, *this);

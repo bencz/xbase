@@ -382,7 +382,7 @@ void CodeGen::emitBinary(const xir::Instruction &i) {
   }
   if (i.byOne) callItemOp(i.binop == BinOp::Add ? rtInc_ : rtDec_, d, {a}); // ++ or --: their own error
   else callItemOp(binaryOp(i), d, {a, bv});
-  checkPending(unwind_);
+  if (!plan_->types().cannotFail(i)) checkPending(unwind_); // else no request can come of it (an overflow's double)
   if (fused) { // a logical, unless an error's handler substituted something else
     Value *r = testTruth(d, unwind_, itemType(d), i.users().front()->index != 0);
     bools.push_back({r, b_.GetInsertBlock()});
@@ -407,7 +407,7 @@ void CodeGen::emitNot(const xir::Instruction &i) {
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   callItemOp(rtNot_, d, {a});
-  checkPending(unwind_);
+  if (!plan_->types().cannotFail(i)) checkPending(unwind_);
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
 }
@@ -437,7 +437,7 @@ void CodeGen::emitNeg(const xir::Instruction &i) {
   b_.CreateBr(join);
   b_.SetInsertPoint(slow);
   callItemOp(rtNeg_, d, {a});
-  checkPending(unwind_);
+  if (!plan_->types().cannotFail(i)) checkPending(unwind_); // -INT64_MIN: a double
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
 }

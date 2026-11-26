@@ -947,7 +947,10 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   thread's collection, or run destructors, and so collect) or, right after an operation whose error may substitute its
   result while that result has a `Local` home the collector does not see, or whose result is an unrooted element read
   (`checkPending`, from the instruction being lowered), `xb_pending`, which never collects nor parks; if that asks to
-  unwind, it goes to the LLVM block of the xIR block's unwind block, or leaves through the function's exit. A runtime
+  unwind, it goes to the LLVM block of the xIR block's unwind block, or leaves through the function's exit. An
+  operator that cannot fail (`TypeInfo::cannotFail`: its operands' types known, no object among them, none that gives
+  an error: two numbers added, an integer negated) has no test after the call of its slow path (an overflow, which
+  gives a double): no request can come of it, and its loop still polls on its back edge. A runtime
   operator may also return a value the error block substituted, of any type: the code after it reads the result's type
   instead of assuming one, unless `subst.check` follows the operation (its types then hold; the check reads the item's
   own tag and leaves for the generic copy on an unlikely edge, see [xir.md](xir.md#passes)), and a comparison that feeds

@@ -1,0 +1,7 @@
+
+add: .T. N
+sub: .T.
+mul: .T.
+inc:            9223372036854776000           -9223372036854776000
+neg: .T.
+with a collector:        200        300
