@@ -97,8 +97,9 @@ memory than there is, expects the allocation to fail instead of the sanitizer to
 
 `bench/primitives/<name>.prg` time the primitives of the language one by one (`strings`: every string function and
 operator, appends, iteration over a string's bytes; `iteration`: `FOR EACH` over each kind of collection, nested, by
-index, and `Enumerable`'s chains next to the loops that do their work), each inline in a loop on data the pass chooses,
-in nanoseconds per operation; `<name>.c` does the same work in C as a C program would write it. `cmake --build
+index, and `Enumerable`'s chains next to the loops that do their work; `reads`: an object's variable and an array's
+element read three times in an expression, next to the same work read once), each inline in a loop on data the pass
+chooses, in nanoseconds per operation; `<name>.c` does the same work in C as a C program would write it. `cmake --build
 build-release --target primitives` builds both and prints them side by side: where a primitive stands against C.
 
 `bench/<name>.prg` are benchmark programs: recursive calls (`fib`), an integer loop (`loops`), arrays (`sieve`,

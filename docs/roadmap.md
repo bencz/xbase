@@ -267,12 +267,17 @@ one design, in this order, each step measured over every benchmark before it is 
    the region alone (the innermost loop nest that holds the guard, or the stretch of straight code between two loops),
    not of the whole function, its live values joined there by block parameters, and both copies leave the region by
    the same exits, where the values that live on are items again. With its operands typed, an operation cannot fail
-   with an error a handler substitutes (but for the errors that remain: a zero divisor, an index out of bounds, which
-   keep a check after them into the same region copy), so the checks after operations, the rounds that choose them
+   with an error a handler substitutes; the errors that remain (a zero divisor, an index out of bounds, an overflow a
+   speculation assumed away) make the typed operation give up before it does anything, into the generic copy at the
+   operation, which runs it again with its error and its handler, once: no xBase code runs in the typed copy, whose
+   operations then read and write only what they name (so that repeated reads merge, invariants leave loops and bounds
+   checks go). So the checks after operations, the rounds that choose them
    (which can check an operation a later guard makes safe: a `FOR` counter that starts from a guarded value) and the
    limits of 500 instructions and 64 checks a function go. The typed copy's values are machine words: integers,
    doubles (with their decimals), logicals; the frame holds items that may refer to heap objects only, so a value the
-   loop does not use takes no register from it and fewer slots are cleared at the entry. Done: copies by regions in
+   loop does not use takes no register from it and fewer slots are cleared at the entry. `AS type` on a `LOCAL`, a
+   `STATIC`, a parameter or a class's `VAR` is a hint for the guards (which types to test, a parameter tested once at
+   the entry), not a check: the language stays untyped. Done: copies by regions in
    functions too large to copy whole or with unwind blocks, joined at their ways out and guarded again after them
    (`typed-continuations` in [xir.md](xir.md#passes)); the rest of this step is to do.
 2. One calling convention. Functions, methods and codeblocks all get the direct entry functions have now (the arguments'
