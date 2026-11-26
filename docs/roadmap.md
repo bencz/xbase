@@ -299,9 +299,8 @@ one design, in this order, each step measured over every benchmark before it is 
 - The ABI check for every module, not only the start module.
 - One table of type properties (heap object, `ValType` letter, sort order, `Empty`, display), with an abort on an
   unknown tag while marking.
-- Number display: the cut to 16 significant digits rounds half to even (the C library's), where Clipper rounds half
-  up (`1286742750677284.5` shows `...284`); integer products beyond 2^53 are exact in xbase, where the reference
-  rounds them through a double (to decide).
+- Number display: integer products beyond 2^53 are exact in xbase, where the reference rounds them through a double
+  (to decide).
 - `Array()` with more than 64 dimensions; one substring search and one byte comparison helper; shared one-byte and
   empty strings instead of allocating them.
 - GC pauses: a stack watermark for young collections (full collections clear no marks any more: their polarity

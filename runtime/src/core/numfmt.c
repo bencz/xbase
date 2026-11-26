@@ -9,7 +9,6 @@
 
 #include <float.h>
 #include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -190,6 +189,79 @@ static int clipper_digits(double a, int dec, char *intDigits, size_t *intLen, ch
   return 1;
 }
 
+/* The decimal digits of a double of 2^64 or more, an integer: its significand shifted into 32-bit limbs (2^1024 needs
+ * 32), then divided by 10^9 again and again, each remainder nine digits from the right. Written to end at `end`
+ * (XB_BIG_DIGITS bytes before it are room enough: 2^1024 has 309 digits); their count. */
+#define XB_BIG_LIMBS 34
+#define XB_BIG_DIGITS 320
+static size_t big_digits(double a, char *end) {
+  uint32_t limb[XB_BIG_LIMBS] = {0};
+  int ex;
+  uint64_t m = (uint64_t)ldexp(frexp(a, &ex), XB_DBL_EXACT_BITS); /* a = m * 2^(ex - 53), ex - 53 > 0 here */
+  int shift = ex - XB_DBL_EXACT_BITS, at = shift / 32, bit = shift % 32;
+  uint64_t low = m << bit, high = bit ? m >> (64 - bit) : 0; /* m << bit across 96 bits */
+  limb[at] = (uint32_t)low;
+  limb[at + 1] = (uint32_t)(low >> 32);
+  limb[at + 2] = (uint32_t)high;
+  int n = at + 3;
+  char *p = end;
+  while (n > 0) {
+    uint64_t rem = 0;
+    for (int i = n; i-- > 0;) {
+      uint64_t cur = rem << 32 | limb[i];
+      limb[i] = (uint32_t)(cur / 1000000000u);
+      rem = cur % 1000000000u;
+    }
+    while (n > 0 && limb[n - 1] == 0) --n;
+    for (int k = 0; k < 9 && (n > 0 || rem > 0); ++k, rem /= 10) *--p = (char)('0' + rem % 10);
+  }
+  return (size_t)(end - p);
+}
+
+/* The first XB_NUM_PRECISION significant digits of a (finite, above 0) into m, rounded half up on the next one as
+ * Clipper rounds them (1286742750677284.5 is ...285), from the exact digits: an integer part below 2^64 and the
+ * fraction's (fraction_digits), or those of a larger double, an integer (big_digits). Returns the decimal exponent of
+ * m[0]. */
+static int significant_digits(double a, char m[XB_NUM_PRECISION]) {
+  char d[XB_NUM_PRECISION + 1]; /* one digit more: the one that rounds */
+  int n = 0, e;
+  if (a < 18446744073709551616.0) { /* 2^64 */
+    double whole, f = modf(a, &whole);
+    fraction fr;
+    fraction_init(&fr, f);
+    if (whole >= 1.0) {
+      char ints[XB_UINT64_DIGITS];
+      size_t len = uint_digits((uint64_t)whole, ints + sizeof ints);
+      e = (int)len - 1;
+      for (; n <= XB_NUM_PRECISION && (size_t)n < len; ++n) d[n] = ints[sizeof ints - len + (size_t)n];
+    } else {
+      for (e = -1;; --e) { /* the fraction's leading zeros */
+        fraction_digits(&fr, d, 1);
+        if (d[0] != '0') break;
+      }
+      n = 1;
+    }
+    if (n <= XB_NUM_PRECISION) fraction_digits(&fr, d + n, XB_NUM_PRECISION + 1 - n);
+  } else {
+    char ints[XB_BIG_DIGITS];
+    size_t len = big_digits(a, ints + sizeof ints);
+    e = (int)len - 1;
+    memcpy(d, ints + sizeof ints - len, XB_NUM_PRECISION + 1);
+  }
+  memcpy(m, d, XB_NUM_PRECISION);
+  if (d[XB_NUM_PRECISION] >= '5') {
+    int k = XB_NUM_PRECISION;
+    while (k-- > 0 && m[k] == '9') m[k] = '0';
+    if (k >= 0) {
+      ++m[k];
+    } else { /* 9999999999999999.5: 1 and zeros, one place up */
+      m[0] = '1';
+      ++e;
+    }
+  }
+  return e;
+}
+
 static void format_double(char *s, double v, int width, int dec) {
   if (!xb_dbl_finite(v)) {
     overflow(s, field_len(width, dec));
@@ -209,12 +281,8 @@ static void format_double(char *s, double v, int width, int dec) {
   }
 
   /* Significant digits m[0..15] of |v|, where m[k] has decimal exponent e - k. */
-  char sci[48];
-  snprintf(sci, sizeof sci, "%.*e", XB_NUM_PRECISION - 1, fabs(v));
   char m[XB_NUM_PRECISION];
-  m[0] = sci[0];
-  memcpy(m + 1, sci + 2, XB_NUM_PRECISION - 1);
-  int e = atoi(strchr(sci, 'e') + 1);
+  int e = significant_digits(fabs(v), m);
 
   /* digits[i] holds the digit of exponent hi - i, from hi down to -dec
    * (positions in 64 bits: dec may be near INT_MAX). */

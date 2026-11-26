@@ -1303,9 +1303,11 @@ buffer, as `Transform()` builds its result, with nothing allocated):
 - a minus sign appears only when a non-zero digit is shown (`-0.001` with 2 decimals prints `0.00`);
 - a value that does not fit, and any infinite or NaN value, fills the field with `*`.
 
-With more significant digits shown, the 16 are the correctly rounded ones. Harbour derives them by repeated
-floating-point division, which can change the last significant digits of values above 2^53 (`51090942171709440000`
-prints as `51090942171709430000` there).
+With more significant digits shown, the 16 are the first ones of the exact digits, rounded half up on the next one as
+Clipper rounds them (`significant_digits`: an exact half after 16 digits goes up, `1286742750677284.5` shows
+`1286742750677285`). Harbour derives them by repeated floating-point division, which can change the last significant
+digits of values above 2^53 (`51090942171709440000` prints as `51090942171709430000` there, `2 ^ 60 + 512` as
+`1152921504606848000` where its exact value is `1152921504606847488`).
 
 ## Functions
 
