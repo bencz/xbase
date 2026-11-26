@@ -15,14 +15,6 @@ namespace xb::xir {
 
 namespace {
 
-// The blocks something unwinds to: reached without a branch, they stay.
-std::unordered_set<const BasicBlock *> unwindBlocks(const Function &f) {
-  std::unordered_set<const BasicBlock *> out;
-  for (auto &b : f.blocks)
-    if (b->unwind) out.insert(b->unwind);
-  return out;
-}
-
 // `cond_br c, T(..., true, ...), T(..., false, ...)`, with the arguments
 // otherwise the same, is `br T(..., c, ...)`.
 bool branchesToOneBlock(Function &f) {
@@ -51,7 +43,7 @@ bool branchesToOneBlock(Function &f) {
 // directly, with the arguments it would have passed.
 bool threadJumps(Function &f, Predecessors &preds) {
   bool changed = false;
-  std::unordered_set<const BasicBlock *> unwinds = unwindBlocks(f);
+  std::unordered_set<const BasicBlock *> unwinds = unwindTargets(f); // reached without a branch: they stay
   for (auto &bp : f.blocks) {
     BasicBlock *e = bp.get();
     if (e == f.entry() || unwinds.count(e) || e->insts.size() != 1 || e->insts[0]->op != Op::Br) continue;

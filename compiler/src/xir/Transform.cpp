@@ -44,6 +44,8 @@ BlockCopy copyBlocks(Function &f, const std::vector<BasicBlock *> &originals, co
   for (BasicBlock *b : originals) {
     BasicBlock *nb = f.addBlock(b->name + suffix);
     c.blocks[b] = nb;
+    c.ends[b] = nb;
+    c.order.push_back(b);
     for (auto &p : b->params) {
       c.values[p.get()] = nb->addParam(p->type());
       c.pairs.push_back({p.get(), c.values[p.get()]});
@@ -223,7 +225,7 @@ void leaveBody(Builder &b, const Function &callee, const VarMap &vars) {
       b.store(it->second, Access::Direct, b.nil());
 }
 
-BasicBlock *unwindBody(Function &f, const Function &callee, const BlockCopy &copy, BasicBlock *handler) {
+BasicBlock *unwindBody(Function &f, const Function &callee, BlockCopy &copy, BasicBlock *handler) {
   if (!handler) return nullptr;
   Builder builder(&f);
   std::map<std::vector<const Function *>, BasicBlock *> pads; // the callee's bodies open -> the block leaving them
@@ -246,13 +248,28 @@ BasicBlock *unwindBody(Function &f, const Function &callee, const BlockCopy &cop
   CFG cfg(callee);
   InlineBodies at;
   openInlineBodies(cfg, at);
-  for (auto [orig, dup] : copy.blocks) {
+  for (const BasicBlock *orig : copy.order) { // in a stable order: the pieces and pads are new blocks
     std::vector<const Function *> open = at.count(orig) ? at.at(orig) : std::vector<const Function *>{};
-    for (auto &i : orig->insts) {
-      if (i->op == Op::InlineEnter) open.push_back(i->blockFn);
-      else if (i->op == Op::InlineLeave && !open.empty()) open.pop_back();
+    BasicBlock *piece = copy.blocks.at(orig);
+    for (size_t k = 0; k < piece->insts.size();) {
+      const Instruction &i = *piece->insts[k];
+      bool enter = i.op == Op::InlineEnter, leave = i.op == Op::InlineLeave;
+      if (!enter && !leave) {
+        ++k;
+        continue;
+      }
+      if (k > 0) { // what comes before runs with the bodies open so far
+        piece->unwind = padFor(open);
+        piece = splitBefore(f, piece, k);
+        k = 0;
+        continue;
+      }
+      if (enter) open.push_back(i.blockFn);
+      else if (!open.empty()) open.pop_back();
+      k = 1;
     }
-    dup->unwind = padFor(open);
+    piece->unwind = padFor(open);
+    copy.ends[orig] = piece;
   }
   return padFor({});
 }

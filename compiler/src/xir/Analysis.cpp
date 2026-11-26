@@ -184,6 +184,13 @@ bool onlyLoaded(const Function &f, const Var *v) {
   return true;
 }
 
+std::unordered_set<const BasicBlock *> unwindTargets(const Function &f) {
+  std::unordered_set<const BasicBlock *> out;
+  for (auto &b : f.blocks)
+    if (b->unwind) out.insert(b->unwind);
+  return out;
+}
+
 bool isResumable(const Function &f) {
   for (auto &b : f.blocks)
     if (Instruction *t = b->terminator(); t && isSuspension(t->op)) return true;

@@ -2,8 +2,6 @@ module SEQUENCE
 
 function MAIN params 1 {
   $f0 = frame 0 "N"
-  $f1 = frame 1 "X"
-  $f2 = frame 2 "N"
 entry:
   %0 = params.ref $f0
   cond_br %0, byref, body
@@ -12,55 +10,104 @@ byref:
   ret %2
 body:
   %4 = load $f0 move
-  store $f2, %4
-  store $f1, 1:w10
   br seq.body
 seq.body unwind seq.unwind:
-  %8 = load $f2
-  %9 = binary div 10:w10, %8
-  store $f1, %9
-  br seq.end
+  %6 = binary div 10:w10, %4
+  br seq.join(%6)
 seq.unwind:
-  %12 = seq.catch
-  cond_br %12, seq.recover, seq.onward
-seq.end:
-  %14 = load $f1
-  ret %14
+  %8 = seq.catch
+  cond_br %8, seq.recover, seq.onward
+seq.join(%10: item):
+  ret %10
 seq.recover:
-  %16 = seq.value
-  store $f1, %16
-  %18 = load $f1
-  %19 = unary neg %18
-  store $f1, %19
-  br seq.end
+  %12 = seq.value
+  %13 = unary neg %12
+  br seq.join(%13)
+seq.onward:
+  ret
+}
+
+function KEPT params 1 {
+  $f0 = frame 0 "N"
+  $f1 = frame 1 "T"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward KEPT.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  store $f1, 0:w10
+  br for.test(0:w10, 1:w10)
+seq.unwind:
+  %7 = load $f1
+  %8 = seq.catch
+  cond_br %8, seq.recover, seq.onward
+seq.join(%10: item):
+  ret %10
+for.test(%12: item, %13: item) unwind seq.unwind:
+  %14 = for.test %13, %4, 1:w0
+  cond_br %14, for.body, seq.join(%12)
+for.body unwind seq.unwind:
+  %16 = binary div 10:w10, %13
+  %17 = binary add.grow %12, %16
+  store $f1, %17
+  %19 = binary add.one %13, 1:w0
+  br for.test(%17, %19)
+seq.recover:
+  %21 = seq.value
+  br seq.join(%7)
 seq.onward:
   ret
 }
 
 function MAIN.byref internal params 1 {
   $f0 = frame 0 "N"
-  $f1 = frame 1 "X"
 entry:
-  store $f1, 1:w10
   br seq.body
 seq.body unwind seq.unwind:
-  %2 = load $f0 maybe_ref
-  %3 = binary div 10:w10, %2
-  store $f1, %3
-  br seq.end
+  %1 = load $f0 maybe_ref
+  %2 = binary div 10:w10, %1
+  br seq.join(%2)
 seq.unwind:
-  %6 = seq.catch
-  cond_br %6, seq.recover, seq.onward
-seq.end:
-  %8 = load $f1
-  ret %8
+  %4 = seq.catch
+  cond_br %4, seq.recover, seq.onward
+seq.join(%6: item):
+  ret %6
 seq.recover:
-  %10 = seq.value
-  store $f1, %10
-  %12 = load $f1
-  %13 = unary neg %12
+  %8 = seq.value
+  %9 = unary neg %8
+  br seq.join(%9)
+seq.onward:
+  ret
+}
+
+function KEPT.byref internal params 1 {
+  $f0 = frame 0 "N"
+  $f1 = frame 1 "T"
+entry:
+  store $f1, 0:w10
+  br for.test(0:w10, 1:w10)
+seq.unwind:
+  %2 = load $f1
+  %3 = seq.catch
+  cond_br %3, seq.recover, seq.onward
+seq.join(%5: item):
+  ret %5
+for.test(%7: item, %8: item) unwind seq.unwind:
+  %9 = load $f0 maybe_ref
+  %10 = for.test %8, %9, 1:w0
+  cond_br %10, for.body, seq.join(%7)
+for.body unwind seq.unwind:
+  %12 = binary div 10:w10, %8
+  %13 = binary add.grow %7, %12
   store $f1, %13
-  br seq.end
+  %15 = binary add.one %8, 1:w0
+  br for.test(%13, %15)
+seq.recover:
+  %17 = seq.value
+  br seq.join(%2)
 seq.onward:
   ret
 }

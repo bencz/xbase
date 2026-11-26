@@ -1,0 +1,110 @@
+module SEQUENCE_INLINE_SPLIT
+
+function MAIN params 1 {
+  $f0 = frame 0 "N"
+  $f1 = frame 1 "R"
+entry:
+  %0 = params.ref $f0
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward MAIN.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  store $f1, 0:w10
+  br inline.enter
+seq.unwind:
+  %7 = load $f1
+  %8 = seq.catch
+  cond_br %8, seq.recover, seq.onward
+seq.join(%10: item):
+  ret %10
+seq.recover:
+  %12 = seq.value
+  br seq.join(%7)
+seq.onward:
+  ret
+inline.unwind:
+  inline.leave
+  br seq.unwind
+entry.inline.2 unwind inline.unwind.2:
+  inline.enter INNER %4
+  %18 = binary mul %4, 2:w10
+  br entry.inline.2
+inline.unwind.2:
+  inline.leave
+  br inline.unwind
+entry.inline.2 unwind inline.unwind:
+  inline.leave
+  %23 = binary add %18, 1:w10
+  br entry.inline.2.leave
+entry.inline.2.leave unwind seq.unwind:
+  inline.leave
+  store $f1, %23
+  br seq.join(%23)
+inline.enter unwind inline.unwind:
+  inline.enter OUTER %4
+  br entry.inline.2
+}
+
+function OUTER internal params 1 {
+  $f0 = frame 0 "X"
+entry:
+  %0 = load $f0 move
+  inline.enter INNER %0
+  %2 = binary mul %0, 2:w10
+  inline.leave
+  %4 = binary add %2, 1:w10
+  ret %4
+}
+
+function INNER internal params 1 {
+  $f0 = frame 0 "Y"
+entry:
+  %0 = load $f0 move
+  %1 = binary mul %0, 2:w10
+  ret %1
+}
+
+function MAIN.byref internal params 1 {
+  $f0 = frame 0 "N"
+  $f1 = frame 1 "R"
+entry:
+  store $f1, 0:w10
+  br seq.body
+seq.body unwind seq.unwind:
+  %2 = load $f0 maybe_ref
+  br inline.enter
+seq.unwind:
+  %4 = load $f1
+  %5 = seq.catch
+  cond_br %5, seq.recover, seq.onward
+seq.join(%7: item):
+  ret %7
+seq.recover:
+  %9 = seq.value
+  br seq.join(%4)
+seq.onward:
+  ret
+inline.unwind:
+  inline.leave
+  br seq.unwind
+entry.inline.2 unwind inline.unwind.2:
+  inline.enter INNER %2
+  %15 = binary mul %2, 2:w10
+  br entry.inline.2
+inline.unwind.2:
+  inline.leave
+  br inline.unwind
+entry.inline.2 unwind inline.unwind:
+  inline.leave
+  %20 = binary add %15, 1:w10
+  br entry.inline.2.leave
+entry.inline.2.leave unwind seq.unwind:
+  inline.leave
+  store $f1, %20
+  br seq.join(%20)
+inline.enter unwind inline.unwind:
+  inline.enter OUTER %2
+  br entry.inline.2
+}

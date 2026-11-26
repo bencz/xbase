@@ -277,9 +277,8 @@ void CodeGen::findSharingLoads(const xir::Function &f, const xir::CFG &cfg) {
   sharingLoads_.clear();
   shareOnEdge_.clear();
   std::unordered_map<const xir::Var *, size_t> bit;
-  std::unordered_set<const xir::BasicBlock *> unwindTargets;
+  std::unordered_set<const xir::BasicBlock *> unwinds = xir::unwindTargets(f);
   for (const auto &b : f.blocks) {
-    if (b->unwind) unwindTargets.insert(b->unwind);
     for (const auto &i : b->insts)
       if (i->op == xir::Op::Append && !bit.count(i->var)) bit.emplace(i->var, bit.size());
   }
@@ -300,7 +299,7 @@ void CodeGen::findSharingLoads(const xir::Function &f, const xir::CFG &cfg) {
     return g;
   };
   auto in = [&](const xir::BasicBlock *b) {
-    Growing g(bit.size(), unwindTargets.count(b) != 0);
+    Growing g(bit.size(), unwinds.count(b) != 0);
     for (const xir::BasicBlock *p : cfg.preds(b)) {
       auto o = out.find(p);
       if (o == out.end()) continue;
@@ -358,7 +357,7 @@ void CodeGen::findSharingLoads(const xir::Function &f, const xir::CFG &cfg) {
     }
   }
   for (const xir::BasicBlock *b : cfg.order()) {
-    if (unwindTargets.count(b) || cfg.preds(b).size() < 2) continue;
+    if (unwinds.count(b) || cfg.preds(b).size() < 2) continue;
     Growing g = in(b);
     for (const auto &[var, k] : bit) {
       if (!g[k] || !ends.at(b)[k]) continue;

@@ -242,7 +242,7 @@ void fuse(Function &f, const EachLoop &l, Function &r, const Body &body) {
     return out;
   };
   for (BasicBlock *orig : body.blocks) {
-    BasicBlock *b = copy.blocks.at(orig);
+    BasicBlock *b = copy.ends.at(orig);
     Instruction *t = b->terminator();
     if (t->op == Op::GenYield) {
       Value *element = t->operand(0);

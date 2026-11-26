@@ -27,7 +27,9 @@ BasicBlock *splitBefore(Function &f, BasicBlock *b, size_t k);
 // a value from outside the copied blocks (a constant, say) is what `outside` gives for it, or itself. `pairs` lists
 // (original, copy) in block order: a stable order of work.
 struct BlockCopy {
-  std::unordered_map<const BasicBlock *, BasicBlock *> blocks;
+  std::unordered_map<const BasicBlock *, BasicBlock *> blocks; // an original -> its copy (where the copy starts)
+  std::unordered_map<const BasicBlock *, BasicBlock *> ends;   // an original -> where its copy ends (unwindBody)
+  std::vector<const BasicBlock *> order;                       // the originals, in the order they were copied
   std::unordered_map<const Value *, Value *> values;
   std::vector<std::pair<Value *, Value *>> pairs;
 };
@@ -103,8 +105,11 @@ void leaveBody(Builder &b, const Function &callee, const VarMap &vars);
 // FOR EACH's cleanup), as its call would return with the error: a block that leaves the body's frame (inline.leave)
 // and goes on to `handler` (returned: the one the block entering the body unwinds to), and for a copied block that
 // ends with bodies the callee inlined open, one that leaves those first. Each block's unwind block so starts with the
-// bodies its end has open (openInlineBodies). Nothing when `handler` is null (the function's exit): null.
-BasicBlock *unwindBody(Function &f, const Function &callee, const BlockCopy &copy, BasicBlock *handler);
+// bodies it has open (openInlineBodies): a copied block where an inlined body starts or ends is split first, so that
+// each inline.enter and inline.leave starts a block (BlockCopy::ends: where the copy now ends), and every operation
+// that may unwind is in a block with its bodies open. Nothing when `handler` is null (the
+// function's exit): null.
+BasicBlock *unwindBody(Function &f, const Function &callee, BlockCopy &copy, BasicBlock *handler);
 
 // SSA form again for values that copies of blocks define once more: each entry lists one value's definitions with
 // their blocks, the original first. Its reachable uses outside the blocks in `inside` (the original and copied blocks)

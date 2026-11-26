@@ -16,39 +16,36 @@ body:
   %7 = seq.with %6
   br seq.body
 seq.body unwind seq.unwind:
-  %9 = load $f1
-  %10 = binary add.grow %9, 1:w10
-  store $f1, %10
+  %9 = binary add.grow %4, 1:w10
+  store $f1, %9
   seq.restore %7
   br seq.join
 seq.unwind unwind seq.always.unwind:
+  %13 = load $f1
   seq.restore %7
   %15 = seq.catch
   cond_br %15, seq.recover, seq.always.unwind
 seq.always.unwind:
-  %17 = seq.suspend
-  %18 = seq.value
+  %17 = load $f1
+  %18 = seq.suspend
+  %19 = seq.value
   br seq.always.code
 seq.join:
-  %20 = load $f1
-  %21 = call QOUT native %20
-  %22 = load $f1
-  ret %22
+  %21 = call QOUT native %9
+  ret %9
 seq.recover unwind seq.always.unwind:
-  %24 = seq.value
+  %23 = seq.value
   br seq.always.exit
 seq.always.exit:
-  %26 = load $f1
-  %27 = call QOUT native %26
+  %25 = call QOUT native %13
   br seq.exit
 seq.exit unwind seq.always.unwind:
   ret 0:w10
 seq.always.code unwind seq.always.resume:
-  %30 = load $f1
-  %31 = call QOUT native %30
+  %28 = call QOUT native %17
   br seq.always.resume
 seq.always.resume:
-  seq.resume %17, %18
+  seq.resume %18, %19
   ret
 }
 

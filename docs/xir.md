@@ -54,8 +54,8 @@ one.
 
 - `BEGIN SEQUENCE`: the body's blocks unwind to a handler, `seq.catch` (`xb_seq_catch`: the request is a `BREAK`
   alone, now taken) then `cond_br` to `RECOVER`, which starts with `seq.value` (the `BREAK` value, stored in the
-  `USING` variable), or onward. A function with a sequence keeps its variables in memory (`promote-variables` leaves
-  it alone), so the handler reads them as the failed operation left them.
+  `USING` variable), or onward. The handler reads the variables as the failed operation left them: those live where it
+  starts stay in memory too, their stores kept, and are loaded there (`promote-variables`).
 - `FOR EACH`: inside a sequence of the function, or when a loop variable may be seen by others (a `STATIC`, a shared
   variable, a parameter), the loop's blocks unwind to a cleanup block that restores the variables (`each.leave`).
 - Onward: an unwind block that has done its work branches to the enclosing one, or returns with the request pending.
@@ -66,7 +66,7 @@ one.
   where `RECOVER` unwinds and the handler goes on (without `RECOVER`, every request goes on): `seq.suspend` sets the
   requests aside, `seq.value` takes the `BREAK` value, the code runs (its blocks unwind to the block of `seq.resume`,
   which follows it too), `seq.resume` puts them back unless the code made one of its own (a `QUIT` set aside stays
-  then), and unwinding goes on. A function with `seq.suspend` keeps its variables in memory too.
+  then), and unwinding goes on; its block is a handler like the others for `promote-variables`.
 
 ## Resumable functions
 
@@ -213,10 +213,13 @@ result. Implemented (`xir/passes/`):
   inlined into a generator, nor into a function that has grown past 3000 instructions. The body is copied with
   `copyBlocks`, its constants made anew in the function. At a call in a `BEGIN SEQUENCE` (or a `FOR EACH` with a
   cleanup), the body's blocks unwind to a block that leaves the body (`inline.leave`) and goes on to the handler, as the
-  call would return with the error (`unwindBody` in `Transform`: one such block for each set of bodies a copied block
-  ends with open, the callee's own inlined bodies first); the block that enters the body unwinds there too and the one
-  that leaves it to the handler, so that each unwind block starts with the bodies the end of every block reaching it has
-  open. - `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
+  call would return with the error (`unwindBody` in `Transform`: one such block for each set of bodies open, the
+  callee's own inlined bodies first; a copied block where one of them starts or ends is split first, each
+  `inline.enter` starting a block and each `inline.leave` in a block of its own, so that every operation that may
+  unwind is in a block with its bodies open, `BlockCopy::ends` saying where each copy now ends); the block that enters
+  the body unwinds there too and the one that leaves it to the handler, so that each unwind block starts with the bodies
+  the end of every block reaching it has open.
+- `inline-functions`: a call of a function of the module, or of a public function of a carried runtime source
   (`Module::library`, below; a method too, which `resolve-sends` made a call of), not an `INIT` or `EXIT` procedure, a
   generator, nor one that calls itself, of at most 30 instructions, or 200 when the call passes a codeblock literal
   (which the body may then run in place too). A function versioned for references runs, for arguments without a
@@ -279,11 +282,16 @@ result. Implemented (`xir/passes/`):
   (their checks passed) one `append` per piece, in order: no string is made for the sum (a `+` of two strings fails only
   past the longest string, where the piece's append then fails instead).
 - `promote-variables` (mem2reg): `LOCAL`s reached only by direct `load` and `store` (not shared, not parameters, not
-  `FOR EACH` variables) become SSA values, except in a function with `BEGIN SEQUENCE`. Block parameters go where
-  definitions meet, in the iterated dominance frontiers of the blocks that store (the entry defines the variable as
-  `NIL`); renaming along the dominator tree replaces each `load` with the current value and drops the `store`s;
-  parameters that only feed each other through a loop are removed (their arguments first, then them). The variables
-  leave the frame.
+  `FOR EACH` variables) become SSA values, except in a resumable function. A handler (an unwind block: a sequence's
+  `seq.catch`, `ALWAYS`'s, a `FOR EACH` cleanup, an inlined body's way out) is reached by unwinding from inside a block,
+  where no branch passes values: a variable live where one starts is loaded first thing there, a definition, and keeps
+  the stores memory needs to hold its value when an operation unwinds there (those after which a block that unwinds to
+  such a handler, or a handler that loads it, which a branch may also enter, is reached before another store; liveness
+  over the control flow graph, unwind edges included); the others lose their loads and stores (a loop in a `BEGIN
+  SEQUENCE`: 0.54 of the instructions). Block parameters go where definitions meet, in the iterated dominance frontiers
+  of the blocks that store (the entry defines the variable as `NIL`); renaming along the dominator tree replaces each
+  `load` with the current value and drops the `store`s (but a kept variable's); parameters that only feed each other
+  through a loop are removed (their arguments first, then them). The variables but the kept ones leave the frame.
 - `fold-constants`: `i64` arithmetic and comparisons, `and` and `not` of booleans, `unbox.i64` and `unbox.bool` of what
   `box.i64` and `box.bool` made or of a constant, `from_bool` and `truth` of constants (`truth` of a logical just made
   is its boolean), `+`, `-`, `*`, the bit operators, unary `-` and `~`, and the comparisons of two number constants (and

@@ -818,9 +818,7 @@ void FramePlan::findEachLoads() {
     }
   if (index.empty()) return;
   using State = std::vector<const Instruction *>; // per variable: the each.move that last changed it, or none
-  std::unordered_set<const BasicBlock *> unwindTargets;
-  for (const BasicBlock *b : cfg_.order())
-    if (b->unwind) unwindTargets.insert(b->unwind);
+  std::unordered_set<const BasicBlock *> unwinds = xir::unwindTargets(f_);
   auto step = [&](const Instruction &i, State &s) {
     auto k = i.var ? index.find(i.var) : index.end();
     if (k == index.end() || (opInfo(i.op).effects & WritesVar) == 0) return;
@@ -830,7 +828,7 @@ void FramePlan::findEachLoads() {
   std::unordered_map<const BasicBlock *, State> out;
   auto entering = [&](const BasicBlock *b) {
     State in(index.size(), nullptr);
-    if (unwindTargets.count(b) || b == cfg_.order().front()) return in;
+    if (unwinds.count(b) || b == cfg_.order().front()) return in;
     bool first = true;
     for (const BasicBlock *p : cfg_.preds(b)) {
       auto o = out.find(p);

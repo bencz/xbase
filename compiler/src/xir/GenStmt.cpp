@@ -361,8 +361,8 @@ void Generator::unwindOnward() {
 // where they join), on the way out of an unwinding (the request set aside
 // meanwhile, and without RECOVER a BREAK is not taken), and before a RETURN,
 // EXIT or LOOP that leaves them (exitCleanups). The handlers read variables as
-// the failed operation left them: the function keeps them in memory
-// (promote-variables leaves it alone).
+// the failed operation left them: in memory, where promote-variables keeps
+// those live there.
 void Generator::genSequence(const SequenceStmt &st) {
   Builder &b = *cur_.b;
   BasicBlock *outer = b.unwindBlock();
