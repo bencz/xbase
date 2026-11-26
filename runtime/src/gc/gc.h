@@ -68,6 +68,8 @@ void  xb_gc_unregister(xb_ctx *ctx);
 /* Raises the requests `bits` on every registered context but `except` (the program's QUIT from any thread). */
 void  xb_gc_raise_all(const xb_ctx *except, uint32_t bits);
 size_t xb_gc_live_objects(void);           /* found by the last full collection */
+size_t xb_gc_live_bytes(void);             /* the bytes of those objects */
+size_t xb_gc_young_budget(void);           /* the allocation that starts the next young collection */
 size_t xb_gc_heap_bytes(void);
 size_t xb_gc_occupied_bytes(void);         /* xb_gc_heap_bytes without the free blocks kept for allocations */
 /* Bytes allocated since the program started: every thread's reported ones and the calling thread's not yet reported

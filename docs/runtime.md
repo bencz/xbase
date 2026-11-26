@@ -285,15 +285,17 @@ The compiler's mirror of the layouts, a buffer's among them, is checked as the p
   dirty) until that one is promoted or dies. Aging adapts: it turns off when the bytes promoted at a young collection
   exceed four times the aged bytes that died (aging then only doubles their tracing; reached objects are promoted at
   once), and back on when a full collection finds that more than half of the old bytes had died.
-- Young budget: a young collection runs when the allocation since the last collection reaches the budget, at least
-  4 MB. The budget doubles after a collection where more than half of the allocation survived (collecting such
-  objects early only promotes them) and halves when less than an eighth did; it never exceeds a quarter of the live
-  data the last full collection found, so the heap stays near the live data (the old generation grows to half again
-  the live data, the young one to a quarter of it). A young collection also scans old objects, the recorded ones and
-  the dirty cards of large arrays, loading what they refer to however little survives: after one, the budget is at
-  least 128 bytes (`XB_GC_SCAN_BYTES`) for each old reference it scanned, up to the live data, so that a program that
-  keeps storing into a large old structure does not rescan it every few megabytes (`linked_list`: 17% faster, 27%
-  more memory; `object_churn` 4% faster, 11% more).
+- Young budget: a young collection runs when the allocation since the last collection reaches the budget, at least 4 MB.
+  The budget doubles after a collection where more than half of the allocation survived as objects in blocks (collecting
+  such objects early only promotes them; a large object's bytes do not count: marked whole and never moved, it costs a
+  young collection little) and halves when less than an eighth did; it never exceeds the live data the last full
+  collection found (the old generation grows to half again the live data, the young one to as much again): a program
+  whose young objects live a while is collected less often (`object_churn`, `memory_footprint`, `linked_list`, `trie`,
+  `csv_parse`: 8 to 20% faster, up to 16% more memory). A young collection also scans old objects, the recorded ones and
+  the dirty cards of large arrays, loading what they refer to however little survives: after one, the budget is at least
+  128 bytes (`XB_GC_SCAN_BYTES`) for each old reference it scanned, up to the live data, so that a program that keeps
+  storing into a large old structure does not rescan it every few megabytes (`linked_list`: 17% faster, 27% more memory;
+  `object_churn` 4% faster, 11% more).
 - Write barrier: storing a pointer into an old object must record that object in the remembered set, because a young
   collection does not scan old objects. The state byte sits `XB_GC_STATE_BACK` bytes before the object; its bits
   `XB_GC_STATE_OLD` and `XB_GC_STATE_RECORDED` tell whether a store must record it (`xb_gc_write` in `xbrt.h`). C code
@@ -427,7 +429,8 @@ use it). `__GcMemory()` returns `{ live objects, the heap's memory in bytes (blo
 mappings: what was given back is not counted), the process's resident bytes (0 where the system does not tell), the
 heap's memory without the free blocks it keeps for the next allocations, the bytes allocated since the program started
 (`xb_gc_allocated_bytes`: what an operation costs in allocation, the same on every run; another thread's bytes count
-once it reports them, at a collection, a slow allocation or its detach) }`.
+once it reports them, at a collection, a slow allocation or its detach), the young budget (`xb_gc_young_budget`), the
+bytes of the live objects the last full collection found (`xb_gc_live_bytes`) }`.
 
 Finalization: an object registered with `xb_gc_finalizable` (an object whose compiled class has a destructor, or of a
 runtime class that has one, `xb_class.destructor`: a failed task nothing observed) that a collection does not reach

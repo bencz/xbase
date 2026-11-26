@@ -131,19 +131,16 @@ _Static_assert(XB_GC_SMALL_MAX == 2 * XB_GC_LINE_SIZE, "largest object in lines,
 #define XB_GC_CLASSES_MAX 64u
 #define XB_GC_CHUNK_BLOCKS 32u                    /* blocks obtained from the system at a time */
 #define XB_GC_RETAIN_MIN 32u                      /* free blocks a collection never gives back */
-/* Bytes allocated between young collections: they adapt to the survival
- * rate: they double while most young objects survive (collecting them early
- * only promotes them) and halve while few do. They never exceed a quarter of
- * the live data the last full collection found (nor go below the minimum), so
- * the heap stays near the live data: the old generation grows to half again
- * the live data before a full collection, the young one to a quarter of it
- * (more for what young collections scan of old objects: XB_GC_SCAN_BYTES). */
+/* Bytes allocated between young collections: they adapt to the survival rate of the objects in blocks (a large
+ * object, marked whole and never moved, costs a young collection little however many bytes it holds): they double
+ * while most of them survive (collecting them early only promotes them, and each collection scans old objects too)
+ * and halve while few do. They never exceed the live data the last full collection found (nor go below the minimum):
+ * the old generation grows to half again the live data before a full collection, the young one to as much again. */
 #define XB_GC_YOUNG_MIN ((size_t)4 << 20)
-#define XB_GC_YOUNG_SHARE 4u                      /* of the live data: the most the young budget takes */
 /* A young collection also scans old objects: those the barrier recorded and the dirty cards of large arrays, whose
  * referents it loads (each a likely cache miss), however little survives. The budget gives each such reference of the
- * last young collection at least this much allocation, up to the live data (past the quarter above), so that a
- * program that keeps storing into a large old structure does not rescan it every few megabytes. */
+ * last young collection at least this much allocation, up to the live data, so that a program that keeps storing into
+ * a large old structure does not rescan it every few megabytes. */
 #define XB_GC_SCAN_BYTES 128u
 #define XB_GC_FULL_GROWTH 2u                      /* old growth past the live data that starts a full one: 1/2 */
 /* A full collection also runs when as much as XB_GC_FULL_ALLOC times the live data (at least XB_GC_MIN_FULL) was
@@ -303,6 +300,7 @@ static struct {
   size_t oldBytes;                 /* estimated size of the old generation */
   size_t fullThreshold;            /* old bytes that trigger a full collection */
   size_t markedBytes;              /* marked by the current collection */
+  size_t markedSmall;              /* of them, those in blocks (not large ones): what young survivors cost */
   size_t scannedRefs;              /* old references the current young collection scanned (XB_GC_SCAN_BYTES) */
   size_t markedObjects;
   size_t liveObjects;              /* found by the last full collection */
@@ -1337,6 +1335,7 @@ static void push(xb_gc_hdr *h) {
     stack_push(&heap.survivors, &heap.survivorsLen, &heap.survivorsCap, h);
   }
   heap.markedBytes += h->size;
+  if (!(h->flags & XB_GC_HDR_LARGE)) heap.markedSmall += h->size;
   ++heap.markedObjects;
   stack_push(&heap.stack, &heap.stackLen, &heap.stackCap, h);
 }
@@ -2245,6 +2244,7 @@ static void collect(int full, int due) {
   }
   next_epoch();
   heap.markedBytes = 0;
+  heap.markedSmall = 0;
   heap.markedObjects = 0;
   heap.scannedRefs = 0;
   heap.evacuating = full && !xb_atomic_load32(&heap.holds, XB_RELAXED) && tlh && stacks_known() && pick_defrag();
@@ -2292,10 +2292,10 @@ static void collect(int full, int due) {
     heap.fullThreshold = heap.liveBytes + (growth > XB_GC_MIN_FULL ? growth : XB_GC_MIN_FULL);
     heap.lastFullNs = now;
   } else {
-    if (heap.markedBytes > heap.allocated / XB_GC_SURVIVAL_HIGH) heap.youngBudget *= 2;
-    else if (heap.markedBytes < heap.allocated / XB_GC_SURVIVAL_LOW) heap.youngBudget /= 2;
+    if (heap.markedSmall > heap.allocated / XB_GC_SURVIVAL_HIGH) heap.youngBudget *= 2;
+    else if (heap.markedSmall < heap.allocated / XB_GC_SURVIVAL_LOW) heap.youngBudget /= 2;
   }
-  if (heap.youngBudget > heap.liveBytes / XB_GC_YOUNG_SHARE) heap.youngBudget = heap.liveBytes / XB_GC_YOUNG_SHARE;
+  if (heap.youngBudget > heap.liveBytes) heap.youngBudget = heap.liveBytes;
   if (heap.youngBudget < XB_GC_YOUNG_MIN) heap.youngBudget = XB_GC_YOUNG_MIN;
   if (!full) {
     size_t scan = heap.scannedRefs > SIZE_MAX / XB_GC_SCAN_BYTES ? SIZE_MAX : heap.scannedRefs * XB_GC_SCAN_BYTES;
@@ -2460,6 +2460,20 @@ size_t xb_gc_occupied_bytes(void) {
   xb_mutex_lock(&heap.lock);
   size_t bytes = heap_bytes_locked();
   for (const xb_hblock *b = heap.freeBlocks; b; b = b->next) bytes -= XB_GC_BLOCK_SIZE;
+  xb_mutex_unlock(&heap.lock);
+  return bytes;
+}
+
+size_t xb_gc_young_budget(void) {
+  xb_mutex_lock(&heap.lock);
+  size_t bytes = heap.youngBudget;
+  xb_mutex_unlock(&heap.lock);
+  return bytes;
+}
+
+size_t xb_gc_live_bytes(void) {
+  xb_mutex_lock(&heap.lock);
+  size_t bytes = heap.liveBytes;
   xb_mutex_unlock(&heap.lock);
   return bytes;
 }
