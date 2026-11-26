@@ -52,16 +52,27 @@ static void out_free(out *o) {
   if (o->p != o->local) free(o->p);
 }
 
-static void put(out *o, char c) {
-  if (o->len == o->cap) {
-    char *grown = malloc(o->cap * 2);
+/* Room for `n` more characters, where they go. */
+static char *out_room(out *o, size_t n) {
+  if (n > o->cap - o->len) {
+    size_t cap = o->cap;
+    while (n > cap - o->len) {
+      if (cap > SIZE_MAX / 2) xb_gc_fatal("out of memory");
+      cap *= 2;
+    }
+    char *grown = malloc(cap);
     if (!grown) xb_gc_fatal("out of memory");
     memcpy(grown, o->p, o->len);
     out_free(o);
     o->p = grown;
-    o->cap *= 2;
+    o->cap = cap;
   }
-  o->p[o->len++] = c;
+  return o->p + o->len;
+}
+
+static void put(out *o, char c) {
+  *out_room(o, 1) = c;
+  ++o->len;
 }
 
 /* SET DATE's picture with its digits shown as `c` ("99/99/99"). */
@@ -71,7 +82,13 @@ static size_t date_template(const xb_ctx *ctx, char c, char out_[XB_DATE_TEXT_SI
   return xb_date_format_digits(digits, ctx->env->settings->date_format, out_);
 }
 
-static int string_placeholder(char c) { return strchr("!#9aAlLnNxXyY", c) != NULL && c; }
+static int string_placeholder(char c) {
+  switch (c) {
+    case '!': case '#': case '9': case 'a': case 'A': case 'l': case 'L': case 'n': case 'N': case 'x': case 'X':
+    case 'y': case 'Y': return 1;
+    default: return 0;
+  }
+}
 
 static void transform_string(xb_ctx *ctx, const xb_str *s, const char *pic, size_t picLen, unsigned flags, out *o) {
   char datePic[XB_DATE_TEXT_SIZE];
@@ -124,9 +141,10 @@ static int number_placeholder(char c) { return c == '9' || c == '#' || c == '$' 
  * and the decimals included), into `o`. */
 static void str_field(const xb_item *v, int width, int dec, out *o) {
   int intWidth = width - (dec ? dec + 1 : 0);
-  xb_str *t = xb_num_to_str(v, intWidth > 0 ? intWidth : 0, dec); /* nothing allocates while it is read */
-  const char *text = xb_str_data(t);
-  for (size_t i = 0; i < t->len; ++i) put(o, text[i]);
+  if (intWidth < 0) intWidth = 0;
+  size_t n = xb_num_text_len(intWidth, dec);
+  xb_num_text(v, intWidth, dec, out_room(o, n));
+  o->len += n;
 }
 
 /* Returns the offset where @B starts trimming (past a parenthesis). */

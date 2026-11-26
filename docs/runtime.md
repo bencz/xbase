@@ -1278,7 +1278,8 @@ above 2^53.
 
 `xb_item_display` formats values the way `?`/`QOut()` print them: `NIL`, `.T.`/`.F.`, strings as they are, arrays,
 codeblocks, objects and hashes as nothing, function references as `@NAME()`, and
-numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`):
+numbers through `xb_num_to_str` (`runtime/src/core/numfmt.c`; `xb_num_text` writes the same text into a caller's
+buffer, as `Transform()` builds its result, with nothing allocated):
 
 - the field has the item's width (or `xb_num_int_width`/`xb_num_dbl_width`) for the sign and integer digits, then a
   dot and the item's decimals; with SET FIXED ON, SET DECIMALS decimals for every number but one of width 1, which

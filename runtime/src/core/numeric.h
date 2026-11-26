@@ -7,6 +7,9 @@
 /* Text of a number in a field of `width` integer columns and `dec` decimals
  * (`width + 1 + dec` characters when dec > 0), Clipper style. */
 xb_str *xb_num_to_str(const xb_item *it, int width, int dec);
+/* That text, its xb_num_text_len( width, dec ) bytes written to `out` (no NUL): nothing allocated. */
+size_t xb_num_text_len(int width, int dec);
+void xb_num_text(const xb_item *it, int width, int dec, char *out);
 /* Str( n, nWidth, nDec ): the number in `width` characters in all, `dec` of them decimals (stars when it does not
  * fit, or when dec >= width), written to `out` (`width` bytes; no NUL), nothing allocated for a number of up to 60
  * digits; a database's numeric field holds this text. */

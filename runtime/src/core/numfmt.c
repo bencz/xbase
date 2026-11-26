@@ -96,19 +96,24 @@ typedef struct fraction {
 } fraction;
 
 static void fraction_init(fraction *fr, double f) {
-  memset(fr->limb, 0, sizeof fr->limb);
   int s = 0;
+  uint64_t m = 0;
   if (f > 0.0) {
     int ex;
-    uint64_t m = (uint64_t)ldexp(frexp(f, &ex), XB_DBL_EXACT_BITS);
+    m = (uint64_t)ldexp(frexp(f, &ex), XB_DBL_EXACT_BITS);
     s = XB_DBL_EXACT_BITS - ex;
-    for (; !(m & 1); m >>= 1) --s;
-    fr->limb[0] = (uint32_t)m;
-    fr->limb[1] = (uint32_t)(m >> 32);
+    for (int step = 32; step > 0; step /= 2) /* its trailing zero bits dropped, half the rest at a time */
+      if (!(m & (((uint64_t)1 << step) - 1))) {
+        m >>= step;
+        s -= step;
+      }
   }
   fr->top = s / 32;
   fr->bit = s % 32;
   fr->n = fr->top + 2;
+  memset(fr->limb, 0, (size_t)fr->n * sizeof fr->limb[0]);
+  fr->limb[0] = (uint32_t)m;
+  fr->limb[1] = (uint32_t)(m >> 32);
 }
 
 /* The fraction's next `count` decimal digits. */
@@ -254,10 +259,13 @@ static void format(char *s, const xb_item *it, int width, int dec) {
   else format_double(s, it->v.d, width, dec);
 }
 
+size_t xb_num_text_len(int width, int dec) { return field_len(width, dec < 0 ? 0 : dec); }
+
+void xb_num_text(const xb_item *it, int width, int dec, char *out) { format(out, it, width, dec < 0 ? 0 : dec); }
+
 xb_str *xb_num_to_str(const xb_item *it, int width, int dec) {
-  if (dec < 0) dec = 0;
-  xb_str *s = xb_str_alloc(field_len(width, dec));
-  format(xb_str_buffer(s), it, width, dec);
+  xb_str *s = xb_str_alloc(xb_num_text_len(width, dec));
+  xb_num_text(it, width, dec, xb_str_buffer(s));
   return s;
 }
 
