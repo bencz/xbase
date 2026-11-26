@@ -1,0 +1,140 @@
+module OPERAND_GUARDS
+
+function SPREAD params 3 {
+  $f0 = frame 0 "A"
+  $f1 = frame 1 "B"
+  $f2 = frame 2 "N"
+entry:
+  %0 = params.ref $f0 $f1 $f2
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward SPREAD.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  %5 = load $f1 move
+  %6 = load $f2 move
+  %7 = subst.check guard 12 %6
+  cond_br %7, body.subst, for.test(1:w10, 0:w10, 0:w10)
+for.test(%9: item, %10: item, %11: item):
+  %12 = for.test %9, %6, 1:w0
+  cond_br %12, for.body, for.end
+for.body:
+  %14 = index %4, %9
+  %15 = subst.check guard 12 %14
+  cond_br %15, for.body.subst, for.body.2
+for.end:
+  %17 = binary add %10, %11
+  ret %17
+for.body.2:
+  %19 = binary mul %14, %14
+  %20 = binary sub %19, %14
+  %21 = binary add.grow %10, %20
+  %22 = index %5, %9
+  %23 = binary mul %22, 2:w10
+  %24 = subst.check %23
+  cond_br %24, for.body.2.subst, for.body.2
+for.body.2:
+  %26 = binary add.grow %11, %23
+  %27 = binary add.one %9, 1:w0
+  %28 = subst.check guard 4 %27
+  cond_br %28, for.body.2.subst.2, for.test(%27, %21, %26)
+for.test.any(%30: item, %31: item, %32: item, %33: item, %34: item, %35: item):
+  %36 = for.test %30, %35, 1:w0
+  cond_br %36, for.body.any, for.end.any
+for.body.any:
+  %38 = index %33, %30
+  br for.body.2.any(%30, %31, %32, %33, %34, %35, %38)
+for.end.any:
+  %40 = binary add %31, %32
+  ret %40
+for.body.2.any(%42: item, %43: item, %44: item, %45: item, %46: item, %47: item, %48: item):
+  %49 = binary mul %48, %48
+  %50 = binary sub %49, %48
+  %51 = binary add.grow %43, %50
+  %52 = index %46, %42
+  %53 = binary mul %52, 2:w10
+  br for.body.2.any.2(%42, %44, %45, %46, %47, %51, %53)
+for.body.2.any.2(%55: item, %56: item, %57: item, %58: item, %59: item, %60: item, %61: item):
+  %62 = binary add.grow %56, %61
+  %63 = binary add.one %55, 1:w0
+  br for.test.any(%63, %60, %62, %57, %58, %59)
+for.body.subst:
+  %65 = subst.value %14
+  br for.body.2.any(%9, %10, %11, %4, %5, %6, %65)
+for.body.2.subst:
+  %67 = subst.value %23
+  br for.body.2.any.2(%9, %11, %4, %5, %6, %21, %67)
+for.body.2.subst.2:
+  %69 = subst.value %27
+  br for.test.any(%69, %21, %26, %4, %5, %6)
+body.subst:
+  %71 = subst.value %6
+  br for.test.any(1:w10, 0:w10, 0:w10, %4, %5, %71)
+}
+
+function SPREAD.byref internal params 3 {
+  $f0 = frame 0 "A"
+  $f1 = frame 1 "B"
+  $f2 = frame 2 "N"
+entry:
+  br for.test(1:w10, 0:w10, 0:w10)
+for.test(%1: item, %2: item, %3: item):
+  %4 = load $f2 maybe_ref
+  %5 = for.test %1, %4, 1:w0
+  cond_br %5, for.body, for.end
+for.body:
+  %7 = load $f0 maybe_ref
+  %8 = index %7, %1
+  %9 = subst.check guard 12 %8
+  cond_br %9, for.body.subst, for.body.2
+for.end:
+  %11 = binary add %2, %3
+  ret %11
+for.body.2:
+  %13 = binary mul %8, %8
+  %14 = binary sub %13, %8
+  %15 = binary add.grow %2, %14
+  %16 = load $f1 maybe_ref
+  %17 = index %16, %1
+  %18 = binary mul %17, 2:w10
+  %19 = subst.check %18
+  cond_br %19, for.body.2.subst, for.body.2
+for.body.2:
+  %21 = binary add.grow %3, %18
+  %22 = binary add.one %1, 1:w0
+  %23 = subst.check guard 4 %22
+  cond_br %23, for.body.2.subst.2, for.test(%22, %15, %21)
+for.test.any(%25: item, %26: item, %27: item):
+  %28 = load $f2 maybe_ref
+  %29 = for.test %25, %28, 1:w0
+  cond_br %29, for.body.any, for.end.any
+for.body.any:
+  %31 = load $f0 maybe_ref
+  %32 = index %31, %25
+  br for.body.2.any(%25, %26, %27, %32)
+for.end.any:
+  %34 = binary add %26, %27
+  ret %34
+for.body.2.any(%36: item, %37: item, %38: item, %39: item):
+  %40 = binary mul %39, %39
+  %41 = binary sub %40, %39
+  %42 = binary add.grow %37, %41
+  %43 = load $f1 maybe_ref
+  %44 = index %43, %36
+  %45 = binary mul %44, 2:w10
+  br for.body.2.any.2(%36, %38, %42, %45)
+for.body.2.any.2(%47: item, %48: item, %49: item, %50: item):
+  %51 = binary add.grow %48, %50
+  %52 = binary add.one %47, 1:w0
+  br for.test.any(%52, %49, %51)
+for.body.subst:
+  %54 = subst.value %8
+  br for.body.2.any(%1, %2, %3, %54)
+for.body.2.subst:
+  %56 = subst.value %18
+  br for.body.2.any.2(%1, %3, %15, %56)
+for.body.2.subst.2:
+  %58 = subst.value %22
+  br for.test.any(%58, %15, %21)
+}

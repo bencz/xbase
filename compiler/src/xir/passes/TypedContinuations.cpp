@@ -129,13 +129,35 @@ bool worthChecking(const Instruction &i, const TypeInfo &types, const TypeInfo &
   return computedWith(i);
 }
 
-// A value worth a guard: made outside an innermost loop that takes it as a number (an operation's result, or a block
-// parameter: where the ways out of a region copied before join), of a type the code would not know there (`types` as
-// code generation sees them: what an error may substitute counts), which may be a number.
+// A value read or received inside an innermost loop, of a type no operation of the loop decides (an element, an
+// object's variable, a variable in memory, a call's or a send's result), that operations of the same loop take as a
+// number twice or more: guarded once where it is made, those operations are typed (cannotFail), with no check after
+// each. One such use only would move its check to the value, for nothing (and give LoopSplit a nest without a call
+// where it found one: linpack's, split whole, ran 1.5 times the instructions).
+bool readAsNumberInLoop(const Instruction &i, const Loops &loops) {
+  switch (i.op) {
+  case Op::Index: case Op::TableIndex: case Op::ObjectGet: case Op::Load: case Op::Call: case Op::Send:
+    break;
+  default:
+    return false;
+  }
+  const Loop *l = loops.innermost(i.parent);
+  if (!l) return false;
+  size_t uses = 0;
+  for (const Instruction *u : i.users())
+    if (l->contains(u->parent) && numericUse(*u)) ++uses;
+  return uses >= 2;
+}
+
+// A value worth a guard (`types` as code generation sees them: what an error may substitute counts), of a type the
+// code would not know there, which may be a number: made outside an innermost loop that takes it as a number (an
+// operation's result, or a block parameter: where the ways out of a region copied before join), or read inside one
+// that does (readAsNumberInLoop).
 bool worthGuarding(const Value &v, const TypeInfo &types, const Loops &loops) {
   TypeSet t = types.of(&v);
   if (v.type() != Type::Item || (t & ~kNumberTypes) == 0 || (t & kNumberTypes) == 0) return false;
-  return entersLoopAsNumber(v, loops);
+  const auto *i = dynamic_cast<const Instruction *>(&v);
+  return entersLoopAsNumber(v, loops) || (i && readAsNumberInLoop(*i, loops));
 }
 
 // The values of the loops that are integers once the speculations hold: the greatest set where each is an

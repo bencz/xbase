@@ -377,8 +377,12 @@ result. Implemented (`xir/passes/`):
   loop takes them as numbers (a `FOR`'s start or limit, an operand of `-`, `*`, `/`, `%`, `^`, a comparison, a
   negation): `subst.check` with a mask (`imm`: the number types it gives itself, as an integer for `Max()` of integers,
   both when it gives none) right after the value, into the same copy otherwise, so the loop keeps its values typed and
-  out of the frame. The guarded value itself keeps a home the collector sees (`TypeInfo::guardNeedsHome`) when until its
-  check it may hold a heap object across a pending test that may collect (a value read from memory, a call of the
+  out of the frame. So does a value read inside an innermost loop (an element, an object's variable, a variable in
+  memory, a call's or a send's result) that operations of the loop take as a number twice or more: one guard where it is
+  read, and those operations typed with no check after each (a single use keeps its operation's check: the guard would
+  only move it, and give `LoopSplit` a nest without a call where it found one; `linpack`'s, split whole, ran 1.5 times
+  the instructions). The guarded value itself keeps a home the collector sees (`TypeInfo::guardNeedsHome`) when until
+  its check it may hold a heap object across a pending test that may collect (a value read from memory, a call of the
   program's function); the result of an operation whose error may substitute it does not, as for a check after it (its
   pending test never collects while the result waits in a home the collector does not see). A block parameter is guarded
   the same way, first in its block (a value carried into loops, a region's join); its home is its types' (nothing runs
