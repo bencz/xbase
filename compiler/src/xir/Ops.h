@@ -31,7 +31,9 @@ enum class Op : uint8_t {
   ArrayLit,       // elems... -> Item
   HashLit,        // key, value, key, value... -> Item       [may fail]
   Index,          // base, index -> Item                    [may fail]
-  TableIndex,     // var (a STATIC table: Var::items); index -> Item: its element      [may fail]
+  TableIndex,     // var (a table: Var::items, a STATIC's or a frame variable's); index -> Item: its element [may fail]
+  TableLen,       // var (a frame variable's table) -> Item: its length (its call's array's, once it has one: by the
+                  // callee, the runtime's Len)
   IndexSet,       // base, index, value                     [may fail]
   MakeBlock,      // block function, captured vars (moved into cells) -> Item
   ForTest,        // counter, limit, step -> Bool           [may fail]

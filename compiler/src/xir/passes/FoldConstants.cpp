@@ -111,11 +111,43 @@ const Instruction *readOnlyArray(const Value *v, const TypeInfo &types) {
   return array;
 }
 
+// The frame tables of `f` (xir::Var::table) whose slot holds NIL wherever a read of it runs: each read's position is a
+// number (one out of bounds raises an error that cannot go on) in a block that unwinds nowhere, so a read that fails
+// ends the call (an inlined body's too: its next run starts at enterBody; not a resumable function's, whose frame a
+// later resumption finds as it was). Their reads and length are their items'.
+std::unordered_set<const Var *> wholeTables(const Function &f, const TypeInfo &types) {
+  if (isResumable(f)) return {};
+  std::unordered_map<const Var *, bool> whole;
+  for (auto &bb : f.blocks)
+    for (auto &i : bb->insts) {
+      if (i->op != Op::TableIndex || i->var->kind != Var::Kind::Frame) continue;
+      TypeSet position = types.of(i->operand(0));
+      bool ok = !bb->unwind && position && (position & ~kNumberTypes) == 0;
+      auto [it, added] = whole.try_emplace(i->var, ok);
+      if (!added) it->second = it->second && ok;
+    }
+  std::unordered_set<const Var *> out;
+  for (auto [v, ok] : whole)
+    if (ok) out.insert(v);
+  return out;
+}
+
 // The value `i` always gives, or null. Counters wrap like the machine
 // arithmetic they lower to.
-Value *foldedValue(Instruction &i, Builder &b, const TypeInfo &types) {
+Value *foldedValue(Function &f, Instruction &i, Builder &b, const TypeInfo &types,
+                   const std::unordered_set<const Var *> &whole) {
   const auto &ops = i.operands();
   switch (i.op) {
+  case Op::TableIndex: { // an element of a whole frame table at a constant position: its item
+    const Constant *k = asConstant(ops[0]);
+    if (!whole.count(i.var) || !k || k->lit != Constant::Lit::Integer || k->ival < 1 ||
+        (uint64_t)k->ival > i.var->items.size())
+      return nullptr;
+    return copyConstant(f, *i.var->items[(size_t)k->ival - 1]);
+  }
+  case Op::TableLen: // of a whole frame table: its items' count, as Len() gives it
+    if (!whole.count(i.var)) return nullptr;
+    return b.integer((int64_t)i.var->items.size(), xb_num_int_width((int64_t)i.var->items.size()));
   case Op::Index: { // an element of a read-only array literal at a constant position: the value it was made with
     const Instruction *array = readOnlyArray(ops[0], types);
     const Constant *k = asConstant(ops[1]);
@@ -207,13 +239,14 @@ bool foldConstants(Function &f) {
   Builder b(&f);
   CFG cfg(f);
   TypeInfo types(cfg);
+  std::unordered_set<const Var *> whole = wholeTables(f, types);
   bool changed = false;
   for (auto &bb : f.blocks) {
     std::unordered_set<const Instruction *> folded;
     for (auto &ip : bb->insts) {
       Instruction &i = *ip;
       if (i.users().empty()) continue; // dead code goes in its own pass
-      if (Value *v = foldedValue(i, b, types)) {
+      if (Value *v = foldedValue(f, i, b, types, whole)) {
         i.replaceAllUsesWith(v);
         i.dropOperands();
         folded.insert(&i);

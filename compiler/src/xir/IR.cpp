@@ -88,6 +88,7 @@ bool Instruction::hasRest() const { return !operands_.empty() && operands_.back(
 uint16_t Instruction::effects() const {
   uint16_t e = opInfo(op).effects;
   if (hasRest()) e |= Fails | RunsCode | ReadsHeap | WritesHeap | Allocates; // xb_args_rest
+  if (op == Op::TableIndex && var && var->kind == Var::Kind::Frame) e |= WritesVar | Allocates; // the call's own array
   return e;
 }
 

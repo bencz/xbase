@@ -197,7 +197,8 @@ private:
   llvm::Constant *funcRef(const xir::Callee &c);
   llvm::Constant *constantPayloadWord(llvm::Constant *payload);
   llvm::Constant *literal(const xir::Constant &c);
-  std::pair<llvm::GlobalVariable *, llvm::GlobalVariable *> tableData(const xir::Var &table);
+  llvm::GlobalVariable *tableData(const xir::Var &table);
+  llvm::GlobalVariable *tableBroken(const xir::Var &table);
   llvm::Constant *stringLiteral(const std::string &s);
   llvm::Constant *messageName(const std::string &message);
   llvm::Constant *aliasName(const std::string &alias);
@@ -323,6 +324,8 @@ private:
                    llvm::Value *&pos, llvm::Value *&state);
   void emitIndex(const xir::Instruction &i);
   void emitTableIndex(const xir::Instruction &i);
+  void emitLocalTableIndex(const xir::Instruction &i);
+  void emitTableLen(const xir::Instruction &i);
   void emitNot(const xir::Instruction &i);
   llvm::Value *indexPosition(llvm::Value *idx, llvm::Value *idxType, llvm::Value *ok, llvm::BasicBlock *slow);
   // bools: a fused truth test's answers (the logical's path writes no item into d then)

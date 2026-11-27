@@ -1107,8 +1107,12 @@ void CodeGen::emitIndex(const xir::Instruction &i) {
 // could change the array runs after its store on this thread, and another thread's change reaches a reader through
 // the synchronization that orders the two, which orders the store before it too.
 void CodeGen::emitTableIndex(const xir::Instruction &i) {
+  if (i.var->kind == xir::Var::Kind::Frame) {
+    emitLocalTableIndex(i);
+    return;
+  }
   Value *idx = addr(i.operand(0)), *d = dest(i);
-  auto [table, broken] = tableData(*i.var);
+  GlobalVariable *table = tableData(*i.var), *broken = tableBroken(*i.var);
   BasicBlock *holds = newBlock("table.holds"), *at = newBlock("table.at"), *slow = newBlock("table.call");
   BasicBlock *join = newBlock("table.end");
   LoadInst *flag = b_.CreateLoad(i8_, broken, "table.broken");
@@ -1125,6 +1129,49 @@ void CodeGen::emitTableIndex(const xir::Instruction &i) {
   Value *base = loadVar(*i.var, i.access, scratchItem(3), unwind_);
   callItemOp(rtIndex_, d, {base, idx});
   checkPending(unwind_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// An element of a LOCAL table (xir::Var::table of a frame variable): while its slot holds NIL, a number within it reads
+// the constant data; any other index makes the call's own array of the items in the slot (xb_array_new) and reads it
+// through the runtime, whose error gives the error block that array, which it may change; and once the slot holds the
+// array, every read of the call is the runtime's of it, as each call's own array would be read.
+void CodeGen::emitLocalTableIndex(const xir::Instruction &i) {
+  Value *idx = addr(i.operand(0)), *d = dest(i);
+  Value *own = rawAddress(*i.var);
+  GlobalVariable *table = tableData(*i.var);
+  BasicBlock *holds = newBlock("table.holds"), *at = newBlock("table.at"), *make = newBlock("table.own.make");
+  BasicBlock *read = newBlock("table.own"), *join = newBlock("table.end");
+  branchLikely(b_.CreateICmpEQ(itemType(own), ConstantInt::get(i32_, XB_T_NIL)), holds, read);
+  b_.SetInsertPoint(holds);
+  Value *pos = indexPosition(idx, typeOf(i.operand(0), idx), b_.getTrue(), make);
+  branchLikely(b_.CreateICmpULT(pos, ConstantInt::get(i64_, i.var->items.size())), at, make);
+  b_.SetInsertPoint(at);
+  copyItem(d, b_.CreateInBoundsGEP(table->getValueType(), table, {ConstantInt::get(i64_, 0), pos}));
+  b_.CreateBr(join);
+  b_.SetInsertPoint(make);
+  b_.CreateCall(rtArrayNew_, {fnCtx_, own, ConstantInt::get(i32_, i.var->items.size()), table});
+  b_.CreateBr(read);
+  b_.SetInsertPoint(read);
+  callItemOp(rtIndex_, d, {own, idx});
+  checkPending(unwind_);
+  b_.CreateBr(join);
+  b_.SetInsertPoint(join);
+}
+
+// The length of a LOCAL table: its items' count while its slot holds NIL, else Len() of the call's own array (which
+// the error block may have resized, or shared).
+void CodeGen::emitTableLen(const xir::Instruction &i) {
+  Value *d = dest(i), *own = rawAddress(*i.var);
+  BasicBlock *holds = newBlock("table.len"), *read = newBlock("table.own.len"), *join = newBlock("table.len.end");
+  branchLikely(b_.CreateICmpEQ(itemType(own), ConstantInt::get(i32_, XB_T_NIL)), holds, read);
+  b_.SetInsertPoint(holds);
+  storeInt(d, ConstantInt::get(i64_, i.var->items.size()));
+  b_.CreateBr(join);
+  b_.SetInsertPoint(read);
+  setNil(d);
+  b_.CreateCall(xbFuncTy_, externFunction(i.callee), {fnCtx_, d, ConstantInt::get(i32_, 1), own});
   b_.CreateBr(join);
   b_.SetInsertPoint(join);
 }

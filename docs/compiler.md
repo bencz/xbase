@@ -399,9 +399,20 @@ the pass: every variable reaches a slot of its frame (the function's, or its cod
 a `STATIC` of the module, every capture of a codeblock one its parent has, the facts recorded fit the frames. Every pass
 and the folder and call resolver go through the tree with one traversal, `parser/Walk.h` (the children of each node in
 source order, each as the pointer that holds it, which a pass may replace). `--dump-ast=<file>` writes the tree after
-the passes (`printAst`: a node per line, its children indented, a function's shared slots and facts on its line).
-The carried runtime sources go through them too.
+the passes (`printAst`: a node per line, its children indented, a function's shared slots and facts on its line:
+`shared:`, `by.value:`, `table:` and the slot). The carried runtime sources go through them too. What a function does
+with its frame variables (assigned after its declaration, captured by a codeblock, used other than as a table's `t[i]`
+or `Len( t )`) is one scan, `variableFacts` (`opt/VariableFacts.*`), that the passes share.
 
+- `local-tables` (`opt/LocalTables.cpp`): a function's `LOCAL` initialized with an array literal of constants (NIL,
+  logicals, numbers) that nothing assigns after its declaration, no codeblock captures, and that the function uses only
+  as `t[i]` (no element assigned nor passed by reference) and `Len( t )` (not passed on, returned or stored) is a table
+  of its call: `LocalDecl::table`. Each call would make the same array, which only those reads see; code generation
+  makes the variable a frame table (`table.index` and `table.len`, [xir.md](xir.md)), read from constant data, its slot
+  NIL until a read fails (an index out of bounds or no number). That read makes the call's own array of the constants
+  in the slot, and the runtime reads it, so the error block gets it in `e:args` and may change it; every read of the
+  call after it reads that array, as at `-O0` and in Clipper, and the next call starts from the constants again
+  (`DaysIn()` with its table of month lengths: 26 times fewer instructions).
 - `value-captures` (`opt/ValueCaptures.cpp`): a function's parameter or `LOCAL` that its codeblocks capture and that
   nothing assigns after its declaration (no assignment, `++`/`--`, reference `@x`, `FOR` or `FOR EACH`, `RECOVER USING`,
   in the function or in its codeblocks, nor `PValue()`: not a parameter of a function that calls a `PARAMS` function or
@@ -714,7 +725,11 @@ branch on it, or on the "or" of several, is likely (`classTest`). `stampSources`
   literal items' header fields and value words), at a position within it while the table holds; any other index loads
   the `STATIC` and calls the runtime's `xb_op_index`, whose error gives the array to code that may change it, so that
   path first breaks the table (`tableData`'s flag, a byte read and written relaxed: a change on another thread reaches a
-  reader through the synchronization that orders them). A local array of a compact form
+  reader through the synchronization that orders them). A frame table (`LocalDecl::table`) has no flag: its slot holding
+  NIL is the table whole (`emitLocalTableIndex`); a read that fails there makes the call's own array in the slot from
+  the same constant data (`xb_array_new`) and calls `xb_op_index` on it, as every read does once the slot holds it, and
+  `table.len` is the constants' count while the slot holds NIL, else the runtime's `Len()` of the array
+  (`emitTableLen`). A local array of a compact form
   ([runtime.md](runtime.md#values)) has paths of its own, after a branch that is no cold path (`kFormTest`, below), for
   one form each, which one test of the form (a compact form is a local array's) selects: a read inlines the logicals'
   when a condition or `.NOT.` tests the element (`readAsLogical`), the integers' otherwise, and gives an item of that

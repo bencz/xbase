@@ -190,8 +190,14 @@ private:
     case Op::TableIndex:
       needsVar(i);
       expect(i, 1, {Type::Item});
-      if (i.var && (i.var->kind != Var::Kind::Static || !i.var->table))
-        fail("table.index of a STATIC that is no table");
+      if (i.var && (i.var->kind == Var::Kind::Capture || !i.var->table))
+        fail("table.index of a variable that is no table");
+      break;
+    case Op::TableLen:
+      needsVar(i);
+      expect(i, 0, {});
+      if (i.var && (i.var->kind != Var::Kind::Frame || !i.var->table))
+        fail("table.len of a variable that is no frame table");
       break;
     case Op::IndexSet: case Op::ForTest: expect(i, 3, {Type::Item, Type::Item, Type::Item}); break;
     case Op::Call:

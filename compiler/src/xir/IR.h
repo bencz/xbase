@@ -130,8 +130,10 @@ struct Var {
                              // reference or a FOR EACH variable somewhere in the module (its item may hold a cell)
   bool param = false;        // Frame: a parameter (its caller may have passed a reference)
   std::string name;          // for the printer
-  // Static: it holds an array of constants that no code changes (fold-constant-statics), whose elements (the init's
-  // constants) table.index reads as constant data.
+  // A table, its elements (`items`) read by table.index as constant data. Static: it holds an array of constants that
+  // no code changes (fold-constant-statics). Frame: a LOCAL whose array of constants its function only reads
+  // (LocalDecl::table): its slot holds NIL until a read fails, which makes the call's own array of the items there,
+  // which the call reads from then on (table.index, table.len).
   bool table = false;
   std::vector<const Constant *> items;
   // Frame or Static: the types its AS declares (a TypeSet; 0: none), a hint the guards choose their masks from: a

@@ -15,6 +15,7 @@ struct AstPass {
 };
 
 constexpr AstPass kAstPipeline[] = {
+    {"local-tables", markLocalTables},
     {"value-captures", markValueCaptures},
 };
 
@@ -120,9 +121,15 @@ public:
     for (auto &f : m.funcs) {
       std::string head = (f->isProcedure ? "procedure " : "function ") + f->name + " locals " +
                          std::to_string(f->numLocals);
+      std::vector<bool> tables(f->numLocals);
+      for (auto &st : f->body)
+        if (st->kind == StmtKind::Local)
+          for (const LocalDecl &d : static_cast<const LocalStmt &>(*st).decls)
+            if (d.table && d.slot < tables.size()) tables[d.slot] = true;
       for (size_t s = 0; s < f->numLocals; ++s) {
         if (s < f->boxed.size() && f->boxed[s]) head += " shared:" + std::to_string(s);
         if (s < f->capturedByValue.size() && f->capturedByValue[s]) head += " by.value:" + std::to_string(s);
+        if (tables[s]) head += " table:" + std::to_string(s);
       }
       line(1, head);
       block(f->body, 2);

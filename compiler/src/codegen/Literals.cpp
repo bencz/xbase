@@ -82,11 +82,11 @@ Constant *CodeGen::literal(const xir::Constant &c) {
   report_fatal_error("xbc: not an item constant");
 }
 
-// The elements of a table STATIC (xir::Var::items) as constant data, an xb_item each, as its array holds them (the
-// literal items' header fields and value words), and its flag: a byte, 1 once the table is broken (emitTableIndex).
-std::pair<GlobalVariable *, GlobalVariable *> CodeGen::tableData(const xir::Var &table) {
-  auto &[data, broken] = tables_[&table];
-  if (data) return {data, broken};
+// The elements of a table (xir::Var::items) as constant data, an xb_item each, as its array holds them (the literal
+// items' header fields and value words).
+GlobalVariable *CodeGen::tableData(const xir::Var &table) {
+  GlobalVariable *&data = tables_[&table].first;
+  if (data) return data;
   Type *rep = itemTy_->getElementType(FValue);
   std::vector<Constant *> items;
   for (const xir::Constant *c : table.items) {
@@ -104,9 +104,16 @@ std::pair<GlobalVariable *, GlobalVariable *> CodeGen::tableData(const xir::Var 
                             ".xb.table");
   data->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   data->setAlignment(itemAlign_);
-  broken = new GlobalVariable(mod_, i8_, false, GlobalValue::PrivateLinkage, ConstantInt::get(i8_, 0),
-                              ".xb.table.broken");
-  return {data, broken};
+  return data;
+}
+
+// A table STATIC's flag: a byte, 1 once the table is broken (emitTableIndex).
+GlobalVariable *CodeGen::tableBroken(const xir::Var &table) {
+  GlobalVariable *&broken = tables_[&table].second;
+  if (!broken)
+    broken = new GlobalVariable(mod_, i8_, false, GlobalValue::PrivateLinkage, ConstantInt::get(i8_, 0),
+                                ".xb.table.broken");
+  return broken;
 }
 
 // Strings are emitted as static xb_str objects (header + bytes + NUL), so a

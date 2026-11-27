@@ -176,6 +176,13 @@ void eraseInstruction(Instruction *i) {
 
 bool plainVar(const Var *v) { return v && v->kind == Var::Kind::Frame && !mayBeInCell(*v); }
 
+void copyVarFacts(Function &f, const Var &from, Var &to) {
+  to.table = from.table;
+  to.declared = from.declared;
+  to.items.clear();
+  for (const Constant *c : from.items) to.items.push_back(copyConstant(f, *c));
+}
+
 VarMap bodyVars(Function &f, const Function &callee, bool refArgs, const std::vector<Var *> &captures,
                 uint32_t firstVar) {
   VarMap vars;
@@ -188,6 +195,7 @@ VarMap bodyVars(Function &f, const Function &callee, bool refArgs, const std::ve
     Var *nv = f.addFrameVar(v->name);
     nv->param = v->param && (refArgs || v->index >= callee.numParams);
     nv->shared = v->shared;
+    copyVarFacts(f, *v, *nv);
     vars[v.get()] = nv;
   }
   return vars;

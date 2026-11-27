@@ -85,6 +85,10 @@ void eraseInstruction(Instruction *i);
 // A frame variable with no cell and no reference passed in: read and written directly.
 bool plainVar(const Var *v);
 
+// What a variable's copy in function `f` (an inlined body's, a specialized copy's) keeps of `from`: its table (its
+// items made constants of `f`) and its AS types.
+void copyVarFacts(Function &f, const Var &from, Var &to);
+
 // A function's body run in another one (an inlined call, a fused generator): the callee's variables, those of the
 // function its copied blocks use instead. Its captures are the variables `captures` gives; its frame variables (but
 // those below `firstVar`: a resume function's enumerator) new ones of `f`. A parameter, when an argument is a

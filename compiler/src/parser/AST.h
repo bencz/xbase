@@ -326,6 +326,7 @@ struct LocalDecl {
   ExprPtr init;                  // may be null
   ValueType declared;            // AS type (no tags: none, or any value)
   uint32_t slot = 0;             // set by Sema
+  bool table = false;            // a LOCAL holding a constant table the function only reads (opt/LocalTables.cpp)
 };
 
 // LOCAL, or STATIC (kind Static: `slot` indexes the module's statics); PRIVATE and PUBLIC (an initializer each, which
@@ -565,6 +566,11 @@ struct ExternDecl {
     return m;
   }
 };
+
+// Len( x ) of the runtime's Len (its EXTERN declaration), one argument, not a function reference.
+inline bool runtimeLen(const CallExpr &c) {
+  return c.callee && c.callee->name == "LEN" && c.args.size() == 1 && !c.reference;
+}
 
 // EXTERNAL name (REQUEST in std.ch): a function the program must link in
 // though nothing may call it by name in the source (Do(), the symbol table).

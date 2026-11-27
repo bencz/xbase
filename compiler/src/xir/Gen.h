@@ -33,6 +33,7 @@ private:
   Function *genCodeblockBody(const BlockExpr &b, const std::string &name, bool plainParams);
   static bool sharedParam(const BlockExpr &b, uint32_t slot);
   Var *frameVar(uint32_t slot);
+  Var *tableOf(const Expr &e);
   Var *hiddenVar();
   Var *varOf(const VarExpr &v);
   Access accessOf(const VarExpr &v);

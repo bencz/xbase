@@ -203,6 +203,7 @@ Function *makeCopy(Module &m, const Function &g, const std::vector<TypeSet> &typ
     Var *nv = c.addVar(v->kind, v->index, v->name);
     nv->shared = v->shared;
     nv->param = v->param;
+    copyVarFacts(c, *v, *nv);
     vars[v.get()] = nv;
   }
   std::vector<BasicBlock *> blocks;

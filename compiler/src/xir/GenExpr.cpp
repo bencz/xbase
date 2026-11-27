@@ -108,6 +108,7 @@ Value *Generator::genExpr(const Expr &e) {
   }
   case ExprKind::Index: {
     auto &ix = static_cast<const IndexExpr &>(e);
+    if (Var *table = tableOf(*ix.base)) return b.tableIndex(table, genExpr(*ix.index));
     Value *base = genExpr(*ix.base);
     Value *idx = genExpr(*ix.index);
     return b.index(base, idx);
@@ -290,7 +291,20 @@ Callee Generator::calleeOf(const CallExpr &c) {
   return callee;
 }
 
+// The frame variable a LOCAL table (LocalDecl::table) is, when `e` reads one (a codeblock's frame holds none).
+Var *Generator::tableOf(const Expr &e) {
+  if (e.kind != ExprKind::Var) return nullptr;
+  const auto &v = static_cast<const VarExpr &>(e);
+  if (v.where != VarWhere::Frame) return nullptr;
+  Var *var = frameVar(v.slot);
+  return var->table ? var : nullptr;
+}
+
 Value *Generator::genCall(const CallExpr &c) {
+  if (Var *table = runtimeLen(c) ? tableOf(*c.args[0]) : nullptr) {
+    cur_.b->setLoc(c.loc);
+    return cur_.b->tableLen(table, calleeOf(c));
+  }
   std::vector<Value *> args = genArgs(c.args);
   Callee callee = calleeOf(c);
   cur_.b->setLoc(c.loc);

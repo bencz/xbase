@@ -202,10 +202,19 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
     v->param = s < f.params.size();
     if (v->param) v->declared = f.params[s].declared.tags;
   }
-  for (auto &st : f.body) // the LOCALs' AS types (their statements come first, at the function's level)
+  for (auto &st : f.body) // the LOCALs' AS types and tables (their statements come first, at the function's level)
     if (st->kind == StmtKind::Local)
-      for (const LocalDecl &d : static_cast<const LocalStmt &>(*st).decls)
-        if (d.declared.tags) frameVar(d.slot)->declared = d.declared.tags;
+      for (const LocalDecl &d : static_cast<const LocalStmt &>(*st).decls) {
+        Var *v = frameVar(d.slot);
+        if (d.declared.tags) v->declared = d.declared.tags;
+        if (!d.table) continue;
+        v->table = true;
+        v->name = d.name;
+        for (const ExprPtr &x : static_cast<const ArrayLitExpr &>(*d.init).elems)
+          v->items.push_back(x->kind == ExprKind::Number    ? cur_.b->number(static_cast<const NumberExpr &>(*x))
+                             : x->kind == ExprKind::Logical ? cur_.b->logical(static_cast<const LogicalExpr &>(*x).value)
+                                                            : cur_.b->nil());
+      }
   Builder &b = *cur_.b;
   b.setBlock(fn->addBlock("entry"));
   b.setLoc(f.loc);

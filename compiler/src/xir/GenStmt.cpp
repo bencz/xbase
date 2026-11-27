@@ -98,7 +98,7 @@ void Generator::takeHandlersBack(const std::vector<std::pair<Var *, Value *>> &s
 // variable may be shared).
 void Generator::genLocals(const LocalStmt &s) {
   for (const LocalDecl &d : s.decls) {
-    if (!d.init) continue;
+    if (!d.init || d.table) continue; // a table's slot holds NIL until its call needs an array of its own
     cur_.b->setLoc(d.loc);
     initLocal(d, genExpr(*d.init));
   }

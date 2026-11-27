@@ -94,6 +94,7 @@ public:
             " params " + std::to_string(f.numParams) + (f.readsArgs ? " args" : "") + (f.method ? " method" : "") +
             (f.callsPrivates ? " privates" : "") + (f.runtime ? " runtime" : "") + " {\n";
     for (auto &v : f.vars) out_ += "  " + varName(*v) + " = " + varDesc(*v) + "\n";
+    tables(f.vars);
     for (auto &b : f.blocks) block(*b);
     out_ += "}\n";
     types_.reset();
@@ -103,12 +104,7 @@ public:
     out_ += "module " + m.name + "\n";
     for (const Callee &r : m.requests) out_ += "  request " + calleeName(r) + "\n";
     for (auto &s : m.statics) out_ += "  " + varName(*s) + " = " + varDesc(*s) + "\n";
-    for (auto &s : m.statics) {
-      if (!s->table) continue;
-      out_ += "  table " + varName(*s) + ":";
-      for (size_t e = 0; e < s->items.size(); ++e) out_ += (e ? ", " : " ") + value(s->items[e]);
-      out_ += "\n";
-    }
+    tables(m.statics);
     for (auto &f : m.functions) {
       out_ += "\n";
       function(*f);
@@ -116,6 +112,15 @@ public:
   }
 
 private:
+  void tables(const std::vector<std::unique_ptr<Var>> &vars) {
+    for (auto &v : vars) {
+      if (!v->table) continue;
+      out_ += "  table " + varName(*v) + ":";
+      for (size_t e = 0; e < v->items.size(); ++e) out_ += (e ? ", " : " ") + value(v->items[e]);
+      out_ += "\n";
+    }
+  }
+
   static std::string varName(const Var &v) {
     switch (v.kind) {
     case Var::Kind::Frame: return "$f" + std::to_string(v.index);

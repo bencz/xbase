@@ -183,6 +183,21 @@ Instruction *Builder::arrayLit(const std::vector<Value *> &elems) {
 
 Instruction *Builder::index(Value *base, Value *idx) { return make(Op::Index, Type::Item, {base, idx}); }
 
+Instruction *Builder::tableIndex(Var *table, Value *idx) {
+  Instruction *i = make(Op::TableIndex, Type::Item, {idx});
+  i->var = table;
+  i->access = Access::Direct;
+  return i;
+}
+
+Instruction *Builder::tableLen(Var *table, Callee len) {
+  Instruction *i = make(Op::TableLen, Type::Item);
+  i->callee = std::move(len);
+  i->var = table;
+  i->access = Access::Direct;
+  return i;
+}
+
 Instruction *Builder::indexSet(Value *base, Value *idx, Value *value) {
   return make(Op::IndexSet, Type::Void, {base, idx, value});
 }

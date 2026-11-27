@@ -581,6 +581,7 @@ void CodeGen::emit(const xir::Instruction &i) {
   }
   case Op::Index: emitIndex(i); break;
   case Op::TableIndex: emitTableIndex(i); break;
+  case Op::TableLen: emitTableLen(i); break;
   case Op::ObjectGet: case Op::ObjectSet: emitObjectAccess(i); break;
   case Op::IndexSet: emitIndexSet(i); break;
   case Op::ParamsRef: {

@@ -28,6 +28,7 @@ constexpr OpInfo kOps[] = {
     {Op::HashLit, "hash", Fails | Allocates},
     {Op::Index, "index", Fails | Substitutes | ReadsHeap},
     {Op::TableIndex, "table.index", Fails | Substitutes | ReadsVar | ReadsHeap},
+    {Op::TableLen, "table.len", ReadsVar | ReadsHeap},
     {Op::IndexSet, "index.set", Fails | WritesHeap},
     {Op::MakeBlock, "block", Allocates | WritesVar},
     {Op::ForTest, "for.test", Fails | Substitutes},

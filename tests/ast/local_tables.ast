@@ -1,0 +1,107 @@
+module LOCAL_TABLES
+  function TABLES locals 3 table:1 table:2
+    local
+      array
+        number 1 w10
+        number 2 w10
+        number 3 w10
+      array
+        .T.
+        nil
+        number -1.500000 w0 d1
+    return
+      binary add
+        binary add
+          index
+            var A frame 1
+            var I frame 0
+          call LEN
+            var A frame 1
+        iif
+          binary exact.eq
+            index
+              var B frame 2
+              var I frame 0
+            nil
+          number 0 w10
+          number 1 w10
+  function OTHERS locals 8 shared:5 by.value:5
+    local
+      array
+        number 1 w10
+        number 2 w10
+      array
+        number 1 w10
+        number 2 w10
+      array
+        number 1 w10
+        number 2 w10
+      array
+        number 1 w10
+        number 2 w10
+      array
+        number 1 w10
+        number 2 w10
+      array
+        string "x"
+      array
+        array
+          number 1 w10
+    expr
+      assign
+        var C frame 1
+        array
+          number 3 w10
+    expr
+      assign
+        index
+          var D frame 2
+          number 1 w10
+        number 5 w10
+    expr
+      call TWICE
+        ref
+          index
+            var E frame 3
+            number 1 w10
+    expr
+      call AEVAL
+        var F frame 4
+        block params 0 locals 0
+          nil
+    return
+      binary add
+        binary add
+          binary add
+            binary add
+              binary add
+                index
+                  var C frame 1
+                  number 1 w10
+                index
+                  var D frame 2
+                  number 1 w10
+              index
+                var E frame 3
+                number 1 w10
+            call EVAL
+              block params 0 locals 0 frame:5
+                index
+                  var G capture 0
+                  number 1 w10
+          call LEN
+            index
+              var H frame 6
+              number 1 w10
+        index
+          index
+            var K frame 7
+            number 1 w10
+          number 1 w10
+  function TWICE locals 1
+    expr
+      assign mul
+        var X frame 0
+        number 2 w10
+    return
+      var X frame 0

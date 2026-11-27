@@ -358,6 +358,7 @@ OwnResult ownResult(const Instruction &i, const TypeInfo &t) {
   case Op::HashLit: return {typeBit(XB_T_HASH), false};
   case Op::MakeBlock: return {typeBit(XB_T_BLOCK), false};
   case Op::FuncRef: return {typeBit(XB_T_SYMBOL), false};
+  case Op::TableLen: return {kIntType, false}; // the items' count, or its call's array's length
   case Op::TableIndex: { // an element, unless its table is broken: the array's, of any type, as a substitution's
     TypeSet elements = 0;
     for (const Constant *c : i.var->items) elements |= literalType(*c);
@@ -581,7 +582,8 @@ IntRange TypeInfo::computeRange(const Instruction &i) const {
       if (of(a) & kIntType) range = hull(range, rangeOf(a, i.parent));
     if (range.empty()) return range;
   }
-  if (i.op == Op::Call && !i.callee.function && i.callee.result.ranged) // RESULT INTEGER RANGE lo TO hi
+  bool runtimeCall = i.op == Op::Call || i.op == Op::TableLen; // table.len: Len()'s
+  if (runtimeCall && !i.callee.function && i.callee.result.ranged) // RESULT INTEGER RANGE lo TO hi
     range = {std::max(range.lo, i.callee.result.lo), std::min(range.hi, i.callee.result.hi)};
   return range;
 }

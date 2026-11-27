@@ -11,6 +11,9 @@ namespace xb {
 // the verifier's report of the first pass that left the tree invalid ("" when every one left it valid).
 std::string optimizeAst(Module &m);
 
+// local-tables (LocalTables.cpp): LocalDecl::table.
+bool markLocalTables(Module &m);
+
 // value-captures (ValueCaptures.cpp): FuncDecl::capturedByValue.
 bool markValueCaptures(Module &m);
 

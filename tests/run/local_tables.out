@@ -1,0 +1,11 @@
+
+days:        730         28          5 .T. NIL .F.          1.25
+run-time decimals:          0.3333          4.0000          1 constant reads:         48
+no number: -1/1000/12 10/10/12 errors:          1
+resized: -1/20/U          5
+first read:        999         15
+recursion: -1:1000,5,5,5
+inlined, failing: -1/1000 4/3 -1/1000 4/3 
+out of bounds: recovered 0/1000 2/1 recovered 0/1000/4
+inlined:      30415 generator:          4          2          8
+no tables:          3          7          6          2          2

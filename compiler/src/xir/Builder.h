@@ -60,6 +60,8 @@ public:
   Instruction *arrayLit(const std::vector<Value *> &elems);
   Instruction *hashLit(const std::vector<Value *> &pairs);
   Instruction *index(Value *base, Value *idx);
+  Instruction *tableIndex(Var *table, Value *idx);
+  Instruction *tableLen(Var *table, Callee len);
   Instruction *indexSet(Value *base, Value *idx, Value *value);
   // The block of `blockFn`: its cells the variables' `captures` and the `values` captured by value, in the order
   // `valueCells` gives (empty: the variables' alone).
