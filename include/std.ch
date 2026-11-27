@@ -215,7 +215,20 @@
 #command @ <row>, <col> CLEAR          => Scroll( <row>, <col> ) ; SetPos( <row>, <col> )
 #command @ <top>, <left> CLEAR TO <bottom>, <right> => ;
          Scroll( <top>, <left>, <bottom>, <right> ) ; SetPos( <top>, <left> )
+/* @ SAY with a PICTURE, its clauses in any order; then without one (the later rule is tried first). */
+#command @ <row>, <col> SAY <xpr> [PICTURE <pic>] [COLOR <color>] => ;
+         DevPos( <row>, <col> ) ; DevOutPict( <xpr>, <pic> [, <color>] )
 #command @ <row>, <col> SAY <xpr> [COLOR <color>] => DevPos( <row>, <col> ) ; DevOut( <xpr> [, <color>] )
+#command @ <top>, <left>, <bottom>, <right> BOX <frame> [COLOR <color>] => ;
+         DispBox( <top>, <left>, <bottom>, <right>, <frame> [, <color>] )
+#command @ <top>, <left> TO <bottom>, <right> [<dbl: DOUBLE>] [COLOR <color>] => ;
+         DispBox( <top>, <left>, <bottom>, <right>, IIf( <.dbl.>, 2, 1 ) [, <color>] )
+#command SAVE SCREEN TO <var>          => <var> := SaveScreen( 0, 0, MaxRow(), MaxCol() )
+#command RESTORE SCREEN FROM <screen>  => RestScreen( 0, 0, MaxRow(), MaxCol(), <screen> )
+#command SAVE SCREEN                   => __ScreenKeep()
+#command RESTORE SCREEN                => __ScreenBack()
+#command SET CURSOR <x:ON,OFF,&>       => SetCursor( IIf( Upper( <(x)> ) == "ON", 1, 0 ) )
+#command SET CURSOR (<x>)              => SetCursor( IIf( <x>, 1, 0 ) )
 #command SET COLOR TO [<*spec*>]       => SetColor( #<spec> )
 #command SET COLOR TO ( <c> )          => SetColor( <c> )
 #command SET COLOUR TO [<*spec*>]      => SET COLOR TO [<spec>]

@@ -102,6 +102,31 @@ int xb_screen_set_size(int32_t rows, int32_t cols);
 void xb_screen_scroll(int32_t top, int32_t left, int32_t bottom, int32_t right, int32_t rows, int32_t cols,
                       unsigned attr);
 
+/* DispBox(): a frame from (top, left) to (bottom, right) (in any order: the corners sorted), the part within the
+ * screen: `frame` its characters, top left, top, top right, right, bottom right, bottom, bottom left, left, then the
+ * one that fills the inside (0: the inside left as it is). A frame of one row is its top character, of one column its
+ * right one; a character of no width or two shows as a blank. */
+void xb_screen_box(int32_t top, int32_t left, int32_t bottom, int32_t right, const uint32_t frame[9], unsigned attr);
+
+/* SaveScreen() and RestScreen(): the rectangle from (top, left) to (bottom, right), its corners sorted and brought
+ * within the screen, as Clipper's string of it: two bytes a cell, row by row, its character (in `cp`, a single-byte
+ * codepage, or CP437 for UTF-8: '?' when it has none) and its attribute; then, when cells hold what that byte does not
+ * give back (another code point, a mark, a half of a wide character), records of them, each byte of theirs in a
+ * character byte (its attribute byte 0, so that changing the attribute bytes leaves them), with their count and a
+ * hash (term/screen.c). The string's bytes come back on the rectangle's cells row by row (bytes past its end as zeros:
+ * Chr(0) in N/N), then the records that are whole and whose cells' character bytes are as saved; the cursor stays. */
+void xb_screen_save(int32_t top, int32_t left, int32_t bottom, int32_t right, const struct xb_codepage *cp,
+                    struct xb_buffer *out);
+void xb_screen_restore(int32_t top, int32_t left, int32_t bottom, int32_t right, const struct xb_codepage *cp,
+                       const char *text, size_t len);
+
+/* DispBegin(), DispEnd(): the depth of held updates changed by `by` (never below 0), returned (DispCount() with 0). A
+ * driver shows the screen once it is 0 again. */
+int32_t xb_screen_hold(int32_t by);
+/* SetCursor(): the cursor's shape (0 none, 1 normal, 2 insert, 3 and 4 special), before `shape` (-1: unchanged;
+ * another, normal) sets it. */
+int xb_screen_cursor_shape(int shape);
+
 /* The screen as text into `out`: its size and the cursor, each row's characters (UTF-8, trailing blanks left out, a
  * control character as its Unicode picture), then the rows whose colors are not all W/N, as runs of attribute*count. */
 void xb_screen_dump(struct xb_buffer *out);

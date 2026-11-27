@@ -1532,7 +1532,8 @@ Each one moved from C is measured against its C version (callgrind).
   `__ArgError( nSubCode, [lSubstitute] )` raises the calling function's argument error (`EG_ARG`, its name as the
   operation, the arguments it received), as its C counterparts do: not substitutable, or with `lSubstitute`
   substitutable, the handler's value its result.
-- Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `AEval` and `AScan`
+- Written in xBase: `QOut`, `QQOut`, `OutStd` and `OutErr` (`rtl/console.prg`), `DevOutPict` and what `SAVE SCREEN`
+  and `RESTORE SCREEN` call (`rtl/screen.prg`, [terminal.md](terminal.md#frames-and-saved-screens)), `AEval` and `AScan`
   (`rtl/arrays.prg`; they also go through collection objects, those `__IsCollection( xValue )` (`core/control.c`)
   finds `FOR EACH` goes through: an `Enumerable`, a generator's enumerator, from position `nStart`, `nCount` elements;
   another object is `AEval`'s argument error and `AScan`'s 0; `AScan` finds a value in an array with the primitive

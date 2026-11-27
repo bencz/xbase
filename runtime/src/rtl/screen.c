@@ -4,6 +4,8 @@
 #include "core/codepage.h"
 #include "term/screen.h"
 
+#include <string.h>
+
 /* A position argument (xb_num_arg) held within 32 bits; `dflt` when it is no number. */
 static int32_t position(const xb_item *argv, uint32_t argc, uint32_t k, int32_t dflt) {
   int64_t n = xb_num_arg(argc, argv, k, dflt);
@@ -158,6 +160,115 @@ void xbf_SETMODE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   int32_t rows, cols;
   xb_screen_size(&rows, &cols);
   xb_set_logical(ret, xb_screen_set_size(position(argv, argc, 0, rows), position(argv, argc, 1, cols)));
+}
+
+/* The frames DispBox() draws for a number: 2 the double one, any other the single one (top left, top, top right,
+ * right, bottom right, bottom, bottom left, left), the inside left as it is. */
+static const uint32_t kSingleFrame[9] = {0x250C, 0x2500, 0x2510, 0x2502, 0x2518, 0x2500, 0x2514, 0x2502, 0};
+static const uint32_t kDoubleFrame[9] = {0x2554, 0x2550, 0x2557, 0x2551, 0x255D, 0x2550, 0x255A, 0x2551, 0};
+
+/* Whether `text` reads in UTF-8 with no byte that starts no character. */
+static int valid_utf8(const char *text, size_t len) {
+  const xb_codepage *utf8 = xb_codepage_utf8();
+  for (size_t at_byte = 0, n = 0; at_byte < len; at_byte += n)
+    if (xb_cp_decode(utf8, text, len, at_byte, &n) == 0xFFFD && n == 1) return 0;
+  return 1;
+}
+
+/* The frame a string gives (read in the codepage up to a Chr(0); under UTF-8, one that is not UTF-8 in CP437, as
+ * Clipper's frames are written in bytes): its characters in DispBox()'s order, marks of no width left out, a missing
+ * one the one before it (the ninth, filling the inside, only when given); an empty string blanks the whole box. */
+static void frame_of(const xb_codepage *cp, const char *text, size_t len, uint32_t frame[9]) {
+  const char *end = memchr(text, 0, len);
+  if (end) len = (size_t)(end - text);
+  if (!cp->chars && !valid_utf8(text, len)) cp = xb_codepage_find("CP437", 5);
+  size_t k = 0;
+  for (size_t at_byte = 0, n = 0; at_byte < len && k < 9; at_byte += n) {
+    uint32_t ch = xb_cp_decode(cp, text, len, at_byte, &n);
+    if (xb_cp_width(ch)) frame[k++] = ch;
+  }
+  if (!k) {
+    for (; k < 9; ++k) frame[k] = ' ';
+    return;
+  }
+  for (size_t j = k; j < 8; ++j) frame[j] = frame[k - 1];
+  if (k < 9) frame[8] = 0;
+}
+
+/* DispBox( nTop, nLeft, nBottom, nRight, [cnFrame], [cColor] ): a frame (term/screen.h): cnFrame's characters, or 2
+ * for the double frame and any other the single one (the same frames as box.ch's B_SINGLE and B_DOUBLE); the cursor
+ * after it at (nTop + 1, nLeft + 1). */
+void xbf_DISPBOX(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  for (uint32_t k = 0; k < 4; ++k)
+    if (k >= argc || !xb_is_number(&argv[k])) return; /* a corner that is no number: no frame */
+  int32_t top = position(argv, argc, 0, 0), left = position(argv, argc, 1, 0);
+  uint32_t frame[9];
+  if (argc > 4 && argv[4].type == XB_T_STRING)
+    frame_of(xb_codepage_of(ctx), xb_str_data(argv[4].v.s), argv[4].v.s->len, frame);
+  else memcpy(frame, xb_num_arg(argc, argv, 4, 1) == 2 ? kDoubleFrame : kSingleFrame, sizeof frame);
+  xb_screen_box(top, left, position(argv, argc, 2, 0), position(argv, argc, 3, 0), frame, color_arg(argv, argc, 5));
+  xb_screen_set_cursor(top < INT32_MAX ? top + 1 : top, left < INT32_MAX ? left + 1 : left);
+}
+
+/* SaveScreen( [nTop], [nLeft], [nBottom], [nRight] ): the rectangle (the whole screen by default) as a string
+ * (term/screen.h). */
+void xbf_SAVESCREEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  int32_t rows, cols;
+  xb_screen_size(&rows, &cols);
+  xb_buffer text = {0};
+  xb_screen_save(position(argv, argc, 0, 0), position(argv, argc, 1, 0), position(argv, argc, 2, rows - 1),
+                 position(argv, argc, 3, cols - 1), xb_codepage_of(ctx), &text);
+  xb_set_str(ret, xb_str_new(text.p ? text.p : "", text.len));
+  xb_buffer_free(&text);
+}
+
+/* RestScreen( [nTop], [nLeft], [nBottom], [nRight], cScreen ): the string SaveScreen() made back on the rectangle. */
+void xbf_RESTSCREEN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ret);
+  if (argc < 5 || argv[4].type != XB_T_STRING) return;
+  int32_t rows, cols;
+  xb_screen_size(&rows, &cols);
+  const xb_str *s = argv[4].v.s;
+  char in_place[XB_TEXT_IN_PLACE];
+  xb_buffer text = {in_place, 0, sizeof in_place, 0}; /* a copy: the string may move while the model's lock waits */
+  xb_buffer_put(&text, xb_str_data(s), s->len);
+  xb_screen_restore(position(argv, argc, 0, 0), position(argv, argc, 1, 0), position(argv, argc, 2, rows - 1),
+                    position(argv, argc, 3, cols - 1), xb_codepage_of(ctx), text.p, text.len);
+  xb_buffer_free(&text);
+}
+
+/* DispBegin(), DispEnd(), DispCount(): the depth of the screen's held updates, one more, one less, as it is. */
+void xbf_DISPBEGIN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(ret);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_screen_hold(1);
+}
+
+void xbf_DISPEND(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(ret);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_screen_hold(-1);
+}
+
+void xbf_DISPCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  XB_UNUSED(argc);
+  XB_UNUSED(argv);
+  xb_set_int(ret, xb_screen_hold(0));
+}
+
+/* SetCursor( [nShape] ): the cursor's shape (setcurs.ch) before nShape (0 to 4; another number, the normal one) sets
+ * it. */
+void xbf_SETCURSOR(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
+  XB_UNUSED(ctx);
+  int set = argc && xb_is_number(&argv[0]);
+  int64_t shape = xb_num_arg(argc, argv, 0, 1);
+  xb_set_int(ret, xb_screen_cursor_shape(!set ? -1 : shape >= 0 && shape <= 4 ? (int)shape : 1));
 }
 
 /* __ScreenDump(): the screen as text on the standard output (term/screen.h), for tests. */

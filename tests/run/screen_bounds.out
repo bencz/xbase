@@ -24,8 +24,36 @@ screen 25 x 80, cursor 18, 80
 22|
 23|
 24|     low
+saved:        284 
 colors: W/N,N/W,N/N,N/N,N/W W/N,N/W,N/N,N/N,N/W N/N,N/W,N/N,N/N,N/W B/W,R/G,BG/R,GR/B,W/N 
 positions: 0,4 1,-4 2,3 24,8 4,4 7,80 10,2 13,0 17,3 18,80 1,0
-screen 2 x 1, cursor 1, 0
+screen 25 x 80, cursor 20, 17
  0|z
  1|
+ 2|
+ 3|
+ 4|
+ 5|
+ 6|
+ 7|
+ 8|
+ 9|
+10|
+11|
+12|
+13|
+14|
+15|
+16|
+17|
+18|
+19|Z 本語 ação é ─ x
+20|日本語 ação é ─ x
+21|  日本語 ação é ─ x
+22|日本語 ação é ─ x
+23|日本語 ação é ─ x
+24|日本語 ação é ─ x
+colors
+22|08*20 07*60
+23|00*20 07*60
+24|1E*20 07*60

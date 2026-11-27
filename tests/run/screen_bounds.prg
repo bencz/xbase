@@ -5,10 +5,13 @@
 // over either half blanks the other, and a scroll that cuts one blanks its other half; a combining mark goes with the
 // character before it, and with none when that one is not shown. A UTF-8 character split between two ?? is one
 // character; a position near the largest integer moves to the right edge; a wide character on a screen one column wide
-// is not shown. A color written U and then another letter is that color (the reference keeps writing it U), and a
-// color string keeps five pairs, as Clipper's (the reference keeps more).
+// is not shown. A color written U and then another letter is that color (the reference keeps writing it U), and a color
+// string keeps five pairs, as Clipper's (the reference keeps more). SaveScreen() keeps what its bytes cannot give (wide
+// characters, other code points, marks) after the cells, which RestScreen() brings back whole, also after a program
+// changes the attribute bytes (shadows, by Stuff() and by Transform()); a cell whose character byte the program changed
+// keeps that character.
 PROCEDURE Main()
-   LOCAL a := {}
+   LOCAL a := {}, cScreen, cShadow, i
 
    @ 0, -2 SAY "abcdef"
    AAdd( a, Pos() )
@@ -57,6 +60,23 @@ PROCEDURE Main()
    SetPos( 0, 0 )
    ?? "日z"
    AAdd( a, Pos() )
+   SetMode( 25, 80 )
+   @ 20, 0 SAY "日本語 ação e" + Chr( 204 ) + Chr( 129 ) + " ─ x"
+   cScreen := SaveScreen( 20, 0, 20, 19 )
+   RestScreen( 21, 2, 21, 21, cScreen )
+   OutStd( "saved:", Len( cScreen ), Chr( 10 ) )
+   cShadow := cScreen
+   FOR i := 2 TO Len( cShadow ) STEP 2
+      cShadow := Stuff( cShadow, i, 1, Chr( 8 ) )
+   NEXT
+   RestScreen( 22, 0, 22, 19, cShadow )
+   cShadow := cScreen
+   FOR i := 2 TO Len( cShadow ) STEP 2
+      cShadow := Stuff( cShadow, i, 1, Chr( 0 ) )
+   NEXT
+   RestScreen( 23, 0, 23, 19, cShadow )
+   RestScreen( 24, 0, 24, 19, Transform( cScreen, Replicate( "X" + Chr( 30 ), Len( cScreen ) / 2 ) ) )
+   RestScreen( 19, 0, 19, 19, Stuff( cScreen, 1, 1, "Z" ) )
    OutStd( "colors:", SetColor( "UW/N" ), SetColor( "UN/N" ), SetColor( "B/W,R/G,BG/R,GR/B,W/N,R/R,G/G" ), ;
       SetColor(), Chr( 10 ) )
    OutStd( "positions:" )

@@ -42,7 +42,9 @@ static struct {
   xb_color colors[XB_COLORS]; /* SetColor()'s pairs */
   int selected;              /* ColorSelect()'s */
   int blink;                 /* SetBlink() */
-} screen = {.markRow = -1, .colors = XB_DEFAULT_COLORS, .blink = 1};
+  int32_t held;              /* DispBegin()'s depth */
+  int shape;                 /* SetCursor() */
+} screen = {.markRow = -1, .colors = XB_DEFAULT_COLORS, .blink = 1, .shape = 1};
 
 static const xb_color kDefaultColors[XB_COLORS] = XB_DEFAULT_COLORS;
 
@@ -411,6 +413,195 @@ void xb_screen_scroll(int32_t top, int32_t left, int32_t bottom, int32_t right, 
   ensure();
   scroll_locked(top, left, bottom, right, rows, cols, attr);
   unlock();
+}
+
+/* A rectangle's corners sorted: top above bottom, left before right. */
+static void sort_corners(int32_t *top, int32_t *left, int32_t *bottom, int32_t *right) {
+  if (*top > *bottom) {
+    int32_t t = *top;
+    *top = *bottom;
+    *bottom = t;
+  }
+  if (*left > *right) {
+    int32_t t = *left;
+    *left = *right;
+    *right = t;
+  }
+}
+
+void xb_screen_box(int32_t top, int32_t left, int32_t bottom, int32_t right, const uint32_t frame[9], unsigned attr) {
+  sort_corners(&top, &left, &bottom, &right);
+  lock();
+  ensure();
+  for (int32_t r = top > 0 ? top : 0; r <= bottom && r < screen.rows; ++r) {
+    for (int32_t c = left > 0 ? left : 0; c <= right && c < screen.cols; ++c) {
+      uint32_t ch;
+      if (top == bottom) ch = frame[1];
+      else if (left == right) ch = frame[3];
+      else if (r == top) ch = c == left ? frame[0] : c == right ? frame[2] : frame[1];
+      else if (r == bottom) ch = c == left ? frame[6] : c == right ? frame[4] : frame[5];
+      else if (c == left) ch = frame[7];
+      else if (c == right) ch = frame[3];
+      else if (frame[8]) ch = frame[8];
+      else continue;
+      put(r, c, xb_cp_width(ch) == 1 ? ch : ' ', 1, attr);
+    }
+  }
+  unlock();
+}
+
+/* The rectangle's corners sorted and brought within the screen. */
+static void within(int32_t *top, int32_t *left, int32_t *bottom, int32_t *right) {
+  sort_corners(top, left, bottom, right);
+  int32_t *v[4] = {top, left, bottom, right};
+  for (int k = 0; k < 4; ++k) {
+    int32_t most = (k % 2 ? screen.cols : screen.rows) - 1;
+    if (*v[k] < 0) *v[k] = 0;
+    if (*v[k] > most) *v[k] = most;
+  }
+}
+
+/* A saved screen's characters are in the codepage when it takes one byte a character, else in CP437. */
+static const xb_codepage *saved_codepage(const xb_codepage *cp) {
+  return cp->chars ? cp : xb_codepage_find("CP437", 5);
+}
+
+/* The records of a saved screen (term/screen.h): their data bytes, each saved in a cell's character byte with a 0 in
+ * its attribute byte, so that a program changing the attribute bytes (a shadow) leaves them whole: the mark, then
+ * the records, then their count and the xb_hash_bytes of the records and the count. */
+static const char kSavedMark[2] = {'X', 'S'};
+enum { SAVED_RECORD = 14, SAVED_TRAILER = 8 };
+
+static void put_saved(xb_buffer *out, const unsigned char *data, size_t n) {
+  for (size_t k = 0; k < n; ++k) {
+    char pair[2] = {(char)data[k], 0};
+    xb_buffer_put(out, pair, 2);
+  }
+}
+
+void xb_screen_save(int32_t top, int32_t left, int32_t bottom, int32_t right, const xb_codepage *cp,
+                    xb_buffer *out) {
+  const xb_codepage *table = saved_codepage(cp);
+  xb_buffer records = {0};
+  uint32_t count = 0, k = 0;
+  lock();
+  ensure();
+  within(&top, &left, &bottom, &right);
+  size_t cells = (size_t)(right - left + 1) * (size_t)(bottom - top + 1);
+  unsigned char *pairs = malloc(2 * cells);
+  if (!pairs) xb_gc_fatal("out of memory");
+  for (int32_t r = top; r <= bottom; ++r) {
+    const cell *line = row_cells(r);
+    for (int32_t c = left; c <= right; ++c, ++k) {
+      const cell *x = &line[c];
+      char bytes[4];
+      /* ASCII is its own byte in every codepage of one byte a character and in CP437 */
+      int one = x->part == WHOLE;
+      if (one && x->ch < 0x80) bytes[0] = (char)x->ch;
+      else if (one) one = xb_cp_encode(table, x->ch, bytes) == 1;
+      unsigned char *pair = pairs + 2 * (size_t)k;
+      pair[0] = one ? (unsigned char)bytes[0] : '?';
+      pair[1] = x->attr;
+      if (one && !x->mark) continue;
+      unsigned char record[SAVED_RECORD];
+      xb_put_le32(record, k);
+      record[4] = pair[0];
+      xb_put_le32(record + 5, x->ch);
+      xb_put_le32(record + 9, x->mark);
+      record[13] = x->part;
+      xb_buffer_put(&records, (const char *)record, sizeof record);
+      ++count;
+    }
+  }
+  unlock();
+  xb_buffer_put(out, (const char *)pairs, 2 * cells);
+  free(pairs);
+  if (count) {
+    unsigned char trailer[SAVED_TRAILER];
+    xb_put_le32(trailer, count);
+    xb_buffer_put(&records, (const char *)trailer, 4);
+    xb_put_le32(trailer + 4, xb_hash_bytes(records.p, records.len));
+    put_saved(out, (const unsigned char *)kSavedMark, sizeof kSavedMark);
+    put_saved(out, (const unsigned char *)records.p, records.len);
+    put_saved(out, trailer + 4, 4);
+  }
+  xb_buffer_free(&records);
+}
+
+/* A record's cell as it could have been saved: a code point of the width its part says, a mark of no width. */
+static int saved_cell_valid(uint32_t ch, uint32_t mark, unsigned part) {
+  int valid = ch <= 0x10FFFF && (ch < 0xD800 || ch > 0xDFFF);
+  if (part == WIDE_SECOND) return ch == 0 && !mark;
+  if (!valid || xb_cp_width(ch) != (part == WIDE_FIRST ? 2 : 1)) return 0;
+  return !mark || (mark <= 0x10FFFF && xb_cp_width(mark) == 0);
+}
+
+/* The records after a saved screen's `cells` (their data bytes gathered into `data`), when they are whole: their
+ * count, or 0. */
+static size_t saved_records(const unsigned char *bytes, size_t len, size_t cells, xb_buffer *data) {
+  size_t extra = len - 2 * cells;
+  if (len <= 2 * cells || extra % 2) return 0;
+  for (size_t k = 0; k < extra / 2; ++k) xb_buffer_put(data, (const char *)&bytes[2 * cells + 2 * k], 1);
+  const unsigned char *d = (const unsigned char *)data->p;
+  size_t n = data->len;
+  if (n < sizeof kSavedMark + SAVED_TRAILER || memcmp(d, kSavedMark, sizeof kSavedMark)) return 0;
+  size_t count = (n - sizeof kSavedMark - SAVED_TRAILER) / SAVED_RECORD;
+  if (sizeof kSavedMark + count * SAVED_RECORD + SAVED_TRAILER != n) return 0;
+  const unsigned char *trailer = d + n - SAVED_TRAILER;
+  if (xb_get_le32(trailer) != count) return 0;
+  if (xb_get_le32(trailer + 4) != xb_hash_bytes((const char *)d + sizeof kSavedMark, n - sizeof kSavedMark - 4))
+    return 0;
+  return count;
+}
+
+void xb_screen_restore(int32_t top, int32_t left, int32_t bottom, int32_t right, const xb_codepage *cp,
+                       const char *text, size_t len) {
+  const xb_codepage *table = saved_codepage(cp);
+  const unsigned char *bytes = (const unsigned char *)text;
+  xb_buffer data = {0};
+  lock();
+  ensure();
+  within(&top, &left, &bottom, &right);
+  int32_t width = right - left + 1;
+  size_t cells = (size_t)width * (size_t)(bottom - top + 1);
+  for (int32_t r = top; r <= bottom; ++r) cut_edges(r, left, right);
+  for (size_t k = 0; k < cells; ++k) { /* bytes past the string's end are zeros */
+    size_t n;
+    char ch = 2 * k < len ? (char)bytes[2 * k] : 0;
+    cell *x = at(top + (int32_t)(k / (size_t)width), left + (int32_t)(k % (size_t)width));
+    *x = (cell){xb_cp_decode(table, &ch, 1, 0, &n), 0, 2 * k + 1 < len ? bytes[2 * k + 1] : 0, WHOLE};
+  }
+  size_t count = saved_records(bytes, len, cells, &data);
+  const unsigned char *d = (const unsigned char *)data.p + sizeof kSavedMark;
+  for (size_t j = 0; j < count; ++j, d += SAVED_RECORD) { /* the characters the bytes do not give */
+    uint32_t k = xb_get_le32(d), ch = xb_get_le32(d + 5), mark = xb_get_le32(d + 9);
+    if (k >= cells || bytes[2 * (size_t)k] != d[4] || d[13] > WIDE_SECOND || !saved_cell_valid(ch, mark, d[13]))
+      continue; /* a cell whose character byte the program changed keeps that one */
+    cell *x = at(top + (int32_t)(k / (uint32_t)width), left + (int32_t)(k % (uint32_t)width));
+    x->ch = ch;
+    x->mark = mark;
+    x->part = d[13];
+  }
+  for (int32_t r = top; r <= bottom; ++r) repair_span(r, left > 0 ? left - 1 : 0, right);
+  unlock();
+  xb_buffer_free(&data);
+}
+
+int32_t xb_screen_hold(int32_t by) {
+  lock();
+  int64_t held = (int64_t)screen.held + by;
+  screen.held = held < 0 ? 0 : held > INT32_MAX ? INT32_MAX : (int32_t)held;
+  int32_t now = screen.held;
+  unlock();
+  return now;
+}
+
+int xb_screen_cursor_shape(int shape) {
+  lock();
+  int was = screen.shape;
+  if (shape >= 0) screen.shape = shape;
+  unlock();
+  return was;
 }
 
 static void put_text(xb_buffer *out, const char *text) { xb_buffer_put(out, text, strlen(text)); }

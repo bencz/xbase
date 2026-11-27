@@ -2,8 +2,8 @@
 
 The screen, the keyboard and the mouse: everything a full-screen program uses (`@ SAY`, `CLS`, `Inkey`, `SaveScreen`,
 `SetColor`, `Alert`, `AChoice`, `MemoEdit`, `GET`/`READ`, `TBrowse`). The screen model, the Stream and Dump drivers and
-the screen's positions and output exist (`runtime/src/term/`, `runtime/src/rtl/screen.c`); the rest is the plan the
-work follows, each part marked planned until it is done.
+the screen's functions exist (`runtime/src/term/`, `runtime/src/rtl/screen.c` and `screen.prg`); the rest is the plan
+the work follows, each part marked planned until it is done.
 
 Goals: Clipper's behavior on every platform; programs that adapt to the size of the terminal or window while they run
 (`MaxRow()` and `MaxCol()` follow it, and a resize reaches the program as an event); exact text and colors in any
@@ -14,17 +14,17 @@ terminal in use today; output that tests can check; no library a program must ca
 1. **The screen model** (portable C, `term/screen.c`): a grid of cells, each a character (a Unicode code point, with its
    width: 1, or 2 for wide characters, whose second cell continues the first; a combining mark that follows it) and a
    color attribute (foreground and background, 16 colors each, as Clipper's); the cursor; the current colors
-   (`SetColor`: standard, enhanced, border, background, unselected; `ColorSelect`). Planned: the cursor's shape
-   (`SetCursor`). Every screen function of the language works on the model only, never on a driver: `DevPos`, `DevOut`,
-   `DispOut`, `DispOutAt`, `Scroll`, `SetPos`, `Row`, `Col`, `MaxRow`, `MaxCol`, `SetMode`, and `?`/`QOut` on the screen
-   (at the cursor, scrolling the screen at its bottom); planned: `DispBox`, `SaveScreen` and `RestScreen` (a cells
-   string, opaque to programs), `DispBegin`/`DispEnd`/`DispCount` (updates held until the outermost `DispEnd`). So every
-   driver shows the same thing. The model is one for the program, under a lock of its own held only for an operation on
-   it (never across I/O, so a thread waiting for it keeps no collection waiting); the console's writes also hold the
-   output lock, so a thread's write reaches the standard output and the model whole and in order. Its rows are a ring in
-   storage: a scroll of the whole screen, as the console's past the bottom row, blanks one row and turns the ring
-   (200,000 lines of `?` on the Stream driver take about 1.5 times as long as when the console was the standard output
-   alone).
+   (`SetColor`: standard, enhanced, border, background, unselected; `ColorSelect`); the cursor's shape (`SetCursor`);
+   the depth of held updates (`DispBegin`, `DispEnd`, `DispCount`: a terminal driver, planned, shows the screen once it
+   is 0 again). Every screen function of the language works on the model only, never on a driver: `DevPos`, `DevOut`,
+   `DevOutPict`, `DispOut`, `DispOutAt`, `Scroll`, `DispBox`, `SaveScreen`, `RestScreen`, `SetPos`, `Row`, `Col`,
+   `MaxRow`, `MaxCol`, `SetMode`, and `?`/`QOut` on the screen (at the cursor, scrolling the screen at its bottom). So
+   every driver shows the same thing. The model is one for the program, under a lock of its own held only for an
+   operation on it (never across I/O, so a thread waiting for it keeps no collection waiting); the console's writes also
+   hold the output lock, so a thread's write reaches the standard output and the model whole and in order. Its rows are
+   a ring in storage: a scroll of the whole screen, as the console's past the bottom row, blanks one row and turns the
+   ring (200,000 lines of `?` on the Stream driver take about 1.5 times as long as when the console was the standard
+   output alone).
 2. **Events** (portable C, planned): one queue of keys (Clipper's `Inkey` codes), mouse events (Clipper 5.3's codes and
    event masks), resize events, the `KEYBOARD` buffer (`SET TYPEAHEAD`), `SET KEY` blocks;
    `Inkey( [nSeconds], [nMask] )`, `NextKey`, `LastKey`, `MRow`, `MCol` and the other mouse functions read it.
@@ -114,8 +114,7 @@ compiled terminfo entry can be added later if a terminal ever needs it.
 ## Characters, colors and codepages
 
 - `DispOut` and the other output functions read their strings as `SET CODEPAGE` says, so `"ação"` shows as four
-  characters in UTF-8; the box strings of `box.ch` are written for the current codepage (UTF-8 box drawing
-  characters by default, CP437's bytes under CP437).
+  characters in UTF-8; the frames of `box.ch` are UTF-8 strings ([Frames and saved screens](#frames-and-saved-screens)).
 - Wide characters (CJK, emoji) take two cells, as the terminal shows them; a width table generated from the Unicode
   data, as the codepage data is, tells which.
 - Colors are Clipper's: `N B G BG R RB GR W`, `+` bright foreground, `*` bright background (with `SetBlink( .F. )`, as
@@ -147,6 +146,36 @@ compiled terminfo entry can be added later if a terminal ever needs it.
 - `SetBlink( [lBlink] )` tells (and sets) whether `*` blinks or brightens the background: the attribute stays the
   same (a terminal driver, planned, shows it so). `IsColor()` is `.T.`.
 
+## Frames and saved screens
+
+- `DispBox( nTop, nLeft, nBottom, nRight, [cnFrame], [cColor] )` draws a frame on the part of the rectangle within the
+  screen, its corners in any order (one that is no number: no frame): `cnFrame` is a string of its characters (top
+  left, top, top right, right, bottom right, bottom, bottom left, left, then one that fills the inside), read in the
+  codepage up to a `Chr(0)` (under UTF-8, a string that is not UTF-8 in CP437, as Clipper's frames are written in
+  bytes), marks of no width left out, a missing character the one before it (the inside only filled by a ninth), an
+  empty string blanking the whole box; the number 2 is the double frame and any other (or none) the single one. A
+  frame of one row is its top character, of one column its right one. The cursor stays at the frame's first given
+  corner plus one row and one column. `@ ... BOX`, `@ ... TO` and `@ ... TO ... DOUBLE` draw with it; `box.ch` names
+  the four frames of Clipper's (`B_SINGLE`, `B_DOUBLE`, `B_SINGLE_DOUBLE`, `B_DOUBLE_SINGLE`) in UTF-8, the default
+  codepage (under another, `DispBox` with 1 and 2 draws the single and the double frames).
+- `SaveScreen( [nTop], [nLeft], [nBottom], [nRight] )` gives the rectangle (the whole screen by default; its corners
+  sorted and brought within the screen) as Clipper's string of it: two bytes a cell, row by row, its character (in a
+  single-byte codepage that one's byte, in UTF-8 CP437's, `?` when it has none) and its attribute, so that a program
+  may change the attribute bytes (a shadow) as Clipper programs do. What those bytes cannot give back (a wide
+  character's halves, other code points, a combining mark), which the reference loses, follows the cells as records
+  (the cell, the byte saved for it, its code point, mark and half), each byte of theirs in a character byte with a 0 in
+  the attribute byte after it, so that a shadow leaves them whole, and closed by their count and a hash.
+  `RestScreen( [nTop], [nLeft], [nBottom], [nRight], cScreen )` puts the string back on the rectangle's cells, row by
+  row, bytes past its end as zeros (`Chr(0)` in `N/N`), then the records, when they are whole, whose cells' character
+  bytes are as saved (a character byte the program changed keeps its character) and whose characters are valid for
+  their halves; the cursor stays. `SAVE SCREEN TO` and `RESTORE SCREEN FROM` save and restore the whole screen through
+  a variable; `SAVE SCREEN` keeps the screen and the cursor in one place of the program's, which `RESTORE SCREEN`
+  brings back once.
+- `SetCursor( [nShape] )` gives the cursor's shape (`setcurs.ch`: 0 none, 1 normal, 2 insert, 3 and 4 special) and
+  sets it (any other number: normal); `SET CURSOR ON|OFF` sets normal or none.
+- `DevOutPict( xValue, cPicture, [cColor] )` shows `Transform( xValue, cPicture )` as `DevOut` does; `@ ... SAY ...
+  PICTURE` uses it, its `PICTURE` and `COLOR` clauses in any order.
+
 ## Restoring the terminal
 
 The VT driver puts the terminal back as it found it (mode, alternate screen, cursor, mouse reporting) when the program
@@ -164,10 +193,9 @@ ends in any way (`QUIT`, an unrecoverable error, a fatal error, a signal that en
 
 ## Order of the work
 
-1. The model, the Stream and Dump drivers, and the screen functions and commands (`@ SAY`, `@ CLEAR`, `CLS`,
-   `@ BOX`, `@ TO`, `?` on the screen), with `SetColor` and colors; `box.ch`. Done: the model, the two drivers, the
-   positions, `?` on the screen, `DevOut`, `DispOut`, `DispOutAt`, `Scroll`, `SetMode`, `@ SAY`, `@ CLEAR`, `CLS`, the
-   colors; next `DispBox`, `@ BOX`, `@ TO`, `SaveScreen`, `RestScreen`, `DispBegin`, `SetCursor`, `@ SAY PICTURE`.
+1. Done: the model, the Stream and Dump drivers, and the screen functions and commands (`@ SAY` with `PICTURE` and
+   `COLOR`, `@ CLEAR`, `CLS`, `@ BOX`, `@ TO`, `SAVE SCREEN`, `RESTORE SCREEN`, `SET COLOR`, `SET CURSOR`, `?` on the
+   screen), the colors, `box.ch` and `setcurs.ch`.
 2. Events: `Inkey`, `NextKey`, `LastKey`, `KEYBOARD`, `SET KEY`, `SET TYPEAHEAD`, `inkey.ch`, event masks, resize.
    The console's redirections: `SET CONSOLE`, `SET ALTERNATE TO <file> [ADDITIVE]` and `SET ALTERNATE ON|OFF`,
    `SET PRINTER TO` and `ON|OFF`, `SET DEVICE`; with them the database commands that print through them, `LIST` and
