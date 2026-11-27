@@ -1522,8 +1522,9 @@ Each one moved from C is measured against its C version (callgrind).
   stack: line 0, no source file, the hidden ones hidden. Their functions are written so that a call with a codeblock
   literal, inlined, folds to its array path (`ValType()` of a block or an array literal is known).
 - Primitives for them: `__ConsoleWrite( lNewLine, [xValues...] )` writes a new line when `lNewLine` is `.T.`, then
-  the display forms of the values ([Display](#display)) separated by spaces, to the console (standard output until the
-  terminal layer exists); `__StdWrite( nHandle, [xValues...] )` writes the values so to the standard output (1) or
+  the display forms of the values ([Display](#display)) separated by spaces, to the console: the screen at its cursor,
+  and the terminal driver's console (the Stream driver's: the standard output, as written; [terminal.md](terminal.md));
+  `__StdWrite( nHandle, [xValues...] )` writes the values so to the standard output (1) or
   error (2), flushing the output before writing to the error. A call gathers its bytes first (`xb_buffer`,
   `core/text.h`: each display form copied as it is made), then writes them in one blocking operation under the output
   lock (`xb_output_lock`, `core/sync.h`, which the report of an unrecoverable error takes too), so no other thread's
@@ -1617,7 +1618,8 @@ leaves it as it is.
   not becomes `?`; between a codepage and itself the text comes back as it is. A byte `CP1252` leaves undefined (0x81,
   0x8D, 0x8F, 0x90, 0x9D) stands for the code point of its own value, so it converts both ways. An unknown codepage, or
   an argument that is no string, is its argument error (9015).
-- Comparisons and sorting compare bytes; the console writes the bytes as they are.
+- Comparisons and sorting compare bytes; the console writes the bytes as they are (the screen reads them in the
+  codepage: [terminal.md](terminal.md)).
 
 ## Files
 
@@ -2015,10 +2017,11 @@ on the program's thread (started with `xb_thread_start` and a stack reserved at 
 first thread when it cannot be started), attached to the collector, it creates the context (the first, which starts the
 `ElapsedMs` clock), makes the arguments after the program's name strings in a frame of its own linked into the context's
 chain (so the collector sees them; an argument that starts with `//` is a runtime option, which the program does not
-receive: `//WORKERS:n` sets the workers that run tasks at once, letters in any case, and any other is ignored, as in the
-reference), calls `xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, flushes output, detaches and
-returns the exit code. `xb_app_main` checks the ABI and calls `xb_program_run`, which runs, in this
-order:
+receive: `//WORKERS:n` sets the workers that run tasks at once, `//TERM:name` the terminal driver
+([terminal.md](terminal.md#drivers)), letters in any case, and any other is ignored, as in the reference), calls
+`xb_app_main( ctx, argc, argv )` (emitted by the compiler) with them, ends the terminal driver (the Dump driver writes
+the screen), flushes output, detaches and returns the exit code. `xb_app_main` checks the ABI and calls
+`xb_program_run`, which runs, in this order:
 
 1. the modules' `STATIC` initializations, from the lowest level up (a library before the ones that use it, the
    program's modules last), in registration order within a level;

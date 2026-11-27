@@ -44,7 +44,11 @@ and end without one. When Harbour is installed, an execution test's expected out
 (ulimit -v 2000000; timeout 10 ./test | head -c 100000) > harbour.out
 ```
 
-`-gtcgi` gives plain console output. Harbour's own mode has compiler extensions that change results (its optimizer
+`-gtcgi` gives plain console output. A screen test runs with the Dump driver (`//TERM:DUMP` in its `.args`), which
+writes the screen as text when the program ends ([terminal.md](terminal.md#drivers)); under Harbour the same program is
+built with `-gtnul`, which keeps a screen and shows nothing, and functions appended to the copy write that screen in the
+Dump driver's format from `SaveScreen()` (character and attribute bytes), with `SetMode( 25, 80 )` and `CLS` first.
+Harbour's own mode has compiler extensions that change results (its optimizer
 turns `x := x op v` into `x op= v` and reads `x` last); language rules such as evaluation order are checked in its
 Clipper mode, adding `-prgflag=-kc` to `hbmk2`. A difference is either fixed or documented as a deliberate one in the
 matching doc (for example the last digits of large doubles in [runtime.md](runtime.md#display), or each operand of

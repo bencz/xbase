@@ -13,10 +13,6 @@ const xb_str *xb_db_str_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
   return argc > k && argv[k].type == XB_T_STRING ? argv[k].v.s : NULL;
 }
 
-int64_t xb_db_num_arg(uint32_t argc, const xb_item *argv, uint32_t k, int64_t dflt) {
-  return argc > k && xb_is_number(&argv[k]) ? xb_num_to_i64(&argv[k]) : dflt;
-}
-
 int xb_db_logical_arg(uint32_t argc, const xb_item *argv, uint32_t k) {
   return argc > k && argv[k].type == XB_T_LOGICAL && argv[k].v.l;
 }
@@ -103,7 +99,7 @@ void xbf_DBCLOSEALL(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_DBSELECTAREA(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   const xb_str *alias = xb_db_str_arg(argc, argv, 0);
-  int64_t n = xb_db_num_arg(argc, argv, 0, -1);
+  int64_t n = xb_num_arg(argc, argv, 0, -1);
   for (uint16_t tries = 1; alias && (n = xb_area_named(ctx, xb_str_data(alias), alias->len)) < 0; ++tries) {
     const char *name = xb_item_cstr(&argv[0]); /* the error's operation */
     if (xb_error_of(ctx, NULL, EG_NOALIAS, 1002, name, NULL, 0, XB_ERR_RETRY, 0, NULL, tries, NULL) != 2) return;
@@ -122,7 +118,7 @@ void xbf_SELECT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* Alias( [nArea] ): the alias of the area (the current one), "" when none is open there. */
 void xbf_ALIAS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
-  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  int64_t n = xb_num_arg(argc, argv, 0, 0);
   const xb_area *a = n > 0 && n <= UINT32_MAX ? xb_area_at(ctx, (uint32_t)n) : xb_area_current(ctx);
   xb_set_str(ret, a ? xb_str_new(a->alias, strlen(a->alias)) : xb_str_empty());
 }
@@ -136,7 +132,7 @@ void xbf_USED(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_DBGOTO(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   xb_area *a = xb_db_used(ctx, "DBGOTO");
-  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  int64_t n = xb_num_arg(argc, argv, 0, 0);
   if (a) xb_area_goto(ctx, a, n < 1 || n > UINT32_MAX ? 0 : (uint32_t)n);
 }
 
@@ -159,7 +155,7 @@ void xbf_DBGOBOTTOM(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 void xbf_DBSKIP(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   xb_area *a = xb_db_used(ctx, "DBSKIP");
-  if (a) xb_area_skip(ctx, a, xb_db_num_arg(argc, argv, 0, 1));
+  if (a) xb_area_skip(ctx, a, xb_num_arg(argc, argv, 0, 1));
 }
 
 void xbf_BOF(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
@@ -214,7 +210,7 @@ void xbf_FCOUNT(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
 
 /* The 0-based field of argument `k` (1-based in the language), or -1. */
 static int64_t field_arg(const xb_area *a, uint32_t argc, const xb_item *argv, uint32_t k) {
-  int64_t n = xb_db_num_arg(argc, argv, k, 0);
+  int64_t n = xb_num_arg(argc, argv, k, 0);
   return a && n >= 1 && n <= a->nfields ? n - 1 : -1;
 }
 
@@ -520,7 +516,7 @@ int xb_db_scope(xb_ctx *ctx, xb_area *a, uint32_t argc, const xb_item *argv, uin
   const xb_item *forBlock = argc > k ? &argv[k] : NULL, *whileBlock = argc > k + 1 ? &argv[k + 1] : NULL;
   int hasWhile = whileBlock && whileBlock->type == XB_T_BLOCK;
   int hasNext = argc > k + 2 && xb_is_number(&argv[k + 2]);
-  int64_t next = xb_db_num_arg(argc, argv, k + 2, 0), record = xb_db_num_arg(argc, argv, k + 3, 0);
+  int64_t next = xb_num_arg(argc, argv, k + 2, 0), record = xb_num_arg(argc, argv, k + 3, 0);
   int rest = xb_db_logical_arg(argc, argv, k + 4);
   if (record > 0) {
     if (!xb_area_goto(ctx, a, record > UINT32_MAX ? 0 : (uint32_t)record)) return 0;
@@ -624,7 +620,7 @@ void xbf_DBRLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_set_logical(ret, 0);
   xb_area *a = xb_db_record(ctx, "DBRLOCK");
   if (!a) return;
-  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  int64_t n = xb_num_arg(argc, argv, 0, 0);
   int given = n > 0 && n <= UINT32_MAX;
   xb_set_logical(ret, xb_area_lock(ctx, a, given ? (uint32_t)n : a->recno, given)); /* none given: as RLock() */
 }
@@ -644,7 +640,7 @@ void xbf_DBRUNLOCK(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   xb_area *a = xb_db_used(ctx, "DBRUNLOCK");
   if (!a) return;
-  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  int64_t n = xb_num_arg(argc, argv, 0, 0);
   if (n > 0 && n <= UINT32_MAX) xb_area_unlock(ctx, a, (uint32_t)n);
   else if (n == 0) xb_area_unlock_records(ctx, a);
 }

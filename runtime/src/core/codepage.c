@@ -10,28 +10,20 @@ static const xb_codepage utf8 = {"UTF8", NULL, NULL, NULL, NULL};
 
 const xb_codepage *xb_codepage_utf8(void) { return &utf8; }
 
-static int same_name(const char *a, const char *b, size_t len) {
-  for (size_t i = 0; i < len; ++i) {
-    char c = a[i] >= 'a' && a[i] <= 'z' ? (char)(a[i] - 'a' + 'A') : a[i];
-    if (c != b[i] || !b[i]) return 0;
-  }
-  return b[len] == '\0';
-}
-
 const xb_codepage *xb_codepage_find(const char *name, size_t len) {
   static const struct {
     const char *alias, *name;
   } aliases[] = {{"UTF-8", "UTF8"},          {"IBM437", "CP437"},         {"IBM850", "CP850"},
                  {"WINDOWS-1252", "CP1252"}, {"ISO-8859-1", "ISO8859-1"}, {"LATIN1", "ISO8859-1"}};
   for (size_t k = 0; k < sizeof aliases / sizeof aliases[0]; ++k)
-    if (same_name(name, aliases[k].alias, len)) {
+    if (xb_name_is(name, len, aliases[k].alias)) {
       name = aliases[k].name;
       len = strlen(name);
       break;
     }
-  if (same_name(name, utf8.name, len)) return &utf8;
+  if (xb_name_is(name, len, utf8.name)) return &utf8;
   for (size_t k = 0; k < xb_cp_singles_count; ++k)
-    if (same_name(name, xb_cp_singles[k].name, len)) return &xb_cp_singles[k];
+    if (xb_name_is(name, len, xb_cp_singles[k].name)) return &xb_cp_singles[k];
   return NULL;
 }
 
@@ -142,14 +134,22 @@ size_t xb_cp_encode(const xb_codepage *cp, uint32_t c, char out[4]) {
 }
 
 /* What code point `c` is (the letter ranges). */
-static int kind_of(uint32_t c) {
-  size_t lo = 0, hi = xb_cp_letters_count;
+/* The kind of the range of `table` that holds `c`, `none` when none does. */
+static int range_kind(const xb_cp_range *table, size_t count, uint32_t c, int none) {
+  size_t lo = 0, hi = count;
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
-    if (xb_cp_letters[mid].last < c) lo = mid + 1;
+    if (table[mid].last < c) lo = mid + 1;
     else hi = mid;
   }
-  return lo < xb_cp_letters_count && xb_cp_letters[lo].first <= c ? xb_cp_letters[lo].kind : XB_CP_NONE;
+  return lo < count && table[lo].first <= c ? table[lo].kind : none;
+}
+
+static int kind_of(uint32_t c) { return range_kind(xb_cp_letters, xb_cp_letters_count, c, XB_CP_NONE); }
+
+int xb_cp_width(uint32_t c) {
+  if (c < 0x300) return 1; /* nothing below the combining diacritics has another width (the soft hyphen shows) */
+  return range_kind(xb_cp_widths, xb_cp_widths_count, c, 1);
 }
 
 /* Code point `c` in the other case, by the runs of `table` (itself when it has none). */

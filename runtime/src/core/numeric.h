@@ -85,6 +85,11 @@ static inline int64_t xb_num_to_i64(const xb_item *it) {
  * every size limit rejects. */
 static inline uint64_t xb_mul_sat_u64(uint64_t a, uint64_t b) { return a && b > UINT64_MAX / a ? UINT64_MAX : a * b; }
 
+/* Argument k of a function as an integer (xb_num_to_i64) when it is a number, else `dflt`. */
+static inline int64_t xb_num_arg(uint32_t argc, const xb_item *argv, uint32_t k, int64_t dflt) {
+  return k < argc && xb_is_number(&argv[k]) ? xb_num_to_i64(&argv[k]) : dflt;
+}
+
 /* A number truncated toward zero and wrapped to 32 bits signed (0 for a
  * double beyond 64 bits), as the C integers of the reference keep numbers. */
 static inline int32_t xb_num_wrap_int32(const xb_item *n) {

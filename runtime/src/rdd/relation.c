@@ -176,7 +176,7 @@ static void set_relation(xb_ctx *ctx, uint32_t argc, xb_item *argv, int scoped) 
   if (xb_db_str_arg(argc, argv, 0)) {
     if (!xb_area_lookup(ctx, &argv[0], &n) || !(a = xb_area_current(ctx))) return; /* the error block may close it */
   } else {
-    int64_t num = xb_db_num_arg(argc, argv, 0, 0);
+    int64_t num = xb_num_arg(argc, argv, 0, 0);
     n = xb_area_number(num);
   }
   xb_area *child = xb_area_at(ctx, n);
@@ -211,7 +211,7 @@ void xbf_DBCLEARRELATION(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv
 /* The current area's relation `nRelation` (1-based; 0 or none: the first), NULL for none. */
 static const xb_relation *relation_arg(xb_ctx *ctx, uint32_t argc, const xb_item *argv) {
   const xb_area *a = xb_area_current(ctx);
-  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  int64_t n = xb_num_arg(argc, argv, 0, 0);
   if (n == 0) n = 1;
   return a && n >= 1 && n <= a->nrelations ? a->relations[n - 1] : NULL;
 }

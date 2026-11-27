@@ -10,10 +10,6 @@ static const xb_str *str_arg(const xb_item *argv, uint32_t argc, uint32_t i) {
   return i < argc && argv[i].type == XB_T_STRING ? argv[i].v.s : NULL;
 }
 
-static int64_t num_arg(const xb_item *argv, uint32_t argc, uint32_t i, int64_t dflt) {
-  return i < argc && xb_is_number(&argv[i]) ? xb_num_to_i64(&argv[i]) : dflt;
-}
-
 static void ret_str(xb_item *ret, const char *p, size_t n) { xb_set_str(ret, xb_str_new(p, n)); }
 
 /* The bytes from `from` of `s`, `n` of them: `s` itself when that is all of it. */
@@ -275,8 +271,8 @@ void xbf_STRTRAN(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   const xb_str *repl = str_arg(argv, argc, 2);
   const char *rp = repl ? xb_str_data(repl) : "";
   size_t rlen = repl ? repl->len : 0;
-  int64_t start = num_arg(argv, argc, 3, 1);
-  int64_t count = num_arg(argv, argc, 4, -1);
+  int64_t start = xb_num_arg(argc, argv, 3, 1);
+  int64_t count = xb_num_arg(argc, argv, 4, -1);
   if (start == 0 || count == 0) {
     ret_str(ret, "", 0);
     return;

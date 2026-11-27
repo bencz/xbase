@@ -1,8 +1,9 @@
-# Terminal (planned)
+# Terminal
 
-The design of the screen, the keyboard and the mouse: everything a full-screen program uses (`@ SAY`, `CLS`, `Inkey`,
-`SaveScreen`, `SetColor`, `Alert`, `AChoice`, `MemoEdit`, `GET`/`READ`, `TBrowse`). Nothing of it exists yet; this
-document is the plan the work follows, and becomes the description of the code as parts of it are done.
+The screen, the keyboard and the mouse: everything a full-screen program uses (`@ SAY`, `CLS`, `Inkey`, `SaveScreen`,
+`SetColor`, `Alert`, `AChoice`, `MemoEdit`, `GET`/`READ`, `TBrowse`). The screen model, the Stream and Dump drivers and
+the screen's positions and output exist (`runtime/src/term/`, `runtime/src/rtl/screen.c`); the rest is the plan the
+work follows, each part marked planned until it is done.
 
 Goals: Clipper's behavior on every platform; programs that adapt to the size of the terminal or window while they run
 (`MaxRow()` and `MaxCol()` follow it, and a resize reaches the program as an event); exact text and colors in any
@@ -10,39 +11,69 @@ terminal in use today; output that tests can check; no library a program must ca
 
 ## Layers
 
-1. **The screen model** (portable C, `runtime/src/term/`): a grid of cells, each a character (a Unicode code point,
-   with its width: 1, or 2 for wide characters, whose second cell continues the first) and a color attribute
-   (foreground and background, 16 colors each, as Clipper's); the cursor (position and shape, `SetCursor`); the current
-   colors (`SetColor`: standard, enhanced, border, background, unselected). Every screen function of the language works
-   on the model only, never on a driver: `DevPos`, `DevOut`, `DispOut`, `DispOutAt`, `Scroll`, `DispBox`, `SaveScreen`
-   and `RestScreen` (a cells string, as Clipper's, opaque to programs), `SetPos`, `Row`, `Col`, `MaxRow`, `MaxCol`,
-   `DispBegin`/`DispEnd`/`DispCount` (updates held until the outermost `DispEnd`), and `?`/`QOut` on the screen (at the
-   cursor, scrolling the screen at its bottom). So every driver shows the same thing.
-2. **Events** (portable C): one queue of keys (Clipper's `Inkey` codes), mouse events (Clipper 5.3's codes and event
-   masks), resize events, the `KEYBOARD` buffer (`SET TYPEAHEAD`), `SET KEY` blocks; `Inkey( [nSeconds], [nMask] )`,
-   `NextKey`, `LastKey`, `MRow`, `MCol` and the other mouse functions read it.
-3. **Drivers**: the only code that touches the operating system's terminal or window. A driver opens and closes the
-   device, tells its size, shows the cells that changed and the cursor, and gives events with a timeout. The interface
-   is small, so drivers are easy to add.
-4. **The library in xBase** (`runtime/src/rtl/*.prg`): `Alert`, `AChoice`, `MemoEdit`, the `GET` class and `READ`,
-   `TBrowse` and `TBColumn`, `dbEdit`, menus: written over layers 1 and 2.
+1. **The screen model** (portable C, `term/screen.c`): a grid of cells, each a character (a Unicode code point, with its
+   width: 1, or 2 for wide characters, whose second cell continues the first; a combining mark that follows it) and a
+   color attribute (foreground and background, 16 colors each, as Clipper's); the cursor. Planned: the cursor's shape
+   (`SetCursor`), the current colors (`SetColor`: standard, enhanced, border, background, unselected). Every screen
+   function of the language works on the model only, never on a driver: `DevPos`, `DevOut`, `DispOut`, `DispOutAt`,
+   `Scroll`, `SetPos`, `Row`, `Col`, `MaxRow`, `MaxCol`, `SetMode`, and `?`/`QOut` on the screen (at the cursor,
+   scrolling the screen at its bottom); planned: `DispBox`, `SaveScreen` and `RestScreen` (a cells string, opaque to
+   programs), `DispBegin`/`DispEnd`/`DispCount` (updates held until the outermost `DispEnd`). So every driver shows the
+   same thing. The model is one for the program, under a lock of its own held only for an operation on it (never
+   across I/O, so a thread waiting for it keeps no collection waiting); the console's writes also hold the output lock,
+   so a thread's write reaches the standard output and the model whole and in order. Its rows are a ring in storage: a
+   scroll of the whole screen, as the console's past the bottom row, blanks one row and turns the ring (200,000 lines
+   of `?` on the Stream driver take about 1.5 times as long as when the console was the standard output alone).
+2. **Events** (portable C, planned): one queue of keys (Clipper's `Inkey` codes), mouse events (Clipper 5.3's codes and
+   event masks), resize events, the `KEYBOARD` buffer (`SET TYPEAHEAD`), `SET KEY` blocks;
+   `Inkey( [nSeconds], [nMask] )`, `NextKey`, `LastKey`, `MRow`, `MCol` and the other mouse functions read it.
+3. **Drivers** (`term/drivers.c`): the only code that touches the operating system's terminal or window. A driver opens
+   and closes the device, tells its size, shows the cells that changed and the cursor, and gives events with a timeout.
+   The interface is small, so drivers are easy to add.
+4. **The library in xBase** (`runtime/src/rtl/*.prg`, planned): `Alert`, `AChoice`, `MemoEdit`, the `GET` class and
+   `READ`, `TBrowse` and `TBColumn`, `dbEdit`, menus: written over layers 1 and 2.
 
 ## Drivers
 
 | Driver | Where | What |
 |---|---|---|
-| Stream | everywhere | No screen: output goes to standard output as a stream, as today (pipes, files, servers, tests of plain output). Screen functions keep the model and show nothing. |
-| VT | Linux, macOS, BSD | xbase's own: the terminal in raw mode (`termios`) and the ECMA-48/xterm sequences: cursor addressing, 16 colors (`SGR`), the alternate screen, cursor shape and visibility, mouse (`SGR` mode 1006), bracketed paste; keys decoded from xterm's sequences with modifiers (Ctrl, Alt, Shift with arrows, Home, End, PgUp, PgDn, Ins, Del, F1 to F12). |
-| Console | Windows | The console API: input records (`ReadConsoleInputW`: keys with their modifiers, mouse, buffer resize events) and cell output. |
-| Dump | everywhere | For tests: the screen in memory, written as text (characters, then colors, row by row) when the program ends or on request; keys come from `KEYBOARD`. |
+| Stream | everywhere | No screen: the console's output (`?`, `QOut`) goes to standard output as the program wrote it, a stream (pipes, files, servers, tests of plain output). Screen functions keep the model and show nothing. |
+| VT | Linux, macOS, BSD | Planned. xbase's own: the terminal in raw mode (`termios`) and the ECMA-48/xterm sequences: cursor addressing, 16 colors (`SGR`), the alternate screen, cursor shape and visibility, mouse (`SGR` mode 1006), bracketed paste; keys decoded from xterm's sequences with modifiers (Ctrl, Alt, Shift with arrows, Home, End, PgUp, PgDn, Ins, Del, F1 to F12). |
+| Console | Windows | Planned. The console API: input records (`ReadConsoleInputW`: keys with their modifiers, mouse, buffer resize events) and cell output. |
+| Dump | everywhere | For tests: the screen in memory, written as text when the program ends (and by `__ScreenDump()`): `screen <rows> x <cols>, cursor <row>, <col>`, each row's characters after its number and a bar (UTF-8, trailing blanks left out, a control character as its Unicode picture, `␉` for `Chr(9)`), then, after `colors`, each row whose attributes are not all `W/N` (07) as runs of attribute and count (`1F*3 07*77`). Keys will come from `KEYBOARD`. |
 | Window | later, a library | A window of its own (Windows; X11 and Wayland), drawing the cells with a font; resizable, which reaches the program as a resize like a terminal's. |
 
-The Stream, VT, Console and Dump drivers are part of the runtime (they need nothing outside the C library); the Window
-driver is a library in `libs/` ([architecture.md](architecture.md#libraries-written-in-xbase)), which registers itself
-with the terminal layer when a program links it. The driver is chosen when the program starts: the VT or Console driver
-when standard input and output are a terminal, the Stream driver otherwise; a Clipper-style runtime switch on the
-command line, which the program does not see, chooses another (`//TERM:STREAM`, `//TERM:VT`, `//TERM:CONSOLE`,
-`//TERM:DUMP`). Never an environment variable.
+The Stream, VT, Console and Dump drivers are (or will be) part of the runtime (they need nothing outside the C library);
+the Window driver is a library in `libs/` ([architecture.md](architecture.md#libraries-written-in-xbase)), which
+registers itself with the terminal layer when a program links it. The driver is chosen when the program starts: the VT
+or Console driver when standard input and output are a terminal, the Stream driver otherwise (until those exist, the
+Stream driver always); a Clipper-style runtime switch on the command line, which the program does not see, chooses
+another (`//TERM:STREAM`, `//TERM:DUMP`; planned `//TERM:VT`, `//TERM:CONSOLE`; a name of no driver changes nothing).
+Never an environment variable.
+
+## Output on the screen
+
+The rules are Clipper's, as the reference implementation keeps them:
+
+- The console (`?`, `??`, `QOut`, `QQOut`) writes at the cursor as a terminal shows a stream: `Chr(13)` goes back to the
+  line's start, `Chr(10)` to the next line's, `Chr(8)` one column back (from a line's start, to the last column of the
+  line before), `Chr(7)` shows nothing, and any other character (control characters too) takes its cell; a line wraps
+  once its last column is written, and past the bottom row the screen scrolls up.
+- A device's output (`@ SAY`, `DevOut`, `DispOut`, `DispOutAt`) writes on the cursor's row only, every character in its
+  cell; what lies past the right edge, or on a row outside the screen, is not shown, and the cursor moves past the text
+  up to the column after the last. A value shows as `?` shows it, but a logical as `T` or `F`; an array, a codeblock,
+  an object or a hash shows nothing. `DispOutAt` leaves the cursor after the text.
+- `SetPos` and `DevPos` take any position, also outside the screen, which `Row()` and `Col()` then give. `Scroll` moves
+  a rectangle (within the screen) up, down, left or right, or clears it, and leaves the cursor; `@ <row>, <col>` clears
+  the row from the column on, `@ ... CLEAR` to the bottom right, `@ ... CLEAR TO` a rectangle, each leaving the cursor
+  at its top left; `CLS` and `CLEAR SCREEN` clear the screen with the cursor at the top left. `SetMode` changes the
+  size, keeping the cells that still fit.
+- xbase does better than the reference at the edges: text that starts left of the screen shows its visible part (the
+  reference shows none of it), and the console's output from a cursor outside the screen starts at the nearest cell
+  inside it (the reference loses characters and changes rows). A wide character that does not fit at the right edge is
+  not shown, nor one wider than the screen; writing over either half of one, or a clear or a scroll that cuts it,
+  blanks its other half. A combining mark goes on the character before it, and nowhere when that one was not shown. A
+  UTF-8 character that one console write ends inside of is completed by the next.
 
 ### Why xbase's own VT driver and not ncurses
 
@@ -108,7 +139,9 @@ ends in any way (`QUIT`, an unrecoverable error, a fatal error, a signal that en
 ## Order of the work
 
 1. The model, the Stream and Dump drivers, and the screen functions and commands (`@ SAY`, `@ CLEAR`, `CLS`,
-   `@ BOX`, `@ TO`, `?` on the screen), with `SetColor` and colors; `box.ch`.
+   `@ BOX`, `@ TO`, `?` on the screen), with `SetColor` and colors; `box.ch`. Done: the model, the two drivers, the
+   positions, `?` on the screen, `DevOut`, `DispOut`, `DispOutAt`, `Scroll`, `SetMode`, `@ SAY`, `@ CLEAR`, `CLS`;
+   next the colors, then `DispBox`, `@ BOX`, `@ TO`, `SaveScreen`, `RestScreen`, `DispBegin`, `SetCursor`.
 2. Events: `Inkey`, `NextKey`, `LastKey`, `KEYBOARD`, `SET KEY`, `SET TYPEAHEAD`, `inkey.ch`, event masks, resize.
    The console's redirections: `SET CONSOLE`, `SET ALTERNATE TO <file> [ADDITIVE]` and `SET ALTERNATE ON|OFF`,
    `SET PRINTER TO` and `ON|OFF`, `SET DEVICE`; with them the database commands that print through them, `LIST` and

@@ -11,7 +11,7 @@ Find the task, read the doc it points to, then the code.
 | Directives, `#command`/`#translate` rules, `std.ch`, tokenization, comments, string literals | [preprocessor.md](preprocessor.md) |
 | Grammar, keywords, name resolution, code generation, object emission, cross-compilation, driver options | [compiler.md](compiler.md) |
 | Values (`xb_item`), frames, calling convention, error propagation, operators, the ABI shared with the compiler | [runtime.md](runtime.md) |
-| The screen, keyboard and mouse: screen model, events, terminal drivers (planned), the native GUI (later) | [terminal.md](terminal.md) |
+| The screen, keyboard and mouse: screen model, events (planned), terminal drivers, the native GUI (later) | [terminal.md](terminal.md) |
 | Work areas, field references, database drivers: DBF, DBT and FPT memos, NTX and CDX indexes, relations, sharing and locks | [rdd.md](rdd.md) |
 | Project files (`.xbprj`), libraries and their module files (`.xbm`), the link step, `libs/` and `samples/` | [projects.md](projects.md) |
 | The libraries xbase provides (`libs/`: `cli`) | [libraries.md](libraries.md) |
@@ -39,6 +39,7 @@ Setup, build and run commands are in the top-level [README.md](../README.md); ag
 | `runtime/src/gc/` | garbage collector |
 | `runtime/src/types/` | representation and base operations of strings, arrays, hashes, codeblocks, references, objects |
 | `runtime/src/rtl/` | functions of the language, by area (`collections.c`: what the array and hash functions share) |
+| `runtime/src/term/` | the terminal layer: the screen model, the drivers that show it ([terminal.md](terminal.md)) |
 | `runtime/src/macro/` | the macro operator: expression compiler, stack machine, text substitution, `Type()` ([runtime.md](runtime.md#macro-operator)) |
 | `runtime/src/platform/` | operating-system interface (`platform.h`) and one directory per platform |
 | `tests/run`, `tests/pp`, `tests/fail`, `tests/xir`, `tests/platform` | execution, preprocessor, compile-failure, xIR and platform tests |

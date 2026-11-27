@@ -16,4 +16,10 @@ typedef struct xb_buffer {
 void xb_buffer_put(xb_buffer *b, const char *p, size_t n);
 void xb_buffer_free(xb_buffer *b);
 
+/* What a buffer for a write of a few values (the console's, a device's) holds in place before it grows. */
+#define XB_TEXT_IN_PLACE 256u
+
+/* The `len` bytes at `a`, letters in any case, are the name `upper` (upper case, NUL-terminated). */
+int xb_name_is(const char *a, size_t len, const char *upper);
+
 #endif

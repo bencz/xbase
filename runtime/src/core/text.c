@@ -21,3 +21,9 @@ void xb_buffer_put(xb_buffer *b, const char *p, size_t n) {
 void xb_buffer_free(xb_buffer *b) {
   if (b->heap) free(b->p);
 }
+
+int xb_name_is(const char *a, size_t len, const char *upper) {
+  for (size_t i = 0; i < len; ++i)
+    if (xb_ascii_upper(a[i]) != upper[i] || !upper[i]) return 0;
+  return upper[len] == '\0';
+}

@@ -1,6 +1,7 @@
 #include "xbrt_int.h"
 
 #include "core/sched.h"
+#include "term/screen.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,15 +19,24 @@ typedef struct program {
   char **argv;
 } program;
 
-/* A runtime option, an argument that starts with //, which the program does not receive: //WORKERS:n sets the
- * workers that run tasks at once (core/sched.c); any other is ignored. Letters in any case. */
-static void runtime_option(const char *arg) {
-  static const char workers[] = "WORKERS:";
+/* What follows the option's name (`name`, upper case) in `arg`, any letter case, or NULL. */
+static const char *option_value(const char *arg, const char *name) {
   size_t k = 0;
-  while (workers[k] && xb_ascii_upper(arg[k]) == workers[k]) ++k;
-  if (workers[k]) return;
-  unsigned long n = strtoul(arg + k, NULL, 10);
-  if (n) xb_sched_set_workers(n > UINT32_MAX ? UINT32_MAX : (unsigned)n);
+  while (name[k] && xb_ascii_upper(arg[k]) == name[k]) ++k;
+  return name[k] ? NULL : arg + k;
+}
+
+/* A runtime option, an argument that starts with //, which the program does not receive: //WORKERS:n sets the
+ * workers that run tasks at once (core/sched.c), //TERM:name the terminal driver (term/drivers.c); any other is
+ * ignored. Letters in any case. */
+static void runtime_option(const char *arg) {
+  const char *value;
+  if ((value = option_value(arg, "WORKERS:")) != NULL) {
+    unsigned long n = strtoul(value, NULL, 10);
+    if (n) xb_sched_set_workers(n > UINT32_MAX ? UINT32_MAX : (unsigned)n);
+  } else if ((value = option_value(arg, "TERM:")) != NULL) {
+    xb_term_start(value);
+  }
 }
 
 /* The command-line arguments after the program's name, but the runtime options, become strings in a frame of their
@@ -54,6 +64,7 @@ XB_NOINLINE static void run(program *p) {
     xb_set_str(&args->slots[i], xb_str_new(a, strlen(a)));
   }
   xb_app_main(ctx, n, args->slots);
+  xb_term_end();
   xb_platform_flush(stdout);
   ctx->frames = args->prev;
   free(args);

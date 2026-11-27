@@ -1,6 +1,7 @@
 add_library(xbrt STATIC
   src/core/codepage.c
   src/core/codepage_data.c
+  src/core/width_data.c
   src/core/control.c
   src/core/ctx.c
   src/core/display.c
@@ -48,6 +49,8 @@ add_library(xbrt STATIC
   src/rdd/order.c
   src/rdd/pages.c
   src/rdd/field.c
+  src/term/drivers.c
+  src/term/screen.c
   src/rtl/agen.c
   src/rtl/arrays.c
   src/rtl/channels.c
@@ -65,6 +68,7 @@ add_library(xbrt STATIC
   src/rtl/strings.c
   src/rtl/tasks.c
   src/rtl/threads.c
+  src/rtl/screen.c
   src/rtl/transform.c
   src/macro/compile.c
   src/macro/lex.c

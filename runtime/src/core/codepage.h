@@ -7,10 +7,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The generated data (core/codepage_data.c, which describes it). */
+/* The generated data (core/codepage_data.c and core/width_data.c, which describe it). */
 typedef struct xb_cp_range {
   uint32_t first, last;
-  uint8_t kind; /* XB_CP_UPPER, XB_CP_LOWER or XB_CP_LETTER */
+  uint8_t kind; /* XB_CP_UPPER, XB_CP_LOWER or XB_CP_LETTER; in xb_cp_widths, the width */
 } xb_cp_range;
 typedef struct xb_cp_case {
   uint32_t first, last;
@@ -29,6 +29,8 @@ extern const xb_cp_case xb_cp_upper[], xb_cp_lower[];
 extern const size_t xb_cp_upper_count, xb_cp_lower_count;
 extern const xb_codepage xb_cp_singles[];
 extern const size_t xb_cp_singles_count;
+extern const xb_cp_range xb_cp_widths[];
+extern const size_t xb_cp_widths_count;
 
 /* What a character is. */
 enum { XB_CP_NONE, XB_CP_UPPER, XB_CP_LOWER, XB_CP_LETTER };
@@ -45,6 +47,8 @@ const xb_codepage *xb_codepage_utf8(void);
 uint32_t xb_cp_decode(const xb_codepage *cp, const char *s, size_t len, size_t at, size_t *n);
 /* Code point `c` in the codepage, in `out`: its length, 0 when the codepage has no such character. */
 size_t xb_cp_encode(const xb_codepage *cp, uint32_t c, char out[4]);
+/* The cells code point `c` takes on a terminal: 0 (a mark on the character before it), 1, or 2 (a wide one). */
+int xb_cp_width(uint32_t c);
 /* What the character at the start of `s` is (XB_CP_NONE for an empty string). */
 int xb_cp_kind(const xb_codepage *cp, const char *s, size_t len);
 /* Changes the case of the characters with a byte above 0x7F in place: the string keeps its length. */

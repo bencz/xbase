@@ -330,10 +330,9 @@ int xb_area_eval(xb_ctx *ctx, xb_area *a, const xb_item *block, xb_item *r);
  * ask to try again). */
 int xb_area_enter(xb_ctx *ctx, const xb_item *area, uint32_t *before);
 
-/* The database functions' arguments (rdd/dbcmd.c): argument `k` as a string (NULL otherwise), a number (`dflt`
- * otherwise), whether it is .T.; the current area, or NULL after "Workarea not in use" for the function `fn`. */
+/* The database functions' arguments (rdd/dbcmd.c): argument `k` as a string (NULL otherwise), whether it is .T. (a
+ * number: xb_num_arg); the current area, or NULL after "Workarea not in use" for the function `fn`. */
 const xb_str *xb_db_str_arg(uint32_t argc, const xb_item *argv, uint32_t k);
-int64_t xb_db_num_arg(uint32_t argc, const xb_item *argv, uint32_t k, int64_t dflt);
 int xb_db_logical_arg(uint32_t argc, const xb_item *argv, uint32_t k);
 xb_area *xb_db_used(xb_ctx *ctx, const char *fn);
 /* The driver argument `k` names (none or "": the default), NULL for a name of none. */

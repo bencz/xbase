@@ -254,7 +254,7 @@ static void transfer_end(transfer *t) {
 void xbf___DBTRANS(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   XB_UNUSED(ret);
   xb_area *src = xb_db_record(ctx, "__DBTRANS");
-  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  int64_t n = xb_num_arg(argc, argv, 0, 0);
   xb_area *dst = n >= 1 && n <= XB_AREA_MAX ? xb_area_at(ctx, (uint32_t)n) : NULL;
   const xb_array *list = argc > 1 && argv[1].type == XB_T_ARRAY ? argv[1].v.p : NULL;
   if (!src) return;

@@ -84,10 +84,10 @@ void xbf_ORDCONDSET(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   if (argc > 1 && argv[1].type == XB_T_BLOCK) c->cond = argv[1];
   if (argc > 3 && argv[3].type == XB_T_BLOCK) c->whileBlock = argv[3];
   if (argc > 4 && argv[4].type == XB_T_BLOCK) c->evalBlock = argv[4];
-  c->every = xb_db_num_arg(argc, argv, 5, 1);
-  c->start = xb_db_num_arg(argc, argv, 6, 0);
-  c->next = xb_db_num_arg(argc, argv, 7, 0);
-  c->record = xb_db_num_arg(argc, argv, 8, 0);
+  c->every = xb_num_arg(argc, argv, 5, 1);
+  c->start = xb_num_arg(argc, argv, 6, 0);
+  c->next = xb_num_arg(argc, argv, 7, 0);
+  c->record = xb_num_arg(argc, argv, 8, 0);
   c->rest = xb_db_logical_arg(argc, argv, 9);
   c->descend = xb_db_logical_arg(argc, argv, 10);
   c->additive = xb_db_logical_arg(argc, argv, 12);
@@ -344,7 +344,7 @@ void xbf_INDEXORD(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
  * controlling order's). */
 void xbf_INDEXKEY(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_area *a = xb_area_current(ctx);
-  int64_t n = xb_db_num_arg(argc, argv, 0, 0);
+  int64_t n = xb_num_arg(argc, argv, 0, 0);
   xb_order *o = a ? order_at(a, n == 0 ? a->order : n >= 1 && n <= a->norders ? (uint32_t)n : 0) : NULL;
   set_text(ret, o ? o->info.key : "");
 }
@@ -426,7 +426,7 @@ void xbf_ORDSCOPE(xb_ctx *ctx, xb_item *ret, uint32_t argc, xb_item *argv) {
   xb_area *a = scope_area(ctx, "ORDSCOPE");
   xb_order *o = a ? xb_area_order(a) : NULL;
   if (!o) return;
-  int64_t which = xb_db_num_arg(argc, argv, 0, 0);
+  int64_t which = xb_num_arg(argc, argv, 0, 0);
   xb_item nil;
   xb_set_nil(&nil);
   const xb_item *v = argc > 1 ? &argv[1] : &nil;

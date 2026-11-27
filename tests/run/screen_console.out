@@ -1,0 +1,53 @@
+screen 25 x 80, cursor 11, 19
+ 0|ab
+ 1|ghjk␉l␀m
+ 2|                                                                               n
+ 3|
+ 4|one          2 .T. NIL   /  /
+ 5|
+ 6|                                                                      wwwwwwwwww
+ 7|wwwwwwwwwwwwwww
+ 8|
+ 9|                                                                      zzzzzzzzzz
+10|
+11|after the full line
+12|
+13|
+14|
+15|
+16|
+17|
+18|
+19|
+20|
+21|
+22|
+23|
+24|
+positions: 1,2 1,1 1,8 3,0 4,31 7,15 10,0 11,19 24,15 24,20
+screen 25 x 80, cursor 24, 20
+ 0|line          7
+ 1|line          8
+ 2|line          9
+ 3|line         10
+ 4|line         11
+ 5|line         12
+ 6|line         13
+ 7|line         14
+ 8|line         15
+ 9|line         16
+10|line         17
+11|line         18
+12|line         19
+13|line         20
+14|line         21
+15|line         22
+16|line         23
+17|line         24
+18|line         25
+19|line         26
+20|line         27
+21|line         28
+22|line         29
+23|line         30xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+24|xxxxxxxxxxxxxxxxxxxx
