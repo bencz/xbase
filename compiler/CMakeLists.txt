@@ -53,6 +53,7 @@ add_executable(xbc
   src/xir/passes/AppendInPlace.cpp
   src/xir/passes/JoinStrings.cpp
   src/xir/passes/FoldConstants.cpp
+  src/xir/passes/MergeReads.cpp
   src/xir/passes/Inline.cpp
   src/xir/passes/PromoteVariables.cpp
   src/xir/passes/RemoveDeadCode.cpp

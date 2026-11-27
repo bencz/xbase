@@ -452,6 +452,26 @@ result. Implemented (`xir/passes/`):
   no object) gets what the runtime finds. A method's sends to its own `Self` are left alone (`readsOwnSelf`): its body
   stays small enough to be inlined where its class is known, and the sends of a body inlined where it is not are the
   caller's, which this versions. `method_call_overhead`: 180 to 47 ms (its sends to an object a macro made).
+- `merge-reads` (`MergeReads.cpp`), after `speculate-sends`, and again right after `typed-continuations`, whose guards
+  leave operators that cannot fail between reads: a read repeated with nothing between that could change what it reads
+  gives the first one's value, and so does an operator that cannot fail (`TypeInfo::cannotFail`) repeated on the same
+  operands (constants compared by value) up to a call (a value kept across a call costs more than the operator:
+  `levenshtein`'s `j + 1`, 2% more instructions). A read merges only where it cannot fail and go on:
+  `object.get`, `table.len`, and an element read whose position is a number, `table.index`, or `index` of a base that
+  is only an array (out of bounds, the error cannot go on, so a read that fails reaches nothing after it; one that
+  substitutes a value would raise its error again). Between the two, nothing writes the heap or runs code, and nothing
+  can fail (but an operator that cannot fail, and a `truth`, whose error unwinds and whose way on tests nothing): an
+  error block may change what is read and go on, and an operation that can fail tests the pending requests on its way
+  on, where a collection's destructors run (an element read's slow path too: a merged read forgets the others before
+  it). An `object.set` (the item itself, no method) makes a later read of
+  that instance variable give the value assigned. What is known passes down the dominator tree to a block entered only
+  from its parent by its branch (not a handler, nor where a check's failure leads, the generic copy's way in); from a
+  check's way on (`subst.check` false), the value it let through.
+  A repeated read a check follows merges only where the first one's check let it through on the way there, with no more
+  types than the second expects (both of their own types, or guards), and the check goes; else the read stays with it.
+  `n += o:x * o:x + o:y * o:x` and `a[i % 3 + 1] * a[i % 3 + 1]`: `o:x` read and guarded once, the position computed
+  and read once (2041M to 1621M instructions). An object whose class only `speculate-sends` tests has a test and a join
+  at each send, and its reads stay apart.
 - `specialize-calls`, on each function after its pipeline (then the pipeline again when it changed it): a call of a
   function of the module (a `FUNCTION`, `PROCEDURE` or method with parameters, not of a carried runtime source (whose
   classes and `STATIC`s are its module's), not an `INIT` or `EXIT` procedure, a body versioned for references, one that

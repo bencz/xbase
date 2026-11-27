@@ -1,0 +1,12 @@
+
+member:         21         23         50
+error block:        131          2 errors:          3
+element:         36         55         21         76
+recovered: 1/80/40
+branches:        300        101
+hash:          7
+types change:         36 ssssss
+overflow: 27670116111000750000.00
+table:       1089       1936
+unguarded first: 38 NNCC errors:          2
+joined:       1011

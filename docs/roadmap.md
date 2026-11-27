@@ -279,8 +279,10 @@ one design, in this order, each step measured over every benchmark before it is 
    to test, a parameter tested once at the entry), not a check: the language stays untyped. Done: `AS type` wherever
    Harbour takes it, a hint for the masks of the guards on what is read from a parameter, `LOCAL` or `STATIC`
    ([compiler.md](compiler.md#grammar)); copies by regions in functions too large to copy whole or with unwind blocks,
-   joined at their ways out and guarded again after them (`typed-continuations` in [xir.md](xir.md#passes)); the rest of
-   this step is to do.
+   joined at their ways out and guarded again after them (`typed-continuations` in [xir.md](xir.md#passes)); repeated
+   reads and operators merged where nothing between them can change what they give, and an instance variable read after
+   its assignment given the value assigned (`merge-reads`); the rest of this step is to do (reads of an object whose
+   class each send tests apart stay apart).
 2. One calling convention. Functions, methods and codeblocks all get the direct entry functions have now (the arguments'
    words in registers, the caller's frame passed), and the generic entry becomes a thunk that reads `argv`; the
    parameters are values, not frame slots, so the frame is set up only on the paths that call or allocate (as for a leaf

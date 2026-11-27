@@ -66,6 +66,10 @@ bool promoteVariables(Function &f);
 // condition becomes a jump.
 bool foldConstants(Function &f);
 
+// A read that repeats one before it with nothing between that could change what it reads (an instance variable, an
+// element, a table's) gives that read's value; a guard of a value a guard let through goes (MergeReads.cpp).
+bool mergeReads(Function &f);
+
 // A STATIC its initializer alone writes, with a constant (not passed by reference nor a FOR EACH variable, assigned
 // nowhere else in the module), holds that constant wherever code reads it: every module's STATICs are initialized,
 // with constants, before any code of the program runs (xb_program_run). Each of its loads becomes the constant

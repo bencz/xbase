@@ -33,6 +33,7 @@ constexpr Pass kPipeline[] = {
     {"resolve-sends", resolveSends},                   // after promote-variables: the objects' classes flow
     {"resolve-scalar-sends", resolveScalarSends},     // after promote-variables: the values' types flow
     {"speculate-sends", speculateSends},               // after the two above: what they leave unresolved
+    {"merge-reads", onFunction<mergeReads>},           // after the sends resolved to instance variables
     {"simplify-cfg", onFunction<simplifyCFG>},
     {"remove-dead-code", onFunction<removeDeadCode>},
     {"unshare-variables", onFunction<unshareVariables>}, // after remove-dead-code: captures gone with dead code
@@ -49,6 +50,7 @@ constexpr unsigned kMaxRounds = 8;
 constexpr Pass kFinal[] = {
     {"join-strings", onFunction<joinStrings>}, // before typed-continuations, whose checks split the chains
     {"typed-continuations", onFunction<typedContinuations>},
+    {"merge-reads", onFunction<mergeReads>},      // after the guards, which leave operators that cannot fail between
     {"split-appends", onFunction<splitAppends>},  // after the checks, which tell the pieces' types
     {"peel-for-types", onFunction<peelForTypes>}, // after the checks, which narrow what the loops carry
     {"version-each", onFunction<versionEachLoops>},

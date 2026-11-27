@@ -102,70 +102,60 @@ while.cond(%1: item {int}, %2: item {int}):
   %3 = binary mul %1, %1 {int}
   %4 = subst.check guard 4 %3
   cond_br %4, while.cond.subst, while.cond.2
-while.body:
-  %6 = binary mul %1, %1 {int}
-  %7 = subst.check guard 4 %6
-  cond_br %7, while.body.subst, for.test(%6, %2)
-for.test(%9: item {int}, %10: item {int}):
-  %11 = for.test %9, 2000000:w10, %1
-  cond_br %11, for.body, for.end
+for.test(%6: item {int}, %7: item {int}):
+  %8 = for.test %6, 2000000:w10, %1
+  cond_br %8, for.body, for.end
 for.body:
-  %13 = binary add.one %10, 1:w0 {int}
-  %14 = subst.check guard 4 %13
-  cond_br %14, for.body.subst, for.body.2
+  %10 = binary add.one %7, 1:w0 {int}
+  %11 = subst.check guard 4 %10
+  cond_br %11, for.body.subst, for.body.2
 for.end:
-  %16 = binary add.one %1, 1:w0 {int}
-  %17 = subst.check guard 4 %16
-  cond_br %17, for.end.subst, while.cond(%16, %10)
+  %13 = binary add.one %1, 1:w0 {int}
+  %14 = subst.check guard 4 %13
+  cond_br %14, for.end.subst, while.cond(%13, %7)
 seq.exit:
   ret %2
 for.body.2:
-  %20 = binary add %9, %1 {int}
-  %21 = subst.check guard 4 %20
-  cond_br %21, for.body.2.subst, for.test(%20, %13)
+  %17 = binary add %6, %1 {int}
+  %18 = subst.check guard 4 %17
+  cond_br %18, for.body.2.subst, for.test(%17, %10)
 while.cond.2:
-  %23 = binary le %3, 2000000:w10 {logical}
-  %24 = truth %23
-  cond_br %24, while.body, seq.exit
-while.cond.any(%26: item {any}, %27: item {any}):
-  %28 = binary mul %26, %26 {any}
-  br while.cond.2.any(%26, %27, %28)
-while.body.any:
-  %30 = binary mul %47, %47 {any}
-  br for.test.any(%30, %48, %47)
-for.test.any(%32: item {any}, %33: item {any}, %34: item {any}):
-  %35 = for.test %32, 2000000:w10, %34
-  cond_br %35, for.body.any, for.end.any
+  %20 = binary le %3, 2000000:w10 {logical}
+  %21 = truth %20
+  cond_br %21, for.test(%3, %2), seq.exit
+while.cond.any(%23: item {any}, %24: item {any}):
+  %25 = binary mul %23, %23 {any}
+  br while.cond.2.any(%23, %24, %25)
+for.test.any(%27: item {any}, %28: item {any}, %29: item {any}):
+  %30 = for.test %27, 2000000:w10, %29
+  cond_br %30, for.body.any, for.end.any
 for.body.any:
-  %37 = binary add.one %33, 1:w0 {any}
-  br for.body.2.any(%34, %32, %37)
+  %32 = binary add.one %28, 1:w0 {any}
+  br for.body.2.any(%29, %27, %32)
 for.end.any:
-  %39 = binary add.one %34, 1:w0 {any}
-  br while.cond.any(%39, %33)
+  %34 = binary add.one %29, 1:w0 {any}
+  br while.cond.any(%34, %28)
 seq.exit.any:
-  ret %48
-for.body.2.any(%42: item {any}, %43: item {any}, %44: item {any}):
-  %45 = binary add %43, %42 {any}
-  br for.test.any(%45, %44, %42)
-while.cond.2.any(%47: item {any}, %48: item {any}, %49: item {any}):
-  %50 = binary le %49, 2000000:w10 {any}
-  %51 = truth %50
-  cond_br %51, while.body.any, seq.exit.any
+  ret %43
+for.body.2.any(%37: item {any}, %38: item {any}, %39: item {any}):
+  %40 = binary add %38, %37 {any}
+  br for.test.any(%40, %39, %37)
+while.cond.2.any(%42: item {any}, %43: item {any}, %44: item {any}):
+  %45 = binary le %44, 2000000:w10 {any}
+  %46 = truth %45
+  cond_br %46, for.test.any(%44, %43, %42), seq.exit.any
 for.body.subst:
-  %53 = subst.value %13 {any}
-  br for.body.2.any(%1, %9, %53)
+  %48 = subst.value %10 {any}
+  br for.body.2.any(%1, %6, %48)
 for.body.2.subst:
-  %55 = subst.value %20 {any}
-  br for.test.any(%55, %13, %1)
+  %50 = subst.value %17 {any}
+  br for.test.any(%50, %10, %1)
 while.cond.subst:
-  %57 = subst.value %3 {any}
-  br while.cond.2.any(%1, %2, %57)
-while.body.subst:
-  %59 = subst.value %6 {any}
-  br for.test.any(%59, %2, %1)
+  %52 = subst.value %3 {any}
+  br while.cond.2.any(%1, %2, %52)
 for.end.subst:
-  %61 = subst.value %16 {any}
-  br while.cond.any(%61, %10)
+  %54 = subst.value %13 {any}
+  br while.cond.any(%54, %7)
 }
 
 function BOUNDED params 0 {
