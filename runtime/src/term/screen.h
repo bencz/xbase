@@ -9,8 +9,28 @@
 struct xb_codepage;
 struct xb_buffer;
 
-/* Clipper's color attribute: the foreground in the low four bits, the background in the high four. */
+/* Clipper's color attribute: the foreground in the low four bits (8: bright), the background in the high four (0x80:
+ * blinking, or bright with SetBlink( .F. )). */
 #define XB_ATTR_STANDARD 0x07u /* W/N */
+#define XB_ATTR_INVERSE 0x70u  /* N/W */
+
+/* A color pair (term/color.c): its attribute, and which sides were written U (1 the foreground, 2 the background),
+ * which SetColor() writes back as U. */
+typedef struct xb_color {
+  uint8_t attr, underline;
+} xb_color;
+
+/* The bytes of the longest pair written ("GR+/GR*"), and one more. */
+#define XB_COLOR_TEXT 8
+
+/* The pair `text` holds (its `len` bytes, up to the comma after it), as SetColor() reads it (docs/terminal.md#colors);
+ * 0 for a pair with no character of a color's (it keeps the pair there was). */
+int xb_color_read(const char *text, size_t len, xb_color *out);
+/* The pair as SetColor() writes it: foreground, + when bright, /, background, * when blinking. */
+size_t xb_color_write(const xb_color *c, char out[XB_COLOR_TEXT]);
+
+/* The five pairs of SetColor(), in its order. */
+enum { XB_COLOR_STANDARD, XB_COLOR_ENHANCED, XB_COLOR_BORDER, XB_COLOR_BACKGROUND, XB_COLOR_UNSELECTED, XB_COLORS };
 
 /* The screen when no driver tells another size: Clipper's. */
 #define XB_SCREEN_ROWS 25
@@ -52,6 +72,22 @@ void xb_screen_console(const struct xb_codepage *cp, const char *text, size_t le
  * too), on the cursor's row only: what lies past the screen's edges is not shown; the cursor moves past it, up to the
  * column after the last (from any column: one past the right edge comes back to it). */
 void xb_screen_say(const struct xb_codepage *cp, const char *text, size_t len, unsigned attr);
+
+/* SetColor(): the five pairs written, separated by commas, into `was` (XB_COLORS * XB_COLOR_TEXT bytes; their length
+ * returned); then, unless `spec` is NULL, the pairs it gives, in order (an empty one keeps its pair; past the fifth,
+ * none counts), the unselected pair following the enhanced one given without it, an empty string giving the defaults
+ * (W/N,N/W,N/N,N/N,N/W), and the standard pair the selected one. */
+size_t xb_screen_colors(const char *spec, size_t len, char *was);
+/* The selected pair's attribute (ColorSelect()): what the output writes in and what clears and scrolls blank with. */
+unsigned xb_screen_color(void);
+/* The attribute a color argument (a COLOR clause, DevOut()'s color) writes in, as the colors would be set to it for
+ * the output and set back after it: its first pair, the standard one when it gives none, the default when it is
+ * empty; the standard pair becomes the selected one. */
+unsigned xb_screen_color_of(const char *spec, size_t len);
+/* ColorSelect( n ): pair n (0 to 4) becomes the selected one; another number changes nothing. */
+void xb_screen_select_color(int64_t n);
+/* SetBlink(): whether * is blinking (else a bright background), before `on` (1, 0; -1: unchanged) sets it. */
+int xb_screen_blink(int on);
 
 void xb_screen_cursor(int32_t *row, int32_t *col);
 void xb_screen_set_cursor(int32_t row, int32_t col);

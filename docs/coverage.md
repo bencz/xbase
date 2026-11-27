@@ -4,7 +4,7 @@ Inventory of the commands and runtime functions of the language, and what xbase 
 update it in the same change that implements an item. Status: **done** (behavior checked against Clipper/Harbour),
 *missing*.
 
-Functions: 224 of 551 done. Commands (`std.ch` families): 78 of 157 done.
+Functions: 231 of 551 done. Commands (`std.ch` families): 80 of 157 done.
 
 ## Statements (grammar)
 
@@ -33,7 +33,7 @@ ALL*, *CLEAR GETS*, **CLEAR MEMORY**, **CLEAR SCREEN**, *CLEAR TYPEAHEAD*, **CLO
 SAVE*, **RECALL**, **REINDEX**, **RELEASE**, **RELEASE ALL**, *RENAME*, **REPLACE**, *REPORT FORM*, **REQUEST**,
 **RESTORE**, *RESTORE SCREEN*, **RUN**, **SAVE**, **SAVE ALL**, *SAVE SCREEN*, **SAVE TO**, **SEEK**, **SELECT**, *SET
 ALTERNATE*, *SET AUTOPEN*, *SET AUTORDER*, *SET AUTOSHARE*, *SET BELL*, **SET CENTURY**, **SET CODEPAGE** (an xbase
-command), *SET COLOR*, *SET COLOUR*, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*,
+command), **SET COLOR**, **SET COLOUR**, *SET CONFIRM*, *SET CONSOLE*, *SET CURSOR*, **SET DATE**, *SET DBFLOCKSCHEME*,
 **SET DECIMALS**, *SET DEFAULT*, **SET DELETED**, *SET DELIMITERS*, *SET DESCENDING*, *SET DEVICE*, *SET DIRCASE*, *SET
 DIRSEPARATOR*, *SET ECHO*, *SET EOL*, **SET EPOCH**, *SET ESCAPE*, *SET EVENTMASK*, **SET EXACT**, **SET EXCLUSIVE**,
 *SET FILECASE*, **SET FILTER**, **SET FIXED**, *SET FORMAT*, *SET FUNCTION*, *SET HARDCOMMIT*, *SET HEADING*, **SET
@@ -106,7 +106,7 @@ standard input), `blob.ch`.
 **FErase**, **FError**, **File**, **FOpen**, **FRead**, **FReadStr**, **FRename**, **FSeek**, *FSetDevMod*, **FWrite**,
 **GetEnv**, *IsDisk*, **MemoRead**, **MemoWrit** ([runtime.md](runtime.md#files))
 
-### Screen, keyboard, mouse and UI (11 of 124 done)
+### Screen, keyboard, mouse and UI (17 of 124 done)
 
 Built on one terminal interface (screen model of character and color cells, cursor; keyboard planned) with drivers
 ([terminal.md](terminal.md)): plain standard output (pipes, tests, servers) and a dump of the screen for tests, done;
@@ -114,19 +114,19 @@ xbase's own terminal driver (Linux, macOS, BSD) and the Windows console, planned
 starts or by a runtime switch on the command line, never by an environment variable.
 
 *Accelerator*, *AChoice*, *Alert*, *ApplyDefau*, *Browse*, *ButtnDefCo*, *CheckBox*, *CheckDefCo*, **Col**,
-*ColorSelect*, *ComboDefCo*, *dbEdit*, *DevOut*, *DevOutPict*, **DevPos**, *DispBegin*, *DispBox*, *DispCount*,
-*DispEnd*, *DispOut*, *DispOutAt*, *EraseGetMsg*, *GetActive*, *GetApplyKey*, *GetClrBack*, *GetClrFore*, *GetClrPair*,
-*GetDoSetKey*, *GetNew*, *GetPairLen*, *GetPairPos*, *GetPostValidate*, *GetPreValidate*, *GetReader*, *GUIApplyKey*,
-*GUIPostValidate*, *GUIPreValidate*, *GUIReader*, *HitTest*, *Inkey*, *IsQuick*, *IsShortcut*, *LastKey*, *ListBDefCo*,
-*ListBox*, **MaxCol**, **MaxRow**, *MCol*, *MDblClk*, *MemoEdit*, *MenuDefCol*, *MenuItem*, *MenuModal*, *MHide*,
-*MLeftDown*, *MPresent*, *MRestState*, *MRightDown*, *MRow*, *MSaveState*, *MSetBounds*, *MSetCursor*, *MSetPos*,
-*MShow*, *NextKey*, **OutErr**, **OutStd**, *PCol*, *Popup*, *PRow*, *PushButton*, **QOut**, **QQOut**, *RadGrDefCo*,
-*RadioButton*, *RadioGroup*, *RadItDefCo*, *RangeCheck*, *ReadExit*, *ReadFormat*, *ReadInsert*, *ReadKill*,
-*ReadModal*, *ReadStats*, *ReadUpdated*, *ReadVar*, **Row**, **Scroll**, *ScrollBar*, *SetBlink*, *SetClrPair*,
-*SetColor*, *SetCursor*, *SetKey*, **SetPos**, *SetPosBS*, *SetPRC*, *ShowGetMsg*, *ShowMsg*, *TApplyKey*, *TBAddCol*,
-*TBApplyKey*, *TBBBlock*, *TBClose*, *TBColumnNew*, *TBCreate*, *TBDelCol*, *TBDisplay*, *TBEditCell*, *TBFBlock*,
-*TBGoBot*, *TBGoTop*, *TBInsCol*, *TBModal*, *TBMouse*, *TBReader*, *TBrowseNew*, *TBSBlock*, *TBSkip*, *Updated*,
-*_CHECKBOX_*, *_LISTBOX_*, *_PUSHBUTT_*, *_RADIOGRP_*
+**ColorSelect**, *ComboDefCo*, *dbEdit*, **DevOut**, *DevOutPict*, **DevPos**, *DispBegin*, *DispBox*, *DispCount*,
+*DispEnd*, **DispOut**, **DispOutAt**, *EraseGetMsg*, *GetActive*, *GetApplyKey*, *GetClrBack*, *GetClrFore*,
+*GetClrPair*, *GetDoSetKey*, *GetNew*, *GetPairLen*, *GetPairPos*, *GetPostValidate*, *GetPreValidate*, *GetReader*,
+*GUIApplyKey*, *GUIPostValidate*, *GUIPreValidate*, *GUIReader*, *HitTest*, *Inkey*, *IsQuick*, *IsShortcut*, *LastKey*,
+*ListBDefCo*, *ListBox*, **MaxCol**, **MaxRow**, *MCol*, *MDblClk*, *MemoEdit*, *MenuDefCol*, *MenuItem*, *MenuModal*,
+*MHide*, *MLeftDown*, *MPresent*, *MRestState*, *MRightDown*, *MRow*, *MSaveState*, *MSetBounds*, *MSetCursor*,
+*MSetPos*, *MShow*, *NextKey*, **OutErr**, **OutStd**, *PCol*, *Popup*, *PRow*, *PushButton*, **QOut**, **QQOut**,
+*RadGrDefCo*, *RadioButton*, *RadioGroup*, *RadItDefCo*, *RangeCheck*, *ReadExit*, *ReadFormat*, *ReadInsert*,
+*ReadKill*, *ReadModal*, *ReadStats*, *ReadUpdated*, *ReadVar*, **Row**, **Scroll**, *ScrollBar*, **SetBlink**,
+*SetClrPair*, **SetColor**, *SetCursor*, *SetKey*, **SetPos**, *SetPosBS*, *SetPRC*, *ShowGetMsg*, *ShowMsg*,
+*TApplyKey*, *TBAddCol*, *TBApplyKey*, *TBBBlock*, *TBClose*, *TBColumnNew*, *TBCreate*, *TBDelCol*, *TBDisplay*,
+*TBEditCell*, *TBFBlock*, *TBGoBot*, *TBGoTop*, *TBInsCol*, *TBModal*, *TBMouse*, *TBReader*, *TBrowseNew*, *TBSBlock*,
+*TBSkip*, *Updated*, *_CHECKBOX_*, *_LISTBOX_*, *_PUSHBUTT_*, *_RADIOGRP_*
 
 ### Errors (3 of 4 done)
 
@@ -144,14 +144,14 @@ starts or by a runtime switch on the command line, never by an environment varia
 **PadL**, **PadR**, **RAt**, **Replicate**, **Right**, **RTrim**, **SoundEx**, **Space**, **StrTran**, **StrZero**,
 **Stuff**, **Upper**, *Word*
 
-### Language, settings and runtime (27 of 94 done)
+### Language, settings and runtime (28 of 94 done)
 
 *AltD*, **AMPM**, **Break**, *cftsAdd*, *cftsClose*, *cftsCrea*, *cftsDelete*, *cftsIfDel*, *cftsNext*, *cftsOpen*,
 *cftsRecN*, *cftsReplac*, *cftsSet*, *cftsUndel*, *cftsVeri*, *cftsVers*, *CLIPPER520*, *CLIPPER530*, **Days**,
 *dbDrop*, *dbExists*, **DBFCDX**, *DBFFPT*, *DBFNSX*, **DBFNTX**, *DbgShadow*, *dbRename*, *DefPath*, *DirRemove*,
 **Do**, **ElapTime**, **Empty**, *ErrorInHandler*, **ErrorLevel**, **Eval**, *FieldBlock*, **FieldDec**, **FieldLen**,
 **FieldType**, *FieldWBlock*, *FKLabel*, *FKMax*, *Get*, *GetE*, *IOUSR_Register*, *IOUSR_SetError*, *IsAffirm*,
-*IsColor*, *IsDefColor*, *IsNegative*, *MakeDir*, *Memory*, **MemVarBlock**, *MMiddleDown*, *NationMsg*, *NetName*,
+**IsColor**, *IsDefColor*, *IsNegative*, *MakeDir*, *Memory*, **MemVarBlock**, *MMiddleDown*, *NationMsg*, *NetName*,
 *NoSnow*, *OS*, **Pad**, **PCount**, **ProcFile**, **ProcLine**, **ProcName**, **PValue**, *rddInfo*, *ReadKey*,
 *RestScreen*, *SaveScreen*, **Secs**, **Set**, *SetCancel*, **SetMode**, *SetTypeahead*, *SIXCDX*, *sx_ClearOrder*,
 *sx_FindRec*, *SYMBOL*, *SYSINIT*, *TBColumn*, *TBrowse*, *TBrowseDB*, *Tone*, *TopBar*, **Trim**, **TString**,

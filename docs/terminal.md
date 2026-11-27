@@ -13,17 +13,18 @@ terminal in use today; output that tests can check; no library a program must ca
 
 1. **The screen model** (portable C, `term/screen.c`): a grid of cells, each a character (a Unicode code point, with its
    width: 1, or 2 for wide characters, whose second cell continues the first; a combining mark that follows it) and a
-   color attribute (foreground and background, 16 colors each, as Clipper's); the cursor. Planned: the cursor's shape
-   (`SetCursor`), the current colors (`SetColor`: standard, enhanced, border, background, unselected). Every screen
-   function of the language works on the model only, never on a driver: `DevPos`, `DevOut`, `DispOut`, `DispOutAt`,
-   `Scroll`, `SetPos`, `Row`, `Col`, `MaxRow`, `MaxCol`, `SetMode`, and `?`/`QOut` on the screen (at the cursor,
-   scrolling the screen at its bottom); planned: `DispBox`, `SaveScreen` and `RestScreen` (a cells string, opaque to
-   programs), `DispBegin`/`DispEnd`/`DispCount` (updates held until the outermost `DispEnd`). So every driver shows the
-   same thing. The model is one for the program, under a lock of its own held only for an operation on it (never
-   across I/O, so a thread waiting for it keeps no collection waiting); the console's writes also hold the output lock,
-   so a thread's write reaches the standard output and the model whole and in order. Its rows are a ring in storage: a
-   scroll of the whole screen, as the console's past the bottom row, blanks one row and turns the ring (200,000 lines
-   of `?` on the Stream driver take about 1.5 times as long as when the console was the standard output alone).
+   color attribute (foreground and background, 16 colors each, as Clipper's); the cursor; the current colors
+   (`SetColor`: standard, enhanced, border, background, unselected; `ColorSelect`). Planned: the cursor's shape
+   (`SetCursor`). Every screen function of the language works on the model only, never on a driver: `DevPos`, `DevOut`,
+   `DispOut`, `DispOutAt`, `Scroll`, `SetPos`, `Row`, `Col`, `MaxRow`, `MaxCol`, `SetMode`, and `?`/`QOut` on the screen
+   (at the cursor, scrolling the screen at its bottom); planned: `DispBox`, `SaveScreen` and `RestScreen` (a cells
+   string, opaque to programs), `DispBegin`/`DispEnd`/`DispCount` (updates held until the outermost `DispEnd`). So every
+   driver shows the same thing. The model is one for the program, under a lock of its own held only for an operation on
+   it (never across I/O, so a thread waiting for it keeps no collection waiting); the console's writes also hold the
+   output lock, so a thread's write reaches the standard output and the model whole and in order. Its rows are a ring in
+   storage: a scroll of the whole screen, as the console's past the bottom row, blanks one row and turns the ring
+   (200,000 lines of `?` on the Stream driver take about 1.5 times as long as when the console was the standard output
+   alone).
 2. **Events** (portable C, planned): one queue of keys (Clipper's `Inkey` codes), mouse events (Clipper 5.3's codes and
    event masks), resize events, the `KEYBOARD` buffer (`SET TYPEAHEAD`), `SET KEY` blocks;
    `Inkey( [nSeconds], [nMask] )`, `NextKey`, `LastKey`, `MRow`, `MCol` and the other mouse functions read it.
@@ -119,7 +120,32 @@ compiled terminfo entry can be added later if a terminal ever needs it.
   data, as the codepage data is, tells which.
 - Colors are Clipper's: `N B G BG R RB GR W`, `+` bright foreground, `*` bright background (with `SetBlink( .F. )`, as
   on VGA) or blinking, `U` underline, `I` inverse, `X` blank, and numbers; `SetColor()` returns and takes Clipper's
-  color strings.
+  color strings (see [Colors](#colors)).
+
+## Colors
+
+`SetColor( [cColors] )` returns the five pairs (standard, enhanced, border, background, unselected; by default
+`W/N,N/W,N/N,N/N,N/W`) and sets those the string gives, in order, as the reference reads them (`term/color.c`):
+
+- A pair is read in order over one attribute, a side at a time, the foreground first; letters in any case: `B`, `G`
+  and `R` add their bits to the side (blue 1, green 2, red 4), `W` makes it white, `N` black; `U` makes it blue,
+  written `U` again; a number gives the side its low three bits, and its 8 a bright foreground or a blinking
+  background; `X` makes both sides black; `I` makes the pair `N/W` and goes on in the background; `/` goes on in the
+  background, and once there it makes the background's colors the foreground's and goes on in a black background; `+`
+  brightens the foreground and `*` makes the background blink, wherever they are; blanks and other characters count
+  for nothing, and a pair of nothing else keeps the one there was. `SetColor()` writes each pair back its own way
+  (`RB` as `BR`, `I` and numbers as the colors they give).
+- An empty pair (`,G/R`) keeps the one there was; the unselected pair follows an enhanced one given without it; an
+  empty string gives the defaults. Pairs after the fifth count for nothing (Clipper's five; the reference keeps more),
+  and a side written `U` and then another letter is written as its color (the reference keeps writing `U`).
+- `ColorSelect( n )` (0 to 4) picks the pair the output writes in, the console's too, and that `Scroll`, `@ ... CLEAR`,
+  `CLS` and the console's scrolling blank with; `SetColor( cColors )` picks the standard pair again. The `COLOR` clause
+  of `@ SAY`, and the color argument of `DevOut`, `DispOut` and `DispOutAt`, write as if the colors were set to the
+  string for the output and set back after it: in its first pair (the standard one when it gives none, the default when
+  the string is empty), the standard pair selected after it. `SET COLOR TO <spec>` and `SET COLOUR TO` take the text as
+  written (a `&` macro in it substituted when the program runs); `SET COLOR TO` alone gives the defaults.
+- `SetBlink( [lBlink] )` tells (and sets) whether `*` blinks or brightens the background: the attribute stays the
+  same (a terminal driver, planned, shows it so). `IsColor()` is `.T.`.
 
 ## Restoring the terminal
 
@@ -140,8 +166,8 @@ ends in any way (`QUIT`, an unrecoverable error, a fatal error, a signal that en
 
 1. The model, the Stream and Dump drivers, and the screen functions and commands (`@ SAY`, `@ CLEAR`, `CLS`,
    `@ BOX`, `@ TO`, `?` on the screen), with `SetColor` and colors; `box.ch`. Done: the model, the two drivers, the
-   positions, `?` on the screen, `DevOut`, `DispOut`, `DispOutAt`, `Scroll`, `SetMode`, `@ SAY`, `@ CLEAR`, `CLS`;
-   next the colors, then `DispBox`, `@ BOX`, `@ TO`, `SaveScreen`, `RestScreen`, `DispBegin`, `SetCursor`.
+   positions, `?` on the screen, `DevOut`, `DispOut`, `DispOutAt`, `Scroll`, `SetMode`, `@ SAY`, `@ CLEAR`, `CLS`, the
+   colors; next `DispBox`, `@ BOX`, `@ TO`, `SaveScreen`, `RestScreen`, `DispBegin`, `SetCursor`, `@ SAY PICTURE`.
 2. Events: `Inkey`, `NextKey`, `LastKey`, `KEYBOARD`, `SET KEY`, `SET TYPEAHEAD`, `inkey.ch`, event masks, resize.
    The console's redirections: `SET CONSOLE`, `SET ALTERNATE TO <file> [ADDITIVE]` and `SET ALTERNATE ON|OFF`,
    `SET PRINTER TO` and `ON|OFF`, `SET DEVICE`; with them the database commands that print through them, `LIST` and

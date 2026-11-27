@@ -49,6 +49,7 @@ add_library(xbrt STATIC
   src/rdd/order.c
   src/rdd/pages.c
   src/rdd/field.c
+  src/term/color.c
   src/term/drivers.c
   src/term/screen.c
   src/rtl/agen.c

@@ -21,6 +21,9 @@ typedef struct cell {
   uint8_t part;  /* WHOLE, or a half of a wide character */
 } cell;
 
+/* SetColor()'s defaults: W/N,N/W,N/N,N/N,N/W. */
+#define XB_DEFAULT_COLORS {{XB_ATTR_STANDARD, 0}, {XB_ATTR_INVERSE, 0}, {0, 0}, {0, 0}, {XB_ATTR_INVERSE, 0}}
+
 /* Sizes SetMode may ask for: a screen of more cells is refused. */
 #define XB_SCREEN_MOST_CELLS ((int64_t)1 << 22)
 
@@ -36,7 +39,14 @@ static struct {
   cell *blanks;              /* a row of blanks in `blanksAttr`, `blanksLen` of them, that fills copy */
   size_t blanksLen;
   unsigned blanksAttr;
-} screen = {.markRow = -1};
+  xb_color colors[XB_COLORS]; /* SetColor()'s pairs */
+  int selected;              /* ColorSelect()'s */
+  int blink;                 /* SetBlink() */
+} screen = {.markRow = -1, .colors = XB_DEFAULT_COLORS, .blink = 1};
+
+static const xb_color kDefaultColors[XB_COLORS] = XB_DEFAULT_COLORS;
+
+static unsigned selected_attr(void) { return screen.colors[screen.selected].attr; }
 
 static void lock(void) { xb_word_lock(&screen.lock); }
 static void unlock(void) { xb_word_unlock(&screen.lock); }
@@ -179,7 +189,7 @@ static void new_line(void) {
   screen.col = 0;
   if (++screen.row < screen.rows) return;
   screen.row = screen.rows - 1;
-  fill(row_cells(0), (size_t)screen.cols, XB_ATTR_STANDARD);
+  fill(row_cells(0), (size_t)screen.cols, selected_attr());
   if (++screen.top == screen.rows) screen.top = 0;
 }
 
@@ -219,7 +229,7 @@ static void console_char(uint32_t ch) {
       return;
     }
     if (screen.col + width > screen.cols) new_line();
-    put(screen.row, screen.col, ch, width, XB_ATTR_STANDARD);
+    put(screen.row, screen.col, ch, width, selected_attr());
     screen.col += width;
     if (screen.col >= screen.cols) new_line();
   }
@@ -254,10 +264,11 @@ void xb_screen_console(const xb_codepage *cp, const char *text, size_t len) {
     /* A run of plain bytes on the cursor's row, up to its end: each in its cell. */
     cell *line = row_cells(screen.row);
     int32_t col = screen.col;
+    uint8_t attr = (uint8_t)selected_attr();
     size_t k = at_byte;
     for (; k < whole && col < screen.cols && plain_byte((unsigned char)text[k]); ++k, ++col) {
       if (line[col].part != WHOLE) cut_edges(screen.row, col, col);
-      line[col] = (cell){(unsigned char)text[k], 0, XB_ATTR_STANDARD, WHOLE};
+      line[col] = (cell){(unsigned char)text[k], 0, attr, WHOLE};
     }
     n = k - at_byte;
     screen.markRow = screen.row;
@@ -287,6 +298,67 @@ void xb_screen_say(const xb_codepage *cp, const char *text, size_t len, unsigned
     screen.col = next < screen.cols ? (int32_t)next : screen.cols;
   }
   unlock();
+}
+
+size_t xb_screen_colors(const char *spec, size_t len, char *was) {
+  xb_color read[XB_COLORS];
+  int given[XB_COLORS] = {0};
+  for (size_t at_byte = 0, k = 0; spec && len && k < XB_COLORS && at_byte <= len; ++k) {
+    const char *comma = memchr(spec + at_byte, ',', len - at_byte);
+    size_t end = comma ? (size_t)(comma - spec) : len;
+    given[k] = xb_color_read(spec + at_byte, end - at_byte, &read[k]);
+    at_byte = end + 1;
+  }
+  size_t n = 0;
+  lock();
+  for (int k = 0; k < XB_COLORS; ++k) {
+    if (k) was[n++] = ',';
+    n += xb_color_write(&screen.colors[k], was + n);
+  }
+  if (spec) {
+    if (!len) memcpy(screen.colors, kDefaultColors, sizeof kDefaultColors);
+    for (int k = 0; k < XB_COLORS; ++k)
+      if (given[k]) screen.colors[k] = read[k];
+    if (given[XB_COLOR_ENHANCED] && !given[XB_COLOR_UNSELECTED])
+      screen.colors[XB_COLOR_UNSELECTED] = screen.colors[XB_COLOR_ENHANCED];
+    screen.selected = XB_COLOR_STANDARD;
+  }
+  unlock();
+  return n;
+}
+
+unsigned xb_screen_color(void) {
+  lock();
+  unsigned attr = selected_attr();
+  unlock();
+  return attr;
+}
+
+unsigned xb_screen_color_of(const char *spec, size_t len) {
+  const char *comma = memchr(spec, ',', len);
+  xb_color pair;
+  int given = xb_color_read(spec, comma ? (size_t)(comma - spec) : len, &pair);
+  lock();
+  const xb_color *none = len ? &screen.colors[XB_COLOR_STANDARD] : &kDefaultColors[XB_COLOR_STANDARD];
+  unsigned attr = given ? pair.attr : none->attr;
+  screen.selected = XB_COLOR_STANDARD;
+  unlock();
+  return attr;
+}
+
+void xb_screen_select_color(int64_t n) {
+  if (n < 0 || n >= XB_COLORS) return;
+  lock();
+  screen.selected = (int)n;
+  unlock();
+}
+
+int xb_screen_blink(int on) {
+  lock();
+  int was = screen.blink;
+  if (on >= 0) screen.blink = on;
+  unlock();
+  return was;
 }
 
 void xb_screen_cursor(int32_t *row, int32_t *col) {

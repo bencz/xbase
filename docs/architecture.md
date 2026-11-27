@@ -136,9 +136,17 @@ Planned:
   xIR of the bodies its author marks as stable, which programs may run in place, as they run the runtime's carried
   sources. Each body run in place is covered by the library's stamp: a mismatch is a link error, never a silent
   difference.
-- Replaceable drivers (terminal drivers, database drivers): a program never assumes which one is active. Compiled
-  code may call a driver directly only behind a guard on the active driver's identity, as it calls the runtime's
-  classes of built-in types behind `xb_scalar_replaced` ([xir.md](xir.md#passes)).
+- Replaceable drivers (terminal drivers, database drivers): a program never assumes which one is active. Compiled code
+  may call a driver directly only behind a guard on the active driver's identity, as it calls the runtime's classes of
+  built-in types behind `xb_scalar_replaced` ([xir.md](xir.md#passes)). Linking a library is all it takes to change
+  drivers: its module registers its drivers when it initializes, before the program's code runs; a driver registered
+  under the name of one the runtime has replaces it, and one registered as the default becomes the one in use (the
+  terminal driver chosen at the start, unless `//TERM:` names another; the database driver that `USE` takes without
+  `VIA`). Drivers are found by name in the registry (`//TERM:`, `RddSetDefault()`, `USE ... VIA`). A driver is written
+  in C, against an interface in `xbrt.h` (a structure of entry points, versioned with the ABI), or in xBase, as a class
+  that inherits the driver's base class and that the runtime calls through an adapter. Today both kinds of driver are
+  tables in the runtime (`term/drivers.c`, `rdd/area.c`); the terminal's interface moves into `xbrt.h` once the VT
+  driver completes it, the database's at the SQL engines.
 - Qualified names (`<library>::Name()`) for a name two libraries declare; C sources in a library (its `NATIVE`
   functions); shared libraries (`.so`, `.dll`, `.dylib`), which need the runtime as a shared library too (one
   collector, context and symbol table per process), the public functions exported (Windows), and modules that

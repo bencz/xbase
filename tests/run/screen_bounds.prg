@@ -5,7 +5,8 @@
 // over either half blanks the other, and a scroll that cuts one blanks its other half; a combining mark goes with the
 // character before it, and with none when that one is not shown. A UTF-8 character split between two ?? is one
 // character; a position near the largest integer moves to the right edge; a wide character on a screen one column wide
-// is not shown.
+// is not shown. A color written U and then another letter is that color (the reference keeps writing it U), and a
+// color string keeps five pairs, as Clipper's (the reference keeps more).
 PROCEDURE Main()
    LOCAL a := {}
 
@@ -56,6 +57,8 @@ PROCEDURE Main()
    SetPos( 0, 0 )
    ?? "日z"
    AAdd( a, Pos() )
+   OutStd( "colors:", SetColor( "UW/N" ), SetColor( "UN/N" ), SetColor( "B/W,R/G,BG/R,GR/B,W/N,R/R,G/G" ), ;
+      SetColor(), Chr( 10 ) )
    OutStd( "positions:" )
    AEval( a, {| p | OutStd( " " + p ) } )
    OutStd( Chr( 10 ) )

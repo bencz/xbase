@@ -1,0 +1,436 @@
+default W/N,N/W,N/N,N/N,N/W
+[W/N]          was W/N,N/W,N/N,N/N,N/W      is W/N,N/W,N/N,N/N,N/W
+[N/W]          was W/N,N/W,N/N,N/N,N/W      is N/W,N/W,N/N,N/N,N/W
+[B/N]          was N/W,N/W,N/N,N/N,N/W      is B/N,N/W,N/N,N/N,N/W
+[G/N]          was B/N,N/W,N/N,N/N,N/W      is G/N,N/W,N/N,N/N,N/W
+[BG/N]         was G/N,N/W,N/N,N/N,N/W      is BG/N,N/W,N/N,N/N,N/W
+[R/N]          was BG/N,N/W,N/N,N/N,N/W     is R/N,N/W,N/N,N/N,N/W
+[RB/N]         was R/N,N/W,N/N,N/N,N/W      is BR/N,N/W,N/N,N/N,N/W
+[GR/N]         was BR/N,N/W,N/N,N/N,N/W     is GR/N,N/W,N/N,N/N,N/W
+[w+/b]         was GR/N,N/W,N/N,N/N,N/W     is W+/B,N/W,N/N,N/N,N/W
+[N/W*]         was W+/B,N/W,N/N,N/N,N/W     is N/W*,N/W,N/N,N/N,N/W
+[W+/B*]        was N/W*,N/W,N/N,N/N,N/W     is W+/B*,N/W,N/N,N/N,N/W
+[U]            was W+/B*,N/W,N/N,N/N,N/W    is U/N,N/W,N/N,N/N,N/W
+[I]            was U/N,N/W,N/N,N/N,N/W      is N/W,N/W,N/N,N/N,N/W
+[X]            was N/W,N/W,N/N,N/N,N/W      is N/N,N/W,N/N,N/N,N/W
+[U/R]          was N/N,N/W,N/N,N/N,N/W      is U/R,N/W,N/N,N/N,N/W
+[I/B]          was U/R,N/W,N/N,N/N,N/W      is W/B,N/W,N/N,N/N,N/W
+[I/R]          was W/B,N/W,N/N,N/N,N/W      is W/R,N/W,N/N,N/N,N/W
+[R/I]          was W/R,N/W,N/N,N/N,N/W      is N/W,N/W,N/N,N/N,N/W
+[I+]           was N/W,N/W,N/N,N/N,N/W      is N+/W,N/W,N/N,N/N,N/W
+[I/U]          was N+/W,N/W,N/N,N/N,N/W     is W/U,N/W,N/N,N/N,N/W
+[X/B]          was W/U,N/W,N/N,N/N,N/W      is N/B,N/W,N/N,N/N,N/W
+[B/X]          was N/B,N/W,N/N,N/N,N/W      is N/N,N/W,N/N,N/N,N/W
+[WX/N]         was N/N,N/W,N/N,N/N,N/W      is N/N,N/W,N/N,N/N,N/W
+[XW/N]         was N/N,N/W,N/N,N/N,N/W      is W/N,N/W,N/N,N/N,N/W
+[U+/W]         was W/N,N/W,N/N,N/N,N/W      is U+/W,N/W,N/N,N/N,N/W
+[W/U]          was U+/W,N/W,N/N,N/N,N/W     is W/U,N/W,N/N,N/N,N/W
+[15/1]         was W/U,N/W,N/N,N/N,N/W      is W+/B,N/W,N/N,N/N,N/W
+[7/0]          was W+/B,N/W,N/N,N/N,N/W     is W/N,N/W,N/N,N/N,N/W
+[R/12]         was W/N,N/W,N/N,N/N,N/W      is R/R*,N/W,N/N,N/N,N/W
+[255/3]        was R/R*,N/W,N/N,N/N,N/W     is W+/BG,N/W,N/N,N/N,N/W
+[-1/2]         was W+/BG,N/W,N/N,N/N,N/W    is B/G,N/W,N/N,N/N,N/W
+[16/0]         was B/G,N/W,N/N,N/N,N/W      is N/N,N/W,N/N,N/N,N/W
+[GR+/RB]       was N/N,N/W,N/N,N/N,N/W      is GR+/BR,N/W,N/N,N/N,N/W
+[BG+*/GR]      was GR+/BR,N/W,N/N,N/N,N/W   is BG+/GR*,N/W,N/N,N/N,N/W
+[*W/N]         was BG+/GR*,N/W,N/N,N/N,N/W  is W/N*,N/W,N/N,N/N,N/W
+[W/N+]         was W/N*,N/W,N/N,N/N,N/W     is W+/N,N/W,N/N,N/N,N/W
+[+R/B]         was W+/N,N/W,N/N,N/N,N/W     is R+/B,N/W,N/N,N/N,N/W
+[G B/N]        was R+/B,N/W,N/N,N/N,N/W     is BG/N,N/W,N/N,N/N,N/W
+[ W / B ]      was BG/N,N/W,N/N,N/N,N/W     is W/B,N/W,N/N,N/N,N/W
+[W/N/R]        was W/B,N/W,N/N,N/N,N/W      is N/R,N/W,N/N,N/N,N/W
+[R/]           was N/R,N/W,N/N,N/N,N/W      is R/N,N/W,N/N,N/N,N/W
+[/R]           was R/N,N/W,N/N,N/N,N/W      is N/R,N/W,N/N,N/N,N/W
+[N]            was N/R,N/W,N/N,N/N,N/W      is N/N,N/W,N/N,N/N,N/W
+[+]            was N/N,N/W,N/N,N/N,N/W      is N+/N,N/W,N/N,N/N,N/W
+[*]            was N+/N,N/W,N/N,N/N,N/W     is N/N*,N/W,N/N,N/N,N/W
+[/]            was N/N*,N/W,N/N,N/N,N/W     is N/N,N/W,N/N,N/N,N/W
+[BOGUS]        was N/N,N/W,N/N,N/N,N/W      is U/N,N/W,N/N,N/N,N/W
+[W/N,R/W]      was U/N,N/W,N/N,N/N,N/W      is W/N,R/W,N/N,N/N,R/W
+[,G/R]         was W/N,R/W,N/N,N/N,R/W      is W/N,G/R,N/N,N/N,G/R
+[B/W,,,,R/G]   was W/N,G/R,N/N,N/N,G/R      is B/W,G/R,N/N,N/N,R/G
+[]             was B/W,G/R,N/N,N/N,R/G      is W/N,N/W,N/N,N/N,N/W
+[,,,,G/B]      was W/N,N/W,N/N,N/N,N/W      is W/N,N/W,N/N,N/N,G/B
+[2N]           was W/N,N/W,N/N,N/N,G/B      is N/N,N/W,N/N,N/N,G/B
+[1BNG]         was N/N,N/W,N/N,N/N,G/B      is G/N,N/W,N/N,N/N,G/B
+[9 1]          was G/N,N/W,N/N,N/N,G/B      is B+/N,N/W,N/N,N/N,G/B
+[N/8 1]        was B+/N,N/W,N/N,N/N,G/B     is N/B*,N/W,N/N,N/N,G/B
+[9X]           was N/B*,N/W,N/N,N/N,G/B     is N+/N,N/W,N/N,N/N,G/B
+[9N]           was N+/N,N/W,N/N,N/N,G/B     is N+/N,N/W,N/N,N/N,G/B
+[R/XB]         was N+/N,N/W,N/N,N/N,G/B     is N/B,N/W,N/N,N/N,G/B
+[/XG]          was N/B,N/W,N/N,N/N,G/B      is N/G,N/W,N/N,N/N,G/B
+[R/XI]         was N/G,N/W,N/N,N/N,G/B      is N/W,N/W,N/N,N/N,G/B
+[IX]           was N/W,N/W,N/N,N/N,G/B      is N/N,N/W,N/N,N/N,G/B
+[I3/N]         was N/N,N/W,N/N,N/N,G/B      is BG/N,N/W,N/N,N/N,G/B
+[IN/N]         was BG/N,N/W,N/N,N/N,G/B     is N/N,N/W,N/N,N/N,G/B
+[IU/N]         was N/N,N/W,N/N,N/N,G/B      is U/N,N/W,N/N,N/N,G/B
+[I9]           was U/N,N/W,N/N,N/N,G/B      is N/B*,N/W,N/N,N/N,G/B
+[+WI2R]        was N/B*,N/W,N/N,N/N,G/B     is N+/GR,N/W,N/N,N/N,G/B
+[BI 2/]        was N+/GR,N/W,N/N,N/N,G/B    is G/N,N/W,N/N,N/N,G/B
+[9/1/]         was G/N,N/W,N/N,N/N,G/B      is B+/N,N/W,N/N,N/N,G/B
+[B1/9/9]       was B+/N,N/W,N/N,N/N,G/B     is B/B*,N/W,N/N,N/N,G/B
+[+R/9/G]       was B/B*,N/W,N/N,N/N,G/B     is B+/G*,N/W,N/N,N/N,G/B
+[cM]           was B+/G*,N/W,N/N,N/N,G/B    is B+/G*,N/W,N/N,N/N,G/B
+[Q]            was B+/G*,N/W,N/N,N/N,G/B    is B+/G*,N/W,N/N,N/N,G/B
+[?]            was B+/G*,N/W,N/N,N/N,G/B    is B+/G*,N/W,N/N,N/N,G/B
+[-]            was B+/G*,N/W,N/N,N/N,G/B    is B+/G*,N/W,N/N,N/N,G/B
+[OS]           was B+/G*,N/W,N/N,N/N,G/B    is B+/G*,N/W,N/N,N/N,G/B
+[W/N,Q]        was B+/G*,N/W,N/N,N/N,G/B    is W/N,N/W,N/N,N/N,G/B
+[W/N,R/W,,,Q]  was W/N,N/W,N/N,N/N,G/B      is W/N,R/W,N/N,N/N,R/W
+[q ] W/N,N/W,N/N,N/N,N/W
+[R,2] R/N,G/N,N/N,N/N,G/N
+[X0I9] N/B*,N/W,N/N,N/N,N/W
+[11,W*] BG+/N,W/N*,N/N,N/N,W/N*
+[RBB+G ] W+/N,N/W,N/N,N/N,N/W
+[X,W?R+*] N/N,W+/N*,N/N,N/N,W+/N*
+[I+/Iq++1] N+/B,N/W,N/N,N/N,N/W
+[2] G/N,N/W,N/N,N/N,N/W
+[qG] G/N,N/W,N/N,N/N,N/W
+[0+X] N+/N,N/W,N/N,N/N,N/W
+[B*0?] N/N*,N/W,N/N,N/N,N/W
+[,GBN2] W/N,G/N,N/N,N/N,G/N
+[B12BBX] N+/N,N/W,N/N,N/N,N/W
+[R+BN+?9] B+/N,N/W,N/N,N/N,N/W
+[N2,qX12I] G/N,N+/W,N/N,N/N,N+/W
+[W] W/N,N/W,N/N,N/N,N/W
+[N9] B+/N,N/W,N/N,N/N,N/W
+[0X9] B+/N,N/W,N/N,N/N,N/W
+[I21 ] N/BR,N/W,N/N,N/N,N/W
+[1*XB0] N/N*,N/W,N/N,N/N,N/W
+[+GWW/2] W+/G,N/W,N/N,N/N,N/W
+[1GB?*BX] N/N*,N/W,N/N,N/N,N/W
+[0B/+2q1W] B+/W,N/W,N/N,N/N,N/W
+[R] R/N,N/W,N/N,N/N,N/W
+[*1] B/N*,N/W,N/N,N/N,N/W
+[XB2] G/N,N/W,N/N,N/N,N/W
+[qX q] N/N,N/W,N/N,N/N,N/W
+[ WR*2] G/N*,N/W,N/N,N/N,N/W
+[/qG290] N/G,N/W,N/N,N/N,N/W
+[20?+X0R] R+/N,N/W,N/N,N/N,N/W
+[ NX*921q] B+/N*,N/W,N/N,N/N,N/W
+[/] N/N,N/W,N/N,N/N,N/W
+[R ] R/N,N/W,N/N,N/N,N/W
+[qWB] W/N,N/W,N/N,N/N,N/W
+[9?? ] B+/N,N/W,N/N,N/N,N/W
+[W990?] GR+/N,N/W,N/N,N/N,N/W
+[,XB0I9] W/N,N/B*,N/N,N/N,N/B*
+[IG9W0,,] N/N*,N/W,N/N,N/N,N/W
+[*WNINq0B] N/B*,N/W,N/N,N/N,N/W
+[X] N/N,N/W,N/N,N/N,N/W
+[G0] N/N,N/W,N/N,N/N,N/W
+[IIX] N/N,N/W,N/N,N/N,N/W
+[0R*9] B+/N*,N/W,N/N,N/N,N/W
+[X*,92] N/N*,R+/N,N/N,N/N,R+/N
+[q, ?IN] W/N,N/N,N/N,N/N,N/N
+[*1+X,R+] N+/N*,R+/N,N/N,N/N,R+/N
+[1I ,IB,+] N/W,N/W,N+/N,N/N,N/W
+[B] B/N,N/W,N/N,N/N,N/W
+[,9] W/N,B+/N,N/N,N/N,B+/N
+[*+*] N+/N*,N/W,N/N,N/N,N/W
+[/ WN] N/N,N/W,N/N,N/N,N/W
+[W,X+*] W/N,N+/N*,N/N,N/N,N+/N*
+[?N WIN] N/N,N/W,N/N,N/N,N/W
+[G2WIB,I] N/W,N/W,N/N,N/N,N/W
+[9+XIXRW9] N+/B*,N/W,N/N,N/N,N/W
+[2] G/N,N/W,N/N,N/N,N/W
+[?2] G/N,N/W,N/N,N/N,N/W
+[1WB] W/N,N/W,N/N,N/N,N/W
+[*9G9] B+/N*,N/W,N/N,N/N,N/W
+[BX2WG] W/N,N/W,N/N,N/N,N/W
+[GRqqI,] N/W,N/W,N/N,N/N,N/W
+[12**,*1] R+/N*,B/N*,N/N,N/N,B/N*
+[G,? + q*] G/N,N+/N*,N/N,N/N,N+/N*
+[2] G/N,N/W,N/N,N/N,N/W
+[R1] B/N,N/W,N/N,N/N,N/W
+[ *N] N/N*,N/W,N/N,N/N,N/W
+[0q? ] N/N,N/W,N/N,N/N,N/W
+[+X*R2] G+/N*,N/W,N/N,N/N,N/W
+[G?//?G] N/G,N/W,N/N,N/N,N/W
+[+9IIGI2] N+/G,N/W,N/N,N/N,N/W
+[??R9/2N ] B+/N,N/W,N/N,N/N,N/W
+[q] W/N,N/W,N/N,N/N,N/W
+[IB] N/W,N/W,N/N,N/N,N/W
+[N+1] B+/N,N/W,N/N,N/N,N/W
+[I XN] N/N,N/W,N/N,N/N,N/W
+[?2qX ] N/N,N/W,N/N,N/N,N/W
+[I1900B] N/BR*,N/W,N/N,N/N,N/W
+[1I2IW,1] N/W,B/N,N/N,N/N,B/N
+[* N,?qBW] N/N*,W/N,N/N,N/N,W/N
+[*] N/N*,N/W,N/N,N/N,N/W
+[WN] N/N,N/W,N/N,N/N,N/W
+[/Iq] N/W,N/W,N/N,N/N,N/W
+[9  9] B+/N,N/W,N/N,N/N,N/W
+[W09*N] N+/N*,N/W,N/N,N/N,N/W
+[I ,Wq1] N/W,B/N,N/N,N/N,B/N
+[XXW+,,q] W+/N,N/W,N/N,N/N,N/W
+[011R*1,N] B+/N*,N/N,N/N,N/N,N/N
+[ ] W/N,N/W,N/N,N/N,N/W
+[/*] N/N*,N/W,N/N,N/N,N/W
+[X,9] N/N,B+/N,N/N,N/N,B+/N
+[?X2G] G/N,N/W,N/N,N/N,N/W
+[19+91] BG+/N,N/W,N/N,N/N,N/W
+[RqIN/N] N/N,N/W,N/N,N/N,N/W
+[IXN?1W1] N/B,N/W,N/N,N/N,N/W
+[/q/0/,/ ] N/N,N/N,N/N,N/N,N/N
+[9] B+/N,N/W,N/N,N/N,N/W
+[G1] B/N,N/W,N/N,N/N,N/W
+[1+,] B+/N,N/W,N/N,N/N,N/W
+[1qIq] N/W,N/W,N/N,N/N,N/W
+[,,I X] W/N,N/W,N/N,N/N,N/W
+[9++9BX] N+/N,N/W,N/N,N/N,N/W
+[R/I2G1R] N/BR,N/W,N/N,N/N,N/W
+[*/9R1XG9] N/B*,N/W,N/N,N/N,N/W
+[9] B+/N,N/W,N/N,N/N,N/W
+[1q] B/N,N/W,N/N,N/N,N/W
+[q2W] W/N,N/W,N/N,N/N,N/W
+[G*2I] N/W*,N/W,N/N,N/N,N/W
+[W2*B0] N/N*,N/W,N/N,N/N,N/W
+[/2qGX?] N/N,N/W,N/N,N/N,N/W
+[9qG9 qN] N+/N,N/W,N/N,N/N,N/W
+[G0*Wq22?] GR/N*,N/W,N/N,N/N,N/W
+[1] B/N,N/W,N/N,N/N,N/W
+[B1] B/N,N/W,N/N,N/N,N/W
+[9IW] N+/W,N/W,N/N,N/N,N/W
+[?, 0] W/N,N/N,N/N,N/N,N/N
+[20RNN] N/N,N/W,N/N,N/N,N/W
+[G2 1G/] BG/N,N/W,N/N,N/N,N/W
+[2++NRII] N+/W,N/W,N/N,N/N,N/W
+[X+R+2XB0] N+/N,N/W,N/N,N/N,N/W
+[W] W/N,N/W,N/N,N/N,N/W
+[/2] N/G,N/W,N/N,N/N,N/W
+[W01] B/N,N/W,N/N,N/N,N/W
+[?/X+] N+/N,N/W,N/N,N/N,N/W
+[?q0GB] BG/N,N/W,N/N,N/N,N/W
+[G1XX0G] G/N,N/W,N/N,N/N,N/W
+[G?+0N9X] N+/N,N/W,N/N,N/N,N/W
+[N2 B1+R0] N+/N,N/W,N/N,N/N,N/W
+[9] B+/N,N/W,N/N,N/N,N/W
+[Wq] W/N,N/W,N/N,N/N,N/W
+[RNW] W/N,N/W,N/N,N/N,N/W
+[q +I] N+/W,N/W,N/N,N/N,N/W
+[022B9] B+/N,N/W,N/N,N/N,N/W
+[IIXBWX] N/N,N/W,N/N,N/N,N/W
+[q2BNXR?] R/N,N/W,N/N,N/N,N/W
+[WW9I*Rq?] N+/W*,N/W,N/N,N/N,N/W
+[/] N/N,N/W,N/N,N/N,N/W
+[?*] N/N*,N/W,N/N,N/N,N/W
+[+ 1] B+/N,N/W,N/N,N/N,N/W
+[+R?G] GR+/N,N/W,N/N,N/N,N/W
+[RNGRX] N/N,N/W,N/N,N/N,N/W
+[R+10N/] N+/N,N/W,N/N,N/N,N/W
+[+2X2 1G] BG+/N,N/W,N/N,N/N,N/W
+[1,B, I12] B/N,B/N,N/R*,N/N,B/N
+[2] G/N,N/W,N/N,N/N,N/W
+[+0] N+/N,N/W,N/N,N/N,N/W
+[W0?] N/N,N/W,N/N,N/N,N/W
+[G2+ ] G+/N,N/W,N/N,N/N,N/W
+[,B *G] W/N,BG/N*,N/N,N/N,BG/N*
+[/1 X1I] N/W,N/W,N/N,N/N,N/W
+[WG*0X?2] G/N*,N/W,N/N,N/N,N/W
+[/X+W,N*,] N+/W,N/N*,N/N,N/N,N/N*
+[1] B/N,N/W,N/N,N/N,N/W
+[0R] R/N,N/W,N/N,N/N,N/W
+[ qI] N/W,N/W,N/N,N/N,N/W
+[+*?q] N+/N*,N/W,N/N,N/N,N/W
+[1X/Nq] N/N,N/W,N/N,N/N,N/W
+[,/1BXX] W/N,N/N,N/N,N/N,N/N
+[IB1GBqI] N/W,N/W,N/N,N/N,N/W
+[/G/XR?BG] N/W,N/W,N/N,N/N,N/W
+[?] W/N,N/W,N/N,N/N,N/W
+[1q] B/N,N/W,N/N,N/N,N/W
+[N,9] N/N,B+/N,N/N,N/N,B+/N
+[*/N?] N/N*,N/W,N/N,N/N,N/W
+[? I**] N/W*,N/W,N/N,N/N,N/W
+[9 0q9?] B+/N,N/W,N/N,N/N,N/W
+[N/W9,BB] N/B*,B/N,N/N,N/N,B/N
+[ ?X*+9G9] B+/N*,N/W,N/N,N/N,N/W
+[+] N+/N,N/W,N/N,N/N,N/W
+[9G] BG+/N,N/W,N/N,N/N,N/W
+[1G/] BG/N,N/W,N/N,N/N,N/W
+[*+B*] B+/N*,N/W,N/N,N/N,N/W
+[BW9GX] N+/N,N/W,N/N,N/N,N/W
+[+9/W,q] B+/W,N/W,N/N,N/N,N/W
+[1I+ *+R] N+/W*,N/W,N/N,N/N,N/W
+[R20WXq?1] B/N,N/W,N/N,N/N,N/W
+[R] R/N,N/W,N/N,N/N,N/W
+[ X] N/N,N/W,N/N,N/N,N/W
+[Wq ] W/N,N/W,N/N,N/N,N/W
+[/+GG] N+/G,N/W,N/N,N/N,N/W
+[XX?Wq] W/N,N/W,N/N,N/N,N/W
+[+I,I2?] N+/W,N/G,N/N,N/N,N/G
+[,GB/9X1] W/N,N/B*,N/N,N/N,N/B*
+[G1NXN+q?] N+/N,N/W,N/N,N/N,N/W
+[I] N/W,N/W,N/N,N/N,N/W
+[*B] B/N*,N/W,N/N,N/N,N/W
+[B+q] B+/N,N/W,N/N,N/N,N/W
+[1 10] G+/N,N/W,N/N,N/N,N/W
+[*1XN0] N/N*,N/W,N/N,N/N,N/W
+[IR,INX] N/W,N/N,N/N,N/N,N/N
+[1G0I 9q] N/B*,N/W,N/N,N/N,N/W
+[1XN RB*X] N/N*,N/W,N/N,N/N,N/W
+[N] N/N,N/W,N/N,N/N,N/W
+[G+] G+/N,N/W,N/N,N/N,N/W
+[IqB] N/W,N/W,N/N,N/N,N/W
+[ *+1] B+/N*,N/W,N/N,N/N,N/W
+[G9I?9] N+/B*,N/W,N/N,N/N,N/W
+[X IB19] N/BG,N/W,N/N,N/N,N/W
+[W9GNB,2] B+/N,G/N,N/N,N/N,G/N
+[?,199RWB] W/N,W/N,N/N,N/N,W/N
+[B] B/N,N/W,N/N,N/N,N/W
+[+2] G+/N,N/W,N/N,N/N,N/W
+[W+,] W+/N,N/W,N/N,N/N,N/W
+[9+9B] B+/N,N/W,N/N,N/N,N/W
+[,R 01] W/N,B/N,N/N,N/N,B/N
+[9B*?R9] B+/N*,N/W,N/N,N/N,N/W
+[q9W2XRB] BR+/N,N/W,N/N,N/N,N/W
+[,qG/X1G,] W/N,N/BG,N/N,N/N,N/BG
+[q] W/N,N/W,N/N,N/N,N/W
+[RW] W/N,N/W,N/N,N/N,N/W
+[Xq0] N/N,N/W,N/N,N/N,N/W
+[+XI ] N+/W,N/W,N/N,N/N,N/W
+[W++ ?] W+/N,N/W,N/N,N/N,N/W
+[,I0+2/] W/N,G+/N,N/N,N/N,G+/N
+[/RG/XNB] N/B,N/W,N/N,N/N,N/W
+[,WNX R92] W/N,R+/N,N/N,N/N,R+/N
+[0] N/N,N/W,N/N,N/N,N/W
+[R1] B/N,N/W,N/N,N/N,N/W
+[/0N] N/N,N/W,N/N,N/N,N/W
+[X+9N] N+/N,N/W,N/N,N/N,N/W
+[R? ?2] G/N,N/W,N/N,N/N,N/W
+[9/q,X/] B+/N,N/N,N/N,N/N,N/N
+[9? ,XIX] B+/N,N/N,N/N,N/N,N/N
+[9RqG, NW] W+/N,W/N,N/N,N/N,W/N
+[/] N/N,N/W,N/N,N/N,N/W
+[ 9] B+/N,N/W,N/N,N/N,N/W
+[qB2] G/N,N/W,N/N,N/N,N/W
+[W*?9] B+/N*,N/W,N/N,N/N,N/W
+[1XWX9] B+/N,N/W,N/N,N/N,N/W
+[ 19,*B] BG/N,B/N*,N/N,N/N,B/N*
+[1 BWI N] N/N,N/W,N/N,N/N,N/W
+[9R +1Gq?] BG+/N,N/W,N/N,N/N,N/W
+[1] B/N,N/W,N/N,N/N,N/W
+[0q] N/N,N/W,N/N,N/N,N/W
+[,0G] W/N,G/N,N/N,N/N,G/N
+[R,,B] R/N,N/W,B/N,N/N,N/W
+[1q+N2] G+/N,N/W,N/N,N/N,N/W
+[*/0,NR] N/N*,R/N,N/N,N/N,R/N
+[qG/90?2] G/G*,N/W,N/N,N/N,N/W
+[/NGX+R2W] N+/W,N/W,N/N,N/N,N/W
+[q] W/N,N/W,N/N,N/N,N/W
+[NW] W/N,N/W,N/N,N/N,N/W
+[B*q] B/N*,N/W,N/N,N/N,N/W
+[?XN?] N/N,N/W,N/N,N/N,N/W
+[29/N/] N+/N,N/W,N/N,N/N,N/W
+[+q900G] GR+/N,N/W,N/N,N/N,N/W
+[,?B10BB] W/N,BG+/N,N/N,N/N,BG+/N
+[2RRN ?/N] N/N,N/W,N/N,N/N,N/W
+[0] N/N,N/W,N/N,N/N,N/W
+[, ] W/N,N/W,N/N,N/N,N/W
+[,BG] W/N,BG/N,N/N,N/N,BG/N
+[GGGR] GR/N,N/W,N/N,N/N,N/W
+[,I2WN] W/N,N/N,N/N,N/N,N/N
+[Xq,*Xq] N/N,N/N*,N/N,N/N,N/N*
+[,W*/RR ] W/N,W/R*,N/N,N/N,W/R*
+[RX/I1/R*] B/R*,N/W,N/N,N/N,N/W
+[q] W/N,N/W,N/N,N/N,N/W
+[XB] B/N,N/W,N/N,N/N,N/W
+[*R0] N/N*,N/W,N/N,N/N,N/W
+[Iq9+] N+/B*,N/W,N/N,N/N,N/W
+[B+B*+] B+/N*,N/W,N/N,N/N,N/W
+[W*R22N] N/N*,N/W,N/N,N/N,N/W
+[2+GB,X2] BG+/N,G/N,N/N,N/N,G/N
+[9IXG+?,0] N+/G,N/N,N/N,N/N,N/N
+[,] W/N,N/W,N/N,N/N,N/W
+[+ ] N+/N,N/W,N/N,N/N,N/W
+[*0,] N/N*,N/W,N/N,N/N,N/W
+[2?R+] GR+/N,N/W,N/N,N/N,N/W
+[GN,,G] N/N,N/W,G/N,N/N,N/W
+[qG1,N9] B/N,B+/N,N/N,N/N,B+/N
+[RI11?WG] N/W*,N/W,N/N,N/N,N/W
+[B9W*?G?I] N+/W*,N/W,N/N,N/N,N/W
+[0] N/N,N/W,N/N,N/N,N/W
+[GG] G/N,N/W,N/N,N/N,N/W
+[+1I] N+/W,N/W,N/N,N/N,N/W
+[B/*W] B/W*,N/W,N/N,N/N,N/W
+[*G++0] N+/N*,N/W,N/N,N/N,N/W
+[G?N2R?] GR/N,N/W,N/N,N/N,N/W
+[*GGI ?B] N/W*,N/W,N/N,N/N,N/W
+[,GW *B0R] W/N,R/N*,N/N,N/N,R/N*
+[G] G/N,N/W,N/N,N/N,N/W
+[G,] G/N,N/W,N/N,N/N,N/W
+[q*,] N/N*,N/W,N/N,N/N,N/W
+[GGG/] G/N,N/W,N/N,N/N,N/W
+[W1/WI] N/W,N/W,N/N,N/N,N/W
+[9*?9WW] W+/N*,N/W,N/N,N/N,N/W
+[RR//qWI] N/W,N/W,N/N,N/N,N/W
+[10W20X92] R+/N,N/W,N/N,N/N,N/W
+[W] W/N,N/W,N/N,N/N,N/W
+[/2] N/G,N/W,N/N,N/N,N/W
+[X+0] N+/N,N/W,N/N,N/N,N/W
+[+++G] G+/N,N/W,N/N,N/N,N/W
+[0B/qN] B/N,N/W,N/N,N/N,N/W
+[1/*BR/] BR/N*,N/W,N/N,N/N,N/W
+[020211+] BG+/N,N/W,N/N,N/N,N/W
+[2,291BW2] G/N,G/N,N/N,N/N,G/N
+[2] G/N,N/W,N/N,N/N,N/W
+[q0] N/N,N/W,N/N,N/N,N/W
+[N91] BG+/N,N/W,N/N,N/N,N/W
+[0X /] N/N,N/W,N/N,N/N,N/W
+[2R/0I] N/W,N/W,N/N,N/N,N/W
+set color to W+/B,GR/N,G/N,B/N,GR/N
+set color to &macro GR+/B,W/R,G/N,B/N,W/R
+set colour to W/N,N/W,N/N,N/N,N/W
+set color to (expr) BG/N,N/W,N/N,N/N,N/W
+blink .T. .T. .F. .F. iscolor .T. 
+screen 25 x 80, cursor 24, 8
+ 0|x  x  x  xy z
+ 1|x  x  x  xy z
+ 2|x  x  x   y z
+ 3|x  x  x   y z
+ 4|x  x  x   y def
+ 5|x  x  x   y g
+ 6|x  x  x     qs
+ 7|x  x  x
+ 8|x  x  x
+ 9|x  x  x     standard again
+10|x  x  x
+11|x  x  x     abcd    efgh
+12|x  x  x
+13|x  x  x
+14|x  x  x
+15|x  x  x
+16|x  x  x
+17|x  x  x
+18|x  x  x
+19|x  x  x
+20|x  x  x
+21|x  x  x
+22|x  x  x
+23|x  x  x
+24|scrolled
+colors
+ 0|70*1 07*2 1F*1 07*6 74*1 07*1 71*1 07*67
+ 1|01*1 07*5 00*1 07*3 02*1 07*69
+ 2|02*1 07*2 C4*1 07*2 02*1 07*3 01*1 07*69
+ 3|03*1 07*2 3F*1 07*2 09*1 07*3 06*1 07*1 01*1 07*67
+ 4|04*1 07*2 21*1 07*2 90*1 07*3 06*1 07*1 16*1 4B*1 07*66
+ 5|05*1 07*2 00*1 07*2 08*1 07*3 06*1 07*1 20*1 07*67
+ 6|06*1 07*2 5E*1 07*2 08*1 07*5 74*2 07*66
+ 7|1F*1 07*2 EB*1 07*2 10*1 07*5 74*4 07*64
+ 8|F0*1 07*2 87*1 07*2 20*1 07*5 74*4 07*64
+ 9|9F*1 07*2 0F*1 07*2 70*1 07*5 14*14 07*54
+10|01*1 07*2 1C*1 07*2 00*1 07*5 14*9 07*59
+11|70*1 07*2 03*1 07*2 03*1 07*13 03*1 07*1 74*2 07*56
+12|00*1 07*2 17*1 07*2 00*1 07*73
+13|41*1 07*2 40*1 07*2 01*1 07*73
+14|17*1 07*2 04*1 07*2 90*1 07*73
+15|47*1 07*2 40*1 07*2 68*1 07*73
+16|70*1 07*2 00*1 07*2 02*1 07*73
+17|78*1 07*2 08*1 07*2 09*1 07*73
+18|17*1 07*2 80*1 07*2 91*1 07*73
+19|10*1 07*2 00*1 07*2 A9*1 07*73
+20|00*1 07*2 01*1 07*2 A9*1 07*73
+21|00*1 07*5 A9*1 07*73
+22|07*6 A9*1 07*73
+23|79*1 07*2 71*1 07*2 A9*1 07*73
+24|56*80

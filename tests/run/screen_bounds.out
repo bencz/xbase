@@ -24,6 +24,7 @@ screen 25 x 80, cursor 18, 80
 22|
 23|
 24|     low
+colors: W/N,N/W,N/N,N/N,N/W W/N,N/W,N/N,N/N,N/W N/N,N/W,N/N,N/N,N/W B/W,R/G,BG/R,GR/B,W/N 
 positions: 0,4 1,-4 2,3 24,8 4,4 7,80 10,2 13,0 17,3 18,80 1,0
 screen 2 x 1, cursor 1, 0
  0|z

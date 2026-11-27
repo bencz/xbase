@@ -215,7 +215,10 @@
 #command @ <row>, <col> CLEAR          => Scroll( <row>, <col> ) ; SetPos( <row>, <col> )
 #command @ <top>, <left> CLEAR TO <bottom>, <right> => ;
          Scroll( <top>, <left>, <bottom>, <right> ) ; SetPos( <top>, <left> )
-#command @ <row>, <col> SAY <xpr>      => DevPos( <row>, <col> ) ; DevOut( <xpr> )
+#command @ <row>, <col> SAY <xpr> [COLOR <color>] => DevPos( <row>, <col> ) ; DevOut( <xpr> [, <color>] )
+#command SET COLOR TO [<*spec*>]       => SetColor( #<spec> )
+#command SET COLOR TO ( <c> )          => SetColor( <c> )
+#command SET COLOUR TO [<*spec*>]      => SET COLOR TO [<spec>]
 
 /* TEXT ... ENDTEXT: each line between them, as written, through QOut(), then QQOut(); `text` is the preprocessor's
    form that takes the lines (see preprocessor.md). */
