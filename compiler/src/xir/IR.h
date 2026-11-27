@@ -134,6 +134,9 @@ struct Var {
   // constants) table.index reads as constant data.
   bool table = false;
   std::vector<const Constant *> items;
+  // Frame or Static: the types its AS declares (a TypeSet; 0: none), a hint the guards choose their masks from: a
+  // value of another type takes the generic copy (the language stays untyped).
+  uint32_t declared = 0;
 };
 
 // How a load or store reaches a variable's item.

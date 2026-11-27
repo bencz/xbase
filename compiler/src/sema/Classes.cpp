@@ -15,7 +15,7 @@ namespace {
 std::string memberName(const ClassDecl &c, const ClassMethodDecl &m) { return c.name + ":" + m.message(); }
 
 // The parameters of a method: SELF, then those written.
-void withSelf(FuncDecl &f, SourceLoc loc) { f.params.insert(f.params.begin(), Param{loc, "SELF"}); }
+void withSelf(FuncDecl &f, SourceLoc loc) { f.params.insert(f.params.begin(), Param{loc, "SELF", {}}); }
 
 // Whether an implementation of `kind` implements a declaration of `declared`
 // (METHOD may implement an ACCESS, as in the other dialects).

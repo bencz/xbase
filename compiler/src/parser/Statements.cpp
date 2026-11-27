@@ -206,9 +206,9 @@ StmtPtr Parser::parseDecl(StmtKind kind) {
         expect(Tok::RBracket, "']'");
       }
       d.init = std::move(dims);
-    } else if (accept(Tok::Assign)) {
-      d.init = parseExpr();
     }
+    d.declared = parseDeclaredType(); // LOCAL n AS NUMERIC := 0, LOCAL a[ 3 ] AS ARRAY
+    if (!d.init && accept(Tok::Assign)) d.init = parseExpr();
     if (namesOnly && d.init) diag_.error(d.loc, keyword + " takes names only");
     st->decls.push_back(std::move(d));
   } while (accept(Tok::Comma));
@@ -560,7 +560,7 @@ StmtPtr Parser::parseTry() {
   st->isTry = true;
   st->leavable = true;
   auto block = std::make_unique<BlockExpr>(openLoc);
-  block->params.push_back({openLoc, "E"});
+  block->params.push_back({openLoc, "E", {}});
   auto call = std::make_unique<CallExpr>(openLoc, "BREAK");
   call->args.push_back(std::make_unique<VarExpr>(openLoc, "E"));
   block->body.push_back(std::move(call));

@@ -337,8 +337,9 @@ std::unique_ptr<FuncDecl> Parser::parseFunc() {
           break;
         }
         if (at(Tok::Ident)) {
-          fn->params.push_back({cur().loc, cur().upper});
+          fn->params.push_back({cur().loc, cur().upper, {}});
           advance();
+          fn->params.back().declared = parseDeclaredType();
         } else {
           expect(Tok::Ident, "parameter name");
           break;
@@ -445,8 +446,10 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
       advance();
     }
   };
-  auto asType = [&] { // AS (or TYPE) type: accepted and ignored (the language is untyped)
-    if (at(Tok::Ident) && (cur().upper == "AS" || cur().upper == "TYPE") && ahead().kind == Tok::Ident) {
+  auto asType = [&] { // AS type (parseDeclaredType), or TYPE name: accepted, no hint kept for a member yet
+    if (at(Tok::Ident) && cur().upper == "AS") {
+      parseDeclaredType();
+    } else if (at(Tok::Ident) && cur().upper == "TYPE" && ahead().kind == Tok::Ident) {
       advance();
       advance();
     }
@@ -570,8 +573,9 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
               expect(Tok::Ident, "parameter name");
               break;
             }
-            m.params.push_back({cur().loc, cur().upper});
+            m.params.push_back({cur().loc, cur().upper, {}});
             advance();
+            m.params.back().declared = parseDeclaredType();
           } while (accept(Tok::Comma));
         }
         expect(Tok::RParen, "')'");
@@ -607,8 +611,9 @@ std::unique_ptr<ClassDecl> Parser::parseClass() {
             expect(Tok::Ident, "parameter name");
             break;
           }
-          m.params.push_back({cur().loc, cur().upper});
+          m.params.push_back({cur().loc, cur().upper, {}});
           advance();
+          m.params.back().declared = parseDeclaredType();
         } while (at(Tok::Comma));
       }
       if (at(Tok::Ident) && cur().upper == "INLINE") parseInline(m);
@@ -682,19 +687,23 @@ std::string Parser::operatorMessage() {
   return text;
 }
 
-// A value type: type names joined by `|`, each named once (NUMERIC holds INTEGER), INTEGER followed by RANGE lo TO hi
-// for the integers it holds (`ranges`: a RESULT's; a parameter's type has none, which no call's argument is checked
-// against), or ANY alone (any value: no tags, as a parameter without AS). Empty, with what is wrong in `error`, when it
-// is no type.
-std::optional<ValueType> Parser::parseValueType(bool ranges, std::string &error) {
+// A value type: type names joined by `|` (when `alternatives`: not in a codeblock's parameters, which `|` ends), each
+// named once (NUMERIC holds INTEGER), INTEGER followed by RANGE lo TO hi for the integers it holds (`ranges`: a
+// RESULT's; a parameter's type has none, which no call's argument is checked against), or ANY alone (any value: no
+// tags, as a parameter without AS). Clipper's and Harbour's names too: CHARACTER (STRING), CODEBLOCK (BLOCK), CLASS
+// name (OBJECT), ARRAY OF type (ARRAY), USUAL and ANYTYPE (ANY), and POINTER, values xbase has none of yet (any
+// value). Empty, with what is wrong in `error`, when it is no type.
+std::optional<ValueType> Parser::parseValueType(bool ranges, std::string &error, bool alternatives) {
   static const std::pair<const char *, uint32_t> names[] = {
       {"NIL", 1u << XB_T_NIL},       {"LOGICAL", 1u << XB_T_LOGICAL},
       {"INTEGER", 1u << XB_T_INT},   {"DOUBLE", 1u << XB_T_DOUBLE},
       {"NUMERIC", (1u << XB_T_INT) | (1u << XB_T_DOUBLE)},
-      {"STRING", 1u << XB_T_STRING}, {"DATE", 1u << XB_T_DATE},
-      {"ARRAY", 1u << XB_T_ARRAY},   {"HASH", 1u << XB_T_HASH},
-      {"BLOCK", 1u << XB_T_BLOCK},   {"OBJECT", 1u << XB_T_OBJECT},
-      {"SYMBOL", 1u << XB_T_SYMBOL}};
+      {"STRING", 1u << XB_T_STRING}, {"CHARACTER", 1u << XB_T_STRING},
+      {"DATE", 1u << XB_T_DATE},     {"ARRAY", 1u << XB_T_ARRAY},
+      {"HASH", 1u << XB_T_HASH},     {"BLOCK", 1u << XB_T_BLOCK},
+      {"CODEBLOCK", 1u << XB_T_BLOCK}, {"OBJECT", 1u << XB_T_OBJECT},
+      {"CLASS", 1u << XB_T_OBJECT},  {"SYMBOL", 1u << XB_T_SYMBOL}};
+  static const char *const anyNames[] = {"ANY", "USUAL", "ANYTYPE", "POINTER"};
   auto integer = [&](int64_t &out) {
     bool minus = accept(Tok::Minus);
     if (!at(Tok::Number) || !cur().isInt) return false;
@@ -703,9 +712,9 @@ std::optional<ValueType> Parser::parseValueType(bool ranges, std::string &error)
     return true;
   };
   ValueType t;
-  if (at(Tok::Ident) && cur().upper == "ANY") {
+  if (at(Tok::Ident) && std::find(std::begin(anyNames), std::end(anyNames), cur().upper) != std::end(anyNames)) {
     advance();
-    if (at(Tok::Pipe)) {
+    if (alternatives && at(Tok::Pipe)) {
       error = "ANY is any value: no other type joins it";
       return std::nullopt;
     }
@@ -717,17 +726,28 @@ std::optional<ValueType> Parser::parseValueType(bool ranges, std::string &error)
       for (const auto &[name, bits] : names)
         if (cur().upper == name) tags = bits;
     if (!tags) {
-      error = "expected a type name (NIL, LOGICAL, INTEGER, DOUBLE, NUMERIC, STRING, DATE, ARRAY, HASH, BLOCK, "
-              "OBJECT, SYMBOL, ANY)";
+      error = "expected a type name (NIL, LOGICAL, INTEGER, DOUBLE, NUMERIC, STRING or CHARACTER, DATE, ARRAY [OF "
+              "type], HASH, BLOCK or CODEBLOCK, OBJECT or CLASS name, SYMBOL, ANY, USUAL, ANYTYPE or POINTER)";
       return std::nullopt;
     }
+    std::string name = cur().upper;
     if (t.tags & tags) {
       error = "a type named twice";
       return std::nullopt;
     }
-    bool isInteger = cur().upper == "INTEGER";
+    bool isInteger = name == "INTEGER";
     t.tags |= tags;
     advance();
+    if (name == "CLASS") { // CLASS name: an object of that class
+      if (!at(Tok::Ident)) {
+        error = "CLASS needs the class's name";
+        return std::nullopt;
+      }
+      advance();
+    } else if (name == "ARRAY" && at(Tok::Ident) && cur().upper == "OF") { // ARRAY OF type: an array
+      advance();
+      if (!parseValueType(false, error, false)) return std::nullopt;
+    }
     if (isInteger && at(Tok::Ident) && cur().upper == "RANGE") {
       if (!ranges) {
         error = "RANGE is a RESULT's only";
@@ -742,8 +762,25 @@ std::optional<ValueType> Parser::parseValueType(bool ranges, std::string &error)
       }
       t.ranged = true;
     }
-  } while (accept(Tok::Pipe));
+  } while (alternatives && accept(Tok::Pipe));
   return t;
+}
+
+// AS type after a declared name (a LOCAL, STATIC, PRIVATE, PUBLIC, MEMVAR, FIELD or PARAMETERS name, a parameter of a
+// function, method or codeblock): Harbour's syntax, a hint for the optimizer where the variable is the function's or
+// the module's (the language stays untyped: Harbour ignores it too). No tags when there is none.
+ValueType Parser::parseDeclaredType(bool alternatives) {
+  if (!at(Tok::Ident) || cur().upper != "AS") return {};
+  SourceLoc loc = cur().loc;
+  advance();
+  std::string error;
+  std::optional<ValueType> t = parseValueType(false, error, alternatives);
+  if (!t) {
+    diag_.error(loc, error + ", " + found());
+    if (at(Tok::Ident)) advance(); // the name that is no type: the declaration goes on after it
+    return {};
+  }
+  return *t;
 }
 
 // EXTERN FUNCTION name( p1 [AS type], [p2] [AS type], ... ) [NATIVE] [RESERVED] [CHECKED] [FOLD] [ARGS] [PARAMS]

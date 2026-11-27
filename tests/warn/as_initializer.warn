@@ -1,0 +1,1 @@
+'N' is declared with another type than its initializer's, CHARACTER (AS is a hint: the value is kept)

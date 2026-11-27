@@ -160,6 +160,13 @@ bool worthGuarding(const Value &v, const TypeInfo &types, const Loops &loops) {
   return entersLoopAsNumber(v, loops) || (i && readAsNumberInLoop(*i, loops));
 }
 
+// The numbers of `mask` a variable read by `i` is declared to hold (AS INTEGER: integers alone), when it declares some
+// of them: the guard tests those only, and a value of another type takes the generic copy.
+TypeSet declaredNumbers(const Instruction &i, TypeSet mask) {
+  if (i.op != Op::Load || !i.var || !(i.var->declared & mask)) return mask;
+  return i.var->declared & mask;
+}
+
 // The values of the loops that are integers once the speculations hold: the greatest set where each is an
 // integer already, + - * of two of them (its guard: no overflow), Int() of one divided by a constant (Types.h), or a
 // block parameter all of whose arguments are (a value the loop carries: its start and what each pass computes). Found
@@ -319,7 +326,7 @@ std::vector<Check> chooseChecks(Function &f, const std::unordered_set<const Basi
         checks.push_back({i.get(), b, nullptr, kIntType});
       } else if (worthGuarding(*i, seen, loops)) { // against the numbers it gives itself (Max() of integers: one)
         TypeSet own = types.of(i.get()) & kNumberTypes;
-        checks.push_back({i.get(), b, nullptr, own ? own : kNumberTypes});
+        checks.push_back({i.get(), b, nullptr, declaredNumbers(*i, own ? own : kNumberTypes)});
       }
     }
   }

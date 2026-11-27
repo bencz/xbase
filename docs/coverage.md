@@ -17,7 +17,8 @@ Statements are part of the compiler's grammar ([compiler.md](compiler.md#grammar
 asynchronous ones in `ASYNC` functions), **ASYNC FUNCTION**, **ASYNC PROCEDURE**, **ASYNC METHOD**, the **AWAIT**
 operator and **AWAIT FOR EACH** (xbase's own), **DECLARE**, **EXTERNAL** (Clipper's name list), **ANNOUNCE**, **CLASS
 ... ENDCLASS** and **METHOD** (xbase's classes, with **ABSTRACT**, **FINAL**, **INTERFACE ... ENDINTERFACE** and
-**IMPLEMENTS**)
+**IMPLEMENTS**); `AS type` after a declared name wherever Harbour takes one (a hint for the optimizer, as Harbour
+ignores it: [compiler.md](compiler.md#grammar))
 
 ## Commands (std.ch)
 

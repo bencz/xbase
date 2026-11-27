@@ -377,21 +377,23 @@ result. Implemented (`xir/passes/`):
   loop takes them as numbers (a `FOR`'s start or limit, an operand of `-`, `*`, `/`, `%`, `^`, a comparison, a
   negation): `subst.check` with a mask (`imm`: the number types it gives itself, as an integer for `Max()` of integers,
   both when it gives none) right after the value, into the same copy otherwise, so the loop keeps its values typed and
-  out of the frame. So does a value read inside an innermost loop (an element, an object's variable, a variable in
-  memory, a call's or a send's result) that operations of the loop take as a number twice or more: one guard where it is
-  read, and those operations typed with no check after each (a single use keeps its operation's check: the guard would
-  only move it, and give `LoopSplit` a nest without a call where it found one; `linpack`'s, split whole, ran 1.5 times
-  the instructions). The guarded value itself keeps a home the collector sees (`TypeInfo::guardNeedsHome`) when until
-  its check it may hold a heap object across a pending test that may collect (a value read from memory, a call of the
-  program's function); the result of an operation whose error may substitute it does not, as for a check after it (its
-  pending test never collects while the result waits in a home the collector does not see). A block parameter is guarded
-  the same way, first in its block (a value carried into loops, a region's join); its home is its types' (nothing runs
-  between the branch and the check, and the check reads the tag the item holds), and its `subst.value` has the types the
-  branches pass (`TypeInfo::passed`). It also speculates: in a loop, `+`, `-` and `*` of two values that are integers
-  once the speculations hold (the greatest set of the loops' values that are integers, `+ - *` or `Int( x / k )` of
-  such, or block parameters all of whose arguments are) and whose ranges may overflow get a guard against the integers
-  alone (`subst.check` with the integer mask; an overflow's double goes on in the copy), so the loop computes with
-  integers in registers; one whose ranges cannot overflow (`fits`) needs none.
+  out of the frame; a value read from a variable declared `AS` some of those types is guarded against those alone (`AS
+  INTEGER`: integers; `Var::declared`, a hint: another value takes the generic copy). So does a value read inside an
+  innermost loop (an element, an object's variable, a variable in memory, a call's or a send's result) that operations
+  of the loop take as a number twice or more: one guard where it is read, and those operations typed with no check after
+  each (a single use keeps its operation's check: the guard would only move it, and give `LoopSplit` a nest without a
+  call where it found one; `linpack`'s, split whole, ran 1.5 times the instructions). The guarded value itself keeps a
+  home the collector sees (`TypeInfo::guardNeedsHome`) when until its check it may hold a heap object across a pending
+  test that may collect (a value read from memory, a call of the program's function); the result of an operation whose
+  error may substitute it does not, as for a check after it (its pending test never collects while the result waits in a
+  home the collector does not see). A block parameter is guarded the same way, first in its block (a value carried into
+  loops, a region's join); its home is its types' (nothing runs between the branch and the check, and the check reads
+  the tag the item holds), and its `subst.value` has the types the branches pass (`TypeInfo::passed`). It also
+  speculates: in a loop, `+`, `-` and `*` of two values that are integers once the speculations hold (the greatest set
+  of the loops' values that are integers, `+ - *` or `Int( x / k )` of such, or block parameters all of whose arguments
+  are) and whose ranges may overflow get a guard against the integers alone (`subst.check` with the integer mask; an
+  overflow's double goes on in the copy), so the loop computes with integers in registers; one whose ranges cannot
+  overflow (`fits`) needs none.
 - `resolve-sends`, after `fold-constants`: a `send` (without `...`, not one an AWAIT fuses) to an object whose class
   `ClassInfo` knows, and a `Super` send of a method to its own `Self` that reaches a method (its parameter 0, which only
   loads read, `onlyLoaded`: the runtime finds a `Super` member from the method's class alone, `Self` being of it or of a

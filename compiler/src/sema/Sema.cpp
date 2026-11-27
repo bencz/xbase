@@ -1,6 +1,7 @@
 #include "sema/Sema.h"
 
 #include "common/Text.h"
+#include "xbrt.h" // type tags, xb_type_class_name
 
 #include <algorithm>
 #include <cctype>
@@ -107,8 +108,28 @@ bool Sema::constantInit(const Expr &e, unsigned blockDepth) const {
 // LOCAL and STATIC declarations. A LOCAL's initializer is resolved before
 // its name is visible; a STATIC is visible in its own initializer, so a
 // codeblock stored in it can call itself.
+namespace {
+
+// The type tag of a literal (a constant, an array, hash or codeblock literal), or -1 for another expression.
+int literalTag(const Expr &e) {
+  switch (e.kind) {
+  case ExprKind::Logical: return XB_T_LOGICAL;
+  case ExprKind::Number: return static_cast<const NumberExpr &>(e).isInt ? XB_T_INT : XB_T_DOUBLE;
+  case ExprKind::String: return XB_T_STRING;
+  case ExprKind::ArrayLit: return XB_T_ARRAY;
+  case ExprKind::HashLit: return XB_T_HASH;
+  case ExprKind::Block: return XB_T_BLOCK;
+  default: return -1;
+  }
+}
+
+} // namespace
+
 void Sema::declare(LocalDecl &d, bool isStatic, Scope &s) {
   if (!isStatic && d.init) expr(*d.init, s);
+  if (int tag = d.init && d.declared.tags ? literalTag(*d.init) : -1; tag >= 0 && !(d.declared.tags & (1u << tag)))
+    diag_.warning(d.init->loc, "'" + d.name + "' is declared with another type than its initializer's, " +
+                                   xb_type_class_name((uint32_t)tag) + " (AS is a hint: the value is kept)");
   bool duplicate = frames_.back().names.count(d.name) != 0 || frames_.back().memvars.count(d.name) != 0 ||
                    frames_.back().fields.count(d.name) != 0;
   if (duplicate) {
@@ -171,8 +192,8 @@ bool Sema::mayStart(const FuncDecl &f) const {
 void Sema::func(FuncDecl &f) {
   curFunc_ = &f;
   Scope s;
-  if (f.async) f.params.insert(f.params.begin(), Param{f.loc, "(TASK)"});               // the task it runs for
-  else if (f.generator) f.params.insert(f.params.begin(), Param{f.loc, "(GENERATOR)"}); // the enumerator it runs for
+  if (f.async) f.params.insert(f.params.begin(), Param{f.loc, "(TASK)", {}});               // the task it runs for
+  else if (f.generator) f.params.insert(f.params.begin(), Param{f.loc, "(GENERATOR)", {}}); // the enumerator it runs for
   frames_.push_back({{}, {}, {}, {}, &f.boxed, nullptr});
   for (const Param &p : f.params) {
     if (!frames_.back().names.emplace(p.name, Binding{VarWhere::Frame, s.next}).second)

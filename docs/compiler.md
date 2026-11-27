@@ -246,6 +246,17 @@ a `CHECKED` function's count includes the other arguments only, so only too many
 elements (`a[i] := v`, `a[i] += v`, `a[i]++`), instance variables (`o:x := v`, a message without arguments) and macros
 can be assigned. `LOCAL a[n1, n2]` (or `a[n1][n2]`) declares `a := Array( n1, n2 )`.
 
+A declared name may be followed by `AS type`, as Harbour writes it, wherever Harbour takes one: `LOCAL`, `STATIC`,
+`PRIVATE`, `PUBLIC`, `MEMVAR`, `FIELD` and `PARAMETERS` names, the parameters of functions, methods and codeblocks,
+class `VAR`s and `METHOD`s (`Parser::parseDeclaredType`). The type is EXTERN's vocabulary (`parseValueType`), with
+Harbour's names too: `CHARACTER` (`STRING`), `CODEBLOCK` (`BLOCK`), `CLASS name` (`OBJECT`), `ARRAY OF type`
+(`ARRAY`), `USUAL` and `ANYTYPE` (`ANY`), `POINTER` (any value: xbase has no pointers yet); `|` joins alternatives
+except in a codeblock's parameters, which it ends. It is a hint, not a check (the language stays untyped, and Harbour
+ignores it too): the value a variable holds is never tested against it. Sema warns when a `LOCAL` or `STATIC` has a
+literal initializer of another type (`NIL` is none: no value yet). The types of a function's parameters, `LOCAL`s
+and the module's `STATIC`s reach the xIR (`Var::declared`), where they narrow the masks of the guards on what is read
+from them ([xir.md](xir.md#passes)).
+
 The levels of the binary operators are a table (`binaryLevels` in `parser/Expressions.cpp`). The bit operators sit where
 C has them, so a comparison binds tighter than `&`, `^^` and `|`: `x & 1 == 0` is `x & ( 1 == 0 )`, an argument error at
 run time, and is written `( x & 1 ) == 0`. `&` is the bit operator after an operand; before one it is the macro

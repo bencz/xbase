@@ -43,9 +43,20 @@ enum class BinOp : uint8_t {
 };
 enum class UnOp : uint8_t { Neg, Plus, Not, BitNot }; // BitNot: ~ (xbase's own)
 
+// A declared value type (EXTERN FUNCTION's RESULT and parameters' AS; a LOCAL's, STATIC's or parameter's AS, a hint
+// for the optimizer: the language stays untyped): the type tags it admits (a bit each, as xir::TypeSet; 0: any value)
+// and, for INTEGER RANGE lo TO hi, the integers among them.
+struct ValueType {
+  uint32_t tags = 0;
+  bool ranged = false;
+  int64_t lo = 0, hi = 0;
+  bool operator==(const ValueType &) const = default;
+};
+
 struct Param {
   SourceLoc loc;
   std::string name;
+  ValueType declared;            // AS type (no tags: none, or any value)
 };
 
 struct Expr {
@@ -313,6 +324,7 @@ struct LocalDecl {
   std::string name;
   ExprPtr macro;                 // PRIVATE &name, PUBLIC &name: the text naming the variable (`name` empty)
   ExprPtr init;                  // may be null
+  ValueType declared;            // AS type (no tags: none, or any value)
   uint32_t slot = 0;             // set by Sema
 };
 
@@ -516,15 +528,6 @@ struct ClassDecl {
   std::vector<ClassMethodDecl> methods;
   std::vector<std::string> friendClasses, friendFunctions; // upper-cased: they reach its HIDDEN and PROTECTED members
   FuncDecl *initValues = nullptr; // set by Sema: returns the INIT values, or null when there are none
-};
-
-// A declared value type (EXTERN FUNCTION's RESULT, a parameter's AS): the type tags it admits (a bit each, as
-// xir::TypeSet; 0: any value) and, for INTEGER RANGE lo TO hi, the integers among them.
-struct ValueType {
-  uint32_t tags = 0;
-  bool ranged = false;
-  int64_t lo = 0, hi = 0;
-  bool operator==(const ValueType &) const = default;
 };
 
 // EXTERN FUNCTION name( params ) attributes: a function the program calls but

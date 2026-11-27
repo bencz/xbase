@@ -1,0 +1,108 @@
+module DECLARED_HINTS
+
+function SUM params 2 {
+  $f0 = frame 0 "N"
+  $f1 = frame 1 "K"
+entry:
+  %0 = params.ref $f0 $f1
+  cond_br %0, byref, body
+byref:
+  %2 = call.forward SUM.byref
+  ret %2
+body:
+  %4 = load $f0 move
+  %5 = subst.check guard 4 %4
+  cond_br %5, body.subst, body.2
+for.test(%7: item, %8: item):
+  %9 = for.test %7, %4, 1:w0
+  cond_br %9, for.body, seq.exit
+for.body:
+  %11 = binary mul %7, %18
+  %12 = binary sub %11, %4
+  %13 = binary add.grow %8, %12
+  %14 = binary add.one %7, 1:w0
+  %15 = subst.check guard 4 %14
+  cond_br %15, for.body.subst, for.test(%14, %13)
+seq.exit:
+  ret %8
+body.2:
+  %18 = load $f1 move
+  %19 = subst.check guard 4 %18
+  cond_br %19, body.2.subst, for.test(1:w10, 0:w10)
+for.test.any(%21: item, %22: item, %23: item, %24: item):
+  %25 = for.test %21, %23, 1:w0
+  cond_br %25, for.body.any, seq.exit.any
+for.body.any:
+  %27 = binary mul %21, %24
+  %28 = binary sub %27, %23
+  %29 = binary add.grow %22, %28
+  %30 = binary add.one %21, 1:w0
+  br for.test.any(%30, %29, %23, %24)
+seq.exit.any:
+  ret %22
+for.body.subst:
+  %33 = subst.value %14
+  br for.test.any(%33, %13, %4, %18)
+body.subst:
+  %35 = subst.value %4
+  %36 = load $f1 move
+  br for.test.any(1:w10, 0:w10, %35, %36)
+body.2.subst:
+  %38 = subst.value %18
+  br for.test.any(1:w10, 0:w10, %4, %38)
+}
+
+function SUM.byref internal params 2 {
+  $f0 = frame 0 "N"
+  $f1 = frame 1 "K"
+entry:
+  br for.test(1:w10, 0:w10)
+for.test(%1: item, %2: item):
+  %3 = load $f0 maybe_ref
+  %4 = for.test %1, %3, 1:w0
+  cond_br %4, for.body, seq.exit
+for.body:
+  %6 = load $f1 maybe_ref
+  %7 = binary mul %1, %6
+  %8 = subst.check %7
+  cond_br %8, for.body.subst, for.body.2
+seq.exit:
+  ret %2
+for.body.2:
+  %11 = load $f0 maybe_ref
+  %12 = binary sub %7, %11
+  %13 = subst.check %12
+  cond_br %13, for.body.2.subst, for.body.2
+for.body.2:
+  %15 = binary add.grow %2, %12
+  %16 = binary add.one %1, 1:w0
+  %17 = subst.check guard 4 %16
+  cond_br %17, for.body.2.subst.2, for.test(%16, %15)
+for.test.any(%19: item, %20: item):
+  %21 = load $f0 maybe_ref
+  %22 = for.test %19, %21, 1:w0
+  cond_br %22, for.body.any, seq.exit.any
+for.body.any:
+  %24 = load $f1 maybe_ref
+  %25 = binary mul %19, %24
+  br for.body.2.any(%19, %20, %25)
+seq.exit.any:
+  ret %20
+for.body.2.any(%28: item, %29: item, %30: item):
+  %31 = load $f0 maybe_ref
+  %32 = binary sub %30, %31
+  br for.body.2.any.2(%28, %29, %32)
+for.body.2.any.2(%34: item, %35: item, %36: item):
+  %37 = binary add.grow %35, %36
+  %38 = binary add.one %34, 1:w0
+  br for.test.any(%38, %37)
+for.body.subst:
+  %40 = subst.value %7
+  br for.body.2.any(%1, %2, %40)
+for.body.2.subst:
+  %42 = subst.value %12
+  br for.body.2.any.2(%1, %2, %42)
+for.body.2.subst.2:
+  %44 = subst.value %16
+  br for.test.any(%44, %15)
+}

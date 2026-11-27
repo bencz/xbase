@@ -192,8 +192,9 @@ ExprPtr Parser::parseBraced() {
           expect(Tok::Ident, "codeblock parameter");
           break;
         }
-        blk->params.push_back({cur().loc, cur().upper});
+        blk->params.push_back({cur().loc, cur().upper, {}});
         advance();
+        blk->params.back().declared = parseDeclaredType(false); // `|` ends the parameters
       } while (accept(Tok::Comma));
     }
     expect(Tok::Pipe, "'|'");

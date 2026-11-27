@@ -23,7 +23,8 @@ std::unique_ptr<Module> Generator::run(const xb::Module &ast) {
   }
   for (size_t i = 0; i < ast.statics.size(); ++i) {
     bool inCell = i < ast.staticsInCell.size() && ast.staticsInCell[i];
-    auto v = std::make_unique<Var>(Var{Var::Kind::Static, (uint32_t)i, inCell, false, ast.statics[i]->name, false, {}});
+    auto v = std::make_unique<Var>(Var{Var::Kind::Static, (uint32_t)i, inCell, false, ast.statics[i]->name, false, {},
+                                       ast.statics[i]->declared.tags});
     mod_->statics.push_back(std::move(v));
   }
   std::vector<Function *> fns;
@@ -199,7 +200,12 @@ void Generator::genBody(const FuncDecl &f, Function *fn, Function *byRef, const 
                    (s >= f.params.size() || f.resumable() || byRef != nullptr);
     v->shared = s < f.boxed.size() && f.boxed[s] && !byValue;
     v->param = s < f.params.size();
+    if (v->param) v->declared = f.params[s].declared.tags;
   }
+  for (auto &st : f.body) // the LOCALs' AS types (their statements come first, at the function's level)
+    if (st->kind == StmtKind::Local)
+      for (const LocalDecl &d : static_cast<const LocalStmt &>(*st).decls)
+        if (d.declared.tags) frameVar(d.slot)->declared = d.declared.tags;
   Builder &b = *cur_.b;
   b.setBlock(fn->addBlock("entry"));
   b.setLoc(f.loc);
